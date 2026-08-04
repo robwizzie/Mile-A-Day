@@ -259,7 +259,7 @@ struct FlameBuddyFigure: View {
         } else {
             Ellipse()
                 .fill(Color(red: 0.20, green: 0.07, blue: 0.04))
-                .frame(width: size * 0.12, height: blink ? size * 0.018 : size * 0.18)
+                .frame(width: size * 0.12, height: blink ? size * 0.018 : eyeHeight)
                 .overlay(alignment: .topLeading) {
                     if !blink {
                         Circle()
@@ -272,19 +272,31 @@ struct FlameBuddyFigure: View {
         }
     }
 
+    /// Wide-open eyes are half of a startled expression, so the happy states
+    /// wear theirs a little softer.
+    private var eyeHeight: CGFloat {
+        switch health {
+        case .blazing, .healthy: return size * 0.155
+        default: return size * 0.18
+        }
+    }
+
     @ViewBuilder
     private var mouth: some View {
         switch health {
         case .blazing, .healthy:
-            ZStack(alignment: .top) {
-                Capsule()
-                    .fill(Color(red: 0.24, green: 0.04, blue: 0.04))
-                    .frame(width: size * 0.22, height: size * 0.14)
-                Capsule()
-                    .fill(Color(red: 1.0, green: 0.42, blue: 0.34))
-                    .frame(width: size * 0.12, height: size * 0.045)
-                    .offset(y: size * 0.08)
-            }
+            // A grin, not a gasp. This was a plain Capsule TALLER than it was
+            // wide, which reads as an "o" of surprise no matter what the rest
+            // of the face is doing.
+            FlameBuddySmileShape()
+                .fill(Color(red: 0.24, green: 0.04, blue: 0.04))
+                .frame(width: size * 0.27, height: size * 0.115)
+                .overlay(alignment: .bottom) {
+                    Capsule()
+                        .fill(Color(red: 1.0, green: 0.42, blue: 0.34))
+                        .frame(width: size * 0.11, height: size * 0.045)
+                }
+                .clipShape(FlameBuddySmileShape())
         case .dimming:
             Capsule()
                 .fill(Color(red: 0.24, green: 0.04, blue: 0.04).opacity(0.82))
@@ -350,6 +362,27 @@ struct FlameBuddyInnerShape: Shape {
         path.addCurve(to: CGPoint(x: x(0.82), y: y(0.72)), control1: CGPoint(x: x(0.66), y: y(0.98)), control2: CGPoint(x: x(0.82), y: y(0.90)))
         path.addCurve(to: CGPoint(x: x(0.60 + wobble * 0.22), y: y(0.38)), control1: CGPoint(x: x(0.82), y: y(0.56)), control2: CGPoint(x: x(0.62), y: y(0.52)))
         path.addCurve(to: CGPoint(x: x(0.52 + wobble * 0.20), y: y(0.02)), control1: CGPoint(x: x(0.72), y: y(0.24)), control2: CGPoint(x: x(0.60), y: y(0.14)))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// An open grin: the corners are the highest points, the top lip dips between
+/// them, and the bottom rounds out wide. Happy mouths are wider than they are
+/// tall — that ratio is what separates a smile from a gasp.
+private struct FlameBuddySmileShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY),
+            control: CGPoint(x: rect.midX, y: rect.minY + rect.height * 0.62)
+        )
+        path.addCurve(
+            to: CGPoint(x: rect.minX, y: rect.minY),
+            control1: CGPoint(x: rect.maxX - rect.width * 0.06, y: rect.maxY + rect.height * 0.34),
+            control2: CGPoint(x: rect.minX + rect.width * 0.06, y: rect.maxY + rect.height * 0.34)
+        )
         path.closeSubpath()
         return path
     }

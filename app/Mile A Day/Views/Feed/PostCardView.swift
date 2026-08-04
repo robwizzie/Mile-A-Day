@@ -305,8 +305,8 @@ struct PostCardView: View {
                         Button {
                             onSetCollabOnProfile(!onProfile)
                         } label: {
-                            Label(onProfile ? "Hide from my profile" : "Show on my profile",
-                                  systemImage: onProfile ? "eye.slash" : "square.grid.2x2")
+                            Label(onProfile ? "Remove from my grid" : "Add to my grid",
+                                  systemImage: onProfile ? "minus.square" : "square.grid.3x3")
                         }
                     }
                     Button(role: .destructive, action: onLeaveCollab) {

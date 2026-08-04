@@ -13,6 +13,7 @@ const { uploadWorkouts, getUserRoutes, getRecentWorkouts, getWorkoutRoute } =
 const {
   createPost,
   getUnifiedFeed,
+  getFeedEntryForPost,
   getStoriesRail,
   getUserPosts,
   getUserTaggedPosts,
@@ -164,6 +165,20 @@ assert.equal(
   feedPost.is_fresh,
   true,
   "post created right after its workout arrived reads fresh to other viewers",
+);
+
+// The SAME post, opened directly (a push tap, a shared link, a grid tap).
+// getFeedEntryForPost shares FEED_ENTRY_PROJECTION with the feed precisely so
+// the two render from identical data, and it builds its own `page` CTE to feed
+// it — so a column added on one side and not the other silently changes what
+// one of them shows. Assert they agree field for field, and that the gate
+// still refuses a stranger.
+const direct = await getFeedEntryForPost(ALICE, post.post_id);
+assert.ok(direct, "post opens directly for a viewer who can see it");
+assert.deepEqual(
+  { ...direct, cursor: null },
+  { ...feedPost, cursor: null },
+  "post opened directly matches the same post in the feed, field for field",
 );
 
 // Stories rail as Alice: Bob's fresh story must appear.

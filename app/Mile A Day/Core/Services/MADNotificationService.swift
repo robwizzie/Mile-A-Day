@@ -100,7 +100,7 @@ final class MADNotificationService: NSObject, ObservableObject {
         // else, and an older install simply renders the one button it knows.
         let hideCollabAction = UNNotificationAction(
             identifier: "COAUTHOR_HIDE_PROFILE_ACTION",
-            title: "Keep off my profile",
+            title: "Keep off my grid",
             options: []
         )
         let removeCollabAction = UNNotificationAction(
@@ -663,9 +663,9 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         }
     }
 
-    /// "Keep off my profile" on a collab-tag push: the tag stays — it's still
+    /// "Keep off my grid" on a collab-tag push: the tag stays — it's still
     /// in their Tagged tab and still on the author's post — but it doesn't
-    /// join their profile grid. The soft alternative to removing themselves,
+    /// join their Posts grid. The soft alternative to removing themselves,
     /// resolvable from the banner for the same reason.
     ///
     /// Same suspended-app constraints as `handleRemoveCollabAction`: a static
@@ -676,20 +676,20 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         guard let postId = data?["post_id"], !postId.isEmpty else {
             await postLocalToast(
                 title: "Couldn't update that post",
-                body: "Open the app to keep it off your profile."
+                body: "Open the app to keep it off your grid."
             )
             return
         }
         do {
             try await PostService.setCoauthorOnProfile(postId: postId, onProfile: false)
             await postLocalToast(
-                title: "Kept off your profile",
+                title: "Kept off your grid",
                 body: "You're still tagged — find it in your Tagged tab."
             )
         } catch {
             await postLocalToast(
                 title: "Couldn't update that post",
-                body: "Open the app to keep it off your profile."
+                body: "Open the app to keep it off your grid."
             )
         }
     }

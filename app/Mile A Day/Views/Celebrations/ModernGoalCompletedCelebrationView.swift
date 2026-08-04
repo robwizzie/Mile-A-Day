@@ -58,12 +58,12 @@ struct ModernGoalCompletedCelebrationView: View {
 
     private var hero: some View {
         VStack(spacing: 10) {
-            ReignitingFlameView(showsFace: false, size: 168, progress: ignitionProgress, intensity: 0.85, startsSad: true)
+            ReignitingFlameView(showsFace: false, size: 168, progress: ignitionProgress, intensity: 0.85, origin: flameOrigin)
                 .frame(height: 184)
 
             if showStreak {
                 VStack(spacing: 10) {
-                    Text("REIGNITED")
+                    Text(wasReignited ? "REIGNITED" : "BLAZING")
                         .font(.system(size: 13, weight: .black, design: .rounded))
                         .tracking(2.6)
                         .foregroundColor(.orange)
@@ -350,8 +350,18 @@ struct ModernGoalCompletedCelebrationView: View {
         }
     }
 
+    /// A coal only when the flame was genuinely OUT before this mile — see the
+    /// Fun celebration for the full reasoning. Streak 1 means yesterday ended
+    /// at zero; everyone else had a live flame all day.
+    private var flameOrigin: FlameRevivalOrigin {
+        guard stats.currentStreak > 1, stats.comebackLine == nil else { return .coal }
+        return .burning(vigor: CGFloat(StreakFlameClock.vigor(at: Date(), dayEnd: nil)))
+    }
+
+    private var wasReignited: Bool { flameOrigin.isCoal }
+
     private var completionSubtitle: String {
-        if stats.percentOver > 50 { return "Goal cleared. Flame restored." }
+        if stats.percentOver > 50 { return wasReignited ? "Goal cleared. Flame restored." : "Goal cleared. Flame roaring." }
         if stats.percentOver > 20 { return "Strong finish. Streak protected." }
         return "Today is complete. Keep the line alive."
     }

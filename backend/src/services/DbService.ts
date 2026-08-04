@@ -26,6 +26,33 @@ export class PostgresService {
       query_timeout: 30_000,
     });
 
+    // Postgres' LLVM JIT is a loss for this workload, and a latent landmine.
+    //
+    // It engages purely on the planner's ESTIMATED cost crossing jit_above_cost
+    // — nothing about the query changes, only the table statistics under it. So
+    // an endpoint runs fine for months and then, once the tables grow past some
+    // invisible line, every execution starts paying ~200ms of LLVM codegen. The
+    // tell is an EXPLAIN whose Execution Time is far larger than anything its
+    // plan nodes account for: prod's feed query read 278ms with ~35ms of actual
+    // node work, while the same query over a LARGER local dataset (on a build
+    // without JIT available) took 99ms.
+    //
+    // Codegen only repays itself when a query evaluates its expressions over
+    // millions of rows. Everything this API runs is OLTP — bounded pages, a few
+    // hundred rows at most — so it never repays, on any endpoint.
+    //
+    // Sent per connection rather than as a startup `options` parameter: a
+    // startup parameter a pooler doesn't accept fails the CONNECTION, which is
+    // an outage, whereas a failed SET here just leaves that connection on the
+    // old behaviour. Connections are long-lived (30s idle timeout, max 20), so
+    // this runs a handful of times, not per query.
+    const jit = process.env.PG_JIT === "on" ? "on" : "off";
+    this.pool.on("connect", (client: any) => {
+      client.query(`SET jit = ${jit}`).catch((err: any) => {
+        console.error("[db] could not set jit:", err?.message ?? err);
+      });
+    });
+
     this.pool.on("error", (err: any) => {
       console.error("Unexpected error on idle client", err);
       process.exit(1);

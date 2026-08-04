@@ -434,6 +434,37 @@ const AUTHOR_VISIBLE_TO_VIEWER = `(
 	OR ${VIEWER_IS_MULTI_COAUTHOR}
 	OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
 )`;
+
+/**
+ * Everything a post `p` must satisfy to be a feed candidate, EXCEPT how it
+ * reached the viewer (author vs coauthor) — that part differs per arm.
+ *
+ * Named because the unified feed now asks it from two arms and getFeed asks it
+ * from one, and the three drifted apart once already: one copy dropped a
+ * private author's post from their OWN feed (bare OWNER_NOT_PRIVATE_SQL has no
+ * self exception — "Only me" still has to include me) while another let a
+ * private coauthor's reach through, so the same post got two different answers
+ * depending on which query asked. One fragment, one answer.
+ */
+const POST_FEED_GATES = `(
+	p.share_to_feed
+	AND p.deleted_at IS NULL
+	AND ${AUTHOR_VISIBLE_TO_VIEWER}
+	AND p.user_id NOT IN (SELECT uid FROM blocked)
+	AND (NOT ${COLLAB_ACTIVE}
+		OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
+)`;
+
+/**
+ * The keyset bound, `$2` being the cursor (NULL on the first page).
+ *
+ * Pushed into each candidate arm rather than applied once above them: a bound
+ * the arm knows about is a starting point for its index scan, whereas the same
+ * bound applied afterwards makes the arm produce its newest rows only to have
+ * them thrown away — which is how page 2 used to cost the same as page 1.
+ */
+const CURSOR_BEFORE = (col: string) =>
+  `($2::timestamptz IS NULL OR ${col} < $2::timestamptz)`;
 const COAUTHOR_COLUMNS = `
 	CASE WHEN ${COAUTHOR_VISIBLE} THEN p.coauthor_user_id END AS coauthor_user_id,
 	CASE WHEN ${COAUTHOR_VISIBLE} THEN p.coauthor_status END AS coauthor_status,
@@ -1456,8 +1487,7 @@ export async function getFeed(
 			${URL_SAFE_CURSOR("p.created_at")} AS cursor
 		FROM posts p
 		JOIN users u ON u.user_id = p.user_id
-		WHERE p.share_to_feed
-			AND p.deleted_at IS NULL
+		WHERE ${POST_FEED_GATES}
 			-- Accepted collab posts reach BOTH authors' circles (semi-join, not a
 			-- JOIN, so a post whose two authors share the viewer isn't doubled).
 			AND EXISTS (
@@ -1465,11 +1495,7 @@ export async function getFeed(
 				WHERE c.uid = p.user_id
 					OR (c.uid = p.coauthor_user_id AND ${COLLAB_REACH_SQL})
 			)
-			AND ${AUTHOR_VISIBLE_TO_VIEWER}
-			AND p.user_id NOT IN (SELECT uid FROM blocked)
-			AND (NOT ${COLLAB_ACTIVE}
-				OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
-			AND ($2::timestamptz IS NULL OR p.created_at < $2::timestamptz)
+			AND ${CURSOR_BEFORE("p.created_at")}
 		ORDER BY p.created_at DESC
 		LIMIT $3
 		`,
@@ -1738,7 +1764,12 @@ const FEED_ENTRY_PROJECTION = `
 			${URL_SAFE_CURSOR("page.sort_ts")} AS cursor
 		FROM page
 		JOIN users u ON u.user_id = page.owner_id
-		LEFT JOIN posts p ON page.kind = 'post' AND p.post_id::text = page.id
+		-- On page.post_uuid, NOT on p.post_id::text = page.id. The cast made the
+		-- join condition non-indexable, so Postgres materialised the whole posts
+		-- table and rescanned it for each of the page's rows; page.post_uuid is
+		-- the uuid the candidate arms already had in hand, so this is a primary
+		-- key probe. (post_uuid IS NOT NULL is exactly page.kind = 'post'.)
+		LEFT JOIN posts p ON p.post_id = page.post_uuid
 		LEFT JOIN workouts wt ON wt.workout_id = page.workout_id
 		LEFT JOIN notification_settings nsp ON nsp.user_id = page.owner_id
 		-- The day's rollup, for entries anchored on a 'daily_mile' workout: the
@@ -1794,73 +1825,124 @@ const FEED_ENTRY_PROJECTION = `
 // BYTE-IDENTICAL string this function runs. A profiler that measures its own
 // copy of the SQL measures the wrong query the moment the two drift.
 //
-// PERF: the expensive per-row columns (route JSONB, is_hyped, hype_count,
-// story_photo_url) are computed ONLY for the page's rows, not for the whole
-// circle's history. The old shape put them in the SELECT list of a UNION ALL
-// that was then ORDER BY sort_ts DESC LIMIT $3 — so Postgres had to evaluate
-// them for every post AND every workout in the viewer's circle across all
-// time before the outer LIMIT could apply, and got linearly slower as the
-// workouts table grew. Now `candidates` unions only the cheap keys, `page`
-// sorts+limits them (the LIMIT is a hard barrier), and the outer SELECT
-// projects the heavy columns onto just those <= $3 rows. Output shape and
-// every value are identical to the old query; results are keyed by column
-// name so column order is irrelevant. All lookups here are already indexed
-// (idx_posts_user_created, idx_workouts_user_device_end for the candidate
-// ordering; hype_log_context_dedupe_idx / idx_hype_log_target_context for the
-// hype checks).
+// PERF, in two layers. Both exist to keep this query's cost proportional to
+// the PAGE and the viewer's CIRCLE, and to nothing that grows on its own.
+//
+// 1. The expensive per-row columns (route JSONB, is_hyped, hype_count,
+//    story_photo_url) are computed ONLY for the page's rows. They used to sit
+//    in the SELECT list of a UNION ALL that was then ORDER BY ... LIMIT $3, so
+//    Postgres evaluated them for every post and workout in the circle's entire
+//    history before the LIMIT could apply. `candidates` now carries only the
+//    cheap keys, `page` sorts+limits them (a hard barrier), and the projection
+//    runs on those <= $3 rows.
+//
+// 2. `candidates` itself is bounded, which layer 1 never was. Each arm is a
+//    LATERAL per circle member, ordered by the member's own index and cut at
+//    $3, so the union is at most (circle x 3 x $3) rows — instead of reading
+//    every qualifying workout the circle has ever logged plus every shared post
+//    in the database, and sorting the lot. Correct because a row in the global
+//    top-$3 is necessarily in its own owner's top-$3. The cursor is pushed into
+//    each arm too, so page 2 costs what page 1 costs.
+//
+// Output shape and every value are identical to the pre-LATERAL query — proven
+// by diffing both against each other over a seeded dataset of collabs, blocks,
+// private authors and multi-page walks, not by reading them. Results are keyed
+// by column name, so column order is irrelevant.
+//
+// Indexes this relies on: idx_posts_user_created and idx_posts_coauthor_user
+// (post arms), idx_workouts_feed_candidates (workout arm — its predicate must
+// keep matching that arm's WHERE), posts_pkey for the projection's post join,
+// and idx_hype_log_target_context for the hype tallies. That last one is
+// PARTIAL, which is why the hype predicates state `context_id IS NOT NULL`
+// (see CONTEXTFUL in hypeService).
 export const UNIFIED_FEED_SQL = `
 		${CIRCLE_CTE},
 		candidates AS (
-			SELECT
-				'post'::text AS kind,
-				p.post_id::text AS id,
-				p.created_at AS sort_ts,
-				p.user_id AS owner_id,
-				p.workout_id AS workout_id
-			FROM posts p
-			WHERE p.share_to_feed AND p.deleted_at IS NULL
-				-- Accepted collab posts reach BOTH authors' circles (semi-join, not
-				-- a JOIN, so a post whose two authors share the viewer isn't doubled).
-				-- These are the SAME four gates getFeed applies, via the same
-				-- fragments. They drifted apart once and produced two different
-				-- answers for one post: this branch dropped a private author's post
-				-- from their OWN feed (bare OWNER_NOT_PRIVATE_SQL has no self
-				-- exception — "only me" has to still include me), and let a private
-				-- coauthor's reach through. Keep them spelled the same.
-				AND EXISTS (
-					SELECT 1 FROM circle c
-					WHERE c.uid = p.user_id
-						OR (c.uid = p.coauthor_user_id AND ${COLLAB_REACH_SQL})
-				)
-				AND ${AUTHOR_VISIBLE_TO_VIEWER}
-				AND p.user_id NOT IN (SELECT uid FROM blocked)
-				AND (NOT ${COLLAB_ACTIVE}
-					OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
-				-- 78ed93a's "reached via coauthor, so the coauthor must not be
-				-- private" is folded into the circle semi-join above (via
-				-- COLLAB_REACH_SQL), costing no second scan of the circle CTE;
-				-- ci-smoke asserts exactly the case that commit targeted. What is
-				-- left here is the AUTHOR's side, with the exemption that keeps a
-				-- private author's post in their own and their coauthor's feed.
-				AND ${AUTHOR_VISIBLE_TO_VIEWER}
+			-- POST candidates, one bounded probe per circle member.
+			--
+			-- The two arms are the two ways a post reaches this viewer: they follow
+			-- the AUTHOR, or they follow an accepted COAUTHOR of a live collab. It
+			-- used to be one scan of the posts table with the circle test as an
+			-- EXISTS filter, which meant reading EVERY share_to_feed row in the
+			-- database on every feed open — the viewer's 3-friend circle paid for
+			-- the whole product's post volume — and evaluating the collab-reach
+			-- privacy subplan once per (post x circle member): 7,712 seq scans of
+			-- notification_settings for one page at test scale. Driving from the
+			-- circle CTE instead makes each arm an index probe
+			-- (idx_posts_user_created / idx_posts_coauthor_user) that reads only
+			-- that member's newest $3 posts, so the cost tracks the viewer's circle
+			-- and never the size of the posts table.
+			--
+			-- UNION, not UNION ALL: the old EXISTS was a semi-join, so a post whose
+			-- author AND coauthor are both in the circle appeared once. Dedupe here
+			-- keeps that. Every other gate is the same fragment in the same place.
+			SELECT kind, id, post_uuid, sort_ts, owner_id, workout_id FROM (
+				SELECT
+					'post'::text AS kind,
+					pc.post_id::text AS id,
+					pc.post_id AS post_uuid,
+					pc.created_at AS sort_ts,
+					pc.user_id AS owner_id,
+					pc.workout_id AS workout_id
+				FROM circle c
+				CROSS JOIN LATERAL (
+					SELECT p.post_id, p.created_at, p.user_id, p.workout_id
+					FROM posts p
+					WHERE p.user_id = c.uid
+						AND ${POST_FEED_GATES}
+						AND ${CURSOR_BEFORE("p.created_at")}
+					ORDER BY p.created_at DESC
+					LIMIT $3
+				) pc
+
+				UNION
+
+				SELECT
+					'post'::text AS kind,
+					pc.post_id::text AS id,
+					pc.post_id AS post_uuid,
+					pc.created_at AS sort_ts,
+					pc.user_id AS owner_id,
+					pc.workout_id AS workout_id
+				FROM circle c
+				CROSS JOIN LATERAL (
+					SELECT p.post_id, p.created_at, p.user_id, p.workout_id
+					FROM posts p
+					WHERE p.coauthor_user_id = c.uid
+						-- 78ed93a: reached via the coauthor, so the collab must be
+						-- live and the coauthor not 'private' — "Only me" has to keep
+						-- their name out of other people's feeds. ci-smoke asserts
+						-- exactly the case that commit targeted.
+						AND ${COLLAB_REACH_SQL}
+						AND ${POST_FEED_GATES}
+						AND ${CURSOR_BEFORE("p.created_at")}
+					ORDER BY p.created_at DESC
+					LIMIT $3
+				) pc
+			) post_candidates
 
 			UNION ALL
 
 			SELECT
 				'workout'::text AS kind,
-				w.workout_id AS id,
-				w.device_end_date AS sort_ts,
-				w.user_id AS owner_id,
-				w.workout_id AS workout_id
-			FROM workouts w
-			JOIN circle c ON c.uid = w.user_id
-			LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
-			WHERE w.user_id NOT IN (SELECT uid FROM blocked)
-				AND COALESCE(ns.share_workouts_to_feed, true) = true
-				-- The feed is always YOUR circle, so 'public' must not pour
-				-- strangers in; only the tightening direction applies here.
-				AND ${OWNER_NOT_PRIVATE_SQL("w.user_id")}
-				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+				wc.workout_id AS id,
+				NULL::uuid AS post_uuid,
+				wc.device_end_date AS sort_ts,
+				wc.user_id AS owner_id,
+				wc.workout_id AS workout_id
+			FROM circle c
+			-- Same per-member bound as the post arms: idx_workouts_feed_candidates
+			-- is (user_id, device_end_date DESC) with a predicate matching this
+			-- WHERE exactly, so this walks that member's newest workouts in order
+			-- and stops at $3 instead of reading their entire history and sorting
+			-- it. That history grows by a row a day forever, which is what made the
+			-- feed get slower on its own with nothing changed.
+			CROSS JOIN LATERAL (
+				SELECT w.workout_id, w.device_end_date, w.user_id
+				FROM workouts w
+				WHERE w.user_id = c.uid
+					AND ${CURSOR_BEFORE("w.device_end_date")}
+					AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 				-- Only two roles ever earn a card: the workout that completed the
 				-- day's mile (which stands in for every pre-mile segment — see the
 				-- rollup lateral below) and anything logged after it. 'rolled_up'
@@ -1905,11 +1987,29 @@ export const UNIFIED_FEED_SQL = `
 						AND p2.user_id NOT IN (SELECT uid FROM blocked)
 						AND (p2.user_id = $1 OR p2.coauthor_user_id = $1
 							OR ${OWNER_NOT_PRIVATE_SQL("p2.user_id")})
-				)
+					)
+				ORDER BY w.device_end_date DESC
+				LIMIT $3
+			) wc
+			-- Whether a member's raw workouts reach the feed at all is a fact about
+			-- the MEMBER, not about each workout, so it is asked once per member
+			-- here instead of once per candidate row inside the lateral. As a row
+			-- filter it cost 2,793 seq scans of notification_settings for one page
+			-- (its user_id IS the primary key — the planner picks a seq scan anyway
+			-- because the table is ~114 rows, which only hurts at that loop count).
+			WHERE c.uid NOT IN (SELECT uid FROM blocked)
+				AND COALESCE((SELECT ns.share_workouts_to_feed
+					FROM notification_settings ns WHERE ns.user_id = c.uid), true)
+				-- The feed is always YOUR circle, so 'public' must not pour
+				-- strangers in; only the tightening direction applies here.
+				AND ${OWNER_NOT_PRIVATE_SQL("c.uid")}
 		),
 		page AS (
-			SELECT kind, id, sort_ts, owner_id, workout_id
+			SELECT kind, id, post_uuid, sort_ts, owner_id, workout_id
 			FROM candidates
+			-- Redundant now that every arm bounds itself on the cursor, and kept
+			-- deliberately: it is the invariant those arms have to satisfy, and it
+			-- costs one comparison over at most (circle size x 3 x $3) rows.
 			WHERE ($2::timestamptz IS NULL OR sort_ts < $2::timestamptz)
 			ORDER BY sort_ts DESC
 			LIMIT $3
@@ -1952,6 +2052,7 @@ export async function getFeedEntryForPost(
 			SELECT
 				'post'::text AS kind,
 				p0.post_id::text AS id,
+				p0.post_id AS post_uuid,
 				p0.created_at AS sort_ts,
 				p0.user_id AS owner_id,
 				p0.workout_id AS workout_id

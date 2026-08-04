@@ -381,41 +381,13 @@ private struct ModernHeroCard: View {
                 .frame(width: 172, height: 176)
                 .layoutPriority(1)
 
-                VStack(spacing: 0) {
-                    ModernHeroStatLine(
-                        icon: "figure.run",
-                        value: String(format: "%.2f", currentDistance),
-                        unit: "mi",
-                        label: "Mileage",
-                        tint: MADTheme.Colors.madRed
-                    )
-                    ModernHeroDivider()
-                    ModernHeroStatLine(
-                        icon: "shoeprints.fill",
-                        value: healthManager.todaysSteps.formatted(),
-                        unit: "steps",
-                        label: "Steps",
-                        tint: stepTint
-                    )
-                    ModernHeroDivider()
-                    if let pace = healthManager.todaysFastestPace {
-                        ModernHeroStatLine(
-                            icon: "timer",
-                            value: formatPace(pace),
-                            unit: "/mi",
-                            label: "Best pace",
-                            tint: MADTheme.Colors.walkBlue
-                        )
-                    } else {
-                        ModernHeroStatLine(
-                            icon: "clock.fill",
-                            value: formattedTimeOnly.isEmpty ? "--" : formattedTimeOnly,
-                            unit: "left",
-                            label: "Left today",
-                            tint: statusColor
-                        )
-                    }
-                }
+                HeroStatColumn(
+                    currentDistance: currentDistance,
+                    steps: healthManager.todaysSteps,
+                    fastestPace: healthManager.todaysFastestPace,
+                    timeLeftText: formattedTimeOnly,
+                    statusColor: statusColor
+                )
                 .frame(maxWidth: .infinity)
             }
 
@@ -512,19 +484,6 @@ private struct ModernHeroCard: View {
             return "Legend status"
         }
         return "\(next.daysToGo) to Day \(next.value)"
-    }
-
-    private var stepTint: Color {
-        if healthManager.todaysSteps >= 10000 { return MADTheme.Colors.success }
-        if healthManager.todaysSteps >= 7500 { return MADTheme.Colors.warning }
-        if healthManager.todaysSteps >= 5000 { return .yellow }
-        return .orange
-    }
-
-    private func formatPace(_ pace: TimeInterval) -> String {
-        let minutes = Int(pace)
-        let seconds = Int((pace - Double(minutes)) * 60)
-        return String(format: "%d:%02d", minutes, seconds)
     }
 
     private var modernProgressLine: some View {
@@ -682,6 +641,73 @@ private struct ModernHeroDivider: View {
             .fill(Color.white.opacity(0.08))
             .frame(height: 1)
             .padding(.leading, 38)
+    }
+}
+
+/// The stat lines beside the streak hero — today's mileage, steps, and either
+/// today's best pace or the time left to run.
+///
+/// BOTH dashboard styles render this exact view. They used to build their own
+/// columns and had drifted apart (Fun showed two stats, Modern three, with
+/// different labels), so the same day read as different numbers depending on
+/// which dashboard you had picked. Anything added here lands on both.
+private struct HeroStatColumn: View {
+    let currentDistance: Double
+    let steps: Int
+    let fastestPace: TimeInterval?
+    /// Time until local midnight, e.g. "6h 30m". Shown when there's no pace yet.
+    let timeLeftText: String
+    let statusColor: Color
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ModernHeroStatLine(
+                icon: "figure.run",
+                value: String(format: "%.2f", currentDistance),
+                unit: "mi",
+                label: "Mileage",
+                tint: MADTheme.Colors.madRed
+            )
+            ModernHeroDivider()
+            ModernHeroStatLine(
+                icon: "shoeprints.fill",
+                value: steps.formatted(),
+                unit: "steps",
+                label: "Steps",
+                tint: stepTint
+            )
+            ModernHeroDivider()
+            if let pace = fastestPace {
+                ModernHeroStatLine(
+                    icon: "timer",
+                    value: Self.formatPace(pace),
+                    unit: "/mi",
+                    label: "Best pace",
+                    tint: MADTheme.Colors.walkBlue
+                )
+            } else {
+                ModernHeroStatLine(
+                    icon: "clock.fill",
+                    value: timeLeftText.isEmpty ? "--" : timeLeftText,
+                    unit: "left",
+                    label: "Left today",
+                    tint: statusColor
+                )
+            }
+        }
+    }
+
+    private var stepTint: Color {
+        if steps >= 10000 { return MADTheme.Colors.success }
+        if steps >= 7500 { return MADTheme.Colors.warning }
+        if steps >= 5000 { return .yellow }
+        return .orange
+    }
+
+    private static func formatPace(_ pace: TimeInterval) -> String {
+        let minutes = Int(pace)
+        let seconds = Int((pace - Double(minutes)) * 60)
+        return String(format: "%d:%02d", minutes, seconds)
     }
 }
 
@@ -1193,7 +1219,7 @@ private struct FlameBuddyHeroCard: View {
                     .frame(width: leftWidth, height: geo.size.height, alignment: .top)
 
                     funStatRows
-                        .padding(.top, 34)
+                        .padding(.top, 8)
                         .frame(width: rightWidth, height: geo.size.height, alignment: .top)
                 }
             }
@@ -1240,6 +1266,13 @@ private struct FlameBuddyHeroCard: View {
         }
     }
 
+    /// Worth saying in words even at the cost of the crown: today's miles
+    /// haven't synced, or the streak is running out of day.
+    private var statusIsUrgent: Bool {
+        guard !trustedDone else { return false }
+        return !distanceIsFresh || userManager.currentUser.isStreakAtRisk
+    }
+
     /// Living the longest streak they have ever had. `>= 7` so a brand-new
     /// account isn't crowned on day 1.
     private var atAllTimeBest: Bool {
@@ -1278,11 +1311,17 @@ private struct FlameBuddyHeroCard: View {
                     .font(.system(size: 9, weight: .black, design: .rounded))
                     .tracking(1.1)
                     .textCase(.uppercase)
-                    .foregroundColor(atAllTimeBest ? .white.opacity(0.75) : statusColor)
+                    .foregroundColor(.white.opacity(0.75))
                     .lineLimit(1)
                     .minimumScaleFactor(0.58)
 
-                if atAllTimeBest {
+                // The status ("Streak at risk", "Syncing", "Streak safe") used
+                // to be its own pill under this box. It rides ON the streak
+                // now — the box already accents in the status colour — and the
+                // freed row is what lets this column carry the same three stats
+                // the Modern hero does. The crown shares that one line, and
+                // yields it whenever the status is actually urgent.
+                if atAllTimeBest && !statusIsUrgent {
                     HStack(spacing: 3) {
                         Image(systemName: "crown.fill")
                             .font(.system(size: 8, weight: .black))
@@ -1294,12 +1333,20 @@ private struct FlameBuddyHeroCard: View {
                     .foregroundColor(gold)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
+                } else {
+                    Text(statusText)
+                        .font(.system(size: 9, weight: .black, design: .rounded))
+                        .tracking(0.5)
+                        .textCase(.uppercase)
+                        .foregroundColor(statusColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.55)
                 }
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 17, style: .continuous)
                 .fill(atAllTimeBest ? gold.opacity(0.10) : Color.black.opacity(0.18))
@@ -1367,31 +1414,19 @@ private struct FlameBuddyHeroCard: View {
         .frame(maxHeight: .infinity)
     }
 
+    /// The Fun column: the streak box (which carries the status line — see
+    /// `streakHeadline`) over the SAME three stats the Modern hero shows.
     private var funStatRows: some View {
         VStack(alignment: .leading, spacing: 0) {
             streakHeadline
                 .padding(.bottom, 8)
-            HStack {
-                Spacer(minLength: 0)
-                statusBadge
-                Spacer(minLength: 0)
-            }
-            .padding(.bottom, 10)
 
-            ModernHeroStatLine(
-                icon: "figure.run",
-                value: String(format: "%.2f", currentDistance),
-                unit: "mi",
-                label: trustedDone ? "Logged" : "Mileage",
-                tint: MADTheme.Colors.madRed
-            )
-            ModernHeroDivider()
-            ModernHeroStatLine(
-                icon: trustedDone ? "checkmark.circle.fill" : "clock.fill",
-                value: trustedDone ? "Done" : (formattedTimeOnly.isEmpty ? "--" : formattedTimeOnly),
-                unit: trustedDone ? "" : "left",
-                label: trustedDone ? "Safe" : "Left today",
-                tint: statusColor
+            HeroStatColumn(
+                currentDistance: currentDistance,
+                steps: healthManager.todaysSteps,
+                fastestPace: healthManager.todaysFastestPace,
+                timeLeftText: formattedTimeOnly,
+                statusColor: statusColor
             )
 
             RecordGhostRow(
@@ -1439,19 +1474,27 @@ private struct FlameBuddyHeroCard: View {
         return "Keep it alive"
     }
 
+    /// Same clock as the Modern hero — `timeUntilStreakReset` goes nil once the
+    /// mile is done, which left the two dashboards showing different values in
+    /// the same "Left today" row.
     private var formattedTimeOnly: String {
         _ = timeRemainingText
-        guard let remaining = userManager.currentUser.timeUntilStreakReset else { return "" }
+        let remaining = secondsUntilLocalMidnight
         let hours = Int(remaining) / 3600
         let minutes = Int(remaining) % 3600 / 60
         return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
     }
 
-    private var stepTint: Color {
-        if healthManager.todaysSteps >= 10000 { return MADTheme.Colors.success }
-        if healthManager.todaysSteps >= 7500 { return MADTheme.Colors.warning }
-        if healthManager.todaysSteps >= 5000 { return .yellow }
-        return .orange
+    private var secondsUntilLocalMidnight: TimeInterval {
+        let now = Date()
+        guard let nextMidnight = Calendar.current.nextDate(
+            after: now,
+            matching: DateComponents(hour: 0, minute: 0, second: 0),
+            matchingPolicy: .nextTime
+        ) else {
+            return userManager.currentUser.timeUntilStreakReset ?? 0
+        }
+        return max(0, nextMidnight.timeIntervalSince(now))
     }
 
     private func updateTimeRemaining() {

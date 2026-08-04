@@ -504,7 +504,7 @@ struct WorkoutDetailView: View {
     private var ghostRaceSection: some View {
         if let race = ghostRaceResult {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                WorkoutDetailSectionHeader(title: "Ghost Race", icon: "flag.checkered")
+                sectionHeader("flag.checkered", "Ghost Race")
                 VStack(spacing: 0) {
                     DetailRow(
                         icon: race.won ? "trophy.fill" : "flag.checkered",
