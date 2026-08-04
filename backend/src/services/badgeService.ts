@@ -148,6 +148,8 @@ async function computeSocialAggregates(userId: string): Promise<{
   buddySessionsCompleted: number;
   buddyDistinctPartners: number;
   buddySessionsWon: number;
+  ghostsBeaten: number;
+  bestGhostMargin: number;
 }> {
   const zero = {
     storyPostsCount: 0,
@@ -159,6 +161,8 @@ async function computeSocialAggregates(userId: string): Promise<{
     buddySessionsCompleted: 0,
     buddyDistinctPartners: 0,
     buddySessionsWon: 0,
+    ghostsBeaten: 0,
+    bestGhostMargin: 0,
   };
   try {
     const [
@@ -171,6 +175,7 @@ async function computeSocialAggregates(userId: string): Promise<{
       buddyDone,
       buddyPartners,
       buddyWon,
+      ghosts,
     ] = await Promise.all([
       db
         .query<{
@@ -265,6 +270,23 @@ async function computeSocialAggregates(userId: string): Promise<{
           [userId],
         )
         .catch(() => [{ count: "0" }]),
+      // Ghost races won. `ghost_margin_seconds` is stamped only on a WIN, so
+      // presence is the win — no comparison needed. Soft-deleted workouts
+      // don't count, same as everywhere else miles are tallied.
+      db
+        .query<{
+          count: string;
+          best: string | null;
+        }>(
+          `SELECT COUNT(*)::text AS count,
+                  COALESCE(MAX(ghost_margin_seconds), 0)::text AS best
+             FROM workouts
+            WHERE user_id = $1
+              AND deleted_at IS NULL
+              AND ghost_margin_seconds IS NOT NULL`,
+          [userId],
+        )
+        .catch(() => [{ count: "0", best: "0" }]),
     ]);
     return {
       storyPostsCount: parseInt(stories[0]?.count ?? "0", 10) || 0,
@@ -276,6 +298,8 @@ async function computeSocialAggregates(userId: string): Promise<{
       buddySessionsCompleted: parseInt(buddyDone[0]?.count ?? "0", 10) || 0,
       buddyDistinctPartners: parseInt(buddyPartners[0]?.count ?? "0", 10) || 0,
       buddySessionsWon: parseInt(buddyWon[0]?.count ?? "0", 10) || 0,
+      ghostsBeaten: parseInt(ghosts[0]?.count ?? "0", 10) || 0,
+      bestGhostMargin: Math.floor(Number(ghosts[0]?.best ?? 0)) || 0,
     };
   } catch {
     return zero;
@@ -488,6 +512,15 @@ function evaluatePredicate(
       // default: completed sessions
       return { earned: agg.buddySessionsCompleted >= req, aggregateOnly: true };
     }
+    case "ghost": {
+      // ghost_beat_* = races won, ghost_margin_* = biggest single margin in
+      // seconds. Same badgeId-prefix family shape as `buddy` above.
+      if (req === null) return { earned: false, aggregateOnly: true };
+      if (badge.badgeId.startsWith("ghost_margin_")) {
+        return { earned: agg.bestGhostMargin >= req, aggregateOnly: true };
+      }
+      return { earned: agg.ghostsBeaten >= req, aggregateOnly: true };
+    }
     default:
       return { earned: false, aggregateOnly: true };
   }
@@ -571,6 +604,9 @@ function isWorkoutDerived(category: BadgeCategory): boolean {
     // Deleting a workout must not strip the medal for a walk you genuinely
     // did with a friend — and the friend's copy of that session still exists.
     category === "buddy"
+    // Ghost medals are deliberately NOT listed here: the win lives on the
+    // workout row itself, so deleting that workout should take the medal
+    // with it, exactly like a pace badge.
   );
 }
 
@@ -911,6 +947,65 @@ const EXTRA_BADGES: Array<{
     rarity: "legendary",
     requirement: 10,
     sortOrder: 956,
+  },
+  // ── Ghost Races ──
+  // Two families by badgeId prefix (see evaluatePredicate's "ghost" case):
+  // ghost_beat_* = races won, ghost_margin_* = biggest single winning margin
+  // in seconds. A race is only counted when it was WON — the tracker stamps
+  // `workouts.ghost_margin_seconds` on a win and nothing else.
+  //
+  // SF Symbols note: there is no ghost symbol on the iOS 17 deployment target
+  // (a too-new symbol renders as a BLANK box, not a fallback), so these use
+  // shipped symbols. The app draws its own ghost where the character matters.
+  {
+    badgeId: "ghost_beat_1",
+    category: "ghost",
+    name: "Ghost Hunter",
+    description: "Beat a ghost over the mile for the first time",
+    icon: "flag.checkered",
+    rarity: "common",
+    requirement: 1,
+    sortOrder: 960,
+  },
+  {
+    badgeId: "ghost_beat_10",
+    category: "ghost",
+    name: "Ghost Buster",
+    description: "Beat your ghost 10 times",
+    icon: "flag.checkered",
+    rarity: "rare",
+    requirement: 10,
+    sortOrder: 961,
+  },
+  {
+    badgeId: "ghost_beat_50",
+    category: "ghost",
+    name: "Unhaunted",
+    description: "Beat your ghost 50 times",
+    icon: "flag.checkered",
+    rarity: "legendary",
+    requirement: 50,
+    sortOrder: 962,
+  },
+  {
+    badgeId: "ghost_margin_15",
+    category: "ghost",
+    name: "Clear Daylight",
+    description: "Beat a ghost by 15 seconds or more",
+    icon: "bolt.fill",
+    rarity: "rare",
+    requirement: 15,
+    sortOrder: 963,
+  },
+  {
+    badgeId: "ghost_margin_45",
+    category: "ghost",
+    name: "Vanishing Act",
+    description: "Beat a ghost by 45 seconds or more",
+    icon: "bolt.fill",
+    rarity: "legendary",
+    requirement: 45,
+    sortOrder: 964,
   },
 ];
 

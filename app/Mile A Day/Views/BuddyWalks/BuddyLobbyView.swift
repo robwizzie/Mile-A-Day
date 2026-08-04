@@ -147,10 +147,12 @@ struct BuddyLobbyView: View {
                                 : Color.white.opacity(0.10)
                         )
                         .frame(width: 34, height: 34)
-                    Image(systemName: "flag.checkered")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(
-                            buddyGhostArmed ? session.accentColor : .white.opacity(0.7))
+                    GhostSprite(
+                        size: 17,
+                        color: buddyGhostArmed ? session.accentColor : .white.opacity(0.7),
+                        floats: false,
+                        glancesBack: true
+                    )
                 }
 
                 VStack(alignment: .leading, spacing: 1) {

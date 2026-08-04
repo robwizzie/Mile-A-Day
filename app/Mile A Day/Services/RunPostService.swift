@@ -71,7 +71,11 @@ enum RunPostService {
             calories: calories > 0 ? calories : nil,
             steps: nil,
             workoutId: anchorId,
-            dateText: dateText(for: anchor.startDate)
+            dateText: dateText(for: anchor.startDate),
+            // The anchor IS the leg that crossed the mile, so its race result
+            // is the day's race result.
+            ghostMarginSeconds: ghostWin(of: anchor)?.margin,
+            ghostTargetSeconds: ghostWin(of: anchor)?.target
         )
     }
 
@@ -102,7 +106,9 @@ enum RunPostService {
                 steps: nil,
                 workoutId: workoutId,
                 dateText: dateText(for: workout.startDate),
-                isExtra: isExtraWorkout(workoutId)
+                isExtra: isExtraWorkout(workoutId),
+                ghostMarginSeconds: ghostWin(of: workout)?.margin,
+                ghostTargetSeconds: ghostWin(of: workout)?.target
             )
         }
 
@@ -165,6 +171,17 @@ enum RunPostService {
             return moving
         }
         return workout.duration
+    }
+
+    /// The ghost win stamped on this workout at finish, if it beat its ghost.
+    /// Only winning workouts carry the metadata, so presence IS the win.
+    private static func ghostWin(of workout: HKWorkout) -> (margin: Double, target: Double)? {
+        guard
+            let margin = workout.metadata?[WorkoutLocationManager.ghostMarginMetadataKey] as? Double,
+            let target = workout.metadata?[WorkoutLocationManager.ghostTargetMetadataKey] as? Double,
+            margin > 0, target > 0
+        else { return nil }
+        return (margin, target)
     }
 
     private static func workoutPaceSecondsPerMile(distance: Double, duration: TimeInterval) -> TimeInterval? {

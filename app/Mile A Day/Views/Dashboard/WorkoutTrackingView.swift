@@ -134,6 +134,10 @@ struct WorkoutTrackingView: View {
     /// How to name the ghost in copy ("your best mile", "your target").
     @State private var raceGhostName = "your best mile"
     @State private var raceFinalDelta: TimeInterval?
+    /// The win, from the moment it's decided until the HealthKit metadata
+    /// stamp carries it onto the saved workout (and from there to the server
+    /// and the feed).
+    @State private var pendingGhostWin: GhostRaceWin?
     /// Chosen target, per activity, remembered between sessions.
     @AppStorage("ghostTargetV1.running") private var runTargetStorage = ""
     @AppStorage("ghostTargetV1.walking") private var walkTargetStorage = ""
@@ -291,12 +295,27 @@ struct WorkoutTrackingView: View {
         .padding(.top, 16)
     }
 
+    /// What a step puts above its question. The ghost is drawn, not a symbol —
+    /// SF Symbols has none that exists on the iOS 17 deployment target.
+    enum WizardGlyph {
+        case symbol(String)
+        case ghost
+    }
+
     /// Glyph + question, identical on every step.
-    private func wizardHeader(glyph: String, title: String, subtitle: String) -> some View {
+    private func wizardHeader(glyph: WizardGlyph, title: String, subtitle: String) -> some View {
         VStack(spacing: 16) {
-            Image(systemName: glyph)
-                .font(.system(size: 60))
-                .foregroundColor(.white)
+            Group {
+                switch glyph {
+                case .symbol(let name):
+                    Image(systemName: name)
+                        .font(.system(size: 60))
+                case .ghost:
+                    GhostSprite(size: 62, glancesBack: true)
+                }
+            }
+            .foregroundColor(.white)
+            .frame(height: 72)
 
             Text(title)
                 .font(.system(size: 32, weight: .bold, design: .rounded))
@@ -314,7 +333,7 @@ struct WorkoutTrackingView: View {
     /// The shared layout of a "pick one of these" step.
     private func wizardStep<Options: View>(
         step: Int,
-        glyph: String,
+        glyph: WizardGlyph,
         title: String,
         subtitle: String,
         onBack: @escaping () -> Void,
@@ -350,7 +369,7 @@ struct WorkoutTrackingView: View {
     private var activitySelectionContent: some View {
         wizardStep(
             step: 1,
-            glyph: "figure.walk",
+            glyph: .symbol("figure.walk"),
             title: "Choose Activity Type",
             subtitle: "Select how you'll complete your mile",
             onBack: { dismiss() }
@@ -369,7 +388,7 @@ struct WorkoutTrackingView: View {
     private var locationTypeSelectionContent: some View {
         wizardStep(
             step: 2,
-            glyph: selectedActivityType == .running ? "figure.run" : "figure.walk",
+            glyph: .symbol(selectedActivityType == .running ? "figure.run" : "figure.walk"),
             title: "Choose Location",
             subtitle: "Where will you be working out?",
             onBack: { goBack(to: { showActivitySelection = true }, from: { showLocationTypeSelection = false }) }
@@ -395,7 +414,7 @@ struct WorkoutTrackingView: View {
     private var raceModeSelectionContent: some View {
         wizardStep(
             step: 3,
-            glyph: "flag.checkered",
+            glyph: .ghost,
             title: "Choose Your Mode",
             subtitle: "Race a time, or just log the miles.",
             onBack: { goBack(to: { showLocationTypeSelection = true }, from: { showRaceModeSelection = false }) }
@@ -409,7 +428,10 @@ struct WorkoutTrackingView: View {
             }
 
             workoutOptionButton(
-                icon: "flag.checkered",
+                leading: {
+                    GhostSprite(size: 34, glancesBack: true)
+                        .frame(width: 50)
+                },
                 title: "Ghost Race",
                 subtitle: ghostRaceSubtitle,
                 featured: true,
@@ -481,18 +503,22 @@ struct WorkoutTrackingView: View {
 
         // Raced and won: `raceFinalDelta` is the frozen verdict at the 1.0-mile
         // crossing — the same number the chip showed, so the popup can't
-        // contradict what the user watched.
-        if raceGhost != nil, let delta = raceFinalDelta, delta > 0 {
-            let margin = max(1, Int(delta.rounded()))
-            var description = "You beat \(raceGhostName) by \(margin)s."
-            if case .newBest(let seconds, _) = outcome {
-                description += " \(BestEffortStore.formatSeconds(seconds)) is your new mile to beat."
-            } else if case .baselineSet(let seconds) = outcome {
-                description += " \(BestEffortStore.formatSeconds(seconds)) is now your mile to beat."
-            }
-            CelebrationManager.shared.addCelebration(
-                .milestone(
-                    title: "Ghost Beaten!", description: description, icon: "flag.checkered"))
+        // contradict what the user watched. Every figure below is derived from
+        // that one frozen delta for the same reason.
+        if let ghost = raceGhost, let delta = raceFinalDelta, delta > 0 {
+            let win = GhostRaceWin(
+                marginSeconds: delta,
+                mileSeconds: max(0, ghost.seconds - delta),
+                ghostSeconds: ghost.seconds,
+                ghostName: raceGhostName,
+                activityKey: raceActivityKey,
+                newRecordSeconds: recordSeconds,
+                workoutId: nil
+            )
+            // Held for the HealthKit metadata stamp further down this same
+            // stop, which is what carries the win to the server.
+            pendingGhostWin = win
+            CelebrationManager.shared.addCelebration(.ghostBeaten(win: win))
             return
         }
 
@@ -1199,12 +1225,21 @@ struct WorkoutTrackingView: View {
             text = ahead ? "\(magnitude)s ahead of \(name)" : "\(magnitude)s behind \(name)"
         }
         return HStack(spacing: 5) {
-            Image(
-                systemName: frozen
-                    ? (ahead ? "trophy.fill" : "flag.checkered")
-                    : (ahead ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
-            )
-            .font(.system(size: 9, weight: .bold))
+            // The ghost itself while the race is live — it glances back when
+            // you're gaining on it, which is the whole feeling of the feature
+            // in one glyph. The verdict swaps to a trophy/flag, because by
+            // then the ghost is beside the point.
+            if frozen {
+                Image(systemName: ahead ? "trophy.fill" : "flag.checkered")
+                    .font(.system(size: 9, weight: .bold))
+            } else {
+                GhostSprite(
+                    size: 11,
+                    color: ahead ? .green : .orange,
+                    floats: false,
+                    glancesBack: ahead
+                )
+            }
             Text(text)
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
                 .tracking(0.4)
@@ -1395,24 +1430,32 @@ struct WorkoutTrackingView: View {
 
     private func workoutOptionButton(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
         workoutOptionButton(
-            icon: icon, title: title, subtitle: subtitle,
+            leading: { optionGlyph(icon) },
+            title: title, subtitle: subtitle,
             accessory: { optionChevron }, action: action)
+    }
+
+    private func optionGlyph(_ icon: String) -> some View {
+        Image(systemName: icon)
+            .font(.system(size: 32))
+            .frame(width: 50)
     }
 
     /// The wizard's option card.
     ///
     /// `featured` brightens the surface so one option can read as the special
     /// one, `badge` is the small pill beside the title (the ghost race's NEW
-    /// flag), and `accessory` replaces the trailing chevron with a readout.
-    /// All three default off, so the plain overload above renders exactly what
-    /// the Run/Walk and Indoor/Outdoor steps have always shown.
+    /// flag), `leading` is the glyph slot (a drawn ghost, not just a symbol),
+    /// and `accessory` replaces the trailing chevron with a readout. The plain
+    /// overload above renders exactly what the Run/Walk and Indoor/Outdoor
+    /// steps have always shown.
     ///
     /// Featuring is deliberately a BRIGHTNESS shift, not a hue one: this whole
     /// screen sits on the red gradient, and `MADTheme.workoutColor("running")`
     /// is that gradient's own top stop — a red-tinted border and glyph would
     /// go muddy on exactly the workout type most people pick.
-    private func workoutOptionButton<Accessory: View>(
-        icon: String,
+    private func workoutOptionButton<Leading: View, Accessory: View>(
+        @ViewBuilder leading: () -> Leading,
         title: String,
         subtitle: String,
         featured: Bool = false,
@@ -1422,9 +1465,7 @@ struct WorkoutTrackingView: View {
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 16) {
-                Image(systemName: icon)
-                    .font(.system(size: 32))
-                    .frame(width: 50)
+                leading()
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
@@ -2159,16 +2200,25 @@ struct WorkoutTrackingView: View {
             }
         }
 
-        // Stamp the tracker's moving time on the workout itself — the sync
-        // reads HKWorkouts back, so this is how display pace's divisor
-        // travels. Best-effort: a metadata failure still saves the workout.
+        // Stamp the tracker's moving time (and a ghost win) on the workout
+        // itself — the sync reads HKWorkouts back, so this is how the display
+        // pace divisor and the race result travel. Best-effort: a metadata
+        // failure still saves the workout.
+        var metadata: [String: Any] = [:]
         let movingSeconds = locationManager.movingSeconds
         if movingSeconds > 0 {
-            builder.addMetadata([WorkoutLocationManager.movingSecondsMetadataKey: movingSeconds]) { _, _ in
+            metadata[WorkoutLocationManager.movingSecondsMetadataKey] = movingSeconds
+        }
+        if let win = pendingGhostWin {
+            metadata[WorkoutLocationManager.ghostMarginMetadataKey] = win.marginSeconds
+            metadata[WorkoutLocationManager.ghostTargetMetadataKey] = win.ghostSeconds
+        }
+        if metadata.isEmpty {
+            beginSave()
+        } else {
+            builder.addMetadata(metadata) { _, _ in
                 beginSave()
             }
-        } else {
-            beginSave()
         }
     }
 
@@ -2218,6 +2268,7 @@ struct WorkoutTrackingView: View {
         raceGhost = nil
         raceGhostName = "your best mile"
         raceFinalDelta = nil
+        pendingGhostWin = nil
 
         // Show result to user. The mile counts via GPS/pedometer sync whether
         // or not the HealthKit write succeeded, so a failed save is never a lost

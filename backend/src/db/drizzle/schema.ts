@@ -249,6 +249,12 @@ export const workouts = pgTable(
     // walks don't read 82:47/mi — while total_duration stays the elapsed
     // truth for PRs, races, and recaps (a race clock doesn't pause).
     movingSeconds: doublePrecision("moving_seconds"),
+    // Ghost race, written ONLY when the ghost was beaten (in-app tracker
+    // stamps it as HKWorkout metadata at finish, the sync carries it here).
+    // Presence therefore means "won" — which is exactly what the ghost medal
+    // family counts. Null on every other workout, including raced-and-lost.
+    ghostMarginSeconds: doublePrecision("ghost_margin_seconds"),
+    ghostTargetSeconds: doublePrecision("ghost_target_seconds"),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "string",

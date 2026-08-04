@@ -137,10 +137,8 @@ struct GhostRaceOptionsContent: View {
     private var header: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
             ZStack {
-                Circle().fill(accent.opacity(0.22)).frame(width: 56, height: 56)
-                Image(systemName: "flag.checkered")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(accent)
+                Circle().fill(accent.opacity(0.22)).frame(width: 64, height: 64)
+                GhostSprite(size: 34, color: accent, glancesBack: true)
             }
             Text("Race a ghost for one mile")
                 .font(.system(size: 24, weight: .bold, design: .rounded))

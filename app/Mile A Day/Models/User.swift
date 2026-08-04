@@ -457,7 +457,17 @@ struct User: Identifiable, Codable {
             ("buddy_won_10", "Pace Setter", "Won 10 buddy races")
         ]
 
-        for (badgeId, name, description) in buddyBadges {
+        // Ghost race medals — same deal as the buddy set above: mirrors of
+        // EXTRA_BADGES so they're discoverable before the first ghost falls.
+        let ghostBadges: [(String, String, String)] = [
+            ("ghost_beat_1", "Ghost Hunter", "Beat a ghost over the mile for the first time"),
+            ("ghost_beat_10", "Ghost Buster", "Beat your ghost 10 times"),
+            ("ghost_beat_50", "Unhaunted", "Beat your ghost 50 times"),
+            ("ghost_margin_15", "Clear Daylight", "Beat a ghost by 15 seconds or more"),
+            ("ghost_margin_45", "Vanishing Act", "Beat a ghost by 45 seconds or more")
+        ]
+
+        for (badgeId, name, description) in buddyBadges + ghostBadges {
             if !hasBadge(id: badgeId) {
                 lockedBadges.append(Badge(
                     id: badgeId,

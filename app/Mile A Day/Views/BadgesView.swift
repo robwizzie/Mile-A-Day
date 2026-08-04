@@ -238,6 +238,11 @@ struct BadgesView: View {
             return allBadges
                 .filter { b in BadgeFilter.buddyPrefixes.contains { b.id.hasPrefix($0) } }
                 .sorted { Self.buddySortKey($0.id) < Self.buddySortKey($1.id) }
+        case .ghost:
+            return allBadges
+                .filter { b in BadgeFilter.ghostPrefixes.contains { b.id.hasPrefix($0) } }
+                .sorted { Self.familySortKey($0.id, BadgeFilter.ghostPrefixes)
+                    < Self.familySortKey($1.id, BadgeFilter.ghostPrefixes) }
         case .new:
             // Use the on-open snapshot so the list survives mark-as-viewed.
             let snapshot = newBadgeIdsAtOpen
@@ -247,8 +252,13 @@ struct BadgesView: View {
 
     /// Orders a buddy medal by family (walks → crew → races won), then tier.
     private static func buddySortKey(_ id: String) -> (Int, Int) {
-        let family = BadgeFilter.buddyPrefixes.firstIndex { id.hasPrefix($0) }
-            ?? BadgeFilter.buddyPrefixes.count
+        familySortKey(id, BadgeFilter.buddyPrefixes)
+    }
+
+    /// Orders a medal by its family's position in `prefixes`, then by the
+    /// numeric tier its id ends with.
+    private static func familySortKey(_ id: String, _ prefixes: [String]) -> (Int, Int) {
+        let family = prefixes.firstIndex { id.hasPrefix($0) } ?? prefixes.count
         let tier = Int(id.split(separator: "_").last ?? "") ?? 0
         return (family, tier)
     }
@@ -495,7 +505,7 @@ struct FilterChip: View {
 // MARK: - Badge Filter
 
 enum BadgeFilter: CaseIterable {
-    case all, streak, miles, speed, distance, challenges, social, buddy, new
+    case all, streak, miles, speed, distance, challenges, social, buddy, ghost, new
 
     var title: String {
         switch self {
@@ -507,6 +517,7 @@ enum BadgeFilter: CaseIterable {
         case .challenges: return "Challenges"
         case .social: return "Social"
         case .buddy: return "Buddy"
+        case .ghost: return "Ghost"
         case .new: return "New"
         }
     }
@@ -521,6 +532,7 @@ enum BadgeFilter: CaseIterable {
         case .challenges: return "trophy.fill"
         case .social: return "person.2.fill"
         case .buddy: return "figure.2"
+        case .ghost: return "flag.checkered"
         case .new: return "sparkles"
         }
     }
@@ -537,6 +549,10 @@ enum BadgeFilter: CaseIterable {
     /// someone, not by app-function activity, and burying seven of them at the
     /// end of the Social list is how a whole category goes unnoticed.
     static let buddyPrefixes = ["buddy_done_", "buddy_crew_", "buddy_won_"]
+
+    /// Ghost race medal families, in progression order: races won, then the
+    /// biggest single winning margin.
+    static let ghostPrefixes = ["ghost_beat_", "ghost_margin_"]
 }
 
 // MARK: - Badge Card Button Style

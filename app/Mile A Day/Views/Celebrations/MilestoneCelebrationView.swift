@@ -22,6 +22,15 @@ struct MilestoneCelebrationView: View {
 
     var body: some View {
         ZStack {
+            // OPAQUE base under the gradient. The stops below carry alpha
+            // (0.8 / 0.9), which made this full-screen celebration
+            // see-through over its bottom two-thirds — the dashboard read
+            // straight through the moment. Keeping the stops (they're what
+            // gives the gradient its depth) and putting a solid color behind
+            // them fixes every milestone celebration at once.
+            Color(red: 0.17, green: 0.09, blue: 0.28)
+                .ignoresSafeArea()
+
             // Gradient background
             LinearGradient(
                 colors: [

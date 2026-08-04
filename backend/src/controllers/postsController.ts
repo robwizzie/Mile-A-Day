@@ -30,6 +30,7 @@ import {
   lockUnearnedPhotos,
   ALLOWED_STORY_REACTIONS,
   PostStatsSnapshot,
+  sanitizeGhostStats,
   type ViewerGoalGate,
 } from "../services/postService.js";
 import {
@@ -260,7 +261,9 @@ export async function createPostController(
     // could sit in the feed claiming a streak the author no longer has. Stamp
     // the server's value over it — only when the client sent one, so a post
     // that deliberately carries no streak chip stays that way.
-    let statsSnapshot = (stats_snapshot ?? null) as PostStatsSnapshot | null;
+    let statsSnapshot = sanitizeGhostStats(
+      (stats_snapshot ?? null) as PostStatsSnapshot | null,
+    );
     if (hasStats && statsSnapshot?.streak != null) {
       try {
         const { streak } = await getActiveStreak(userId);

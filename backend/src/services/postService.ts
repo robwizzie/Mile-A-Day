@@ -36,6 +36,46 @@ export interface PostStatsSnapshot {
   duration?: number | null;
   streak?: number | null;
   date?: string | null;
+  /**
+   * Ghost race, present only when the ghost was BEATEN: seconds of margin and
+   * the ghost's mile time.
+   *
+   * Deliberately carried in the snapshot rather than in its own column. The
+   * snapshot is jsonb that every feed projection already returns verbatim, so
+   * a ghost win reaches the feed, the profile grid, stories and post detail
+   * without touching one of those guard-heavy SELECTs.
+   *
+   * Display only, and client-asserted — `sanitizeGhostStats` clamps it to
+   * plausible values so a bad client can only brag with a believable number on
+   * its OWN post. Anything that must be TRUSTED (medals) counts
+   * `workouts.ghost_margin_seconds` instead, which arrives from the synced
+   * HKWorkout on the same footing as distance.
+   */
+  ghost_margin_seconds?: number | null;
+  ghost_target_seconds?: number | null;
+}
+
+/**
+ * Drop a ghost claim that isn't plausible, keeping the rest of the snapshot.
+ * Bounds mirror the client's `GhostTarget.isPlausible` (2:00…40:00); a margin
+ * can never exceed the ghost it beat.
+ */
+export function sanitizeGhostStats(
+  stats: PostStatsSnapshot | null,
+): PostStatsSnapshot | null {
+  if (!stats) return stats;
+  const margin = Number(stats.ghost_margin_seconds);
+  const target = Number(stats.ghost_target_seconds);
+  const ok =
+    Number.isFinite(margin) &&
+    Number.isFinite(target) &&
+    margin > 0 &&
+    target >= 120 &&
+    target <= 2400 &&
+    margin <= target;
+  if (ok) return stats;
+  const { ghost_margin_seconds, ghost_target_seconds, ...rest } = stats;
+  return rest;
 }
 
 /**

@@ -13,6 +13,10 @@ export type Workout = {
   // Seconds of actual movement (in-app tracker only) — display pace uses
   // this; totalDuration stays the elapsed truth for PRs/races/recaps.
   movingSeconds?: number;
+  // Ghost race, sent only when the in-app tracker BEAT its ghost over the
+  // mile: seconds of margin, and the ghost's own mile time.
+  ghostMarginSeconds?: number;
+  ghostTargetSeconds?: number;
   splits: WorkoutSplit[];
   source?: WorkoutSource;
   // Optional simplified GPS trace ([[lat, lng], ...]) for outdoor walks/runs.

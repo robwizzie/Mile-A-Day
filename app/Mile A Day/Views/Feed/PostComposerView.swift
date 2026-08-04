@@ -17,6 +17,11 @@ struct RunStatsInput: Equatable {
     /// Post-goal bonus workout: the sticker bakes the distance as "+0.14 mi"
     /// so a short extra walk reads as ADDED miles, not the whole day.
     var isExtra: Bool = false
+    /// Ghost race, set only when this workout BEAT its ghost. Read straight off
+    /// the HKWorkout's metadata, so it's keyed to the right workout by
+    /// construction — no separate stash to fall out of sync.
+    var ghostMarginSeconds: Double?
+    var ghostTargetSeconds: Double?
 
     var snapshot: PostStats {
         PostStats(
@@ -26,7 +31,9 @@ struct RunStatsInput: Equatable {
             streak: streak,
             date: dateText,
             calories: calories,
-            steps: steps
+            steps: steps,
+            ghost_margin_seconds: ghostMarginSeconds,
+            ghost_target_seconds: ghostTargetSeconds
         )
     }
 
