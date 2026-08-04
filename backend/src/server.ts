@@ -227,11 +227,21 @@ app.get("/status/schema", async (req, res) => {
                 [uid],
               );
 
+              // How much of Execution Time the plan actually accounts for.
+              // A large shortfall is time spent OUTSIDE the node tree, which in
+              // practice means JIT codegen (see DbService's note) — the plan
+              // looks cheap while the query is slow, and no amount of staring
+              // at hottest_nodes explains it. `jit` below is Postgres' own
+              // report, present only when it engaged.
+              const execMs = root?.["Execution Time"] ?? 0;
+              const topMs = (root?.["Plan"]?.["Actual Total Time"] ?? 0) * 1;
               return {
                 rows_returned: rows.length,
                 full_query_ms: fullMs,
                 planning_ms: Math.round(root?.["Planning Time"] ?? 0),
-                execution_ms: Math.round(root?.["Execution Time"] ?? 0),
+                execution_ms: Math.round(execMs),
+                unaccounted_ms: Math.round(execMs - topMs),
+                jit: root?.["JIT"] ?? null,
                 scale: scale[0],
                 // Inclusive time, so parents contain their children — read the
                 // deepest expensive node, not just the top one.

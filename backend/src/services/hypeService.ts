@@ -149,7 +149,11 @@ export async function getContextHypers(
 		FROM (
 			SELECT DISTINCT ON (h.sender_id) h.sender_id, h.created_at
 			FROM hype_log h
-			WHERE h.target_id = $1 AND ${matchSql}
+			-- Same reason as CONTEXTFUL below, hoisted to the outer WHERE so it
+			-- reaches the index scan: every branch of matchSql needs a non-null
+			-- context_id to match anyway, and without saying so this reads all of
+			-- hype_log instead of probing target_id.
+			WHERE h.target_id = $1 AND h.context_id IS NOT NULL AND ${matchSql}
 			ORDER BY h.sender_id, h.created_at DESC
 		) h2
 		JOIN users u ON u.user_id = h2.sender_id
@@ -212,6 +216,27 @@ export async function logHypeIfUnderLimit(
 const MILE_COMPOSITE_RE = /:(\d{4}-\d{2}-\d{2})$/;
 
 /**
+ * `context_id IS NOT NULL`, stated explicitly so the planner can use the
+ * indexes that lead with `target_id`.
+ *
+ * A no-op for RESULTS: every arm of the match predicates below is a
+ * `context_id = …` / `context_id IN (…)` / `… = h.context_id` test, none of
+ * which a NULL context_id can satisfy. It is emphatically NOT a no-op for the
+ * PLAN. Both indexes that lead with target_id — `idx_hype_log_target_context`
+ * and `hype_log_context_dedupe_idx` — are PARTIAL on exactly this predicate,
+ * and Postgres will only use a partial index when it can prove the query
+ * implies the index's WHERE clause. It cannot prove that from a disjunction of
+ * equality tests buried under `OR`s and hashed subplans, so it silently
+ * discarded both and fell back to reading ALL of hype_log once per feed row,
+ * applying `target_id = …` as a filter: 34k rows examined per card, 612k for
+ * one 20-card page, 63ms of a 99ms feed query at test scale — and growing with
+ * every hype anyone ever sends, which is why the feed kept getting slower.
+ * Stating the predicate makes the partial indexes provably applicable and turns
+ * that back into a per-card index probe on `target_id`.
+ */
+const CONTEXTFUL = (h: string) => `${h}.context_id IS NOT NULL`;
+
+/**
  * SQL fragment matching a mile hype row against a workout row by the canonical
  * user:local_date composite key. Legacy workout_id-keyed rows were collapsed
  * onto composites by migration 0012, so this is a plain equality now. Owns the
@@ -234,6 +259,8 @@ export function mileHypeKeyMatchSql(
  */
 export function runHypeMatchSql(h: string, w: string): string {
   return `(
+		${CONTEXTFUL(h)}
+		AND (
 		(${h}.context_type = 'mile' AND (
 			${mileHypeKeyMatchSql(h, w)}
 			OR ${h}.context_id = ${w}.workout_id::text
@@ -244,7 +271,7 @@ export function runHypeMatchSql(h: string, w: string): string {
 			WHERE p_.workout_id = ${w}.workout_id AND p_.user_id = ${w}.user_id
 				AND p_.deleted_at IS NULL
 		))
-	)`;
+	))`;
 }
 
 /**
@@ -297,6 +324,8 @@ export function runHypedByViewerMatchSql(h: string, w: string): string {
  */
 export function postHypeMatchSql(h: string, p: string): string {
   return `(
+		${CONTEXTFUL(h)}
+		AND (
 		(${h}.context_type = 'post' AND ${h}.context_id = ${p}.post_id::text)
 		OR (${p}.workout_id IS NOT NULL AND ${h}.context_type = 'mile' AND (
 			${h}.context_id = ${p}.workout_id::text
@@ -310,7 +339,7 @@ export function postHypeMatchSql(h: string, p: string): string {
 			WHERE p2_.workout_id = ${p}.workout_id AND p2_.user_id = ${p}.user_id
 				AND p2_.deleted_at IS NULL
 		))
-	)`;
+	))`;
 }
 
 /**
