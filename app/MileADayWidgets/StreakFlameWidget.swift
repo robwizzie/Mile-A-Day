@@ -207,6 +207,46 @@ private struct FlameArt: View {
     }
 }
 
+/// Sizing for the medium widget's stat column, DERIVED from the height the
+/// column is actually given rather than assumed.
+///
+/// The steps row went missing twice because the layout was picked from a
+/// predicted canvas height. Predicting it is the mistake: a medium widget's
+/// usable height depends on the device AND on system content margins that are
+/// nothing like the documented figure. So nothing here is a constant — the row
+/// height is whatever is left after the streak box, split three ways, and the
+/// type scales to the row. The column fills its space exactly, on any device,
+/// and all three stats always fit because they are what the arithmetic solves
+/// for.
+private struct FlameColumnMetrics {
+    let boxHeight: CGFloat
+    let streakSize: CGFloat
+    let rowHeight: CGFloat
+    let iconSize: CGFloat
+    let valueSize: CGFloat
+    let labelSize: CGFloat
+    let spacing: CGFloat
+
+    /// Solves `box + spacing + 3 × row + 2 hairlines == height`, then sizes the
+    /// type to the row. The caps are the "looks right on a big widget" values;
+    /// the floors stop a freak small canvas from rendering unreadable type
+    /// (it would overflow slightly instead, which is the better failure).
+    static func fitting(height: CGFloat) -> FlameColumnMetrics {
+        let spacing: CGFloat = 4
+        let box = min(38, max(26, height * 0.30))
+        let row = max(18, (height - box - spacing - 2) / 3)
+        return FlameColumnMetrics(
+            boxHeight: box,
+            streakSize: min(25, box * 0.66),
+            rowHeight: row,
+            iconSize: min(22, row * 0.82),
+            valueSize: min(15, row * 0.56),
+            labelSize: min(7.5, row * 0.30),
+            spacing: spacing
+        )
+    }
+}
+
 /// Dashboard-header stat row: tinted icon chip, big value + unit, small-caps
 /// label. Mirrors `ModernHeroStatLine`.
 private struct FlameStat: View {
@@ -217,30 +257,31 @@ private struct FlameStat: View {
     let unit: String
     let label: String
     let tint: Color
+    let metrics: FlameColumnMetrics
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: metrics.iconSize * 0.45, weight: .bold))
                 .foregroundColor(tint)
-                .frame(width: 22, height: 22)
+                .frame(width: metrics.iconSize, height: metrics.iconSize)
                 .background(Circle().fill(tint.opacity(0.14)))
 
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
                     value
-                        .font(.system(size: 14, weight: .black, design: .rounded))
+                        .font(.system(size: metrics.valueSize, weight: .black, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
                     Text(unit)
-                        .font(.system(size: 8, weight: .heavy, design: .rounded))
+                        .font(.system(size: metrics.labelSize + 0.5, weight: .heavy, design: .rounded))
                         .foregroundColor(.white.opacity(0.6))
                         .lineLimit(1)
                 }
                 Text(label)
-                    .font(.system(size: 7.5, weight: .black, design: .rounded))
+                    .font(.system(size: metrics.labelSize, weight: .black, design: .rounded))
                     .textCase(.uppercase)
                     .foregroundColor(.white.opacity(0.42))
                     .lineLimit(1)
@@ -248,20 +289,22 @@ private struct FlameStat: View {
 
             Spacer(minLength: 0)
         }
-        // Gives the hairline between rows room to breathe, the way the
-        // dashboard column's 44pt rows do.
-        .frame(maxWidth: .infinity, minHeight: 25, alignment: .leading)
+        // FIXED, not minHeight: the column's height has to be knowable without
+        // measuring text.
+        .frame(maxWidth: .infinity, height: metrics.rowHeight, alignment: .leading)
     }
 }
 
 /// Hairline between stat rows — the dashboard hero's `ModernHeroDivider`,
 /// inset past the icon chip so it starts under the text.
 private struct FlameStatDivider: View {
+    let metrics: FlameColumnMetrics
+
     var body: some View {
         Rectangle()
             .fill(Color.white.opacity(0.08))
             .frame(height: 1)
-            .padding(.leading, 30)
+            .padding(.leading, metrics.iconSize + 8)
     }
 }
 
@@ -273,17 +316,18 @@ private struct FlameStatDivider: View {
 private struct FlameStreakBox: View {
     let entry: StreakFlameEntry
     let statusColor: Color
+    let metrics: FlameColumnMetrics
 
     private static let gold = Color(red: 1.0, green: 0.78, blue: 0.25)
 
     private var accent: Color { entry.atAllTimeBest ? Self.gold : statusColor }
 
     var body: some View {
-        // Sized for the NARROWEST medium widget (a 393pt phone leaves this
-        // column ~150pt), so nothing has to auto-shrink on a small screen.
+        // Sized for the NARROWEST medium widget (a 375pt phone leaves this
+        // column ~145pt), so nothing has to auto-shrink on a small screen.
         HStack(alignment: .center, spacing: 6) {
             Text("\(entry.streak)")
-                .font(.system(size: 24, weight: .black, design: .rounded))
+                .font(.system(size: metrics.streakSize, weight: .black, design: .rounded))
                 .monospacedDigit()
                 .foregroundColor(.white)
                 .lineLimit(1)
@@ -292,11 +336,11 @@ private struct FlameStreakBox: View {
 
             Rectangle()
                 .fill(accent.opacity(0.45))
-                .frame(width: 1, height: 19)
+                .frame(width: 1, height: metrics.boxHeight * 0.5)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("DAY STREAK")
-                    .font(.system(size: 8, weight: .black, design: .rounded))
+                    .font(.system(size: metrics.labelSize + 1, weight: .black, design: .rounded))
                     .tracking(0.5)
                     .foregroundColor(.white.opacity(0.75))
                     .lineLimit(1)
@@ -305,9 +349,9 @@ private struct FlameStreakBox: View {
                 if entry.atAllTimeBest {
                     HStack(spacing: 2) {
                         Image(systemName: "crown.fill")
-                            .font(.system(size: 7, weight: .black))
+                            .font(.system(size: metrics.labelSize, weight: .black))
                         Text("BEST EVER")
-                            .font(.system(size: 8, weight: .black, design: .rounded))
+                            .font(.system(size: metrics.labelSize + 1, weight: .black, design: .rounded))
                             .tracking(0.4)
                     }
                     .foregroundColor(Self.gold)
@@ -315,7 +359,7 @@ private struct FlameStreakBox: View {
                     .minimumScaleFactor(0.6)
                 } else {
                     Text(entry.statusLabel)
-                        .font(.system(size: 8, weight: .black, design: .rounded))
+                        .font(.system(size: metrics.labelSize + 1, weight: .black, design: .rounded))
                         .tracking(0.3)
                         .textCase(.uppercase)
                         .foregroundColor(statusColor)
@@ -329,7 +373,8 @@ private struct FlameStreakBox: View {
             FlameTokenPill(count: entry.tokensReady, tint: entry.isFun ? MADWidgetStyle.green : .cyan)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        // FIXED height, so the column's total is arithmetic — see FlameColumnMetrics.
+        .frame(height: metrics.boxHeight)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(entry.atAllTimeBest ? Self.gold.opacity(0.10) : Color.black.opacity(0.18))
@@ -432,31 +477,32 @@ private struct MediumFlameView: View {
 
     var body: some View {
         HStack(spacing: 10) {
+            // maxHeight, not a fixed 146: a child taller than the container
+            // makes the HStack taller than the canvas, and then the
+            // GeometryReader beside it can't be trusted to report the real
+            // height. The art still DRAWS at 146 and overflows exactly as
+            // before — only its layout height changes.
             FlameArt(entry: entry, size: entry.isFun ? 146 : 122)
-                .frame(width: 132, height: 146)
+                .frame(width: 132, maxHeight: .infinity)
 
-            // Steps is the row that gives way when the canvas is short.
-            //
-            // Widget content margins are 20pt a side, NOT the 16 you'd guess:
-            // a medium widget is 170pt tall on a Pro Max but only ~130pt of
-            // that is usable, and ~118pt on a 393pt phone. Three rows plus the
-            // streak box come to ~122, so the big phones get steps and the
-            // small ones drop it rather than clipping. (Measure by rendering,
-            // not arithmetic: the column is centred, so its height is
-            // `2 * (85 - topInset)`.)
-            ViewThatFits(in: .vertical) {
-                column(showsSteps: true)
-                column(showsSteps: false)
+            // Measure, don't predict. A ViewThatFits between a with-steps and a
+            // without-steps candidate silently dropped the row whenever the
+            // predicted height was off — and it was, twice, because a medium
+            // widget's usable height is well under what the content-margin
+            // docs imply. Reading the real height makes all three rows fit by
+            // construction instead of by luck.
+            GeometryReader { geo in
+                column(metrics: .fitting(height: geo.size.height))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxHeight: .infinity)
         .widgetURL(flameDeepLink(entry))
     }
 
-    private func column(showsSteps: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            FlameStreakBox(entry: entry, statusColor: flameStatusColor(entry))
+    private func column(metrics: FlameColumnMetrics) -> some View {
+        VStack(alignment: .leading, spacing: metrics.spacing) {
+            FlameStreakBox(entry: entry, statusColor: flameStatusColor(entry), metrics: metrics)
 
             // Rows separated by hairlines rather than one rule above the
             // block, so the stack matches the dashboard's stat column.
@@ -466,24 +512,25 @@ private struct MediumFlameView: View {
                     value: Text(String(format: "%.2f", entry.miles)),
                     unit: "mi",
                     label: "Mileage",
-                    tint: MADWidgetStyle.red
+                    tint: MADWidgetStyle.red,
+                    metrics: metrics
                 )
 
-                if showsSteps {
-                    FlameStatDivider()
-                    FlameStat(
-                        icon: "shoeprints.fill",
-                        value: Text(entry.steps.formatted()),
-                        unit: "steps",
-                        label: "Steps",
-                        tint: flameStepTint(entry.steps)
-                    )
-                }
+                FlameStatDivider(metrics: metrics)
 
-                FlameStatDivider()
+                FlameStat(
+                    icon: "shoeprints.fill",
+                    value: Text(entry.steps.formatted()),
+                    unit: "steps",
+                    label: "Steps",
+                    tint: flameStepTint(entry.steps),
+                    metrics: metrics
+                )
+
+                FlameStatDivider(metrics: metrics)
 
                 if entry.isGoalCompleted {
-                    FlameStat(icon: "checkmark.seal.fill", value: Text("Done"), unit: "", label: "Streak safe", tint: MADWidgetStyle.green)
+                    FlameStat(icon: "checkmark.seal.fill", value: Text("Done"), unit: "", label: "Streak safe", tint: MADWidgetStyle.green, metrics: metrics)
                 } else {
                     FlameStat(
                         icon: "clock.fill",
@@ -493,7 +540,8 @@ private struct MediumFlameView: View {
                         // far edge. "LEFT TODAY" underneath already says it.
                         unit: "",
                         label: "Left today",
-                        tint: flameStatusColor(entry)
+                        tint: flameStatusColor(entry),
+                        metrics: metrics
                     )
                 }
             }
