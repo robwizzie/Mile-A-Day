@@ -20,6 +20,7 @@ import dailyChallengesRoutes from "./routes/dailyChallengesRoutes.js";
 import dailyStepsRoutes from "./routes/dailyStepsRoutes.js";
 import leaderboardRoutes from "./routes/leaderboardRoutes.js";
 import liveTrackingRoutes from "./routes/liveTrackingRoutes.js";
+import ghostRoutes from "./routes/ghostRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
 import buddyRoutes from "./routes/buddyRoutes.js";
 import {
@@ -314,6 +315,7 @@ app.use("/blocks", blocksRoutes);
 app.use("/leaderboard", leaderboardRoutes);
 app.use("/buddy", buddyRoutes);
 app.use("/live", liveTrackingRoutes);
+app.use("/ghosts", ghostRoutes);
 
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   console.error("Error:", err.message);

@@ -267,6 +267,32 @@ struct ChallengeCelebrationInfo: Equatable {
     let challengeStreak: Int
 }
 
+/// Payload for the ghost-race win.
+///
+/// Snapshotted at the 1.00-mile crossing, so the celebration can only ever
+/// show the same numbers the live chip showed — the popup can't contradict
+/// what the user watched happen.
+struct GhostRaceWin: Equatable {
+    /// Seconds the user finished AHEAD by. Always positive; a loss stays
+    /// silent (the frozen chip already told that story).
+    let marginSeconds: Double
+    /// The user's mile time, interpolated at the exact crossing.
+    let mileSeconds: Double
+    /// The ghost's mile time.
+    let ghostSeconds: Double
+    /// How the ghost was named in copy ("your best", "your PR", "your target").
+    let ghostName: String
+    /// "running" | "walking" — drives the verb and the accent.
+    let activityKey: String
+    /// Set when this mile ALSO became the new best to beat.
+    let newRecordSeconds: Double?
+    /// The friend whose mile this was, when the ghost was theirs. Carried onto
+    /// the saved workout so the server can tell them they were caught.
+    let friendUserId: String?
+    /// Workout it belongs to, so the win can be attached to the post.
+    let workoutId: String?
+}
+
 /// Types of celebrations that can be shown
 enum CelebrationType: Identifiable, Equatable {
     case goalCompleted(stats: GoalCompletionStats)
@@ -291,6 +317,8 @@ enum CelebrationType: Identifiable, Equatable {
     case comeback(day: Int, priorLength: Int, recordLength: Int, eraNumber: Int, eraStart: String)
     /// The current streak just PASSED the user's all-time record.
     case newRecordStreak(days: Int, previousBest: Int, eraStart: String)
+    /// Beat the ghost you chose over the mile.
+    case ghostBeaten(win: GhostRaceWin)
 
     var id: String {
         switch self {
@@ -316,6 +344,8 @@ enum CelebrationType: Identifiable, Equatable {
             return "comeback-\(eraStart)-\(day)"
         case .newRecordStreak(_, _, let eraStart):
             return "record-\(eraStart)"
+        case .ghostBeaten(let win):
+            return "ghost-beaten-\(win.workoutId ?? "\(win.mileSeconds)")"
         }
     }
 
@@ -343,6 +373,8 @@ enum CelebrationType: Identifiable, Equatable {
             return d1 == d2 && s1 == s2 // one per era-day
         case (.newRecordStreak(_, _, let s1), .newRecordStreak(_, _, let s2)):
             return s1 == s2 // one record moment per era
+        case (.ghostBeaten(let w1), .ghostBeaten(let w2)):
+            return w1.workoutId == w2.workoutId // one win per raced workout
         default:
             return false
         }

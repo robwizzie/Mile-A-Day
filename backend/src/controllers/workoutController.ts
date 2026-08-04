@@ -36,6 +36,7 @@ import {
   checkLeadChanges,
 } from "../services/notificationService.js";
 import { evaluateWorkoutRewards } from "../services/badgeService.js";
+import { notifyGhostsBeaten } from "../services/ghostService.js";
 import {
   fireBadgeEarnedPush,
   fanOutFriendBadgePush,
@@ -157,6 +158,11 @@ export async function uploadWorkouts(req: Request, res: Response) {
     } catch (rewardError: any) {
       console.error("Error evaluating workout rewards:", rewardError.message);
     }
+
+    // "Your ghost was caught" — only fires for a workout that raced a FRIEND's
+    // mile and won. Claim-stamped inside, so the constant re-uploads of the
+    // same workout can't re-push, and it never throws.
+    await notifyGhostsBeaten(userId, uploadedWorkoutIds);
 
     // Check if user has now completed their mile and notify friends.
     // Skipped on the initial account-setup backfill (isFullSync) and when this

@@ -46,6 +46,18 @@ export const CLIENT_FEATURES = {
    * string stays `coauthor_invite` for everyone.
    */
   collabTagV1: "collab_tag_v1",
+
+  /**
+   * The build can race a FRIEND's mile as its ghost — it sends
+   * `ghostFriendUserId` on sync and routes the `ghost_beaten` push to a
+   * rematch.
+   *
+   * Gated on the RECIPIENT, not the racer: an older build has no handler for
+   * that push, so it would arrive as a notification whose tap does nothing.
+   * The race itself works fine against a friend on any build — being someone's
+   * ghost requires nothing of them.
+   */
+  ghostFriendRaceV1: "ghost_friend_race_v1",
 } as const;
 
 export type ClientFeature =

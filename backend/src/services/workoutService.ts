@@ -10,6 +10,44 @@ import {
 
 const db = PostgresService.getInstance();
 
+/**
+ * The ghost-race columns for one workout's upsert, as
+ * `[margin, target, friendUserId]`.
+ *
+ * The tracker stamps these on the HKWorkout only when the ghost was BEATEN, so
+ * a non-null margin IS a win — which is what the ghost medal family counts.
+ * Implausible claims are dropped to null rather than stored: bounds mirror the
+ * client's `GhostTarget.isPlausible` (2:00…40:00), and you cannot beat a ghost
+ * by more than the ghost's own time.
+ *
+ * `friendUserId` is present only when the ghost was a FRIEND's mile. It is
+ * client-asserted and NOT validated here — it is validated where it matters,
+ * at notify time in `notifyGhostsBeaten`, which re-checks the friendship and
+ * the block state before telling anyone anything. Storing an unverified id is
+ * harmless; pushing on one would be a spoofing vector.
+ */
+function ghostRaceParams(
+  workout: Workout,
+): [number | null, number | null, string | null] {
+  const margin = Number(workout.ghostMarginSeconds);
+  const target = Number(workout.ghostTargetSeconds);
+  const ok =
+    Number.isFinite(margin) &&
+    Number.isFinite(target) &&
+    margin > 0 &&
+    target >= 120 &&
+    target <= 2400 &&
+    margin <= target;
+  if (!ok) return [null, null, null];
+  const friend =
+    typeof workout.ghostFriendUserId === "string" &&
+    workout.ghostFriendUserId.length > 0 &&
+    workout.ghostFriendUserId !== workout.workoutId
+      ? workout.ghostFriendUserId
+      : null;
+  return [margin, target, friend];
+}
+
 export async function uploadWorkouts(
   userId: string,
   workouts: Workout[],
@@ -68,11 +106,14 @@ export async function uploadWorkouts(
         calories,
         total_duration,
         moving_seconds,
+        ghost_margin_seconds,
+        ghost_target_seconds,
+        ghost_friend_user_id,
         source,
         exclusion_reason,
         speed_flagged
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       ON CONFLICT (workout_id)
       DO UPDATE SET
         distance = EXCLUDED.distance,
@@ -84,6 +125,12 @@ export async function uploadWorkouts(
         calories = EXCLUDED.calories,
         total_duration = EXCLUDED.total_duration,
         moving_seconds = EXCLUDED.moving_seconds,
+        -- COALESCE, not overwrite: a re-upload from a path that doesn't carry
+        -- HealthKit metadata (fullSync, recalibrate) must never erase a win
+        -- the tracker already recorded. Same reasoning as workout_routes.
+        ghost_margin_seconds = COALESCE(EXCLUDED.ghost_margin_seconds, workouts.ghost_margin_seconds),
+        ghost_target_seconds = COALESCE(EXCLUDED.ghost_target_seconds, workouts.ghost_target_seconds),
+        ghost_friend_user_id = COALESCE(EXCLUDED.ghost_friend_user_id, workouts.ghost_friend_user_id),
         source = CASE
           WHEN workouts.source IN ('manual', 'edited') THEN workouts.source
           ELSE EXCLUDED.source
@@ -142,6 +189,11 @@ export async function uploadWorkouts(
           (workout.movingSeconds as number) > 0
             ? Math.min(workout.movingSeconds as number, workout.totalDuration)
             : null,
+          // Ghost race — stamped only on a WIN, so presence is the win. Bounds
+          // mirror the client's GhostTarget.isPlausible (2:00…40:00) and a
+          // margin can never exceed the ghost it beat; anything else is
+          // dropped rather than trusted.
+          ...ghostRaceParams(workout),
           workout.source || "healthkit",
           speed.exclusionReason,
           speed.speedFlagged,

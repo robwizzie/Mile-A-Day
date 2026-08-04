@@ -150,6 +150,35 @@ struct PostCardView: View {
         .fixedSize()
     }
 
+    /// "Beat the ghost" chip, shown when the post's workout won its race.
+    ///
+    /// The margin is the whole story — "GHOST −14s" says you beat the thing you
+    /// were chasing by fourteen seconds, in the width of a word. Sits next to
+    /// FRESH and is `fixedSize()` for the same reason: on a collab header
+    /// carrying two names, the chips must never be what gets squeezed.
+    private func ghostChip(margin: Double) -> some View {
+        HStack(spacing: 4) {
+            GhostSprite(size: 11, color: .white, floats: false)
+            Text("−\(max(1, Int(margin.rounded())))s")
+                .font(.system(size: 10, weight: .black, design: .rounded))
+                .monospacedDigit()
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(
+            Capsule().fill(
+                LinearGradient(
+                    colors: [Color(red: 0.42, green: 0.31, blue: 0.85),
+                             Color(red: 0.24, green: 0.18, blue: 0.55)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+        )
+        .fixedSize()
+    }
+
     /// Buddy Walk header: a stack of avatars plus a byline that collapses past
     /// three names. Deliberately a separate branch from the two-person collab
     /// header below rather than a generalization of it — that one is tuned and
@@ -258,6 +287,7 @@ struct PostCardView: View {
                 .disabled(onTapAuthor == nil)
             }
             if isFresh { freshChip }
+            if let win = post.stats_snapshot?.ghostWin { ghostChip(margin: win.margin) }
             Spacer()
             if let type = post.workout_type {
                 Image(systemName: ActivityCardView.icon(type))

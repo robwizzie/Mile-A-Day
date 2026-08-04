@@ -70,6 +70,9 @@ struct CelebrationContainerView: View {
 
         case .newRecordStreak(let days, let previousBest, _):
             RecordStreakCelebrationView(days: days, previousBest: previousBest)
+
+        case .ghostBeaten(let win):
+            GhostBeatenCelebrationView(win: win)
         }
     }
 }

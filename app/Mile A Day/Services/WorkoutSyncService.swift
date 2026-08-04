@@ -754,6 +754,25 @@ class WorkoutSyncService: ObservableObject {
                 workoutDict["movingSeconds"] = movingSeconds
             }
 
+            // Ghost race, stamped by the tracker only when the ghost was
+            // BEATEN — so sending it at all is the win. The server COALESCEs
+            // these on re-upload, so a later route-less or fullSync push can't
+            // erase a win this one recorded.
+            if let ghostMargin = workout.metadata?[WorkoutLocationManager.ghostMarginMetadataKey] as? Double,
+               let ghostTarget = workout.metadata?[WorkoutLocationManager.ghostTargetMetadataKey] as? Double,
+               ghostMargin > 0, ghostTarget > 0 {
+                workoutDict["ghostMarginSeconds"] = ghostMargin
+                workoutDict["ghostTargetSeconds"] = ghostTarget
+                // Only set when the ghost was a FRIEND's mile. The server
+                // re-checks the friendship before telling them anything, so an
+                // id here is a claim, not an authorization.
+                if let ghostFriendId = workout.metadata?[
+                    WorkoutLocationManager.ghostFriendMetadataKey] as? String,
+                    !ghostFriendId.isEmpty {
+                    workoutDict["ghostFriendUserId"] = ghostFriendId
+                }
+            }
+
             // Attach the simplified GPS path when the workout has one, so the
             // backend can store it and feed cards can draw the mile's route.
             if fetchRoutes, let route = await simplifiedRoute(for: workout) {

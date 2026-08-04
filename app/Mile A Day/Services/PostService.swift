@@ -30,6 +30,25 @@ struct PostStats: Codable, Equatable {
     let date: String?
     var calories: Double?
     var steps: Int?
+    /// Ghost race, present ONLY when the ghost was beaten — seconds of margin
+    /// and the ghost's mile time.
+    ///
+    /// Rides in `stats_snapshot` rather than in its own column deliberately:
+    /// the snapshot is jsonb that every feed projection already returns
+    /// verbatim, so a ghost win reaches the feed, the profile grid, stories
+    /// and post detail without touching a single one of those guard-heavy
+    /// SELECTs. Defaulted so existing `PostStats(...)` call sites are
+    /// unaffected, and optional so older posts decode fine.
+    var ghost_margin_seconds: Double? = nil
+    var ghost_target_seconds: Double? = nil
+
+    /// The win, when this post carries one.
+    var ghostWin: (margin: Double, ghostSeconds: Double)? {
+        guard let margin = ghost_margin_seconds, margin > 0,
+              let target = ghost_target_seconds, target > 0
+        else { return nil }
+        return (margin, target)
+    }
 }
 
 /// One credited participant on a multi-person collab post (Buddy Walks).

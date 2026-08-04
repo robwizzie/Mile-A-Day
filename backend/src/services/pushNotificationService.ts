@@ -163,7 +163,11 @@ export type NotificationType =
   | "buddy_joined"
   | "buddy_started"
   | "buddy_finished"
-  | "buddy_friend_active";
+  | "buddy_friend_active"
+  // A friend beat YOUR mile as their ghost. Deliberately not high-priority and
+  // not cap-exempt: it's a flourish about someone else's workout, so quiet
+  // hours and the daily cap both apply.
+  | "ghost_beaten";
 
 interface PushPayload {
   title: string;
