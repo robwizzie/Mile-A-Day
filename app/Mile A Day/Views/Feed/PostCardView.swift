@@ -14,10 +14,6 @@ struct PostCardView: View {
     let post: PostItem
     /// The run's story-only photo, when different from the post media.
     var storyPhotoURL: URL? = nil
-    /// Post shared during the run's 10-min fresh window — wears a "Fresh"
-    /// chip. Server truth (`is_fresh`) so EVERY viewer sees it; the poster's
-    /// own device also derives it locally for instant feedback.
-    var isFresh: Bool = false
     var isHyping: Bool = false
     /// Daily hype allowance spent (never true for unlimited roles) — dims the
     /// unspent Hype button, same as the friends list.
@@ -132,30 +128,12 @@ struct PostCardView: View {
             .lineLimit(1)
     }
 
-    /// "Fresh" chip for a post shared inside the run's 10-minute window.
-    private var freshChip: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "bolt.fill")
-                .font(.system(size: 9, weight: .black))
-            Text("FRESH")
-                .font(.system(size: 10, weight: .black, design: .rounded))
-        }
-        .foregroundColor(.white)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(Capsule().fill(MADTheme.Colors.madRed))
-        // A collab header carries two names in the space of one. Without this
-        // the chip is as compressible as they are, and "FRESH" is the first
-        // thing to get squeezed — let the names truncate instead.
-        .fixedSize()
-    }
-
     /// "Beat the ghost" chip, shown when the post's workout won its race.
     ///
     /// The margin is the whole story — "GHOST −14s" says you beat the thing you
-    /// were chasing by fourteen seconds, in the width of a word. Sits next to
-    /// FRESH and is `fixedSize()` for the same reason: on a collab header
-    /// carrying two names, the chips must never be what gets squeezed.
+    /// were chasing by fourteen seconds, in the width of a word. `fixedSize()`
+    /// because on a collab header carrying two names, the chip must never be
+    /// what gets squeezed — let the names truncate instead.
     private func ghostChip(margin: Double) -> some View {
         HStack(spacing: 4) {
             GhostSprite(size: 11, color: .white, floats: false)
@@ -236,7 +214,7 @@ struct PostCardView: View {
                 // The overlap is PADDING, not `.offset` — an offset draws
                 // outside the layout bounds, so the cluster measured 40pt tall
                 // while occupying 44, and everything else in the header (the
-                // FRESH chip especially) centered 2pt high against it.
+                // chips especially) centered 2pt high against it.
                 ZStack(alignment: .bottomTrailing) {
                     Button { onTapAuthor?() } label: {
                         AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
@@ -286,7 +264,6 @@ struct PostCardView: View {
                 .buttonStyle(.plain)
                 .disabled(onTapAuthor == nil)
             }
-            if isFresh { freshChip }
             if let win = post.stats_snapshot?.ghostWin { ghostChip(margin: win.margin) }
             Spacer()
             if let type = post.workout_type {

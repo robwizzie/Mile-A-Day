@@ -280,12 +280,11 @@ enum RunPostService {
 
         do {
             let mediaUrl = try await PostService.uploadMedia(finalImage)
-            let created: PostItem
             do {
                 // isAuto — the server may replace this card in place with a
                 // later photo post, but it never counts as the user's one post
                 // per workout.
-                created = try await createAutoPost(mediaUrl: mediaUrl, workoutId: workoutId, stats: stats)
+                _ = try await createAutoPost(mediaUrl: mediaUrl, workoutId: workoutId, stats: stats)
             } catch let APIError.badRequest(message)
                         where message == "auto_post_workout_unavailable" || message == "auto_post_stats_mismatch" {
                 // HealthKit/backend sync can lag the prompt by a beat. Keep the
@@ -293,14 +292,8 @@ enum RunPostService {
                 // instead of making "Skip" look broken. The raw workout card can
                 // still appear later if the sync catches up.
                 print("[RunPostService] linked auto post rejected (\(message)); retrying unlinked")
-                created = try await createAutoPost(mediaUrl: mediaUrl, workoutId: nil, stats: stats)
+                _ = try await createAutoPost(mediaUrl: mediaUrl, workoutId: nil, stats: stats)
             }
-            // Skipping the photo still counts as posting this run live if it's
-            // within the fresh window (no-op otherwise).
-            FreshPostWindowManager.shared.markPostedLive(
-                postId: created.post_id,
-                workoutId: created.workout_id ?? workoutId
-            )
         } catch {
             print("[RunPostService] autoPostMile failed: \(error)")
         }

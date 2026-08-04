@@ -93,6 +93,7 @@ struct SocialFeedView: View {
     @State private var pendingCompose = false
     @State private var showMileHint = false
     @State private var showAlreadySharedHint = false
+    @State private var showWindowClosedHint = false
     @State private var showMemories = false
     @State private var showWeeklyRecap = false
     /// Entry briefly ringed after a notification deep-link lands on it, so
@@ -110,12 +111,24 @@ struct SocialFeedView: View {
     @State private var pendingProfileUser: BackendUser?
 
     private var currentUserId: String? { UserDefaults.standard.string(forKey: "backendUserId") }
-    /// Completing the daily mile unlocks posting AND viewing friends' stories.
+    /// Completing the daily mile unlocks viewing friends' stories (all day) and
+    /// is the first half of the gate on posting.
     private var mileDone: Bool {
         ProgressCalculator.isGoalCompleted(
             current: healthManager.todaysDistance,
             goal: userManager.currentUser.goalMiles
         )
+    }
+
+    /// The second half: a photo may only go out during the 10-minute window
+    /// that opens when a qualifying walk/run lands. Completing the mile is what
+    /// makes posting possible at all; this is what keeps a post attached to the
+    /// activity that earned it instead of to some point later in the day.
+    ///
+    /// Mirrored authoritatively on the server (`post_window_closed`), so this
+    /// only decides what the UI offers — never whether a post is allowed.
+    private var canPostNow: Bool {
+        mileDone && freshWindow.isOpen
     }
 
     /// Server-day formatter: Postgres emits Gregorian "yyyy-MM-dd" — pin the
@@ -312,7 +325,7 @@ struct SocialFeedView: View {
                         currentUserId: currentUserId,
                         myName: userManager.currentUser.username ?? userManager.currentUser.name,
                         myImageURL: userManager.currentUser.profileImageUrl,
-                        canPost: mileDone,
+                        canPost: canPostNow,
                         hasSharedWorkout: alreadySharedWorkout,
                         windowOpen: freshWindow.isOpen,
                         windowOpenedAt: freshWindow.windowOpenedAt,
@@ -407,7 +420,8 @@ struct SocialFeedView: View {
                 async let feedLoad: Void = refresh()
                 async let termsLoad: Void = loadTermsStatus()
                 async let hypeLoad: Void = loadHypeStatus()
-                _ = await (feedLoad, termsLoad, hypeLoad)
+                async let windowLoad: Void = syncPostWindow()
+                _ = await (feedLoad, termsLoad, hypeLoad, windowLoad)
             }
         }
         // Returning to the Feed tab silently pulls fresh posts so a mile just
@@ -427,14 +441,16 @@ struct SocialFeedView: View {
                 Task {
                     async let railLoad: Void = refreshRail()
                     async let hypeLoad: Void = loadHypeStatus()
-                    _ = await (railLoad, hypeLoad)
+                    async let windowLoad: Void = syncPostWindow()
+                    _ = await (railLoad, hypeLoad, windowLoad)
                 }
                 return
             }
             Task {
                 async let feedLoad: Void = refresh()
                 async let hypeLoad: Void = loadHypeStatus()
-                _ = await (feedLoad, hypeLoad)
+                async let windowLoad: Void = syncPostWindow()
+                _ = await (feedLoad, hypeLoad, windowLoad)
             }
         }
         .fullScreenCover(item: $viewerGroup) { group in
@@ -560,6 +576,11 @@ struct SocialFeedView: View {
         } message: {
             Text("One post per walk or run — that's the reward. Do another walk or run to share again, or delete a post or story to swap the shot.")
         }
+        .alert("That moment has passed", isPresented: $showWindowClosedHint) {
+            Button("Got it", role: .cancel) {}
+        } message: {
+            Text("Photos share in the 10 minutes after a walk or run — that's what keeps this feed about moving. Head out again and the window reopens. 🏃")
+        }
     }
 
     // MARK: - Weekly Recap teaser
@@ -662,12 +683,6 @@ struct SocialFeedView: View {
             PostCardView(
                 post: post,
                 storyPhotoURL: entry.storyPhotoURL,
-                // Server truth first (every viewer sees a friend's fresh post);
-                // the local window keeps the poster's OWN badge instant while
-                // the next refresh catches up.
-                isFresh: (entry.is_fresh ?? false)
-                    || (entry.is_self
-                        && freshWindow.wasPostedLive(postId: post.post_id, workoutId: post.workout_id)),
                 isHyping: hypingIds.contains(entry.id),
                 isOutOfHypes: isOutOfHypes,
                 onHype: { Task { await hype(entry) } },
@@ -706,22 +721,26 @@ struct SocialFeedView: View {
     }
 
     /// The compose FAB. Hidden entirely once the mile is done AND already
-    /// shared — one post per walk/run, so there's nothing to add. Still shows
-    /// the lock state before the mile is finished.
+    /// shared — one post per walk/run, so there's nothing to add. Otherwise it
+    /// reads as unlocked only while a post can actually go out: the mile is
+    /// done AND the walk's 10-minute window is still open. It stays visible but
+    /// locked the rest of the time so tapping it can explain itself, which is
+    /// the same thing it already did before the mile was finished.
     @ViewBuilder
     private var composeButton: some View {
         if !(mileDone && alreadySharedWorkout) {
             Button(action: handleCompose) {
-                Image(systemName: mileDone ? "plus" : "lock.fill")
+                Image(systemName: canPostNow ? "plus" : "lock.fill")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(.white)
                     .frame(width: 56, height: 56)
                     .background(
-                        Circle().fill(mileDone ? AnyShapeStyle(MADTheme.Colors.redGradient) : AnyShapeStyle(Color.gray.opacity(0.6)))
+                        Circle().fill(canPostNow ? AnyShapeStyle(MADTheme.Colors.redGradient) : AnyShapeStyle(Color.gray.opacity(0.6)))
                     )
-                    // Fresh-window countdown ring around the FAB while open.
+                    // Countdown ring around the FAB — now a deadline, not just
+                    // a nudge, so it runs whenever the window is what's open.
                     .overlay {
-                        if mileDone && freshWindow.isOpen, let openedAt = freshWindow.windowOpenedAt {
+                        if canPostNow, let openedAt = freshWindow.windowOpenedAt {
                             FreshWindowRing(openedAt: openedAt, color: .white, lineWidth: 3)
                                 .padding(-5)
                         }
@@ -877,6 +896,10 @@ struct SocialFeedView: View {
         // Reachable from the rail's own-story cell even after the FAB hides —
         // enforce one-share-per-workout at the entry point too.
         guard !alreadySharedWorkout else { showAlreadySharedHint = true; return }
+        // The window can lapse between the tap and here (the FAB is a render
+        // behind an expiry the timer hasn't published yet), and it's also the
+        // only guard on the rail's own-story cell. Read the clock, not the UI.
+        guard freshWindow.isOpen else { showWindowClosedHint = true; return }
         // The cache also covers acceptance that happened OUTSIDE this view
         // (post-run composer gate) after our one-shot loadTermsStatus ran.
         if termsAccepted == true || PostService.termsAcceptedCached {
@@ -884,6 +907,24 @@ struct SocialFeedView: View {
         } else {
             pendingCompose = true
             showTermsGate = true
+        }
+    }
+
+    /// Reconcile the local posting window against the server's.
+    ///
+    /// The local one opens from a Dashboard observer watching HealthKit, so a
+    /// workout that landed while the app was closed leaves this device with no
+    /// window if the user opens straight to the Feed tab — the composer would
+    /// sit locked through the exact ten minutes it should be inviting. The
+    /// server derives the same window from its own workout rows and doesn't
+    /// have that blind spot. Adopt-only: the local clock still owns closing.
+    private func syncPostWindow() async {
+        guard let status = try? await PostService.postWindow(),
+              status.open,
+              let workoutId = status.workout_id,
+              let openedAt = status.openedAtDate else { return }
+        await MainActor.run {
+            freshWindow.adopt(workoutId: workoutId, openedAt: openedAt)
         }
     }
 

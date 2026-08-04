@@ -316,6 +316,9 @@ private struct StoryGroupPlayerView: View {
     @State private var viewersSheetFor: PostItem?
     /// Stories promoted to the feed this session ("Add to feed").
     @State private var promotedIds: Set<String> = []
+    /// Observed so the "Add to feed" pill disappears the moment the walk's
+    /// posting window lapses, rather than one render later.
+    @ObservedObject private var freshWindow = FreshPostWindowManager.shared
     @State private var promoting = false
     @State private var promoteError: String?
 
@@ -669,10 +672,15 @@ private struct StoryGroupPlayerView: View {
     /// DELIBERATE feed post (server-computed `workout_on_feed`; the auto card
     /// doesn't count — replacing it is the point) — otherwise "Add to feed"
     /// would be offered only to 409 on tap.
+    ///
+    /// Also hidden once the walk's posting window has closed: promoting creates
+    /// a feed post, which the server holds to the same 10-minute rule, so the
+    /// pill would be offered only to 403 for exactly the same reason.
     private func canPromote(_ post: PostItem) -> Bool {
         post.share_to_feed != true
             && post.workout_on_feed != true
             && !promotedIds.contains(post.post_id)
+            && freshWindow.isOpen
     }
 
     private func addToFeedPill(_ post: PostItem) -> some View {
@@ -838,10 +846,7 @@ private struct StoryGroupPlayerView: View {
                 shareToFeed: true,
                 shareToStory: false,
                 stats: post.stats_snapshot,
-                isAuto: false,
-                // Promoting while the run's 10-min window is still open counts
-                // as posting live — the FRESH chip follows onto the feed.
-                postedLive: FreshPostWindowManager.shared.isOpen
+                isAuto: false
             )
             await MainActor.run {
                 promotedIds.insert(post.post_id)
@@ -852,6 +857,13 @@ private struct StoryGroupPlayerView: View {
             await MainActor.run {
                 paused = true
                 promoteError = "This workout already has a feed post. Delete it first to share this photo instead."
+            }
+        } catch let APIError.apiError(message) where message == "post_window_closed" {
+            // Backstop for a window that lapsed between render and tap —
+            // canPromote hides the pill, but the story viewer can sit open.
+            await MainActor.run {
+                paused = true
+                promoteError = "Photos share in the 10 minutes after a walk or run, and that window just closed. Your story stays up for 24 hours."
             }
         } catch {
             print("[StoryViewer] ❌ Add to feed failed: \(error)")

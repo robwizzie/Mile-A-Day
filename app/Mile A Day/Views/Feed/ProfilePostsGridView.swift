@@ -25,6 +25,9 @@ struct ProfilePostsGridView: View {
     @State private var selectedStoryPost: PostItem?
     @State private var addingToFeedIds: Set<String> = []
     @State private var addToFeedError: String?
+    /// Observed so the "Add to feed" pills disappear when the walk's posting
+    /// window lapses while the grid is on screen.
+    @ObservedObject private var freshWindow = FreshPostWindowManager.shared
 
     // Tagged grid — loaded lazily the first time the section is opened.
     @State private var taggedPosts: [PostItem] = []
@@ -273,24 +276,29 @@ struct ProfilePostsGridView: View {
             }
             .buttonStyle(.plain)
 
-            Button { addToFeed(post) } label: {
-                HStack(spacing: 4) {
-                    if addingToFeedIds.contains(post.post_id) {
-                        ProgressView().tint(.white).scaleEffect(0.6)
-                    } else {
-                        Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .heavy))
+            // Promoting a story puts a photo on the feed, so it answers to the
+            // same 10-minute window as posting one — offering it after the
+            // window has closed would only earn a 403.
+            if freshWindow.isOpen {
+                Button { addToFeed(post) } label: {
+                    HStack(spacing: 4) {
+                        if addingToFeedIds.contains(post.post_id) {
+                            ProgressView().tint(.white).scaleEffect(0.6)
+                        } else {
+                            Image(systemName: "plus")
+                                .font(.system(size: 10, weight: .heavy))
+                        }
+                        Text("Add to feed")
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
                     }
-                    Text("Add to feed")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                    .frame(width: 108)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(MADTheme.Colors.redGradient))
                 }
-                .foregroundColor(.white)
-                .frame(width: 108)
-                .padding(.vertical, 7)
-                .background(Capsule().fill(MADTheme.Colors.redGradient))
+                .buttonStyle(.plain)
+                .disabled(addingToFeedIds.contains(post.post_id))
             }
-            .buttonStyle(.plain)
-            .disabled(addingToFeedIds.contains(post.post_id))
         }
     }
 
@@ -319,6 +327,10 @@ struct ProfilePostsGridView: View {
                 try await PostService.addPostToFeed(postId: post.post_id)
                 // Reload so the promoted post re-splits into the grid.
                 await load()
+            } catch let APIError.apiError(message) where message == "post_window_closed" {
+                await MainActor.run {
+                    addToFeedError = "Photos reach the feed in the 10 minutes after a walk or run, and that window has closed. Your story stays on your profile."
+                }
             } catch {
                 await MainActor.run {
                     addToFeedError = "This run may already have a feed post. Pull to refresh and try again."

@@ -27,6 +27,8 @@ import {
   getOwnPostMemories,
   getOwnedWorkoutDistance,
   getOwnedWorkoutRollupDistance,
+  getPostWindowStatus,
+  POST_WINDOW_MS,
   lockUnearnedPhotos,
   ALLOWED_STORY_REACTIONS,
   PostStatsSnapshot,
@@ -51,6 +53,7 @@ import {
   getActiveStreak,
   getDailyGoalStatus,
 } from "../services/workoutService.js";
+import { CLIENT_FEATURES, userSupports } from "../services/clientFeatures.js";
 import { hasUnlimitedActions } from "../services/privilegedUsers.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import { logError } from "../services/errorLogService.js";
@@ -194,6 +197,33 @@ export async function createPostController(
         miles: goal.miles,
         goal_miles: goal.goalMiles,
       });
+    }
+
+    // A photo belongs to the walk or run that earned it: posting is open for
+    // ten minutes after a qualifying workout lands (the one that reached the
+    // goal, then each additional one) and closes with that window. Without it
+    // the feed drifts into an all-day photo stream that happens to sit next to
+    // some mileage.
+    //
+    // Two deliberate exemptions:
+    //  - Auto posts. They're the generated route/stats card the app writes when
+    //    the user SKIPS the photo prompt — already bound to their workout by
+    //    construction, and blocking them would leave the run with no card.
+    //  - Devices that predate the rule. Those builds open the composer whenever
+    //    the mile is done, so enforcing here would let someone shoot and edit a
+    //    photo and fail only at publish, with no UI that can explain why. They
+    //    keep the old behavior until they update (see CLIENT_FEATURES).
+    if (
+      is_auto !== true &&
+      (await userSupports(userId, CLIENT_FEATURES.postWindowV1))
+    ) {
+      const postWindow = await getPostWindowStatus(userId, goal.localDate);
+      if (!postWindow.open) {
+        return res.status(403).json({
+          error: "post_window_closed",
+          window_seconds: Math.round(POST_WINDOW_MS / 1000),
+        });
+      }
     }
 
     // Only link the post to a workout the caller actually owns. Workout ids are
@@ -741,6 +771,32 @@ export async function updatePostController(
       return res.status(400).json({ error: "Nothing to update" });
     }
 
+    // Promoting a story onto the feed puts a photo on the feed, so it answers
+    // to the same 10-minute window as creating one — otherwise it's a way
+    // around the rule: share a story inside the window, then promote it from
+    // the profile grid whenever you like. The story viewer's own "Add to feed"
+    // routes through createPost and is already held to this; the two are the
+    // same user action on two screens and can't disagree.
+    //
+    // Caption edits stay ungated. Fixing a typo isn't posting a photo, and a
+    // post that's already on the feed shouldn't freeze at whatever text it
+    // shipped with.
+    if (
+      addToFeed &&
+      (await userSupports(userId, CLIENT_FEATURES.postWindowV1))
+    ) {
+      const goal = await getDailyGoalStatus(userId);
+      const postWindow = goal.completed
+        ? await getPostWindowStatus(userId, goal.localDate)
+        : null;
+      if (!postWindow?.open) {
+        return res.status(403).json({
+          error: "post_window_closed",
+          window_seconds: Math.round(POST_WINDOW_MS / 1000),
+        });
+      }
+    }
+
     const result = await updateOwnPost(userId, postId, {
       ...(hasCaption
         ? {
@@ -909,6 +965,46 @@ export async function getTermsStatusController(
   } catch (error: any) {
     console.error("Error fetching terms status:", error.message);
     res.status(500).json({ error: "Error fetching terms status" });
+  }
+}
+
+/**
+ * GET /posts/window — can a photo be posted right now, and for how much longer?
+ *
+ * The client runs its own countdown off the workout it saw finish, which is
+ * what drives the compose UI. This is the reconciling read for the cases that
+ * countdown can't cover: a second device that never observed the workout, a
+ * cold launch after a Watch run synced in the background, or simply a client
+ * that wants to check before opening the composer rather than after.
+ *
+ * Reports the DISPLAY window (`seconds_remaining` hits 0 at the ten-minute
+ * mark); the create path's grace is deliberately not published, so a client
+ * counting down to zero is never the reason a post is refused.
+ */
+export async function getPostWindowController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  const userId = req.userId!;
+  try {
+    const goal = await getDailyGoalStatus(userId);
+    // No goal, no window — report it as closed rather than surfacing a window
+    // that the mile gate would reject anyway.
+    const postWindow = goal.completed
+      ? await getPostWindowStatus(userId, goal.localDate)
+      : null;
+    res.status(200).json({
+      open: postWindow?.open ?? false,
+      workout_id: postWindow?.workoutId ?? null,
+      opened_at: postWindow?.openedAt ?? null,
+      closes_at: postWindow?.closesAt ?? null,
+      seconds_remaining: postWindow?.secondsRemaining ?? 0,
+      window_seconds: Math.round(POST_WINDOW_MS / 1000),
+      mile_completed: goal.completed,
+    });
+  } catch (error: any) {
+    console.error("Error fetching post window:", error.message);
+    res.status(500).json({ error: "Error fetching post window" });
   }
 }
 

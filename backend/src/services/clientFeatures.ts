@@ -58,6 +58,21 @@ export const CLIENT_FEATURES = {
    * ghost requires nothing of them.
    */
   ghostFriendRaceV1: "ghost_friend_race_v1",
+
+  /**
+   * The build understands that posting a photo is bound to a 10-minute window
+   * after a qualifying walk/run: it locks its own compose affordances when the
+   * window closes, and it renders the `post_window_closed` 403 as an
+   * explanation rather than a generic failure.
+   *
+   * Gated because this RESTRICTS behavior a shipped build already offers.
+   * Those builds show the composer whenever the mile is done, so enforcing the
+   * window on them would let someone shoot a photo, edit it, pick a
+   * destination, and only then fail at publish — with no UI able to say why.
+   * They keep the old all-day rule until they update, which is the safe
+   * direction for a rule that exists to shape a habit, not to protect data.
+   */
+  postWindowV1: "post_window_v1",
 } as const;
 
 export type ClientFeature =

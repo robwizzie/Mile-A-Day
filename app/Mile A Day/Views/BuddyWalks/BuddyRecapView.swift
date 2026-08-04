@@ -11,6 +11,8 @@ struct BuddyRecapView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var buddy = BuddySessionService.shared
 
+    @ObservedObject private var freshWindow = FreshPostWindowManager.shared
+
     @State private var recap: BuddyRecapResponse?
     @State private var isLoading = true
     @State private var showComposer = false
@@ -126,6 +128,25 @@ struct BuddyRecapView: View {
         }
     }
 
+    /// Sharing follows the same 10-minute rule as every other photo post, and a
+    /// recap is reachable long after the walk (deep link, notification, a
+    /// screen left open). So the CTA reflects the window rather than 403-ing on
+    /// tap — and it says what closed rather than just going grey, since this is
+    /// the screen's primary action.
+    @ViewBuilder
+    private func shareButton(_ session: BuddySessionState) -> some View {
+        if freshWindow.isOpen {
+            shareCTA(session)
+        } else {
+            Text("Photos share in the 10 minutes after a walk — that window has closed.")
+                .font(MADTheme.Typography.caption)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, MADTheme.Spacing.md)
+        }
+    }
+
     /// Post the walk as one collab crediting everyone who finished it.
     ///
     /// The participants are passed through rather than picked: the whole point
@@ -133,7 +154,7 @@ struct BuddyRecapView: View {
     /// re-select the people they just walked with would be busywork. The
     /// server still validates every id (accepted friend, no block) and quietly
     /// drops any that fail, so a stale roster degrades instead of erroring.
-    private func shareButton(_ session: BuddySessionState) -> some View {
+    private func shareCTA(_ session: BuddySessionState) -> some View {
         Button {
             MADHaptics.action()
             showComposer = true

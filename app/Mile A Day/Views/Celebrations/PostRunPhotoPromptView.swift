@@ -73,8 +73,9 @@ struct PostRunPhotoPromptView: View {
                     midRunSnapStrip
                 }
 
-                // Countdown pill — the fresh window is open for this run. Purely
-                // an in-the-moment nudge; posting stays available after it ends.
+                // Countdown pill — the posting window is open for this run. A
+                // real deadline, not just a nudge: sharing closes with it, and
+                // the next walk or run is what opens the next one.
                 if freshWindow.isOpen(forWorkout: workoutId) {
                     countdownPill
                         .opacity(appeared ? 1 : 0)
@@ -159,6 +160,18 @@ struct PostRunPhotoPromptView: View {
         }
         .onAppear {
             midRunSnaps = MidRunPhotoStash.entries()
+            // This prompt is the LAST celebration in the queue (priority 9), so
+            // a slow walk through goal/badges/leaderboard — or a backgrounded
+            // app — can outlast the 10-minute posting window. Offering a camera
+            // then would spend the user's effort on a publish the server
+            // refuses. Take the skip path instead: the run still gets its
+            // route/stats card, which is an `is_auto` post and exempt from the
+            // window. Deferred a tick because resolving a celebration from
+            // inside its own onAppear mutates the manager mid-update.
+            guard freshWindow.isOpen else {
+                DispatchQueue.main.async { skip() }
+                return
+            }
             withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { appeared = true }
         }
         .alert("Couldn't add that photo", isPresented: Binding(
@@ -220,13 +233,13 @@ struct PostRunPhotoPromptView: View {
 
     // MARK: - Fresh-window countdown
 
-    /// Self-ticking countdown for the run's 10-minute fresh window. Uses the
+    /// Self-ticking countdown for the run's 10-minute posting window. Uses the
     /// native `Text(timerInterval:)` (no manual timer) so it stays cheap.
     private var countdownPill: some View {
         HStack(spacing: 6) {
             Image(systemName: "bolt.fill")
                 .font(.system(size: 11, weight: .bold))
-            Text("Post now — fresh for")
+            Text("Share this run — closes in")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
             Text(
                 timerInterval: (freshWindow.windowOpenedAt ?? Date())...freshWindow.windowEndDate,

@@ -302,9 +302,13 @@ struct FeedEntry: Codable, Identifiable {
     /// Server withheld this post's photo (viewer hasn't run today) — carried
     /// into the rendered PostItem so the card draws a lock.
     let photo_locked: Bool?
-    /// Post shared inside the author's 10-minute fresh window (server truth) —
-    /// the FRESH chip every viewer sees, not just the poster. Optional: older
-    /// servers omit it.
+    /// Post shared inside the author's 10-minute window (server truth).
+    ///
+    /// Nothing renders it any more: once posting is GATED on that window, every
+    /// post from a current build is fresh and the chip marked nothing. Kept
+    /// because the server still sends it — decoding is where an unexpected key
+    /// is free and a missing one isn't, and builds that predate the gate still
+    /// draw the chip from it.
     var is_fresh: Bool?
     var comment_count: Int?
     // Collab post fields (post entries only; nil while pending unless viewer
@@ -451,6 +455,24 @@ struct TermsStatus: Decodable {
     var accepted_at: String?
 }
 
+/// `GET /posts/window` — the server's view of whether a photo can go out now.
+///
+/// The device's own countdown (`FreshPostWindowManager`) is what drives the UI;
+/// this exists to reconcile the cases it can't see, chiefly a workout that
+/// synced while the app was closed. `opened_at` is a backend `timestamptz`, so
+/// it's typed as a String and parsed with fractional seconds — the `.iso8601`
+/// decoder can't read those and would fail the whole payload.
+struct PostWindowStatus: Decodable {
+    let open: Bool
+    let workout_id: String?
+    let opened_at: String?
+    let closes_at: String?
+    let seconds_remaining: Double
+    let mile_completed: Bool
+
+    var openedAtDate: Date? { BuddyDate.parse(opened_at) }
+}
+
 enum PostError: LocalizedError {
     case invalidURL
     case compressionFailed
@@ -572,8 +594,7 @@ enum PostService {
         // post_coauthors rows and the legacy scalar columns, so a shipped
         // client still renders a coherent two-person collab.
         coauthorUserIds: [String]? = nil,
-        buddySessionId: String? = nil,
-        postedLive: Bool = false
+        buddySessionId: String? = nil
     ) async throws -> PostItem {
         struct Body: Encodable {
             let media_url: String
@@ -587,7 +608,6 @@ enum PostService {
             let coauthor_user_id: String?
             let coauthor_user_ids: [String]?
             let buddy_session_id: String?
-            let posted_live: Bool
         }
         let bodyData = try JSONEncoder().encode(
             Body(
@@ -601,8 +621,7 @@ enum PostService {
                 include_route: includeRoute,
                 coauthor_user_id: coauthorUserId,
                 coauthor_user_ids: coauthorUserIds,
-                buddy_session_id: buddySessionId,
-                posted_live: postedLive
+                buddy_session_id: buddySessionId
             )
         )
         return try await APIClient.fancyFetch(
@@ -804,6 +823,14 @@ enum PostService {
             method: .POST,
             body: bodyData,
             responseType: OKResponse.self
+        )
+    }
+
+    /// The server's posting window. See `PostWindowStatus`.
+    static func postWindow() async throws -> PostWindowStatus {
+        try await APIClient.fancyFetch(
+            endpoint: "/posts/window",
+            responseType: PostWindowStatus.self
         )
     }
 
