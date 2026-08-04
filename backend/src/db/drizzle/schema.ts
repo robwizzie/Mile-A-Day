@@ -255,6 +255,21 @@ export const workouts = pgTable(
     // family counts. Null on every other workout, including raced-and-lost.
     ghostMarginSeconds: doublePrecision("ghost_margin_seconds"),
     ghostTargetSeconds: doublePrecision("ghost_target_seconds"),
+    // Whose ghost it was, when the target was a FRIEND's mile rather than the
+    // user's own best/PR/typed time. Null for a solo ghost — the margin and
+    // target columns above stay set either way, so this only ever answers
+    // "is there someone to tell about this?".
+    ghostFriendUserId: varchar("ghost_friend_user_id", { length: 255 }),
+    // Claim stamp for the "your ghost was beaten" push. Nullable with NO
+    // default on purpose: `ADD COLUMN ts timestamptz DEFAULT now()` stores one
+    // DDL-time missing-value for every pre-existing row, so a cron gating on
+    // it fires on the whole backlog at once. Claim-then-send (h2h_matchups
+    // pattern) is what stops the constant re-uploads of a workout — fullSync,
+    // recalibrate — from re-pushing.
+    ghostNotifiedAt: timestamp("ghost_notified_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "string",

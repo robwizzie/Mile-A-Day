@@ -14,6 +14,7 @@
  */
 import { PostgresService } from "../dist/services/DbService.js";
 import { uploadWorkouts } from "../dist/services/workoutService.js";
+import { notifyGhostsBeaten } from "../dist/services/ghostService.js";
 
 const db = PostgresService.getInstance();
 const USER = "ghost-check-user";
@@ -115,8 +116,73 @@ async function main() {
   );
   check("deleted workout stops counting", aggAfter.count, 1);
 
+  // ── Friend ghosts: whose ghost was beaten, and telling them once ──
+  const FRIEND = "ghost-check-friend";
+  await db.query(
+    `INSERT INTO users (user_id, apple_sub, email, username, first_name, last_name)
+     VALUES ($1, $2, $3, $4, 'Ghost', 'Friend')
+     ON CONFLICT (user_id) DO NOTHING`,
+    [FRIEND, `sub-${FRIEND}`, `${FRIEND}@example.com`, FRIEND],
+  );
+  await db.query(
+    `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1, $2, 'accepted')
+     ON CONFLICT (user_id, friend_id) DO NOTHING`,
+    [USER, FRIEND],
+  );
+
+  await uploadWorkouts(USER, [
+    workout("ghost-friend-win", {
+      ghostMarginSeconds: 9,
+      ghostTargetSeconds: 600,
+      ghostFriendUserId: FRIEND,
+    }),
+  ]);
+  const [friendRow] = await db.query(
+    `SELECT ghost_friend_user_id AS f FROM workouts WHERE workout_id = 'ghost-friend-win'`,
+  );
+  check("friend id stored", friendRow?.f, FRIEND);
+
+  // Same COALESCE protection as the margin: a fullSync re-upload carries no
+  // HealthKit metadata and must not anonymize a recorded win.
+  await uploadWorkouts(USER, [workout("ghost-friend-win")]);
+  const [afterResync] = await db.query(
+    `SELECT ghost_friend_user_id AS f FROM workouts WHERE workout_id = 'ghost-friend-win'`,
+  );
+  check("friend id survives a metadata-less re-upload", afterResync?.f, FRIEND);
+
+  // The notify pass claims the row exactly once, so the constant re-uploads of
+  // the same workout can never re-push.
+  await notifyGhostsBeaten(USER, ["ghost-friend-win"]);
+  const [claimed] = await db.query(
+    `SELECT (ghost_notified_at IS NOT NULL) AS done FROM workouts
+      WHERE workout_id = 'ghost-friend-win'`,
+  );
+  check("notify claims the row", claimed?.done, true);
+
+  await db.query(
+    `UPDATE workouts SET ghost_notified_at = NULL WHERE workout_id = 'ghost-friend-win'`,
+  );
+  // A workout naming someone who ISN'T a friend must not even be claimed —
+  // the id is client-asserted, so the friendship is re-checked at notify time.
+  await db.query(
+    `UPDATE workouts SET ghost_friend_user_id = 'ghost-check-stranger'
+      WHERE workout_id = 'ghost-friend-win'`,
+  );
+  await notifyGhostsBeaten(USER, ["ghost-friend-win"]);
+  const [stranger] = await db.query(
+    `SELECT (ghost_notified_at IS NOT NULL) AS done FROM workouts
+      WHERE workout_id = 'ghost-friend-win'`,
+  );
+  check("a non-friend claim is never notified", stranger?.done, false);
+
+  await db.query(
+    `DELETE FROM friendships WHERE user_id = $1 OR friend_id = $1`,
+    [FRIEND],
+  );
   await db.query(`DELETE FROM workouts WHERE user_id = $1`, [USER]);
-  await db.query(`DELETE FROM users WHERE user_id = $1`, [USER]);
+  await db.query(`DELETE FROM users WHERE user_id = ANY($1::text[])`, [
+    [USER, FRIEND],
+  ]);
 
   console.log(
     failures === 0

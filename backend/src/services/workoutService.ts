@@ -11,15 +11,24 @@ import {
 const db = PostgresService.getInstance();
 
 /**
- * The ghost-race columns for one workout's upsert, as `[margin, target]`.
+ * The ghost-race columns for one workout's upsert, as
+ * `[margin, target, friendUserId]`.
  *
  * The tracker stamps these on the HKWorkout only when the ghost was BEATEN, so
  * a non-null margin IS a win — which is what the ghost medal family counts.
  * Implausible claims are dropped to null rather than stored: bounds mirror the
  * client's `GhostTarget.isPlausible` (2:00…40:00), and you cannot beat a ghost
  * by more than the ghost's own time.
+ *
+ * `friendUserId` is present only when the ghost was a FRIEND's mile. It is
+ * client-asserted and NOT validated here — it is validated where it matters,
+ * at notify time in `notifyGhostsBeaten`, which re-checks the friendship and
+ * the block state before telling anyone anything. Storing an unverified id is
+ * harmless; pushing on one would be a spoofing vector.
  */
-function ghostRaceParams(workout: Workout): [number | null, number | null] {
+function ghostRaceParams(
+  workout: Workout,
+): [number | null, number | null, string | null] {
   const margin = Number(workout.ghostMarginSeconds);
   const target = Number(workout.ghostTargetSeconds);
   const ok =
@@ -29,7 +38,14 @@ function ghostRaceParams(workout: Workout): [number | null, number | null] {
     target >= 120 &&
     target <= 2400 &&
     margin <= target;
-  return ok ? [margin, target] : [null, null];
+  if (!ok) return [null, null, null];
+  const friend =
+    typeof workout.ghostFriendUserId === "string" &&
+    workout.ghostFriendUserId.length > 0 &&
+    workout.ghostFriendUserId !== workout.workoutId
+      ? workout.ghostFriendUserId
+      : null;
+  return [margin, target, friend];
 }
 
 export async function uploadWorkouts(
@@ -92,11 +108,12 @@ export async function uploadWorkouts(
         moving_seconds,
         ghost_margin_seconds,
         ghost_target_seconds,
+        ghost_friend_user_id,
         source,
         exclusion_reason,
         speed_flagged
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       ON CONFLICT (workout_id)
       DO UPDATE SET
         distance = EXCLUDED.distance,
@@ -113,6 +130,7 @@ export async function uploadWorkouts(
         -- the tracker already recorded. Same reasoning as workout_routes.
         ghost_margin_seconds = COALESCE(EXCLUDED.ghost_margin_seconds, workouts.ghost_margin_seconds),
         ghost_target_seconds = COALESCE(EXCLUDED.ghost_target_seconds, workouts.ghost_target_seconds),
+        ghost_friend_user_id = COALESCE(EXCLUDED.ghost_friend_user_id, workouts.ghost_friend_user_id),
         source = CASE
           WHEN workouts.source IN ('manual', 'edited') THEN workouts.source
           ELSE EXCLUDED.source

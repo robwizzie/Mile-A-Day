@@ -18,7 +18,12 @@ const db = PostgresService.getInstance();
 // Shared circle + symmetric-block fragment. `$1` is always the viewer id.
 // `circle` = the viewer's accepted friends plus the viewer themself; blocked
 // ids (either direction) are excluded so neither party sees the other.
-const CIRCLE_CTE = `
+//
+// Exported so other friend-scoped reads (ghostService) get the SAME circle and
+// the SAME symmetric block rule rather than re-deriving it — leaderboardService
+// re-derived it and quietly lost the block half. Because it hardcodes `$1`, any
+// query using it must keep the viewer as its first parameter.
+export const CIRCLE_CTE = `
 WITH circle AS (
 	SELECT friend_id AS uid FROM friendships WHERE user_id = $1 AND status = 'accepted'
 	UNION

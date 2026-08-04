@@ -31,6 +31,10 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// that wasn't raced or wasn't won, so "present" means "won".
     static let ghostMarginMetadataKey = "MAD_ghost_margin_seconds"
     static let ghostTargetMetadataKey = "MAD_ghost_target_seconds"
+    /// Set alongside the two above when the ghost was a FRIEND's mile. This is
+    /// what lets the server tell them they were caught — without it the win is
+    /// recorded but anonymous.
+    static let ghostFriendMetadataKey = "MAD_ghost_friend_id"
 
     private let locationManager = CLLocationManager()
     private let pedometer = CMPedometer()

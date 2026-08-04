@@ -45,11 +45,28 @@ struct GhostRaceOptionsContent: View {
     /// would throw away wheel edits mid-decision.
     @State private var hasPrimed = false
 
+    @ObservedObject private var friendGhosts = FriendGhostService.shared
+
     private var isRun: Bool { activityKey == "running" }
 
+    /// Friends you can chase, fastest first (the server orders them), minus
+    /// yourself — your own mile is already offered as "best tracked in-app".
+    private var friends: [FriendGhost] {
+        friendGhosts.ghosts(for: activityKey)
+            .filter { $0.user_id != UserManager.shared.currentUser.backendUserId }
+    }
+
+    /// Your own targets, then friends, then `.custom`.
+    ///
+    /// `.custom` MUST stay last — it's the always-available fallback, and the
+    /// picker's promise is that there is always something to race.
     private var targets: [BestEffortStore.GhostTarget] {
-        BestEffortStore.availableTargets(
+        var base = BestEffortStore.availableTargets(
             for: activityKey, seedPaceSecondsPerMile: seedPaceSeconds)
+        let custom = base.removeLast()
+        base.append(contentsOf: friends.map(\.target))
+        base.append(custom)
+        return base
     }
 
     private var customTotalSeconds: Double {
@@ -95,6 +112,12 @@ struct GhostRaceOptionsContent: View {
             hasPrimed = true
             primeSelection()
         }
+        // Friends load AFTER the first prime, so a stored friend target is
+        // resolved from its own persisted seconds rather than waiting on the
+        // network — the picker is never blank and never blocks.
+        .task(id: activityKey) {
+            await friendGhosts.refreshIfNeeded(activityKey: activityKey)
+        }
     }
 
     /// One-shot: seed the wheels and the selected row from what's already
@@ -117,6 +140,9 @@ struct GhostRaceOptionsContent: View {
     }
 
     /// Custom matches on KIND, not on seconds — the wheels own the value.
+    /// A friend matches on ID: two friends are not interchangeable, and this
+    /// is what lets a re-opened picker recognise the friend already armed
+    /// instead of silently dropping the selection.
     private func targetsContain(_ target: BestEffortStore.GhostTarget) -> Bool {
         targets.contains {
             switch ($0, target) {
@@ -124,6 +150,8 @@ struct GhostRaceOptionsContent: View {
                 return true
             case (.custom, .custom):
                 return true
+            case (.friend(let a, _, _), .friend(let b, _, _)):
+                return a == b
             default:
                 return false
             }
@@ -163,7 +191,16 @@ struct GhostRaceOptionsContent: View {
                 .font(MADTheme.Typography.headline)
                 .foregroundStyle(MADTheme.Colors.madWhite)
 
-            ForEach(Array(targets.enumerated()), id: \.offset) { _, target in
+            ForEach(Array(targets.enumerated()), id: \.offset) { index, target in
+                // The friend block gets its own heading so the list reads as
+                // two ideas — your times, then theirs — instead of one long
+                // undifferentiated column.
+                if case .friend = target, isFirstFriendRow(at: index) {
+                    Text("Chase a friend")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundStyle(MADTheme.Colors.madWhite)
+                        .padding(.top, MADTheme.Spacing.sm)
+                }
                 targetRow(target)
             }
 
@@ -181,6 +218,11 @@ struct GhostRaceOptionsContent: View {
         }
     }
 
+    /// True for the first friend in `targets` — drives the section heading.
+    private func isFirstFriendRow(at index: Int) -> Bool {
+        targets.firstIndex { if case .friend = $0 { return true }; return false } == index
+    }
+
     private func targetRow(_ target: BestEffortStore.GhostTarget) -> some View {
         let info = rowInfo(target)
         let isOn = matchesSelection(target)
@@ -189,10 +231,27 @@ struct GhostRaceOptionsContent: View {
             withAnimation(MADTheme.Animation.quick) { selection = target }
         } label: {
             HStack(spacing: MADTheme.Spacing.md) {
-                Image(systemName: info.icon)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(isOn ? accent : MADTheme.Colors.madWhite.opacity(0.5))
+                // A friend gets their face where the other targets get a
+                // symbol — it's the whole reason this row reads differently.
+                if case .friend(let id, _, _) = target,
+                    let friend = friends.first(where: { $0.user_id == id })
+                {
+                    AvatarView(
+                        name: friend.avatarName,
+                        imageURL: friend.profile_image_url,
+                        size: 30
+                    )
+                    .overlay(
+                        Circle().strokeBorder(
+                            isOn ? accent : Color.clear, lineWidth: 1.5)
+                    )
                     .frame(width: 30)
+                } else {
+                    Image(systemName: info.icon)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(isOn ? accent : MADTheme.Colors.madWhite.opacity(0.5))
+                        .frame(width: 30)
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(info.title)
@@ -223,6 +282,10 @@ struct GhostRaceOptionsContent: View {
             return true
         case (.custom, .custom):
             return true
+        // By ID. Matching on kind here would highlight EVERY friend row at
+        // once, since they're all `.friend`.
+        case (.friend(let a, _, _), .friend(let b, _, _)):
+            return a == b
         default:
             return false
         }
@@ -246,6 +309,16 @@ struct GhostRaceOptionsContent: View {
                 "All-time PR",
                 "Your fastest mile from ANY workout, Apple Watch included. Held at one even pace.",
                 BestEffortStore.formatSeconds(seedPaceSeconds ?? 0)
+            )
+        case .friend(_, let seconds, let name):
+            return (
+                "person.fill",
+                name,
+                // Same caveat the footnote gives for the user's own PR: this is
+                // their fastest mile from ANY synced workout, so it can be
+                // faster than anything they've tracked in this app.
+                "Their fastest mile from any synced workout. Held at one even pace.",
+                BestEffortStore.formatSeconds(seconds)
             )
         case .custom:
             return (
@@ -436,6 +509,7 @@ struct GhostRaceOptionsContent: View {
         case .recordedBest: return BestEffortStore.best(for: activityKey)?.seconds ?? 0
         case .personalRecord: return seedPaceSeconds ?? 0
         case .custom(let seconds): return seconds
+        case .friend(_, let seconds, _): return seconds
         }
     }
 

@@ -763,6 +763,14 @@ class WorkoutSyncService: ObservableObject {
                ghostMargin > 0, ghostTarget > 0 {
                 workoutDict["ghostMarginSeconds"] = ghostMargin
                 workoutDict["ghostTargetSeconds"] = ghostTarget
+                // Only set when the ghost was a FRIEND's mile. The server
+                // re-checks the friendship before telling them anything, so an
+                // id here is a claim, not an authorization.
+                if let ghostFriendId = workout.metadata?[
+                    WorkoutLocationManager.ghostFriendMetadataKey] as? String,
+                    !ghostFriendId.isEmpty {
+                    workoutDict["ghostFriendUserId"] = ghostFriendId
+                }
             }
 
             // Attach the simplified GPS path when the workout has one, so the

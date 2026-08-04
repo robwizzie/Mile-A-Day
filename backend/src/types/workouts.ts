@@ -17,6 +17,9 @@ export type Workout = {
   // mile: seconds of margin, and the ghost's own mile time.
   ghostMarginSeconds?: number;
   ghostTargetSeconds?: number;
+  // Whose ghost it was, when the raced target was a friend's mile. Client-
+  // asserted; the friendship is re-checked before any push goes out.
+  ghostFriendUserId?: string;
   splits: WorkoutSplit[];
   source?: WorkoutSource;
   // Optional simplified GPS trace ([[lat, lng], ...]) for outdoor walks/runs.

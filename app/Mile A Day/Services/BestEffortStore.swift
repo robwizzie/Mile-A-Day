@@ -53,6 +53,14 @@ enum BestEffortStore {
         case personalRecord
         /// A time the user typed in. Constant pace, same as the PR ghost.
         case custom(seconds: Double)
+        /// A FRIEND's fastest mile, from `GET /ghosts/friends`.
+        ///
+        /// The seconds and the name ride in the case rather than being looked
+        /// up, because `resolve` is synchronous and offline — there is nowhere
+        /// to await a friend's time inside this store, and `shortName` is
+        /// produced there. The stored name is refreshed whenever the picker
+        /// reloads, so a rename shows up the next time they open it.
+        case friend(id: String, seconds: Double, name: String)
 
         /// Compact form for @AppStorage — the enum has an associated value, so
         /// it can't be RawRepresentable in the way AppStorage wants.
@@ -61,6 +69,10 @@ enum BestEffortStore {
             case .recordedBest: return "best"
             case .personalRecord: return "pr"
             case .custom(let seconds): return "custom:\(Int(seconds.rounded()))"
+            case .friend(let id, let seconds, let name):
+                // Name goes LAST so it may contain colons — the decoder splits
+                // with maxSplits and takes the remainder verbatim.
+                return "friend:\(id):\(Int(seconds.rounded())):\(name)"
             }
         }
 
@@ -69,12 +81,38 @@ enum BestEffortStore {
             case "best": self = .recordedBest
             case "pr": self = .personalRecord
             default:
+                // NOTE: this switches over a STRING, so a missing case here is
+                // silent — a stored target that doesn't decode just falls back
+                // to `defaultTarget` with no crash and no warning. Any new case
+                // added above must be given a branch here too.
+                if storage.hasPrefix("friend:") {
+                    let parts = storage.dropFirst("friend:".count)
+                        .split(separator: ":", maxSplits: 2,
+                               omittingEmptySubsequences: false)
+                    guard parts.count == 3,
+                        !parts[0].isEmpty,
+                        let seconds = Double(parts[1]),
+                        Self.isPlausible(seconds)
+                    else { return nil }
+                    self = .friend(
+                        id: String(parts[0]),
+                        seconds: seconds,
+                        name: String(parts[2])
+                    )
+                    return
+                }
                 guard storage.hasPrefix("custom:"),
                     let seconds = Double(storage.dropFirst("custom:".count)),
                     Self.isPlausible(seconds)
                 else { return nil }
                 self = .custom(seconds: seconds)
             }
+        }
+
+        /// The friend whose mile this races, when it races one.
+        var friendUserId: String? {
+            if case .friend(let id, _, _) = self { return id }
+            return nil
         }
 
         /// A mile between 2 and 40 minutes. The floor is the same one
@@ -129,6 +167,18 @@ enum BestEffortStore {
             guard GhostTarget.isPlausible(seconds) else { return nil }
             return ResolvedGhost(
                 target: target, effort: constantPace(seconds), shortName: "your target")
+        case .friend(_, let seconds, let name):
+            guard GhostTarget.isPlausible(seconds) else { return nil }
+            // A flat pace, like the PR and custom ghosts: the server only has
+            // the friend's fastest mile SPLIT, never their effort curve (that
+            // lives on their device). `shortName` is their name, so the live
+            // chip reads "12s ahead of Alex" and the celebration "ahead of
+            // Alex over the mile" with no copy changes anywhere.
+            return ResolvedGhost(
+                target: target,
+                effort: constantPace(seconds),
+                shortName: name.isEmpty ? "your friend" : name
+            )
         }
     }
 

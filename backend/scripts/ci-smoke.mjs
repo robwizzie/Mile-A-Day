@@ -28,6 +28,7 @@ const { signMediaUrl, verifyPostsMediaAccess, stripMediaQuery } =
   await import("../dist/services/mediaSigningService.js");
 const { getNotificationPreferences, updateNotificationPreferences } =
   await import("../dist/services/notificationSettingsService.js");
+const { getFriendGhosts } = await import("../dist/services/ghostService.js");
 // Hype authorization is controller-level (it's where the friend/visibility
 // gate lives), so the collab assertions below drive the real handlers.
 const { sendHype, getContextHypersController } =
@@ -1199,6 +1200,118 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     3.3,
     "a post with no linked workout keeps its stats (not nulled by the rollup join)",
   );
+
+
+// ─── Friend ghosts ────────────────────────────────────────────────────────
+//
+// The ghost picker offers a friend's fastest mile as a target. Every rule that
+// keeps that honest is a WHERE clause, so each one gets an assertion: this is
+// the query that decides whose time a stranger can chase.
+{
+  const ghostWorkout = async (userId, id, type, splitDistance, splitPace) => {
+    await db.query(
+      `INSERT INTO workouts (user_id, workout_id, distance, local_date, date,
+                             timezone_offset, workout_type, device_end_date,
+                             calories, total_duration)
+       VALUES ($1, $2, 1.0, $3, $4, 0, $5, $6, 50, 600)
+       ON CONFLICT (workout_id) DO NOTHING`,
+      // `date` and `local_date` are DATE columns; `device_end_date` is
+      // timestamptz. Reusing one param for a date and a timestamptz is a
+      // param-type conflict, not a coercion.
+      [userId, id, localDate, localDate, type, nowIso],
+    );
+    await db.query(
+      `INSERT INTO workout_splits (workout_id, split_number, split_duration,
+                                   split_distance, split_pace)
+       VALUES ($1, 1, $2, $3, $2)
+       ON CONFLICT (workout_id, split_number) DO UPDATE
+         SET split_distance = EXCLUDED.split_distance,
+             split_pace = EXCLUDED.split_pace`,
+      [id, splitPace, splitDistance],
+    );
+  };
+
+  await ghostWorkout(BOB, "ci-ghost-bob-run", "running", 1.0, 540);
+  await ghostWorkout(DANA, "ci-ghost-dana-run", "running", 1.0, 500);
+
+  let ghosts = await getFriendGhosts(ALICE, "running");
+  let ids = ghosts.map((g) => g.user_id);
+  assert.ok(ids.includes(BOB), "a friend's mile is offered as a ghost");
+  assert.equal(
+    ghosts.find((g) => g.user_id === BOB).mile_seconds,
+    540,
+    "the ghost time is the friend's fastest mile split, in seconds",
+  );
+
+  // DANA is Alice's friend too, and faster — the list is a leaderboard.
+  assert.deepEqual(
+    ghosts.map((g) => g.mile_seconds),
+    [...ghosts.map((g) => g.mile_seconds)].sort((a, b) => a - b),
+    "ghosts come back fastest-first",
+  );
+
+  // A non-friend is never offered. CARL is Bob's friend, not Alice's.
+  await ghostWorkout(CARL, "ci-ghost-carl-run", "running", 1.0, 400);
+  ghosts = await getFriendGhosts(ALICE, "running");
+  assert.ok(
+    !ghosts.some((g) => g.user_id === CARL),
+    "a non-friend's mile is never offered, however fast",
+  );
+
+  // Activity type: a RUN split must never become a WALK ghost.
+  const walkGhosts = await getFriendGhosts(ALICE, "walking");
+  assert.ok(
+    !walkGhosts.some((g) => g.user_id === BOB),
+    "a friend's run mile is not offered as a walk ghost",
+  );
+
+  // The 0.999 floor: a 0.96-mile split is an extrapolated partial, not a mile.
+  await ghostWorkout(DANA, "ci-ghost-dana-partial", "walking", 0.96, 300);
+  assert.ok(
+    !(await getFriendGhosts(ALICE, "walking")).some((g) => g.user_id === DANA),
+    "a sub-0.999 split is excluded (extrapolated partial, unbeatable)",
+  );
+
+  // Blocks hide the mile in BOTH directions.
+  await db.query(
+    `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+    [BOB, ALICE],
+  );
+  assert.ok(
+    !(await getFriendGhosts(ALICE, "running")).some((g) => g.user_id === BOB),
+    "a block hides the blocker's mile from the blocked user",
+  );
+  assert.ok(
+    !(await getFriendGhosts(BOB, "running")).some((g) => g.user_id === ALICE),
+    "a block hides the mile in the other direction too",
+  );
+  await db.query(`DELETE FROM user_blocks WHERE blocker_id = $1`, [BOB]);
+
+  // workout_visibility = 'private' removes you from being raceable. This is
+  // the privacy control the feature reuses instead of minting a new toggle.
+  await updateNotificationPreferences(BOB, { workout_visibility: "private" });
+  assert.ok(
+    !(await getFriendGhosts(ALICE, "running")).some((g) => g.user_id === BOB),
+    "a 'private' user is not offered as a ghost",
+  );
+  await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
+
+  // A soft-deleted workout stops supplying the number.
+  await db.query(
+    `UPDATE workouts SET deleted_at = NOW() WHERE workout_id = 'ci-ghost-bob-run'`,
+  );
+  assert.ok(
+    !(await getFriendGhosts(ALICE, "running")).some((g) => g.user_id === BOB),
+    "a soft-deleted workout stops supplying a ghost time",
+  );
+  await db.query(
+    `UPDATE workouts SET deleted_at = NULL WHERE workout_id = 'ci-ghost-bob-run'`,
+  );
+
+  await db.query(`DELETE FROM workout_splits WHERE workout_id LIKE 'ci-ghost-%'`);
+  await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-ghost-%'`);
+}
 
   await db.query(`DELETE FROM posts WHERE user_id = $1`, [CARL]);
   await db.query(`DELETE FROM workouts WHERE user_id = $1`, [CARL]);

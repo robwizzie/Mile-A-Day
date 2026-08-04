@@ -513,6 +513,10 @@ struct WorkoutTrackingView: View {
                 ghostName: raceGhostName,
                 activityKey: raceActivityKey,
                 newRecordSeconds: recordSeconds,
+                // Whose ghost it was, when it was a friend's. Read from the
+                // armed target rather than the resolved one — `ResolvedGhost`
+                // deliberately keeps only a display name.
+                friendUserId: raceTarget.friendUserId,
                 workoutId: nil
             )
             // Held for the HealthKit metadata stamp further down this same
@@ -2212,6 +2216,11 @@ struct WorkoutTrackingView: View {
         if let win = pendingGhostWin {
             metadata[WorkoutLocationManager.ghostMarginMetadataKey] = win.marginSeconds
             metadata[WorkoutLocationManager.ghostTargetMetadataKey] = win.ghostSeconds
+            // Only present when the ghost was a friend's — that's what lets
+            // the server tell them they were caught.
+            if let friendId = win.friendUserId {
+                metadata[WorkoutLocationManager.ghostFriendMetadataKey] = friendId
+            }
         }
         if metadata.isEmpty {
             beginSave()

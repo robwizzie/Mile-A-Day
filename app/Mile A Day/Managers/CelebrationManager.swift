@@ -286,6 +286,9 @@ struct GhostRaceWin: Equatable {
     let activityKey: String
     /// Set when this mile ALSO became the new best to beat.
     let newRecordSeconds: Double?
+    /// The friend whose mile this was, when the ghost was theirs. Carried onto
+    /// the saved workout so the server can tell them they were caught.
+    let friendUserId: String?
     /// Workout it belongs to, so the win can be attached to the post.
     let workoutId: String?
 }
