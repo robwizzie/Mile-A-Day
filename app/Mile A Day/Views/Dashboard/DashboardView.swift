@@ -983,6 +983,8 @@ struct DashboardView: View {
     private func syncWidgetData() {
         let state = currentState
         WidgetDataStore.save(todayMiles: state.distance, goal: state.goal)
+        // Before the streak save — that one carries the reload for both.
+        WidgetDataStore.save(longestStreak: userManager.currentUser.longestStreak ?? 0)
         WidgetDataStore.save(streak: userManager.currentUser.streak)
         WidgetDataStore.save(weekCompletions: currentWeekCompletions(), weekMiles: currentWeekMiles())
         // No blanket reloadAllTimelines() here: the store reloads the right

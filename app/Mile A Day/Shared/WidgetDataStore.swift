@@ -113,6 +113,26 @@ struct WidgetDataStore {
         return defaults.integer(forKey: streakKey)
     }
 
+    private static let longestStreakKey = "longest_streak"
+
+    /// All-time-best streak, so the flame widget can crown the streak box the
+    /// same way the dashboard hero does.
+    ///
+    /// Deliberately does NOT reload any timeline: it only ever changes on a day
+    /// the streak itself changed, and `save(streak:)` — always called alongside
+    /// it — reloads for both. Spending a second reload here would buy nothing
+    /// and widget reloads are rationed per day.
+    static func save(longestStreak: Int) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        guard defaults.integer(forKey: longestStreakKey) != longestStreak else { return }
+        defaults.set(longestStreak, forKey: longestStreakKey)
+    }
+
+    static func loadLongestStreak() -> Int {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return 0 }
+        return defaults.integer(forKey: longestStreakKey)
+    }
+
     // MARK: - Recovery
 
     private static let lastForcedReloadKey = "last_forced_widget_reload"

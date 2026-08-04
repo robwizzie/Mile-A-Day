@@ -403,7 +403,11 @@ private struct ModernHeroCard: View {
         .background(heroBackground)
         .overlay(alignment: .topTrailing) {
             tokensChip
-                .padding(14)
+                // Horizontal inset matches the card's own 18, so the chip's
+                // right edge lines up with the stats beneath it instead of
+                // hanging 4pt further out.
+                .padding(.horizontal, 18)
+                .padding(.top, 14)
         }
         .sheet(isPresented: $showTokens) {
             StreakTokensDetailView()
@@ -1152,6 +1156,10 @@ private struct ModernChallengeRow: View {
 }
 
 private struct FlameBuddyHeroCard: View {
+    /// Distance from the hero's top edge to the ground the buddy stands on.
+    /// Held constant so the art keeps its footing when the card's height moves.
+    private static let groundBaseline: CGFloat = 196
+
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     let currentDistance: Double
@@ -1214,16 +1222,22 @@ private struct FlameBuddyHeroCard: View {
 
                         FunHeroGround()
                             .frame(width: buddySize * 1.26, height: 28)
-                            .offset(y: geo.size.height - 46)
+                            // A fixed distance from the TOP, not from the card's
+                            // bottom: the buddy is top-anchored, so tying the
+                            // ground to the card height detaches it from the
+                            // flame's feet the moment the card grows.
+                            .offset(y: Self.groundBaseline)
                     }
                     .frame(width: leftWidth, height: geo.size.height, alignment: .top)
 
                     funStatRows
-                        .padding(.top, 8)
+                        // Clears the savers chip in the corner above — at 8 the
+                        // streak box sat right against it.
+                        .padding(.top, 24)
                         .frame(width: rightWidth, height: geo.size.height, alignment: .top)
                 }
             }
-            .frame(height: 242)
+            .frame(height: 258)
 
             DashboardMilestoneBar(streak: userManager.currentUser.streak)
                 .padding(.horizontal, 2)
@@ -1233,7 +1247,9 @@ private struct FlameBuddyHeroCard: View {
         .background(cardBackground)
         .overlay(alignment: .topTrailing) {
             tokensChip
-                .padding(14)
+                // Right edge lines up with the streak box below it.
+                .padding(.horizontal, 18)
+                .padding(.top, 14)
         }
         .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .onTapGesture {
