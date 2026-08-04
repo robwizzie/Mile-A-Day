@@ -61,8 +61,10 @@ export interface FriendGhost {
  * becomes a ghost nobody can catch. Same floor the pace leaderboard uses, so
  * the two agree.
  *
- * The viewer is included in their own list: the picker reads as a leaderboard,
- * and seeing your own time next to your friends' is the point.
+ * The viewer comes back in their own list (CIRCLE_CTE includes self) and the
+ * CLIENT drops them — their own mile is already offered twice over, as "best
+ * tracked in-app" and as their all-time PR, and a third row for the same
+ * person reads as a bug. Returning them anyway keeps that a client decision.
  */
 export async function getFriendGhosts(
   userId: string,

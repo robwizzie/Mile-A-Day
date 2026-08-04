@@ -162,7 +162,12 @@ export async function uploadWorkouts(req: Request, res: Response) {
     // "Your ghost was caught" — only fires for a workout that raced a FRIEND's
     // mile and won. Claim-stamped inside, so the constant re-uploads of the
     // same workout can't re-push, and it never throws.
-    await notifyGhostsBeaten(userId, uploadedWorkoutIds);
+    //
+    // Deliberately NOT awaited, unlike the rewards above: nothing in the sync
+    // response depends on it, and every workout upload would otherwise pay for
+    // a query plus a preference check plus an APNs round trip before the
+    // client hears back.
+    void notifyGhostsBeaten(userId, uploadedWorkoutIds);
 
     // Check if user has now completed their mile and notify friends.
     // Skipped on the initial account-setup backfill (isFullSync) and when this
