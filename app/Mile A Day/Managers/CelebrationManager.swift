@@ -643,7 +643,11 @@ class CelebrationManager: ObservableObject {
         pendingAction = .none
     }
 
-    /// Priority for ordering celebrations: lower = shown first
+    /// Priority for ordering celebrations: lower = shown first.
+    ///
+    /// Exhaustive on purpose — a new celebration must be given a deliberate
+    /// place in the running order, not silently land wherever a `default`
+    /// happened to put it. (This is the switch that caught `.ghostBeaten`.)
     private func priority(of celebration: CelebrationType) -> Int {
         switch celebration {
         case .badgeSummary: return -2 // One-time welcome — show first
@@ -651,12 +655,16 @@ class CelebrationManager: ObservableObject {
         case .goalCompleted: return 0
         case .newRecordStreak: return 1 // crown lands right after the flame
         case .comeback: return 2 // the emotional beat before the leaderboard
-        case .leaderboardMoveUp: return 3 // right after the fire/streak screen
-        case .postGoalWorkout: return 4
-        case .badgeUnlocked: return 5
-        case .milestone: return 6
-        case .challengeCompleted: return 7 // celebrate the daily challenge as a finale
-        case .postRunPhotoPrompt: return 8 // BeReal photo prompt — the very last step
+        // After the streak beats, which are rarer and carry more weight, but
+        // before the social ones: beating the ghost is about the workout that
+        // just ended, so it belongs next to it rather than after a badge.
+        case .ghostBeaten: return 3
+        case .leaderboardMoveUp: return 4 // right after the fire/streak screen
+        case .postGoalWorkout: return 5
+        case .badgeUnlocked: return 6
+        case .milestone: return 7
+        case .challengeCompleted: return 8 // celebrate the daily challenge as a finale
+        case .postRunPhotoPrompt: return 9 // BeReal photo prompt — the very last step
         }
     }
 
