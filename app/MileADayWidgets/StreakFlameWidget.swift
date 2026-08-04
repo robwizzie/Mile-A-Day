@@ -290,8 +290,10 @@ private struct FlameStat: View {
             Spacer(minLength: 0)
         }
         // FIXED, not minHeight: the column's height has to be knowable without
-        // measuring text.
-        .frame(maxWidth: .infinity, height: metrics.rowHeight, alignment: .leading)
+        // measuring text. Two frames because `frame` has no
+        // maxWidth-plus-height overload.
+        .frame(height: metrics.rowHeight)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -483,7 +485,8 @@ private struct MediumFlameView: View {
             // height. The art still DRAWS at 146 and overflows exactly as
             // before — only its layout height changes.
             FlameArt(entry: entry, size: entry.isFun ? 146 : 122)
-                .frame(width: 132, maxHeight: .infinity)
+                .frame(width: 132)
+                .frame(maxHeight: .infinity)
 
             // Measure, don't predict. A ViewThatFits between a with-steps and a
             // without-steps candidate silently dropped the row whenever the
