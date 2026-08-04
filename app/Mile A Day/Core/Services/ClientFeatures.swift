@@ -22,7 +22,20 @@ enum ClientFeatures {
     /// buttons — it still opens the post, which is the safe direction.
     static let collabTagV1 = "collab_tag_v1"
 
+    /// This build understands the `ghost_beaten` push — "Alex beat your mile by
+    /// 6s" — and can race a friend's mile as its ghost in the first place.
+    ///
+    /// The meaning here is deliberately "won't be confused by the push", not
+    /// "can act on it": tapping it just opens the app, which is what every
+    /// other informational push does. A rematch deep-link is a later addition
+    /// and would need its OWN string if it ever needs gating, because reusing
+    /// this one with a new meaning would silently mis-describe every install
+    /// that already sent it.
+    static let ghostFriendRaceV1 = "ghost_friend_race_v1"
+
     /// Declared on registration. Add a string here only in the same build that
     /// actually implements the behavior.
-    static let supported: [String] = [friendRequestV2, collabTagV1]
+    static let supported: [String] = [
+        friendRequestV2, collabTagV1, ghostFriendRaceV1,
+    ]
 }
