@@ -221,26 +221,26 @@ private struct FlameStat: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(size: 10, weight: .bold))
                 .foregroundColor(tint)
-                .frame(width: 24, height: 24)
+                .frame(width: 22, height: 22)
                 .background(Circle().fill(tint.opacity(0.14)))
 
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
                     value
-                        .font(.system(size: 16, weight: .black, design: .rounded))
+                        .font(.system(size: 14, weight: .black, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
                     Text(unit)
-                        .font(.system(size: 8.5, weight: .heavy, design: .rounded))
+                        .font(.system(size: 8, weight: .heavy, design: .rounded))
                         .foregroundColor(.white.opacity(0.6))
                         .lineLimit(1)
                 }
                 Text(label)
-                    .font(.system(size: 8, weight: .black, design: .rounded))
+                    .font(.system(size: 7.5, weight: .black, design: .rounded))
                     .textCase(.uppercase)
                     .foregroundColor(.white.opacity(0.42))
                     .lineLimit(1)
@@ -250,7 +250,7 @@ private struct FlameStat: View {
         }
         // Gives the hairline between rows room to breathe, the way the
         // dashboard column's 44pt rows do.
-        .frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 25, alignment: .leading)
     }
 }
 
@@ -261,7 +261,7 @@ private struct FlameStatDivider: View {
         Rectangle()
             .fill(Color.white.opacity(0.08))
             .frame(height: 1)
-            .padding(.leading, 32)
+            .padding(.leading, 30)
     }
 }
 
@@ -280,10 +280,10 @@ private struct FlameStreakBox: View {
 
     var body: some View {
         // Sized for the NARROWEST medium widget (a 393pt phone leaves this
-        // column ~154pt), so nothing has to auto-shrink on a small screen.
+        // column ~150pt), so nothing has to auto-shrink on a small screen.
         HStack(alignment: .center, spacing: 6) {
             Text("\(entry.streak)")
-                .font(.system(size: 26, weight: .black, design: .rounded))
+                .font(.system(size: 24, weight: .black, design: .rounded))
                 .monospacedDigit()
                 .foregroundColor(.white)
                 .lineLimit(1)
@@ -292,7 +292,7 @@ private struct FlameStreakBox: View {
 
             Rectangle()
                 .fill(accent.opacity(0.45))
-                .frame(width: 1, height: 20)
+                .frame(width: 1, height: 19)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("DAY STREAK")
@@ -435,10 +435,15 @@ private struct MediumFlameView: View {
             FlameArt(entry: entry, size: entry.isFun ? 146 : 122)
                 .frame(width: 132, height: 146)
 
-            // Steps is the row that gives way when the canvas is short: a
-            // medium widget is ~138pt tall on a Pro Max but only ~123pt on a
-            // 393pt phone, which is one row short of the dashboard's three.
-            // ViewThatFits drops it there rather than letting the column clip.
+            // Steps is the row that gives way when the canvas is short.
+            //
+            // Widget content margins are 20pt a side, NOT the 16 you'd guess:
+            // a medium widget is 170pt tall on a Pro Max but only ~130pt of
+            // that is usable, and ~118pt on a 393pt phone. Three rows plus the
+            // streak box come to ~122, so the big phones get steps and the
+            // small ones drop it rather than clipping. (Measure by rendering,
+            // not arithmetic: the column is centred, so its height is
+            // `2 * (85 - topInset)`.)
             ViewThatFits(in: .vertical) {
                 column(showsSteps: true)
                 column(showsSteps: false)
@@ -450,7 +455,7 @@ private struct MediumFlameView: View {
     }
 
     private func column(showsSteps: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 4) {
             FlameStreakBox(entry: entry, statusColor: flameStatusColor(entry))
 
             // Rows separated by hairlines rather than one rule above the
@@ -483,7 +488,10 @@ private struct MediumFlameView: View {
                     FlameStat(
                         icon: "clock.fill",
                         value: entry.dayEnd.map { MADWidgetCountdown.text(to: $0) } ?? Text("--"),
-                        unit: "left",
+                        // No unit: a `.relative` Text is greedy, so it claimed
+                        // the row's spare width and stranded "left" against the
+                        // far edge. "LEFT TODAY" underneath already says it.
+                        unit: "",
                         label: "Left today",
                         tint: flameStatusColor(entry)
                     )

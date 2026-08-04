@@ -464,7 +464,12 @@ struct GhostRaceOptionsContent: View {
                 }
             }
         }
-        .tint(accent)
+        // Brand red, deliberately NOT `accent`. iOS draws a switch's knob white
+        // no matter what, and this content is hosted on the tracker's red
+        // gradient with `accent: .white` — so tinting with the accent produced a
+        // white knob on a white track: a plain white pill that didn't read as a
+        // switch at all. Any track colour here has to contrast with that knob.
+        .tint(MADTheme.Colors.madRed)
         .padding(MADTheme.Spacing.md)
         .ghostRaceSurface(selected: false, accent: accent)
         .onChange(of: coachEnabled) { _, _ in MADHaptics.tap() }
