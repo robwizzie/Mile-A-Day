@@ -20,8 +20,13 @@ struct RunStatsInput: Equatable {
     /// Ghost race, set only when this workout BEAT its ghost. Read straight off
     /// the HKWorkout's metadata, so it's keyed to the right workout by
     /// construction — no separate stash to fall out of sync.
-    var ghostMarginSeconds: Double?
-    var ghostTargetSeconds: Double?
+    /// Six of the eight `RunStatsInput` call sites don't pass these. A `var`
+    /// optional already gets an implicit nil in the memberwise init, so the
+    /// `= nil` is for the reader, not the compiler — unlike a `let` optional,
+    /// which is genuinely required (that's what broke the celebration's
+    /// #Preview when `GhostRaceWin.friendUserId` was added).
+    var ghostMarginSeconds: Double? = nil
+    var ghostTargetSeconds: Double? = nil
 
     var snapshot: PostStats {
         PostStats(
