@@ -56,6 +56,32 @@ struct GhostRaceOptionsContent: View {
             .filter { $0.user_id != UserManager.shared.currentUser.backendUserId }
     }
 
+    /// Friend rows: the ones the server returned, plus the friend already
+    /// armed if they aren't in that list yet.
+    ///
+    /// That second part is load-bearing. `primeSelection` runs synchronously
+    /// in `onAppear`, while the friend list arrives over the network from
+    /// `.task` — so at prime time this list is EMPTY on a cold cache. Without
+    /// the armed friend pinned in, `targetsContain(current)` returns false and
+    /// the picker silently reverts an armed friend ghost to `defaultTarget`:
+    /// you chose Alex last session, you re-open the picker, and it has quietly
+    /// swapped you back to your own best. Same failure as matching friends by
+    /// kind, reached through a different door.
+    ///
+    /// Pinning it is safe because a `.friend` target is self-contained — it
+    /// carries its own seconds and name, so it stays raceable with no network
+    /// at all, and it survives the friend dropping off the list entirely
+    /// (unfriended, went private, switched activity).
+    private var friendTargets: [BestEffortStore.GhostTarget] {
+        var list = friends.map(\.target)
+        if let current, let armedId = current.friendUserId,
+            !list.contains(where: { $0.friendUserId == armedId })
+        {
+            list.insert(current, at: 0)
+        }
+        return list
+    }
+
     /// Your own targets, then friends, then `.custom`.
     ///
     /// `.custom` MUST stay last — it's the always-available fallback, and the
@@ -63,8 +89,10 @@ struct GhostRaceOptionsContent: View {
     private var targets: [BestEffortStore.GhostTarget] {
         var base = BestEffortStore.availableTargets(
             for: activityKey, seedPaceSecondsPerMile: seedPaceSeconds)
+        // `availableTargets` always ends with `.custom` — lift it off, insert
+        // the friends, put it back last.
         let custom = base.removeLast()
-        base.append(contentsOf: friends.map(\.target))
+        base.append(contentsOf: friendTargets)
         base.append(custom)
         return base
     }
