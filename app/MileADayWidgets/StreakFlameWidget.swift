@@ -32,6 +32,9 @@ struct StreakFlameEntry: TimelineEntry {
     let isFun: Bool
     /// All-time best, for the dashboard hero's gold "BEST EVER" crown.
     var longestStreak: Int = 0
+    /// Today's steps. Refreshed roughly per 1,000 (see `WidgetDataStore`), so
+    /// it lags the dashboard's live number by up to a bucket.
+    var steps: Int = 0
 
     var isAtRisk: Bool { health == .critical }
 
@@ -60,6 +63,7 @@ struct StreakFlameProvider: TimelineProvider {
         /// bakes at midnight (see getTimeline).
         var progress: Double
         var miles: Double
+        var steps: Int
         let goal: Double
         var completed: Bool
         let tokensReady: Int
@@ -79,7 +83,8 @@ struct StreakFlameProvider: TimelineProvider {
             dayEnd: MADWidgetClock.endOfDay(),
             tokensReady: 3,
             isFun: true,
-            longestStreak: 436
+            longestStreak: 436,
+            steps: 6842
         )
     }
 
@@ -104,6 +109,7 @@ struct StreakFlameProvider: TimelineProvider {
         var freshDay = snapshot
         freshDay.progress = 0
         freshDay.miles = 0
+        freshDay.steps = 0
         freshDay.completed = false
         entries.append(makeEntry(date: dayEnd, snapshot: freshDay))
 
@@ -117,6 +123,7 @@ struct StreakFlameProvider: TimelineProvider {
             longestStreak: WidgetDataStore.loadLongestStreak(),
             progress: data.progress,
             miles: data.miles,
+            steps: WidgetDataStore.loadTodaySteps(),
             goal: data.goal,
             completed: data.streakCompleted,
             tokensReady: WidgetDataStore.loadTokensReady(),
@@ -148,7 +155,8 @@ struct StreakFlameProvider: TimelineProvider {
             dayEnd: snapshot.completed ? nil : midnight,
             tokensReady: snapshot.tokensReady,
             isFun: snapshot.isFun,
-            longestStreak: snapshot.longestStreak
+            longestStreak: snapshot.longestStreak,
+            steps: snapshot.steps
         )
     }
 }
@@ -163,6 +171,15 @@ private func flameStatusColor(_ entry: StreakFlameEntry) -> Color {
 
 private func flameDeepLink(_: StreakFlameEntry) -> URL? {
     URL(string: "mileaday://dashboard")
+}
+
+/// Mirrors `HeroStatColumn.stepTint` — same thresholds, same colours, so the
+/// steps row is the same shade in both places.
+private func flameStepTint(_ steps: Int) -> Color {
+    if steps >= 10000 { return Color(red: 0.2, green: 0.7, blue: 0.3) }   // MADTheme success
+    if steps >= 7500 { return Color(red: 1.0, green: 0.6, blue: 0.0) }    // MADTheme warning
+    if steps >= 5000 { return .yellow }
+    return .orange
 }
 
 /// The flame art itself — Fun buddy or Modern flame in the progress ring, both
@@ -204,26 +221,26 @@ private struct FlameStat: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(size: 11, weight: .bold))
                 .foregroundColor(tint)
-                .frame(width: 26, height: 26)
+                .frame(width: 24, height: 24)
                 .background(Circle().fill(tint.opacity(0.14)))
 
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
                     value
-                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .font(.system(size: 16, weight: .black, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
                     Text(unit)
-                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .font(.system(size: 8.5, weight: .heavy, design: .rounded))
                         .foregroundColor(.white.opacity(0.6))
                         .lineLimit(1)
                 }
                 Text(label)
-                    .font(.system(size: 8.5, weight: .black, design: .rounded))
+                    .font(.system(size: 8, weight: .black, design: .rounded))
                     .textCase(.uppercase)
                     .foregroundColor(.white.opacity(0.42))
                     .lineLimit(1)
@@ -233,7 +250,7 @@ private struct FlameStat: View {
         }
         // Gives the hairline between rows room to breathe, the way the
         // dashboard column's 44pt rows do.
-        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 26, alignment: .leading)
     }
 }
 
@@ -244,7 +261,7 @@ private struct FlameStatDivider: View {
         Rectangle()
             .fill(Color.white.opacity(0.08))
             .frame(height: 1)
-            .padding(.leading, 34)
+            .padding(.leading, 32)
     }
 }
 
@@ -266,7 +283,7 @@ private struct FlameStreakBox: View {
         // column ~154pt), so nothing has to auto-shrink on a small screen.
         HStack(alignment: .center, spacing: 6) {
             Text("\(entry.streak)")
-                .font(.system(size: 28, weight: .black, design: .rounded))
+                .font(.system(size: 26, weight: .black, design: .rounded))
                 .monospacedDigit()
                 .foregroundColor(.white)
                 .lineLimit(1)
@@ -275,7 +292,7 @@ private struct FlameStreakBox: View {
 
             Rectangle()
                 .fill(accent.opacity(0.45))
-                .frame(width: 1, height: 22)
+                .frame(width: 1, height: 20)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("DAY STREAK")
@@ -312,7 +329,7 @@ private struct FlameStreakBox: View {
             FlameTokenPill(count: entry.tokensReady, tint: entry.isFun ? MADWidgetStyle.green : .cyan)
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(entry.atAllTimeBest ? Self.gold.opacity(0.10) : Color.black.opacity(0.18))
@@ -416,41 +433,63 @@ private struct MediumFlameView: View {
     var body: some View {
         HStack(spacing: 10) {
             FlameArt(entry: entry, size: entry.isFun ? 146 : 122)
-                .frame(width: 140, height: 150)
+                .frame(width: 132, height: 146)
 
-            VStack(alignment: .leading, spacing: 7) {
-                FlameStreakBox(entry: entry, statusColor: flameStatusColor(entry))
-
-                // Rows separated by hairlines rather than one rule above the
-                // block, so the stack matches the dashboard's stat column.
-                VStack(spacing: 0) {
-                    FlameStat(
-                        icon: "figure.run",
-                        value: Text(String(format: "%.2f", entry.miles)),
-                        unit: "mi",
-                        label: "Mileage",
-                        tint: MADWidgetStyle.red
-                    )
-
-                    FlameStatDivider()
-
-                    if entry.isGoalCompleted {
-                        FlameStat(icon: "checkmark.seal.fill", value: Text("Done"), unit: "", label: "Streak safe", tint: MADWidgetStyle.green)
-                    } else {
-                        FlameStat(
-                            icon: "clock.fill",
-                            value: entry.dayEnd.map { MADWidgetCountdown.text(to: $0) } ?? Text("--"),
-                            unit: "left",
-                            label: "Left today",
-                            tint: flameStatusColor(entry)
-                        )
-                    }
-                }
+            // Steps is the row that gives way when the canvas is short: a
+            // medium widget is ~138pt tall on a Pro Max but only ~123pt on a
+            // 393pt phone, which is one row short of the dashboard's three.
+            // ViewThatFits drops it there rather than letting the column clip.
+            ViewThatFits(in: .vertical) {
+                column(showsSteps: true)
+                column(showsSteps: false)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxHeight: .infinity)
         .widgetURL(flameDeepLink(entry))
+    }
+
+    private func column(showsSteps: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            FlameStreakBox(entry: entry, statusColor: flameStatusColor(entry))
+
+            // Rows separated by hairlines rather than one rule above the
+            // block, so the stack matches the dashboard's stat column.
+            VStack(spacing: 0) {
+                FlameStat(
+                    icon: "figure.run",
+                    value: Text(String(format: "%.2f", entry.miles)),
+                    unit: "mi",
+                    label: "Mileage",
+                    tint: MADWidgetStyle.red
+                )
+
+                if showsSteps {
+                    FlameStatDivider()
+                    FlameStat(
+                        icon: "shoeprints.fill",
+                        value: Text(entry.steps.formatted()),
+                        unit: "steps",
+                        label: "Steps",
+                        tint: flameStepTint(entry.steps)
+                    )
+                }
+
+                FlameStatDivider()
+
+                if entry.isGoalCompleted {
+                    FlameStat(icon: "checkmark.seal.fill", value: Text("Done"), unit: "", label: "Streak safe", tint: MADWidgetStyle.green)
+                } else {
+                    FlameStat(
+                        icon: "clock.fill",
+                        value: entry.dayEnd.map { MADWidgetCountdown.text(to: $0) } ?? Text("--"),
+                        unit: "left",
+                        label: "Left today",
+                        tint: flameStatusColor(entry)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -487,16 +526,16 @@ struct StreakFlameWidget: Widget {
 #Preview(as: .systemSmall) {
     StreakFlameWidget()
 } timeline: {
-    StreakFlameEntry(date: .now, streak: 436, progress: 0.0, miles: 0, goal: 1, isGoalCompleted: false, health: .healthy, vigor: 0.62, dayEnd: .now.addingTimeInterval(5.85 * 3600), tokensReady: 3, isFun: true, longestStreak: 436)
-    StreakFlameEntry(date: .now, streak: 436, progress: 0.4, miles: 0.4, goal: 1, isGoalCompleted: false, health: .critical, vigor: 0.2, dayEnd: .now.addingTimeInterval(1.2 * 3600), tokensReady: 0, isFun: false, longestStreak: 500)
-    StreakFlameEntry(date: .now, streak: 437, progress: 1.0, miles: 1.0, goal: 1, isGoalCompleted: true, health: .blazing, vigor: nil, dayEnd: nil, tokensReady: 2, isFun: true, longestStreak: 437)
+    StreakFlameEntry(date: .now, streak: 436, progress: 0.0, miles: 0, goal: 1, isGoalCompleted: false, health: .healthy, vigor: 0.62, dayEnd: .now.addingTimeInterval(5.85 * 3600), tokensReady: 3, isFun: true, longestStreak: 436, steps: 4210)
+    StreakFlameEntry(date: .now, streak: 436, progress: 0.4, miles: 0.4, goal: 1, isGoalCompleted: false, health: .critical, vigor: 0.2, dayEnd: .now.addingTimeInterval(1.2 * 3600), tokensReady: 0, isFun: false, longestStreak: 500, steps: 8930)
+    StreakFlameEntry(date: .now, streak: 437, progress: 1.0, miles: 1.0, goal: 1, isGoalCompleted: true, health: .blazing, vigor: nil, dayEnd: nil, tokensReady: 2, isFun: true, longestStreak: 437, steps: 12480)
 }
 
 #Preview(as: .systemMedium) {
     StreakFlameWidget()
 } timeline: {
     // At the all-time best (gold crown) …
-    StreakFlameEntry(date: .now, streak: 448, progress: 0.25, miles: 0.25, goal: 1, isGoalCompleted: false, health: .dimming, vigor: 0.45, dayEnd: .now.addingTimeInterval(5.2 * 3600), tokensReady: 3, isFun: true, longestStreak: 448)
+    StreakFlameEntry(date: .now, streak: 448, progress: 0.25, miles: 0.25, goal: 1, isGoalCompleted: false, health: .dimming, vigor: 0.45, dayEnd: .now.addingTimeInterval(5.2 * 3600), tokensReady: 3, isFun: true, longestStreak: 448, steps: 7420)
     // … and chasing one, at risk (status line instead of the crown).
-    StreakFlameEntry(date: .now, streak: 436, progress: 0.25, miles: 0.25, goal: 1, isGoalCompleted: false, health: .critical, vigor: 0.2, dayEnd: .now.addingTimeInterval(1.5 * 3600), tokensReady: 3, isFun: false, longestStreak: 500)
+    StreakFlameEntry(date: .now, streak: 436, progress: 0.25, miles: 0.25, goal: 1, isGoalCompleted: false, health: .critical, vigor: 0.2, dayEnd: .now.addingTimeInterval(1.5 * 3600), tokensReady: 3, isFun: false, longestStreak: 500, steps: 11305)
 }

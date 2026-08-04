@@ -133,6 +133,55 @@ struct WidgetDataStore {
         return defaults.integer(forKey: longestStreakKey)
     }
 
+    // MARK: - Steps (flame widget stat row)
+
+    private static let stepsKey = "today_steps"
+    private static let stepsDayKey = "today_steps_day"
+
+    /// Re-render the flame widget once per this many steps.
+    ///
+    /// The STORED value is always exact — this only rations how often the
+    /// widget rebuilds. Steps climb all day, and iOS caps widget reloads per
+    /// day and drops every reload for a kind that goes over (the app's own
+    /// included, which freezes the widget while the app stays right). Reloading
+    /// on each new step count would spend the whole budget on this one row.
+    private static let stepsReloadBucket = 1000
+
+    /// Today's step count for the flame widget's stat row.
+    ///
+    /// Monotonic within the day: `HealthKitManager.todaysSteps` is set to 0
+    /// when its query FAILS (a locked device — protected data), and a real step
+    /// count never goes down, so a zero after a real reading is always a bad
+    /// read. Taking it would blank the widget's row at random.
+    static func save(todaySteps: Int) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        let stamp = dayStamp()
+        let isNewDay = defaults.string(forKey: stepsDayKey) != stamp
+        let previous = isNewDay ? 0 : defaults.integer(forKey: stepsKey)
+        let steps = isNewDay ? max(0, todaySteps) : max(previous, todaySteps)
+
+        // A new day always writes (yesterday's count has to clear) — otherwise
+        // only a real change is worth touching disk.
+        guard isNewDay || steps != previous else { return }
+        defaults.set(steps, forKey: stepsKey)
+        defaults.set(stamp, forKey: stepsDayKey)
+
+        // In-between values ride along on the next miles/streak write or the
+        // foreground full reload, so the row is never more than a bucket stale.
+        let crossedBucket = steps / stepsReloadBucket != previous / stepsReloadBucket
+        guard isNewDay || crossedBucket else { return }
+        DispatchQueue.main.async {
+            WidgetCenter.shared.reloadTimelines(ofKind: "StreakFlameWidget")
+        }
+    }
+
+    /// Zero on a stale day, like `load()` does for miles.
+    static func loadTodaySteps() -> Int {
+        guard let defaults = UserDefaults(suiteName: suiteName),
+              defaults.string(forKey: stepsDayKey) == dayStamp() else { return 0 }
+        return defaults.integer(forKey: stepsKey)
+    }
+
     // MARK: - Recovery
 
     private static let lastForcedReloadKey = "last_forced_widget_reload"

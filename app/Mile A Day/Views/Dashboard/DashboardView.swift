@@ -983,6 +983,7 @@ struct DashboardView: View {
     private func syncWidgetData() {
         let state = currentState
         WidgetDataStore.save(todayMiles: state.distance, goal: state.goal)
+        WidgetDataStore.save(todaySteps: healthManager.todaysSteps)
         // Before the streak save — that one carries the reload for both.
         WidgetDataStore.save(longestStreak: userManager.currentUser.longestStreak ?? 0)
         WidgetDataStore.save(streak: userManager.currentUser.streak)

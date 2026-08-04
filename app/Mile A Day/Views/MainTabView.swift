@@ -526,6 +526,7 @@ struct MainTabView: View {
 
     private func syncWidgetData() {
         WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles)
+        WidgetDataStore.save(todaySteps: healthManager.todaysSteps)
         // Before the streak save — that one carries the reload for both.
         WidgetDataStore.save(longestStreak: userManager.currentUser.longestStreak ?? 0)
         WidgetDataStore.save(streak: userManager.currentUser.streak)
