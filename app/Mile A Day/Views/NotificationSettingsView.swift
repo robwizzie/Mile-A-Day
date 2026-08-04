@@ -200,8 +200,8 @@ struct NotificationSettingsView: View {
                         settingsToggle("New posts from friends", isOn: $prefs.friendPostsEnabled,
                             description: "Get notified when a friend shares a photo")
                         settingsDivider
-                        settingsToggle("Tagged posts on my profile", isOn: $prefs.taggedPostsOnProfile,
-                            description: "Add collabs friends tag you in to your profile grid — turn off and they stay in your Tagged tab only")
+                        settingsToggle("Tagged posts on my grid", isOn: $prefs.taggedPostsOnProfile,
+                            description: "Add collabs friends tag you in to your Posts grid — turn off and they stay in your Tagged tab only")
                         settingsDivider
                         settingsToggle("Weekly recap", isOn: $prefs.weeklyRecapEnabled,
                             description: "A Sunday summary of your week's miles, ready to share")

@@ -23,9 +23,10 @@ struct PostDetailView: View {
     /// True for surfaces showing OTHER people's posts (the Tagged tab):
     /// author/coauthor names and caption @mentions open profiles.
     var showsAuthorProfiles: Bool = false
-    /// True only when `posts` IS the viewer's own profile GRID. Hiding a collab
-    /// from your grid then has to drop it from this list too, or the user taps
-    /// "Hide from my profile" and watches the post sit exactly where it was.
+    /// True only when `posts` IS the viewer's own profile GRID. Removing a
+    /// collab from your grid then has to drop it from this list too, or the
+    /// user taps "Remove from my grid" and watches the post sit exactly where
+    /// it was.
     /// Every other surface (Tagged tab, feed, deep link) keeps showing it —
     /// that's the entire point of the setting.
     var dropsCollabsHiddenFromProfile: Bool = false

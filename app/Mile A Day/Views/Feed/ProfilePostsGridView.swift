@@ -48,7 +48,7 @@ struct ProfilePostsGridView: View {
             }
         }
         .task { if !loaded { await load() } }
-        // The "Tagged posts on my profile" switch lives in Settings, which is
+        // The "Tagged posts on my grid" switch lives in Settings, which is
         // pushed FROM here — so popping back lands on a grid that's still
         // alive and still holding the tags the user just turned off. Without
         // this the setting reads as broken at the exact moment it's used.
@@ -464,8 +464,8 @@ struct ProfilePostsGridView: View {
             Button {
                 Task { await setCollabOnProfile(post, onProfile: !onProfile) }
             } label: {
-                Label(onProfile ? "Hide from my profile" : "Show on my profile",
-                      systemImage: onProfile ? "eye.slash" : "square.grid.2x2")
+                Label(onProfile ? "Remove from my grid" : "Add to my grid",
+                      systemImage: onProfile ? "minus.square" : "square.grid.3x3")
             }
         }
     }
@@ -474,7 +474,8 @@ struct ProfilePostsGridView: View {
         await MainActor.run {
             MADHaptics.tap()
             // Both grids can be showing the same collab, so keep them in step
-            // or the Tagged tab offers "Hide" on something already hidden.
+            // or the Tagged tab offers "Remove from my grid" on something
+            // that already left it.
             for idx in taggedPosts.indices where taggedPosts[idx].post_id == post.post_id {
                 taggedPosts[idx].coauthor_on_profile = onProfile
             }

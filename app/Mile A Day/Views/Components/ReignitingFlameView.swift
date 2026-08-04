@@ -1,13 +1,42 @@
 import SwiftUI
 
+/// What the flame is coming back FROM when the day's mile lands.
+///
+/// `.coal` is the true reignite: the streak was actually out, so a cold ember
+/// lingers on screen and visibly catches. `.burning` is the ordinary day — the
+/// flame was alive the whole time, burnt down to whatever the clock left it,
+/// and it simply swells into a full blaze. Both celebrations used to hardcode
+/// the coal, which told a 400-day streak it had died and been revived.
+enum FlameRevivalOrigin: Equatable {
+    case coal
+    /// The time-left fraction the flame was burning at (1 = full day ahead).
+    case burning(vigor: CGFloat)
+
+    var isCoal: Bool { self == .coal }
+
+    /// The scale the animation starts at — for a living flame, the size it was
+    /// already drawn at behind the celebration, so the swell reads as the SAME
+    /// flame growing rather than a new one being born.
+    var startScale: CGFloat {
+        switch self {
+        case .coal:
+            return 0.10
+        case .burning(let vigor):
+            return StreakFlameClock.flameScale(vigor: Double(min(max(vigor, 0), 1)))
+        }
+    }
+}
+
 struct ReignitingFlameView: View {
     var showsFace: Bool
     var size: CGFloat = 220
     var progress: CGFloat
     var intensity: CGFloat = 1
-    var startsSad: Bool = false
+    var origin: FlameRevivalOrigin = .coal
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var startsSad: Bool { origin.isCoal }
 
     private var clampedProgress: CGFloat {
         min(max(progress, 0), 1)
@@ -41,7 +70,14 @@ struct ReignitingFlameView: View {
         }
         .frame(width: size * 1.34, height: size * 1.24)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(clampedProgress >= 1 ? "Flame reignited" : "Flame reigniting")
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        if startsSad {
+            return clampedProgress >= 1 ? "Flame reignited" : "Flame reigniting"
+        }
+        return clampedProgress >= 1 ? "Flame blazing" : "Flame growing"
     }
 
     @ViewBuilder
@@ -49,10 +85,10 @@ struct ReignitingFlameView: View {
         ZStack {
             // The dying coal lingers, then hands off to the flame that catches
             // over it — a crossfade instead of a hard swap, so the ember visibly
-            // BECOMES fire rather than popping into it. Only the reignite path
-            // has an ember; the plain (Modern) path renders the flame alone.
+            // BECOMES fire rather than popping into it. Only a flame that was
+            // actually OUT has an ember; a living flame just swells.
             if startsSad {
-                SadEmberBuddy(size: size * 0.46, progress: min(1, clampedProgress / 0.24))
+                SadEmberBuddy(size: size * 0.46, showsFace: showsFace, progress: min(1, clampedProgress / 0.24))
                     .scaleEffect(0.86 + clampedProgress * 0.42, anchor: .bottom)
                     .offset(y: size * 0.24)
                     .opacity(emberOpacity)
@@ -64,21 +100,64 @@ struct ReignitingFlameView: View {
     }
 
     private func flameFigure(phase: CGFloat, blink: Bool) -> some View {
-        FlameBuddyFigure(
-            health: revivalHealth,
-            flickerPhase: phase,
-            blink: blink,
-            size: size,
-            showsFace: showsFace && (startsSad || clampedProgress > 0.58)
-        )
+        ZStack {
+            // The flame it WAS: the dashboard hero's own continuous palette,
+            // warming from the day's leftover vigor toward full…
+            if case .burning(let vigor) = origin {
+                let warmed = warmedVigor(from: vigor)
+                figure(health: .healthy, vigor: warmed, phase: phase, blink: blink)
+                    // FlameBuddyFigure couples `vigor` to colour AND size, but
+                    // the burn-down size is already carried by `flameScale`
+                    // below. Neutralise the figure's own shrink (against
+                    // `.blazing`'s 1.05 body scale) so the crossfading pair sit
+                    // at exactly the same size and vigor drives colour alone.
+                    .scaleEffect(1.05 / StreakFlameClock.flameScale(vigor: Double(warmed)), anchor: .bottom)
+                    .opacity(1 - blazeMix)
+            }
+
+            // …crossfading into the blaze it BECOMES. A crossfade rather than a
+            // health swap, so the colours never pop mid-animation.
+            figure(health: revivalHealth, vigor: nil, phase: phase, blink: blink)
+                .opacity(startsSad ? 1 : blazeMix)
+        }
         .scaleEffect(
             x: flameScale * (1 + sin(phase * 0.42) * 0.014 * effectiveFlameProgress),
             y: flameScale * (1 + cos(phase * 0.34) * 0.010 * effectiveFlameProgress),
             anchor: .bottom
         )
         .opacity(flameOpacity)
-        .offset(y: (1 - easedFlameProgress) * size * 0.22 + sin(phase * 0.38) * 1.2 * effectiveFlameProgress)
+        .offset(y: flameRise + sin(phase * 0.38) * 1.2 * effectiveFlameProgress)
         .shadow(color: Color.orange.opacity(Double(effectiveFlameProgress) * Double(0.28 * intensity)), radius: size * 0.10 * intensity, x: 0, y: size * 0.04)
+    }
+
+    private func figure(health: FlameHealth, vigor: CGFloat?, phase: CGFloat, blink: Bool) -> some View {
+        FlameBuddyFigure(
+            health: health,
+            flickerPhase: phase,
+            blink: blink,
+            size: size,
+            // A living flame already wore its face on the dashboard, so it
+            // keeps it the whole way through — same as the reignite path.
+            showsFace: showsFace,
+            vigor: vigor
+        )
+    }
+
+    /// How far up the flame climbs into place. A reignited flame rises out of
+    /// its ember; a living one is already standing where it stands.
+    private var flameRise: CGFloat {
+        startsSad ? (1 - easedFlameProgress) * size * 0.22 : 0
+    }
+
+    /// The living flame's colour warming from the day's leftover vigor to full.
+    private func warmedVigor(from vigor: CGFloat) -> CGFloat {
+        let start = min(max(vigor, 0), 1)
+        return start + (1 - start) * easedFlameProgress
+    }
+
+    /// Crossfade weight from the flame-as-it-was into the full blaze.
+    private var blazeMix: Double {
+        Double(smoothstep(0.45, 1.0, clampedProgress))
     }
 
     /// Coal opacity: full while it lingers, gone once the flame has caught over
@@ -146,12 +225,19 @@ struct ReignitingFlameView: View {
         effectiveFlameProgress * effectiveFlameProgress * (3 - 2 * effectiveFlameProgress)
     }
 
+    /// Grows from wherever the flame already was to a full blaze. A reignite
+    /// starts from a spark; a living flame starts at the size the clock had
+    /// burnt it down to, so the celebration continues the dashboard rather
+    /// than restarting it.
     private var flameScale: CGFloat {
-        0.10 + easedFlameProgress * 0.92
+        let start = origin.startScale
+        return start + easedFlameProgress * (1.02 - start)
     }
 
+    /// Only a flame catching from a coal fades in — a living one is already lit.
     private var flameOpacity: Double {
-        Double(min(1, 0.10 + easedFlameProgress * 1.10))
+        guard startsSad else { return 1 }
+        return Double(min(1, 0.10 + easedFlameProgress * 1.10))
     }
 
     private var revivalHealth: FlameHealth {
@@ -215,6 +301,10 @@ struct ReignitingFlameView: View {
 
 private struct SadEmberBuddy: View {
     let size: CGFloat
+    /// Mirrors the host's `showsFace`. The Modern celebration asks for a
+    /// faceless flame and the ember used to draw its frown anyway — the one
+    /// place a face ever appeared on the Modern dashboard.
+    var showsFace: Bool = true
     let progress: CGFloat
 
     var body: some View {
@@ -234,22 +324,24 @@ private struct SadEmberBuddy: View {
                 )
                 .shadow(color: Color.orange.opacity(Double(progress) * 0.16), radius: size * 0.10, x: 0, y: 4)
 
-            HStack(spacing: size * 0.20) {
-                SadEmberFrownShape()
-                    .stroke(Color.white.opacity(0.55), style: StrokeStyle(lineWidth: max(1.5, size * 0.018), lineCap: .round))
-                    .frame(width: size * 0.13, height: size * 0.07)
-                    .rotationEffect(.degrees(8))
-                SadEmberFrownShape()
-                    .stroke(Color.white.opacity(0.55), style: StrokeStyle(lineWidth: max(1.5, size * 0.018), lineCap: .round))
-                    .frame(width: size * 0.13, height: size * 0.07)
-                    .rotationEffect(.degrees(-8))
-            }
-            .offset(y: -size * 0.06)
+            if showsFace {
+                HStack(spacing: size * 0.20) {
+                    SadEmberFrownShape()
+                        .stroke(Color.white.opacity(0.55), style: StrokeStyle(lineWidth: max(1.5, size * 0.018), lineCap: .round))
+                        .frame(width: size * 0.13, height: size * 0.07)
+                        .rotationEffect(.degrees(8))
+                    SadEmberFrownShape()
+                        .stroke(Color.white.opacity(0.55), style: StrokeStyle(lineWidth: max(1.5, size * 0.018), lineCap: .round))
+                        .frame(width: size * 0.13, height: size * 0.07)
+                        .rotationEffect(.degrees(-8))
+                }
+                .offset(y: -size * 0.06)
 
-            SadEmberFrownShape()
-                .stroke(Color.white.opacity(0.62), style: StrokeStyle(lineWidth: max(2, size * 0.022), lineCap: .round))
-                .frame(width: size * 0.26, height: size * 0.10)
-                .offset(y: size * 0.13)
+                SadEmberFrownShape()
+                    .stroke(Color.white.opacity(0.62), style: StrokeStyle(lineWidth: max(2, size * 0.022), lineCap: .round))
+                    .frame(width: size * 0.26, height: size * 0.10)
+                    .offset(y: size * 0.13)
+            }
 
             Circle()
                 .fill(Color.orange.opacity(Double(progress) * 0.50))

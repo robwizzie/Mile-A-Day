@@ -79,13 +79,25 @@ struct FunGoalCompletedCelebrationView: View {
     }
 
     private var reigniteStage: some View {
-        ReignitingFlameView(showsFace: true, size: 210, progress: ignitionProgress, intensity: 1.35, startsSad: true)
+        ReignitingFlameView(showsFace: true, size: 210, progress: ignitionProgress, intensity: 1.35, origin: flameOrigin)
             .frame(width: 330, height: 276)
     }
 
+    /// A coal only when the flame was genuinely OUT before this mile. The
+    /// streak is refreshed today-inclusive before the celebration is built, so
+    /// a streak of 1 means yesterday ended at zero — everyone else had a live
+    /// flame all day and gets it swelled to a blaze instead of killed off and
+    /// revived.
+    private var flameOrigin: FlameRevivalOrigin {
+        guard stats.currentStreak > 1, stats.comebackLine == nil else { return .coal }
+        return .burning(vigor: CGFloat(StreakFlameClock.vigor(at: Date(), dayEnd: nil)))
+    }
+
+    private var wasReignited: Bool { flameOrigin.isCoal }
+
     private var streakSection: some View {
         VStack(spacing: 10) {
-            Text("REIGNITED")
+            Text(wasReignited ? "REIGNITED" : "BLAZING")
                 .font(.system(size: 14, weight: .black, design: .rounded))
                 .tracking(3)
                 .foregroundColor(.orange)
@@ -371,7 +383,8 @@ struct FunGoalCompletedCelebrationView: View {
     private var completionSubtitle: String {
         if stats.percentOver > 50 { return "Your flame is absolutely roaring." }
         if stats.percentOver > 20 { return "Big mile. Big flame." }
-        return "You brought your flame back to life."
+        // "Back to life" only when it actually was out.
+        return wasReignited ? "You brought your flame back to life." : "Your flame is safe for another day."
     }
 
     private func startSequence() {
