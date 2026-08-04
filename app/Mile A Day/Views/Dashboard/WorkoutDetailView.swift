@@ -148,6 +148,11 @@ struct WorkoutDetailView: View {
                         // The numbers — one home, no repeats across cards.
                         statsSection
 
+                        // The race, if this workout was one. Every completed
+                        // race appears here, won or lost — this is the only
+                        // surface that shows a loss, which is the point.
+                        ghostRaceSection
+
                         // Mile splits as a pace bar chart.
                         mileSplitsSection
 
@@ -477,6 +482,61 @@ struct WorkoutDetailView: View {
     /// The run's headline numbers, in ONE place — distance lives in the hero,
     /// everything else lives here (no more repeating pace/calories in a second
     /// "Performance" card).
+    /// The ghost race this workout was, read straight off the HealthKit
+    /// metadata the tracker stamped at finish — so it needs no backend, works
+    /// offline, and is available the instant the workout saves.
+    ///
+    /// Signed: positive means the ghost was beaten, negative means it wasn't.
+    /// A loss shows here and NOWHERE else — not the feed, not a celebration,
+    /// not a push. Recording it is what gives the feature a memory; broadcasting
+    /// it is what nobody asked for.
+    @ViewBuilder
+    private var ghostRaceSection: some View {
+        if let race = ghostRaceResult {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                WorkoutDetailSectionHeader(title: "Ghost Race", icon: "flag.checkered")
+                VStack(spacing: 0) {
+                    DetailRow(
+                        icon: race.won ? "trophy.fill" : "flag.checkered",
+                        iconColor: race.won ? .green : .orange,
+                        title: race.won ? "Result" : "Result",
+                        value: race.won
+                            ? "Beat it by \(Int(race.margin.rounded()))s"
+                            : "\(Int(abs(race.margin).rounded()))s off"
+                    )
+                    DetailRow(
+                        icon: "stopwatch",
+                        title: "Ghost's mile",
+                        value: BestEffortStore.formatSeconds(race.target)
+                    )
+                    DetailRow(
+                        icon: "figure.run",
+                        title: "Your mile",
+                        value: BestEffortStore.formatSeconds(
+                            max(0, race.target - race.margin))
+                    )
+                }
+                .padding(MADTheme.Spacing.md)
+                .background(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .fill(Color(.secondarySystemBackground))
+                )
+            }
+        }
+    }
+
+    /// Signed race result from the workout's own metadata, when it raced.
+    private var ghostRaceResult: (margin: Double, target: Double, won: Bool)? {
+        guard
+            let margin = workout.metadata?[
+                WorkoutLocationManager.ghostMarginMetadataKey] as? Double,
+            let target = workout.metadata?[
+                WorkoutLocationManager.ghostTargetMetadataKey] as? Double,
+            margin != 0, target > 0
+        else { return nil }
+        return (margin, target, margin > 0)
+    }
+
     private var statsSection: some View {
         WorkoutStatsCard(
             duration: workout.formattedDuration,

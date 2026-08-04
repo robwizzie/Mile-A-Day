@@ -43,6 +43,8 @@ struct WorkoutTrackingView: View {
     @State private var selectedLocationType: HKWorkoutSessionLocationType = .outdoor
     @State private var countdownNumber = 3
     @State private var showCountdown = false
+    /// Retained so Cancel can invalidate it — see `startCountdown`.
+    @State private var countdownTimer: Timer?
     @State private var isTracking = false
     @State private var elapsedTime: TimeInterval = 0
     @State private var timer: Timer?
@@ -60,6 +62,9 @@ struct WorkoutTrackingView: View {
     @State private var recapDuration: TimeInterval = 0
     @State private var recapStartingDistance: Double = 0
     @State private var recapGoalDistance: Double = 0
+    /// Quarter splits vs the ghost, snapshotted before tracking tears down.
+    @State private var recapRaceSplits: [BestEffortStore.RaceSplit] = []
+    @State private var recapGhostName: String = "your ghost"
     @State private var showStopConfirmation = false // Confirmation before ending workout
     @State private var isStopping = false // Prevents double-stop and shows "Ending..." UI
     /// Whether the Live Activity goal-completed alert was already sent (or the
@@ -114,6 +119,8 @@ struct WorkoutTrackingView: View {
     // mid-walk. The consent interstitial runs ONCE (first tracked workout on
     // this build), between picking a location and the countdown.
     @ObservedObject private var livePresence = LivePresenceService.shared
+    /// Published coach lines, echoed on screen under the delta chip.
+    @ObservedObject private var coach = GhostCoach.shared
     @State private var showFriendsOutSheet = false
     @State private var hypeToast: String?
     @AppStorage("hasAnsweredLivePresenceConsent") private var hasAnsweredLivePresenceConsent = false
@@ -134,10 +141,15 @@ struct WorkoutTrackingView: View {
     /// How to name the ghost in copy ("your best mile", "your target").
     @State private var raceGhostName = "your best mile"
     @State private var raceFinalDelta: TimeInterval?
-    /// The win, from the moment it's decided until the HealthKit metadata
-    /// stamp carries it onto the saved workout (and from there to the server
-    /// and the feed).
-    @State private var pendingGhostWin: GhostRaceWin?
+    /// One completed race, held from the moment it's decided until the
+    /// HealthKit metadata stamp carries it onto the saved workout (and from
+    /// there to the server). Signed: positive won, negative lost.
+    struct RaceStamp {
+        let marginSeconds: Double
+        let ghostSeconds: Double
+        let friendUserId: String?
+    }
+    @State private var pendingRaceStamp: RaceStamp?
     /// Chosen target, per activity, remembered between sessions.
     @AppStorage("ghostTargetV1.running") private var runTargetStorage = ""
     @AppStorage("ghostTargetV1.walking") private var walkTargetStorage = ""
@@ -222,10 +234,12 @@ struct WorkoutTrackingView: View {
                 myMileSeconds = a.t + (b.t - a.t) * ((1.0 - a.d) / span)
             }
         }
+        let finalDelta = ghost.seconds - myMileSeconds
         withAnimation(.spring(response: 0.4)) {
-            raceFinalDelta = ghost.seconds - myMileSeconds
+            raceFinalDelta = finalDelta
         }
         MADHaptics.action()
+        GhostCoach.shared.finish(won: finalDelta > 0, marginSeconds: finalDelta)
     }
 
     // Workout distance only (starts at 0). `liveDistance` is THE number:
@@ -551,28 +565,42 @@ struct WorkoutTrackingView: View {
             }
         }()
 
-        // Raced and won: `raceFinalDelta` is the frozen verdict at the 1.0-mile
-        // crossing — the same number the chip showed, so the popup can't
-        // contradict what the user watched. Every figure below is derived from
-        // that one frozen delta for the same reason.
-        if let ghost = raceGhost, let delta = raceFinalDelta, delta > 0 {
-            let win = GhostRaceWin(
+        // Every COMPLETED race is recorded, win or loss. `raceFinalDelta` is the
+        // frozen verdict at the 1.0-mile crossing — the same number the chip
+        // showed — and its sign is the result: positive won, negative lost.
+        //
+        // Losses used to vanish entirely, which meant the feature could only
+        // ever show you your victories: no history, no "two seconds away", no
+        // reason to come back. The stamp is separate from the celebration for
+        // exactly that reason — one records, the other congratulates.
+        if let ghost = raceGhost, let delta = raceFinalDelta {
+            pendingRaceStamp = RaceStamp(
                 marginSeconds: delta,
-                mileSeconds: max(0, ghost.seconds - delta),
                 ghostSeconds: ghost.seconds,
-                ghostName: raceGhostName,
-                activityKey: raceActivityKey,
-                newRecordSeconds: recordSeconds,
                 // Whose ghost it was, when it was a friend's. Read from the
                 // armed target rather than the resolved one — `ResolvedGhost`
                 // deliberately keeps only a display name.
-                friendUserId: raceTarget.friendUserId,
-                workoutId: nil
+                friendUserId: raceTarget.friendUserId
             )
-            // Held for the HealthKit metadata stamp further down this same
-            // stop, which is what carries the win to the server.
-            pendingGhostWin = win
-            CelebrationManager.shared.addCelebration(.ghostBeaten(win: win))
+        }
+
+        // Won: the popup. A LOSS stays silent here on purpose — the frozen chip
+        // already told that story mid-workout and the ghost lives another day.
+        if let ghost = raceGhost, let delta = raceFinalDelta, delta > 0 {
+            CelebrationManager.shared.addCelebration(
+                .ghostBeaten(
+                    win: GhostRaceWin(
+                        marginSeconds: delta,
+                        mileSeconds: max(0, ghost.seconds - delta),
+                        ghostSeconds: ghost.seconds,
+                        ghostName: raceGhostName,
+                        activityKey: raceActivityKey,
+                        newRecordSeconds: recordSeconds,
+                        friendUserId: raceTarget.friendUserId,
+                        workoutId: nil
+                    )
+                )
+            )
             return
         }
 
@@ -607,13 +635,47 @@ struct WorkoutTrackingView: View {
     // MARK: - Countdown
 
     private var countdownContent: some View {
-        VStack {
+        VStack(spacing: 0) {
+            Spacer()
+
             Text("\(countdownNumber)")
                 .font(.system(size: 120, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
                 .scaleEffect(countdownNumber > 0 ? 1.0 : 0.5)
                 .opacity(countdownNumber > 0 ? 1.0 : 0.0)
                 .animation(.spring(response: 0.5, dampingFraction: 0.6), value: countdownNumber)
+
+            Spacer()
+
+            // The last exit before a workout exists. Tapping Run when you meant
+            // Walk, or opening this by accident, otherwise costs a junk workout
+            // that has to be deleted afterwards — and a deleted workout still
+            // churns the day's feed roles and streak recompute. Nothing has
+            // been created yet at this point, so cancelling here is clean.
+            //
+            // Deliberately large and low: it's on screen for three seconds and
+            // the user is often already moving.
+            Button {
+                cancelCountdown()
+            } label: {
+                Text("Cancel")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.15))
+                            .overlay(
+                                Capsule().strokeBorder(
+                                    Color.white.opacity(0.4), lineWidth: 1.5)
+                            )
+                    )
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 48)
+            .padding(.bottom, 64)
         }
         .onAppear {
             startCountdown()
@@ -1258,9 +1320,24 @@ struct WorkoutTrackingView: View {
                 raceDeltaChip(delta: delta, frozen: raceFinalDelta != nil)
                     .transition(.opacity.combined(with: .scale))
             }
+
+            // Every coach line as text too. This is what makes the feature work
+            // with the volume down, with the coach switched off, or before the
+            // `audio` background mode lets it speak through a locked screen.
+            if raceGhost != nil, let line = coach.lastLine {
+                Text(line)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.75))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .padding(.horizontal, 24)
+                    .transition(.opacity)
+                    .id(line)
+            }
         }
         .animation(.spring(response: 0.3), value: locationManager.isAutoPaused)
         .animation(.spring(response: 0.3), value: raceFinalDelta != nil)
+        .animation(.easeInOut(duration: 0.25), value: coach.lastLine)
     }
 
     /// Ghost race readout: live ahead/behind while the mile is in progress,
@@ -1600,6 +1677,8 @@ struct WorkoutTrackingView: View {
                     startingDistance: recapStartingDistance,
                     goalDistance: recapGoalDistance,
                     streak: userManager.currentUser.streak,
+                    raceSplits: recapRaceSplits,
+                    raceGhostName: recapGhostName,
                     onDismiss: { dismiss() }
                 )
             } else {
@@ -1950,16 +2029,24 @@ struct WorkoutTrackingView: View {
         }
     }
 
+    /// The 3-2-1. Retained in `countdownTimer` so Cancel can actually stop it:
+    /// as a bare `scheduledTimer` it outlived the view, so tearing the screen
+    /// down still fired `startWorkout()` three seconds later.
     private func startCountdown() {
+        // onAppear can run again (re-entering after a cancel) — never leave a
+        // second timer racing the first.
+        countdownTimer?.invalidate()
+
         // Haptic feedback for countdown
         let impact = UIImpactFeedbackGenerator(style: .heavy)
 
-        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
+        countdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
             if countdownNumber > 1 {
                 countdownNumber -= 1
                 impact.impactOccurred()
             } else {
                 timer.invalidate()
+                countdownTimer = nil
                 // Start workout
                 withAnimation {
                     showCountdown = false
@@ -1967,6 +2054,21 @@ struct WorkoutTrackingView: View {
                 }
                 startWorkout()
             }
+        }
+    }
+
+    /// Back out before anything is created. Returns to the first step rather
+    /// than dismissing, because the common reason to cancel is picking Run when
+    /// you meant Walk — and from there Back still leaves.
+    private func cancelCountdown() {
+        countdownTimer?.invalidate()
+        countdownTimer = nil
+        MADHaptics.tap()
+        wizardGoingBack = true
+        withAnimation(.easeInOut(duration: 0.28)) {
+            showCountdown = false
+            countdownNumber = 3
+            showActivitySelection = true
         }
     }
 
@@ -1986,6 +2088,11 @@ struct WorkoutTrackingView: View {
         if raceArmed, let ghost = resolvedGhost {
             raceGhost = ghost.effort
             raceGhostName = ghost.shortName
+            GhostCoach.shared.start(
+                ghostName: ghost.shortName,
+                isRun: selectedActivityType == .running,
+                ghostSeconds: ghost.effort.seconds
+            )
         } else {
             raceGhost = nil
             raceGhostName = "your best mile"
@@ -2072,6 +2179,21 @@ struct WorkoutTrackingView: View {
             guard !isStopping else { return }
             elapsedTime = Date().timeIntervalSince(startDate)
             updateLiveActivity()
+
+            // Ghost coach rides this tick rather than owning a timer. It reads
+            // the SAME delta the chip renders, so the voice can never say
+            // something the screen contradicts.
+            if let ghost = raceGhost, let delta = raceDeltaSeconds {
+                GhostCoach.shared.update(
+                    GhostCoach.Sample(
+                        distance: locationManager.liveDistance,
+                        raceClock: locationManager.raceClockSeconds,
+                        delta: delta,
+                        ghostSeconds: ghost.seconds,
+                        recentPace: locationManager.recentPaceSecondsPerMile
+                    )
+                )
+            }
             // Foreground heartbeat driver (self-throttled to ~45s). The
             // background driver is the location/pedometer callback path.
             livePresence.tick()
@@ -2117,6 +2239,20 @@ struct WorkoutTrackingView: View {
             workoutId: nil
         )
         celebrateRaceOutcome(raceOutcome)
+
+        // Quarter splits vs the ghost, captured HERE because stopTracking()
+        // below clears the effort curve — the recap renders after teardown, so
+        // by the time it exists the raw material is gone.
+        if let ghost = raceGhost {
+            recapRaceSplits = BestEffortStore.raceSplits(
+                rawCurve: locationManager.effortCurve,
+                distanceScale: curveDistance > 0 ? finalDistance / curveDistance : 1.0,
+                ghost: ghost
+            )
+            recapGhostName = raceGhostName
+        } else {
+            recapRaceSplits = []
+        }
 
         // Freeze the recap stats now, before anything refreshes underneath us
         recapDistance = finalDistance
@@ -2257,12 +2393,15 @@ struct WorkoutTrackingView: View {
         if movingSeconds > 0 {
             metadata[WorkoutLocationManager.movingSecondsMetadataKey] = movingSeconds
         }
-        if let win = pendingGhostWin {
-            metadata[WorkoutLocationManager.ghostMarginMetadataKey] = win.marginSeconds
-            metadata[WorkoutLocationManager.ghostTargetMetadataKey] = win.ghostSeconds
+        if let race = pendingRaceStamp {
+            // Signed — a negative margin is a race that was lost, and it is
+            // stored just as deliberately as a win.
+            metadata[WorkoutLocationManager.ghostMarginMetadataKey] = race.marginSeconds
+            metadata[WorkoutLocationManager.ghostTargetMetadataKey] = race.ghostSeconds
             // Only present when the ghost was a friend's — that's what lets
-            // the server tell them they were caught.
-            if let friendId = win.friendUserId {
+            // the server tell them they were caught (and only when it was a
+            // win; the server re-checks the sign).
+            if let friendId = race.friendUserId {
                 metadata[WorkoutLocationManager.ghostFriendMetadataKey] = friendId
             }
         }
@@ -2321,7 +2460,8 @@ struct WorkoutTrackingView: View {
         raceGhost = nil
         raceGhostName = "your best mile"
         raceFinalDelta = nil
-        pendingGhostWin = nil
+        pendingRaceStamp = nil
+        GhostCoach.shared.stop()
 
         // Show result to user. The mile counts via GPS/pedometer sync whether
         // or not the HealthKit write succeeded, so a failed save is never a lost

@@ -1,4 +1,5 @@
 import { PostgresService } from "./DbService.js";
+import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
 import type {
   Badge,
   UserBadge,
@@ -103,7 +104,7 @@ export async function computeAggregates(
     db.query<{ min_pace: string | null }>(
       `SELECT MIN(s.split_pace)::text AS min_pace
 			FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-			WHERE w.user_id = $1 AND s.split_pace > 0 AND s.split_distance >= 0.95 AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL`,
+			WHERE w.user_id = $1 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95 AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL`,
       [userId],
     ),
     db.query<{ best_day: string | null }>(
@@ -270,9 +271,10 @@ async function computeSocialAggregates(userId: string): Promise<{
           [userId],
         )
         .catch(() => [{ count: "0" }]),
-      // Ghost races won. `ghost_margin_seconds` is stamped only on a WIN, so
-      // presence is the win — no comparison needed. Soft-deleted workouts
-      // don't count, same as everywhere else miles are tallied.
+      // Ghost races WON. `ghost_margin_seconds` is signed — every completed
+      // race is stored, losses included — so this must compare, not just test
+      // for presence. The MAX matters as much as the count: without `> 0` a
+      // user who has only ever lost would report a negative "best margin".
       db
         .query<{
           count: string;
@@ -283,7 +285,7 @@ async function computeSocialAggregates(userId: string): Promise<{
              FROM workouts
             WHERE user_id = $1
               AND deleted_at IS NULL
-              AND ghost_margin_seconds IS NOT NULL`,
+              AND ghost_margin_seconds > 0`,
           [userId],
         )
         .catch(() => [{ count: "0", best: "0" }]),

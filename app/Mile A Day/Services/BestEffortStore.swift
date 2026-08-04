@@ -115,12 +115,74 @@ enum BestEffortStore {
             return nil
         }
 
-        /// A mile between 2 and 40 minutes. The floor is the same one
-        /// `recordFinish` uses to reject broken data; the ceiling keeps a
-        /// fat-fingered target from being unbeatable-by-standing-still.
+        /// A mile between 4:01 and 40:00.
+        ///
+        /// The floor is the mile world record (3:43) rounded up: anything at
+        /// or under it, from a consumer phone, is a car or a GPS glitch rather
+        /// than a person. It has to match the server's
+        /// `MIN_PLAUSIBLE_MILE_SECONDS` exactly — a target outside the band
+        /// would be armed, raced, won, and then dropped on upload, so the win
+        /// would simply never appear. The ceiling keeps a fat-fingered target
+        /// from being unbeatable-by-standing-still.
         static func isPlausible(_ seconds: Double) -> Bool {
-            seconds.isFinite && seconds >= 120 && seconds <= 2400
+            seconds.isFinite && seconds >= minPlausibleSeconds
+                && seconds <= maxPlausibleSeconds
         }
+
+        /// 4:01 — mirrors `backend/src/services/mileTime.ts`.
+        static let minPlausibleSeconds: Double = 241
+        static let maxPlausibleSeconds: Double = 2400
+    }
+
+    /// One quarter of a raced mile: your split beside the ghost's.
+    struct RaceSplit: Identifiable, Equatable {
+        /// 0-based quarter index.
+        let index: Int
+        let yours: TimeInterval
+        let ghost: TimeInterval
+
+        var id: Int { index }
+        var label: String { "Q\(index + 1)" }
+        /// Seconds GAINED on the ghost in this quarter (negative = lost).
+        var delta: TimeInterval { ghost - yours }
+    }
+
+    /// Quarter-by-quarter comparison of a finished mile against its ghost.
+    ///
+    /// This is the story of the race — "3 down at halfway, took it in the last
+    /// quarter" — and it's the one thing the live chip can never show, because
+    /// the chip only knows the running total.
+    ///
+    /// Same inputs and the same scaling as `recordFinish`, so the splits
+    /// describe the exact mile that was recorded rather than a second opinion.
+    /// Returns empty unless the curve is a genuine full mile from a standing
+    /// start — a recovered workout resumes mid-distance and has no history for
+    /// the quarters it never saw.
+    static func raceSplits(
+        rawCurve: [(t: TimeInterval, d: Double)],
+        distanceScale: Double,
+        ghost: BestMileEffort
+    ) -> [RaceSplit] {
+        let scale = distanceScale.isFinite && distanceScale > 0 ? distanceScale : 1.0
+        let curve = rawCurve.map { CurvePoint(t: $0.t, d: $0.d * scale) }
+        guard let first = curve.first, let last = curve.last,
+            first.d <= 0.05, last.d >= 1.0
+        else { return [] }
+
+        let mine = BestMileEffort(dateISO: "", seconds: last.t, curve: curve)
+        var splits: [RaceSplit] = []
+        for quarter in 0..<4 {
+            let from = Double(quarter) * 0.25
+            let to = from + 0.25
+            splits.append(
+                RaceSplit(
+                    index: quarter,
+                    yours: timeAtDistance(to, in: mine) - timeAtDistance(from, in: mine),
+                    ghost: timeAtDistance(to, in: ghost) - timeAtDistance(from, in: ghost)
+                )
+            )
+        }
+        return splits
     }
 
     /// A resolved target: the effort to race plus how to talk about it.
@@ -195,7 +257,8 @@ enum BestEffortStore {
     /// Walks never inherit a RUN PR — a run PR is not a walk target, and
     /// offering it would be an unbeatable ghost dressed up as a fair one.
     private static func seededPace(activityKey: String, pace: Double?) -> Double? {
-        guard activityKey == "running", let pace, pace.isFinite, pace >= 180, pace <= 1800
+        guard activityKey == "running", let pace, pace.isFinite,
+            pace >= GhostTarget.minPlausibleSeconds, pace <= 1800
         else { return nil }
         return pace
     }
@@ -222,7 +285,7 @@ enum BestEffortStore {
         let stored = UserDefaults.standard.double(forKey: customKey(activityKey))
         if GhostTarget.isPlausible(stored) { return stored }
         if let recorded = best(for: activityKey)?.seconds {
-            return max(120, (recorded - 15).rounded())
+            return max(GhostTarget.minPlausibleSeconds, (recorded - 15).rounded())
         }
         return activityKey == "running" ? 540 : 720
     }
@@ -294,7 +357,11 @@ enum BestEffortStore {
             }
         }
         // Sub-2-minute "miles" are broken data, not efforts.
-        guard mileSeconds.isFinite, mileSeconds >= 120 else { return .notAMile }
+        // Same floor as everything else that reports a mile time: a sub-4:01
+        // "mile" is a drive, and letting one in here would make it the user's
+        // recorded best — the ghost they can then never beat.
+        guard mileSeconds.isFinite, mileSeconds >= GhostTarget.minPlausibleSeconds
+        else { return .notAMile }
 
         // Keep only the first mile, downsampled to ≤ 60 points, ending
         // exactly at 1.0 so timeAtDistance is exact at the finish line.

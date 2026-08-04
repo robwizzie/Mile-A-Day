@@ -173,8 +173,11 @@ enum RunPostService {
         return workout.duration
     }
 
-    /// The ghost win stamped on this workout at finish, if it beat its ghost.
-    /// Only winning workouts carry the metadata, so presence IS the win.
+    /// The ghost WIN stamped on this workout, if it beat its ghost.
+    ///
+    /// The margin is signed and every completed race is stamped, so presence is
+    /// no longer the win — the `> 0` below is what keeps losses out of the
+    /// feed. That's deliberate: nobody wants their loss posted.
     private static func ghostWin(of workout: HKWorkout) -> (margin: Double, target: Double)? {
         guard
             let margin = workout.metadata?[WorkoutLocationManager.ghostMarginMetadataKey] as? Double,

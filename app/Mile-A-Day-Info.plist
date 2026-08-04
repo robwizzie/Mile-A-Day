@@ -40,6 +40,10 @@
 		<string>fetch</string>
 		<string>processing</string>
 		<string>location</string>
+		<!-- Spoken ghost-race coaching. Without this the audio session is
+		     silenced the moment the screen locks, which is most of a real
+		     run — the coach would only ever work while you're watching it. -->
+		<string>audio</string>
 	</array>
 </dict>
 </plist>

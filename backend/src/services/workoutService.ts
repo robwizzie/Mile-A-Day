@@ -1,4 +1,8 @@
 import { Workout } from "../types/workouts.js";
+import {
+  MIN_PLAUSIBLE_MILE_SECONDS,
+  MAX_PLAUSIBLE_MILE_SECONDS,
+} from "./mileTime.js";
 import { PostgresService } from "./DbService.js";
 import { VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL } from "./visibilityService.js";
 import {
@@ -14,11 +18,19 @@ const db = PostgresService.getInstance();
  * The ghost-race columns for one workout's upsert, as
  * `[margin, target, friendUserId]`.
  *
- * The tracker stamps these on the HKWorkout only when the ghost was BEATEN, so
- * a non-null margin IS a win — which is what the ghost medal family counts.
+ * `margin` is SIGNED: positive = won by that many seconds, negative = lost by
+ * them. It is stamped for every completed race, not just wins, because a race
+ * you lost by two seconds is the most motivating thing the feature can show you
+ * and it used to vanish without trace.
+ *
+ * The consequence, and the reason this comment is long: `IS NOT NULL` no longer
+ * means "won". Anything counting WINS must say `> 0` — the medal aggregate (both
+ * the count and the MAX, which would otherwise return a negative for someone who
+ * has only lost), and the "your ghost was caught" push.
+ *
  * Implausible claims are dropped to null rather than stored: bounds mirror the
- * client's `GhostTarget.isPlausible` (2:00…40:00), and you cannot beat a ghost
- * by more than the ghost's own time.
+ * client's `GhostTarget.isPlausible` (4:01…40:00), and no margin in either
+ * direction can exceed a whole plausible mile.
  *
  * `friendUserId` is present only when the ghost was a FRIEND's mile. It is
  * client-asserted and NOT validated here — it is validated where it matters,
@@ -34,10 +46,10 @@ function ghostRaceParams(
   const ok =
     Number.isFinite(margin) &&
     Number.isFinite(target) &&
-    margin > 0 &&
-    target >= 120 &&
-    target <= 2400 &&
-    margin <= target;
+    margin !== 0 &&
+    target >= MIN_PLAUSIBLE_MILE_SECONDS &&
+    target <= MAX_PLAUSIBLE_MILE_SECONDS &&
+    Math.abs(margin) <= MAX_PLAUSIBLE_MILE_SECONDS;
   if (!ok) return [null, null, null];
   const friend =
     typeof workout.ghostFriendUserId === "string" &&
@@ -658,7 +670,7 @@ export async function getBestSplit(userId: string, startDate?: string) {
     WHERE w.user_id = $1
 	AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 	AND split_distance >= 0.95
-	AND ws.split_pace > 0
+	AND ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}
 	`;
 
   const params: (string | number)[] = [userId];
@@ -1047,7 +1059,7 @@ export async function getTodayStats(userId: string): Promise<TodayStats> {
 		SELECT MIN(ws.split_pace) AS pace
 		FROM today_workouts tw
 		JOIN workout_splits ws ON ws.workout_id = tw.workout_id
-		WHERE ws.split_distance >= 0.95 AND ws.split_pace > 0
+		WHERE ws.split_distance >= 0.95 AND ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}
 	),
 	workout_best AS (
 		SELECT MIN(total_duration / NULLIF(distance, 0)) AS pace
@@ -1316,7 +1328,7 @@ export async function computePersonalRecords(
 	   FROM workout_splits s
 	   JOIN workouts w ON w.workout_id = s.workout_id
 	   WHERE w.user_id = $1
-	       AND s.split_pace > 0
+	       AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}
 	       AND s.split_distance >= 0.95
 	       ${excludeClause}
 	   ORDER BY s.split_pace ASC, w.local_date DESC
