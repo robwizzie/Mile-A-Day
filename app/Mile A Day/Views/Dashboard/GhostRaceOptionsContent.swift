@@ -46,6 +46,7 @@ struct GhostRaceOptionsContent: View {
     @State private var hasPrimed = false
 
     @ObservedObject private var friendGhosts = FriendGhostService.shared
+    @AppStorage(GhostCoach.enabledKey) private var coachEnabled = true
 
     private var isRun: Bool { activityKey == "running" }
 
@@ -124,6 +125,7 @@ struct GhostRaceOptionsContent: View {
                     header
                     targetList
                     if isCustomSelected { customPicker }
+                    coachToggle
                     howItWorks
                     // Reserves scroll room under the pinned footer.
                     Color.clear.frame(height: 180)
@@ -379,7 +381,11 @@ struct GhostRaceOptionsContent: View {
     private var customPicker: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
             HStack(spacing: 0) {
-                wheel(value: $customMinutes, range: 2...40, unit: "min")
+                // Starts at 4, not 2: everything below 4:01 is rejected as a
+                // drive, so offering those minutes was offering a dead end.
+                // 4:00 exactly stays selectable and simply disables the button,
+                // the same way the 40:01 corner already does.
+                wheel(value: $customMinutes, range: 4...40, unit: "min")
                 Text(":")
                     .font(.system(size: 26, weight: .bold, design: .rounded))
                     .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
@@ -432,6 +438,36 @@ struct GhostRaceOptionsContent: View {
     private var referenceSeconds: Double? {
         BestEffortStore.best(for: activityKey)?.seconds
             ?? (isRun ? seedPaceSeconds : nil)
+    }
+
+    // MARK: - Coach
+
+    /// Lives HERE rather than in app settings because this is the screen where
+    /// someone decides to race — the only moment the setting means anything,
+    /// and the moment they'll look for it after hearing a voice they didn't
+    /// expect. Default on; one tap off, and it stays off.
+    private var coachToggle: some View {
+        Toggle(isOn: $coachEnabled) {
+            HStack(spacing: MADTheme.Spacing.md) {
+                Image(systemName: coachEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(coachEnabled ? accent : MADTheme.Colors.madWhite.opacity(0.5))
+                    .frame(width: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Coach")
+                        .font(MADTheme.Typography.bodyBold)
+                        .foregroundStyle(MADTheme.Colors.madWhite)
+                    Text("Calls out where you stand at each quarter mile, and whenever the lead changes.")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .tint(accent)
+        .padding(MADTheme.Spacing.md)
+        .ghostRaceSurface(selected: false, accent: accent)
+        .onChange(of: coachEnabled) { _, _ in MADHaptics.tap() }
     }
 
     // MARK: - Explainer

@@ -1,4 +1,5 @@
 import { PostgresService } from "./DbService.js";
+import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
 import {
   coverageActiveFor,
   computeCoveredStreak,
@@ -144,7 +145,7 @@ async function getStreakLeaderboard(
 				JOIN workouts w ON w.workout_id = ws.workout_id
 				WHERE w.user_id = u.user_id
 				  AND ws.split_distance >= 0.999
-				  AND ws.split_pace > 0
+				  AND ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}
 			) AS period_best_pace,
 			RANK() OVER (ORDER BY u.current_streak DESC)::int AS rank
 		FROM users u
@@ -212,7 +213,7 @@ async function getCurrentUserStreakEntry(
 				JOIN workouts w ON w.workout_id = ws.workout_id
 				WHERE w.user_id = u.user_id
 				  AND ws.split_distance >= 0.999
-				  AND ws.split_pace > 0
+				  AND ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}
 			) AS period_best_pace,
 			(
 				SELECT COUNT(*)::int FROM users u2
@@ -312,7 +313,7 @@ async function getMilesLeaderboard(
 				JOIN workouts w ON w.workout_id = ws.workout_id
 				WHERE w.user_id = u.user_id
 				  AND ws.split_distance >= 0.999
-				  AND ws.split_pace > 0
+				  AND ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}
 				  ${bestPaceDateClause}
 			) AS period_best_pace,
 			RANK() OVER (ORDER BY t.value DESC)::int AS rank
@@ -417,7 +418,7 @@ async function getCurrentUserMilesEntry(
   const paceWheres: string[] = [
     `w.user_id = $1`,
     `ws.split_distance >= 0.999`,
-    `ws.split_pace > 0`,
+    `ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}`,
   ];
   if (startDate) {
     paceParams.push(startDate);
@@ -479,7 +480,7 @@ async function getPaceLeaderboard(
   const wheres: string[] = [
     `w.user_id = ANY($1::text[])`,
     `ws.split_distance >= 0.999`,
-    `ws.split_pace > 0`,
+    `ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}`,
   ];
   let dateParamIndex: number | null = null;
   if (startDate) {
@@ -582,7 +583,7 @@ async function getCurrentUserPaceEntry(
   const myWheres: string[] = [
     `w.user_id = $1`,
     `ws.split_distance >= 0.999`,
-    `ws.split_pace > 0`,
+    `ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}`,
   ];
   if (startDate) {
     myParams.push(startDate);
@@ -605,7 +606,7 @@ async function getCurrentUserPaceEntry(
   const rankWheres: string[] = [
     `w.user_id = ANY($2::text[])`,
     `ws.split_distance >= 0.999`,
-    `ws.split_pace > 0`,
+    `ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}`,
   ];
   if (startDate) {
     rankParams.push(startDate);

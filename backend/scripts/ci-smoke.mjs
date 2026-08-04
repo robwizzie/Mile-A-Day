@@ -1309,6 +1309,24 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     `UPDATE workouts SET deleted_at = NULL WHERE workout_id = 'ci-ghost-bob-run'`,
   );
 
+  // A sub-4:01 mile is a car, not a person. It must not become anyone's
+  // ghost, PR, leaderboard entry or badge — the floor is shared, so this
+  // asserts the one surface and documents the rule for the rest.
+  await ghostWorkout(BOB, "ci-ghost-bob-car", "running", 1.0, 140);
+  const carGhosts = await getFriendGhosts(ALICE, "running");
+  assert.equal(
+    carGhosts.find((g) => g.user_id === BOB)?.mile_seconds,
+    540,
+    "a 2:20 mile is ignored; the real 9:00 stays the ghost",
+  );
+  await db.query(
+    `DELETE FROM workout_splits WHERE workout_id = 'ci-ghost-bob-run'`,
+  );
+  assert.ok(
+    !(await getFriendGhosts(ALICE, "running")).some((g) => g.user_id === BOB),
+    "with only the sub-4:01 split left, they drop out entirely",
+  );
+
   await db.query(`DELETE FROM workout_splits WHERE workout_id LIKE 'ci-ghost-%'`);
   await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-ghost-%'`);
 }

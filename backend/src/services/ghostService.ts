@@ -1,4 +1,8 @@
 import { PostgresService } from "./DbService.js";
+import {
+  MIN_PLAUSIBLE_MILE_SECONDS,
+  MAX_PLAUSIBLE_MILE_SECONDS,
+} from "./mileTime.js";
 import { CIRCLE_CTE } from "./postService.js";
 import { OWNER_NOT_PRIVATE_SQL } from "./visibilityService.js";
 import { sendPush } from "./pushNotificationService.js";
@@ -13,14 +17,13 @@ export const GHOST_ACTIVITIES = ["running", "walking"] as const;
 export type GhostActivity = (typeof GHOST_ACTIVITIES)[number];
 
 /**
- * A mile between 2:00 and 40:00 — the same window the client's
- * `BestEffortStore.GhostTarget.isPlausible` enforces, and the same one
- * `ghostRaceParams` uses when storing a result. Kept in sync deliberately: a
- * ghost outside this band would be armed, raced, won, and then silently
- * dropped on upload.
+ * A believable mile — the shared floor, so a friend's ghost can never be a
+ * drive. Matches the client's `BestEffortStore.GhostTarget.isPlausible` and
+ * the bounds `ghostRaceParams` stores results under: a ghost outside this band
+ * would be armed, raced, won, and then silently dropped on upload.
  */
-const MIN_GHOST_SECONDS = 120;
-const MAX_GHOST_SECONDS = 2400;
+const MIN_GHOST_SECONDS = MIN_PLAUSIBLE_MILE_SECONDS;
+const MAX_GHOST_SECONDS = MAX_PLAUSIBLE_MILE_SECONDS;
 
 /** Friend count worth offering in a picker. */
 const MAX_GHOSTS = 50;
@@ -82,7 +85,7 @@ export async function getFriendGhosts(
 			   AND w.workout_type = $2
 			   AND w.deleted_at IS NULL
 			   AND w.exclusion_reason IS NULL
-			   AND ws.split_pace > 0
+			   AND ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}
 			   AND ws.split_distance >= 0.999
 			 GROUP BY w.user_id
 		)

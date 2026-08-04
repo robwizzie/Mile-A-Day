@@ -1,4 +1,5 @@
 import { PostgresService } from "./DbService.js";
+import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
 import type {
   Badge,
   UserBadge,
@@ -103,7 +104,7 @@ export async function computeAggregates(
     db.query<{ min_pace: string | null }>(
       `SELECT MIN(s.split_pace)::text AS min_pace
 			FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-			WHERE w.user_id = $1 AND s.split_pace > 0 AND s.split_distance >= 0.95 AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL`,
+			WHERE w.user_id = $1 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95 AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL`,
       [userId],
     ),
     db.query<{ best_day: string | null }>(

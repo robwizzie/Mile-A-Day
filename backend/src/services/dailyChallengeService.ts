@@ -1,4 +1,5 @@
 import { PostgresService } from "./DbService.js";
+import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
 import {
   DailyChallenge,
   TodaysChallengeResponse,
@@ -381,7 +382,7 @@ async function computeProgress(
       }>(
         `SELECT
 					(SELECT MIN(s.split_pace) FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					 WHERE w.user_id = $1 AND w.local_date = $2 AND s.split_pace > 0 AND s.split_distance >= 0.95)::text AS min_pace,
+					 WHERE w.user_id = $1 AND w.local_date = $2 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95)::text AS min_pace,
 					(SELECT COALESCE(SUM(distance),0) FROM workouts WHERE user_id = $1 AND local_date = $2 AND deleted_at IS NULL AND exclusion_reason IS NULL)::text AS day_total`,
         [userId, localDate],
       );
@@ -447,11 +448,11 @@ async function computeProgress(
         `WITH prior AS (
 					SELECT MIN(s.split_pace) AS p
 					FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					WHERE w.user_id = $1 AND w.local_date < $2 AND s.split_pace > 0 AND s.split_distance >= 0.95
+					WHERE w.user_id = $1 AND w.local_date < $2 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
 				), today AS (
 					SELECT MIN(s.split_pace) AS p
 					FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					WHERE w.user_id = $1 AND w.local_date = $2 AND s.split_pace > 0 AND s.split_distance >= 0.95
+					WHERE w.user_id = $1 AND w.local_date = $2 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
 				)
 				SELECT prior.p::text AS prior_min, today.p::text AS today_min FROM prior, today`,
         [userId, localDate],
@@ -594,7 +595,7 @@ async function evaluatePredicate(
 						SELECT 1 FROM workout_splits s
 						  JOIN workouts w ON w.workout_id = s.workout_id
 						WHERE w.user_id = $1 AND w.local_date = $2
-						  AND s.split_pace > 0
+						  AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}
 						  AND s.split_distance >= 0.95
 						  AND s.split_pace / 60.0 <= 12.0
 					)
@@ -616,11 +617,11 @@ async function evaluatePredicate(
         `WITH prior AS (
 					SELECT MIN(s.split_pace) AS p
 					FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					WHERE w.user_id = $1 AND w.local_date < $2 AND s.split_pace > 0 AND s.split_distance >= 0.95
+					WHERE w.user_id = $1 AND w.local_date < $2 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
 				), today AS (
 					SELECT MIN(s.split_pace) AS p
 					FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					WHERE w.user_id = $1 AND w.local_date = $2 AND s.split_pace > 0 AND s.split_distance >= 0.95
+					WHERE w.user_id = $1 AND w.local_date = $2 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
 				)
 				SELECT prior.p::text AS prior_min, today.p::text AS today_min FROM prior, today`,
         [userId, localDate],
@@ -1186,7 +1187,7 @@ async function renderDescription(
   const rows = await db.query<{ min_pace: string | null }>(
     `SELECT MIN(s.split_pace)::text AS min_pace
 		FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-		WHERE w.user_id = $1 AND s.split_pace > 0 AND s.split_distance >= 0.95`,
+		WHERE w.user_id = $1 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95`,
     [userId],
   );
   const secPerMile = rows[0]?.min_pace ? parseFloat(rows[0].min_pace) : 0;

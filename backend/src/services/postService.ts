@@ -1,4 +1,8 @@
 import { PostgresService } from "./DbService.js";
+import {
+  MIN_PLAUSIBLE_MILE_SECONDS,
+  MAX_PLAUSIBLE_MILE_SECONDS,
+} from "./mileTime.js";
 import { CLIENT_FEATURES, userSupports } from "./clientFeatures.js";
 import { sendPush } from "./pushNotificationService.js";
 import { shouldSendNotification } from "./notificationSettingsService.js";
@@ -62,7 +66,7 @@ export interface PostStatsSnapshot {
 
 /**
  * Drop a ghost claim that isn't plausible, keeping the rest of the snapshot.
- * Bounds mirror the client's `GhostTarget.isPlausible` (2:00…40:00); a margin
+ * Bounds mirror the client's `GhostTarget.isPlausible` (4:01…40:00); a margin
  * can never exceed the ghost it beat.
  */
 export function sanitizeGhostStats(
@@ -75,8 +79,8 @@ export function sanitizeGhostStats(
     Number.isFinite(margin) &&
     Number.isFinite(target) &&
     margin > 0 &&
-    target >= 120 &&
-    target <= 2400 &&
+    target >= MIN_PLAUSIBLE_MILE_SECONDS &&
+    target <= MAX_PLAUSIBLE_MILE_SECONDS &&
     margin <= target;
   if (ok) return stats;
   const { ghost_margin_seconds, ghost_target_seconds, ...rest } = stats;

@@ -43,6 +43,8 @@ struct WorkoutTrackingView: View {
     @State private var selectedLocationType: HKWorkoutSessionLocationType = .outdoor
     @State private var countdownNumber = 3
     @State private var showCountdown = false
+    /// Retained so Cancel can invalidate it — see `startCountdown`.
+    @State private var countdownTimer: Timer?
     @State private var isTracking = false
     @State private var elapsedTime: TimeInterval = 0
     @State private var timer: Timer?
@@ -114,6 +116,8 @@ struct WorkoutTrackingView: View {
     // mid-walk. The consent interstitial runs ONCE (first tracked workout on
     // this build), between picking a location and the countdown.
     @ObservedObject private var livePresence = LivePresenceService.shared
+    /// Published coach lines, echoed on screen under the delta chip.
+    @ObservedObject private var coach = GhostCoach.shared
     @State private var showFriendsOutSheet = false
     @State private var hypeToast: String?
     @AppStorage("hasAnsweredLivePresenceConsent") private var hasAnsweredLivePresenceConsent = false
@@ -222,10 +226,12 @@ struct WorkoutTrackingView: View {
                 myMileSeconds = a.t + (b.t - a.t) * ((1.0 - a.d) / span)
             }
         }
+        let finalDelta = ghost.seconds - myMileSeconds
         withAnimation(.spring(response: 0.4)) {
-            raceFinalDelta = ghost.seconds - myMileSeconds
+            raceFinalDelta = finalDelta
         }
         MADHaptics.action()
+        GhostCoach.shared.finish(won: finalDelta > 0, marginSeconds: finalDelta)
     }
 
     // Workout distance only (starts at 0). `liveDistance` is THE number:
@@ -607,13 +613,47 @@ struct WorkoutTrackingView: View {
     // MARK: - Countdown
 
     private var countdownContent: some View {
-        VStack {
+        VStack(spacing: 0) {
+            Spacer()
+
             Text("\(countdownNumber)")
                 .font(.system(size: 120, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
                 .scaleEffect(countdownNumber > 0 ? 1.0 : 0.5)
                 .opacity(countdownNumber > 0 ? 1.0 : 0.0)
                 .animation(.spring(response: 0.5, dampingFraction: 0.6), value: countdownNumber)
+
+            Spacer()
+
+            // The last exit before a workout exists. Tapping Run when you meant
+            // Walk, or opening this by accident, otherwise costs a junk workout
+            // that has to be deleted afterwards — and a deleted workout still
+            // churns the day's feed roles and streak recompute. Nothing has
+            // been created yet at this point, so cancelling here is clean.
+            //
+            // Deliberately large and low: it's on screen for three seconds and
+            // the user is often already moving.
+            Button {
+                cancelCountdown()
+            } label: {
+                Text("Cancel")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.15))
+                            .overlay(
+                                Capsule().strokeBorder(
+                                    Color.white.opacity(0.4), lineWidth: 1.5)
+                            )
+                    )
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 48)
+            .padding(.bottom, 64)
         }
         .onAppear {
             startCountdown()
@@ -1258,9 +1298,24 @@ struct WorkoutTrackingView: View {
                 raceDeltaChip(delta: delta, frozen: raceFinalDelta != nil)
                     .transition(.opacity.combined(with: .scale))
             }
+
+            // Every coach line as text too. This is what makes the feature work
+            // with the volume down, with the coach switched off, or before the
+            // `audio` background mode lets it speak through a locked screen.
+            if raceGhost != nil, let line = coach.lastLine {
+                Text(line)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.75))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .padding(.horizontal, 24)
+                    .transition(.opacity)
+                    .id(line)
+            }
         }
         .animation(.spring(response: 0.3), value: locationManager.isAutoPaused)
         .animation(.spring(response: 0.3), value: raceFinalDelta != nil)
+        .animation(.easeInOut(duration: 0.25), value: coach.lastLine)
     }
 
     /// Ghost race readout: live ahead/behind while the mile is in progress,
@@ -1950,16 +2005,24 @@ struct WorkoutTrackingView: View {
         }
     }
 
+    /// The 3-2-1. Retained in `countdownTimer` so Cancel can actually stop it:
+    /// as a bare `scheduledTimer` it outlived the view, so tearing the screen
+    /// down still fired `startWorkout()` three seconds later.
     private func startCountdown() {
+        // onAppear can run again (re-entering after a cancel) — never leave a
+        // second timer racing the first.
+        countdownTimer?.invalidate()
+
         // Haptic feedback for countdown
         let impact = UIImpactFeedbackGenerator(style: .heavy)
 
-        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
+        countdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
             if countdownNumber > 1 {
                 countdownNumber -= 1
                 impact.impactOccurred()
             } else {
                 timer.invalidate()
+                countdownTimer = nil
                 // Start workout
                 withAnimation {
                     showCountdown = false
@@ -1967,6 +2030,21 @@ struct WorkoutTrackingView: View {
                 }
                 startWorkout()
             }
+        }
+    }
+
+    /// Back out before anything is created. Returns to the first step rather
+    /// than dismissing, because the common reason to cancel is picking Run when
+    /// you meant Walk — and from there Back still leaves.
+    private func cancelCountdown() {
+        countdownTimer?.invalidate()
+        countdownTimer = nil
+        MADHaptics.tap()
+        wizardGoingBack = true
+        withAnimation(.easeInOut(duration: 0.28)) {
+            showCountdown = false
+            countdownNumber = 3
+            showActivitySelection = true
         }
     }
 
@@ -1986,6 +2064,10 @@ struct WorkoutTrackingView: View {
         if raceArmed, let ghost = resolvedGhost {
             raceGhost = ghost.effort
             raceGhostName = ghost.shortName
+            GhostCoach.shared.start(
+                ghostName: ghost.shortName,
+                isRun: selectedActivityType == .running
+            )
         } else {
             raceGhost = nil
             raceGhostName = "your best mile"
@@ -2072,6 +2154,16 @@ struct WorkoutTrackingView: View {
             guard !isStopping else { return }
             elapsedTime = Date().timeIntervalSince(startDate)
             updateLiveActivity()
+
+            // Ghost coach rides this tick rather than owning a timer. It reads
+            // the SAME delta the chip renders, so the voice can never say
+            // something the screen contradicts.
+            if raceGhost != nil {
+                GhostCoach.shared.update(
+                    distance: locationManager.liveDistance,
+                    delta: raceDeltaSeconds
+                )
+            }
             // Foreground heartbeat driver (self-throttled to ~45s). The
             // background driver is the location/pedometer callback path.
             livePresence.tick()
@@ -2322,6 +2414,7 @@ struct WorkoutTrackingView: View {
         raceGhostName = "your best mile"
         raceFinalDelta = nil
         pendingGhostWin = nil
+        GhostCoach.shared.stop()
 
         // Show result to user. The mile counts via GPS/pedometer sync whether
         // or not the HealthKit write succeeded, so a failed save is never a lost
