@@ -330,25 +330,73 @@ struct WorkoutTrackingView: View {
         .padding(.horizontal, 32)
     }
 
-    /// The shared layout of a "pick one of these" step.
-    private func wizardStep<Options: View>(
-        step: Int,
-        glyph: WizardGlyph,
-        title: String,
-        subtitle: String,
-        onBack: @escaping () -> Void,
-        @ViewBuilder options: () -> Options
-    ) -> some View {
-        VStack(spacing: 0) {
-            wizardTopBar(step: step, onBack: onBack)
+    /// Which pre-start step is on screen, derived from the flags so the
+    /// wizard can be rendered as ONE scaffold instead of four screens.
+    enum PreStartStep {
+        case activity, location, mode, ghostOptions
 
-            VStack(spacing: 40) {
-                Spacer()
-                wizardHeader(glyph: glyph, title: title, subtitle: subtitle)
-                Spacer()
-                VStack(spacing: 20) { options() }
+        /// Which progress segment to fill. Ghost options is a SUB-step of the
+        /// mode choice, not a fourth question, so it shares segment 3.
+        var indicator: Int { self == .activity ? 1 : (self == .location ? 2 : 3) }
+    }
+
+    private var currentPreStartStep: PreStartStep? {
+        if showActivitySelection { return .activity }
+        if showLocationTypeSelection { return .location }
+        if showRaceModeSelection { return .mode }
+        if showGhostOptions { return .ghostOptions }
+        return nil
+    }
+
+    /// The whole pre-start wizard, as one screen whose CONTENTS change.
+    ///
+    /// The gradient behind this never re-rendered, but the step content used to
+    /// slide as a single block — back bar, progress dots, glyph and title
+    /// included — so every answer looked like the entire screen being replaced.
+    /// Now the chrome is rendered once and holds still: only the question
+    /// crossfades and only the options slide, which is the part that actually
+    /// changed.
+    private func preStartWizard(_ step: PreStartStep) -> some View {
+        VStack(spacing: 0) {
+            // Persistent. The dots and the back action change, the bar doesn't.
+            wizardTopBar(step: step.indicator) { goBack(from: step) }
+
+            if step == .ghostOptions {
+                ghostOptionsBody
+                    .transition(wizardTransition)
+            } else {
+                VStack(spacing: 40) {
+                    Spacer()
+
+                    // Both animated regions sit in a ZStack so the outgoing and
+                    // incoming copies OVERLAP. In a VStack they'd each be
+                    // allocated their own row mid-transition and everything
+                    // below would jump — the exact thing this restructure is
+                    // meant to stop.
+                    ZStack {
+                        // Crossfades in place rather than sliding: the question
+                        // is part of the frame, so moving it is what made the
+                        // whole screen feel like it swapped.
+                        wizardHeader(
+                            glyph: glyph(for: step),
+                            title: title(for: step),
+                            subtitle: subtitle(for: step)
+                        )
+                        .id(step)
+                        .transition(.opacity)
+                    }
+
+                    Spacer()
+
+                    ZStack {
+                        VStack(spacing: 20) { options(for: step) }
+                            .id(step)
+                            .transition(wizardTransition)
+                    }
                     .padding(.horizontal, 32)
-                Spacer()
+
+                    Spacer()
+                }
             }
         }
     }
@@ -364,61 +412,74 @@ struct WorkoutTrackingView: View {
         )
     }
 
-    // MARK: - Step 1: Activity
+    // MARK: - Per-step content
 
-    private var activitySelectionContent: some View {
-        wizardStep(
-            step: 1,
-            glyph: .symbol("figure.walk"),
-            title: "Choose Activity Type",
-            subtitle: "Select how you'll complete your mile",
-            onBack: { dismiss() }
-        ) {
+    private func glyph(for step: PreStartStep) -> WizardGlyph {
+        let activity = selectedActivityType == .running ? "figure.run" : "figure.walk"
+        switch step {
+        case .activity: return .symbol("figure.walk")
+        case .location: return .symbol(activity)
+        // NOT the ghost: racing is one of the two answers here, and putting its
+        // mascot above the question pre-announces the winner.
+        case .mode: return .symbol("stopwatch")
+        case .ghostOptions: return .ghost
+        }
+    }
+
+    private func title(for step: PreStartStep) -> String {
+        switch step {
+        case .activity: return "Choose Activity Type"
+        case .location: return "Choose Location"
+        case .mode: return "Choose Your Mode"
+        case .ghostOptions: return "Ghost Race"
+        }
+    }
+
+    private func subtitle(for step: PreStartStep) -> String {
+        switch step {
+        case .activity: return "Select how you'll complete your mile"
+        case .location: return "Where will you be working out?"
+        case .mode: return "Race a time, or just log the miles."
+        case .ghostOptions: return "Pick a time to chase."
+        }
+    }
+
+    private func goBack(from step: PreStartStep) {
+        switch step {
+        case .activity:
+            dismiss()
+        case .location:
+            goBack(to: { showActivitySelection = true },
+                   from: { showLocationTypeSelection = false })
+        case .mode:
+            goBack(to: { showLocationTypeSelection = true },
+                   from: { showRaceModeSelection = false })
+        case .ghostOptions:
+            goBack(to: { showRaceModeSelection = true },
+                   from: { showGhostOptions = false })
+        }
+    }
+
+    @ViewBuilder
+    private func options(for step: PreStartStep) -> some View {
+        switch step {
+        case .activity:
             workoutOptionButton(icon: "figure.run", title: "Run", subtitle: "Track as a running workout") {
                 selectActivity(.running)
             }
             workoutOptionButton(icon: "figure.walk", title: "Walk", subtitle: "Track as a walking workout") {
                 selectActivity(.walking)
             }
-        }
-    }
 
-    // MARK: - Step 2: Location
-
-    private var locationTypeSelectionContent: some View {
-        wizardStep(
-            step: 2,
-            glyph: .symbol(selectedActivityType == .running ? "figure.run" : "figure.walk"),
-            title: "Choose Location",
-            subtitle: "Where will you be working out?",
-            onBack: { goBack(to: { showActivitySelection = true }, from: { showLocationTypeSelection = false }) }
-        ) {
+        case .location:
             workoutOptionButton(icon: "location.fill", title: "Outdoor", subtitle: "Uses GPS for accurate tracking") {
                 selectLocationType(.outdoor)
             }
             workoutOptionButton(icon: indoorLocationIcon, title: "Indoor", subtitle: "Treadmill or indoors — uses motion sensors") {
                 selectLocationType(.indoor)
             }
-        }
-    }
 
-    // MARK: - Step 3: Race mode
-
-    /// "Am I racing?" as a step of its own.
-    ///
-    /// It used to be a small card wedged under the Indoor/Outdoor buttons on a
-    /// screen about something else, opening a modal sheet — which read as an
-    /// add-on rather than a choice the flow cares about. Asking it here also
-    /// means the activity is already locked in, so the target on offer is
-    /// always the one for the activity being started.
-    private var raceModeSelectionContent: some View {
-        wizardStep(
-            step: 3,
-            glyph: .ghost,
-            title: "Choose Your Mode",
-            subtitle: "Race a time, or just log the miles.",
-            onBack: { goBack(to: { showLocationTypeSelection = true }, from: { showRaceModeSelection = false }) }
-        ) {
+        case .mode:
             workoutOptionButton(
                 icon: selectedActivityType == .running ? "figure.run" : "figure.walk",
                 title: "Just Track It",
@@ -436,52 +497,41 @@ struct WorkoutTrackingView: View {
                 subtitle: ghostRaceSubtitle,
                 featured: true,
                 badge: hasArmedGhostRaceOnce ? nil : "NEW",
-                accessory: {
-                    if let ghost = resolvedGhost {
-                        VStack(spacing: 0) {
-                            Text(BestEffortStore.formatSeconds(ghost.effort.seconds))
-                                .font(.system(size: 18, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                                .monospacedDigit()
-                            Text("TO BEAT")
-                                .font(.system(size: 8, weight: .black, design: .rounded))
-                                .tracking(0.6)
-                                .foregroundColor(.white.opacity(0.65))
-                        }
-                    } else {
-                        optionChevron
-                    }
-                }
+                // No time here on purpose. The next screen is where the target
+                // is chosen, and printing one before that reads as a decision
+                // already made — for a first-time racer it's a number they've
+                // never seen, attached to a choice they haven't made yet.
+                accessory: { optionChevron }
             ) {
                 chooseRaceMode(ghost: true)
             }
+
+        case .ghostOptions:
+            EmptyView()
         }
     }
 
     // MARK: - Step 4: Ghost options
 
     /// The picker, inline. Same content the buddy lobby shows as a sheet — it
-    /// just gets the wizard's back bar and background instead of modal chrome.
-    private var ghostOptionsContent: some View {
-        VStack(spacing: 0) {
-            wizardTopBar(step: 3) {
-                goBack(to: { showRaceModeSelection = true }, from: { showGhostOptions = false })
-            }
-
-            GhostRaceOptionsContent(
-                activityKey: raceActivityKey,
-                seedPaceSeconds: raceSeedPaceSeconds,
-                current: raceArmed ? raceTarget : nil,
-                // White, not the workout color: this renders on the tracker's
-                // red gradient, where a red CTA would vanish. Matches the
-                // presence-consent step's primary button on the same screen.
-                accent: .white,
-                accentForeground: Color(red: 0.5, green: 0.15, blue: 0.2),
-                declineTitle: "Skip the race",
-                onRace: { armGhost($0) },
-                onDecline: { chooseRaceMode(ghost: false) }
-            )
-        }
+    /// just gets the wizard's background instead of modal chrome.
+    ///
+    /// No top bar of its own: `preStartWizard` renders that once for every
+    /// step, which is what keeps the frame still while the contents change.
+    private var ghostOptionsBody: some View {
+        GhostRaceOptionsContent(
+            activityKey: raceActivityKey,
+            seedPaceSeconds: raceSeedPaceSeconds,
+            current: raceArmed ? raceTarget : nil,
+            // White, not the workout color: this renders on the tracker's
+            // red gradient, where a red CTA would vanish. Matches the
+            // presence-consent step's primary button on the same screen.
+            accent: .white,
+            accentForeground: Color(red: 0.5, green: 0.15, blue: 0.2),
+            declineTitle: "Skip the race",
+            onRace: { armGhost($0) },
+            onDecline: { chooseRaceMode(ghost: false) }
+        )
     }
 
     /// What to say about the finished mile.
@@ -542,14 +592,16 @@ struct WorkoutTrackingView: View {
             ))
     }
 
-    /// Copy for the Ghost Race option. `resolvedGhost` is what makes the
-    /// promise concrete — the card shows the exact time it would race, so a
-    /// repeat racer knows what tapping means before they tap.
+    /// Copy for the Ghost Race option.
+    ///
+    /// Deliberately names no specific ghost. This card used to print the exact
+    /// time it would race, and a variant of it named the target ("Chase your
+    /// best…") — both presume a choice that is made on the NEXT screen, where
+    /// you can pick your best, your PR, a friend's mile, or any time you type.
+    /// For a first-time racer the old version was a number they'd never seen
+    /// attached to a decision they hadn't made.
     private var ghostRaceSubtitle: String {
-        guard let ghost = resolvedGhost else {
-            return "Chase your best mile, your PR, or a time you pick."
-        }
-        return "Chase \(ghost.shortName) for one mile — live ahead/behind on screen."
+        "Chase your best, a friend's, or any time you pick — live ahead/behind on screen."
     }
 
     // MARK: - Countdown
@@ -1531,18 +1583,10 @@ struct WorkoutTrackingView: View {
             )
             .ignoresSafeArea()
 
-            if showActivitySelection {
-                activitySelectionContent
-                    .transition(wizardTransition)
-            } else if showLocationTypeSelection {
-                locationTypeSelectionContent
-                    .transition(wizardTransition)
-            } else if showRaceModeSelection {
-                raceModeSelectionContent
-                    .transition(wizardTransition)
-            } else if showGhostOptions {
-                ghostOptionsContent
-                    .transition(wizardTransition)
+            if let step = currentPreStartStep {
+                // ONE branch for all four steps: the scaffold stays mounted
+                // across them, so only what changed animates.
+                preStartWizard(step)
             } else if showPresenceConsent {
                 presenceConsentContent
             } else if showCountdown {
