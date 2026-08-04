@@ -305,6 +305,7 @@ struct GhostBeatenCelebrationView: View {
             ghostName: "your best",
             activityKey: "running",
             newRecordSeconds: 528,
+            friendUserId: nil,
             workoutId: "preview"
         )
     )
