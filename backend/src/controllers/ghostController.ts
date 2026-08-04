@@ -2,6 +2,7 @@ import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/auth.js";
 import {
   getFriendGhosts,
+  getGhostHistory,
   GHOST_ACTIVITIES,
   GhostActivity,
 } from "../services/ghostService.js";
@@ -27,5 +28,21 @@ export async function friendGhosts(req: AuthenticatedRequest, res: Response) {
   } catch (error: any) {
     console.error("Error loading friend ghosts:", error.message);
     return res.status(500).json({ error: "Error loading friend ghosts" });
+  }
+}
+
+/**
+ * GET /ghosts/history
+ *
+ * Every race this user finished, newest first, wins and losses alike.
+ * Self-scoped on `req.userId` — your own race history is yours.
+ */
+export async function ghostHistory(req: AuthenticatedRequest, res: Response) {
+  try {
+    const races = await getGhostHistory(req.userId!);
+    return res.status(200).json({ races });
+  } catch (error: any) {
+    console.error("Error loading ghost history:", error.message);
+    return res.status(500).json({ error: "Error loading ghost history" });
   }
 }

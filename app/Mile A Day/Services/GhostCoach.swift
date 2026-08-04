@@ -39,9 +39,24 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
 
     private let synthesizer = AVSpeechSynthesizer()
 
-    /// Hard floor between lines. Three quarter-mile callouts plus a lead change
-    /// on a nine-minute mile is about as much as anyone wants.
-    private static let minSecondsBetweenLines: TimeInterval = 25
+    /// How much a line is worth interrupting for.
+    ///
+    /// The floor adapts because a race decided by three seconds deserves more
+    /// talk than a rout: a fixed interval either nags during a blowout or goes
+    /// quiet exactly when it matters.
+    enum Urgency {
+        /// Lead changes, milestones, a close race — the moments worth hearing.
+        case high
+        /// Effort nudges in a race that isn't close.
+        case normal
+
+        var floor: TimeInterval {
+            switch self {
+            case .high: return 15
+            case .normal: return 40
+            }
+        }
+    }
 
     private var ghostName = "your ghost"
     private var isRacing = false
@@ -57,35 +72,73 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
 
     // MARK: - Lifecycle
 
-    func start(ghostName: String, isRun: Bool) {
+    func start(ghostName: String, isRun: Bool, ghostSeconds: Double) {
         guard Self.isEnabled else { return }
         self.ghostName = ghostName
         isRacing = true
         lastSpokeAt = .distantPast
         firedMilestones = []
         wasAhead = nil
-        say("Racing \(ghostName). \(isRun ? "Run" : "Walk") strong.", force: true)
+        // The brief. A target in the abstract is hard to run to; a quarter
+        // split is a number you can actually check yourself against.
+        let quarter = ghostSeconds / 4
+        say(
+            "Racing \(ghostName). \(BestEffortStore.formatSeconds(ghostSeconds)) "
+                + "for the mile — \(BestEffortStore.formatSeconds(quarter)) a quarter.",
+            force: true
+        )
+    }
+
+    /// Everything the coach needs, sampled at one instant.
+    ///
+    /// A struct rather than loose arguments because the lines are only honest
+    /// if the figures agree with each other — `delta` and `recentPace` read
+    /// from the same tick, so the coach can't say "slipping" off a stale pace
+    /// while quoting a fresh delta.
+    struct Sample {
+        /// Miles so far — `liveDistance`, the same number the ring shows.
+        let distance: Double
+        /// Race clock in seconds (moving time outdoors).
+        let raceClock: TimeInterval
+        /// Seconds ahead(+)/behind(−), the SAME figure the chip renders.
+        let delta: TimeInterval
+        /// The ghost's mile time.
+        let ghostSeconds: Double
+        /// Pace over roughly the last minute, seconds/mile. Nil when the
+        /// runner has gone quiet — the coach must then say nothing about
+        /// effort rather than guess.
+        let recentPace: Double?
+
+        /// Seconds per mile needed over what's left to finish level with the
+        /// ghost. Pure arithmetic — no curve lookup, because the finish line
+        /// is a fixed distance and the ghost's total is a fixed time.
+        var requiredPace: Double? {
+            let remaining = 1.0 - distance
+            guard remaining > 0.02 else { return nil }
+            let budget = ghostSeconds - raceClock
+            guard budget > 0 else { return nil }
+            return budget / remaining
+        }
     }
 
     /// Called from the tracker's existing 1 Hz tick — no timer of its own.
-    ///
-    /// `delta` is the SAME frozen-at-the-crossing figure the chip shows
-    /// (positive = ahead), so the voice can never contradict the screen.
-    func update(distance: Double, delta: TimeInterval?) {
-        guard Self.isEnabled, isRacing, let delta else { return }
+    func update(_ sample: Sample) {
+        guard Self.isEnabled, isRacing else { return }
+        let delta = sample.delta
         // Under 2 seconds either way is inside the noise — calling it a lead
         // would have the coach flip-flopping every few strides.
         let ahead = delta >= 2
         let behind = delta <= -2
 
-        // A lead CHANGE is the most useful thing to hear, so it outranks the
-        // distance milestones and is checked first.
+        // A lead CHANGE is the most useful thing to hear, so it outranks
+        // everything else.
         if ahead || behind {
             if let was = wasAhead, was != ahead {
                 say(
                     ahead
-                        ? "You're ahead of \(ghostName) by \(seconds(delta))."
-                        : "\(ghostName.capitalizedFirst) is up by \(seconds(delta)). Time to push."
+                        ? "You're ahead of \(ghostName) by \(seconds(delta)). \(holdLine(sample))"
+                        : "\(ghostName.capitalizedFirst) is up by \(seconds(delta)). \(chaseLine(sample))",
+                    urgency: .high
                 )
                 wasAhead = ahead
                 return
@@ -93,13 +146,57 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
             if wasAhead == nil { wasAhead = ahead }
         }
 
-        for milestone in Self.milestones where distance >= milestone.at {
+        // Distance milestones — each fires once, with the standing and, when
+        // it's known, what it now takes.
+        for milestone in Self.milestones where sample.distance >= milestone.at {
             guard !firedMilestones.contains(milestone.id) else { continue }
             firedMilestones.insert(milestone.id)
-            say("\(milestone.label) \(standing(delta))")
+            say("\(milestone.label) \(standing(delta)) \(chaseLine(sample))", urgency: .high)
             return
         }
+
+        // Effort. This is the line that makes it a coach rather than a
+        // scoreboard, and it's the one that needs a real pace derivative —
+        // silence is correct when `recentPace` is nil.
+        if let effort = effortLine(sample) {
+            say(effort, urgency: closeRace(delta) ? .high : .normal)
+        }
     }
+
+    /// Fading or holding, judged against what it currently takes to win.
+    ///
+    /// Only speaks when the gap is big enough to act on: telling someone
+    /// they're two seconds per mile off is noise, and being told to push when
+    /// you're already pushing is worse than silence.
+    private func effortLine(_ sample: Sample) -> String? {
+        guard let recent = sample.recentPace, let required = sample.requiredPace
+        else { return nil }
+        // Enough of the mile is left that a correction is still possible.
+        guard sample.distance >= 0.15, sample.distance <= 0.92 else { return nil }
+
+        let drift = recent - required
+        if drift > 20 {
+            return "You're slipping. \(paceWords(required)) to take it back."
+        }
+        if drift < -20, sample.delta > 0 {
+            return "That's the pace. You're pulling away."
+        }
+        return nil
+    }
+
+    /// What it takes from here, when that's still a real question.
+    private func chaseLine(_ sample: Sample) -> String {
+        guard let required = sample.requiredPace else { return "" }
+        return "\(paceWords(required)) to win."
+    }
+
+    private func holdLine(_ sample: Sample) -> String {
+        guard sample.requiredPace != nil else { return "" }
+        return "Hold it."
+    }
+
+    /// A race decided by a handful of seconds deserves more talk than a rout.
+    private func closeRace(_ delta: TimeInterval) -> Bool { abs(delta) < 6 }
 
     /// The verdict, spoken once. A loss stays silent by design.
     func finish(won: Bool, marginSeconds: TimeInterval) {
@@ -139,6 +236,16 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         return "Dead even."
     }
 
+    /// "8:40 pace" — spoken, so the synthesizer reads it as a time rather than
+    /// two numbers.
+    private func paceWords(_ secondsPerMile: Double) -> String {
+        let whole = max(0, Int(secondsPerMile.rounded()))
+        let minutes = whole / 60
+        let secs = whole % 60
+        if secs == 0 { return "\(minutes) minute pace" }
+        return "\(minutes) \(secs < 10 ? "oh " : "")\(secs) pace"
+    }
+
     private func seconds(_ value: TimeInterval) -> String {
         let whole = max(1, Int(abs(value).rounded()))
         return whole == 1 ? "1 second" : "\(whole) seconds"
@@ -146,9 +253,9 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
 
     // MARK: - Speech
 
-    private func say(_ line: String, force: Bool = false) {
+    private func say(_ line: String, urgency: Urgency = .normal, force: Bool = false) {
         guard Self.isEnabled else { return }
-        if !force, Date().timeIntervalSince(lastSpokeAt) < Self.minSecondsBetweenLines {
+        if !force, Date().timeIntervalSince(lastSpokeAt) < urgency.floor {
             return
         }
         lastSpokeAt = Date()

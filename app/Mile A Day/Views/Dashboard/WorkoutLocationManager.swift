@@ -218,6 +218,55 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         return movingSeconds
     }
 
+    /// Pace over roughly the last minute, in seconds per mile. Nil until the
+    /// curve holds two samples far enough apart to mean anything.
+    ///
+    /// This is the app's ONLY non-cumulative pace: every other pace figure —
+    /// the recap, the Live Activity, the splits — divides total time by total
+    /// distance, which can't tell you that someone who started fast is now
+    /// dying. The ghost coach needs the derivative to say "you're slipping"
+    /// instead of only "you're behind".
+    ///
+    /// Derived rather than plumbed: `effortCurve` is already sampled on every
+    /// odometer move, so this adds no timer, no state and nothing to the
+    /// accrual path. Two honest limits, both inherited from the curve:
+    ///
+    ///  - It only appends when distance strictly INCREASES, so a stopped
+    ///    runner produces no new points and this figure goes stale rather than
+    ///    falling. Callers must treat a stale value as "unknown", which is why
+    ///    the freshness check against `raceClockSeconds` is here and not
+    ///    optional.
+    ///  - Resolution is one sample per ~0.02 mi or ~10 s, so this is good for
+    ///    "fading over the last quarter" and useless for stride-level feedback.
+    var recentPaceSecondsPerMile: Double? {
+        guard effortCurve.count >= 2 else { return nil }
+        let now = raceClockSeconds
+        let newest = effortCurve[effortCurve.count - 1]
+
+        // Gone quiet: either standing still or the odometer has stalled. Either
+        // way the last window no longer describes what's happening NOW.
+        guard now - newest.t <= 30 else { return nil }
+
+        // Walk back for a window of at least 45s / 0.08 mi — enough to average
+        // out the curve's coarse sampling without smearing a whole quarter.
+        var anchor = newest
+        for index in stride(from: effortCurve.count - 2, through: 0, by: -1) {
+            anchor = effortCurve[index]
+            if newest.t - anchor.t >= 45 || newest.d - anchor.d >= 0.08 { break }
+        }
+
+        let seconds = newest.t - anchor.t
+        let miles = newest.d - anchor.d
+        guard seconds >= 20, miles >= 0.01 else { return nil }
+        let pace = seconds / miles
+        // A window this short can produce nonsense off one bad sample; bound it
+        // to the same window a real mile lives in.
+        guard pace >= BestEffortStore.GhostTarget.minPlausibleSeconds,
+            pace <= BestEffortStore.GhostTarget.maxPlausibleSeconds
+        else { return nil }
+        return pace
+    }
+
     /// Append an effort-curve point when enough distance or time has passed.
     /// Called on the main queue from `refreshLiveDistance` — i.e. from every
     /// path that moves the odometer, indoor and outdoor alike.

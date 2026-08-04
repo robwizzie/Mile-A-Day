@@ -15,6 +15,10 @@ struct WorkoutRecapView: View {
     let startingDistance: Double  // Miles already done today before this workout
     let goalDistance: Double      // Daily goal in miles
     let streak: Int               // Current streak in days
+    /// Quarter-by-quarter against the ghost, empty when this wasn't a race.
+    /// Defaulted so every existing construction site is unaffected.
+    var raceSplits: [BestEffortStore.RaceSplit] = []
+    var raceGhostName: String = "your ghost"
     let onDismiss: () -> Void
 
     // Staggered entrance
@@ -57,6 +61,72 @@ struct WorkoutRecapView: View {
         return String(format: "%d'%02d\"", minutes, seconds)
     }
 
+    /// Where the race was won or lost.
+    ///
+    /// The live chip could only ever show the running total, so "I was down at
+    /// halfway and took it in the last quarter" — the actual shape of the race
+    /// — was never visible anywhere. Four rows, your split against the ghost's,
+    /// with the quarter you gained tinted green and the one you gave away
+    /// orange.
+    @ViewBuilder
+    private var raceBreakdown: some View {
+        if !raceSplits.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 6) {
+                    Image(systemName: "flag.checkered")
+                        .font(.system(size: 12, weight: .bold))
+                    Text("VS \(raceGhostName.uppercased())")
+                        .font(.system(size: 12, weight: .black, design: .rounded))
+                        .tracking(0.8)
+                }
+                .foregroundColor(.white.opacity(0.6))
+
+                ForEach(raceSplits) { split in
+                    HStack(spacing: 12) {
+                        Text(split.label)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.7))
+                            .frame(width: 26, alignment: .leading)
+
+                        Text(BestEffortStore.formatSeconds(split.yours))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundColor(.white)
+
+                        Text(BestEffortStore.formatSeconds(split.ghost))
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundColor(.white.opacity(0.45))
+
+                        Spacer()
+
+                        Text(deltaText(split.delta))
+                            .font(.system(size: 14, weight: .heavy, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundColor(split.delta >= 0 ? .green : .orange)
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white.opacity(0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    /// "+3s" / "−2s" — seconds gained on the ghost in that quarter.
+    private func deltaText(_ delta: TimeInterval) -> String {
+        let whole = Int(delta.rounded())
+        if whole == 0 { return "even" }
+        return whole > 0 ? "+\(whole)s" : "\(whole)s"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -67,6 +137,8 @@ struct WorkoutRecapView: View {
                     distanceSection
 
                     statsGrid
+
+                    raceBreakdown
 
                     goalCard
                 }

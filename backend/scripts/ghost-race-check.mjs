@@ -14,7 +14,10 @@
  */
 import { PostgresService } from "../dist/services/DbService.js";
 import { uploadWorkouts } from "../dist/services/workoutService.js";
-import { notifyGhostsBeaten } from "../dist/services/ghostService.js";
+import {
+  notifyGhostsBeaten,
+  getGhostHistory,
+} from "../dist/services/ghostService.js";
 
 const db = PostgresService.getInstance();
 const USER = "ghost-check-user";
@@ -174,6 +177,77 @@ async function main() {
       WHERE workout_id = 'ghost-friend-win'`,
   );
   check("a non-friend claim is never notified", stranger?.done, false);
+
+  // ── Losses ──
+  //
+  // The margin is SIGNED and every completed race is stored. That makes
+  // `IS NOT NULL` stop meaning "won", so each consequence gets an assertion.
+  await db.query(
+    `UPDATE workouts SET ghost_notified_at = NULL, ghost_friend_user_id = $1
+      WHERE workout_id = 'ghost-friend-win'`,
+    [FRIEND],
+  );
+  await uploadWorkouts(USER, [
+    workout("ghost-loss", {
+      ghostMarginSeconds: -7,
+      ghostTargetSeconds: 600,
+      ghostFriendUserId: FRIEND,
+    }),
+  ]);
+  const [loss] = await db.query(
+    `SELECT ghost_margin_seconds AS m FROM workouts WHERE workout_id = 'ghost-loss'`,
+  );
+  check("a loss is stored, signed", Number(loss?.m), -7);
+
+  // ...and survives the same metadata-less re-upload a win does.
+  await uploadWorkouts(USER, [workout("ghost-loss")]);
+  const [lossAfter] = await db.query(
+    `SELECT ghost_margin_seconds AS m FROM workouts WHERE workout_id = 'ghost-loss'`,
+  );
+  check("a loss survives a metadata-less re-upload", Number(lossAfter?.m), -7);
+
+  // A loss must never be notified — that would tell someone their ghost was
+  // caught when it wasn't.
+  await notifyGhostsBeaten(USER, ["ghost-loss"]);
+  const [lossNotified] = await db.query(
+    `SELECT (ghost_notified_at IS NOT NULL) AS done FROM workouts
+      WHERE workout_id = 'ghost-loss'`,
+  );
+  check("a loss is never notified", lossNotified?.done, false);
+
+  // Medals count WINS. This is the subtle one: without `> 0` the MAX returns a
+  // NEGATIVE for a user who has only ever lost, and COALESCE won't catch it.
+  await db.query(`DELETE FROM workouts WHERE user_id = $1 AND workout_id <> 'ghost-loss'`, [USER]);
+  const [onlyLosses] = await db.query(
+    `SELECT COUNT(*)::int AS count,
+            COALESCE(MAX(ghost_margin_seconds), 0)::int AS best
+       FROM workouts
+      WHERE user_id = $1 AND deleted_at IS NULL AND ghost_margin_seconds > 0`,
+    [USER],
+  );
+  check("a loss does not count as a win", onlyLosses.count, 0);
+  check("bestGhostMargin is 0, not negative", onlyLosses.best, 0);
+
+  // History keeps the losses — the one surface that should.
+  const history = await getGhostHistory(USER);
+  check("history includes the loss", history.length, 1);
+  check(
+    "history reports the friend's name",
+    history[0]?.friend_name,
+    "Ghost",
+  );
+
+  // An implausible loss is still dropped, same as an implausible win.
+  await uploadWorkouts(USER, [
+    workout("ghost-loss-absurd", {
+      ghostMarginSeconds: -99999,
+      ghostTargetSeconds: 600,
+    }),
+  ]);
+  const [absurdLoss] = await db.query(
+    `SELECT ghost_margin_seconds AS m FROM workouts WHERE workout_id = 'ghost-loss-absurd'`,
+  );
+  check("an implausible loss is dropped", absurdLoss?.m, null);
 
   await db.query(
     `DELETE FROM friendships WHERE user_id = $1 OR friend_id = $1`,

@@ -134,6 +134,57 @@ enum BestEffortStore {
         static let maxPlausibleSeconds: Double = 2400
     }
 
+    /// One quarter of a raced mile: your split beside the ghost's.
+    struct RaceSplit: Identifiable, Equatable {
+        /// 0-based quarter index.
+        let index: Int
+        let yours: TimeInterval
+        let ghost: TimeInterval
+
+        var id: Int { index }
+        var label: String { "Q\(index + 1)" }
+        /// Seconds GAINED on the ghost in this quarter (negative = lost).
+        var delta: TimeInterval { ghost - yours }
+    }
+
+    /// Quarter-by-quarter comparison of a finished mile against its ghost.
+    ///
+    /// This is the story of the race — "3 down at halfway, took it in the last
+    /// quarter" — and it's the one thing the live chip can never show, because
+    /// the chip only knows the running total.
+    ///
+    /// Same inputs and the same scaling as `recordFinish`, so the splits
+    /// describe the exact mile that was recorded rather than a second opinion.
+    /// Returns empty unless the curve is a genuine full mile from a standing
+    /// start — a recovered workout resumes mid-distance and has no history for
+    /// the quarters it never saw.
+    static func raceSplits(
+        rawCurve: [(t: TimeInterval, d: Double)],
+        distanceScale: Double,
+        ghost: BestMileEffort
+    ) -> [RaceSplit] {
+        let scale = distanceScale.isFinite && distanceScale > 0 ? distanceScale : 1.0
+        let curve = rawCurve.map { CurvePoint(t: $0.t, d: $0.d * scale) }
+        guard let first = curve.first, let last = curve.last,
+            first.d <= 0.05, last.d >= 1.0
+        else { return [] }
+
+        let mine = BestMileEffort(dateISO: "", seconds: last.t, curve: curve)
+        var splits: [RaceSplit] = []
+        for quarter in 0..<4 {
+            let from = Double(quarter) * 0.25
+            let to = from + 0.25
+            splits.append(
+                RaceSplit(
+                    index: quarter,
+                    yours: timeAtDistance(to, in: mine) - timeAtDistance(from, in: mine),
+                    ghost: timeAtDistance(to, in: ghost) - timeAtDistance(from, in: ghost)
+                )
+            )
+        }
+        return splits
+    }
+
     /// A resolved target: the effort to race plus how to talk about it.
     struct ResolvedGhost: Equatable {
         var target: GhostTarget

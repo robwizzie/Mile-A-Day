@@ -149,7 +149,10 @@ export async function notifyGhostsBeaten(
           AND racer.user_id = $1
           AND w.deleted_at IS NULL
           AND w.ghost_notified_at IS NULL
-          AND w.ghost_margin_seconds IS NOT NULL
+          -- Greater than zero, NOT merely non-null: the margin is signed and
+          -- losses are stored too. Telling someone their ghost was caught when
+          -- the racer actually lost would be the exact opposite of the truth.
+          AND w.ghost_margin_seconds > 0
           AND w.ghost_friend_user_id IS NOT NULL
           AND w.ghost_friend_user_id <> $1
           AND EXISTS (
@@ -201,4 +204,65 @@ export async function notifyGhostsBeaten(
       userId: racerId,
     });
   }
+}
+
+export interface GhostRaceRecord {
+  workout_id: string;
+  /** Signed: positive won by, negative lost by. */
+  margin_seconds: number;
+  /** The ghost's mile time. */
+  target_seconds: number;
+  /** `date` column, so a plain string is safe (no fractional-seconds trap). */
+  local_date: string;
+  workout_type: string | null;
+  /** Null unless the ghost was a friend's mile AND they're still visible. */
+  friend_name: string | null;
+}
+
+/**
+ * Every race this user has finished, newest first — WINS AND LOSSES.
+ *
+ * `IS NOT NULL` is correct here and nowhere else: history is the one surface
+ * that wants the losses. They're what makes it a record of racing rather than a
+ * trophy cabinet, and "2 seconds off" is the line most likely to get someone
+ * back out.
+ *
+ * The friend's NAME is re-gated on the friendship still existing and no block
+ * either way — you raced them, but that doesn't entitle you to their name
+ * forever. It degrades to null rather than dropping the row, so the race is
+ * still remembered as "a friend's mile".
+ */
+export async function getGhostHistory(
+  userId: string,
+  limit = 50,
+): Promise<GhostRaceRecord[]> {
+  return db.query<GhostRaceRecord>(
+    `SELECT w.workout_id,
+            w.ghost_margin_seconds AS margin_seconds,
+            w.ghost_target_seconds AS target_seconds,
+            to_char(w.local_date, 'YYYY-MM-DD') AS local_date,
+            w.workout_type,
+            CASE
+              WHEN f.user_id IS NULL THEN NULL
+              WHEN NOT EXISTS (
+                SELECT 1 FROM friendships fr
+                 WHERE fr.user_id = $1 AND fr.friend_id = f.user_id
+                   AND fr.status = 'accepted'
+              ) THEN NULL
+              WHEN EXISTS (
+                SELECT 1 FROM user_blocks b
+                 WHERE (b.blocker_id = $1 AND b.blocked_id = f.user_id)
+                    OR (b.blocker_id = f.user_id AND b.blocked_id = $1)
+              ) THEN NULL
+              ELSE COALESCE(f.first_name, f.username)
+            END AS friend_name
+       FROM workouts w
+       LEFT JOIN users f ON f.user_id = w.ghost_friend_user_id
+      WHERE w.user_id = $1
+        AND w.deleted_at IS NULL
+        AND w.ghost_margin_seconds IS NOT NULL
+      ORDER BY w.device_end_date DESC
+      LIMIT $2`,
+    [userId, Math.min(Math.max(limit, 1), 100)],
+  );
 }

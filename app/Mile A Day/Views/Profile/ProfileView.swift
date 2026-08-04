@@ -328,6 +328,10 @@ struct ProfileView: View {
         VStack(spacing: MADTheme.Spacing.lg) {
             performanceSection
             RacePRsSection(userId: userManager.currentUser.backendUserId)
+            // Beside the PRs rather than on its own screen: both answer "how
+            // fast am I", and a race history buried a tap deeper is a race
+            // history nobody reads. Self-scoped, so it's own-profile only.
+            GhostRacesSection()
             routeHeatmapCard
         }
     }
