@@ -55,6 +55,28 @@ struct FitnessSourcePlatform: Identifiable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
+/// A platform that either can't reach Apple Health at all, or only reaches it
+/// partially — and the honest reason why.
+///
+/// This exists because the failure is otherwise invisible and looks like OUR
+/// bug: a Samsung Health user simply never sees their workouts appear and has
+/// no way to find out that the iOS app has no Apple Health sync to give. Naming
+/// the reason costs nothing and turns a mystery into a decision.
+///
+/// Where a platform offers a data export, the answer is not an apology — it's
+/// the history importer, which recovers everything up to today.
+struct FitnessSourceLimitation: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let symbol: String
+    /// Partial = it connects, but not for everything the user expects.
+    let isPartial: Bool
+    let reason: String
+    let workaround: String
+    /// Whether the workaround is "export your data and import it here".
+    let offersImport: Bool
+}
+
 enum FitnessSourceCatalog {
     /// Apple's own sources (Watch, Fitness, the Health app itself). Grouped and
     /// labelled separately because there is nothing for the user to connect —
@@ -270,6 +292,75 @@ enum FitnessSourceCatalog {
                 "Turn on the connection and allow Workouts.",
             ],
             caveat: nil
+        ),
+    ]
+
+    /// Platforms that can't fully bridge into Apple Health, with the reason.
+    /// Kept factual — these are statements about what the software does, never
+    /// a dig at a competitor, which is both fairer and safer in review.
+    static let limitations: [FitnessSourceLimitation] = [
+        FitnessSourceLimitation(
+            id: "samsung",
+            name: "Samsung Health",
+            symbol: "iphone.slash",
+            isPartial: false,
+            reason:
+                "Samsung Health doesn't sync to Apple Health. Its iPhone app has never "
+                + "supported writing workouts there, so nothing it records can reach "
+                + "Mile A Day automatically.",
+            workaround:
+                "Export your Samsung Health data and import it here — that brings across "
+                + "everything up to today.",
+            offersImport: true
+        ),
+        FitnessSourceLimitation(
+            id: "googlefit",
+            name: "Google Fit",
+            symbol: "xmark.circle",
+            isPartial: false,
+            reason:
+                "Google has retired the Google Fit APIs, and its replacement, Health "
+                + "Connect, is Android-only — there's no iPhone version for us to read.",
+            workaround:
+                "If you use a Fitbit, the Google Health app now writes to Apple Health — "
+                + "connect that instead. Otherwise, export and import your history.",
+            offersImport: true
+        ),
+        FitnessSourceLimitation(
+            id: "huawei",
+            name: "Huawei Health",
+            symbol: "iphone.slash",
+            isPartial: false,
+            reason:
+                "Huawei Health doesn't write workouts to Apple Health on iPhone.",
+            workaround: "Export your activities and import them here.",
+            offersImport: true
+        ),
+        FitnessSourceLimitation(
+            id: "strava-partial",
+            name: "Strava",
+            symbol: "exclamationmark.triangle",
+            isPartial: true,
+            reason:
+                "Strava connects, but it only sends activities you recorded IN Strava. A "
+                + "run that synced into Strava from a watch never reaches Apple Health — "
+                + "which is why your Strava feed can look fuller than your streak here.",
+            workaround:
+                "Connect your watch's own app (Garmin Connect, COROS, Polar) as well. "
+                + "That's the copy that carries the workout.",
+            offersImport: false
+        ),
+        FitnessSourceLimitation(
+            id: "peloton-partial",
+            name: "Peloton",
+            symbol: "exclamationmark.triangle",
+            isPartial: true,
+            reason:
+                "Peloton connects fully, but only running and walking count toward a mile. "
+                + "Cycling and strength classes still reach Apple Health — they just "
+                + "aren't miles.",
+            workaround: "Tread runs and outdoor runs count normally.",
+            offersImport: false
         ),
     ]
 

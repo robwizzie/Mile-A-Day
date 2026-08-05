@@ -594,17 +594,32 @@ function duplicateExclusionStatements(
 			w.total_duration,
 			EXISTS (
 				SELECT 1 FROM workout_routes r WHERE r.workout_id = w.workout_id
-			) AS has_route
+			) AS has_route,
+			-- Is this row OLDER than the user's grandfather line, i.e. one that
+			-- pass 3 is forbidden to exclude?
+			(u.dedupe_since IS NOT NULL AND w.created_at < u.dedupe_since)
+				AS grandfathered
 		FROM workouts w
+		JOIN users u ON u.user_id = w.user_id
 		WHERE w.user_id = $1 AND w.local_date = $2::date
 			AND w.deleted_at IS NULL
 			AND w.source_bundle_id IS NOT NULL
 			AND w.total_duration > 0
 	),
 	-- Preference order: the copy we'd rather keep sorts FIRST.
+	--
+	-- "grandfathered" leads deliberately. A row older than dedupe_since can
+	-- never be excluded, so if it were the one designated as the duplicate the
+	-- pair would BOTH keep counting — the exact double-count this whole pass
+	-- exists to stop. Reachable as soon as history import exists: an imported
+	-- workout is new (excludable) and carries a route, so on "has_route" alone
+	-- it would win survivorship over the un-excludable native row it duplicates.
+	-- Keeping the un-excludable row means the other side is always actionable.
+	-- Route preference still decides within each grandfather class.
 	ranked AS (
 		SELECT *, ROW_NUMBER() OVER (
-			ORDER BY has_route DESC, created_at ASC, workout_id ASC
+			ORDER BY grandfathered DESC, has_route DESC,
+				created_at ASC, workout_id ASC
 		) AS pref
 		FROM day
 	),
