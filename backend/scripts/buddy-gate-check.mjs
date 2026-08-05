@@ -27,6 +27,7 @@ import {
 } from "../dist/services/buddyRecurringService.js";
 import {
   createSession,
+  getBuddyPartners,
   getInviteCandidates,
   startSession,
   updateSession,
@@ -428,6 +429,61 @@ async function main() {
 
   check("routines list for their owner", (await listRecurringWalks(HOST)).length, 1);
   check("routines are per-user", (await listRecurringWalks(PAL)).length, 0);
+
+  // ── 6. Miles walked together ────────────────────────────────────────
+  //
+  // Derived, never stored, so the risk is the JOIN shape rather than drift.
+  const together = await db.query(
+    `INSERT INTO buddy_sessions
+       (join_code, host_user_id, mode, activity_type, status, origin, local_date)
+     VALUES ('TGTHR1', $1, 'together', 'walking', 'completed', 'invite', CURRENT_DATE)
+     RETURNING id`,
+    [HOST],
+  );
+  const togetherId = together[0].id;
+  await db.query(
+    `INSERT INTO buddy_session_participants
+       (session_id, user_id, status, final_distance_miles)
+     VALUES ($1, $2, 'finished', 1.5), ($1, $3, 'finished', 1.4)`,
+    [togetherId, HOST, PAL],
+  );
+
+  const partners = await getBuddyPartners(HOST);
+  check("a finished walk shows up as a partner", partners.length, 1);
+  check("the partner is the right person", partners[0]?.user_id, PAL);
+  // YOUR miles, not the pooled 2.9 — a pooled figure double-counts the same
+  // walk from each side, so the two of you would see different numbers.
+  check("miles are the viewer's own", Number(partners[0]?.miles_together), 1.5);
+  check("walks are counted", partners[0]?.walks, 1);
+
+  // A walk the other person abandoned isn't a walk you took together.
+  await db.query(
+    `UPDATE buddy_session_participants SET status = 'left'
+      WHERE session_id = $1 AND user_id = $2`,
+    [togetherId, PAL],
+  );
+  check(
+    "an abandoned walk does not count",
+    (await getBuddyPartners(HOST)).length,
+    0,
+  );
+  await db.query(
+    `UPDATE buddy_session_participants SET status = 'finished'
+      WHERE session_id = $1 AND user_id = $2`,
+    [togetherId, PAL],
+  );
+
+  // Un-friend them and the history stops being readable — you walked with
+  // them, but that doesn't entitle you to their profile forever.
+  await db.query(
+    `DELETE FROM friendships WHERE user_id = $1 AND friend_id = $2`,
+    [HOST, PAL],
+  );
+  check(
+    "history is withheld once the friendship ends",
+    (await getBuddyPartners(HOST)).length,
+    0,
+  );
 
   await cleanup();
 

@@ -1582,3 +1582,76 @@ export async function sweepAbandonedSessions(): Promise<number> {
 
   return stale.length;
 }
+
+// ─── Shared history ─────────────────────────────────────────────────────
+
+export interface BuddyPartner {
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  profile_image_url: string | null;
+  /** Walks the two of you both finished. */
+  walks: number;
+  /** YOUR miles across those walks — not the pooled total. */
+  miles_together: number;
+  /** `date` column, so a plain string is safe. */
+  last_walk_date: string | null;
+}
+
+/**
+ * Who you actually walk with, and how much.
+ *
+ * Nothing in the app recorded that two people have walked forty miles together
+ * across twelve walks, which is the number that makes a shared habit feel like
+ * a thing you HAVE rather than a thing you keep re-arranging. Derived entirely
+ * from existing rows — no new writes, no counters to drift.
+ *
+ * Counts only sessions BOTH of you finished: a walk one person abandoned in the
+ * lobby isn't a walk you took together, and counting it would inflate the one
+ * number the feature is asking people to trust.
+ *
+ * The miles reported are the VIEWER's own, deliberately. A pooled total sounds
+ * bigger but double-counts the same walk from each side, so the two of you
+ * would see different numbers for the same history and neither would match the
+ * distance either actually covered. `final_distance_miles` is the reconciled
+ * figure stamped from the real synced workout; `distance_miles` is the live
+ * display value and is only a fallback.
+ *
+ * Names are re-gated on the friendship still existing and no block either way —
+ * you walked with them, but that doesn't entitle you to their profile forever.
+ */
+export async function getBuddyPartners(
+  userId: string,
+  limit = 10,
+): Promise<BuddyPartner[]> {
+  return db.query<BuddyPartner>(
+    `SELECT u.user_id, u.username, u.first_name, u.profile_image_url,
+            COUNT(*)::int AS walks,
+            ROUND(SUM(COALESCE(me.final_distance_miles, me.distance_miles))::numeric, 2)::float
+              AS miles_together,
+            to_char(MAX(s.local_date), 'YYYY-MM-DD') AS last_walk_date
+       FROM buddy_session_participants me
+       JOIN buddy_sessions s ON s.id = me.session_id
+       JOIN buddy_session_participants them
+         ON them.session_id = me.session_id AND them.user_id <> me.user_id
+       JOIN users u ON u.user_id = them.user_id
+      WHERE me.user_id = $1
+        AND me.status = 'finished'
+        AND them.status = 'finished'
+        AND s.status = 'completed'
+        AND EXISTS (
+          SELECT 1 FROM friendships f
+           WHERE f.user_id = $1 AND f.friend_id = u.user_id
+             AND f.status = 'accepted'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM user_blocks b
+           WHERE (b.blocker_id = $1 AND b.blocked_id = u.user_id)
+              OR (b.blocker_id = u.user_id AND b.blocked_id = $1)
+        )
+      GROUP BY u.user_id, u.username, u.first_name, u.profile_image_url
+      ORDER BY miles_together DESC, walks DESC
+      LIMIT $2`,
+    [userId, Math.min(Math.max(limit, 1), 50)],
+  );
+}

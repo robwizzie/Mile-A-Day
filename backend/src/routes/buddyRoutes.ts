@@ -18,6 +18,7 @@ import {
   createRoutineController,
   deleteRoutineController,
   listRoutinesController,
+  partnersController,
   updateRoutineController,
   updateSessionController,
 } from "../controllers/buddyController.js";
@@ -59,6 +60,9 @@ router.post("/sessions/:sessionId/finish", finishController);
 // spawns a real scheduled session from each one shortly before it's due, so
 // everything downstream is the existing lobby machinery. Self-scoped on the
 // token; ownership is re-checked in the service.
+// Miles walked together, per friend. The number that makes a shared habit
+// feel like a thing you have rather than one you keep re-arranging.
+router.get("/partners", partnersController);
 router.get("/recurring", listRoutinesController);
 router.post("/recurring", createRoutineController);
 router.patch("/recurring/:routineId", updateRoutineController);

@@ -523,3 +523,51 @@ struct BuddyRecurringWalk: Codable, Identifiable, Equatable {
 struct BuddyRoutinesResponse: Codable {
     let routines: [BuddyRecurringWalk]
 }
+
+// MARK: - Walking partners
+
+/// How much you've actually walked with one friend.
+///
+/// Derived server-side from finished sessions you both completed — no stored
+/// counter, so it can't drift. `milesTogether` is YOUR distance across those
+/// walks, not the pooled total: a pooled figure double-counts the same walk
+/// from each side, so the two of you would see different numbers for the same
+/// history and neither would match what either actually covered.
+struct BuddyPartner: Codable, Identifiable, Equatable {
+    let userId: String
+    let username: String?
+    let firstName: String?
+    let profileImageUrl: String?
+    let walks: Int
+    let milesTogether: Double
+    /// `date` column, so a plain string is safe.
+    let lastWalkDate: String?
+
+    var id: String { userId }
+
+    var displayName: String {
+        if let firstName, !firstName.isEmpty { return firstName }
+        if let username, !username.isEmpty { return username }
+        return "Friend"
+    }
+
+    /// "12 walks · 14.2 mi together"
+    var summary: String {
+        let walkWord = walks == 1 ? "walk" : "walks"
+        return "\(walks) \(walkWord) · \(String(format: "%.1f", milesTogether)) mi together"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case username
+        case firstName = "first_name"
+        case profileImageUrl = "profile_image_url"
+        case walks
+        case milesTogether = "miles_together"
+        case lastWalkDate = "last_walk_date"
+    }
+}
+
+struct BuddyPartnersResponse: Codable {
+    let partners: [BuddyPartner]
+}

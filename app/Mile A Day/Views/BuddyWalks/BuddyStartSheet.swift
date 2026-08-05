@@ -1,17 +1,17 @@
 import SwiftUI
 
-/// Start a buddy walk, or join one someone else started.
+/// Set up a buddy walk, and answer the ones you've been invited to.
 ///
-/// Start-vs-join is the FIRST thing the screen asks, as a segmented control at
-/// the top. Earlier passes buried joining behind a "#" toolbar glyph (nobody
-/// knew what it meant), then added a second join button in the footer — which
-/// left the sheet with two ways in and, worse, a primary button reading "Start
-/// with a share code" sitting directly above "Join with their code". Two
-/// code-flavoured buttons, opposite meanings. One switch at the top removes the
-/// ambiguity: pick a lane, then the rest of the screen is only about that lane.
+/// There is no join code any more. Codes existed so you could pull in someone
+/// the app couldn't name — but everyone you can walk with is already an
+/// accepted friend, so the code was a second, weaker path to a thing the
+/// friend list does better: it had to be read aloud or pasted, it could be
+/// mistyped, and it put a text field on the screen that most people read as the
+/// primary way in. Invites go out from the friend list; invites you receive
+/// land at the top of this sheet.
 ///
-/// Within the Start lane it opens on "Just Together" with no goal to set, so
-/// the common case — two friends about to walk — is pick-a-friend-and-go.
+/// Opens on "Just Together" with no goal to set, so the common case — two
+/// friends about to walk — is pick-a-friend-and-go.
 struct BuddyStartSheet: View {
     /// Handed back so the caller can push straight into the lobby.
     let onCreated: (BuddySessionState) -> Void
@@ -19,21 +19,11 @@ struct BuddyStartSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var buddy = BuddySessionService.shared
 
-    private enum Lane: String, CaseIterable {
-        case start, join
-        var title: String { self == .start ? "Start one" : "Join one" }
-        var icon: String { self == .start ? "plus.circle.fill" : "arrow.right.circle.fill" }
-    }
-
-    @State private var lane: Lane = .start
     @State private var mode: BuddyMode = .together
     @State private var goal: Double = BuddyMode.together.defaultGoal
     @State private var isRun = false
     @State private var selected: Set<String> = []
     @State private var isCreating = false
-    @State private var joinCode = ""
-    @State private var isJoining = false
-    @FocusState private var codeFocused: Bool
     /// Errors are mirrored into LOCAL state. Driving `.alert(isPresented:)`
     /// straight off `buddy.errorMessage` meant the binding's setter wrote to an
     /// @Published from inside a view update — "Publishing changes from within
@@ -101,10 +91,8 @@ struct BuddyStartSheet: View {
 
                 ScrollView {
                     VStack(spacing: MADTheme.Spacing.lg) {
-                        lanePicker
-                        if lane == .start { startLane } else { joinLane }
-                        // Clears the sticky footer (button + the reassurance
-                        // line under it, which the join lane doesn't render).
+                        startLane
+                        // Clears the sticky footer (button + the line under it).
                         Color.clear.frame(height: 140)
                     }
                     .padding(.horizontal, MADTheme.Spacing.md)
@@ -130,7 +118,9 @@ struct BuddyStartSheet: View {
                 // concurrently — they have nothing to do with each other.
                 async let candidates: Void = buddy.loadCandidates()
                 async let routines: Void = buddy.loadRoutines()
-                _ = await (candidates, routines)
+                async let partners: Void = buddy.loadPartners()
+                async let sessions: Void = buddy.refreshMySessions()
+                _ = await (candidates, routines, partners, sessions)
                 // Re-run once the list has landed: a cold launch can open this
                 // sheet before the prefetch finishes, and a remembered friend
                 // can only be re-selected once they're actually in the list.
@@ -157,89 +147,207 @@ struct BuddyStartSheet: View {
 
     @ViewBuilder
     private var startLane: some View {
+        invitesSection
         summaryHeader
         activityToggle
         modeSection
         if mode.needsGoal { goalSection }
         scheduleSection
         friendSection
+        partnersSection
         routinesSection
     }
 
-    // MARK: - Lane picker
+    // MARK: - Invitations
 
-    private var lanePicker: some View {
-        HStack(spacing: 4) {
-            ForEach(Lane.allCases, id: \.self) { option in
-                laneChip(option)
+    /// Walks you've been asked to join, at the very top.
+    ///
+    /// This is the piece that was missing entirely. `buddy.invites` has always
+    /// been fetched and stored, but the ONLY thing that ever read it was a count
+    /// badge on the dashboard pill — there was no list anywhere in the app. So a
+    /// buddy_invite push landed, the tap routed to the Dashboard, and the invite
+    /// was a number on a pill that opened a screen which didn't mention it. The
+    /// honest description of that is: you could be invited, and you could not
+    /// accept.
+    @ViewBuilder
+    private var invitesSection: some View {
+        if !buddy.invites.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                sectionTitle(
+                    buddy.invites.count == 1
+                        ? "You've been invited" : "\(buddy.invites.count) invites")
+                VStack(spacing: MADTheme.Spacing.sm) {
+                    ForEach(buddy.invites) { invite in
+                        inviteRow(invite)
+                    }
+                }
             }
         }
-        .padding(4)
-        .background(Capsule().fill(MADTheme.Colors.madWhite.opacity(0.10)))
     }
 
-    private func laneChip(_ option: Lane) -> some View {
-        let isOn = lane == option
-        return Button {
-            MADHaptics.tap()
-            // No withAnimation and no focus write here, deliberately. Animating
-            // this cross-fades two whole subtrees, and toggling focus from the
-            // chip drove a keyboard present/dismiss cycle on every tap — both
-            // land as input lag. The join lane focuses itself once it exists.
-            lane = option
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: option.icon).font(.system(size: 13, weight: .semibold))
-                Text(option.title).font(MADTheme.Typography.bodyBold)
+    private func inviteRow(_ invite: BuddySessionState) -> some View {
+        let host = invite.participants.first(where: { $0.isHost })
+        let tint = MADTheme.workoutColor(invite.activityType)
+
+        return VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            HStack(spacing: MADTheme.Spacing.md) {
+                AvatarView(
+                    name: host?.displayName ?? "Friend",
+                    imageURL: host?.profileImageUrl,
+                    size: 44
+                )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(host?.displayName ?? "A friend") invited you")
+                        .font(MADTheme.Typography.bodyBold)
+                        .foregroundStyle(MADTheme.Colors.madWhite)
+                        .lineLimit(1)
+                    Text(inviteDetail(invite))
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: Self.chipHeight)
-            .background(Capsule().fill(isOn ? accent : .clear))
-            .foregroundStyle(
-                isOn ? MADTheme.Colors.madWhite : MADTheme.Colors.madWhite.opacity(0.6))
+
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Button {
+                    MADHaptics.action()
+                    Task {
+                        do {
+                            try await buddy.join(sessionId: invite.id)
+                            if let joined = buddy.session {
+                                onCreated(joined)
+                                dismiss()
+                            }
+                        } catch {
+                            errorText =
+                                (error as? LocalizedError)?.errorDescription
+                                ?? "Couldn't join that walk."
+                        }
+                    }
+                } label: {
+                    Text("Join")
+                        .font(MADTheme.Typography.bodyBold)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                        .background(Capsule().fill(tint))
+                        .foregroundStyle(MADTheme.Colors.madWhite)
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    MADHaptics.tap()
+                    Task { await buddy.decline(sessionId: invite.id) }
+                } label: {
+                    Text("Not now")
+                        .font(MADTheme.Typography.body)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                        .background(
+                            Capsule().fill(MADTheme.Colors.madWhite.opacity(0.10)))
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.75))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(plainCard())
+        .overlay(
+            RoundedRectangle(
+                cornerRadius: MADTheme.CornerRadius.large, style: .continuous
+            )
+            .strokeBorder(tint.opacity(0.45), lineWidth: 1.5)
+        )
+    }
+
+    private func inviteDetail(_ invite: BuddySessionState) -> String {
+        let activity = invite.isRunning ? "Run" : "Walk"
+        if let goal = invite.goalValue, goal > 0 {
+            let unit = invite.mode == .raceTime ? "min" : "mi"
+            let number =
+                goal == goal.rounded()
+                ? "\(Int(goal))" : String(format: "%.1f", goal)
+            return "\(invite.mode.title) · \(number) \(unit) · \(activity)"
+        }
+        return "\(invite.mode.title) · \(activity)"
+    }
+
+    // MARK: - Partners
+
+    /// Miles you've actually put in together.
+    ///
+    /// The retention line. Nothing in the app recorded that two people had
+    /// walked forty miles across twelve walks, which is the number that turns a
+    /// shared habit into a thing you have rather than one you keep
+    /// re-arranging. Hidden until there IS a history — an empty "0 walks" panel
+    /// on someone's first day is discouraging, not motivating.
+    @ViewBuilder
+    private var partnersSection: some View {
+        if !buddy.partners.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                sectionTitle("You've walked with")
+                VStack(spacing: 0) {
+                    ForEach(Array(buddy.partners.prefix(5).enumerated()), id: \.element.id) {
+                        index, partner in
+                        if index > 0 {
+                            Divider().background(MADTheme.Colors.madWhite.opacity(0.08))
+                        }
+                        partnerRow(partner)
+                    }
+                }
+                .background(plainCard())
+            }
+        }
+    }
+
+    /// Tapping a partner picks them for THIS walk — the stat and the action are
+    /// the same gesture, so "we've walked 14 miles together" is one tap from
+    /// "let's go again".
+    private func partnerRow(_ partner: BuddyPartner) -> some View {
+        let canPick = buddy.candidates.contains { $0.userId == partner.userId }
+        return Button {
+            guard canPick else { return }
+            MADHaptics.tap()
+            withAnimation(MADTheme.Animation.quick) {
+                if selected.contains(partner.userId) {
+                    selected.remove(partner.userId)
+                } else {
+                    selected.insert(partner.userId)
+                }
+            }
+        } label: {
+            HStack(spacing: MADTheme.Spacing.md) {
+                AvatarView(
+                    name: partner.displayName,
+                    imageURL: partner.profileImageUrl,
+                    size: 36
+                )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(partner.displayName)
+                        .font(MADTheme.Typography.smallBold)
+                        .foregroundStyle(MADTheme.Colors.madWhite)
+                    Text(partner.summary)
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.55))
+                }
+                Spacer(minLength: 0)
+                if canPick {
+                    Image(
+                        systemName: selected.contains(partner.userId)
+                            ? "checkmark.circle.fill" : "circle"
+                    )
+                    .font(.system(size: 18))
+                    .foregroundStyle(
+                        selected.contains(partner.userId)
+                            ? accent : MADTheme.Colors.madWhite.opacity(0.25))
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    // MARK: - Join lane
-
-    private var joinLane: some View {
-        VStack(spacing: MADTheme.Spacing.lg) {
-            VStack(spacing: MADTheme.Spacing.sm) {
-                ZStack {
-                    Circle().fill(accent.opacity(0.18)).frame(width: 72, height: 72)
-                    Image(systemName: "number")
-                        .font(.system(size: 30, weight: .bold))
-                        .foregroundStyle(accent)
-                }
-                Text("Enter their code")
-                    .font(MADTheme.Typography.title3)
-                    .foregroundStyle(MADTheme.Colors.madWhite)
-                Text("Six characters, shown on the host's screen while they wait.")
-                    .font(MADTheme.Typography.subheadline)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.65))
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, MADTheme.Spacing.lg)
-            .padding(.horizontal, MADTheme.Spacing.md)
-            .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.extraLarge)
-
-            TextField("ABC123", text: $joinCode)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-                .multilineTextAlignment(.center)
-                .font(.system(size: 34, weight: .bold, design: .rounded))
-                .tracking(8)
-                .foregroundStyle(MADTheme.Colors.madWhite)
-                .focused($codeFocused)
-                .padding(MADTheme.Spacing.md)
-                .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.large)
-                .onChange(of: joinCode) { _, newValue in
-                    joinCode = String(newValue.uppercased().prefix(6))
-                }
-                .onAppear { codeFocused = true }
-        }
+        .disabled(!canPick)
     }
 
     // MARK: - Summary header
@@ -776,11 +884,9 @@ struct BuddyStartSheet: View {
                 // earlier label said "start", so tapping it felt like committing
                 // to walking RIGHT NOW — people backed out rather than find out.
                 // Nothing about the flow changed; it always opened a lobby.
-                if lane == .start {
-                    Text("Nobody moves until you start it.")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
-                }
+                Text("Nobody moves until you start it.")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
             }
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.bottom, MADTheme.Spacing.sm)
@@ -791,13 +897,13 @@ struct BuddyStartSheet: View {
     private var primaryButton: some View {
         Button {
             MADHaptics.action()
-            Task { lane == .start ? await create() : await join() }
+            Task { await create() }
         } label: {
             HStack(spacing: 8) {
-                if isCreating || isJoining {
+                if isCreating {
                     ProgressView().tint(MADTheme.Colors.madWhite)
                 } else {
-                    Image(systemName: lane == .start ? "figure.2" : "arrow.right.circle.fill")
+                    Image(systemName: "figure.2")
                         .font(.system(size: 16, weight: .semibold))
                 }
                 Text(primaryTitle)
@@ -813,10 +919,7 @@ struct BuddyStartSheet: View {
         .opacity(primaryDisabled ? 0.5 : 1)
     }
 
-    private var primaryDisabled: Bool {
-        if lane == .join { return joinCode.count < 6 || isJoining }
-        return isCreating
-    }
+    private var primaryDisabled: Bool { isCreating }
 
     /// Says CREATE, never START.
     ///
@@ -824,12 +927,7 @@ struct BuddyStartSheet: View {
     /// host taps Start in there — but every label it has worn said "start", so
     /// the screen promised something it didn't do. "Create lobby" describes the
     /// actual outcome, and the caption under the button closes the gap.
-    ///
-    /// It also never mentions the share code: an earlier label ("Start with a
-    /// share code") read as an INPUT and sat directly above the join field,
-    /// which genuinely does take one. The code is a consequence of creating.
     private var primaryTitle: String {
-        if lane == .join { return isJoining ? "Joining…" : "Join walk" }
         if isCreating { return "Creating…" }
         if selected.isEmpty { return "Create lobby" }
         return selected.count == 1 ? "Create & invite 1" : "Create & invite \(selected.count)"
@@ -930,21 +1028,4 @@ struct BuddyStartSheet: View {
         }
     }
 
-    private func join() async {
-        guard !isJoining else { return }
-        isJoining = true
-        defer { isJoining = false }
-        do {
-            try await buddy.join(code: joinCode)
-            if let session = buddy.session {
-                MADHaptics.success()
-                onCreated(session)
-                dismiss()
-            }
-        } catch {
-            MADHaptics.error()
-            errorText =
-                (error as? LocalizedError)?.errorDescription ?? "Couldn't join that walk."
-        }
-    }
 }
