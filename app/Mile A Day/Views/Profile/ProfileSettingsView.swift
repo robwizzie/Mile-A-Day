@@ -25,6 +25,7 @@ struct ProfileSettingsView: View {
     let isDeletingAccount: Bool
 
     @State private var showingPrivacySettings = false
+    @State private var showingImportHistory = false
 
     var body: some View {
         ScrollView {
@@ -44,6 +45,9 @@ struct ProfileSettingsView: View {
         .navigationBarTitleDisplayMode(.large)
         .sheet(isPresented: $showingPrivacySettings) {
             PrivacySettingsView()
+        }
+        .sheet(isPresented: $showingImportHistory) {
+            ImportHistoryView(userManager: userManager)
         }
         .alert("Sign Out", isPresented: $showingLogoutConfirmation) {
             Button("Cancel", role: .cancel) { }
@@ -120,6 +124,21 @@ struct ProfileSettingsView: View {
                     iconColor: Color.teal
                 )
             }
+
+            settingsDivider
+
+            // A sheet, not a NavigationLink: ImportHistoryView owns its own
+            // NavigationStack and Cancel/Done button, which a pushed
+            // destination would nest inside this one.
+            Button { showingImportHistory = true } label: {
+                MADSettingsRow(
+                    icon: "clock.arrow.circlepath",
+                    title: "Import Past Workouts",
+                    subtitle: "Bring in history from a Strava or Garmin export",
+                    iconColor: Color.indigo
+                )
+            }
+            .buttonStyle(.plain)
 
             settingsDivider
 

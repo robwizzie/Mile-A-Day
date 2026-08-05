@@ -60,6 +60,9 @@ struct FitnessConnectionsView: View {
     @State private var duplicates: DuplicateSummary = .empty
     @State private var isResolvingDuplicates = false
     @State private var resolveMessage: String?
+    @State private var selectedLimitation: FitnessSourceLimitation?
+    @State private var showingImport = false
+    @State private var searchText = ""
 
     var body: some View {
         ScrollView {
@@ -80,9 +83,15 @@ struct FitnessConnectionsView: View {
                     duplicatesCard
                 }
 
-                if !sourceService.availablePlatforms.isEmpty {
+                importHistoryCard
+
+                if !filteredPlatforms.isEmpty || !searchText.isEmpty {
                     availableSection
                 }
+
+                troubleshootingCard
+
+                limitationsSection
 
                 appleHealthFooter
             }
@@ -102,6 +111,149 @@ struct FitnessConnectionsView: View {
         }
         .sheet(item: $selectedPlatform) { platform in
             FitnessSourceSetupSheet(platform: platform)
+        }
+        .sheet(item: $selectedLimitation) { limitation in
+            FitnessLimitationSheet(
+                limitation: limitation,
+                onImport: {
+                    selectedLimitation = nil
+                    showingImport = true
+                }
+            )
+        }
+        .sheet(isPresented: $showingImport) {
+            ImportHistoryView(userManager: userManager)
+        }
+    }
+
+    /// Catalog entries matching the search box. The list runs to a dozen-plus
+    /// platforms, which is past the point where scanning beats typing.
+    private var filteredPlatforms: [FitnessSourcePlatform] {
+        let available = sourceService.availablePlatforms
+        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !query.isEmpty else { return available }
+        return available.filter { $0.name.lowercased().contains(query) }
+    }
+
+    /// The single most useful thing on this screen: connecting an app is
+    /// forward-only, and almost nobody expects that. Stated up front, with the
+    /// fix attached rather than left as a dead end.
+    private var importHistoryCard: some View {
+        Button { showingImport = true } label: {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(MADTheme.Colors.redGradient)
+                    Text("Bring in your past workouts")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.primary)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                Text(
+                    "Connecting an app only sends workouts from that moment on — it won't "
+                        + "backfill your history. Import a file from Strava, Garmin or "
+                        + "anywhere else to count everything you've already done."
+                )
+                .font(MADTheme.Typography.footnote)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var troubleshootingCard: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                ForEach(Self.troubleshootingTips, id: \.self) { tip in
+                    HStack(alignment: .top, spacing: MADTheme.Spacing.sm) {
+                        Text("•").foregroundColor(.secondary)
+                        Text(tip)
+                            .font(MADTheme.Typography.footnote)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+            .padding(.top, MADTheme.Spacing.sm)
+        } label: {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(Color.orange)
+                Text("Workouts not showing up?")
+                    .font(MADTheme.Typography.smallBold)
+                    .foregroundColor(.primary)
+            }
+        }
+        .tint(.secondary)
+        .padding(MADTheme.Spacing.md)
+        .madLiquidGlass()
+    }
+
+    private static let troubleshootingTips = [
+        "Check the app's own Apple Health setting is on — that switch, not this screen, is what actually sends data.",
+        "Make sure Mile A Day can read Workouts: Settings → Health → Data Access & Devices → Mile A Day.",
+        "Strava only sends activities recorded in Strava itself. If your run came from a watch, connect that watch's app too.",
+        "This list only counts the last 90 days, so an app you haven't used recently won't appear.",
+        "Workouts recorded before you connected an app never sync — use Bring in your past workouts above.",
+    ]
+
+    /// Why some big names aren't in the list above. Every entry names the real
+    /// reason, and offers the import where the platform has an export.
+    private var limitationsSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            sectionHeader("Why isn't my app here?", systemImage: "info.circle.fill")
+
+            VStack(spacing: 0) {
+                ForEach(FitnessSourceCatalog.limitations) { limitation in
+                    Button { selectedLimitation = limitation } label: {
+                        HStack(spacing: MADTheme.Spacing.md) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.secondary.opacity(0.15))
+                                    .frame(width: 36, height: 36)
+                                Image(systemName: limitation.symbol)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.secondary)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(limitation.name)
+                                    .font(MADTheme.Typography.smallBold)
+                                    .foregroundColor(.primary)
+                                Text(
+                                    limitation.isPartial
+                                        ? "Connects, with limits" : "Can't connect"
+                                )
+                                .font(MADTheme.Typography.caption)
+                                .foregroundColor(.secondary)
+                            }
+                            Spacer(minLength: MADTheme.Spacing.sm)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, MADTheme.Spacing.sm)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    if limitation.id != FitnessSourceCatalog.limitations.last?.id {
+                        Divider().padding(.leading, 52)
+                    }
+                }
+            }
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
         }
     }
 
@@ -203,9 +355,12 @@ struct FitnessConnectionsView: View {
 
             Spacer(minLength: MADTheme.Spacing.sm)
 
-            Image(systemName: "checkmark.circle.fill")
+            // Never a bare green check: a wired-up app that hasn't sent anything
+            // in a month reads as broken under one, and the user goes looking
+            // for a connection problem that isn't there.
+            Image(systemName: source.status.symbol)
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(MADTheme.Colors.success)
+                .foregroundColor(source.status.tint)
         }
         .padding(.vertical, MADTheme.Spacing.sm)
     }
@@ -213,7 +368,11 @@ struct FitnessConnectionsView: View {
     private func subtitle(for source: DetectedFitnessSource) -> String {
         let workouts = source.workoutCount == 1 ? "1 workout" : "\(source.workoutCount) workouts"
         let miles = String(format: "%.1f mi", source.totalMiles)
-        return "\(workouts) · \(miles) · last \(Self.relative(source.lastWorkoutDate))"
+        let recency = "last \(Self.relative(source.lastWorkoutDate))"
+        guard source.status == .quiet else {
+            return "\(workouts) · \(miles) · \(recency)"
+        }
+        return "\(source.status.label) · \(workouts) · \(recency)"
     }
 
     private static func relative(_ date: Date) -> String {
@@ -226,14 +385,42 @@ struct FitnessConnectionsView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             sectionHeader("Add another app", systemImage: "plus.circle.fill")
 
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.secondary)
+                TextField("Search apps", text: $searchText)
+                    .font(MADTheme.Typography.small)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.vertical, MADTheme.Spacing.sm)
+            .madLiquidGlass()
+
             VStack(spacing: 0) {
-                ForEach(sourceService.availablePlatforms) { platform in
+                if filteredPlatforms.isEmpty {
+                    Text("No apps match \"\(searchText)\". Check \"Why isn't my app here?\" below.")
+                        .font(MADTheme.Typography.footnote)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, MADTheme.Spacing.sm)
+                }
+                ForEach(filteredPlatforms) { platform in
                     Button { selectedPlatform = platform } label: {
                         availableRow(platform)
                     }
                     .buttonStyle(.plain)
 
-                    if platform.id != sourceService.availablePlatforms.last?.id {
+                    if platform.id != filteredPlatforms.last?.id {
                         Divider().padding(.leading, 52)
                     }
                 }
@@ -403,6 +590,79 @@ struct FitnessConnectionsView: View {
             duplicates = try await DuplicateWorkoutService.fetchSummary(userId: userId)
         } catch {
             resolveMessage = "Couldn't clean up right now. Try again later."
+        }
+    }
+}
+
+/// Why a given platform can't (fully) connect, and what to do instead.
+///
+/// The point of this screen is that a dead end always ends in an action: where
+/// the platform offers a data export, the answer is the history importer rather
+/// than an apology.
+struct FitnessLimitationSheet: View {
+    let limitation: FitnessSourceLimitation
+    let onImport: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
+                    VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                        Label(
+                            limitation.isPartial
+                                ? "Connects, with limits" : "Can't connect to Apple Health",
+                            systemImage: limitation.symbol
+                        )
+                        .font(MADTheme.Typography.smallBold)
+                        .foregroundColor(
+                            limitation.isPartial ? MADTheme.Colors.warning : .secondary)
+
+                        Text(limitation.reason)
+                            .font(MADTheme.Typography.subheadline)
+                            .foregroundColor(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(MADTheme.Spacing.md)
+                    .madLiquidGlass()
+
+                    VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                        Text("What you can do")
+                            .font(MADTheme.Typography.smallBold)
+                            .foregroundColor(.primary)
+                        Text(limitation.workaround)
+                            .font(MADTheme.Typography.subheadline)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(MADTheme.Spacing.md)
+                    .madLiquidGlass()
+
+                    if limitation.offersImport {
+                        Button(action: onImport) {
+                            Text("Import My History")
+                                .font(MADTheme.Typography.bodyBold)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, MADTheme.Spacing.md)
+                                .background(MADTheme.Colors.redGradient)
+                                .foregroundColor(.white)
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(MADTheme.Spacing.md)
+            }
+            .background(MADTheme.Colors.appBackgroundGradient)
+            .navigationTitle(limitation.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
     }
 }

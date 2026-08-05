@@ -18,6 +18,45 @@ struct DetectedFitnessSource: Identifiable, Hashable {
 
     var symbol: String { platform?.symbol ?? (isApple ? "applelogo" : "app.badge") }
     var tint: Color { platform?.tint ?? MADTheme.Colors.madRed }
+
+    /// "Connected" and "not connected" aren't enough states.
+    ///
+    /// An app that IS wired up but hasn't sent anything in weeks looks broken
+    /// under a green check — the user reads "connected" and then can't find
+    /// their workouts. Saying "quiet" instead tells them the connection is fine
+    /// and the missing data is the thing to chase.
+    var status: FitnessSourceStatus {
+        let age = Date().timeIntervalSince(lastWorkoutDate)
+        return age <= 30 * 24 * 60 * 60 ? .active : .quiet
+    }
+}
+
+enum FitnessSourceStatus {
+    case active
+    case quiet
+
+    var label: String {
+        switch self {
+        case .active: return "Sending"
+        case .quiet: return "No recent workouts"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .active: return "checkmark.circle.fill"
+        // Plain clock, not one of the badged variants — those are SF Symbols 5+
+        // and render as a blank box on the iOS 17 deployment target.
+        case .quiet: return "clock.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .active: return MADTheme.Colors.success
+        case .quiet: return MADTheme.Colors.warning
+        }
+    }
 }
 
 /// Discovers which apps are feeding Apple Health, so the Connections screen can
