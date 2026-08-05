@@ -745,43 +745,33 @@ struct FitnessSourceSetupSheet: View {
                         .madLiquidGlass()
                     }
 
-                    // Two paths on purpose. The primary tries to launch the app
-                    // directly, which is the fast route when its URL scheme is
-                    // right — but those schemes are vendor-controlled and can't
-                    // be verified from here, so the secondary is an explicit,
-                    // always-correct link to the App Store product page (which
-                    // itself shows OPEN when the app is installed). The user is
-                    // never left without a working destination.
-                    Button {
-                        FitnessSourceLauncher.open(platform)
-                    } label: {
-                        Text("Open \(platform.name)")
-                            .font(MADTheme.Typography.bodyBold)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, MADTheme.Spacing.md)
-                            .background(MADTheme.Colors.redGradient)
-                            .foregroundColor(.white)
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-
+                    // ONE destination, and it's the App Store product page.
+                    // There was a "launch the app directly" button above this
+                    // using a custom URL scheme; schemes can be registered by
+                    // anyone, so a guessed one opened a completely unrelated
+                    // app. The product page always resolves to the right app and
+                    // carries its own Open button when it's installed.
                     Button {
                         FitnessSourceLauncher.openAppStore(for: platform)
                     } label: {
-                        HStack(spacing: MADTheme.Spacing.xs) {
-                            Image(systemName: "arrow.up.forward.app")
-                                .font(.system(size: 12, weight: .semibold))
+                        HStack(spacing: MADTheme.Spacing.sm) {
+                            Image(systemName: "arrow.up.forward.app.fill")
+                                .font(.system(size: 15, weight: .semibold))
                             Text("Find \(platform.name) in the App Store")
-                                .font(MADTheme.Typography.small)
+                                .font(MADTheme.Typography.bodyBold)
                         }
-                        .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, MADTheme.Spacing.md)
+                        .background(MADTheme.Colors.redGradient)
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
 
                     Text(
-                        "Once it's on, your workouts appear here automatically — usually "
-                            + "within a few minutes of finishing."
+                        "Already have it? Tap Open on the App Store page. Once the Health "
+                            + "setting is on, your workouts appear here automatically — "
+                            + "usually within a few minutes of finishing."
                     )
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(.secondary)
