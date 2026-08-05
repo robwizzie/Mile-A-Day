@@ -15,6 +15,10 @@ import {
   recapController,
   sessionStateController,
   startSessionController,
+  createRoutineController,
+  deleteRoutineController,
+  listRoutinesController,
+  updateRoutineController,
   updateSessionController,
 } from "../controllers/buddyController.js";
 
@@ -50,5 +54,14 @@ router.post("/sessions/:sessionId/start", startSessionController);
 router.patch("/sessions/:sessionId", updateSessionController);
 router.post("/sessions/:sessionId/progress", progressController);
 router.post("/sessions/:sessionId/finish", finishController);
+
+// Standing walks ("us, 6pm, weekdays"). A TEMPLATE, not a session: the cron
+// spawns a real scheduled session from each one shortly before it's due, so
+// everything downstream is the existing lobby machinery. Self-scoped on the
+// token; ownership is re-checked in the service.
+router.get("/recurring", listRoutinesController);
+router.post("/recurring", createRoutineController);
+router.patch("/recurring/:routineId", updateRoutineController);
+router.delete("/recurring/:routineId", deleteRoutineController);
 
 export default router;

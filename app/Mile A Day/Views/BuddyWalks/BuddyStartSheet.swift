@@ -44,6 +44,9 @@ struct BuddyStartSheet: View {
     /// default — starting now is overwhelmingly the common case.
     @State private var isScheduled = false
     @State private var scheduledDate = Date().addingTimeInterval(60 * 60)
+    /// Weekdays this walk repeats on, 0 = Sunday (matching the server's
+    /// EXTRACT(DOW)). Empty = a one-off, which is the default.
+    @State private var repeatDays: Set<Int> = []
 
     private var activityType: String { isRun ? "running" : "walking" }
     private var accent: Color { MADTheme.workoutColor(activityType) }
@@ -109,6 +112,7 @@ struct BuddyStartSheet: View {
                 // so the FIRST one lands as fast as the rest.
                 MADHaptics.warmUp()
                 await buddy.loadCandidates()
+                await buddy.loadRoutines()
             }
             .onChange(of: buddy.errorMessage) { _, newValue in
                 guard let newValue else { return }
@@ -137,6 +141,7 @@ struct BuddyStartSheet: View {
         if mode.needsGoal { goalSection }
         scheduleSection
         friendSection
+        routinesSection
     }
 
     // MARK: - Lane picker
@@ -496,6 +501,146 @@ struct BuddyStartSheet: View {
                 .frame(maxWidth: .infinity)
                 .background(plainCard(MADTheme.CornerRadius.medium))
                 .foregroundStyle(MADTheme.Colors.madWhite)
+
+                repeatRow
+            }
+        }
+    }
+
+    /// Make it a habit.
+    ///
+    /// Offered only once a time is set, because that's the moment it becomes a
+    /// plan rather than an impulse — and because the routine's time IS this
+    /// picker's time-of-day. Picking no days is the normal case and costs
+    /// nothing; picking some creates a standing walk alongside this one.
+    private var repeatRow: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
+            HStack(spacing: 6) {
+                Image(systemName: "repeat")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(
+                        repeatDays.isEmpty ? MADTheme.Colors.madWhite.opacity(0.6) : accent)
+                Text("Repeat weekly")
+                    .font(MADTheme.Typography.smallBold)
+                    .foregroundStyle(MADTheme.Colors.madWhite)
+                Spacer(minLength: 0)
+                if !repeatDays.isEmpty {
+                    Text(scheduledDate, format: .dateTime.hour().minute())
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(accent)
+                }
+            }
+
+            HStack(spacing: 4) {
+                // 0 = Sunday, matching the server's EXTRACT(DOW).
+                ForEach(0..<7, id: \.self) { day in
+                    dayChip(day)
+                }
+            }
+
+            Text(
+                repeatDays.isEmpty
+                    ? "Just this once."
+                    : "We'll set this up every week and invite the same people."
+            )
+            .font(MADTheme.Typography.caption)
+            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(plainCard(MADTheme.CornerRadius.medium))
+    }
+
+    private func dayChip(_ day: Int) -> some View {
+        // Single letters, Sunday-first. Deliberately not localized weekday
+        // symbols: those are 3 letters in most locales and seven of them will
+        // not fit a phone width.
+        let letters = ["S", "M", "T", "W", "T", "F", "S"]
+        let isOn = repeatDays.contains(day)
+        return Button {
+            MADHaptics.tap()
+            withAnimation(MADTheme.Animation.quick) {
+                if isOn { repeatDays.remove(day) } else { repeatDays.insert(day) }
+            }
+        } label: {
+            Text(letters[day])
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .frame(maxWidth: .infinity)
+                .frame(height: 34)
+                .background(
+                    Circle().fill(isOn ? accent : MADTheme.Colors.madWhite.opacity(0.10))
+                )
+                .foregroundStyle(
+                    isOn ? MADTheme.Colors.madWhite : MADTheme.Colors.madWhite.opacity(0.65))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Standing walks already set up, so the sheet is also where you turn one
+    /// off. Hidden entirely when there are none — an empty list here would just
+    /// be noise on the screen someone opens to start walking.
+    @ViewBuilder
+    private var routinesSection: some View {
+        if !buddy.routines.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                sectionTitle("Your routines")
+                VStack(spacing: 0) {
+                    ForEach(Array(buddy.routines.enumerated()), id: \.element.id) { index, routine in
+                        if index > 0 {
+                            Divider().background(MADTheme.Colors.madWhite.opacity(0.08))
+                        }
+                        routineRow(routine)
+                    }
+                }
+                .background(plainCard())
+            }
+        }
+    }
+
+    private func routineRow(_ routine: BuddyRecurringWalk) -> some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            Image(systemName: routine.isRunning ? "figure.run" : "figure.walk")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(
+                    routine.isActive
+                        ? MADTheme.workoutColor(routine.activityType)
+                        : MADTheme.Colors.madWhite.opacity(0.35)
+                )
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(routine.daysText) · \(routine.timeText)")
+                    .font(MADTheme.Typography.smallBold)
+                    .foregroundStyle(
+                        MADTheme.Colors.madWhite.opacity(routine.isActive ? 1 : 0.5))
+                Text(routine.mode.title)
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+            }
+
+            Spacer(minLength: MADTheme.Spacing.sm)
+
+            Toggle(
+                "",
+                isOn: Binding(
+                    get: { routine.isActive },
+                    set: { on in Task { await buddy.setRoutineActive(routine.id, isActive: on) } }
+                )
+            )
+            .labelsHidden()
+            .tint(accent)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        // Delete lives in a context menu rather than a visible button: it's
+        // rare, destructive, and the toggle beside it already covers "not this
+        // week" without losing the setup.
+        .contextMenu {
+            Button(role: .destructive) {
+                Task { await buddy.deleteRoutine(routine.id) }
+            } label: {
+                Label("Delete routine", systemImage: "trash")
             }
         }
     }
@@ -704,6 +849,20 @@ struct BuddyStartSheet: View {
                 origin: selected.isEmpty ? .code : .invite,
                 scheduledStartAt: isScheduled ? scheduledDate : nil
             )
+            // The routine is a SEPARATE object, created after the session and
+            // deliberately not inside its failure path: if this throws, the
+            // walk they just made still exists and still opens. Losing the
+            // repeat is recoverable; losing the walk is not.
+            if isScheduled, !repeatDays.isEmpty {
+                try? await buddy.createRoutine(
+                    mode: mode,
+                    goalValue: mode.needsGoal ? goal : nil,
+                    activityType: activityType,
+                    inviteUserIds: Array(selected),
+                    daysOfWeek: Array(repeatDays),
+                    at: scheduledDate
+                )
+            }
             MADHaptics.success()
             onCreated(state)
             dismiss()

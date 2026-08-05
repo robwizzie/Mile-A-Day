@@ -465,3 +465,61 @@ struct FriendOutNow: Codable, Identifiable, Equatable {
 struct FriendsOutNowResponse: Codable {
     let friends: [FriendOutNow]
 }
+
+// MARK: - Recurring walks
+
+/// A standing buddy walk — "us, 6pm, weekdays".
+///
+/// A TEMPLATE, not a session. The server spawns a real scheduled session from
+/// it shortly before each occurrence, so nothing downstream (lobby, countdown,
+/// recap) knows a routine was involved.
+///
+/// `minutesOfDay` is LOCAL wall-clock minutes since midnight, paired with an
+/// IANA zone, never an instant — "6pm on weekdays" has to survive DST, and a
+/// stored timestamp would drift an hour twice a year.
+struct BuddyRecurringWalk: Codable, Identifiable, Equatable {
+    let id: String
+    let mode: BuddyMode
+    let goalValue: Double?
+    let activityType: String
+    let daysOfWeek: [Int]
+    let minutesOfDay: Int
+    let isActive: Bool
+
+    var isRunning: Bool { activityType == "running" }
+
+    /// "6:00 PM", in the reader's own locale.
+    var timeText: String {
+        var components = DateComponents()
+        components.hour = minutesOfDay / 60
+        components.minute = minutesOfDay % 60
+        guard let date = Calendar.current.date(from: components) else { return "" }
+        return date.formatted(date: .omitted, time: .shortened)
+    }
+
+    /// "Weekdays" / "Every day" / "Mon, Wed, Fri" — 0 = Sunday, matching the
+    /// server's `EXTRACT(DOW)`.
+    var daysText: String {
+        let days = Set(daysOfWeek)
+        if days == Set(0...6) { return "Every day" }
+        if days == Set(1...5) { return "Weekdays" }
+        if days == Set([0, 6]) { return "Weekends" }
+        let names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        return daysOfWeek.sorted().compactMap { names.indices.contains($0) ? names[$0] : nil }
+            .joined(separator: ", ")
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case mode
+        case goalValue = "goal_value"
+        case activityType = "activity_type"
+        case daysOfWeek = "days_of_week"
+        case minutesOfDay = "minutes_of_day"
+        case isActive = "is_active"
+    }
+}
+
+struct BuddyRoutinesResponse: Codable {
+    let routines: [BuddyRecurringWalk]
+}

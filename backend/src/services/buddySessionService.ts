@@ -2,6 +2,7 @@ import { PostgresService } from "./DbService.js";
 import { areFriends } from "./friendshipService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { shouldSendNotification } from "./notificationSettingsService.js";
+import { CLIENT_FEATURES, userSupports } from "./clientFeatures.js";
 import { evaluateSocialBadgesForUser } from "./badgeService.js";
 import { logError } from "./errorLogService.js";
 import { BadRequestError } from "../errors/Errors.js";
@@ -273,7 +274,7 @@ export interface CreateSessionInput {
  * demand a goal on the way through, and switching back has to drop it. Two
  * copies of that rule would let the lobby write a state create would reject.
  */
-function validateGoal(mode: BuddyMode, raw: number | null): number | null {
+export function validateGoal(mode: BuddyMode, raw: number | null): number | null {
   if (mode === "together") return null;
   if (raw === null || !(raw > 0)) throw new BadRequestError("goal_required");
   if (mode === "race_time" && raw > 24 * 60) {
@@ -441,6 +442,11 @@ export async function joinSession(
     }
   }
 
+  // Hoisted out of the transaction so the notify decision below can read it:
+  // only a genuine arrival is worth a push. Re-joining a session you're already
+  // in (a reconnect, a second tap) must stay silent.
+  let previous: string | null = null;
+
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
@@ -453,7 +459,7 @@ export async function joinSession(
         WHERE session_id = $1 AND user_id = $2`,
       [sessionId, userId],
     );
-    const previous = already.rows[0]?.status ?? null;
+    previous = already.rows[0]?.status ?? null;
 
     // Only count people occupying a slot. 'left'/'declined' free theirs.
     if (previous === null || previous === "left" || previous === "declined") {
@@ -496,9 +502,78 @@ export async function joinSession(
 
   await recordEvent(sessionId, userId, "joined");
 
+  // Tell the host somebody actually showed up. Without this the only way to
+  // learn your invite was accepted is to sit watching the lobby repaint — so a
+  // host who pockets their phone finds out by texting to ask, which is the
+  // coordination this feature exists to remove.
+  if (
+    previous === null ||
+    previous === "invited" ||
+    previous === "left" ||
+    previous === "declined"
+  ) {
+    void notifyHostOfJoin(
+      sessionId,
+      session.host_user_id,
+      userId,
+      session.status,
+    );
+  }
+
   const fresh = await getSessionRow(sessionId);
   if (!fresh) throw new BadRequestError("session_not_found");
   return toState(fresh, await loadParticipants(sessionId, fresh.host_user_id));
+}
+
+/**
+ * "Sam joined your walk" — to the HOST only.
+ *
+ * Only the host, deliberately: in a five-person lobby, notifying everyone on
+ * every arrival means four people get four banners for something they can
+ * already see on screen. The host is the one who has to decide when to start,
+ * so they're the one who needs to know without looking.
+ *
+ * Uses `buddy_joined`, which every build carrying the buddy screens already
+ * routes (`MainTabView`) — the type existed and simply had nothing sending it.
+ * Still gated on `buddy_walks_v1` so a build without those screens can't be
+ * handed a push that opens nothing.
+ *
+ * Never throws: a join must not fail because a push didn't go out.
+ */
+async function notifyHostOfJoin(
+  sessionId: string,
+  hostUserId: string | null,
+  joinerId: string,
+  sessionStatus: string,
+): Promise<void> {
+  if (!hostUserId || hostUserId === joinerId) return;
+  try {
+    if (!(await shouldSendNotification(hostUserId, joinerId, "buddy"))) return;
+    if (!(await userSupports(hostUserId, CLIENT_FEATURES.buddyWalksV1))) return;
+
+    const rows = await db.query<{
+      first_name: string | null;
+      username: string | null;
+    }>(`SELECT first_name, username FROM users WHERE user_id = $1`, [joinerId]);
+    const name = rows[0]?.first_name || rows[0]?.username || "A friend";
+
+    await sendPush(hostUserId, {
+      title: "Buddy Walk",
+      body:
+        sessionStatus === "active"
+          ? `${name} joined your walk`
+          : `${name} is in — start when you're ready`,
+      type: "buddy_joined",
+      // String-valued only: shipped builds decode the inbox as
+      // [String: String], so one number breaks the whole decode.
+      data: { session_id: sessionId, joiner_user_id: joinerId },
+    });
+  } catch (err) {
+    void logError("buddy", "failed to notify host of buddy join", {
+      userId: hostUserId,
+      context: { sessionId, error: String(err) },
+    });
+  }
 }
 
 export async function declineSession(

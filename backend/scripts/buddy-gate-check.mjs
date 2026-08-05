@@ -20,6 +20,12 @@ import { PostgresService } from "../dist/services/DbService.js";
 import { buddySessionsEnabled } from "../dist/services/buddyFeatures.js";
 import { registerDevice } from "../dist/controllers/deviceController.js";
 import {
+  createRecurringWalk,
+  listRecurringWalks,
+  spawnDueRecurringWalks,
+  updateRecurringWalk,
+} from "../dist/services/buddyRecurringService.js";
+import {
   createSession,
   getInviteCandidates,
   startSession,
@@ -313,6 +319,115 @@ async function main() {
     await errorCode(() => updateSession(session.id, HOST, { goalValue: 5 })),
     "session_not_editable",
   );
+
+  // ── 5. Recurring walks ──────────────────────────────────────────────
+  //
+  // The timezone arithmetic is the risk here: "6pm on weekdays" is a LOCAL
+  // wall-clock rule, and a stored instant would drift an hour twice a year.
+  // So every assertion drives the spawn through the host's own zone.
+  const TZ = "America/New_York";
+  const nowLocal = new Date(
+    new Date().toLocaleString("en-US", { timeZone: TZ }),
+  );
+  const localMinutes = nowLocal.getHours() * 60 + nowLocal.getMinutes();
+  const localDow = nowLocal.getDay();
+
+  // Due RIGHT NOW: inside the [start-15, start+10) spawn window.
+  const routine = await createRecurringWalk(HOST, {
+    mode: "together",
+    activityType: "walking",
+    inviteUserIds: [PAL, OPTED_OUT],
+    daysOfWeek: [localDow],
+    minutesOfDay: localMinutes,
+    timezone: TZ,
+  });
+  check("a routine is stored", routine.days_of_week?.length, 1);
+
+  const spawned = await spawnDueRecurringWalks();
+  check("a due routine spawns exactly one walk", spawned, 1);
+
+  const spawnedRows = await db.query(
+    `SELECT id, scheduled_start_at FROM buddy_sessions
+      WHERE host_user_id = $1 AND scheduled_start_at IS NOT NULL`,
+    [HOST],
+  );
+  check("the spawned walk is scheduled", spawnedRows.length, 1);
+
+  // The claim is what stops overlapping containers double-spawning on deploy.
+  check("a second sweep does not re-spawn", await spawnDueRecurringWalks(), 0);
+
+  // Invitees are re-validated at spawn, not trusted from when the routine was
+  // set up — a routine outlives the friendships that created it.
+  const spawnedInvites = await db.query(
+    `SELECT user_id FROM buddy_session_participants WHERE session_id = $1`,
+    [spawnedRows[0].id],
+  );
+  const spawnedIds = new Set(spawnedInvites.map((r) => r.user_id));
+  check("a spawned walk invites an eligible friend", spawnedIds.has(PAL), true);
+  check(
+    "a spawned walk drops an opted-out friend",
+    spawnedIds.has(OPTED_OUT),
+    false,
+  );
+
+  // Turning it off must actually stop it.
+  await db.query(
+    `UPDATE buddy_recurring_walks SET last_spawned_date = NULL WHERE id = $1`,
+    [routine.id],
+  );
+  await updateRecurringWalk(HOST, routine.id, { isActive: false });
+  check("a paused routine never spawns", await spawnDueRecurringWalks(), 0);
+
+  // A routine for a DIFFERENT weekday must not fire today.
+  await updateRecurringWalk(HOST, routine.id, {
+    isActive: true,
+    daysOfWeek: [(localDow + 3) % 7],
+  });
+  check("a routine for another day never spawns", await spawnDueRecurringWalks(), 0);
+
+  // ...and one whose time has long passed is skipped rather than fired stale.
+  await updateRecurringWalk(HOST, routine.id, {
+    daysOfWeek: [localDow],
+    // 3 hours ago, well outside the 10-minute grace.
+    minutesOfDay: (localMinutes + 1440 - 180) % 1440,
+  });
+  check(
+    "a routine hours past its time is skipped",
+    await spawnDueRecurringWalks(),
+    0,
+  );
+
+  // A zone Postgres can't resolve would raise inside the cron and abort the
+  // sweep for every OTHER user, so it's refused at write time.
+  check(
+    "an invalid timezone is rejected",
+    await errorCode(() =>
+      createRecurringWalk(HOST, {
+        mode: "together",
+        activityType: "walking",
+        daysOfWeek: [1],
+        minutesOfDay: 600,
+        timezone: "Mars/Olympus_Mons",
+      }),
+    ),
+    "invalid_timezone",
+  );
+  check(
+    "an empty day list is rejected",
+    await errorCode(() =>
+      createRecurringWalk(HOST, {
+        mode: "together",
+        activityType: "walking",
+        daysOfWeek: [],
+        minutesOfDay: 600,
+        timezone: TZ,
+      }),
+    ),
+    "invalid_days",
+  );
+
+  check("routines list for their owner", (await listRecurringWalks(HOST)).length, 1);
+  check("routines are per-user", (await listRecurringWalks(PAL)).length, 0);
 
   await cleanup();
 
