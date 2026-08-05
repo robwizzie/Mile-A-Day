@@ -2083,3 +2083,73 @@ export const postCoauthors = pgTable(
     ),
   ],
 );
+
+/**
+ * A standing buddy walk — "us, 6pm, weekdays".
+ *
+ * The point of the feature is a habit, and until now every occurrence meant
+ * rebuilding the lobby and re-inviting from scratch. This is the template; the
+ * cron spawns a real `buddy_sessions` row from it shortly before each due time
+ * and everything downstream (the scheduled-start promotion, the heads-up push,
+ * the lobby) is the existing machinery unchanged.
+ *
+ * Time is stored as LOCAL wall-clock minutes plus an IANA zone, never as a
+ * timestamp: "6pm on weekdays" has to survive DST, and a stored instant would
+ * drift an hour twice a year. `minutes_of_day` rather than a `time` column
+ * because the cron does arithmetic on it.
+ */
+export const buddyRecurringWalks = pgTable(
+  "buddy_recurring_walks",
+  {
+    id: varchar({ length: 32 })
+      .default(sql`replace((gen_random_uuid())::text, '-'::text, ''::text)`)
+      .primaryKey()
+      .notNull(),
+    hostUserId: text("host_user_id").notNull(),
+    mode: text().notNull(),
+    goalValue: doublePrecision("goal_value"),
+    activityType: varchar("activity_type", { length: 50 }).notNull(),
+    // Who gets invited to every occurrence. Re-validated at spawn time against
+    // friendship/block/enrollment/opt-out — a routine set up months ago must
+    // not keep inviting someone who has since unfriended or opted out.
+    inviteUserIds: text("invite_user_ids")
+      .array()
+      .default(sql`'{}'::text[]`)
+      .notNull(),
+    // 0=Sunday … 6=Saturday, matching Postgres EXTRACT(DOW).
+    daysOfWeek: integer("days_of_week").array().notNull(),
+    /** Local wall-clock minutes since midnight, 0…1439. */
+    minutesOfDay: integer("minutes_of_day").notNull(),
+    timezone: text().notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    // The host's LOCAL date we last spawned for. Claimed before the spawn, so
+    // overlapping containers on a deploy can't create the walk twice.
+    lastSpawnedDate: date("last_spawned_date"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_buddy_recurring_active").using(
+      "btree",
+      table.isActive.asc().nullsLast(),
+      table.hostUserId.asc().nullsLast(),
+    ),
+    foreignKey({
+      columns: [table.hostUserId],
+      foreignColumns: [users.userId],
+      name: "buddy_recurring_walks_host_user_id_fkey",
+    }).onDelete("cascade"),
+    check(
+      "buddy_recurring_walks_mode_check",
+      sql`mode = ANY (ARRAY['together'::text, 'coop_goal'::text, 'race_goal'::text, 'race_time'::text])`,
+    ),
+    check(
+      "buddy_recurring_walks_minutes_check",
+      sql`minutes_of_day >= 0 AND minutes_of_day <= 1439`,
+    ),
+  ],
+);

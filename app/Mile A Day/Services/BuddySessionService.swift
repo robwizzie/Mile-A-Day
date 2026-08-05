@@ -83,6 +83,30 @@ final class BuddySessionService: ObservableObject {
     /// Foreground poll cadence. Fast enough that a friend's number never feels
     /// frozen, slow enough not to matter for battery over an hour.
     private let pollInterval: TimeInterval = 5
+
+    /// Consecutive polls that returned an unchanged `state_version`.
+    ///
+    /// Drives the backoff below. Reset in `apply` the moment anything moves.
+    private var quietPolls = 0
+
+    /// How long to wait before the next poll.
+    ///
+    /// A lobby is not a chat: nobody joins within 5 seconds of being invited,
+    /// and the common case is a room left open while the host waits for someone
+    /// to text back. At a flat 5s that's 720 requests an hour, per participant,
+    /// on cellular — for a screen where nothing is happening. Backing off after
+    /// ~30s and ~2min of silence costs nothing anyone can perceive, because the
+    /// instant something DOES change the counter resets and the next poll is
+    /// fast again.
+    ///
+    /// Never backs off while a walk is actually running — the roster is the
+    /// point then, and progress reports carry it anyway (see `pollOnce`).
+    private var nextPollDelay: TimeInterval {
+        if session?.status == .active { return pollInterval }
+        if quietPolls < 6 { return pollInterval }       // first ~30s
+        if quietPolls < 24 { return 15 }                // out to ~5 min
+        return 30
+    }
     /// Minimum gap between progress reports, independent of the tracker's 1 Hz
     /// UI tick.
     private let progressInterval: TimeInterval = 5
@@ -207,6 +231,85 @@ final class BuddySessionService: ObservableObject {
         } catch {
             candidates = []
             print("[BuddySessionService] loadCandidates failed: \(error)")
+        }
+    }
+
+    // MARK: - Routines
+
+    /// Standing walks this user has set up. Published so the list and the
+    /// create path stay in agreement without either owning the other's state.
+    @Published private(set) var routines: [BuddyRecurringWalk] = []
+
+    func loadRoutines() async {
+        guard currentUserId != nil else { return }
+        do {
+            routines = try await request(
+                "/buddy/recurring", responseType: BuddyRoutinesResponse.self
+            ).routines
+        } catch {
+            // Silent: this drives an optional list, and a network blip must not
+            // produce an alert for something the user didn't ask for.
+            print("[BuddySessionService] loadRoutines failed: \(error)")
+        }
+    }
+
+    /// Turn the walk being created into a habit.
+    ///
+    /// The time is sent as LOCAL wall-clock minutes plus the device's IANA
+    /// zone — never an instant. "6pm on weekdays" has to survive DST, and a
+    /// timestamp would drift an hour twice a year.
+    func createRoutine(
+        mode: BuddyMode,
+        goalValue: Double?,
+        activityType: String,
+        inviteUserIds: [String],
+        daysOfWeek: [Int],
+        at date: Date
+    ) async throws {
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+        var payload: [String: Any] = [
+            "mode": mode.rawValue,
+            "activityType": activityType,
+            "inviteUserIds": inviteUserIds,
+            "daysOfWeek": daysOfWeek.sorted(),
+            "minutesOfDay": (parts.hour ?? 0) * 60 + (parts.minute ?? 0),
+            "timezone": TimeZone.current.identifier,
+        ]
+        if mode.needsGoal, let goalValue { payload["goalValue"] = goalValue }
+
+        let created = try await request(
+            "/buddy/recurring",
+            method: .POST,
+            json: payload,
+            responseType: BuddyRecurringWalk.self
+        )
+        routines.append(created)
+    }
+
+    func setRoutineActive(_ id: String, isActive: Bool) async {
+        do {
+            let updated = try await request(
+                "/buddy/recurring/\(id)",
+                method: .PATCH,
+                json: ["isActive": isActive],
+                responseType: BuddyRecurringWalk.self
+            )
+            if let index = routines.firstIndex(where: { $0.id == id }) {
+                routines[index] = updated
+            }
+        } catch {
+            print("[BuddySessionService] setRoutineActive failed: \(error)")
+        }
+    }
+
+    func deleteRoutine(_ id: String) async {
+        do {
+            _ = try await request(
+                "/buddy/recurring/\(id)", method: .DELETE,
+                responseType: BuddyOKResponse.self)
+            routines.removeAll { $0.id == id }
+        } catch {
+            print("[BuddySessionService] deleteRoutine failed: \(error)")
         }
     }
 
@@ -437,12 +540,17 @@ final class BuddySessionService: ObservableObject {
     func startPolling() {
         stopPolling()
         guard hasLiveSession else { return }
+        quietPolls = 0
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                try? await Task.sleep(nanoseconds: UInt64(self.pollInterval * 1_000_000_000))
+                try? await Task.sleep(
+                    nanoseconds: UInt64(self.nextPollDelay * 1_000_000_000))
                 if Task.isCancelled { return }
                 await self.pollOnce()
+                // Counted AFTER the poll so `apply` has had its chance to reset
+                // it; a poll that changed something must not also age the room.
+                self.quietPolls += 1
             }
         }
     }
@@ -481,6 +589,10 @@ final class BuddySessionService: ObservableObject {
             stopPolling()
             return
         }
+        // Anything actually changed → the room is live again, so poll fast.
+        // `state_version` is bumped by every server-side mutation, which makes
+        // it exactly the "did something happen" signal the backoff needs.
+        if state.stateVersion != session?.stateVersion { quietPolls = 0 }
         session = state
         if state.status == .completed || state.status == .cancelled {
             stopPolling()

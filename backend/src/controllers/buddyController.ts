@@ -27,6 +27,12 @@ import {
   startSession,
   updateSession,
 } from "../services/buddySessionService.js";
+import {
+  createRecurringWalk,
+  deleteRecurringWalk,
+  listRecurringWalks,
+  updateRecurringWalk,
+} from "../services/buddyRecurringService.js";
 
 /**
  * Buddy Walks & Runs controllers.
@@ -399,5 +405,118 @@ export async function recapController(
     res.json(await getRecap(req.params.sessionId, req.userId!));
   } catch (error) {
     handleError(res, error, "loading buddy recap");
+  }
+}
+
+// ─── Recurring walks ────────────────────────────────────────────────────
+
+/** GET /buddy/recurring — this user's standing walks. */
+export async function listRoutinesController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    res.json({ routines: await listRecurringWalks(req.userId!) });
+  } catch (error) {
+    handleError(res, error, "loading buddy routines");
+  }
+}
+
+/**
+ * POST /buddy/recurring — make a walk a habit.
+ *
+ * Enum whitelisting mirrors createSessionController; everything else
+ * (days, time, timezone, goal) is validated in the service so the PATCH
+ * shares exactly one copy of those rules.
+ */
+export async function createRoutineController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const { mode, goalValue, activityType, inviteUserIds } = req.body ?? {};
+    if (!BUDDY_MODES.includes(mode as BuddyMode)) {
+      return res.status(400).json({ error: "invalid_mode" });
+    }
+    if (!BUDDY_ACTIVITY_TYPES.includes(activityType as BuddyActivityType)) {
+      return res.status(400).json({ error: "invalid_activity_type" });
+    }
+    if (inviteUserIds !== undefined && !Array.isArray(inviteUserIds)) {
+      return res.status(400).json({ error: "invalid_invite_list" });
+    }
+    const routine = await createRecurringWalk(req.userId!, {
+      mode: mode as BuddyMode,
+      goalValue: goalValue === undefined ? null : Number(goalValue),
+      activityType: activityType as BuddyActivityType,
+      inviteUserIds: inviteUserIds as string[] | undefined,
+      daysOfWeek: req.body?.daysOfWeek,
+      minutesOfDay: req.body?.minutesOfDay,
+      timezone: req.body?.timezone,
+    });
+    res.status(201).json(routine);
+  } catch (error) {
+    handleError(res, error, "creating buddy routine");
+  }
+}
+
+/** PATCH /buddy/recurring/:routineId — including the on/off switch. */
+export async function updateRoutineController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const { mode, goalValue, activityType, inviteUserIds, isActive } =
+      req.body ?? {};
+    if (mode !== undefined && !BUDDY_MODES.includes(mode as BuddyMode)) {
+      return res.status(400).json({ error: "invalid_mode" });
+    }
+    if (
+      activityType !== undefined &&
+      !BUDDY_ACTIVITY_TYPES.includes(activityType as BuddyActivityType)
+    ) {
+      return res.status(400).json({ error: "invalid_activity_type" });
+    }
+    if (inviteUserIds !== undefined && !Array.isArray(inviteUserIds)) {
+      return res.status(400).json({ error: "invalid_invite_list" });
+    }
+    const routine = await updateRecurringWalk(
+      req.userId!,
+      req.params.routineId,
+      {
+        mode: mode as BuddyMode | undefined,
+        goalValue:
+          goalValue === undefined
+            ? undefined
+            : goalValue === null
+              ? null
+              : Number(goalValue),
+        activityType: activityType as BuddyActivityType | undefined,
+        inviteUserIds: inviteUserIds as string[] | undefined,
+        daysOfWeek: req.body?.daysOfWeek,
+        minutesOfDay: req.body?.minutesOfDay,
+        timezone: req.body?.timezone,
+        isActive: isActive === undefined ? undefined : Boolean(isActive),
+      },
+    );
+    res.json(routine);
+  } catch (error) {
+    handleError(res, error, "updating buddy routine");
+  }
+}
+
+/** DELETE /buddy/recurring/:routineId */
+export async function deleteRoutineController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    await deleteRecurringWalk(req.userId!, req.params.routineId);
+    res.json({ ok: true });
+  } catch (error) {
+    handleError(res, error, "deleting buddy routine");
   }
 }
