@@ -103,15 +103,20 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Needed for the diff below. The default shallow clone has no
+          # origin/main, so `origin/main...HEAD` failed with "bad revision" and
+          # the step was silently useless.
+          fetch-depth: 0
       - name: Check for iOS changes
         id: changed
         run: |
-          if git diff --name-only origin/main...HEAD -- 'app/**' | grep -q .; then
+          BASE="origin/${{ github.base_ref || 'main' }}"
+          if git diff --name-only "$BASE"...HEAD -- 'app/**' | grep -q .; then
             echo "ios=true" >> "$GITHUB_OUTPUT"
           else
             echo "ios=false" >> "$GITHUB_OUTPUT"
           fi
-        continue-on-error: true
       # There is no iOS test target worth running and no scheme build here —
       # this is purely "does the Swift still compile". That is exactly the class
       # of failure that has been reaching main: a non-exhaustive switch, a stale
@@ -123,6 +128,8 @@ jobs:
       # report every cross-file reference as undefined. The Watch app and the
       # widget extension are SEPARATE targets and are excluded.
       - name: Type-check the main app target
+        # Skipped when nothing under app/ changed — this runner bills at 10x.
+        if: steps.changed.outputs.ios == 'true'
         run: |
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           find "app/Mile A Day" -name '*.swift' -print0 > /tmp/swift-files

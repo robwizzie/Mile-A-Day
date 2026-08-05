@@ -17,6 +17,10 @@ private enum FriendsTabMode: String, CaseIterable, Identifiable {
 struct FriendsListView: View {
     @ObservedObject var friendService: FriendService
     @StateObject private var healthManager = HealthKitManager.shared
+    /// Live presence for the "Out right now" section. Shared singleton, so the
+    /// dashboard's prefetch has usually already populated it by the time this
+    /// tab is opened.
+    @ObservedObject private var buddy = BuddySessionService.shared
     @StateObject private var userManager = UserManager.shared
     @State private var topMode: FriendsTabMode = .friends
     @State private var showingSearch = false
@@ -139,6 +143,10 @@ struct FriendsListView: View {
             }
         }
         .task {
+            // Presence is the one thing on this screen that is only true for
+            // the next few minutes, so it is always re-pulled on open rather
+            // than trusted from whenever the dashboard last looked.
+            await buddy.refreshFriendsOutNow()
             if friendService.friends.isEmpty && friendService.friendRequests.isEmpty && friendService.sentRequests.isEmpty {
                 await friendService.refreshAllData()
             }
@@ -178,6 +186,7 @@ struct FriendsListView: View {
         .refreshable {
             // refreshAllData re-fetches nudge statuses internally.
             await friendService.refreshAllData()
+            await buddy.refreshFriendsOutNow()
             await loadMyRank()
             await loadFeed(force: true)
         }
@@ -343,6 +352,7 @@ struct FriendsListView: View {
                     )
                     .padding(.top, MADTheme.Spacing.lg)
                 } else {
+                    outRightNowSection
                     cheerThemOnSection
                     doneTodaySection
                 }
@@ -357,6 +367,65 @@ struct FriendsListView: View {
             .padding(.bottom, MADTheme.Spacing.xxl)
         }
         .scrollIndicators(.hidden)
+    }
+
+    // MARK: - Out right now
+
+    /// Friends who are walking or running THIS MINUTE.
+    ///
+    /// This lived only inside `WorkoutTrackingView`, which meant you could only
+    /// discover that a friend was out if you were already out yourself — useless
+    /// as a "should I go with them" signal, which is the entire point of knowing.
+    /// The friends list is where someone looks to see what their friends are
+    /// doing, so it belongs here.
+    ///
+    /// `BuddyJoinFriendCard` is reused verbatim rather than reimplemented: it
+    /// already reads live presence (so a friend out on their OWN appears, not
+    /// just one inside a buddy room) and already picks the right action —
+    /// **Join** when there's a room, **Ask to walk** when there isn't. Renders
+    /// nothing when nobody is out, so it never holds space speculatively.
+    @ViewBuilder
+    private var outRightNowSection: some View {
+        if !buddy.friendsOutNow.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                HStack(spacing: 8) {
+                    ZStack {
+                        Circle()
+                            .fill(MADTheme.Colors.success.opacity(0.35))
+                            .frame(width: 9, height: 9)
+                            .scaleEffect(1.9)
+                            .opacity(0.55)
+                        Circle()
+                            .fill(MADTheme.Colors.success)
+                            .frame(width: 9, height: 9)
+                    }
+                    Text("Out right now")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundStyle(MADTheme.Colors.madWhite)
+                    Spacer()
+                }
+
+                BuddyJoinFriendCard(
+                    // Always false here: this list is not a workout screen, and
+                    // gating on a live workout would hide the section exactly
+                    // when a friend is most worth joining.
+                    hasActiveWorkout: false,
+                    onJoined: openJoinedLobby
+                )
+            }
+        }
+    }
+
+    /// Hand the joined session to the Dashboard, which owns the lobby
+    /// presentation (`BuddyFlowModifier`). Parking the id on `DeepLinkRouter`
+    /// is the same path a buddy push takes, so there is one way in rather than
+    /// two that can drift.
+    private func openJoinedLobby() {
+        guard let sessionId = buddy.session?.id else { return }
+        DeepLinkRouter.shared.requestOpenBuddySession(sessionId: sessionId)
+        NotificationCenter.default.post(
+            name: NSNotification.Name("MAD_SwitchTab"), object: nil, userInfo: ["tab": 0]
+        )
     }
 
     // MARK: - Today (rolling-48h workout feed + hypes)

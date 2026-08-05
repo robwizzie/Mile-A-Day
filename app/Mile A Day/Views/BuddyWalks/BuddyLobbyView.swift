@@ -125,6 +125,79 @@ struct BuddyLobbyView: View {
         }
     }
 
+    // MARK: - Plan header
+
+    /// What this room is, and — for the host — the way to change it.
+    ///
+    /// Being able to edit the plan is what turns a lobby into a waiting room
+    /// rather than a receipt: plans change between "let's walk" and "everyone's
+    /// here", and the only way to act on that used to be abandoning the room and
+    /// rebuilding it.
+    ///
+    /// Non-hosts see the same summary with no affordance. The server enforces
+    /// host-only anyway (`not_host`), so this is about not offering something
+    /// that would just fail.
+    private func planHeader(_ session: BuddySessionState) -> some View {
+        VStack(spacing: MADTheme.Spacing.xs) {
+            ZStack {
+                Circle()
+                    .fill(session.accentColor.opacity(0.18))
+                    .frame(width: 76, height: 76)
+                Circle()
+                    .strokeBorder(session.accentColor.opacity(0.45), lineWidth: 1.5)
+                    .frame(width: 76, height: 76)
+                Image(systemName: session.mode.icon)
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(session.accentColor)
+            }
+            // Keyed on the plan so a change the HOST made animates on every
+            // other phone too, when the poll brings it in.
+            .animation(MADTheme.Animation.quick, value: session.mode)
+
+            Text(session.mode.title)
+                .font(MADTheme.Typography.title2)
+                .foregroundStyle(MADTheme.Colors.madWhite)
+
+            Text(planLine(session))
+                .font(MADTheme.Typography.body)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
+                .multilineTextAlignment(.center)
+
+            if session.isHost(buddy.currentUserId) {
+                Button {
+                    MADHaptics.tap()
+                    showSettings = true
+                } label: {
+                    Label("Edit", systemImage: "slider.horizontal.3")
+                        .font(MADTheme.Typography.caption)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(MADTheme.Colors.madWhite.opacity(0.10)))
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+        }
+        .padding(.top, MADTheme.Spacing.xl)
+        // Its own presentation node: this view also carries the ghost-setup
+        // sheet, and two sheets on ONE node makes SwiftUI silently drop one.
+        .background(
+            Color.clear
+                .sheet(isPresented: $showSettings) {
+                    BuddyLobbySettingsSheet(session: session)
+                }
+        )
+    }
+
+    /// "2.0 miles · Walk" — the plan as one line, so the goal and the activity
+    /// aren't two separate things to hold in your head.
+    private func planLine(_ session: BuddySessionState) -> String {
+        let activity = session.isRunning ? "Run" : "Walk"
+        guard let goal = session.goalValue else { return activity }
+        return "\(goalText(goal, mode: session.mode)) · \(activity)"
+    }
+
     // MARK: - People
 
     /// Everyone in one card: who's here, and — one tap away — who else could be.
