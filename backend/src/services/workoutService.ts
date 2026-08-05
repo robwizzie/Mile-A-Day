@@ -122,10 +122,11 @@ export async function uploadWorkouts(
         ghost_target_seconds,
         ghost_friend_user_id,
         source,
+        source_bundle_id,
         exclusion_reason,
         speed_flagged
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       ON CONFLICT (workout_id)
       DO UPDATE SET
         distance = EXCLUDED.distance,
@@ -147,6 +148,11 @@ export async function uploadWorkouts(
           WHEN workouts.source IN ('manual', 'edited') THEN workouts.source
           ELSE EXCLUDED.source
         END,
+        -- COALESCE for the same reason as the ghost columns: a re-upload from a
+        -- path that doesn't carry the HealthKit source (an older client, a
+        -- recalibrate) must not erase provenance we already recorded. Losing it
+        -- would silently un-dedupe the day.
+        source_bundle_id = COALESCE(EXCLUDED.source_bundle_id, workouts.source_bundle_id),
         -- Recompute the speed classification from the latest figures, but never
         -- clear a user soft-delete (deleted_at is intentionally not updated here).
         exclusion_reason = EXCLUDED.exclusion_reason,
@@ -207,6 +213,12 @@ export async function uploadWorkouts(
           // dropped rather than trusted.
           ...ghostRaceParams(workout),
           workout.source || "healthkit",
+          // Which app wrote this into HealthKit. Absent on older clients, which
+          // simply never participate in cross-app dedup.
+          typeof workout.sourceBundleId === "string" &&
+          workout.sourceBundleId.trim() !== ""
+            ? workout.sourceBundleId.trim().slice(0, 255)
+            : null,
           speed.exclusionReason,
           speed.speedFlagged,
         ],
@@ -239,9 +251,12 @@ export async function uploadWorkouts(
   await db.transaction([
     advisoryLockStatement(userId),
     ...upserts,
-    ...[...affectedDays].flatMap((localDate) =>
-      feedRoleStatements(userId, localDate),
-    ),
+    // Duplicate detection runs between the upsert and the feed roles, and the
+    // order is load-bearing both ways — see duplicateExclusionStatements.
+    ...[...affectedDays].flatMap((localDate) => [
+      ...duplicateExclusionStatements(userId, localDate),
+      ...feedRoleStatements(userId, localDate),
+    ]),
   ]);
 
   return workouts.map((w) => w.workoutId);
@@ -484,6 +499,325 @@ function feedRoleStatements(
       params,
     },
   ];
+}
+
+/**
+ * Cross-app duplicate detection.
+ *
+ * HealthKit is the integration layer for every third-party platform: Strava,
+ * Garmin Connect, Whoop, Oura, Peloton and the rest all write workouts into
+ * Apple Health, and the app reads them with no source filter. That's what makes
+ * "connect your other apps" possible at all — but it also means a user with two
+ * of them connected hands us the SAME real-world run twice, as two HKWorkouts
+ * with two different UUIDs. UUID dedup can't see it, so both rows count: double
+ * miles, double progress toward the daily mile, inflated leaderboards and
+ * competition scores.
+ *
+ * A pair is the same run when all three hold:
+ *   - **Different apps.** Two workouts from the SAME bundle id are never
+ *     duplicates — that's a user legitimately logging two sessions, and one app
+ *     doesn't double-write itself. A null bundle id (pre-feature rows, older
+ *     clients) matches nothing; unknown provenance fails open.
+ *   - **They genuinely overlap in time**, by at least half of the shorter
+ *     workout. Bare interval intersection is too weak: a cooldown walk that
+ *     clips the end of a run shares a minute without being the same activity.
+ *   - **Their distances agree**, within 20% of the longer one (floor 0.1 mi).
+ *     Watch GPS and phone GPS disagree by a few percent on the same route.
+ *
+ * The survivor is deterministic and prefers the richest copy: has a GPS route →
+ * uploaded first → lowest workout_id. Losers get `duplicate_of` set.
+ *
+ * Chains are avoided by resolving in two passes — a row can only ever be marked
+ * a duplicate OF a row that is not itself a duplicate. A duplicate that somehow
+ * overlaps no keeper is left unmarked rather than guessed at (fail open: the
+ * failure mode of over-counting is a wrong number, of under-counting is a
+ * broken streak).
+ */
+const DUPLICATE_EXCLUSION_REASON = "duplicate_source";
+/** Share of the SHORTER workout that must overlap before it's the same run. */
+const DUPLICATE_MIN_OVERLAP_RATIO = 0.5;
+/** How far two measurements of one route may disagree (fraction of the longer). */
+const DUPLICATE_DISTANCE_TOLERANCE = 0.2;
+/** Absolute floor for the above, so short walks aren't held to a few feet. */
+const DUPLICATE_DISTANCE_FLOOR = 0.1;
+
+/**
+ * Is cross-app duplicate EXCLUSION live?
+ *
+ * Kill switch, default OFF (env flags are kill switches, never the safety
+ * mechanism — see .claude/rules/backend.md). Detection still runs and still
+ * populates `duplicate_of` while it's off, so the flag can be flipped on only
+ * after diffing what it would do against real data. Flipping it back off
+ * unwinds every exclusion it applied on the next sync of each day.
+ */
+function duplicateExclusionEnabled(): boolean {
+  const v = (process.env.WORKOUT_DEDUPE ?? "").toLowerCase();
+  return v === "1" || v === "true" || v === "on";
+}
+
+/**
+ * The detection + exclusion pass, as statements ready to splice into a caller's
+ * transaction. Runs on the whole `(user, local_date)` for the same reason
+ * `feedRoleStatements` does: which copy survives depends on the day's shape, and
+ * a late Watch sync can land a better copy after the one we already kept.
+ *
+ * MUST run AFTER the upsert and BEFORE `feedRoleStatements`:
+ *   - after, because the upsert resets `exclusion_reason` to the per-workout
+ *     speed classification on every re-upload, which would wipe a duplicate mark;
+ *   - before, because feed roles hide anything with an `exclusion_reason`, so
+ *     duplicates drop out of the feed for free.
+ *
+ * Layers rather than clobbers: it only ever writes `exclusion_reason` where it
+ * IS NULL, and only ever clears its OWN reason. A `vehicle_speed` exclusion is
+ * never overwritten and never resurrected.
+ */
+function duplicateExclusionStatements(
+  userId: string,
+  localDate: string,
+): { query: string; params: any[] }[] {
+  const enabled = duplicateExclusionEnabled();
+  return [
+    {
+      // Pass 1: recompute `duplicate_of` for the day, from scratch.
+      // Unconditional — this column is an observation, not a policy, and the
+      // review endpoints report on it even while the kill switch is off.
+      query: `
+	WITH day AS (
+		SELECT
+			w.workout_id,
+			w.source_bundle_id,
+			w.distance,
+			w.created_at,
+			w.device_end_date AS ends_at,
+			w.device_end_date
+				- (w.total_duration * interval '1 second') AS starts_at,
+			w.total_duration,
+			EXISTS (
+				SELECT 1 FROM workout_routes r WHERE r.workout_id = w.workout_id
+			) AS has_route
+		FROM workouts w
+		WHERE w.user_id = $1 AND w.local_date = $2::date
+			AND w.deleted_at IS NULL
+			AND w.source_bundle_id IS NOT NULL
+			AND w.total_duration > 0
+	),
+	-- Preference order: the copy we'd rather keep sorts FIRST.
+	ranked AS (
+		SELECT *, ROW_NUMBER() OVER (
+			ORDER BY has_route DESC, created_at ASC, workout_id ASC
+		) AS pref
+		FROM day
+	),
+	-- Every ordered pair that describes one run recorded by two apps.
+	-- NB: not named "overlaps" — that is the OVERLAPS operator keyword, which
+	-- Postgres rejects as a CTE name.
+	same_run AS (
+		SELECT a.workout_id AS dup_id, b.workout_id AS keep_id, b.pref AS keep_pref
+		FROM ranked a
+		JOIN ranked b
+			ON b.pref < a.pref
+			AND a.source_bundle_id <> b.source_bundle_id
+			AND EXTRACT(EPOCH FROM (
+				LEAST(a.ends_at, b.ends_at) - GREATEST(a.starts_at, b.starts_at)
+			)) >= $3 * LEAST(a.total_duration, b.total_duration)
+			AND abs(a.distance - b.distance) <= GREATEST(
+				$4, $5 * GREATEST(a.distance, b.distance)
+			)
+	),
+	-- A row is a duplicate if any better-ranked row is the same run...
+	dups AS (SELECT DISTINCT dup_id FROM same_run),
+	-- ...and it may only point at a keeper, never at another duplicate, so a
+	-- three-app chain collapses onto one survivor instead of a linked list.
+	resolved AS (
+		SELECT o.dup_id, o.keep_id,
+			ROW_NUMBER() OVER (PARTITION BY o.dup_id ORDER BY o.keep_pref) AS rn
+		FROM same_run o
+		WHERE o.keep_id NOT IN (SELECT dup_id FROM dups)
+	),
+	final AS (SELECT dup_id, keep_id FROM resolved WHERE rn = 1)
+	UPDATE workouts w
+	SET duplicate_of = f.keep_id
+	FROM (
+		SELECT d.workout_id, f.keep_id
+		FROM day d
+		LEFT JOIN final f ON f.dup_id = d.workout_id
+	) f(workout_id, keep_id)
+	WHERE w.workout_id = f.workout_id AND w.user_id = $1
+		-- Skip no-op rewrites: a re-sync of an unchanged day costs no row
+		-- versions and no index churn (same rule as feed_role).
+		AND w.duplicate_of IS DISTINCT FROM f.keep_id`,
+      params: [
+        userId,
+        localDate,
+        DUPLICATE_MIN_OVERLAP_RATIO,
+        DUPLICATE_DISTANCE_FLOOR,
+        DUPLICATE_DISTANCE_TOLERANCE,
+      ],
+    },
+    {
+      // Pass 2: release rows that are no longer duplicates — or every row we
+      // ever excluded, when the kill switch is off, so flipping it off actually
+      // unwinds. Only ever clears OUR reason; a speed exclusion is untouched.
+      query: `
+	UPDATE workouts SET exclusion_reason = NULL
+	WHERE user_id = $1 AND local_date = $2::date
+		AND exclusion_reason = '${DUPLICATE_EXCLUSION_REASON}'
+		AND (NOT $3::boolean OR duplicate_of IS NULL)`,
+      params: [userId, localDate, enabled],
+    },
+    {
+      // Pass 3: exclude, but only past the user's grandfather line.
+      //
+      // `created_at >= dedupe_since` is what keeps this from rewriting history:
+      // every workout uploaded before the feature shipped pre-dates the stamp,
+      // so nobody's totals or streaks move when the switch goes on. A user who
+      // explicitly asks to clean up their history has `dedupe_since` moved back
+      // (POST /workouts/:userId/duplicates/resolve) and only then do old rows
+      // qualify. A NULL stamp excludes nothing.
+      query: `
+	UPDATE workouts w
+	SET exclusion_reason = '${DUPLICATE_EXCLUSION_REASON}'
+	FROM users u
+	WHERE w.user_id = $1 AND w.local_date = $2::date
+		AND u.user_id = w.user_id
+		AND $3::boolean
+		AND w.duplicate_of IS NOT NULL
+		AND w.exclusion_reason IS NULL
+		AND w.deleted_at IS NULL
+		AND u.dedupe_since IS NOT NULL
+		AND w.created_at >= u.dedupe_since`,
+      params: [userId, localDate, enabled],
+    },
+  ];
+}
+
+/** Re-run cross-app duplicate detection for one (user, local_date). */
+export async function recomputeDuplicatesForDay(
+  userId: string,
+  localDate: string,
+): Promise<void> {
+  await db.transaction([
+    advisoryLockStatement(userId),
+    ...duplicateExclusionStatements(userId, localDate),
+    ...feedRoleStatements(userId, localDate),
+  ]);
+}
+
+export type DuplicateSummary = {
+  /** Grandfathered duplicates: detected, but still counting toward totals. */
+  pendingCount: number;
+  /** Miles that would come off the user's totals if they clean these up. */
+  pendingMiles: number;
+  /** Days those duplicates fall on — what the cleanup would recompute. */
+  affectedDays: number;
+  /** Duplicates currently excluded (i.e. already not counting). */
+  excludedCount: number;
+  /** Apps involved, so the UI can say "Strava and Garmin Connect". */
+  apps: string[];
+  sample: {
+    workoutId: string;
+    localDate: string;
+    distance: number;
+    sourceBundleId: string | null;
+    duplicateOf: string;
+  }[];
+};
+
+/**
+ * What cross-app duplicate detection found for a user, split into what is
+ * already excluded and what is grandfathered (detected but still counting,
+ * because it pre-dates their `dedupe_since`).
+ *
+ * This is the read behind the Connections screen's "we found N duplicates"
+ * card. It never changes anything — the user decides.
+ */
+export async function getDuplicateSummary(
+  userId: string,
+): Promise<DuplicateSummary> {
+  const rows = await db.query<{
+    workout_id: string;
+    local_date: string;
+    distance: string | number;
+    source_bundle_id: string | null;
+    duplicate_of: string;
+    is_excluded: boolean;
+  }>(
+    `SELECT w.workout_id, to_char(w.local_date, 'YYYY-MM-DD') AS local_date,
+		w.distance, w.source_bundle_id, w.duplicate_of,
+		(w.exclusion_reason = $2) AS is_excluded
+	FROM workouts w
+	WHERE w.user_id = $1
+		AND w.duplicate_of IS NOT NULL
+		AND w.deleted_at IS NULL
+		AND (w.exclusion_reason IS NULL OR w.exclusion_reason = $2)
+	ORDER BY w.local_date DESC, w.workout_id`,
+    [userId, DUPLICATE_EXCLUSION_REASON],
+  );
+
+  const pending = rows.filter((r) => !r.is_excluded);
+  const days = new Set(pending.map((r) => r.local_date));
+  const apps = [
+    ...new Set(
+      rows.map((r) => r.source_bundle_id).filter((b): b is string => !!b),
+    ),
+  ];
+
+  return {
+    pendingCount: pending.length,
+    pendingMiles:
+      Math.round(
+        pending.reduce((sum, r) => sum + Number(r.distance), 0) * 100,
+      ) / 100,
+    affectedDays: days.size,
+    excludedCount: rows.length - pending.length,
+    apps,
+    sample: pending.slice(0, 25).map((r) => ({
+      workoutId: r.workout_id,
+      localDate: r.local_date,
+      distance: Number(r.distance),
+      sourceBundleId: r.source_bundle_id,
+      duplicateOf: r.duplicate_of,
+    })),
+  };
+}
+
+/**
+ * The user's explicit opt-in to clean up historical duplicates.
+ *
+ * Moves `dedupe_since` back past their whole history, then re-runs the pass on
+ * exactly the days that hold duplicates (bounded — not their entire archive).
+ * This is the ONLY thing that can change already-uploaded totals, and it only
+ * ever runs because someone tapped the button; nothing here happens on a sync.
+ *
+ * Returns the days it touched so the caller can refresh derived state.
+ */
+export async function resolveDuplicateHistory(
+  userId: string,
+): Promise<{ days: string[]; removedMiles: number }> {
+  const before = await getDuplicateSummary(userId);
+  if (before.pendingCount === 0) return { days: [], removedMiles: 0 };
+
+  const dayRows = await db.query<{ local_date: string }>(
+    `SELECT DISTINCT to_char(local_date, 'YYYY-MM-DD') AS local_date
+	FROM workouts
+	WHERE user_id = $1 AND duplicate_of IS NOT NULL AND deleted_at IS NULL
+		AND (exclusion_reason IS NULL OR exclusion_reason = $2)`,
+    [userId, DUPLICATE_EXCLUSION_REASON],
+  );
+
+  await db.query(
+    `UPDATE users SET dedupe_since = COALESCE(
+		(SELECT MIN(created_at) FROM workouts WHERE user_id = $1), dedupe_since
+	) WHERE user_id = $1`,
+    [userId],
+  );
+
+  const days = dayRows.map((r) => r.local_date);
+  for (const localDate of days) {
+    await recomputeDuplicatesForDay(userId, localDate);
+  }
+
+  return { days, removedMiles: before.pendingMiles };
 }
 
 /**
