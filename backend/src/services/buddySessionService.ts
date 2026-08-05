@@ -274,7 +274,10 @@ export interface CreateSessionInput {
  * demand a goal on the way through, and switching back has to drop it. Two
  * copies of that rule would let the lobby write a state create would reject.
  */
-export function validateGoal(mode: BuddyMode, raw: number | null): number | null {
+export function validateGoal(
+  mode: BuddyMode,
+  raw: number | null,
+): number | null {
   if (mode === "together") return null;
   if (raw === null || !(raw > 0)) throw new BadRequestError("goal_required");
   if (mode === "race_time" && raw > 24 * 60) {
@@ -334,22 +337,20 @@ export async function createSession(
   }
   if (!sessionId) throw new BadRequestError("could_not_allocate_code");
 
-  // Host is 'joined' immediately — they never see their own invite.
+  // Host is 'joined' immediately — they never see their own invite. Inserted
+  // in the SAME statement as the invitees: one round trip for the whole roster
+  // instead of one per person, which is what a host with three friends picked
+  // was paying before the lobby could open.
   await db.query(
-    `INSERT INTO buddy_session_participants (session_id, user_id, status, joined_at)
-     VALUES ($1, $2, 'joined', NOW())`,
-    [sessionId, hostUserId],
+    `INSERT INTO buddy_session_participants
+       (session_id, user_id, status, invited_by, joined_at)
+     SELECT $1, $2, 'joined', NULL, NOW()
+     UNION ALL
+     SELECT $1, invitee, 'invited', $2, NULL
+       FROM unnest($3::text[]) AS invitee
+     ON CONFLICT (session_id, user_id) DO NOTHING`,
+    [sessionId, hostUserId, eligible],
   );
-
-  for (const inviteeId of eligible) {
-    await db.query(
-      `INSERT INTO buddy_session_participants
-         (session_id, user_id, status, invited_by)
-       VALUES ($1, $2, 'invited', $3)
-       ON CONFLICT (session_id, user_id) DO NOTHING`,
-      [sessionId, inviteeId, hostUserId],
-    );
-  }
 
   await recordEvent(sessionId, hostUserId, "created", { mode, goalValue });
   void notifyInvitees(sessionId, hostUserId, eligible);
@@ -775,15 +776,13 @@ async function addInvitees(
   const eligible = await eligibleInvitees(hostUserId, wanted);
   if (eligible.length === 0) return;
 
-  for (const inviteeId of eligible) {
-    await db.query(
-      `INSERT INTO buddy_session_participants
-         (session_id, user_id, status, invited_by)
-       VALUES ($1, $2, 'invited', $3)
-       ON CONFLICT (session_id, user_id) DO NOTHING`,
-      [sessionId, inviteeId, hostUserId],
-    );
-  }
+  await db.query(
+    `INSERT INTO buddy_session_participants
+       (session_id, user_id, status, invited_by)
+     SELECT $1, invitee, 'invited', $2 FROM unnest($3::text[]) AS invitee
+     ON CONFLICT (session_id, user_id) DO NOTHING`,
+    [sessionId, hostUserId, eligible],
+  );
   void notifyInvitees(sessionId, hostUserId, eligible);
 }
 
@@ -1316,27 +1315,40 @@ function buddyOptedInSql(userColumn: string): string {
  *
  * Shared by createSession and the lobby's add-invitees path so the two cannot
  * drift; a second copy of these rules is exactly how a gate gets half-applied.
+ *
+ * ONE round trip regardless of how many people were picked. The first version
+ * of this walked the list with three awaits each (friendship, blocks, then
+ * enrollment + preference), so inviting three friends cost nine sequential
+ * queries before the session row was even inserted — the single biggest reason
+ * creating a walk felt slow. Set-based, the answer is the same and the cost is
+ * flat. The ORDER of the returned ids follows the caller's list rather than the
+ * table, so the host's picking order survives into the roster.
  */
 async function eligibleInvitees(
   hostUserId: string,
   inviteIds: string[],
 ): Promise<string[]> {
-  const eligible: string[] = [];
-  for (const inviteeId of inviteIds) {
-    if (inviteeId === hostUserId) continue;
-    if (!(await areFriends(hostUserId, inviteeId))) continue;
-    if (await isBlockedEitherWay(hostUserId, inviteeId)) continue;
-    const ok = await db.query(
-      `SELECT 1 FROM users u
-        WHERE u.user_id = $1
-          AND u.buddy_enrolled_at IS NOT NULL
-          AND ${buddyOptedInSql("u.user_id")}`,
-      [inviteeId],
-    );
-    if (ok.length === 0) continue;
-    eligible.push(inviteeId);
-  }
-  return eligible;
+  const wanted = inviteIds.filter((id) => id !== hostUserId);
+  if (wanted.length === 0) return [];
+
+  const rows = await db.query<{ user_id: string }>(
+    `SELECT u.user_id
+       FROM users u
+       JOIN friendships f
+         ON f.user_id = $1 AND f.friend_id = u.user_id AND f.status = 'accepted'
+      WHERE u.user_id = ANY($2::text[])
+        AND u.buddy_enrolled_at IS NOT NULL
+        AND ${buddyOptedInSql("u.user_id")}
+        AND NOT EXISTS (
+          SELECT 1 FROM user_blocks b
+           WHERE (b.blocker_id = $1 AND b.blocked_id = u.user_id)
+              OR (b.blocker_id = u.user_id AND b.blocked_id = $1)
+        )`,
+    [hostUserId, wanted],
+  );
+
+  const allowed = new Set(rows.map((r) => r.user_id));
+  return wanted.filter((id) => allowed.has(id));
 }
 
 /**

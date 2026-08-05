@@ -48,6 +48,19 @@ struct BuddyStartSheet: View {
     /// EXTRACT(DOW)). Empty = a one-off, which is the default.
     @State private var repeatDays: Set<Int> = []
 
+    /// Last setup, restored on open.
+    ///
+    /// Buddy walks are a habit with a fixed shape — the same person, the same
+    /// activity, the same mode, most days. Re-picking all three every time was
+    /// most of why setting one up "takes forever", and none of those taps ever
+    /// carried information. Restored rather than hardcoded, so a first-time
+    /// user still lands on the zero-config default (Just Together, walking).
+    @AppStorage("buddyLastModeV1") private var lastModeRaw = BuddyMode.together.rawValue
+    @AppStorage("buddyLastIsRunV1") private var lastIsRun = false
+    @AppStorage("buddyLastInviteesV1") private var lastInvitees = ""
+    /// One-shot: restoring must not fight the user's taps on a later re-render.
+    @State private var didRestore = false
+
     private var activityType: String { isRun ? "running" : "walking" }
     private var accent: Color { MADTheme.workoutColor(activityType) }
 
@@ -111,8 +124,17 @@ struct BuddyStartSheet: View {
                 // This screen is several taps in a row; warm the Taptic Engine
                 // so the FIRST one lands as fast as the rest.
                 MADHaptics.warmUp()
-                await buddy.loadCandidates()
-                await buddy.loadRoutines()
+                restoreLastSetup()
+                // Both already prefetched on the dashboard, so the sheet opens
+                // populated and these are a refresh, not a blocking load. Run
+                // concurrently — they have nothing to do with each other.
+                async let candidates: Void = buddy.loadCandidates()
+                async let routines: Void = buddy.loadRoutines()
+                _ = await (candidates, routines)
+                // Re-run once the list has landed: a cold launch can open this
+                // sheet before the prefetch finishes, and a remembered friend
+                // can only be re-selected once they're actually in the list.
+                restoreInvitees()
             }
             .onChange(of: buddy.errorMessage) { _, newValue in
                 guard let newValue else { return }
@@ -833,6 +855,40 @@ struct BuddyStartSheet: View {
                 ? "\(Int(value)) mi" : String(format: "%.1f mi", value))
     }
 
+    /// Put back the mode and activity from last time. Friends are restored
+    /// separately, because they can only be re-selected once the candidate
+    /// list exists.
+    private func restoreLastSetup() {
+        guard !didRestore else { return }
+        didRestore = true
+        if let saved = BuddyMode(rawValue: lastModeRaw) {
+            mode = saved
+            if saved.needsGoal { goal = saved.defaultGoal }
+        }
+        isRun = lastIsRun
+        restoreInvitees()
+    }
+
+    /// Re-select whoever you walked with last time — but ONLY if they're still
+    /// an eligible candidate. Someone who has since unfriended, opted out or
+    /// dropped off a buddy-capable build must not silently reappear in the
+    /// invite list, where the server would drop them anyway and the host would
+    /// never learn why.
+    private func restoreInvitees() {
+        guard selected.isEmpty, !lastInvitees.isEmpty, !buddy.candidates.isEmpty else {
+            return
+        }
+        let remembered = Set(lastInvitees.split(separator: ",").map(String.init))
+        let stillThere = Set(buddy.candidates.map(\.userId))
+        selected = remembered.intersection(stillThere)
+    }
+
+    private func rememberSetup() {
+        lastModeRaw = mode.rawValue
+        lastIsRun = isRun
+        lastInvitees = selected.sorted().joined(separator: ",")
+    }
+
     private func create() async {
         guard !isCreating else { return }
         isCreating = true
@@ -863,6 +919,7 @@ struct BuddyStartSheet: View {
                     at: scheduledDate
                 )
             }
+            rememberSetup()
             MADHaptics.success()
             onCreated(state)
             dismiss()
