@@ -44,9 +44,22 @@ enum ClientFeatures {
     /// to say why.
     static let postWindowV1 = "post_window_v1"
 
+    /// This build has the Buddy Walks & Runs screens — it can render a lobby, a
+    /// live roster and a recap, and it registers the BUDDY_INVITE category.
+    ///
+    /// This one does more than gate a payload: declaring it is what ENROLLS the
+    /// user (the server stamps `users.buddy_enrolled_at` on registration), and
+    /// an enrolled user is offered to their friends as someone who can be pulled
+    /// into a walk. So a build that sends this string without the screens would
+    /// have its owner invited to something their app cannot open.
+    ///
+    /// It is also the only thing standing between an older install and a buddy
+    /// invite now that the server-side `BUDDY_SESSIONS` flag defaults on.
+    static let buddyWalksV1 = "buddy_walks_v1"
+
     /// Declared on registration. Add a string here only in the same build that
     /// actually implements the behavior.
     static let supported: [String] = [
-        friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1,
+        friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
     ]
 }

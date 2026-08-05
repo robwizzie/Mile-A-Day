@@ -25,6 +25,7 @@ import {
   recordProgress,
   setReady,
   startSession,
+  updateSession,
 } from "../services/buddySessionService.js";
 
 /**
@@ -55,6 +56,33 @@ function handleError(res: Response, error: unknown, logLabel: string): void {
   }
   console.error(`Error ${logLabel}:`, error);
   res.status(500).json({ error: `Error ${logLabel}` });
+}
+
+/** Sentinel for "the client sent a scheduled start we won't accept". */
+const INVALID_SCHEDULE = Symbol("invalid_scheduled_start");
+
+/**
+ * Validate an optional scheduled-start timestamp.
+ *
+ * A scheduled walk has to be far enough out to be worth scheduling and near
+ * enough to still be real — rejecting here keeps a typo'd year from parking a
+ * lobby in the table forever.
+ *
+ * Returns `undefined` for absent (leave alone) and `null` for an explicit clear
+ * — the lobby needs to tell those apart, since "don't touch my schedule" and
+ * "cancel my schedule" are different requests. A rejection comes back as the
+ * sentinel rather than a throw so both callers map it to the same 400.
+ */
+function parseScheduledStart(
+  raw: unknown,
+): string | null | undefined | typeof INVALID_SCHEDULE {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  const when = new Date(String(raw));
+  if (Number.isNaN(when.getTime())) return INVALID_SCHEDULE;
+  const minutesOut = (when.getTime() - Date.now()) / 60000;
+  if (minutesOut < 2 || minutesOut > 60 * 24 * 14) return INVALID_SCHEDULE;
+  return when.toISOString();
 }
 
 export async function enrollController(
@@ -123,20 +151,9 @@ export async function createSessionController(
       return res.status(400).json({ error: "invalid_origin" });
     }
 
-    // A scheduled walk has to be far enough out to be worth scheduling and
-    // near enough to still be real. Rejecting here keeps a typo'd year from
-    // parking a lobby in the table forever.
-    let scheduled: string | null = null;
-    if (scheduledStartAt !== undefined && scheduledStartAt !== null) {
-      const when = new Date(String(scheduledStartAt));
-      if (Number.isNaN(when.getTime())) {
-        return res.status(400).json({ error: "invalid_scheduled_start" });
-      }
-      const minutesOut = (when.getTime() - Date.now()) / 60000;
-      if (minutesOut < 2 || minutesOut > 60 * 24 * 14) {
-        return res.status(400).json({ error: "invalid_scheduled_start" });
-      }
-      scheduled = when.toISOString();
+    const scheduled = parseScheduledStart(scheduledStartAt);
+    if (scheduled === INVALID_SCHEDULE) {
+      return res.status(400).json({ error: "invalid_scheduled_start" });
     }
 
     const state = await createSession(req.userId!, {
@@ -150,6 +167,59 @@ export async function createSessionController(
     res.status(201).json(state);
   } catch (error) {
     handleError(res, error, "creating buddy session");
+  }
+}
+
+/**
+ * PATCH /buddy/sessions/:sessionId — host edits the lobby before it starts.
+ *
+ * Every enum is whitelisted before it reaches the service for the same reason
+ * `createSessionController` does it: an unvalidated value lands on the table's
+ * CHECK constraint and surfaces as a 500 instead of a 400.
+ */
+export async function updateSessionController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const { mode, goalValue, activityType, inviteUserIds } = req.body ?? {};
+
+    if (mode !== undefined && !BUDDY_MODES.includes(mode as BuddyMode)) {
+      return res.status(400).json({ error: "invalid_mode" });
+    }
+    if (
+      activityType !== undefined &&
+      !BUDDY_ACTIVITY_TYPES.includes(activityType as BuddyActivityType)
+    ) {
+      return res.status(400).json({ error: "invalid_activity_type" });
+    }
+    if (inviteUserIds !== undefined && !Array.isArray(inviteUserIds)) {
+      return res.status(400).json({ error: "invalid_invite_list" });
+    }
+
+    const scheduled = parseScheduledStart(req.body?.scheduledStartAt);
+    if (scheduled === INVALID_SCHEDULE) {
+      return res.status(400).json({ error: "invalid_scheduled_start" });
+    }
+
+    const state = await updateSession(req.params.sessionId, req.userId!, {
+      mode: mode as BuddyMode | undefined,
+      // Absent leaves the stored goal alone; an explicit null clears it. Both
+      // matter, so this cannot collapse to `?? null`.
+      goalValue:
+        goalValue === undefined
+          ? undefined
+          : goalValue === null
+            ? null
+            : Number(goalValue),
+      activityType: activityType as BuddyActivityType | undefined,
+      scheduledStartAt: scheduled,
+      inviteUserIds: inviteUserIds as string[] | undefined,
+    });
+    res.json(state);
+  } catch (error) {
+    handleError(res, error, "updating buddy session");
   }
 }
 

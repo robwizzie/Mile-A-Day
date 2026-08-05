@@ -63,6 +63,13 @@ jobs:
         run: node dist/db/migrateCli.js
       - name: Seeded feed/story/hype/signing smoke test
         run: node scripts/ci-smoke.mjs
+      # Buddy Walks shipped fully built and then sat dead in production because
+      # a rollout flag defaulted off and every endpoint answered 404 in silence.
+      # These assertions pin the flag's direction, the enrollment that rides
+      # device registration, the opt-out (including the no-settings-row default)
+      # and the host-only lobby PATCH.
+      - name: Buddy gate + lobby-edit check
+        run: node scripts/buddy-gate-check.mjs
 
   website:
     name: Website (lint + build)

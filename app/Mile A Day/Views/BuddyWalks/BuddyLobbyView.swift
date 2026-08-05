@@ -20,6 +20,7 @@ struct BuddyLobbyView: View {
     @State private var qrImage: UIImage?
     @State private var didCopy = false
     @State private var showGhostSetup = false
+    @State private var showSettings = false
 
     /// Ghost race arming for THIS buddy walk.
     ///
@@ -89,20 +90,7 @@ struct BuddyLobbyView: View {
 
     private func lobby(_ session: BuddySessionState) -> some View {
         VStack(spacing: MADTheme.Spacing.lg) {
-            VStack(spacing: MADTheme.Spacing.xs) {
-                Image(systemName: session.mode.icon)
-                    .font(.system(size: 32, weight: .semibold))
-                    .foregroundStyle(session.accentColor)
-                Text(session.mode.title)
-                    .font(MADTheme.Typography.title2)
-                    .foregroundStyle(MADTheme.Colors.madWhite)
-                if let goal = session.goalValue {
-                    Text(goalText(goal, mode: session.mode))
-                        .font(MADTheme.Typography.body)
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
-                }
-            }
-            .padding(.top, MADTheme.Spacing.xl)
+            planHeader(session)
 
             inviteCard(session)
 
@@ -123,6 +111,81 @@ struct BuddyLobbyView: View {
             actions(session)
                 .padding(MADTheme.Spacing.md)
         }
+    }
+
+    // MARK: - Plan header
+
+    /// What this room is, and — for the host — the way to change it.
+    ///
+    /// The plan used to be three stacked labels with nothing to do about them.
+    /// Being able to edit it is what turns a lobby into a waiting room rather
+    /// than a receipt: plans change between "let's walk" and "everyone's here",
+    /// and the only way to act on that was to abandon the room and rebuild it,
+    /// which also invalidated the code you'd already sent people.
+    ///
+    /// Non-hosts see the same summary with no affordance. The server enforces
+    /// host-only anyway (`not_host`), so this is about not offering something
+    /// that would just fail.
+    private func planHeader(_ session: BuddySessionState) -> some View {
+        VStack(spacing: MADTheme.Spacing.xs) {
+            ZStack {
+                Circle()
+                    .fill(session.accentColor.opacity(0.18))
+                    .frame(width: 76, height: 76)
+                Circle()
+                    .strokeBorder(session.accentColor.opacity(0.45), lineWidth: 1.5)
+                    .frame(width: 76, height: 76)
+                Image(systemName: session.mode.icon)
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(session.accentColor)
+            }
+            // Keyed on the whole plan so a change the HOST made animates on
+            // every other phone too, when the 5s poll brings it in.
+            .animation(MADTheme.Animation.quick, value: session.mode)
+
+            Text(session.mode.title)
+                .font(MADTheme.Typography.title2)
+                .foregroundStyle(MADTheme.Colors.madWhite)
+
+            Text(planLine(session))
+                .font(MADTheme.Typography.body)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
+                .multilineTextAlignment(.center)
+
+            if session.isHost(buddy.currentUserId) {
+                Button {
+                    MADHaptics.tap()
+                    showSettings = true
+                } label: {
+                    Label("Edit", systemImage: "slider.horizontal.3")
+                        .font(MADTheme.Typography.caption)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(MADTheme.Colors.madWhite.opacity(0.10)))
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+        }
+        .padding(.top, MADTheme.Spacing.xl)
+        // Its own presentation node. This view already carries the ghost-setup
+        // sheet and a ShareLink, and two sheets on ONE node makes SwiftUI
+        // silently drop one.
+        .background(
+            Color.clear
+                .sheet(isPresented: $showSettings) {
+                    BuddyLobbySettingsSheet(session: session)
+                }
+        )
+    }
+
+    /// "2.0 miles · Walk" — the plan as one line, so the goal and the activity
+    /// aren't two separate things to hold in your head.
+    private func planLine(_ session: BuddySessionState) -> String {
+        let activity = session.isRunning ? "Run" : "Walk"
+        guard let goal = session.goalValue else { return activity }
+        return "\(goalText(goal, mode: session.mode)) · \(activity)"
     }
 
     // MARK: - Ghost race
@@ -322,15 +385,41 @@ struct BuddyLobbyView: View {
         }
     }
 
+    /// One person in the room.
+    ///
+    /// Presence is carried by the AVATAR — ringed and full-strength once they're
+    /// in, dimmed while they're still an outstanding invite — rather than by a
+    /// text badge alone. Somebody scanning this list wants to know "who's
+    /// actually here", and a row of identical grey pills answers that far more
+    /// slowly than a row of faces where the ones who showed up are the bright
+    /// ones. The chip stays for the states a ring can't spell (Done, Out) and as
+    /// the accessible label.
+    ///
+    /// Flat fill, not `.madLiquidGlass`: this renders once per participant and
+    /// re-renders on every 5s poll. `BuddyStartSheet` already learned that
+    /// several live blur surfaces on one screen is what makes these views feel
+    /// sluggish, and on this background the two are indistinguishable.
     private func participantRow(_ participant: BuddyParticipant, session: BuddySessionState)
         -> some View
     {
-        HStack(spacing: MADTheme.Spacing.md) {
+        let isIn = participant.status == .joined || participant.status == .ready
+            || participant.status == .active
+        let isOut = participant.status == .left || participant.status == .declined
+
+        return HStack(spacing: MADTheme.Spacing.md) {
             AvatarView(
                 name: participant.displayName,
                 imageURL: participant.profileImageUrl,
                 size: 40
             )
+            .overlay(
+                Circle()
+                    .strokeBorder(
+                        isIn ? session.accentColor : Color.clear,
+                        lineWidth: 2
+                    )
+            )
+            .opacity(isIn ? 1 : 0.45)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(
@@ -338,7 +427,7 @@ struct BuddyLobbyView: View {
                         ? "You" : participant.displayName
                 )
                 .font(MADTheme.Typography.bodyBold)
-                .foregroundStyle(MADTheme.Colors.madWhite)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(isOut ? 0.45 : 1))
 
                 if participant.isHost {
                     Text("Host")
@@ -352,7 +441,15 @@ struct BuddyLobbyView: View {
             statusChip(participant.status, accent: session.accentColor)
         }
         .padding(MADTheme.Spacing.sm)
-        .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.medium)
+        .background(
+            RoundedRectangle(
+                cornerRadius: MADTheme.CornerRadius.medium, style: .continuous
+            )
+            .fill(MADTheme.Colors.madWhite.opacity(0.06))
+        )
+        // The 5s poll is what surfaces an arrival, so the animation has to key
+        // on the value that changed rather than on an onAppear that already ran.
+        .animation(MADTheme.Animation.standard, value: participant.status)
     }
 
     private func statusChip(_ status: BuddyParticipantStatus, accent: Color) -> some View {

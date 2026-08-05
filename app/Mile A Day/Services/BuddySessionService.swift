@@ -22,7 +22,8 @@ enum BuddyServiceError: LocalizedError {
         case "session_not_found": return "We couldn't find that buddy walk."
         case "not_friends_with_host": return "You need to be friends to join."
         case "blocked": return "You can't join this buddy walk."
-        case "not_host": return "Only the host can start."
+        case "not_host": return "Only the host can change this."
+        case "session_not_editable": return "This walk already started."
         case "not_a_participant": return "You're not in this buddy walk."
         case "goal_required": return "Pick a goal to continue."
         case "goal_too_large": return "That goal is a little too ambitious."
@@ -245,6 +246,55 @@ final class BuddySessionService: ObservableObject {
         )
         apply(state)
         startPolling()
+        return state
+    }
+
+    /// Change the lobby's settings, or pull more people in, before it starts.
+    ///
+    /// Host-only and lobby-only server-side. Only the fields you pass are
+    /// touched — which is why `scheduledStartAt` needs three states rather than
+    /// two: omitted leaves the booking alone, `.some(nil)` cancels it, and a
+    /// date moves it. A plain optional couldn't say "cancel".
+    ///
+    /// `goalValue` follows the mode. Sending a new mode without a goal makes
+    /// the server clear it, which is right for `together` and a 400
+    /// (`goal_required`) for the scored modes — so callers changing INTO a
+    /// scored mode must send both together.
+    func updateSession(
+        mode: BuddyMode? = nil,
+        goalValue: Double? = nil,
+        activityType: String? = nil,
+        scheduledStartAt: Date?? = nil,
+        inviteUserIds: [String]? = nil
+    ) async throws -> BuddySessionState {
+        guard let sessionId = session?.id else {
+            throw BuddyServiceError.api("session_not_found")
+        }
+        var payload: [String: Any] = [:]
+        if let mode { payload["mode"] = mode.rawValue }
+        if let goalValue { payload["goalValue"] = goalValue }
+        if let activityType { payload["activityType"] = activityType }
+        if let inviteUserIds { payload["inviteUserIds"] = inviteUserIds }
+        if let scheduledStartAt {
+            // Present-but-nil is the explicit cancel; NSNull is how that
+            // survives JSONSerialization, which drops a Swift nil entirely.
+            // Written as an if/else rather than `map(...) ?? NSNull()` because
+            // that form asks Swift to unify String and NSNull through `??`,
+            // which only resolves via Any and reads as ambiguous.
+            if let date = scheduledStartAt {
+                payload["scheduledStartAt"] = ISO8601DateFormatter().string(from: date)
+            } else {
+                payload["scheduledStartAt"] = NSNull()
+            }
+        }
+
+        let state = try await request(
+            "/buddy/sessions/\(sessionId)",
+            method: .PATCH,
+            json: payload,
+            responseType: BuddySessionState.self
+        )
+        apply(state)
         return state
     }
 

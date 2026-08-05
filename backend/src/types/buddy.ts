@@ -172,6 +172,8 @@ export interface BuddySessionState {
 
 export type BuddyEventKind =
   | "created"
+  /** Host changed the lobby's mode/goal/activity/schedule before starting. */
+  | "updated"
   | "joined"
   | "left"
   | "declined"
