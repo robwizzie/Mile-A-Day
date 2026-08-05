@@ -744,6 +744,12 @@ class WorkoutSyncService: ObservableObject {
                 "totalDuration": workout.duration,
                 "splits": splitsData,
                 "source": "healthkit",
+                // WHICH app wrote this into HealthKit. The server needs it to
+                // spot the same run arriving twice from two connected apps
+                // (Garmin Connect and Strava both writing one workout is two
+                // HKWorkout UUIDs, so UUID dedup can't see it) — without this
+                // the miles, the daily goal and the leaderboards all double.
+                "sourceBundleId": workout.sourceRevision.source.bundleIdentifier,
             ]
 
             // In-app tracked workouts carry their moving time as metadata —

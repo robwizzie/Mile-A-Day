@@ -22,6 +22,11 @@ export type Workout = {
   ghostFriendUserId?: string;
   splits: WorkoutSplit[];
   source?: WorkoutSource;
+  // Bundle id of the app that wrote this workout into HealthKit
+  // (com.strava.stravaride, com.garmin.connect.mobile, …). Optional: older
+  // clients don't send it, and those workouts just never take part in
+  // cross-app duplicate detection.
+  sourceBundleId?: string;
   // Optional simplified GPS trace ([[lat, lng], ...]) for outdoor walks/runs.
   route?: [number, number][];
 };

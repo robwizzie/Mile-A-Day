@@ -174,6 +174,24 @@ export const users = pgTable(
     })
       .defaultNow()
       .notNull(),
+    // The grandfather line for cross-app duplicate exclusion: a workout is only
+    // ever auto-excluded as a duplicate when its `created_at >= dedupe_since`.
+    //
+    // DEFAULT now() IS DELIBERATE HERE, and it is the one case where the
+    // "ADD COLUMN ts DEFAULT now() stamps every existing row with one DDL-time
+    // value" gotcha is the FEATURE, not the bug: that single deploy-instant
+    // value is exactly the grandfather line we want. Every workout a user had
+    // already uploaded pre-dates it, so nobody's mile totals or streaks move
+    // when dedup turns on — only newly-synced workouts are deduped. New users
+    // get their real insert time, which is also correct (they have no history).
+    // Costs no table rewrite. Do NOT "fix" this to a backfill.
+    //
+    // Moved backwards (to the user's earliest workout) only by an explicit
+    // opt-in through POST /workouts/:userId/duplicates/resolve.
+    dedupeSince: timestamp("dedupe_since", {
+      withTimezone: true,
+      mode: "string",
+    }).defaultNow(),
     // Streak-features enrollment stamp (Double Down / Streak Save / Streak
     // Assist). Only the new app build calls the enable endpoint, so null =
     // legacy build → every streak feature is invisible AND inert for this user
@@ -303,6 +321,20 @@ export const workouts = pgTable(
     // unclassified row stays VISIBLE — failing open beats silently swallowing
     // someone's run.
     feedRole: text("feed_role").default("extra").notNull(),
+    // Bundle id of the app that WROTE this workout into HealthKit
+    // (com.strava.stravaride, com.garmin.connect.mobile, …). Distinct from
+    // `source`, which is varchar(20) and answers healthkit/manual/edited — a
+    // bundle id doesn't fit there and means something different. Null on every
+    // pre-existing row and on any client too old to send it; the dedup pass
+    // treats null as "unknown app", never as a match.
+    sourceBundleId: varchar("source_bundle_id", { length: 255 }),
+    // The workout this one duplicates — set when two apps (say Garmin Connect
+    // and Strava) both wrote the same real-world run, which HealthKit hands us
+    // as two different UUIDs. ALWAYS populated by detection, independent of
+    // whether the row is actually excluded: the exclusion is gated separately
+    // on the user's `dedupe_since` grandfather line, so this column stays a
+    // pure observation that the review endpoints can report on.
+    duplicateOf: varchar("duplicate_of", { length: 255 }),
   },
   (table) => [
     index("idx_workouts_local_date_user_id").using(

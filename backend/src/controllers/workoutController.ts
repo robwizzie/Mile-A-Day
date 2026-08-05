@@ -25,6 +25,8 @@ import {
   getUserRoutes,
   getWorkoutRoute as getWorkoutRouteDb,
   getStreakErasForUser,
+  getDuplicateSummary,
+  resolveDuplicateHistory,
 } from "../services/workoutService.js";
 import { checkRaceCompletions } from "../services/competitionService.js";
 import { softDeleteWorkout } from "../services/workoutDeletionService.js";
@@ -535,6 +537,62 @@ export async function recalibrateStreak(req: Request, res: Response) {
     res
       .status(500)
       .json({ error: "Error recalibrating streak: " + error.message });
+  }
+}
+
+/**
+ * What cross-app duplicate detection found for this user — read-only.
+ *
+ * Backs the "we found N duplicate workouts" card on the Connections screen.
+ * `pendingCount` is what's still counting toward their totals (grandfathered
+ * history); `excludedCount` is what dedup already removed going forward.
+ */
+export async function getDuplicates(req: Request, res: Response) {
+  if (!hasRequiredKeys(["userId"], req, res)) return;
+
+  try {
+    const summary = await getDuplicateSummary(req.params.userId);
+    return res.status(200).json(summary);
+  } catch (error: any) {
+    console.error("Error reading duplicate summary:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error reading duplicates: " + error.message });
+  }
+}
+
+/**
+ * The user's explicit opt-in to stop counting historical duplicates.
+ *
+ * This is the only path that changes already-uploaded totals, so it is a
+ * deliberate POST behind requireSelfAccess and never happens on a sync. The
+ * streak is refreshed afterwards because removing duplicate miles can change
+ * which days reached the goal.
+ */
+export async function resolveDuplicates(req: Request, res: Response) {
+  if (!hasRequiredKeys(["userId"], req, res)) return;
+
+  try {
+    const userId = req.params.userId;
+
+    const user = await getUser({ userId });
+    if (!user) {
+      return res.status(400).send({ error: `No user found with ID ${userId}` });
+    }
+
+    const result = await resolveDuplicateHistory(userId);
+    const streak = await refreshCurrentStreak(userId);
+
+    return res.status(200).json({
+      resolved_days: result.days.length,
+      removed_miles: result.removedMiles,
+      streak,
+    });
+  } catch (error: any) {
+    console.error("Error resolving duplicates:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error resolving duplicates: " + error.message });
   }
 }
 

@@ -112,6 +112,17 @@ struct ProfileSettingsView: View {
 
             settingsDivider
 
+            NavigationLink(destination: FitnessConnectionsView(userManager: userManager)) {
+                MADSettingsRow(
+                    icon: "link.circle.fill",
+                    title: "Connected Apps",
+                    subtitle: "Strava, Garmin, WHOOP, Oura and more",
+                    iconColor: Color.teal
+                )
+            }
+
+            settingsDivider
+
             Button(action: onRecalibrateStreak) {
                 MADSettingsRow(
                     icon: "arrow.triangle.2.circlepath",

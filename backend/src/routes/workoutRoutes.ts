@@ -13,6 +13,8 @@ import {
   getRaceRecords,
   getRaceHistoryController,
   getStreakEras,
+  getDuplicates,
+  resolveDuplicates,
 } from "../controllers/workoutController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
 
@@ -33,6 +35,15 @@ router.delete(
   "/:userId/workout/:workoutId",
   requireSelfAccess("userId"),
   deleteWorkout,
+);
+// Cross-app duplicates (the same run written to HealthKit by two connected
+// apps). Self-only both ways: the read exposes the user's own workout history,
+// and the resolve is the one action that can change their historical totals.
+router.get("/:userId/duplicates", requireSelfAccess("userId"), getDuplicates);
+router.post(
+  "/:userId/duplicates/resolve",
+  requireSelfAccess("userId"),
+  resolveDuplicates,
 );
 // Self-only: friends' route visibility is governed by share_route_maps on
 // feed payloads; the raw full-history dump is never exposed to others.
