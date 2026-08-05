@@ -204,16 +204,32 @@ enum FitnessSourceLauncher {
         }
     }
 
-    /// A SEARCH url rather than a hardcoded App Store id: ids differ by
-    /// storefront and get retired when a vendor re-publishes (Fitbit → Google
-    /// Health did exactly that), and a wrong id sends someone to the wrong app.
-    /// A search term stays correct everywhere.
-    private static func openAppStore(for platform: FitnessSourcePlatform) {
-        let term =
-            platform.name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
-            ?? platform.name
-        guard let url = URL(string: "https://apps.apple.com/search?term=\(term)") else { return }
-        UIApplication.shared.open(url)
+    /// The app's real App Store product page.
+    ///
+    /// This was a `?term=` SEARCH url, which is what made every one of these
+    /// buttons land somewhere wrong: `apps.apple.com/search` without a
+    /// storefront segment doesn't resolve to the App Store app at all, so a
+    /// failed scheme fell through to a dead end. And even when a search does
+    /// resolve it only produces a results list.
+    ///
+    /// `apps.apple.com/app/id<N>` is storefront-agnostic — Apple redirects to
+    /// the viewer's own store — opens the App Store app directly, and shows
+    /// OPEN rather than GET when the app is already installed. That reliable
+    /// destination is what lets the optimistic `urlScheme` above stay
+    /// best-effort: a scheme that is wrong, missing, or changed by the vendor
+    /// now costs a tap instead of stranding the user.
+    /// `itms-apps:` first, `https:` as the backstop. The itms scheme is handled
+    /// by the App Store app itself, so it can't be intercepted or land in
+    /// Safari the way an https universal link can when link handling is off or
+    /// the user opted the App Store out of it.
+    static func openAppStore(for platform: FitnessSourcePlatform) {
+        let path = "apps.apple.com/app/id\(platform.appStoreId)"
+        guard let storeURL = URL(string: "itms-apps://\(path)") else { return }
+
+        UIApplication.shared.open(storeURL, options: [:]) { opened in
+            guard !opened, let webURL = URL(string: "https://\(path)") else { return }
+            UIApplication.shared.open(webURL)
+        }
     }
 
     /// The Apple Health app, where every one of these connections ultimately

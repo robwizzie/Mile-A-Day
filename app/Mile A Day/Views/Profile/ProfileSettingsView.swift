@@ -24,8 +24,14 @@ struct ProfileSettingsView: View {
     let isRecalibratingStreak: Bool
     let isDeletingAccount: Bool
 
-    @State private var showingPrivacySettings = false
-    @State private var showingImportHistory = false
+    @State private var activeSheet: SettingsSheet?
+
+    /// The modals this page presents, so a single `.sheet(item:)` drives both.
+    enum SettingsSheet: String, Identifiable {
+        case privacy
+        case importHistory
+        var id: String { rawValue }
+    }
 
     var body: some View {
         ScrollView {
@@ -43,11 +49,17 @@ struct ProfileSettingsView: View {
         .background(MADTheme.Colors.appBackgroundGradient)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
-        .sheet(isPresented: $showingPrivacySettings) {
-            PrivacySettingsView()
-        }
-        .sheet(isPresented: $showingImportHistory) {
-            ImportHistoryView(userManager: userManager)
+        // ONE sheet modifier for both destinations. Two `.sheet`s on the same
+        // node compete and one silently never presents — the settings row then
+        // reads as a dead button. Same reason FitnessConnectionsView routes all
+        // of its modals through a single item.
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .privacy:
+                PrivacySettingsView()
+            case .importHistory:
+                ImportHistoryView(userManager: userManager)
+            }
         }
         .alert("Sign Out", isPresented: $showingLogoutConfirmation) {
             Button("Cancel", role: .cancel) { }
@@ -130,7 +142,7 @@ struct ProfileSettingsView: View {
             // A sheet, not a NavigationLink: ImportHistoryView owns its own
             // NavigationStack and Cancel/Done button, which a pushed
             // destination would nest inside this one.
-            Button { showingImportHistory = true } label: {
+            Button { activeSheet = .importHistory } label: {
                 MADSettingsRow(
                     icon: "clock.arrow.circlepath",
                     title: "Import Past Workouts",
@@ -179,7 +191,7 @@ struct ProfileSettingsView: View {
 
             settingsDivider
 
-            Button { showingPrivacySettings = true } label: {
+            Button { activeSheet = .privacy } label: {
                 MADSettingsRow(
                     icon: "lock.shield.fill",
                     title: "Privacy Settings",
