@@ -60,6 +60,12 @@ struct FlameBuddyFigure: View {
     /// day — always vivid, never washed out. When nil the figure keeps its
     /// legacy stage-based look (widgets, Live Activity, previews).
     var vigor: CGFloat? = nil
+    /// How far a live (vigor-driven) flame has been warmed into a full blaze,
+    /// 0…1. Palette, glow and core brightness cross to the `.blazing` look
+    /// continuously, so the goal celebration can grow the SAME flame into a
+    /// blaze instead of fading a second `.blazing` figure in over it. Ignored
+    /// without `vigor`, so every legacy caller renders byte-identically.
+    var blaze: CGFloat = 0
     /// Grounded flames (the Fun buddy) sit on the ground: they shrink toward
     /// their base and cast a ground shadow. A non-grounded flame (the Modern
     /// ring) shrinks toward its center so it stays framed in the circle.
@@ -105,14 +111,26 @@ struct FlameBuddyFigure: View {
         return min(max(vigor, 0), 1)
     }
 
+    /// Blaze blend, honored only on the continuous (vigor-driven) path.
+    private var blazeValue: CGFloat {
+        guard vigorValue != nil else { return 0 }
+        return min(max(blaze, 0), 1)
+    }
+
     private var effectiveBodyScale: CGFloat {
         if let v = vigorValue { return StreakFlameClock.flameScale(vigor: Double(v)) }
         return health.bodyScale
     }
 
     private var effectiveGlowOpacity: Double {
-        if let v = vigorValue, health != .critical { return 0.16 + Double(v) * 0.36 }
+        if let v = vigorValue, health != .critical {
+            return lerp(0.16 + Double(v) * 0.36, FlameHealth.blazing.glowOpacity, blazeValue)
+        }
         return health.glowOpacity
+    }
+
+    private func lerp(_ a: Double, _ b: Double, _ t: CGFloat) -> Double {
+        a + (b - a) * Double(min(max(t, 0), 1))
     }
 
     private var wobble: CGFloat {
@@ -135,7 +153,7 @@ struct FlameBuddyFigure: View {
 
     private var outerColors: [Color] {
         if let v = vigorValue, health != .critical {
-            return FlamePalette.outer(vigor: v)
+            return FlamePalette.outer(vigor: v, blaze: blazeValue)
         }
         switch health {
         case .blazing:
@@ -155,7 +173,7 @@ struct FlameBuddyFigure: View {
 
     private var innerColors: [Color] {
         if let v = vigorValue, health != .critical {
-            return FlamePalette.inner(vigor: v)
+            return FlamePalette.inner(vigor: v, blaze: blazeValue)
         }
         switch health {
         case .blazing:
@@ -173,7 +191,7 @@ struct FlameBuddyFigure: View {
 
     private var innerOpacity: Double {
         if let v = vigorValue, health != .critical {
-            return 0.36 + Double(v) * 0.52
+            return lerp(0.36 + Double(v) * 0.52, 0.95, blazeValue)
         }
         switch health {
         case .blazing: return 0.95

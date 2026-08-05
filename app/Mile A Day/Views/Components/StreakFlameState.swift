@@ -69,20 +69,90 @@ enum FlamePalette {
         )
     }
 
-    static func outer(vigor: CGFloat) -> [Color] {
+    static func outer(vigor: CGFloat, blaze: CGFloat = 0) -> [Color] {
         let t = 1 - Double(min(max(vigor, 0), 1))
-        return [
-            lerp((1.00, 0.95, 0.32), (1.00, 0.66, 0.16), t),
-            lerp((1.00, 0.58, 0.00), (0.97, 0.34, 0.10), t),
-            lerp((1.00, 0.22, 0.10), (0.55, 0.08, 0.10), t)
+        let live = [
+            mix((1.00, 0.95, 0.32), (1.00, 0.66, 0.16), t),
+            mix((1.00, 0.58, 0.00), (0.97, 0.34, 0.10), t),
+            mix((1.00, 0.22, 0.10), (0.55, 0.08, 0.10), t)
         ]
+        guard blaze > 0 else { return live.map { color($0) } }
+        return blend(resample(live, to: blazeOuter.count), blazeOuter, blaze)
     }
 
-    static func inner(vigor: CGFloat) -> [Color] {
+    static func inner(vigor: CGFloat, blaze: CGFloat = 0) -> [Color] {
         let t = 1 - Double(min(max(vigor, 0), 1))
-        return [
-            lerp((1.00, 0.98, 0.44), (1.00, 0.78, 0.26), t),
-            lerp((1.00, 0.65, 0.12), (0.92, 0.32, 0.10), t)
+        let live = [
+            mix((1.00, 0.98, 0.44), (1.00, 0.78, 0.26), t),
+            mix((1.00, 0.65, 0.12), (0.92, 0.32, 0.10), t)
         ]
+        guard blaze > 0 else { return live.map { color($0) } }
+        return blend(resample(live, to: blazeInner.count), blazeInner, blaze)
+    }
+
+    // MARK: - Blazing target
+
+    /// The white-hot stops the `.blazing` stage draws, expressed on the
+    /// continuous palette so ONE live flame can be warmed the whole way into a
+    /// blaze. The goal celebration used to crossfade a second `.blazing` figure
+    /// over the living one instead — and the two wobble on different curves, so
+    /// the mismatched silhouettes ghosted apart mid-fade and read as a second
+    /// flame appearing and going away.
+    private static let blazeOuter: [(Double, Double, Double)] = [
+        (1.00, 1.00, 1.00),
+        (1.00, 0.88, 0.28),
+        (1.00, 0.584, 0.00),
+        (1.00, 0.20, 0.10)
+    ]
+
+    private static let blazeInner: [(Double, Double, Double)] = [
+        (1.00, 1.00, 1.00),
+        (1.00, 0.92, 0.30),
+        (1.00, 0.50, 0.08)
+    ]
+
+    private static func color(_ c: (Double, Double, Double)) -> Color {
+        Color(red: c.0, green: c.1, blue: c.2)
+    }
+
+    private static func mix(
+        _ a: (Double, Double, Double),
+        _ b: (Double, Double, Double),
+        _ t: Double
+    ) -> (Double, Double, Double) {
+        let clamped = min(max(t, 0), 1)
+        return (
+            a.0 + (b.0 - a.0) * clamped,
+            a.1 + (b.1 - a.1) * clamped,
+            a.2 + (b.2 - a.2) * clamped
+        )
+    }
+
+    /// Re-express a gradient with a different number of EVENLY spaced stops.
+    /// Exact for the piecewise-linear gradients SwiftUI draws, so a resampled
+    /// palette renders identically to the original — which is what lets the
+    /// 3-stop live palette blend stop-for-stop into the 4-stop blaze without
+    /// the colours shifting the moment the blend starts.
+    private static func resample(
+        _ stops: [(Double, Double, Double)],
+        to count: Int
+    ) -> [(Double, Double, Double)] {
+        guard stops.count > 1, count > 1 else { return stops }
+        guard stops.count != count else { return stops }
+        let last = Double(stops.count - 1)
+        return (0..<count).map { (index: Int) -> (Double, Double, Double) in
+            let position = Double(index) / Double(count - 1) * last
+            let lower = min(Int(position), stops.count - 2)
+            return mix(stops[lower], stops[lower + 1], position - Double(lower))
+        }
+    }
+
+    private static func blend(
+        _ from: [(Double, Double, Double)],
+        _ to: [(Double, Double, Double)],
+        _ amount: CGFloat
+    ) -> [Color] {
+        let t = Double(min(max(amount, 0), 1))
+        return zip(from, to).map { pair in color(mix(pair.0, pair.1, t)) }
     }
 }
