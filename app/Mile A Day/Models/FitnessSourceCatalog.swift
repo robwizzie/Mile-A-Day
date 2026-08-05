@@ -39,22 +39,20 @@ struct FitnessSourcePlatform: Identifiable, Hashable {
     let bundleHints: [String]
     let nameHints: [String]
 
-    /// Optimistic deep link into the installed app.
+    /// Numeric App Store id — the ONLY way this screen ever links to a partner
+    /// app, and deliberately so.
     ///
-    /// Vendor-controlled and not verifiable from here, so treat every one of
-    /// these as a guess that might already be stale. That's tolerable only
-    /// because `FitnessSourceLauncher.open` falls back to the App Store product
-    /// page below when the scheme doesn't resolve — never leave that fallback
-    /// pointing at a search, or a wrong guess here becomes a dead button.
-    let urlScheme: String?
-
-    /// Numeric App Store id, used to build `apps.apple.com/app/id<N>`.
+    /// There used to be a `urlScheme` here too, tried first as a shortcut into
+    /// the installed app. That is unsafe by construction: custom URL schemes are
+    /// first-come-first-served and unverifiable, so ANY app can register
+    /// `fitbit://`. One did — tapping Google Health opened an unrelated fitness
+    /// app. A wrong scheme doesn't fail loudly, it silently hands the user to
+    /// somebody else's software, which is far worse than an extra tap.
     ///
-    /// A real product page, never a search URL: a search lands the user on a
-    /// results list (or, if the URL form is wrong, nowhere at all) and makes
-    /// them pick the right app themselves. This is also what makes a wrong or
-    /// missing `urlScheme` harmless — the fallback is always a correct
-    /// destination, and for an installed app the product page shows OPEN.
+    /// An App Store id can't do that. It resolves to exactly one app, shows
+    /// OPEN when it's already installed, and is verifiable — unlike a scheme,
+    /// which nothing can validate from inside this app. Never reintroduce a
+    /// scheme here without a way to prove it belongs to the vendor.
     let appStoreId: String
 
     /// Where the Apple Health toggle lives, in that app's own words.
@@ -105,7 +103,6 @@ enum FitnessSourceCatalog {
             tint: Color(red: 0.98, green: 0.31, blue: 0.0),
             bundleHints: ["com.strava"],
             nameHints: ["strava"],
-            urlScheme: "strava://",
             appStoreId: "426826309",
             setupSteps: [
                 "Open Strava and go to the You tab.",
@@ -125,7 +122,6 @@ enum FitnessSourceCatalog {
             tint: Color(red: 0.0, green: 0.44, blue: 0.72),
             bundleHints: ["com.garmin"],
             nameHints: ["garmin"],
-            urlScheme: "garminconnectmobile://",
             appStoreId: "583446403",
             setupSteps: [
                 "Open Garmin Connect and tap More in the bottom-right.",
@@ -144,7 +140,6 @@ enum FitnessSourceCatalog {
             tint: Color(red: 0.0, green: 0.66, blue: 0.56),
             bundleHints: ["com.fitbit", "com.google.health"],
             nameHints: ["fitbit", "google health"],
-            urlScheme: "fitbit://",
             appStoreId: "462638897",
             setupSteps: [
                 "Open Google Health (formerly the Fitbit app).",
@@ -163,7 +158,6 @@ enum FitnessSourceCatalog {
             tint: Color(red: 0.1, green: 0.1, blue: 0.1),
             bundleHints: ["whoop"],
             nameHints: ["whoop"],
-            urlScheme: "whoop://",
             appStoreId: "933944389",
             setupSteps: [
                 "Open WHOOP and go to More, then App Settings.",
@@ -179,7 +173,6 @@ enum FitnessSourceCatalog {
             tint: Color(red: 0.4, green: 0.35, blue: 0.75),
             bundleHints: ["ouraring", "com.oura"],
             nameHints: ["oura"],
-            urlScheme: "oura://",
             appStoreId: "1043837948",
             setupSteps: [
                 "Open Oura and tap your profile icon.",
@@ -197,7 +190,6 @@ enum FitnessSourceCatalog {
             tint: Color(red: 0.85, green: 0.15, blue: 0.25),
             bundleHints: ["onepeloton"],
             nameHints: ["peloton"],
-            urlScheme: "peloton://",
             appStoreId: "792750948",
             setupSteps: [
                 "Open Peloton and tap your profile, then the settings gear.",
@@ -215,7 +207,6 @@ enum FitnessSourceCatalog {
             tint: Color(red: 0.95, green: 0.35, blue: 0.1),
             bundleHints: ["com.nike"],
             nameHints: ["nike"],
-            urlScheme: "nikerunclub://",
             appStoreId: "387771637",
             setupSteps: [
                 "Open Nike Run Club and go to the Profile tab.",
@@ -231,7 +222,6 @@ enum FitnessSourceCatalog {
             tint: Color(red: 0.9, green: 0.5, blue: 0.05),
             bundleHints: ["coros"],
             nameHints: ["coros"],
-            urlScheme: nil,
             appStoreId: "1277625343",
             setupSteps: [
                 "Open the COROS app and go to the Profile tab.",
@@ -247,7 +237,6 @@ enum FitnessSourceCatalog {
             tint: Color(red: 0.0, green: 0.55, blue: 0.85),
             bundleHints: ["polar"],
             nameHints: ["polar"],
-            urlScheme: nil,
             appStoreId: "717172678",
             setupSteps: [
                 "Open Polar Flow and tap the menu in the top left.",
@@ -263,7 +252,6 @@ enum FitnessSourceCatalog {
             tint: Color(red: 0.15, green: 0.35, blue: 0.55),
             bundleHints: ["suunto", "amerbrands"],
             nameHints: ["suunto"],
-            urlScheme: nil,
             appStoreId: "1230327951",
             setupSteps: [
                 "Open Suunto and go to the profile tab.",
@@ -279,7 +267,6 @@ enum FitnessSourceCatalog {
             tint: Color(red: 0.2, green: 0.45, blue: 0.95),
             bundleHints: ["runna"],
             nameHints: ["runna"],
-            urlScheme: nil,
             appStoreId: "1594204443",
             setupSteps: [
                 "Open Runna and go to the Profile tab.",
@@ -295,7 +282,6 @@ enum FitnessSourceCatalog {
             tint: Color(red: 0.1, green: 0.6, blue: 0.85),
             bundleHints: ["mapmyrun", "mapmyfitness"],
             nameHints: ["mapmyrun", "map my run"],
-            urlScheme: nil,
             appStoreId: "291890420",
             setupSteps: [
                 "Open MapMyRun and go to More, then Settings.",
@@ -311,7 +297,6 @@ enum FitnessSourceCatalog {
             tint: Color(red: 0.1, green: 0.1, blue: 0.1),
             bundleHints: ["runtastic", "adidas"],
             nameHints: ["adidas", "runtastic"],
-            urlScheme: nil,
             appStoreId: "336599882",
             setupSteps: [
                 "Open adidas Running and go to the Profile tab.",

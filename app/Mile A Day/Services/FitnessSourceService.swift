@@ -185,43 +185,32 @@ final class FitnessSourceService {
 
 /// Opens a partner app so the user can flip its Apple Health toggle.
 enum FitnessSourceLauncher {
-    /// Try the app's own URL scheme, fall back to the App Store.
+    /// The app's App Store product page — the ONLY destination this screen
+    /// ever opens for a partner app.
     ///
-    /// Deliberately uses `open(_:options:completionHandler:)` and NEVER
-    /// `canOpenURL`. `canOpenURL` requires every scheme to be declared in
-    /// `LSApplicationQueriesSchemes`, and this target's Info.plist is generated
-    /// from the Xcode project file, which is off-limits. `open` needs no
-    /// declaration and reports failure in its handler — so a scheme that is
-    /// wrong, missing, or changed by the vendor costs nothing: it just falls
-    /// through to the store. No single point of failure.
-    static func open(_ platform: FitnessSourcePlatform) {
-        guard let scheme = platform.urlScheme, let url = URL(string: scheme) else {
-            openAppStore(for: platform)
-            return
-        }
-        UIApplication.shared.open(url, options: [:]) { opened in
-            if !opened { openAppStore(for: platform) }
-        }
-    }
-
-    /// The app's real App Store product page.
+    /// Two earlier versions of this were wrong in instructive ways:
     ///
-    /// This was a `?term=` SEARCH url, which is what made every one of these
-    /// buttons land somewhere wrong: `apps.apple.com/search` without a
-    /// storefront segment doesn't resolve to the App Store app at all, so a
-    /// failed scheme fell through to a dead end. And even when a search does
-    /// resolve it only produces a results list.
+    /// 1. A `?term=` SEARCH url. `apps.apple.com/search` carries no storefront
+    ///    segment and doesn't resolve to the App Store app at all, so every
+    ///    button that reached it was a dead end.
+    /// 2. A custom URL scheme tried first as a shortcut into the installed app
+    ///    (`fitbit://` and friends). Custom schemes are first-come-first-served
+    ///    and unverifiable, so a wrong one does NOT fail — it opens whichever
+    ///    other app registered it. Tapping Google Health opened an unrelated
+    ///    fitness app. Handing someone to a stranger's software is a much worse
+    ///    failure than one extra tap, and nothing inside this app can detect
+    ///    it, so there is no safe way to keep a guessed scheme.
     ///
-    /// `apps.apple.com/app/id<N>` is storefront-agnostic — Apple redirects to
-    /// the viewer's own store — opens the App Store app directly, and shows
-    /// OPEN rather than GET when the app is already installed. That reliable
-    /// destination is what lets the optimistic `urlScheme` above stay
-    /// best-effort: a scheme that is wrong, missing, or changed by the vendor
-    /// now costs a tap instead of stranding the user.
-    /// `itms-apps:` first, `https:` as the backstop. The itms scheme is handled
-    /// by the App Store app itself, so it can't be intercepted or land in
-    /// Safari the way an https universal link can when link handling is off or
-    /// the user opted the App Store out of it.
+    /// An App Store id resolves to exactly one app and shows OPEN when it's
+    /// already installed, so the shortcut was buying very little anyway. Do not
+    /// reintroduce a scheme without a way to prove it belongs to the vendor.
+    ///
+    /// `itms-apps:` first, `https:` as the backstop: the itms scheme is handled
+    /// by the App Store app itself, so it can't land in Safari the way an https
+    /// universal link can when link handling is off. Uses
+    /// `open(_:options:completionHandler:)` and never `canOpenURL`, which would
+    /// need `LSApplicationQueriesSchemes` in an Info.plist generated from the
+    /// off-limits project file.
     static func openAppStore(for platform: FitnessSourcePlatform) {
         let path = "apps.apple.com/app/id\(platform.appStoreId)"
         guard let storeURL = URL(string: "itms-apps://\(path)") else { return }
