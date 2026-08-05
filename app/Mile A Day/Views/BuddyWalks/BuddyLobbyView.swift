@@ -21,9 +21,12 @@ struct BuddyLobbyView: View {
     @State private var didCopy = false
     @State private var showGhostSetup = false
     @State private var showSettings = false
-    /// The QR starts hidden. See `inviteCard` — it's essential for ten seconds
-    /// and dead weight after, which is a disclosure, not a hero.
+    /// The share-a-link block starts collapsed. See `peopleCard` — tapping a
+    /// friend is the path that matters; a link is for people not in the app.
+    @State private var showShare = false
     @State private var showQR = false
+    /// Friends with an invite request in flight, so their tile can show it.
+    @State private var invitingIds: Set<String> = []
 
     /// Ghost race arming for THIS buddy walk.
     ///
@@ -111,12 +114,17 @@ struct BuddyLobbyView: View {
             ScrollView {
                 VStack(spacing: MADTheme.Spacing.lg) {
                     planHeader(session)
-                    rosterCard(session)
-                    inviteCard(session)
+                    peopleCard(session)
                     ghostRaceRow(session)
                         .padding(.horizontal, MADTheme.Spacing.md)
                     Color.clear.frame(height: 4)
                 }
+            }
+            .task {
+                // A lobby reached by push or deep link never passed through the
+                // dashboard prefetch, so the friend row would be empty exactly
+                // when someone is trying to pull people in.
+                await buddy.loadCandidates()
             }
 
             actions(session)
@@ -125,22 +133,33 @@ struct BuddyLobbyView: View {
         }
     }
 
-    // MARK: - Roster
+    // MARK: - People
 
-    /// Who's here, as faces rather than a list of rows.
+    /// Everyone in one card: who's here, and — one tap away — who else could be.
     ///
-    /// A lobby is a social moment; a column of grey pills is a table. Big
-    /// avatars in a wrapping row read as "the group", and the count in the
-    /// header answers "are we waiting on anyone?" at a glance — which is the
-    /// question the host is actually asking before they tap Start.
+    /// This replaces a roster card sitting above a separate "invite" card whose
+    /// only real control was a ShareLink. That arrangement meant the ONLY
+    /// visible way to invite someone was to send them a link, while inviting an
+    /// actual Mile A Day friend was buried behind the Edit button under a
+    /// heading called "Add more people". Nobody found it, and the reasonable
+    /// conclusion from looking at the screen was that the feature didn't exist.
     ///
-    /// Capped at 8 by the server, so a `LazyVGrid` of adaptive columns fits
-    /// every real case in one or two rows without scrolling.
-    private func rosterCard(_ session: BuddySessionState) -> some View {
+    /// So the friends row lives here, in the same card as the roster, as
+    /// tappable faces: one tap invites, no sheet, no navigation. Sharing a link
+    /// survives as a disclosure at the bottom because it solves a different
+    /// problem — someone who isn't on Mile A Day at all — and shouldn't outrank
+    /// the common case.
+    ///
+    /// Host-only, because the server is (`not_host`). A guest sees the roster
+    /// and the share block, which is everything they can actually act on.
+    private func peopleCard(_ session: BuddySessionState) -> some View {
         let people = session.lobbyParticipants
         let here = people.filter {
             $0.status == .joined || $0.status == .ready || $0.status == .active
         }.count
+        let present = Set(people.map(\.userId))
+        let invitable = buddy.candidates.filter { !present.contains($0.userId) }
+        let isHost = session.isHost(buddy.currentUserId)
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack {
@@ -148,7 +167,7 @@ struct BuddyLobbyView: View {
                     .font(MADTheme.Typography.headline)
                     .foregroundStyle(MADTheme.Colors.madWhite)
                 Spacer()
-                Text(here == people.count ? "Everyone's in" : "\(here) of \(people.count)")
+                Text(waitingText(here: here, total: people.count))
                     .font(MADTheme.Typography.caption)
                     .foregroundStyle(
                         here == people.count
@@ -157,13 +176,34 @@ struct BuddyLobbyView: View {
             }
 
             LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 72), spacing: MADTheme.Spacing.sm)],
+                columns: [GridItem(.adaptive(minimum: 68), spacing: MADTheme.Spacing.sm)],
                 spacing: MADTheme.Spacing.md
             ) {
                 ForEach(people) { participant in
                     rosterTile(participant, session: session)
                 }
             }
+
+            if isHost, !invitable.isEmpty {
+                Divider().background(MADTheme.Colors.madWhite.opacity(0.10))
+
+                Text("Tap to invite")
+                    .font(MADTheme.Typography.smallBold)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.75))
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 68), spacing: MADTheme.Spacing.sm)],
+                    spacing: MADTheme.Spacing.md
+                ) {
+                    ForEach(invitable) { candidate in
+                        inviteTile(candidate, session: session)
+                    }
+                }
+            }
+
+            Divider().background(MADTheme.Colors.madWhite.opacity(0.10))
+
+            shareBlock(session)
         }
         .padding(MADTheme.Spacing.md)
         .frame(maxWidth: .infinity)
@@ -174,6 +214,16 @@ struct BuddyLobbyView: View {
             .fill(MADTheme.Colors.madWhite.opacity(0.06))
         )
         .padding(.horizontal, MADTheme.Spacing.md)
+        .animation(MADTheme.Animation.standard, value: session.participants.count)
+    }
+
+    /// "Everyone's in" is wrong when you're on your own — there is no everyone
+    /// yet, and the phrase reads as though the walk is ready to go when the
+    /// whole point of the screen is that nobody has been asked.
+    private func waitingText(here: Int, total: Int) -> String {
+        if total <= 1 { return "Just you so far" }
+        if here == total { return "Everyone's in" }
+        return "\(here) of \(total)"
     }
 
     /// One face. Presence is carried by the avatar — ringed and full strength
@@ -191,7 +241,7 @@ struct BuddyLobbyView: View {
             AvatarView(
                 name: participant.displayName,
                 imageURL: participant.profileImageUrl,
-                size: 56
+                size: 54
             )
             .overlay(
                 Circle()
@@ -218,9 +268,195 @@ struct BuddyLobbyView: View {
                 .foregroundStyle(
                     isIn ? session.accentColor : MADTheme.Colors.madWhite.opacity(0.4))
         }
-        // The 5s poll is what surfaces an arrival, so this keys on the value
-        // that changed rather than an onAppear that already ran.
+        // The poll is what surfaces an arrival, so this keys on the value that
+        // changed rather than an onAppear that already ran.
         .animation(MADTheme.Animation.standard, value: participant.status)
+    }
+
+    /// A friend who isn't in yet. Tapping sends the invite immediately — the
+    /// PATCH already exists and is idempotent, so there is nothing to confirm.
+    private func inviteTile(_ candidate: BuddyCandidate, session: BuddySessionState)
+        -> some View
+    {
+        let sending = invitingIds.contains(candidate.userId)
+        return Button {
+            guard !sending else { return }
+            MADHaptics.action()
+            invite(candidate, session: session)
+        } label: {
+            VStack(spacing: 6) {
+                AvatarView(
+                    name: candidate.displayName,
+                    imageURL: candidate.profileImageUrl,
+                    size: 54
+                )
+                .opacity(sending ? 0.45 : 0.8)
+                .overlay(alignment: .bottomTrailing) {
+                    ZStack {
+                        Circle().fill(session.accentColor).frame(width: 20, height: 20)
+                        if sending {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(MADTheme.Colors.madWhite)
+                        } else {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(MADTheme.Colors.madWhite)
+                        }
+                    }
+                }
+
+                Text(candidate.displayName)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.85))
+                    .lineLimit(1)
+
+                Text(sending ? "Inviting…" : "Invite")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(session.accentColor)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(sending)
+    }
+
+    private func invite(_ candidate: BuddyCandidate, session: BuddySessionState) {
+        invitingIds.insert(candidate.userId)
+        Task {
+            // The response carries the new roster, so the tile moves from the
+            // invite row to the roster on its own — no local bookkeeping, and
+            // no chance of the two rows disagreeing.
+            _ = try? await buddy.updateSession(inviteUserIds: [candidate.userId])
+            invitingIds.remove(candidate.userId)
+        }
+    }
+
+    /// For someone who isn't on Mile A Day at all.
+    ///
+    /// Collapsed by default and phrased as what it's FOR, rather than sitting at
+    /// the top labelled "Invite a friend" — which is what made a share sheet
+    /// look like the only way to invite anyone.
+    @ViewBuilder
+    private func shareBlock(_ session: BuddySessionState) -> some View {
+        Button {
+            MADHaptics.tap()
+            withAnimation(MADTheme.Animation.quick) { showShare.toggle() }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "link")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("Invite someone not on Mile A Day")
+                    .font(MADTheme.Typography.caption)
+                Spacer(minLength: 0)
+                Image(systemName: showShare ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+
+        if showShare {
+            VStack(spacing: MADTheme.Spacing.sm) {
+                if let url = DeepLinkRouter.buddyShareURL(code: session.joinCode) {
+                    ShareLink(
+                        item: url,
+                        message: Text(
+                            "Walk with me on Mile A Day — join code \(session.joinCode)")
+                    ) {
+                        Label("Share a link", systemImage: "square.and.arrow.up")
+                            .font(MADTheme.Typography.bodyBold)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .background(Capsule().fill(session.accentColor))
+                            .foregroundStyle(MADTheme.Colors.madWhite)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Button {
+                        UIPasteboard.general.string = session.joinCode
+                        MADHaptics.success()
+                        withAnimation(MADTheme.Animation.quick) { didCopy = true }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text(session.joinCode)
+                                .font(.system(size: 20, weight: .bold, design: .rounded))
+                                .tracking(3)
+                                .foregroundStyle(MADTheme.Colors.madWhite)
+                            Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(
+                                    didCopy
+                                        ? session.accentColor
+                                        : MADTheme.Colors.madWhite.opacity(0.5))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                        .background(
+                            RoundedRectangle(
+                                cornerRadius: MADTheme.CornerRadius.medium,
+                                style: .continuous
+                            )
+                            .fill(MADTheme.Colors.madWhite.opacity(0.08))
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        MADHaptics.tap()
+                        withAnimation(MADTheme.Animation.quick) { showQR.toggle() }
+                    } label: {
+                        Image(systemName: "qrcode")
+                            .font(.system(size: 17, weight: .semibold))
+                            .frame(width: 50, height: 42)
+                            .background(
+                                RoundedRectangle(
+                                    cornerRadius: MADTheme.CornerRadius.medium,
+                                    style: .continuous
+                                )
+                                .fill(
+                                    showQR
+                                        ? session.accentColor
+                                        : MADTheme.Colors.madWhite.opacity(0.08))
+                            )
+                            .foregroundStyle(MADTheme.Colors.madWhite)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if showQR {
+                    VStack(spacing: 4) {
+                        if let qrImage {
+                            Image(uiImage: qrImage)
+                                .interpolation(.none)
+                                .resizable()
+                                .frame(width: 148, height: 148)
+                                .padding(8)
+                                .background(RoundedRectangle(cornerRadius: 12).fill(.white))
+                        } else {
+                            ProgressView()
+                                .tint(MADTheme.Colors.madWhite)
+                                .frame(width: 148, height: 148)
+                        }
+                        Text("Point a camera at this")
+                            .font(MADTheme.Typography.caption)
+                            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+                    }
+                }
+            }
+            // Generated only once the QR is actually revealed — a CIFilter
+            // render on every lobby, for a control most sessions never open.
+            .task(id: "\(session.joinCode)-\(showQR)") {
+                didCopy = false
+                guard showQR, qrImage == nil else { return }
+                qrImage = ShareProfileView.generateQRCode(
+                    from: DeepLinkRouter.buddyShareURL(code: session.joinCode)?.absoluteString
+                        ?? session.joinCode
+                )
+            }
+        }
     }
 
     private func statusWord(_ status: BuddyParticipantStatus) -> String {
@@ -232,81 +468,6 @@ struct BuddyLobbyView: View {
         case .finished: return "Done"
         case .left, .declined: return "Out"
         }
-    }
-
-    // MARK: - Plan header
-
-    /// What this room is, and — for the host — the way to change it.
-    ///
-    /// The plan used to be three stacked labels with nothing to do about them.
-    /// Being able to edit it is what turns a lobby into a waiting room rather
-    /// than a receipt: plans change between "let's walk" and "everyone's here",
-    /// and the only way to act on that was to abandon the room and rebuild it,
-    /// which also invalidated the code you'd already sent people.
-    ///
-    /// Non-hosts see the same summary with no affordance. The server enforces
-    /// host-only anyway (`not_host`), so this is about not offering something
-    /// that would just fail.
-    private func planHeader(_ session: BuddySessionState) -> some View {
-        VStack(spacing: MADTheme.Spacing.xs) {
-            ZStack {
-                Circle()
-                    .fill(session.accentColor.opacity(0.18))
-                    .frame(width: 76, height: 76)
-                Circle()
-                    .strokeBorder(session.accentColor.opacity(0.45), lineWidth: 1.5)
-                    .frame(width: 76, height: 76)
-                Image(systemName: session.mode.icon)
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(session.accentColor)
-            }
-            // Keyed on the whole plan so a change the HOST made animates on
-            // every other phone too, when the 5s poll brings it in.
-            .animation(MADTheme.Animation.quick, value: session.mode)
-
-            Text(session.mode.title)
-                .font(MADTheme.Typography.title2)
-                .foregroundStyle(MADTheme.Colors.madWhite)
-
-            Text(planLine(session))
-                .font(MADTheme.Typography.body)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
-                .multilineTextAlignment(.center)
-
-            if session.isHost(buddy.currentUserId) {
-                Button {
-                    MADHaptics.tap()
-                    showSettings = true
-                } label: {
-                    Label("Edit", systemImage: "slider.horizontal.3")
-                        .font(MADTheme.Typography.caption)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(MADTheme.Colors.madWhite.opacity(0.10)))
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.85))
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 2)
-            }
-        }
-        .padding(.top, MADTheme.Spacing.xl)
-        // Its own presentation node. This view already carries the ghost-setup
-        // sheet and a ShareLink, and two sheets on ONE node makes SwiftUI
-        // silently drop one.
-        .background(
-            Color.clear
-                .sheet(isPresented: $showSettings) {
-                    BuddyLobbySettingsSheet(session: session)
-                }
-        )
-    }
-
-    /// "2.0 miles · Walk" — the plan as one line, so the goal and the activity
-    /// aren't two separate things to hold in your head.
-    private func planLine(_ session: BuddySessionState) -> String {
-        let activity = session.isRunning ? "Run" : "Walk"
-        guard let goal = session.goalValue else { return activity }
-        return "\(goalText(goal, mode: session.mode)) · \(activity)"
     }
 
     // MARK: - Ghost race
@@ -438,130 +599,6 @@ struct BuddyLobbyView: View {
         return "Chasing \(ghost.shortName)"
     }
 
-    /// The invite moment — the whole reason a lobby exists.
-    ///
-    /// This used to be the code as static text: nothing to tap, nothing to
-    /// send, no way to get anyone in except reading six characters aloud. A
-    /// lobby nobody can be invited to is a lobby nobody uses. Three ways in,
-    /// covering the three real situations: standing next to them (scan), in a
-    /// chat (share), on a call (read the code).
-    /// Three ways in, in the order people actually need them.
-    ///
-    /// Share is first because it covers the common case (they're in a chat, not
-    /// standing next to you). The code is second, tappable to copy, for reading
-    /// aloud on a call. The QR is third and COLLAPSED — it's the right answer
-    /// for the ten seconds you're stood together and dead weight afterwards,
-    /// yet at 132pt plus its caption it was the largest thing on the screen and
-    /// pushed the roster off the bottom. A disclosure is exactly the right
-    /// shape for "occasionally essential".
-    ///
-    /// The QR is also generated lazily now, only once it's asked for: rendering
-    /// a CIFilter image on appear cost work every single lobby, for a control
-    /// most sessions never use.
-    private func inviteCard(_ session: BuddySessionState) -> some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            if let url = DeepLinkRouter.buddyShareURL(code: session.joinCode) {
-                ShareLink(
-                    item: url,
-                    message: Text(
-                        "Walk with me on Mile A Day — join code \(session.joinCode)")
-                ) {
-                    Label("Invite a friend", systemImage: "square.and.arrow.up")
-                        .font(MADTheme.Typography.bodyBold)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                        .background(Capsule().fill(session.accentColor))
-                        .foregroundStyle(MADTheme.Colors.madWhite)
-                }
-                .buttonStyle(.plain)
-            }
-
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Button {
-                    UIPasteboard.general.string = session.joinCode
-                    MADHaptics.success()
-                    withAnimation(MADTheme.Animation.quick) { didCopy = true }
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(session.joinCode)
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .tracking(3)
-                            .foregroundStyle(MADTheme.Colors.madWhite)
-                        Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(
-                                didCopy
-                                    ? session.accentColor
-                                    : MADTheme.Colors.madWhite.opacity(0.5))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                    .background(
-                        RoundedRectangle(
-                            cornerRadius: MADTheme.CornerRadius.medium, style: .continuous
-                        )
-                        .fill(MADTheme.Colors.madWhite.opacity(0.08))
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    MADHaptics.tap()
-                    withAnimation(MADTheme.Animation.quick) { showQR.toggle() }
-                } label: {
-                    Image(systemName: "qrcode")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(width: 52, height: 44)
-                        .background(
-                            RoundedRectangle(
-                                cornerRadius: MADTheme.CornerRadius.medium, style: .continuous
-                            )
-                            .fill(
-                                showQR
-                                    ? session.accentColor
-                                    : MADTheme.Colors.madWhite.opacity(0.08))
-                        )
-                        .foregroundStyle(MADTheme.Colors.madWhite)
-                }
-                .buttonStyle(.plain)
-            }
-
-            if showQR {
-                VStack(spacing: 4) {
-                    if let qrImage {
-                        Image(uiImage: qrImage)
-                            .interpolation(.none)
-                            .resizable()
-                            .frame(width: 148, height: 148)
-                            .padding(8)
-                            .background(RoundedRectangle(cornerRadius: 12).fill(.white))
-                    } else {
-                        ProgressView()
-                            .tint(MADTheme.Colors.madWhite)
-                            .frame(width: 148, height: 148)
-                    }
-                    Text("Point a camera at this")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
-                }
-                .transition(.opacity.combined(with: .scale(scale: 0.94)))
-            }
-        }
-        .padding(MADTheme.Spacing.md)
-        .frame(maxWidth: .infinity)
-        .madLiquidGlassCard()
-        .padding(.horizontal, MADTheme.Spacing.md)
-        // Generated only when the QR is actually revealed, and re-generated if
-        // the code ever changes under it.
-        .task(id: "\(session.joinCode)-\(showQR)") {
-            didCopy = false
-            guard showQR, qrImage == nil else { return }
-            qrImage = ShareProfileView.generateQRCode(
-                from: DeepLinkRouter.buddyShareURL(code: session.joinCode)?.absoluteString
-                    ?? session.joinCode
-            )
-        }
-    }
 
 
     private func actions(_ session: BuddySessionState) -> some View {
@@ -582,8 +619,8 @@ struct BuddyLobbyView: View {
                     VStack(spacing: 1) {
                         Text(readyCount(session) > 1 ? "Start together" : "Start now")
                             .font(MADTheme.Typography.bodyBold)
-                        if readyCount(session) < 2 {
-                            Text("They can join once you're moving")
+                        if let note = startNote(session) {
+                            Text(note)
                                 .font(MADTheme.Typography.caption)
                                 .opacity(0.85)
                         }
@@ -663,6 +700,19 @@ struct BuddyLobbyView: View {
     }
 
     // MARK: - Helpers
+
+    /// The line under Start, which has to mean something in all three states.
+    ///
+    /// "They can join once you're moving" was shown whenever fewer than two
+    /// people were ready — including when you were alone in a room you'd invited
+    /// nobody to, where "they" referred to nobody at all and read as though the
+    /// app was waiting on someone you'd forgotten about.
+    private func startNote(_ session: BuddySessionState) -> String? {
+        let others = session.lobbyParticipants.filter { $0.userId != buddy.currentUserId }
+        if others.isEmpty { return "Invite someone above, or head out on your own" }
+        if readyCount(session) < 2 { return "They can join once you're moving" }
+        return nil
+    }
 
     private func readyCount(_ session: BuddySessionState) -> Int {
         session.participants.filter { $0.status == .joined || $0.status == .ready }.count
