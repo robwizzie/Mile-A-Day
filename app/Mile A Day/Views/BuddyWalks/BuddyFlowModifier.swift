@@ -88,12 +88,26 @@ struct BuddyFlowModifier: ViewModifier {
                 // Walks UI, which is what makes the user eligible to be invited
                 // at all. Idempotent, so it's safe on every appearance.
                 await BuddySessionService.shared.enrollIfNeeded()
-                await BuddySessionService.shared.refreshMySessions()
+
+                // Everything after enrollment is INDEPENDENT, so it runs
+                // concurrently rather than in a chain. Serially this was four
+                // round trips deep before the dashboard settled, and the
+                // candidate list — the one the start sheet blocks on — was
+                // last in the queue.
+                //
+                // Warming the candidates HERE is the point: the sheet used to
+                // fetch them in its own `.task`, so opening it showed an empty
+                // "Who's coming?" for a round trip every single time. Prefetched,
+                // it opens populated, which is most of what made setup feel slow.
+                async let sessions: Void = BuddySessionService.shared.refreshMySessions()
                 // "Alex is walking right now" — pulled, never pushed, so this
                 // is the only thing that surfaces the offer. Reads live
                 // presence, so a friend out on their OWN shows up too, not
                 // just friends already inside a buddy room.
-                await BuddySessionService.shared.refreshFriendsOutNow()
+                async let friendsOut: Void = BuddySessionService.shared.refreshFriendsOutNow()
+                async let candidates: Void = BuddySessionService.shared.loadCandidates()
+                async let routines: Void = BuddySessionService.shared.loadRoutines()
+                _ = await (sessions, friendsOut, candidates, routines)
 
                 // The `.onReceive` pair above only fires for values published
                 // AFTER this mounts. On a cold launch the link is already

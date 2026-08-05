@@ -229,7 +229,11 @@ final class BuddySessionService: ObservableObject {
                 "/buddy/candidates", responseType: BuddyCandidatesResponse.self
             ).candidates
         } catch {
-            candidates = []
+            // Deliberately KEEPS whatever we already had. This list is
+            // prefetched on the dashboard so the start sheet opens populated;
+            // blanking it on a transient blip would turn a warm sheet into the
+            // "No friends set up for buddy walks" empty state, which is the
+            // exact message that made a working feature look broken.
             print("[BuddySessionService] loadCandidates failed: \(error)")
         }
     }

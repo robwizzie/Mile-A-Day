@@ -21,6 +21,9 @@ struct BuddyLobbyView: View {
     @State private var didCopy = false
     @State private var showGhostSetup = false
     @State private var showSettings = false
+    /// The QR starts hidden. See `inviteCard` — it's essential for ten seconds
+    /// and dead weight after, which is a disclosure, not a hero.
+    @State private var showQR = false
 
     /// Ghost race arming for THIS buddy walk.
     ///
@@ -88,28 +91,146 @@ struct BuddyLobbyView: View {
 
     // MARK: - Lobby
 
+    /// The waiting room.
+    ///
+    /// Ordering is the whole design here, and the previous one was backwards.
+    /// The roster used to be the ONLY flexible child — a `ScrollView` under a
+    /// fixed header, a 132pt QR card and the ghost row — so on a real phone it
+    /// collapsed to a ~60pt sliver with the first participant sliced in half.
+    /// The single most important question a lobby answers ("who's actually
+    /// here?") was the one thing you couldn't see.
+    ///
+    /// So: who's here comes FIRST, at a size you can read across the room. The
+    /// invite card follows, compacted, with the QR behind a tap — it matters
+    /// enormously for ten seconds and then never again, which is exactly the
+    /// shape of a disclosure, not of the biggest element on screen. One scroll
+    /// view wraps the lot so nothing can be squeezed by its neighbours, and the
+    /// actions stay pinned outside it because Start must never scroll away.
     private func lobby(_ session: BuddySessionState) -> some View {
-        VStack(spacing: MADTheme.Spacing.lg) {
-            planHeader(session)
-
-            inviteCard(session)
-
-            ghostRaceRow(session)
-                .padding(.horizontal, MADTheme.Spacing.md)
-
+        VStack(spacing: 0) {
             ScrollView {
-                VStack(spacing: MADTheme.Spacing.sm) {
-                    ForEach(session.lobbyParticipants) { participant in
-                        participantRow(participant, session: session)
-                    }
+                VStack(spacing: MADTheme.Spacing.lg) {
+                    planHeader(session)
+                    rosterCard(session)
+                    inviteCard(session)
+                    ghostRaceRow(session)
+                        .padding(.horizontal, MADTheme.Spacing.md)
+                    Color.clear.frame(height: 4)
                 }
-                .padding(.horizontal, MADTheme.Spacing.md)
             }
-
-            Spacer(minLength: 0)
 
             actions(session)
                 .padding(MADTheme.Spacing.md)
+                .background(.ultraThinMaterial)
+        }
+    }
+
+    // MARK: - Roster
+
+    /// Who's here, as faces rather than a list of rows.
+    ///
+    /// A lobby is a social moment; a column of grey pills is a table. Big
+    /// avatars in a wrapping row read as "the group", and the count in the
+    /// header answers "are we waiting on anyone?" at a glance — which is the
+    /// question the host is actually asking before they tap Start.
+    ///
+    /// Capped at 8 by the server, so a `LazyVGrid` of adaptive columns fits
+    /// every real case in one or two rows without scrolling.
+    private func rosterCard(_ session: BuddySessionState) -> some View {
+        let people = session.lobbyParticipants
+        let here = people.filter {
+            $0.status == .joined || $0.status == .ready || $0.status == .active
+        }.count
+
+        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            HStack {
+                Text("Who's here")
+                    .font(MADTheme.Typography.headline)
+                    .foregroundStyle(MADTheme.Colors.madWhite)
+                Spacer()
+                Text(here == people.count ? "Everyone's in" : "\(here) of \(people.count)")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(
+                        here == people.count
+                            ? session.accentColor
+                            : MADTheme.Colors.madWhite.opacity(0.55))
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 72), spacing: MADTheme.Spacing.sm)],
+                spacing: MADTheme.Spacing.md
+            ) {
+                ForEach(people) { participant in
+                    rosterTile(participant, session: session)
+                }
+            }
+        }
+        .padding(MADTheme.Spacing.md)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(
+                cornerRadius: MADTheme.CornerRadius.extraLarge, style: .continuous
+            )
+            .fill(MADTheme.Colors.madWhite.opacity(0.06))
+        )
+        .padding(.horizontal, MADTheme.Spacing.md)
+    }
+
+    /// One face. Presence is carried by the avatar — ringed and full strength
+    /// once they're in, dimmed while the invite is still outstanding — with the
+    /// word underneath only for the states a ring can't spell.
+    private func rosterTile(_ participant: BuddyParticipant, session: BuddySessionState)
+        -> some View
+    {
+        let isIn = participant.status == .joined || participant.status == .ready
+            || participant.status == .active
+        let name =
+            participant.userId == buddy.currentUserId ? "You" : participant.displayName
+
+        return VStack(spacing: 6) {
+            AvatarView(
+                name: participant.displayName,
+                imageURL: participant.profileImageUrl,
+                size: 56
+            )
+            .overlay(
+                Circle()
+                    .strokeBorder(isIn ? session.accentColor : Color.clear, lineWidth: 2.5)
+            )
+            .opacity(isIn ? 1 : 0.4)
+            .overlay(alignment: .bottomTrailing) {
+                if participant.isHost {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(MADTheme.Colors.madBlack)
+                        .padding(4)
+                        .background(Circle().fill(session.accentColor))
+                }
+            }
+
+            Text(name)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(isIn ? 1 : 0.5))
+                .lineLimit(1)
+
+            Text(isIn ? "In" : statusWord(participant.status))
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(
+                    isIn ? session.accentColor : MADTheme.Colors.madWhite.opacity(0.4))
+        }
+        // The 5s poll is what surfaces an arrival, so this keys on the value
+        // that changed rather than an onAppear that already ran.
+        .animation(MADTheme.Animation.standard, value: participant.status)
+    }
+
+    private func statusWord(_ status: BuddyParticipantStatus) -> String {
+        switch status {
+        case .invited: return "Invited"
+        case .joined: return "In"
+        case .ready: return "Ready"
+        case .active: return "Moving"
+        case .finished: return "Done"
+        case .left, .declined: return "Out"
         }
     }
 
@@ -324,38 +445,21 @@ struct BuddyLobbyView: View {
     /// lobby nobody can be invited to is a lobby nobody uses. Three ways in,
     /// covering the three real situations: standing next to them (scan), in a
     /// chat (share), on a call (read the code).
+    /// Three ways in, in the order people actually need them.
+    ///
+    /// Share is first because it covers the common case (they're in a chat, not
+    /// standing next to you). The code is second, tappable to copy, for reading
+    /// aloud on a call. The QR is third and COLLAPSED — it's the right answer
+    /// for the ten seconds you're stood together and dead weight afterwards,
+    /// yet at 132pt plus its caption it was the largest thing on the screen and
+    /// pushed the roster off the bottom. A disclosure is exactly the right
+    /// shape for "occasionally essential".
+    ///
+    /// The QR is also generated lazily now, only once it's asked for: rendering
+    /// a CIFilter image on appear cost work every single lobby, for a control
+    /// most sessions never use.
     private func inviteCard(_ session: BuddySessionState) -> some View {
         VStack(spacing: MADTheme.Spacing.sm) {
-            if let qrImage {
-                Image(uiImage: qrImage)
-                    .interpolation(.none)
-                    .resizable()
-                    .frame(width: 132, height: 132)
-                    .padding(8)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(.white))
-                Text("Point a camera at this")
-                    .font(MADTheme.Typography.caption)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
-            }
-
-            Button {
-                UIPasteboard.general.string = session.joinCode
-                MADHaptics.success()
-                withAnimation(MADTheme.Animation.quick) { didCopy = true }
-            } label: {
-                VStack(spacing: 2) {
-                    Text(didCopy ? "COPIED" : "OR SHARE THIS CODE")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundStyle(
-                            didCopy ? session.accentColor : MADTheme.Colors.madWhite.opacity(0.5))
-                    Text(session.joinCode)
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .tracking(6)
-                        .foregroundStyle(MADTheme.Colors.madWhite)
-                }
-            }
-            .buttonStyle(.plain)
-
             if let url = DeepLinkRouter.buddyShareURL(code: session.joinCode) {
                 ShareLink(
                     item: url,
@@ -371,106 +475,94 @@ struct BuddyLobbyView: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Button {
+                    UIPasteboard.general.string = session.joinCode
+                    MADHaptics.success()
+                    withAnimation(MADTheme.Animation.quick) { didCopy = true }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(session.joinCode)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .tracking(3)
+                            .foregroundStyle(MADTheme.Colors.madWhite)
+                        Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(
+                                didCopy
+                                    ? session.accentColor
+                                    : MADTheme.Colors.madWhite.opacity(0.5))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(
+                        RoundedRectangle(
+                            cornerRadius: MADTheme.CornerRadius.medium, style: .continuous
+                        )
+                        .fill(MADTheme.Colors.madWhite.opacity(0.08))
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    MADHaptics.tap()
+                    withAnimation(MADTheme.Animation.quick) { showQR.toggle() }
+                } label: {
+                    Image(systemName: "qrcode")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 52, height: 44)
+                        .background(
+                            RoundedRectangle(
+                                cornerRadius: MADTheme.CornerRadius.medium, style: .continuous
+                            )
+                            .fill(
+                                showQR
+                                    ? session.accentColor
+                                    : MADTheme.Colors.madWhite.opacity(0.08))
+                        )
+                        .foregroundStyle(MADTheme.Colors.madWhite)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if showQR {
+                VStack(spacing: 4) {
+                    if let qrImage {
+                        Image(uiImage: qrImage)
+                            .interpolation(.none)
+                            .resizable()
+                            .frame(width: 148, height: 148)
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(.white))
+                    } else {
+                        ProgressView()
+                            .tint(MADTheme.Colors.madWhite)
+                            .frame(width: 148, height: 148)
+                    }
+                    Text("Point a camera at this")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.94)))
+            }
         }
         .padding(MADTheme.Spacing.md)
         .frame(maxWidth: .infinity)
         .madLiquidGlassCard()
         .padding(.horizontal, MADTheme.Spacing.md)
-        .task(id: session.joinCode) {
+        // Generated only when the QR is actually revealed, and re-generated if
+        // the code ever changes under it.
+        .task(id: "\(session.joinCode)-\(showQR)") {
+            didCopy = false
+            guard showQR, qrImage == nil else { return }
             qrImage = ShareProfileView.generateQRCode(
                 from: DeepLinkRouter.buddyShareURL(code: session.joinCode)?.absoluteString
                     ?? session.joinCode
             )
-            didCopy = false
         }
     }
 
-    /// One person in the room.
-    ///
-    /// Presence is carried by the AVATAR — ringed and full-strength once they're
-    /// in, dimmed while they're still an outstanding invite — rather than by a
-    /// text badge alone. Somebody scanning this list wants to know "who's
-    /// actually here", and a row of identical grey pills answers that far more
-    /// slowly than a row of faces where the ones who showed up are the bright
-    /// ones. The chip stays for the states a ring can't spell (Done, Out) and as
-    /// the accessible label.
-    ///
-    /// Flat fill, not `.madLiquidGlass`: this renders once per participant and
-    /// re-renders on every 5s poll. `BuddyStartSheet` already learned that
-    /// several live blur surfaces on one screen is what makes these views feel
-    /// sluggish, and on this background the two are indistinguishable.
-    private func participantRow(_ participant: BuddyParticipant, session: BuddySessionState)
-        -> some View
-    {
-        let isIn = participant.status == .joined || participant.status == .ready
-            || participant.status == .active
-        let isOut = participant.status == .left || participant.status == .declined
-
-        return HStack(spacing: MADTheme.Spacing.md) {
-            AvatarView(
-                name: participant.displayName,
-                imageURL: participant.profileImageUrl,
-                size: 40
-            )
-            .overlay(
-                Circle()
-                    .strokeBorder(
-                        isIn ? session.accentColor : Color.clear,
-                        lineWidth: 2
-                    )
-            )
-            .opacity(isIn ? 1 : 0.45)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(
-                    participant.userId == buddy.currentUserId
-                        ? "You" : participant.displayName
-                )
-                .font(MADTheme.Typography.bodyBold)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(isOut ? 0.45 : 1))
-
-                if participant.isHost {
-                    Text("Host")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundStyle(session.accentColor)
-                }
-            }
-
-            Spacer()
-
-            statusChip(participant.status, accent: session.accentColor)
-        }
-        .padding(MADTheme.Spacing.sm)
-        .background(
-            RoundedRectangle(
-                cornerRadius: MADTheme.CornerRadius.medium, style: .continuous
-            )
-            .fill(MADTheme.Colors.madWhite.opacity(0.06))
-        )
-        // The 5s poll is what surfaces an arrival, so the animation has to key
-        // on the value that changed rather than on an onAppear that already ran.
-        .animation(MADTheme.Animation.standard, value: participant.status)
-    }
-
-    private func statusChip(_ status: BuddyParticipantStatus, accent: Color) -> some View {
-        let (label, color): (String, Color) = {
-            switch status {
-            case .invited: return ("Invited", MADTheme.Colors.madWhite.opacity(0.4))
-            case .joined: return ("In", accent)
-            case .ready: return ("Ready", MADTheme.Colors.success)
-            case .active: return ("Moving", MADTheme.Colors.success)
-            case .finished: return ("Done", MADTheme.Colors.success)
-            case .left, .declined: return ("Out", MADTheme.Colors.madWhite.opacity(0.3))
-            }
-        }()
-
-        return Text(label)
-            .font(MADTheme.Typography.caption)
-            .padding(.horizontal, MADTheme.Spacing.sm)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(color.opacity(0.2)))
-            .foregroundStyle(color)
-    }
 
     private func actions(_ session: BuddySessionState) -> some View {
         VStack(spacing: MADTheme.Spacing.sm) {
