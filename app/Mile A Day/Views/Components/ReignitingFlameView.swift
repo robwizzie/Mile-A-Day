@@ -100,25 +100,28 @@ struct ReignitingFlameView: View {
     }
 
     private func flameFigure(phase: CGFloat, blink: Bool) -> some View {
-        ZStack {
-            // The flame it WAS: the dashboard hero's own continuous palette,
-            // warming from the day's leftover vigor toward full…
+        Group {
             if case .burning(let vigor) = origin {
+                // ONE flame the whole way: the dashboard hero's own continuous
+                // palette, warming from the day's leftover vigor and blending
+                // into the blaze it becomes. This used to be two FlameBuddyFigures
+                // crossfading by opacity — and because the two wobble on
+                // different curves and each draws its own glow and ground
+                // shadow, the pair ghosted apart mid-fade: a second flame that
+                // appeared, faded out, and handed back to the first.
                 let warmed = warmedVigor(from: vigor)
-                figure(health: .healthy, vigor: warmed, phase: phase, blink: blink)
+                figure(health: .healthy, vigor: warmed, blaze: blazeMix, phase: phase, blink: blink)
                     // FlameBuddyFigure couples `vigor` to colour AND size, but
                     // the burn-down size is already carried by `flameScale`
                     // below. Neutralise the figure's own shrink (against
-                    // `.blazing`'s 1.05 body scale) so the crossfading pair sit
-                    // at exactly the same size and vigor drives colour alone.
+                    // `.blazing`'s 1.05 body scale) so vigor drives colour alone
+                    // and the swell stays one uninterrupted ramp.
                     .scaleEffect(1.05 / StreakFlameClock.flameScale(vigor: Double(warmed)), anchor: .bottom)
-                    .opacity(1 - blazeMix)
+            } else {
+                // The reignite: an ember has no vigor to warm, so it steps up
+                // through the health stages as it catches.
+                figure(health: revivalHealth, vigor: nil, blaze: 0, phase: phase, blink: blink)
             }
-
-            // …crossfading into the blaze it BECOMES. A crossfade rather than a
-            // health swap, so the colours never pop mid-animation.
-            figure(health: revivalHealth, vigor: nil, phase: phase, blink: blink)
-                .opacity(startsSad ? 1 : blazeMix)
         }
         .scaleEffect(
             x: flameScale * (1 + sin(phase * 0.42) * 0.014 * effectiveFlameProgress),
@@ -130,7 +133,7 @@ struct ReignitingFlameView: View {
         .shadow(color: Color.orange.opacity(Double(effectiveFlameProgress) * Double(0.28 * intensity)), radius: size * 0.10 * intensity, x: 0, y: size * 0.04)
     }
 
-    private func figure(health: FlameHealth, vigor: CGFloat?, phase: CGFloat, blink: Bool) -> some View {
+    private func figure(health: FlameHealth, vigor: CGFloat?, blaze: CGFloat, phase: CGFloat, blink: Bool) -> some View {
         FlameBuddyFigure(
             health: health,
             flickerPhase: phase,
@@ -139,7 +142,8 @@ struct ReignitingFlameView: View {
             // A living flame already wore its face on the dashboard, so it
             // keeps it the whole way through — same as the reignite path.
             showsFace: showsFace,
-            vigor: vigor
+            vigor: vigor,
+            blaze: blaze
         )
     }
 
@@ -155,9 +159,11 @@ struct ReignitingFlameView: View {
         return start + (1 - start) * easedFlameProgress
     }
 
-    /// Crossfade weight from the flame-as-it-was into the full blaze.
-    private var blazeMix: Double {
-        Double(smoothstep(0.45, 1.0, clampedProgress))
+    /// How far the living flame has been warmed into the full blaze. Blends the
+    /// one figure's palette and glow — it is NOT an opacity crossfade, so the
+    /// flame never thins out or doubles up while it changes.
+    private var blazeMix: CGFloat {
+        smoothstep(0.34, 1.0, clampedProgress)
     }
 
     /// Coal opacity: full while it lingers, gone once the flame has caught over
