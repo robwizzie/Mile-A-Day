@@ -15,6 +15,7 @@ import {
   recapController,
   sessionStateController,
   startSessionController,
+  updateSessionController,
 } from "../controllers/buddyController.js";
 
 const router = Router();
@@ -44,6 +45,9 @@ router.post("/sessions/:sessionId/decline", declineSessionController);
 router.post("/sessions/:sessionId/leave", leaveSessionController);
 router.post("/sessions/:sessionId/ready", readyController);
 router.post("/sessions/:sessionId/start", startSessionController);
+// Host-only, lobby-only: change mode/goal/activity/schedule or add invitees
+// after the room exists, so a change of plan doesn't mean a new join code.
+router.patch("/sessions/:sessionId", updateSessionController);
 router.post("/sessions/:sessionId/progress", progressController);
 router.post("/sessions/:sessionId/finish", finishController);
 

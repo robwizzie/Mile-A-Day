@@ -73,6 +73,21 @@ export const CLIENT_FEATURES = {
    * direction for a rule that exists to shape a habit, not to protect data.
    */
   postWindowV1: "post_window_v1",
+
+  /**
+   * The build has the Buddy Walks & Runs screens — it can render a lobby, a
+   * live roster and a recap, and it registers the BUDDY_INVITE category.
+   *
+   * This is the capability half of the buddy gate, and it carries more weight
+   * than the others: declaring it is what stamps `users.buddy_enrolled_at` at
+   * registration, and an enrolled user is offered to friends as someone they
+   * can pull into a walk. A build without these screens must never be offered,
+   * because the invite push would open nothing.
+   *
+   * That makes this the only safeguard once BUDDY_SESSIONS defaults on — do not
+   * send this string from a build that does not actually render the lobby.
+   */
+  buddyWalksV1: "buddy_walks_v1",
 } as const;
 
 export type ClientFeature =

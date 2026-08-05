@@ -87,8 +87,9 @@ struct BuddyStartSheet: View {
                     VStack(spacing: MADTheme.Spacing.lg) {
                         lanePicker
                         if lane == .start { startLane } else { joinLane }
-                        // Clears the sticky footer.
-                        Color.clear.frame(height: 120)
+                        // Clears the sticky footer (button + the reassurance
+                        // line under it, which the join lane doesn't render).
+                        Color.clear.frame(height: 140)
                     }
                     .padding(.horizontal, MADTheme.Spacing.md)
                     .padding(.top, MADTheme.Spacing.sm)
@@ -115,7 +116,7 @@ struct BuddyStartSheet: View {
                 buddy.errorMessage = nil
             }
             .alert(
-                "Couldn't start",
+                "Couldn't create lobby",
                 isPresented: Binding(
                     get: { errorText != nil },
                     set: { if !$0 { errorText = nil } }
@@ -529,22 +530,31 @@ struct BuddyStartSheet: View {
         }
     }
 
-    /// The candidate list is filtered to friends whose app build actually has
-    /// Buddy Walks — so "nobody here" can mean "none of them have updated",
-    /// which must not be phrased as a problem with their friend list.
+    /// The candidate list is filtered to friends whose build has Buddy Walks and
+    /// who haven't opted out — so "nobody here" can mean "none of them have
+    /// updated", which must never be phrased as a problem with their friend
+    /// list.
+    ///
+    /// It must also not be a dead end. The old copy mentioned the share code in
+    /// passing, at the bottom, in the dimmest text on the card — so the one
+    /// thing you CAN still do read as a consolation prize. Creating the lobby
+    /// anyway and sending the code is a completely normal path (it's how you
+    /// walk with someone who hasn't updated), so it's stated as the next step.
     private var emptyFriendsCard: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
-            Image(systemName: "person.2.slash")
+            Image(systemName: "qrcode")
                 .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.4))
-            Text("No friends set up for buddy walks yet")
+                .foregroundStyle(accent)
+            Text("Nobody to invite from here yet")
                 .font(MADTheme.Typography.smallBold)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.85))
                 .multilineTextAlignment(.center)
-            Text("They'll appear once they update. You can still start one and share the code.")
-                .font(MADTheme.Typography.caption)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
-                .multilineTextAlignment(.center)
+            Text(
+                "Friends show up once they're on a build with buddy walks. Create the lobby anyway — you'll get a code and a QR to send them."
+            )
+            .font(MADTheme.Typography.caption)
+            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+            .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(MADTheme.Spacing.lg)
@@ -593,10 +603,21 @@ struct BuddyStartSheet: View {
             .frame(height: 28)
             .allowsHitTesting(false)
 
-            primaryButton
-                .padding(.horizontal, MADTheme.Spacing.md)
-                .padding(.bottom, MADTheme.Spacing.sm)
-                .background(MADTheme.Colors.madBlack)
+            VStack(spacing: 6) {
+                primaryButton
+                // The single most important sentence on this screen. Every
+                // earlier label said "start", so tapping it felt like committing
+                // to walking RIGHT NOW — people backed out rather than find out.
+                // Nothing about the flow changed; it always opened a lobby.
+                if lane == .start {
+                    Text("Nobody moves until you start it.")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.bottom, MADTheme.Spacing.sm)
+            .background(MADTheme.Colors.madBlack)
         }
     }
 
@@ -630,16 +651,21 @@ struct BuddyStartSheet: View {
         return isCreating
     }
 
-    /// Never mentions the share code. The old label — "Start with a share
-    /// code" — read as an INPUT ("start by entering a code") and sat directly
-    /// above the join button, which genuinely does take a code. The code is a
-    /// consequence of starting, and the header sentence already says so.
+    /// Says CREATE, never START.
+    ///
+    /// This button has always opened a lobby — the walk doesn't begin until the
+    /// host taps Start in there — but every label it has worn said "start", so
+    /// the screen promised something it didn't do. "Create lobby" describes the
+    /// actual outcome, and the caption under the button closes the gap.
+    ///
+    /// It also never mentions the share code: an earlier label ("Start with a
+    /// share code") read as an INPUT and sat directly above the join field,
+    /// which genuinely does take one. The code is a consequence of creating.
     private var primaryTitle: String {
         if lane == .join { return isJoining ? "Joining…" : "Join walk" }
-        if isCreating { return "Starting…" }
-        let noun = isRun ? "run" : "walk"
-        if selected.isEmpty { return "Start \(noun)" }
-        return selected.count == 1 ? "Invite 1 & start" : "Invite \(selected.count) & start"
+        if isCreating { return "Creating…" }
+        if selected.isEmpty { return "Create lobby" }
+        return selected.count == 1 ? "Create & invite 1" : "Create & invite \(selected.count)"
     }
 
     // MARK: - Helpers
@@ -684,7 +710,7 @@ struct BuddyStartSheet: View {
         } catch {
             MADHaptics.error()
             errorText =
-                (error as? LocalizedError)?.errorDescription ?? "Couldn't create the buddy walk."
+                (error as? LocalizedError)?.errorDescription ?? "Couldn't create the lobby."
         }
     }
 

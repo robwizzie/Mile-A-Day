@@ -264,30 +264,34 @@ export interface CreateSessionInput {
   scheduledStartAt?: string | null;
 }
 
+/**
+ * A goal is required for every mode except 'together', which is goal-less by
+ * definition, and the ceiling depends on the unit (minutes vs miles).
+ *
+ * Lives here rather than inline in createSession because the lobby can now
+ * change the mode after the fact: switching 'together' → 'race_goal' has to
+ * demand a goal on the way through, and switching back has to drop it. Two
+ * copies of that rule would let the lobby write a state create would reject.
+ */
+function validateGoal(mode: BuddyMode, raw: number | null): number | null {
+  if (mode === "together") return null;
+  if (raw === null || !(raw > 0)) throw new BadRequestError("goal_required");
+  if (mode === "race_time" && raw > 24 * 60) {
+    throw new BadRequestError("goal_too_large");
+  }
+  if ((mode === "coop_goal" || mode === "race_goal") && raw > 200) {
+    throw new BadRequestError("goal_too_large");
+  }
+  return raw;
+}
+
 export async function createSession(
   hostUserId: string,
   input: CreateSessionInput,
 ): Promise<BuddySessionState> {
   const { mode, activityType } = input;
 
-  // A goal is required for every mode except 'together', which is goal-less by
-  // definition. Validating here keeps the CHECK constraints from having to
-  // encode cross-column rules.
-  const needsGoal = mode !== "together";
-  const goalValue = input.goalValue ?? null;
-  if (needsGoal && (goalValue === null || !(goalValue > 0))) {
-    throw new BadRequestError("goal_required");
-  }
-  if (mode === "race_time" && goalValue !== null && goalValue > 24 * 60) {
-    throw new BadRequestError("goal_too_large");
-  }
-  if (
-    (mode === "coop_goal" || mode === "race_goal") &&
-    goalValue !== null &&
-    goalValue > 200
-  ) {
-    throw new BadRequestError("goal_too_large");
-  }
+  const goalValue = validateGoal(mode, input.goalValue ?? null);
 
   const inviteIds = Array.from(new Set(input.inviteUserIds ?? [])).filter(
     (id) => id !== hostUserId,
@@ -296,20 +300,7 @@ export async function createSession(
     throw new BadRequestError("too_many_participants");
   }
 
-  // Every invitee must be an accepted friend, unblocked in both directions, AND
-  // enrolled (i.e. running a build that has the buddy UI). An unenrolled
-  // invitee would get a push for a screen that does not exist in their app.
-  const eligible: string[] = [];
-  for (const inviteeId of inviteIds) {
-    if (!(await areFriends(hostUserId, inviteeId))) continue;
-    if (await isBlockedEitherWay(hostUserId, inviteeId)) continue;
-    const enrolled = await db.query(
-      `SELECT 1 FROM users WHERE user_id = $1 AND buddy_enrolled_at IS NOT NULL`,
-      [inviteeId],
-    );
-    if (enrolled.length === 0) continue;
-    eligible.push(inviteeId);
-  }
+  const eligible = await eligibleInvitees(hostUserId, inviteIds);
 
   // Retry on join-code collision. The unique index is partial (open sessions
   // only), so the space is tiny in practice and a handful of attempts is plenty.
@@ -584,6 +575,141 @@ export async function startSession(
   const fresh = await getSessionRow(sessionId);
   if (!fresh) throw new BadRequestError("session_not_found");
   return toState(fresh, await loadParticipants(sessionId, fresh.host_user_id));
+}
+
+export interface UpdateSessionInput {
+  mode?: BuddyMode;
+  goalValue?: number | null;
+  activityType?: BuddyActivityType;
+  /** `null` clears the schedule; ABSENT leaves it untouched. */
+  scheduledStartAt?: string | null;
+  /** Additive only. Removing someone is their own leave/decline. */
+  inviteUserIds?: string[];
+}
+
+/**
+ * Change a lobby's settings, or pull more people into it.
+ *
+ * The host's mind changes between "let's walk" and "everyone's here", and until
+ * now the only way to act on that was to abandon the room and rebuild it —
+ * which also invalidated the code they'd already shared. This is the endpoint
+ * that makes the lobby a real waiting room rather than a receipt.
+ *
+ * Three guards, in order:
+ *  - host only, because everyone else is looking at these settings;
+ *  - lobby only, because changing the mode mid-walk would silently rescore
+ *    distance people have already covered;
+ *  - and, critically, `WHERE status = 'lobby'` on the UPDATE itself. The status
+ *    check above it is a nicety for the error message; THIS is what makes an
+ *    edit racing a scheduled promotion lose cleanly. `activateSession` uses the
+ *    same guard for the same reason.
+ *
+ * Goal and mode are validated together through `validateGoal`, so switching to
+ * a scored mode demands a goal in the same request and switching back to
+ * 'together' drops it — the lobby can never write a state create would reject.
+ */
+export async function updateSession(
+  sessionId: string,
+  userId: string,
+  patch: UpdateSessionInput,
+): Promise<BuddySessionState> {
+  const session = await getSessionRow(sessionId);
+  if (!session) throw new BadRequestError("session_not_found");
+  if (session.host_user_id !== userId) throw new BadRequestError("not_host");
+  if (session.status !== "lobby") {
+    throw new BadRequestError("session_not_editable");
+  }
+
+  const mode = patch.mode ?? (session.mode as BuddyMode);
+  // The goal follows the mode it's being validated against: an unchanged mode
+  // keeps the stored goal unless the patch names a new one.
+  const rawGoal =
+    patch.goalValue !== undefined
+      ? patch.goalValue
+      : patch.mode !== undefined && patch.mode !== session.mode
+        ? null
+        : (session.goal_value ?? null);
+  const goalValue = validateGoal(
+    mode,
+    rawGoal === null ? null : Number(rawGoal),
+  );
+  const activityType =
+    patch.activityType ?? (session.activity_type as BuddyActivityType);
+
+  const changed = await db.query<{ id: string }>(
+    `UPDATE buddy_sessions
+        SET mode = $2,
+            goal_value = $3,
+            activity_type = $4,
+            scheduled_start_at = CASE WHEN $5 THEN $6::timestamptz
+                                      ELSE scheduled_start_at END,
+            state_version = state_version + 1
+      WHERE id = $1 AND status = 'lobby'
+      RETURNING id`,
+    [
+      sessionId,
+      mode,
+      goalValue,
+      activityType,
+      patch.scheduledStartAt !== undefined,
+      patch.scheduledStartAt ?? null,
+    ],
+  );
+  // Lost the race to a start that landed first. Report it as the state the
+  // caller will now see rather than as a failure to write.
+  if (changed.length === 0) throw new BadRequestError("session_not_editable");
+
+  if (patch.inviteUserIds?.length) {
+    await addInvitees(sessionId, userId, patch.inviteUserIds);
+  }
+
+  await recordEvent(sessionId, userId, "updated", { mode, goalValue });
+
+  const fresh = await getSessionRow(sessionId);
+  if (!fresh) throw new BadRequestError("session_not_found");
+  return toState(fresh, await loadParticipants(sessionId, fresh.host_user_id));
+}
+
+/**
+ * Add people to a lobby that already exists.
+ *
+ * Reuses `eligibleInvitees` and `notifyInvitees` rather than re-deriving who
+ * may be invited — the create path's rules ARE the rules. The participant
+ * insert is `ON CONFLICT DO NOTHING`, so re-inviting someone who already
+ * joined, declined or left is a no-op and never resurrects them or re-pushes.
+ */
+async function addInvitees(
+  sessionId: string,
+  hostUserId: string,
+  requested: string[],
+): Promise<void> {
+  const existing = await db.query<{ user_id: string }>(
+    `SELECT user_id FROM buddy_session_participants WHERE session_id = $1`,
+    [sessionId],
+  );
+  const already = new Set(existing.map((row) => row.user_id));
+
+  const wanted = Array.from(new Set(requested)).filter(
+    (id) => !already.has(id),
+  );
+  if (wanted.length === 0) return;
+  if (already.size + wanted.length > BUDDY_MAX_PARTICIPANTS) {
+    throw new BadRequestError("too_many_participants");
+  }
+
+  const eligible = await eligibleInvitees(hostUserId, wanted);
+  if (eligible.length === 0) return;
+
+  for (const inviteeId of eligible) {
+    await db.query(
+      `INSERT INTO buddy_session_participants
+         (session_id, user_id, status, invited_by)
+       VALUES ($1, $2, 'invited', $3)
+       ON CONFLICT (session_id, user_id) DO NOTHING`,
+      [sessionId, inviteeId, hostUserId],
+    );
+  }
+  void notifyInvitees(sessionId, hostUserId, eligible);
 }
 
 /**
@@ -1083,7 +1209,65 @@ export async function reconcileBuddySessions(
 
 // ─── Discovery helpers ──────────────────────────────────────────────────
 
-/** Friends eligible to be invited: accepted, unblocked both ways, enrolled. */
+/**
+ * "This user is willing to be pulled into a buddy walk", as a SQL predicate.
+ *
+ * Everyone is opted IN by default, so the absence of a settings row must read
+ * as yes — `notification_settings` is created lazily on first write, and most
+ * users have never opened that screen. A plain join would silently hide every
+ * one of them.
+ *
+ * Note this is the PREFERENCE, not the capability. `buddy_enrolled_at` answers
+ * "can their app render this"; this answers "do they want it". Both are
+ * required, and only this one belongs to the user.
+ */
+function buddyOptedInSql(userColumn: string): string {
+  return `COALESCE(
+    (SELECT ns.buddy_invites_enabled FROM notification_settings ns
+      WHERE ns.user_id = ${userColumn}),
+    TRUE
+  )`;
+}
+
+/**
+ * Filter a client-supplied invite list down to who may actually be invited.
+ *
+ * Every id here is client-asserted, so this re-checks the same four rules the
+ * picker used rather than trusting that the list came from it: accepted
+ * friendship, no block either way, a build that can render the invite, and the
+ * invitee's own preference. Ineligible ids are dropped silently — telling a
+ * host which of their friends opted out would leak a preference that isn't
+ * theirs to see.
+ *
+ * Shared by createSession and the lobby's add-invitees path so the two cannot
+ * drift; a second copy of these rules is exactly how a gate gets half-applied.
+ */
+async function eligibleInvitees(
+  hostUserId: string,
+  inviteIds: string[],
+): Promise<string[]> {
+  const eligible: string[] = [];
+  for (const inviteeId of inviteIds) {
+    if (inviteeId === hostUserId) continue;
+    if (!(await areFriends(hostUserId, inviteeId))) continue;
+    if (await isBlockedEitherWay(hostUserId, inviteeId)) continue;
+    const ok = await db.query(
+      `SELECT 1 FROM users u
+        WHERE u.user_id = $1
+          AND u.buddy_enrolled_at IS NOT NULL
+          AND ${buddyOptedInSql("u.user_id")}`,
+      [inviteeId],
+    );
+    if (ok.length === 0) continue;
+    eligible.push(inviteeId);
+  }
+  return eligible;
+}
+
+/**
+ * Friends eligible to be invited: accepted, unblocked both ways, on a build
+ * that has the buddy screens, and not opted out.
+ */
 export async function getInviteCandidates(userId: string): Promise<
   Array<{
     user_id: string;
@@ -1102,6 +1286,7 @@ export async function getInviteCandidates(userId: string): Promise<
       WHERE f.user_id = $1
         AND f.status = 'accepted'
         AND u.buddy_enrolled_at IS NOT NULL
+        AND ${buddyOptedInSql("u.user_id")}
         AND NOT EXISTS (
           SELECT 1 FROM user_blocks b
            WHERE (b.blocker_id = $1 AND b.blocked_id = u.user_id)

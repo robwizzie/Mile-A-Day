@@ -992,6 +992,10 @@ struct NotificationSettingsResponse: Codable {
     /// (the grid is a SQL query), so this is the authority, not the local copy.
     /// Optional: absent on older server builds (treat as on).
     let tagged_posts_on_profile: Bool?
+    /// May friends invite me to a Buddy Walk? Server-enforced (it decides
+    /// whether I appear in their picker at all), so this is the authority.
+    /// Optional: absent on older server builds (treat as on).
+    let buddy_invites_enabled: Bool?
 }
 
 struct FriendNotificationSetting: Codable, Identifiable {

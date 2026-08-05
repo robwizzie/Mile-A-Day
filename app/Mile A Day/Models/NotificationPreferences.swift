@@ -124,6 +124,22 @@ struct NotificationPreferences: Codable {
         set { taggedPostsOnProfileRaw = newValue }
     }
 
+    /// Friends may invite me to Buddy Walks & Runs. ON by default — everyone
+    /// with the feature is opted in, and this is the opt-out.
+    ///
+    /// Synced to the backend rather than kept local, like
+    /// `friendRequestReminderEnabled`: the invite push is sent server-side, so
+    /// a local-only switch could not turn it off (App Review 4.5.4). Turning it
+    /// off also removes me from friends' invite pickers entirely, so it reads
+    /// as "I'm not doing buddy walks" rather than only muting the banner.
+    /// Same optional-backing pattern so prefs saved by older builds still
+    /// decode instead of resetting everything to defaults.
+    private var buddyInvitesEnabledRaw: Bool?
+    var buddyInvitesEnabled: Bool {
+        get { buddyInvitesEnabledRaw ?? true }
+        set { buddyInvitesEnabledRaw = newValue }
+    }
+
     /// Who can see my routes and photos. Same optional-backing pattern, and an
     /// unrecognised stored value falls back to `.friends` rather than to
     /// something more exposed.

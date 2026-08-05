@@ -164,6 +164,9 @@ struct NotificationSettingsView: View {
                         settingsToggle("Friend request accepted", isOn: $prefs.friendRequestAcceptedEnabled)
                         settingsDivider
                         settingsToggle("Friend nudges", isOn: $prefs.friendNudgeEnabled)
+                        settingsDivider
+                        settingsToggle("Buddy walks & runs", isOn: $prefs.buddyInvitesEnabled,
+                            description: "Friends can invite you to walk or run together. Turn off to stop the invites and drop out of their picker")
                     }
 
                     // Privacy — the coarse gate. Sits above the sharing toggles
@@ -557,6 +560,10 @@ struct NotificationSettingsView: View {
                     // a local-only flag could never actually silence it.
                     "friend_request_reminder_enabled": prefs.friendRequestReminderEnabled,
                     "workout_visibility": prefs.workoutVisibility.rawValue,
+                    // Must reach the server: this doesn't only mute a push, it
+                    // decides whether you appear in friends' buddy pickers at
+                    // all — which is a SQL query, not a client decision.
+                    "buddy_invites_enabled": prefs.buddyInvitesEnabled,
                 ]
                 _ = try await friendService.updateNotificationSettings(backendSettings)
                 // The profile grid is server-built, so it can't notice this on
@@ -602,6 +609,14 @@ struct NotificationSettingsView: View {
             }
             if let taggedOnProfile, prefs.taggedPostsOnProfile != taggedOnProfile {
                 prefs.taggedPostsOnProfile = taggedOnProfile
+                changed = true
+            }
+            // Same reason as the two above: this one gates a SQL query (who
+            // shows up in a friend's buddy picker), so the server's value wins
+            // over whatever this install last wrote.
+            if let buddyInvites = settings.buddy_invites_enabled,
+                prefs.buddyInvitesEnabled != buddyInvites {
+                prefs.buddyInvitesEnabled = buddyInvites
                 changed = true
             }
             // Keep the local copy honest too, so a later Save of some unrelated
