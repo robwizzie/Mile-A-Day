@@ -56,12 +56,10 @@ struct FitnessConnectionsView: View {
     @ObservedObject var userManager: UserManager
 
     @State private var sourceService = FitnessSourceService()
-    @State private var selectedPlatform: FitnessSourcePlatform?
     @State private var duplicates: DuplicateSummary = .empty
     @State private var isResolvingDuplicates = false
     @State private var resolveMessage: String?
-    @State private var selectedLimitation: FitnessSourceLimitation?
-    @State private var showingImport = false
+    @State private var activeSheet: ConnectionSheet?
     @State private var searchText = ""
 
     var body: some View {
@@ -109,20 +107,51 @@ struct FitnessConnectionsView: View {
             await sourceService.refresh()
             await loadDuplicates()
         }
-        .sheet(item: $selectedPlatform) { platform in
-            FitnessSourceSetupSheet(platform: platform)
+        // ONE sheet modifier, driven by an enum.
+        //
+        // Three stacked `.sheet`s on the same node is the trap this repo
+        // already documents for fullScreenCover: they compete, and one of them
+        // silently never presents — a button that "does nothing". Routing every
+        // destination through a single Identifiable item removes the race
+        // entirely, and makes handing off between destinations explicit.
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .setup(let platform):
+                FitnessSourceSetupSheet(platform: platform)
+            case .limitation(let limitation):
+                FitnessLimitationSheet(
+                    limitation: limitation,
+                    // Close this sheet, THEN open the importer — never swap the
+                    // item while presented. SwiftUI drops one of two
+                    // presentations made in the same transaction (the same race
+                    // PostDeepLink.openAfterDismiss exists to avoid), which
+                    // would leave "Import My History" doing nothing at all.
+                    onImport: {
+                        activeSheet = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            activeSheet = .importHistory
+                        }
+                    }
+                )
+            case .importHistory:
+                ImportHistoryView(userManager: userManager)
+            }
         }
-        .sheet(item: $selectedLimitation) { limitation in
-            FitnessLimitationSheet(
-                limitation: limitation,
-                onImport: {
-                    selectedLimitation = nil
-                    showingImport = true
-                }
-            )
-        }
-        .sheet(isPresented: $showingImport) {
-            ImportHistoryView(userManager: userManager)
+    }
+
+    /// Every modal this screen can show. Identifiable so one `.sheet(item:)`
+    /// can drive all of them.
+    enum ConnectionSheet: Identifiable {
+        case setup(FitnessSourcePlatform)
+        case limitation(FitnessSourceLimitation)
+        case importHistory
+
+        var id: String {
+            switch self {
+            case .setup(let p): return "setup-\(p.id)"
+            case .limitation(let l): return "limitation-\(l.id)"
+            case .importHistory: return "import"
+            }
         }
     }
 
@@ -139,7 +168,7 @@ struct FitnessConnectionsView: View {
     /// forward-only, and almost nobody expects that. Stated up front, with the
     /// fix attached rather than left as a dead end.
     private var importHistoryCard: some View {
-        Button { showingImport = true } label: {
+        Button { activeSheet = .importHistory } label: {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Image(systemName: "clock.arrow.circlepath")
@@ -216,7 +245,7 @@ struct FitnessConnectionsView: View {
 
             VStack(spacing: 0) {
                 ForEach(FitnessSourceCatalog.limitations) { limitation in
-                    Button { selectedLimitation = limitation } label: {
+                    Button { activeSheet = .limitation(limitation) } label: {
                         HStack(spacing: MADTheme.Spacing.md) {
                             ZStack {
                                 Circle()
@@ -415,7 +444,7 @@ struct FitnessConnectionsView: View {
                         .padding(.vertical, MADTheme.Spacing.sm)
                 }
                 ForEach(filteredPlatforms) { platform in
-                    Button { selectedPlatform = platform } label: {
+                    Button { activeSheet = .setup(platform) } label: {
                         availableRow(platform)
                     }
                     .buttonStyle(.plain)
@@ -716,6 +745,13 @@ struct FitnessSourceSetupSheet: View {
                         .madLiquidGlass()
                     }
 
+                    // Two paths on purpose. The primary tries to launch the app
+                    // directly, which is the fast route when its URL scheme is
+                    // right — but those schemes are vendor-controlled and can't
+                    // be verified from here, so the secondary is an explicit,
+                    // always-correct link to the App Store product page (which
+                    // itself shows OPEN when the app is installed). The user is
+                    // never left without a working destination.
                     Button {
                         FitnessSourceLauncher.open(platform)
                     } label: {
@@ -726,6 +762,20 @@ struct FitnessSourceSetupSheet: View {
                             .background(MADTheme.Colors.redGradient)
                             .foregroundColor(.white)
                             .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        FitnessSourceLauncher.openAppStore(for: platform)
+                    } label: {
+                        HStack(spacing: MADTheme.Spacing.xs) {
+                            Image(systemName: "arrow.up.forward.app")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Find \(platform.name) in the App Store")
+                                .font(MADTheme.Typography.small)
+                        }
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.plain)
 
