@@ -100,6 +100,10 @@ struct FitnessConnectionsView: View {
         .navigationTitle("Connected Apps")
         .navigationBarTitleDisplayMode(.large)
         .task {
+            // Icons first and independently: they're cosmetic, cached, and must
+            // never gate the HealthKit read that actually populates the screen.
+            await AppIconLoader.shared.loadIfNeeded(
+                for: FitnessSourceCatalog.all.map { $0.appStoreId })
             await sourceService.refresh()
             await loadDuplicates()
         }
@@ -364,14 +368,13 @@ struct FitnessConnectionsView: View {
 
     private func connectedRow(_ source: DetectedFitnessSource) -> some View {
         HStack(spacing: MADTheme.Spacing.md) {
-            ZStack {
-                Circle()
-                    .fill(source.tint.opacity(0.15))
-                    .frame(width: 36, height: 36)
-                Image(systemName: source.symbol)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(source.tint)
-            }
+            PlatformIconView(
+                symbol: source.symbol,
+                tint: source.tint,
+                // Nil for a HealthKit source we don't recognise — it still
+                // renders, just with the generic symbol.
+                appStoreId: source.platform?.appStoreId
+            )
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(source.displayName)
@@ -461,14 +464,11 @@ struct FitnessConnectionsView: View {
 
     private func availableRow(_ platform: FitnessSourcePlatform) -> some View {
         HStack(spacing: MADTheme.Spacing.md) {
-            ZStack {
-                Circle()
-                    .fill(platform.tint.opacity(0.15))
-                    .frame(width: 36, height: 36)
-                Image(systemName: platform.symbol)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(platform.tint)
-            }
+            PlatformIconView(
+                symbol: platform.symbol,
+                tint: platform.tint,
+                appStoreId: platform.appStoreId
+            )
 
             Text(platform.name)
                 .font(MADTheme.Typography.smallBold)
@@ -793,14 +793,12 @@ struct FitnessSourceSetupSheet: View {
 
     private var header: some View {
         HStack(spacing: MADTheme.Spacing.md) {
-            ZStack {
-                Circle()
-                    .fill(platform.tint.opacity(0.15))
-                    .frame(width: 48, height: 48)
-                Image(systemName: platform.symbol)
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundColor(platform.tint)
-            }
+            PlatformIconView(
+                symbol: platform.symbol,
+                tint: platform.tint,
+                appStoreId: platform.appStoreId,
+                size: 48
+            )
             VStack(alignment: .leading, spacing: 2) {
                 Text("Connect \(platform.name)")
                     .font(MADTheme.Typography.title3)

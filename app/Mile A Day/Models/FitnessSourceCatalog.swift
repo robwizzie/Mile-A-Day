@@ -108,7 +108,7 @@ enum FitnessSourceCatalog {
                 "Open Strava and go to the You tab.",
                 "Tap the settings gear, then Manage Apps and Devices.",
                 "Choose Health, then turn on Send to Health.",
-                "Make sure Workouts and Routes are enabled on the permission screen.",
+                "Allow Workouts and Routes on the permission screen.",
             ],
             caveat:
                 "Strava only sends activities you recorded IN Strava. A run that "
@@ -126,8 +126,8 @@ enum FitnessSourceCatalog {
             setupSteps: [
                 "Open Garmin Connect and tap More in the bottom-right.",
                 "Go to Settings, then Connected Apps.",
-                "Select Apple Health and tap Connect with Apple Health.",
-                "Enable Workouts, Active Energy, Heart Rate and Steps.",
+                "Select Apple Health, then tap Connect with Apple Health.",
+                "Allow Workouts, Active Energy, Heart Rate and Steps.",
             ],
             caveat:
                 "Garmin syncs one way, into Apple Health. That's all Mile A Day "
@@ -160,9 +160,10 @@ enum FitnessSourceCatalog {
             nameHints: ["whoop"],
             appStoreId: "933944389",
             setupSteps: [
-                "Open WHOOP and go to More, then App Settings.",
-                "Choose Integrations, then Apple Health.",
-                "Turn on the connection and allow Workouts.",
+                "Open WHOOP and tap More, then scroll to App Settings.",
+                "Tap Integrations, then Apple Health at the top.",
+                "Tap Connect and follow the prompts.",
+                "Allow the data types you want WHOOP to share.",
             ],
             caveat: nil
         ),
@@ -175,9 +176,10 @@ enum FitnessSourceCatalog {
             nameHints: ["oura"],
             appStoreId: "1043837948",
             setupSteps: [
-                "Open Oura and tap your profile icon.",
-                "Go to App integrations, then Apple Health.",
-                "Enable it and allow Workouts and Steps.",
+                "Open Oura and tap the menu icon in the top-left.",
+                "Tap Settings, then Apple Health under Data Sharing.",
+                "Turn on Connect to Health.",
+                "Allow Workouts and Steps when prompted.",
             ],
             caveat:
                 "Oura's strength is recovery and sleep. It logs walks and workouts "
@@ -192,9 +194,10 @@ enum FitnessSourceCatalog {
             nameHints: ["peloton"],
             appStoreId: "792750948",
             setupSteps: [
-                "Open Peloton and tap your profile, then the settings gear.",
-                "Choose Apple Health and turn on the connection.",
-                "Allow Workouts when prompted.",
+                "Open Peloton and tap More.",
+                "Under Account, tap Health App.",
+                "Tap Connect to Health App.",
+                "Turn on the workout categories, then tap Allow.",
             ],
             caveat:
                 "Tread and outdoor runs count toward your mile. Cycling and "
@@ -209,9 +212,10 @@ enum FitnessSourceCatalog {
             nameHints: ["nike"],
             appStoreId: "387771637",
             setupSteps: [
-                "Open Nike Run Club and go to the Profile tab.",
-                "Tap the settings gear, then Health.",
-                "Turn on Write to Health and allow Workouts.",
+                "Nike Run Club asks for Health access the first time you open it — tap Allow.",
+                "To change it later, open the iPhone Settings app.",
+                "Go to Privacy & Security, then Health, then Nike Run Club.",
+                "Turn on Workouts so your runs are written to Apple Health.",
             ],
             caveat: nil
         ),
@@ -224,9 +228,10 @@ enum FitnessSourceCatalog {
             nameHints: ["coros"],
             appStoreId: "1277625343",
             setupSteps: [
-                "Open the COROS app and go to the Profile tab.",
-                "Tap Settings, then Apple Health.",
-                "Enable the connection and allow Workouts.",
+                "Open the COROS app and go to the Profile page.",
+                "Tap Setting, then 3rd Party Apps.",
+                "Tap Data Sync, then Apple Health.",
+                "Select the data types to sync, including Workouts.",
             ],
             caveat: nil
         ),
@@ -239,9 +244,10 @@ enum FitnessSourceCatalog {
             nameHints: ["polar"],
             appStoreId: "717172678",
             setupSteps: [
-                "Open Polar Flow and tap the menu in the top left.",
-                "Go to Settings, then Apple Health.",
-                "Turn on the connection and allow Workouts.",
+                "Open Polar Flow and tap More in the bottom-right.",
+                "Go to General settings.",
+                "Turn on the Apple Health toggle.",
+                "Allow the categories you want Polar to share.",
             ],
             caveat: nil
         ),
@@ -254,9 +260,10 @@ enum FitnessSourceCatalog {
             nameHints: ["suunto"],
             appStoreId: "1230327951",
             setupSteps: [
-                "Open Suunto and go to the profile tab.",
-                "Tap Settings, then Apple Health.",
-                "Enable it and allow Workouts.",
+                "Open the Suunto app and tap the profile icon.",
+                "Tap Settings and scroll to Save to Apple Health.",
+                "Turn the toggle on, then tap Allow.",
+                "Enable the activity categories so workouts sync.",
             ],
             caveat: nil
         ),
@@ -269,9 +276,10 @@ enum FitnessSourceCatalog {
             nameHints: ["runna"],
             appStoreId: "1594204443",
             setupSteps: [
-                "Open Runna and go to the Profile tab.",
-                "Tap Settings, then Apple Health.",
-                "Allow Runna to write Workouts.",
+                "Open Runna and go to your Profile.",
+                "Tap Connected Apps & Devices, then Apple Health.",
+                "Turn on Sync Completed Workouts.",
+                "Allow Runna to write Workouts when prompted.",
             ],
             caveat: nil
         ),
@@ -284,9 +292,10 @@ enum FitnessSourceCatalog {
             nameHints: ["mapmyrun", "map my run"],
             appStoreId: "291890420",
             setupSteps: [
-                "Open MapMyRun and go to More, then Settings.",
-                "Choose Apps & Devices, then Apple Health.",
-                "Connect and allow Workouts.",
+                "Open Map My Run and tap the three-dot menu in the bottom-right.",
+                "Tap Apps & Devices, then Apple Watch.",
+                "Turn on the Apple Health toggle.",
+                "Choose Turn All Categories On.",
             ],
             caveat: nil
         ),
@@ -299,9 +308,10 @@ enum FitnessSourceCatalog {
             nameHints: ["adidas", "runtastic"],
             appStoreId: "336599882",
             setupSteps: [
-                "Open adidas Running and go to the Profile tab.",
-                "Tap the settings gear, then Apple Health.",
-                "Turn on the connection and allow Workouts.",
+                "Open adidas Running and go to your Profile.",
+                "Tap the gear icon to open Settings.",
+                "Tap Partner Accounts, then Apple Health.",
+                "Tap Continue, then Share with Apple Health.",
             ],
             caveat: nil
         ),
