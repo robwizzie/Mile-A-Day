@@ -36,7 +36,14 @@ export async function liveTrackingHeartbeat(
       return res.status(400).json({ error: "session_id is required" });
     }
 
-    const result = await heartbeat(req.userId!, sessionId);
+    // Distance is optional: older builds don't send it, and their friends'
+    // cards simply keep showing the last figure rather than resetting to zero.
+    // snake_case: this endpoint's body is snake_case throughout (session_id),
+    // and a camelCase key here would simply never arrive.
+    const raw = req.body?.distance_miles;
+    const distanceMiles =
+      raw === undefined || raw === null ? undefined : Number(raw);
+    const result = await heartbeat(req.userId!, sessionId, distanceMiles);
     if (result === null) {
       // Stale/ended session (e.g. a second device rotated session_id, or a
       // zombie heartbeat after end). Client treats this as "re-start or

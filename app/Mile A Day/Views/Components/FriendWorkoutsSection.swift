@@ -75,6 +75,13 @@ struct FriendWorkoutRow: View {
             }
 
             VStack(alignment: .leading, spacing: 3) {
+                // fixedSize, not lineLimit alone. The verb had no layout
+                // priority while the distance beside it had `.layoutPriority(1)`,
+                // so on a tight row SwiftUI compressed "Walked" first — to a
+                // single glyph plus an ellipsis, which rendered as a stray
+                // apostrophe before the number. These are two short words that
+                // must be whole or absent; there is nothing useful in half of
+                // "Walked".
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(verb)
                         .font(.system(size: 14, weight: .bold, design: .rounded))
@@ -85,12 +92,17 @@ struct FriendWorkoutRow: View {
                         .monospacedDigit()
                         .foregroundColor(MADTheme.Colors.primaryText)
                         .lineLimit(1)
-                        .layoutPriority(1)
                 }
+                .fixedSize(horizontal: true, vertical: false)
                 HStack(spacing: 5) {
                     Image(systemName: "clock.fill")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.orange)
+                    // Scale, never clip. As one lineLimit(1) Text this cut its
+                    // own tail when space ran short — and the tail is the pace,
+                    // so "23:11 • 23:11 /mi" became "23:11 •…", which says less
+                    // than showing nothing would. Tightening + a scale floor
+                    // keeps the whole string on the narrowest phone.
                     Text(paceText == nil
                          ? workout.formattedDuration
                          : "\(workout.formattedDuration) \u{2022} \(paceText!)")
@@ -98,6 +110,8 @@ struct FriendWorkoutRow: View {
                         .monospacedDigit()
                         .foregroundColor(MADTheme.Colors.secondaryText)
                         .lineLimit(1)
+                        .allowsTightening(true)
+                        .minimumScaleFactor(0.75)
                 }
 
                 // Identical chips to the owner's own WorkoutRow — a friend's run
@@ -112,7 +126,9 @@ struct FriendWorkoutRow: View {
                 )
             }
 
-            Spacer(minLength: MADTheme.Spacing.sm)
+            .layoutPriority(1)
+
+            Spacer(minLength: MADTheme.Spacing.xs)
 
             VStack(alignment: .trailing, spacing: 2) {
                 Text(dateLabel)

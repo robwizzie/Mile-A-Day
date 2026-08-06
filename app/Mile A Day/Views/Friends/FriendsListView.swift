@@ -352,7 +352,6 @@ struct FriendsListView: View {
                     )
                     .padding(.top, MADTheme.Spacing.lg)
                 } else {
-                    outRightNowSection
                     cheerThemOnSection
                     doneTodaySection
                 }
@@ -388,23 +387,6 @@ struct FriendsListView: View {
     private var outRightNowSection: some View {
         if !buddy.friendsOutNow.isEmpty {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                HStack(spacing: 8) {
-                    ZStack {
-                        Circle()
-                            .fill(MADTheme.Colors.success.opacity(0.35))
-                            .frame(width: 9, height: 9)
-                            .scaleEffect(1.9)
-                            .opacity(0.55)
-                        Circle()
-                            .fill(MADTheme.Colors.success)
-                            .frame(width: 9, height: 9)
-                    }
-                    Text("Out right now")
-                        .font(MADTheme.Typography.headline)
-                        .foregroundStyle(MADTheme.Colors.madWhite)
-                    Spacer()
-                }
-
                 BuddyJoinFriendCard(
                     // Always false here: this list is not a workout screen, and
                     // gating on a live workout would hide the section exactly
@@ -954,14 +936,28 @@ struct FriendsListView: View {
     @ViewBuilder
     private var cheerThemOnSection: some View {
         let incomplete = incompleteFriends
-        if !incomplete.isEmpty {
+        let liveIds = Set(buddy.friendsOutNow.map(\.userId))
+        if !incomplete.isEmpty || !liveIds.isEmpty {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 sectionHeader(
                     title: "CHEER THEM ON",
                     trailing: ""
                 )
+
+                // Anyone OUT RIGHT NOW comes first, with how far they've got.
+                // They're the friends where cheering actually reaches someone
+                // mid-effort rather than after the fact, and they were
+                // previously visible only from inside your own workout.
+                if !liveIds.isEmpty {
+                    outRightNowSection
+                        .padding(.bottom, 2)
+                }
+
                 VStack(spacing: 6) {
-                    ForEach(incomplete) { friend in
+                    // Live friends are rendered above with their real progress;
+                    // a second static row for the same person would contradict
+                    // the first the moment they moved.
+                    ForEach(incomplete.filter { !liveIds.contains($0.id) }) { friend in
                         friendRowCompact(friend: friend, isCompleted: false)
                     }
                 }

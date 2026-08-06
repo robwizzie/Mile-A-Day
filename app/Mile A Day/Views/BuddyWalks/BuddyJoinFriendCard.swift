@@ -1,120 +1,152 @@
 import SwiftUI
 
-/// "Alex is walking right now."
+/// "Alex is walking right now — 0.62 of 1 mi."
 ///
 /// The permission-free stand-in for ambient proximity sensing. Detecting nearby
 /// friends in the background would need CoreBluetooth background advertising —
 /// unreliable, battery-hungry, and a heavy privacy/App Review surface — and it
 /// would only ever work for people physically next to you. This produces the
 /// same "they're doing it, go with them" moment at any distance, for remote
-/// friends too, and costs nothing but one pull on the dashboard.
+/// friends too, and costs nothing but one pull.
 ///
-/// It reads LIVE PRESENCE rather than buddy rooms. That distinction is the
-/// whole point: the earlier version could only see friends already inside a
-/// buddy session, so a friend out walking on their own — the single best person
-/// to start a walk with — didn't appear at all. Now both show up, with the
-/// action that fits:
-///   - already in a room → **Join**
-///   - out on their own  → **Ask to walk** (starts a session and invites them)
+/// It reads LIVE PRESENCE rather than buddy rooms, so a friend out walking on
+/// their own — the single best person to start a walk with — appears alongside
+/// one already in a room, each with the action that fits.
 ///
-/// Renders nothing when nobody is out, so it never occupies dashboard space
-/// speculatively.
+/// **Density.** A popular user can have a dozen friends out at once, and twelve
+/// full-width rows is a wall that buries whatever was below it. Past
+/// `collapseThreshold` the list shows the closest-to-finishing few and folds the
+/// rest behind one line, because "who is nearly done" is the group most worth
+/// cheering and the one where a hype lands while it still counts.
 struct BuddyJoinFriendCard: View {
+    /// Hides the Join/Ask action — you cannot join a walk during a walk. The
+    /// rows still render: seeing a friend is out is useful mid-workout too,
+    /// and hyping them from there is the whole point of the tracker's sheet.
     let hasActiveWorkout: Bool
-    /// Called after a successful join so the dashboard can open the lobby.
+    /// Called after a successful join so the host surface can open the lobby.
     let onJoined: () -> Void
 
     @ObservedObject private var buddy = BuddySessionService.shared
     @State private var busyUserId: String?
-    /// Friends we've already invited this session — the row stays, because they
-    /// are still out and that's still true, but the button must not read as
-    /// though nothing happened.
+    /// Friends we've already invited — the row stays, because they are still
+    /// out and that's still true, but the button must not read as though
+    /// nothing happened.
     @State private var askedUserIds: Set<String> = []
+    @State private var hypedUserIds: Set<String> = []
+    @State private var expanded = false
+
+    private static let collapseThreshold = 3
+
+    /// Closest to finishing first. Someone at 0.9 mi is minutes from a
+    /// celebration; someone at 0.05 has half an hour to go.
+    private var ordered: [FriendOutNow] {
+        buddy.friendsOutNow.sorted {
+            ($0.distanceMiles ?? 0) / $0.goal > ($1.distanceMiles ?? 0) / $1.goal
+        }
+    }
+
+    private var visible: [FriendOutNow] {
+        guard ordered.count > Self.collapseThreshold, !expanded else { return ordered }
+        return Array(ordered.prefix(Self.collapseThreshold))
+    }
 
     var body: some View {
-        if !hasActiveWorkout, !buddy.friendsOutNow.isEmpty {
+        if !buddy.friendsOutNow.isEmpty {
             VStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(buddy.friendsOutNow) { friend in
+                ForEach(visible) { friend in
                     row(friend)
+                }
+
+                if ordered.count > Self.collapseThreshold {
+                    Button {
+                        MADHaptics.tap()
+                        withAnimation(MADTheme.Animation.standard) { expanded.toggle() }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(
+                                expanded
+                                    ? "Show fewer"
+                                    : "\(ordered.count - Self.collapseThreshold) more out right now"
+                            )
+                            Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
     }
 
     private func row(_ friend: FriendOutNow) -> some View {
-        HStack(spacing: MADTheme.Spacing.md) {
-            AvatarView(
-                name: friend.displayName,
-                imageURL: friend.profileImageUrl,
-                size: 40
-            )
-            .overlay(alignment: .bottomTrailing) {
-                Circle()
-                    .fill(MADTheme.Colors.success)
-                    .frame(width: 12, height: 12)
-                    .overlay(Circle().stroke(MADTheme.Colors.madBlack, lineWidth: 2))
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(friend.displayName) is \(friend.isRunning ? "running" : "walking")")
-                    .font(MADTheme.Typography.smallBold)
-                    .foregroundStyle(MADTheme.Colors.madWhite)
-                    .lineLimit(1)
-
-                Text(subtitle(friend))
-                    .font(MADTheme.Typography.caption)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 0)
-
-            action(friend)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .background(Capsule().fill(Color.white.opacity(0.10)))
-        .overlay(Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1))
-    }
-
-    @ViewBuilder
-    private func action(_ friend: FriendOutNow) -> some View {
-        if busyUserId == friend.userId {
-            ProgressView().tint(MADTheme.Colors.madWhite)
-        } else if askedUserIds.contains(friend.userId) {
-            Text("Invited")
-                .font(MADTheme.Typography.smallBold)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
-                .background(Capsule().fill(Color.white.opacity(0.12)))
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
-        } else {
-            Button {
-                Task { await act(friend) }
-            } label: {
-                Text(friend.hasJoinableRoom ? "Join" : "Ask to walk")
-                    .font(MADTheme.Typography.smallBold)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(friend.accentColor))
-                    .foregroundStyle(MADTheme.Colors.madWhite)
-            }
-            .buttonStyle(.plain)
-            .disabled(busyUserId != nil)
-        }
+        FriendOutLiveRow(
+            name: friend.displayName,
+            imageURL: friend.profileImageUrl,
+            isRunning: friend.isRunning,
+            distanceMiles: friend.distanceMiles,
+            goalMiles: friend.goal,
+            subtitle: subtitle(friend),
+            canJoin: !hasActiveWorkout && !askedUserIds.contains(friend.userId),
+            joinTitle: friend.hasJoinableRoom ? "Join" : "Ask to walk",
+            onJoin: { Task { await act(friend) } },
+            onHype: { Task { await hype(friend) } },
+            hyped: hypedUserIds.contains(friend.userId),
+            busy: busyUserId == friend.userId
+        )
     }
 
     private func subtitle(_ friend: FriendOutNow) -> String {
+        if askedUserIds.contains(friend.userId) { return "Invited — waiting on them" }
+        let elapsed = FriendOutTime.elapsed(since: friend.startedAt)
         guard friend.hasJoinableRoom else {
-            return "On their own — ask them to team up"
+            return elapsed ?? "On their own"
         }
         let others = max(0, (friend.buddyParticipantCount ?? 1) - 1)
         let people = others == 0
             ? "on their own"
             : (others == 1 ? "with 1 other" : "with \(others) others")
-        let mode = friend.buddyMode?.title ?? "Buddy walk"
-        return "\(mode) · \(people)"
+        return [friend.buddyMode?.title ?? "Buddy walk", people].joined(separator: " · ")
+    }
+
+    /// Hype a friend mid-walk.
+    ///
+    /// Uses the SAME 'mile' composite the rest of the app does
+    /// (`<userId>:<localDate>`) rather than a bespoke context, so it dedupes
+    /// against a hype sent from the feed for the same day and lands on their
+    /// tracking screen through LivePresenceService's hype poll. The local_date
+    /// has to be THEIRS, not the viewer's — the server keys on the walker's day.
+    private func hype(_ friend: FriendOutNow) async {
+        guard !hypedUserIds.contains(friend.userId) else { return }
+        // Optimistic: a clap that waits on the network reads as a dead button,
+        // and the failure path below puts it back.
+        hypedUserIds.insert(friend.userId)
+        MADHaptics.success()
+        do {
+            if let localDate = friend.localDate {
+                _ = try await HypeService.sendHype(
+                    targetUserId: friend.userId,
+                    context: HypeContext(
+                        contextType: "mile",
+                        contextId: "\(friend.userId):\(localDate)",
+                        contextLabel: friend.isRunning ? "run" : "walk"
+                    )
+                )
+            } else {
+                // Older server build with no local_date on the wire. The
+                // context-less path still reaches them.
+                _ = try await HypeService.sendHype(targetUserId: friend.userId)
+            }
+        } catch {
+            hypedUserIds.remove(friend.userId)
+            MADHaptics.error()
+            buddy.errorMessage =
+                (error as? LocalizedError)?.errorDescription ?? "Couldn't send that."
+        }
     }
 
     private func act(_ friend: FriendOutNow) async {

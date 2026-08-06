@@ -1792,6 +1792,14 @@ export const liveTrackingSessions = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
+    /// Live distance, in miles, as of the last heartbeat.
+    ///
+    /// Presence answered "they are out" and nothing else, so a friend's card
+    /// could say someone was walking but never how it was going — which is the
+    /// part anyone watching actually wants. Clamped MONOTONIC on write: a
+    /// heartbeat that arrives out of order, or from a device whose GPS burped,
+    /// must never make a friend's number go backwards in front of an audience.
+    distanceMiles: doublePrecision("distance_miles").default(0).notNull(),
     lastSeenAt: timestamp("last_seen_at", {
       withTimezone: true,
       mode: "string",

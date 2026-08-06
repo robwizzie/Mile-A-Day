@@ -1,0 +1,1 @@
+ALTER TABLE "live_tracking_sessions" ADD COLUMN "distance_miles" double precision DEFAULT 0 NOT NULL;
