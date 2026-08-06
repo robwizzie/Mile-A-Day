@@ -19,6 +19,13 @@ struct BuddyRosterStrip: View {
                 CoopGoalBar(session: session)
             }
 
+            // The rings were unexplained, which is most of why they read as
+            // decoration with a hidden meaning. One line fixes that.
+            Text(ringLegend)
+                .font(MADTheme.Typography.caption)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: MADTheme.Spacing.md) {
                     ForEach(orderedParticipants) { participant in
@@ -69,6 +76,15 @@ struct BuddyRosterStrip: View {
         }
     }
 
+    /// What the rings are measuring, in words.
+    private var ringLegend: String {
+        if session.mode == .raceTime { return "Rings fill toward a mile" }
+        if let goal = session.goalValue, goal > 0 {
+            return String(format: "Rings fill toward %.1f mi", goal)
+        }
+        return "Rings fill toward a mile"
+    }
+
     private var headerText: String {
         switch session.mode {
         case .together:
@@ -100,7 +116,12 @@ private struct BuddyRosterAvatar: View {
                 size: 52,
                 ringWidth: isMe ? 4 : 3,
                 accent: session.accentColor,
-                badge: participant.status == .finished ? .check : .live
+                // No `.live` dot for everyone else. It marked "workout in
+                // progress" on every face, during a workout — a red dot that is
+                // always present on every tile carries no information and read
+                // as a warning badge. The check still means something: they
+                // finished.
+                badge: participant.status == .finished ? .check : nil
             )
             // Stale = no report in 90s. Dimmed to a hairline, never removed:
             // a friend who vanishes mid-walk reads as a crash.
@@ -119,16 +140,21 @@ private struct BuddyRosterAvatar: View {
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(isMe ? 1 : 0.75))
                 .lineLimit(1)
 
-            Text(participant.isStale ? "—" : String(format: "%.2f", participant.distanceMiles))
+            Text(participant.isStale ? "—" : String(format: "%.2f mi", participant.distanceMiles))
                 .font(MADTheme.Typography.smallBold)
                 .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .foregroundStyle(
                     participant.isStale
                         ? MADTheme.Colors.madWhite.opacity(0.4)
                         : session.accentColor
                 )
         }
-        .frame(width: 64)
+        // 52pt ring + a 4pt stroke + the badge's 2pt overhang needs more than
+        // 64 to sit in, and `.offset` draws OUTSIDE layout bounds — so at 64
+        // the ring and the two-decimal distance were both being cropped.
+        .frame(width: 78)
         .animation(MADTheme.Animation.standard, value: participant.distanceMiles)
     }
 
@@ -138,24 +164,37 @@ private struct BuddyRosterAvatar: View {
         return participant.distanceMiles >= best
     }
 
-    /// Co-op has no individual target, so the ring shows each person's share of
-    /// the group total instead of progress toward a goal they don't own.
+    /// Everyone's ring measures the SAME distance, so comparing two of them
+    /// means something.
+    ///
+    /// It used to be `yourDistance / furthestPersonsDistance`, which quietly
+    /// made the leader's ring full — and `AvatarWithRing` paints a full ring
+    /// solid GREEN. So in "Just Together", a mode whose own subtitle is "No
+    /// goal — just move together", whoever was a few feet ahead got a green
+    /// trophy ring and everyone else got a partial blue arc, with nothing on
+    /// screen explaining either. It turned a walk into a scoreboard nobody
+    /// asked for, and it also meant the rings rescaled every time somebody
+    /// moved, so they never sat still.
+    ///
+    /// Now it's progress toward a fixed target: the session's goal where there
+    /// is one, otherwise the daily mile. Green-at-full then means "they
+    /// finished their mile", which is worth showing.
     private var ringProgress: Double {
-        switch session.mode {
-        case .together:
-            let best = session.activeParticipants.map(\.distanceMiles).max() ?? 0
-            return best > 0 ? participant.distanceMiles / best : 0
-        case .coopGoal:
-            guard session.groupDistanceMiles > 0 else { return 0 }
-            return participant.distanceMiles / session.groupDistanceMiles
-        case .raceGoal:
-            guard let goal = session.goalValue, goal > 0 else { return 0 }
-            return participant.distanceMiles / goal
-        case .raceTime:
-            let best = session.activeParticipants.map(\.distanceMiles).max() ?? 0
-            return best > 0 ? participant.distanceMiles / best : 0
-        }
+        guard ringTarget > 0 else { return 0 }
+        return participant.distanceMiles / ringTarget
     }
+
+    private var ringTarget: Double {
+        // race_time's goal is MINUTES, not miles — using it here would compare
+        // a distance against a duration and produce a meaningless ring.
+        if session.mode == .raceTime { return BuddyRosterAvatar.dailyMile }
+        if let goal = session.goalValue, goal > 0 { return goal }
+        return BuddyRosterAvatar.dailyMile
+    }
+
+    /// The app's whole premise, and the only target every participant shares
+    /// when the session itself declares none.
+    static let dailyMile: Double = 1.0
 }
 
 /// Co-op's distinguishing visual: one shared bar, segmented per person, so you

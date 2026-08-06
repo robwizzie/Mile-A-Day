@@ -238,6 +238,25 @@ final class BuddySessionService: ObservableObject {
         }
     }
 
+    // MARK: - Partners
+
+    /// Who you actually walk with, and how much. Read-only history.
+    @Published private(set) var partners: [BuddyPartner] = []
+
+    func loadPartners() async {
+        guard currentUserId != nil else { return }
+        do {
+            partners = try await request(
+                "/buddy/partners", responseType: BuddyPartnersResponse.self
+            ).partners
+        } catch {
+            // Silent, and KEEPS whatever we had: this drives a nice-to-have
+            // section, and blanking it on a blip would make a real history look
+            // like it had been lost.
+            print("[BuddySessionService] loadPartners failed: \(error)")
+        }
+    }
+
     // MARK: - Routines
 
     /// Standing walks this user has set up. Published so the list and the

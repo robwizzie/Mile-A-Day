@@ -24,6 +24,7 @@ import {
   leaveSession,
   recordProgress,
   setReady,
+  getBuddyPartners,
   startSession,
   updateSession,
 } from "../services/buddySessionService.js";
@@ -518,5 +519,22 @@ export async function deleteRoutineController(
     res.json({ ok: true });
   } catch (error) {
     handleError(res, error, "deleting buddy routine");
+  }
+}
+
+/**
+ * GET /buddy/partners — who you actually walk with, and how much.
+ *
+ * Self-scoped on the token: your own walking history is yours.
+ */
+export async function partnersController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    res.json({ partners: await getBuddyPartners(req.userId!) });
+  } catch (error) {
+    handleError(res, error, "loading buddy partners");
   }
 }
