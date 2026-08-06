@@ -11,7 +11,10 @@
  * Usage: DATABASE_URL=... node scripts/dedupe-containment-check.mjs
  */
 import { PostgresService } from "../dist/services/DbService.js";
-import { recomputeDuplicatesForDay } from "../dist/services/workoutService.js";
+import {
+  recomputeDuplicatesForDay,
+  setDuplicateDecision,
+} from "../dist/services/workoutService.js";
 
 const db = PostgresService.getInstance();
 
@@ -124,6 +127,38 @@ async function main() {
   const [sameSource] = await db.query(
     `SELECT duplicate_of FROM workouts WHERE workout_id = 'mad-second'`);
   check("same-source fragments are never paired", sameSource?.duplicate_of, null);
+
+  // ── The user's own answer outranks detection, and STICKS ────────────
+  //
+  // This is what makes automatic exclusion acceptable: a workout is the
+  // user's own record of something they did, and they must be able to
+  // overrule the machine and have it hold. The recompute runs on every sync
+  // of the day, so "sticks" is the entire test.
+  await db.query(`DELETE FROM workouts WHERE user_id = $1 AND workout_id <> 'mad-walk' AND workout_id <> 'google-walk'`, [USER]);
+  await db.query(`UPDATE users SET dedupe_since = '2000-01-01'::timestamptz WHERE user_id = $1`, [USER]);
+  await recomputeDuplicatesForDay(USER, DAY);
+  const [autoExcluded] = await db.query(
+    `SELECT exclusion_reason FROM workouts WHERE workout_id = 'google-walk'`);
+  check("detection excludes it by default", autoExcluded?.exclusion_reason, "duplicate_source");
+
+  await setDuplicateDecision(USER, "google-walk", "count");
+  const [counted] = await db.query(
+    `SELECT exclusion_reason FROM workouts WHERE workout_id = 'google-walk'`);
+  check("'count it' releases the exclusion", counted?.exclusion_reason, null);
+
+  // The recompute that runs on every sync must NOT undo them.
+  await recomputeDuplicatesForDay(USER, DAY);
+  const [stillCounted] = await db.query(
+    `SELECT exclusion_reason FROM workouts WHERE workout_id = 'google-walk'`);
+  check("...and a later sync does not reverse it", stillCounted?.exclusion_reason, null);
+
+  // The other direction: "don't count it" holds even where detection sees
+  // nothing to pair it with.
+  await setDuplicateDecision(USER, "mad-walk", "exclude");
+  await recomputeDuplicatesForDay(USER, DAY);
+  const [userExcluded] = await db.query(
+    `SELECT exclusion_reason FROM workouts WHERE workout_id = 'mad-walk'`);
+  check("'don't count it' holds too", userExcluded?.exclusion_reason, "duplicate_source");
 
   // The kill switch's DIRECTION, same regression class as BUDDY_SESSIONS: a
   // pass that is inert unless someone remembers to set an env var is a pass

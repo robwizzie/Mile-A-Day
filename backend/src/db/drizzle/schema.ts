@@ -335,6 +335,19 @@ export const workouts = pgTable(
     // on the user's `dedupe_since` grandfather line, so this column stays a
     // pure observation that the review endpoints can report on.
     duplicateOf: varchar("duplicate_of", { length: 255 }),
+    /// The USER's explicit answer to "is this a duplicate?", which outranks
+    /// detection.
+    ///
+    /// 'count'   — count it, whatever detection thinks.
+    /// 'exclude' — don't count it, whatever detection thinks.
+    /// NULL      — no opinion; detection decides.
+    ///
+    /// This exists because the exclusion pass re-runs on EVERY sync of the day.
+    /// Without somewhere durable to record intent, a user who said "no, that
+    /// really was a second walk" would have their choice silently reversed by
+    /// the next heartbeat, which is exactly the surprise the feature is meant
+    /// to prevent.
+    duplicateDecision: text("duplicate_decision"),
   },
   (table) => [
     index("idx_workouts_local_date_user_id").using(

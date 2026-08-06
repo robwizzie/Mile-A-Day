@@ -471,7 +471,11 @@ struct UserProfileDetailView: View {
                 VStack(spacing: MADTheme.Spacing.md) {
                     FriendWorkoutsSection(
                         workouts: friendWorkouts,
-                        onWorkoutTap: { workout in selectedWorkout = workout }
+                        onWorkoutTap: { workout in selectedWorkout = workout },
+                        // Only the owner is told when one of their workouts
+                        // isn't counting, and only the owner can overrule it.
+                        isOwnProfile: isCurrentUser(),
+                        ownerUserId: user.user_id
                     )
                     if canLoadMore && !isLoadingMoreWorkouts {
                         loadMoreButton

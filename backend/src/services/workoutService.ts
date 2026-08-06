@@ -720,7 +720,12 @@ function duplicateExclusionStatements(
 	UPDATE workouts SET exclusion_reason = NULL
 	WHERE user_id = $1 AND local_date = $2::date
 		AND exclusion_reason = '${DUPLICATE_EXCLUSION_REASON}'
-		AND (NOT $3::boolean OR duplicate_of IS NULL)`,
+		-- The user's own answer outranks detection. Without this clause a
+		-- "no, that really was a second walk" would be silently reversed by
+		-- the next sync of the day, which is the precise surprise this whole
+		-- feature is supposed to prevent.
+		AND (NOT $3::boolean OR duplicate_of IS NULL
+		     OR duplicate_decision = 'count')`,
       params: [userId, localDate, enabled],
     },
     {
@@ -738,12 +743,22 @@ function duplicateExclusionStatements(
 	FROM users u
 	WHERE w.user_id = $1 AND w.local_date = $2::date
 		AND u.user_id = w.user_id
-		AND $3::boolean
-		AND w.duplicate_of IS NOT NULL
 		AND w.exclusion_reason IS NULL
 		AND w.deleted_at IS NULL
-		AND u.dedupe_since IS NOT NULL
-		AND w.created_at >= u.dedupe_since`,
+		AND (
+			-- The user said don't count it. Honoured regardless of the kill
+			-- switch or the grandfather line: it is their own workout and
+			-- their own explicit answer.
+			w.duplicate_decision = 'exclude'
+			OR (
+				$3::boolean
+				AND w.duplicate_of IS NOT NULL
+				-- ...but never over the top of "count it".
+				AND w.duplicate_decision IS DISTINCT FROM 'count'
+				AND u.dedupe_since IS NOT NULL
+				AND w.created_at >= u.dedupe_since
+			)
+		)`,
       params: [userId, localDate, enabled],
     },
   ];
@@ -1894,4 +1909,39 @@ export async function getRaceHistory(
     [userId, dist.miles * RACE_BAND_LO, dist.miles * RACE_BAND_HI],
   );
   return rows.map((r) => mapRaceRow({ ...r, bucket: distanceKey }));
+}
+
+/**
+ * Record the user's own answer to "is this workout a duplicate?".
+ *
+ * This is the control that makes automatic exclusion acceptable at all. A
+ * workout is the user's own record of something they actually did; taking it
+ * out of their totals because two apps both wrote it is a judgement call, and
+ * the user has to be able to overrule it in one tap and have that stick.
+ *
+ * Sticky by construction: the decision lives on the row, and both the release
+ * and exclude passes read it, so the recompute that runs on every sync of the
+ * day re-derives the same answer instead of undoing theirs.
+ *
+ * `decision` is 'count' | 'exclude' | null (null = hand it back to detection).
+ * Scoped to the caller's own workouts — a workout id alone is not authority.
+ */
+export async function setDuplicateDecision(
+  userId: string,
+  workoutId: string,
+  decision: "count" | "exclude" | null,
+): Promise<{ localDate: string } | null> {
+  const rows = await db.query<{ local_date: string }>(
+    `UPDATE workouts
+        SET duplicate_decision = $3
+      WHERE user_id = $1 AND workout_id = $2 AND deleted_at IS NULL
+      RETURNING to_char(local_date, 'YYYY-MM-DD') AS local_date`,
+    [userId, workoutId, decision],
+  );
+  if (rows.length === 0) return null;
+
+  // Re-run the day so the decision takes effect immediately rather than at the
+  // next sync — the user is looking at the number they just changed.
+  await recomputeDuplicatesForDay(userId, rows[0].local_date);
+  return { localDate: rows[0].local_date };
 }

@@ -718,9 +718,26 @@ struct RecentWorkout: Codable {
     let source: String?
     let originalDistance: Double?
     let originalDuration: Double?
+    /// Which app wrote this into Apple Health. Optional: absent on older
+    /// server builds, and nil reads as first-party (no chip drawn).
+    let sourceBundleId: String?
+    /// Why this workout isn't counting, if it isn't. 'duplicate_source' is the
+    /// one a user can overrule.
+    let exclusionReason: String?
+    /// The workout this one was judged a copy of.
+    let duplicateOf: String?
+    /// The user's own answer, which outranks detection: "count" / "exclude".
+    let duplicateDecision: String?
 
     var isManualOrEdited: Bool {
         source == "manual" || source == "edited"
+    }
+
+    var attribution: WorkoutAttribution { WorkoutAttribution(bundleId: sourceBundleId) }
+
+    /// Excluded as a cross-app duplicate AND the user hasn't overruled it.
+    var isHiddenDuplicate: Bool {
+        exclusionReason == "duplicate_source" && duplicateDecision != "count"
     }
 
     enum CodingKeys: String, CodingKey {
@@ -737,6 +754,10 @@ struct RecentWorkout: Codable {
         case source
         case originalDistance = "original_distance"
         case originalDuration = "original_duration"
+        case sourceBundleId = "source_bundle_id"
+        case exclusionReason = "exclusion_reason"
+        case duplicateOf = "duplicate_of"
+        case duplicateDecision = "duplicate_decision"
     }
     
     /// Extracts just the date part (yyyy-MM-dd) from the local_date string
