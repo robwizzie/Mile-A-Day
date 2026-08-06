@@ -69,15 +69,19 @@ struct FriendWorkoutsSection: View {
 /// WorkoutRow (accent icon chip, verb + hero distance, duration • pace,
 /// date/time trailing) — a workout reads the same no matter whose it is.
 struct FriendWorkoutRow: View {
+    let workout: FriendWorkout
+    var showChevron: Bool = false
+    // Declared AFTER the existing properties on purpose. Swift's memberwise
+    // init takes arguments in declaration order, so putting these first made
+    // every existing call site a compile error ("argument 'isOwnProfile' must
+    // precede argument 'workout'"). New optional parameters go last.
     var isOwnProfile: Bool = false
     var ownerUserId: String? = nil
+
     /// Local override so the row updates the instant the owner overrules the
     /// duplicate call, rather than waiting for the next profile refresh.
     @State private var overruled = false
     @State private var isDeciding = false
-
-    let workout: FriendWorkout
-    var showChevron: Bool = false
 
     var body: some View {
         VStack(spacing: 8) {
