@@ -235,12 +235,25 @@ private struct RoadToMilestoneCard: View {
     private func dayData(for date: Date, dayNumber: Int) -> RoadDayData {
         let records = healthManager.workoutIndex?.workouts(for: date) ?? []
         let workouts = workouts(on: date, matching: records)
-        let workoutDistance = workouts.reduce(0.0) { total, workout in
-            total + (workout.totalDistance?.doubleValue(for: .mile()) ?? 0)
-        }
+        // Deduped, like every other day total. Summing the array directly is
+        // what let this view disagree with the dashboard about the same day.
+        let workoutDistance = WorkoutDedup.totalMiles(workouts)
         let indexedDistance = records.reduce(0) { $0 + $1.distance }
         let todaysDistance = dayNumber == streak ? healthManager.todaysDistance : 0
-        let measuredDistance = max(workoutDistance, indexedDistance, todaysDistance)
+
+        // The real HKWorkouts WIN when we have them, rather than being max()'d
+        // against the other two.
+        //
+        // max() was the bug behind this view showing a bigger number than the
+        // dashboard for the same day: the index sums WorkoutRecords, which carry
+        // no source and so can't be deduped, and taking the largest of three
+        // measurements guarantees the LEAST deduplicated one is displayed.
+        // Whichever source is richest should decide, and that's the workouts.
+        // The other two stay as fallbacks for days whose HKWorkouts aren't
+        // loaded — max() between them is fine, they're both un-deduped.
+        let measuredDistance = workouts.isEmpty
+            ? max(indexedDistance, todaysDistance)
+            : max(workoutDistance, todaysDistance)
         let distance = measuredDistance > 0 ? measuredDistance : (dayNumber < streak ? goalMiles : 0)
         let activity = activityType(for: dayNumber, records: records, workouts: workouts, distance: distance)
 
