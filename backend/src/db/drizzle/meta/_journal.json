@@ -302,6 +302,20 @@
       "when": 1785949811263,
       "tag": "0042_odd_surge",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1786036141356,
+      "tag": "0043_chemical_xavin",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1786036964585,
+      "tag": "0044_loud_red_ghost",
+      "breakpoints": true
     }
   ]
 }

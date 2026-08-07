@@ -425,6 +425,17 @@ struct FriendOutNow: Codable, Identifiable, Equatable {
     let lastName: String?
     let profileImageUrl: String?
     let workoutType: String
+    /// Live miles as of their last heartbeat. Monotonic server-side.
+    /// Optional: absent from older server builds, in which case the row shows
+    /// presence without asserting a confident "0.00".
+    let distanceMiles: Double?
+    /// THEIR daily goal, so progress draws against the right target.
+    let goalMiles: Double?
+    /// When their session started — used for "out 12m".
+    let startedAt: String?
+    /// Their CURRENT local date: the composite key half needed to hype a mile
+    /// mid-walk through the existing endpoint.
+    let localDate: String?
     /// Non-nil only when they're in a buddy room that has space left.
     let buddySessionId: String?
     let buddyJoinCode: String?
@@ -448,6 +459,9 @@ struct FriendOutNow: Codable, Identifiable, Equatable {
     /// which is an invitation opportunity, not a dead end.
     var hasJoinableRoom: Bool { buddySessionId != nil }
 
+    /// Their goal, defaulting to the app's premise when the server didn't say.
+    var goal: Double { (goalMiles ?? 0) > 0 ? (goalMiles ?? 1) : 1 }
+
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
         case username
@@ -455,6 +469,10 @@ struct FriendOutNow: Codable, Identifiable, Equatable {
         case lastName = "last_name"
         case profileImageUrl = "profile_image_url"
         case workoutType = "workout_type"
+        case distanceMiles = "distance_miles"
+        case goalMiles = "goal_miles"
+        case startedAt = "started_at"
+        case localDate = "local_date"
         case buddySessionId = "buddy_session_id"
         case buddyJoinCode = "buddy_join_code"
         case buddyMode = "buddy_mode"

@@ -27,6 +27,7 @@ import {
   getStreakErasForUser,
   getDuplicateSummary,
   resolveDuplicateHistory,
+  setDuplicateDecision,
 } from "../services/workoutService.js";
 import { checkRaceCompletions } from "../services/competitionService.js";
 import { softDeleteWorkout } from "../services/workoutDeletionService.js";
@@ -819,5 +820,37 @@ export async function updateWorkout(req: Request, res: Response) {
   } catch (error: any) {
     console.error("Error updating workout:", error.message);
     res.status(500).json({ error: "Error updating workout: " + error.message });
+  }
+}
+
+/**
+ * POST /workouts/:userId/duplicates/:workoutId
+ *
+ * The user's own answer about ONE workout, e.g. "no, that really was a second
+ * walk — count it". Self-scoped via requireSelfAccess on the route.
+ */
+export async function setDuplicateDecisionController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const raw = req.body?.decision;
+    if (raw !== "count" && raw !== "exclude" && raw !== null) {
+      return res.status(400).json({ error: "invalid_decision" });
+    }
+    const result = await setDuplicateDecision(
+      req.params.userId,
+      req.params.workoutId,
+      raw,
+    );
+    if (result === null) {
+      return res.status(404).json({ error: "workout_not_found" });
+    }
+    // The day's totals just moved. The client refreshes its own stats — this
+    // returns the affected date so it knows which day to re-pull.
+    res.json({ ok: true, local_date: result.localDate });
+  } catch (error: any) {
+    console.error("Error setting duplicate decision:", error.message);
+    res.status(500).json({ error: "Error setting duplicate decision" });
   }
 }

@@ -14,6 +14,7 @@ import {
   getRaceHistoryController,
   getStreakEras,
   getDuplicates,
+  setDuplicateDecisionController,
   resolveDuplicates,
 } from "../controllers/workoutController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
@@ -44,6 +45,17 @@ router.post(
   "/:userId/duplicates/resolve",
   requireSelfAccess("userId"),
   resolveDuplicates,
+);
+// One workout, one answer: "count it" / "don't". The user's decision outranks
+// detection and survives the recompute that runs on every sync.
+//
+// MUST stay below /resolve: Express matches in registration order, and a
+// wildcard registered first would capture the literal "resolve" as a workout id
+// and silently turn the history-cleanup action into a 404.
+router.post(
+  "/:userId/duplicates/:workoutId",
+  requireSelfAccess("userId"),
+  setDuplicateDecisionController,
 );
 // Self-only: friends' route visibility is governed by share_route_maps on
 // feed payloads; the raw full-history dump is never exposed to others.

@@ -26,6 +26,13 @@ struct LiveFriendOut: Decodable, Equatable, Identifiable {
     let profile_image_url: String?
     let workout_type: String
     let started_at: String
+    /// Live miles as of their last heartbeat. Monotonic server-side, so this
+    /// never ticks backwards while someone is watching it.
+    /// Optional: absent from older server builds.
+    let distance_miles: Double?
+    /// THEIR daily goal, so progress is drawn against the right target rather
+    /// than a hardcoded mile. Optional for the same reason.
+    let goal_miles: Double?
     /// The friend's CURRENT local date — the composite key half needed to
     /// send them a mile hype through the existing hype endpoint.
     let local_date: String
@@ -133,8 +140,21 @@ final class LivePresenceService: ObservableObject {
         Task {
             defer { self.inFlight = false }
             do {
-                struct Body: Encodable { let session_id: String }
-                let body = try JSONEncoder().encode(Body(session_id: sessionId))
+                struct Body: Encodable {
+                    let session_id: String
+                    let distance_miles: Double
+                }
+                // The tracker's own live number, so friends watching see how
+                // far this walk has actually got rather than only that it
+                // exists. `liveDistance` is THE workout number everywhere else
+                // (see WorkoutLocationManager) — reusing it means the figure a
+                // friend sees is the one the walker sees.
+                let body = try JSONEncoder().encode(
+                    Body(
+                        session_id: sessionId,
+                        distance_miles: WorkoutLocationManager.shared.liveDistance
+                    )
+                )
                 let resp: HeartbeatResponse = try await APIClient.fancyFetch(
                     endpoint: "/live/heartbeat",
                     method: .POST,

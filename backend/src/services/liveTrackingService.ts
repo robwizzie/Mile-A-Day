@@ -26,6 +26,10 @@ export interface LiveFriend {
   profile_image_url: string | null;
   workout_type: string;
   started_at: string;
+  /** Live miles as of their last heartbeat. Monotonic. */
+  distance_miles: number;
+  /** THEIR daily goal, so progress is drawn against the right target. */
+  goal_miles: number;
   /** The friend's CURRENT local date — the composite key half a viewer needs
    *  to send them a mile hype with zero hype-side changes. */
   local_date: string;
@@ -52,6 +56,10 @@ export interface FriendOutNow {
   profile_image_url: string | null;
   workout_type: string;
   started_at: string;
+  /** Live miles as of their last heartbeat. Monotonic. */
+  distance_miles: number;
+  /** THEIR daily goal, so progress is drawn against the right target. */
+  goal_miles: number;
   /** Non-null only when they're in a buddy room with space left. */
   buddy_session_id: string | null;
   buddy_join_code: string | null;
@@ -115,12 +123,23 @@ export async function startSession(
 export async function heartbeat(
   userId: string,
   sessionId: string,
+  distanceMiles?: number,
 ): Promise<{ friends_out: LiveFriend[]; hypes: LiveHype[] } | null> {
+  // GREATEST, never assignment: heartbeats can arrive out of order, and a
+  // friend's live number is being watched by other people. It may stall, it
+  // must never tick backwards. A missing/NaN value leaves the stored figure
+  // alone rather than resetting it to zero.
+  const reported =
+    typeof distanceMiles === "number" && Number.isFinite(distanceMiles)
+      ? Math.max(0, distanceMiles)
+      : null;
   const bumped = await db.query<{ started_at: Date }>(
-    `UPDATE live_tracking_sessions SET last_seen_at = NOW()
+    `UPDATE live_tracking_sessions
+        SET last_seen_at = NOW(),
+            distance_miles = GREATEST(distance_miles, COALESCE($3, distance_miles))
      WHERE user_id = $1 AND session_id = $2 AND ended_at IS NULL
      RETURNING started_at`,
-    [userId, sessionId],
+    [userId, sessionId, reported],
   );
   if (bumped.length === 0) return null;
   // timestamptz comes back as a JS Date (house rule) — passed straight back
@@ -132,6 +151,8 @@ export async function heartbeat(
       `SELECT u.user_id, u.username, u.first_name, u.last_name,
               u.profile_image_url, s.workout_type,
               to_char(s.started_at AT TIME ZONE 'UTC', ${ISO_TS}) AS started_at,
+              s.distance_miles,
+              u.goal_miles::float AS goal_miles,
               to_char(
                 (NOW() + (COALESCE(
                   (SELECT w2.timezone_offset FROM workouts w2
@@ -236,6 +257,10 @@ export async function friendsOutNow(userId: string): Promise<FriendOutNow[]> {
     `SELECT u.user_id, u.username, u.first_name, u.last_name,
             u.profile_image_url, s.workout_type,
             to_char(s.started_at AT TIME ZONE 'UTC', ${ISO_TS}) AS started_at,
+            s.distance_miles,
+            -- THEIR goal, not the viewer's. A friend on a 2-mile goal rendered
+            -- against a 1-mile bar reads as finished when they're halfway.
+            u.goal_miles::float AS goal_miles,
             room.id AS buddy_session_id,
             room.join_code AS buddy_join_code,
             room.mode AS buddy_mode,

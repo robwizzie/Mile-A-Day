@@ -823,6 +823,14 @@ struct FriendWorkout: Codable, Identifiable {
     /// This run has a real (non-auto) photo post — never a generated route/stats
     /// card. Optional: absent from older servers. Existence only, never a url.
     let hasPhoto: Bool?
+    /// Which app wrote this into Apple Health. Optional: absent on older
+    /// server builds, and nil reads as first-party (no chip drawn).
+    let sourceBundleId: String?
+    /// Why this isn't counting, if it isn't. 'duplicate_source' is the one the
+    /// owner can overrule.
+    let exclusionReason: String?
+    /// The owner's own answer, which outranks detection: "count" / "exclude".
+    let duplicateDecision: String?
 
     var isManualOrEdited: Bool {
         source == "manual" || source == "edited"
@@ -840,6 +848,9 @@ struct FriendWorkout: Codable, Identifiable {
         case source
         case hasRoute = "has_route"
         case hasPhoto = "has_photo"
+        case sourceBundleId = "source_bundle_id"
+        case exclusionReason = "exclusion_reason"
+        case duplicateDecision = "duplicate_decision"
     }
 
     var formattedDate: String {

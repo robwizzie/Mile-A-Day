@@ -70,6 +70,12 @@ jobs:
       # and the host-only lobby PATCH.
       - name: Buddy gate + lobby-edit check
         run: node scripts/buddy-gate-check.mjs
+      # Cross-app duplicate detection. An app that records a FRAGMENT of a walk
+      # another app already recorded fails every distance-agreement test while
+      # being unambiguously the same walk — which is how a 1.84 mi walk counted
+      # as 2.55 in production.
+      - name: Cross-app duplicate containment check
+        run: node scripts/dedupe-containment-check.mjs
 
   website:
     name: Website (lint + build)

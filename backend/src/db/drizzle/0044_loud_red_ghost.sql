@@ -1,0 +1,1 @@
+ALTER TABLE "workouts" ADD COLUMN "duplicate_decision" text;

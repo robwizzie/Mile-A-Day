@@ -542,17 +542,38 @@ const DUPLICATE_DISTANCE_TOLERANCE = 0.2;
 const DUPLICATE_DISTANCE_FLOOR = 0.1;
 
 /**
+ * How much of the SHORTER workout must sit inside the longer one before it's
+ * treated as a fragment of the same activity rather than a separate one.
+ *
+ * Deliberately high. At 0.9 the shorter workout is essentially wholly enclosed,
+ * which is what makes "you can't be on two outdoor walks at once" a safe
+ * inference. A looser value would start pairing a genuine second walk that
+ * merely began before the first one ended.
+ */
+const DUPLICATE_CONTAINMENT_RATIO = 0.9;
+
+/**
  * Is cross-app duplicate EXCLUSION live?
  *
- * Kill switch, default OFF (env flags are kill switches, never the safety
- * mechanism — see .claude/rules/backend.md). Detection still runs and still
- * populates `duplicate_of` while it's off, so the flag can be flipped on only
- * after diffing what it would do against real data. Flipping it back off
- * unwinds every exclusion it applied on the next sync of each day.
+ * ON unless explicitly disabled. It shipped default-off so its behaviour could
+ * be diffed against real data first; that diffing has happened, and the answer
+ * was that a real user's day read 2.55 mi for a 1.84 mi walk because Google
+ * Health independently wrote a 0.36 mi fragment of the same walk into HealthKit.
+ * Left off, the whole pass is inert and the double-count is what users see.
+ *
+ * Two things keep this from rewriting history when it flips:
+ *  - `users.dedupe_since` grandfathers every workout created before the column
+ *    was added, so no existing total or streak moves. Only newly-synced
+ *    workouts can be excluded.
+ *  - Setting WORKOUT_DEDUPE to "false"/"0"/"off" unwinds every exclusion it
+ *    applied, on the next sync of each affected day. It is a true kill switch.
+ *
+ * A user who WANTS their history cleaned up moves their own grandfather line
+ * back via POST /workouts/:userId/duplicates/resolve; nothing else does.
  */
 function duplicateExclusionEnabled(): boolean {
   const v = (process.env.WORKOUT_DEDUPE ?? "").toLowerCase();
-  return v === "1" || v === "true" || v === "on";
+  return !(v === "0" || v === "false" || v === "off");
 }
 
 /**
@@ -635,8 +656,29 @@ function duplicateExclusionStatements(
 			AND EXTRACT(EPOCH FROM (
 				LEAST(a.ends_at, b.ends_at) - GREATEST(a.starts_at, b.starts_at)
 			)) >= $3 * LEAST(a.total_duration, b.total_duration)
-			AND abs(a.distance - b.distance) <= GREATEST(
-				$4, $5 * GREATEST(a.distance, b.distance)
+			AND (
+				-- Either both apps recorded the WHOLE activity, so the
+				-- distances agree...
+				abs(a.distance - b.distance) <= GREATEST(
+					$4, $5 * GREATEST(a.distance, b.distance)
+				)
+				-- ...or A is a FRAGMENT of B: a's window sits almost
+				-- entirely inside b's and it covers no more ground.
+				--
+				-- This is the case agreement alone cannot see. A phone app that
+				-- starts tracking partway through, or segments a walk
+				-- differently, writes a short workout inside the long one — and
+				-- 0.36 vs 1.84 fails every distance test there is while being
+				-- unambiguously the same walk. You cannot be on two outdoor
+				-- walks at the same moment, so a contained window from another
+				-- source is the same walk however little of it that app caught.
+				OR (
+					EXTRACT(EPOCH FROM (
+						LEAST(a.ends_at, b.ends_at)
+							- GREATEST(a.starts_at, b.starts_at)
+					)) >= $6 * a.total_duration
+					AND a.distance <= b.distance
+				)
 			)
 	),
 	-- A row is a duplicate if any better-ranked row is the same run...
@@ -667,6 +709,7 @@ function duplicateExclusionStatements(
         DUPLICATE_MIN_OVERLAP_RATIO,
         DUPLICATE_DISTANCE_FLOOR,
         DUPLICATE_DISTANCE_TOLERANCE,
+        DUPLICATE_CONTAINMENT_RATIO,
       ],
     },
     {
@@ -677,7 +720,12 @@ function duplicateExclusionStatements(
 	UPDATE workouts SET exclusion_reason = NULL
 	WHERE user_id = $1 AND local_date = $2::date
 		AND exclusion_reason = '${DUPLICATE_EXCLUSION_REASON}'
-		AND (NOT $3::boolean OR duplicate_of IS NULL)`,
+		-- The user's own answer outranks detection. Without this clause a
+		-- "no, that really was a second walk" would be silently reversed by
+		-- the next sync of the day, which is the precise surprise this whole
+		-- feature is supposed to prevent.
+		AND (NOT $3::boolean OR duplicate_of IS NULL
+		     OR duplicate_decision = 'count')`,
       params: [userId, localDate, enabled],
     },
     {
@@ -695,12 +743,22 @@ function duplicateExclusionStatements(
 	FROM users u
 	WHERE w.user_id = $1 AND w.local_date = $2::date
 		AND u.user_id = w.user_id
-		AND $3::boolean
-		AND w.duplicate_of IS NOT NULL
 		AND w.exclusion_reason IS NULL
 		AND w.deleted_at IS NULL
-		AND u.dedupe_since IS NOT NULL
-		AND w.created_at >= u.dedupe_since`,
+		AND (
+			-- The user said don't count it. Honoured regardless of the kill
+			-- switch or the grandfather line: it is their own workout and
+			-- their own explicit answer.
+			w.duplicate_decision = 'exclude'
+			OR (
+				$3::boolean
+				AND w.duplicate_of IS NOT NULL
+				-- ...but never over the top of "count it".
+				AND w.duplicate_decision IS DISTINCT FROM 'count'
+				AND u.dedupe_since IS NOT NULL
+				AND w.created_at >= u.dedupe_since
+			)
+		)`,
       params: [userId, localDate, enabled],
     },
   ];
@@ -1851,4 +1909,39 @@ export async function getRaceHistory(
     [userId, dist.miles * RACE_BAND_LO, dist.miles * RACE_BAND_HI],
   );
   return rows.map((r) => mapRaceRow({ ...r, bucket: distanceKey }));
+}
+
+/**
+ * Record the user's own answer to "is this workout a duplicate?".
+ *
+ * This is the control that makes automatic exclusion acceptable at all. A
+ * workout is the user's own record of something they actually did; taking it
+ * out of their totals because two apps both wrote it is a judgement call, and
+ * the user has to be able to overrule it in one tap and have that stick.
+ *
+ * Sticky by construction: the decision lives on the row, and both the release
+ * and exclude passes read it, so the recompute that runs on every sync of the
+ * day re-derives the same answer instead of undoing theirs.
+ *
+ * `decision` is 'count' | 'exclude' | null (null = hand it back to detection).
+ * Scoped to the caller's own workouts — a workout id alone is not authority.
+ */
+export async function setDuplicateDecision(
+  userId: string,
+  workoutId: string,
+  decision: "count" | "exclude" | null,
+): Promise<{ localDate: string } | null> {
+  const rows = await db.query<{ local_date: string }>(
+    `UPDATE workouts
+        SET duplicate_decision = $3
+      WHERE user_id = $1 AND workout_id = $2 AND deleted_at IS NULL
+      RETURNING to_char(local_date, 'YYYY-MM-DD') AS local_date`,
+    [userId, workoutId, decision],
+  );
+  if (rows.length === 0) return null;
+
+  // Re-run the day so the decision takes effect immediately rather than at the
+  // next sync — the user is looking at the number they just changed.
+  await recomputeDuplicatesForDay(userId, rows[0].local_date);
+  return { localDate: rows[0].local_date };
 }
