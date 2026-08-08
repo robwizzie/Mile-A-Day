@@ -158,18 +158,15 @@ struct FriendWorkoutRow: View {
                 // reads the same as yours. Route/photo come from the server
                 // (`has_route`/`has_photo`); older servers omit them and the
                 // chips simply don't draw.
-                HStack(spacing: 6) {
-                    WorkoutRowTags(
-                        source: WorkoutSource(rawValue: workout.source ?? "") ?? .healthkit,
-                        hasRoute: workout.hasRoute == true,
-                        hasPhoto: workout.hasPhoto == true,
-                        routeColor: workoutColor
-                    )
-                    // Which app actually wrote this. Silent for Mile A Day and
-                    // Apple — badging the expected sources would make the chip
-                    // wallpaper and hide the one case that matters.
-                    WorkoutSourceChip(
-                        attribution: WorkoutAttribution(bundleId: workout.sourceBundleId))
+                // Same overflow trap as the owner's own row, and worse here:
+                // Manual + Route + Photo + a named source is four fixed-size
+                // chips on one line. Each publishes a width no ancestor can
+                // shrink, so the row can end up demanding more than the screen
+                // — which a ScrollView answers by centring and clipping,
+                // silently eating the screen's side margins. Stack instead.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) { rowChips(truncating: false) }
+                    VStack(alignment: .leading, spacing: 4) { rowChips(truncating: true) }
                 }
             }
 
@@ -202,6 +199,25 @@ struct FriendWorkoutRow: View {
         .opacity(showsDuplicateNotice ? 0.55 : 1)
         .background(Color.white.opacity(0.05))
         .cornerRadius(MADTheme.CornerRadius.medium)
+    }
+
+    /// One definition behind both `ViewThatFits` candidates — they must differ
+    /// in arrangement only, never in which chips they show.
+    @ViewBuilder
+    private func rowChips(truncating: Bool) -> some View {
+        WorkoutRowTags(
+            source: WorkoutSource(rawValue: workout.source ?? "") ?? .healthkit,
+            hasRoute: workout.hasRoute == true,
+            hasPhoto: workout.hasPhoto == true,
+            routeColor: workoutColor
+        )
+        // Which app actually wrote this. Silent for Mile A Day and Apple —
+        // badging the expected sources would make the chip wallpaper and hide
+        // the one case that matters.
+        WorkoutSourceChip(
+            attribution: WorkoutAttribution(bundleId: workout.sourceBundleId),
+            allowsTruncation: truncating
+        )
     }
 
     /// Only on the OWNER's own list, only for the duplicate exclusion, and only

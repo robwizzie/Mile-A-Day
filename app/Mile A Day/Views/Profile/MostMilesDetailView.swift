@@ -402,14 +402,26 @@ struct WorkoutRow: View {
         let attribution = WorkoutAttribution(
             bundleId: workout.sourceRevision.source.bundleIdentifier)
         if attribution.displayName != nil || showsCountedState {
-            HStack(spacing: 6) {
-                WorkoutSourceChip(attribution: attribution)
-                if showsCountedState {
-                    WorkoutTagChip(
-                        icon: isCounted ? "checkmark.circle.fill" : "minus.circle.fill",
-                        label: isCounted ? "Counted" : "Not counted",
-                        color: isCounted ? MADTheme.Colors.success : MADTheme.Colors.warning
-                    )
+            // Side by side when they fit, stacked when they don't — and the
+            // stacked candidate lets the source chip truncate, so SOMETHING
+            // here always fits no matter how long the writing app's name is.
+            //
+            // These chips are `fixedSize` deliberately, but that publishes a
+            // minimum width no ancestor can shrink, and it propagated all the
+            // way out: "Google Health (Fitbit)" + "Not counted" needed ~241pt
+            // of a ~208pt slot, so the row — and therefore the card, and the
+            // padded VStack — demanded 487pt on a 430pt screen. A ScrollView
+            // CENTRES content it can't fit and clips both ends, which ate the
+            // 20pt screen gutter and 8pt of card besides. That is why the
+            // Workouts cards sat flush against the bezel, and why raising the
+            // gutter did nothing to fix it: a wider gutter just made the
+            // overflow wider, and the clip absorbed it. Symptom appears on a
+            // screen whose padding is provably correct — always suspect a
+            // fixed-size atom below before touching the padding above.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) { provenanceChips(attribution, truncating: false) }
+                VStack(alignment: .leading, spacing: 4) {
+                    provenanceChips(attribution, truncating: true)
                 }
             }
             .padding(.top, 1)
@@ -420,6 +432,27 @@ struct WorkoutRow: View {
                 .foregroundColor(MADTheme.Colors.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 1)
+        }
+    }
+
+    /// The provenance chips themselves, so both `ViewThatFits` candidates are
+    /// built from ONE definition.
+    ///
+    /// Load-bearing: a `ViewThatFits` whose candidates differ in CONTENT drops
+    /// a chip instead of just re-arranging, and the drop is silent. These two
+    /// differ in arrangement and in whether the source chip may truncate —
+    /// never in what they show.
+    @ViewBuilder
+    private func provenanceChips(
+        _ attribution: WorkoutAttribution, truncating: Bool
+    ) -> some View {
+        WorkoutSourceChip(attribution: attribution, allowsTruncation: truncating)
+        if showsCountedState {
+            WorkoutTagChip(
+                icon: isCounted ? "checkmark.circle.fill" : "minus.circle.fill",
+                label: isCounted ? "Counted" : "Not counted",
+                color: isCounted ? MADTheme.Colors.success : MADTheme.Colors.warning
+            )
         }
     }
 

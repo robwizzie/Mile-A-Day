@@ -171,6 +171,27 @@ struct WorkoutsView: View {
     private static let discSize: CGFloat = 33
     private static let cellHeight: CGFloat = 40
 
+    /// The photo badge pinned to a day disc's top-right.
+    ///
+    /// An explicit SQUARE frame, not `.padding` around the glyph: `camera.fill`
+    /// is far wider than it is tall, so padding yields an oblong frame, and a
+    /// `Circle()` background inscribes itself in the SHORTER side and centres —
+    /// leaving ~1pt of dead frame at the trailing edge that
+    /// `.overlay(alignment: .topTrailing)` then aligns to instead of the circle
+    /// you can see. A square frame makes the frame and the circle the same
+    /// thing, so the alignment means what it says.
+    private static let photoBadgeSize: CGFloat = 10.5
+
+    /// Nudge that lands the badge's CENTRE on the disc's rim at 45°, so it
+    /// reads as pinned to the corner rather than floating near it.
+    ///
+    /// Derived, not eyeballed. The old `.offset(x: 2, y: -2)` was tuned by hand
+    /// against the oblong frame above, and it left the badge measurably off the
+    /// diagonal — ~1pt higher than it sat right, on every day with a photo.
+    private static var photoBadgeNudge: CGFloat {
+        discSize / 2 / CGFloat(2).squareRoot() - (discSize - photoBadgeSize) / 2
+    }
+
     /// Without this, the dots and the camera badge are just decoration nobody
     /// can decode — the legend is what makes the month readable at a glance.
     private var calendarLegend: some View {
@@ -227,10 +248,13 @@ struct WorkoutsView: View {
                             Image(systemName: "camera.fill")
                                 .font(.system(size: 6, weight: .black))
                                 .foregroundColor(.white)
-                                .padding(2.5)
+                                .frame(
+                                    width: Self.photoBadgeSize,
+                                    height: Self.photoBadgeSize
+                                )
                                 .background(Circle().fill(Color.pink))
                                 .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1))
-                                .offset(x: 2, y: -2)
+                                .offset(x: Self.photoBadgeNudge, y: -Self.photoBadgeNudge)
                         }
                     }
 
