@@ -11,6 +11,8 @@
 #   4. seeded feed/story/hype/signing smoke test against the migrated schema
 #
 # iOS is NOT built here — Xcode Cloud owns that (see docs/XCODE_CLOUD_SETUP.md).
+# Swift is type-checked by the separate ios.yml workflow: macOS runners queue,
+# and a stalled one must not be able to cancel the Linux jobs below.
 name: CI
 
 on:
@@ -95,54 +97,3 @@ jobs:
       # script assumed a global install. `next build` type-checks, which is
       # the gate that matters here.
       - run: npm run build
-
-  ios-typecheck:
-    name: iOS (type-check)
-    # Only when the app actually changes — macOS minutes bill at 10x Linux.
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
-    runs-on: macos-latest
-    # NON-BLOCKING FOR NOW. This job has never run before it was written, and a
-    # whole-target `swiftc -typecheck` can fail for reasons unrelated to any
-    # diff (SDK drift, a file that only compiles with Xcode's build settings).
-    # Turning it red on day one would block every merge. Read the log, confirm
-    # it goes green on a known-good commit, THEN delete this line so it gates.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Needed for the diff below. The default shallow clone has no
-          # origin/main, so `origin/main...HEAD` failed with "bad revision" and
-          # the step was silently useless.
-          fetch-depth: 0
-      - name: Check for iOS changes
-        id: changed
-        run: |
-          BASE="origin/${{ github.base_ref || 'main' }}"
-          if git diff --name-only "$BASE"...HEAD -- 'app/**' | grep -q .; then
-            echo "ios=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ios=false" >> "$GITHUB_OUTPUT"
-          fi
-      # There is no iOS test target worth running and no scheme build here —
-      # this is purely "does the Swift still compile". That is exactly the class
-      # of failure that has been reaching main: a non-exhaustive switch, a stale
-      # call site, a Codable struct missing a CodingKey. All of them are type
-      # errors, none of them need a simulator.
-      #
-      # The whole main-app source set goes in ONE invocation because Swift
-      # resolves types across files within a module; checking files singly would
-      # report every cross-file reference as undefined. The Watch app and the
-      # widget extension are SEPARATE targets and are excluded.
-      - name: Type-check the main app target
-        # Skipped when nothing under app/ changed — this runner bills at 10x.
-        if: steps.changed.outputs.ios == 'true'
-        run: |
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          find "app/Mile A Day" -name '*.swift' -print0 > /tmp/swift-files
-          COUNT=$(tr -dc '\0' < /tmp/swift-files | wc -c)
-          echo "Type-checking $COUNT Swift files against $SDK"
-          xargs -0 xcrun swiftc -typecheck \
-            -sdk "$SDK" \
-            -target arm64-apple-ios17.0 \
-            -swift-version 5 \
-            < /tmp/swift-files
