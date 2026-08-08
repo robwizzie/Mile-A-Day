@@ -63,7 +63,13 @@ struct WorkoutsView: View {
                         )
                     }
                 }
-                .padding(MADTheme.Spacing.md)
+                // Horizontal and vertical are set separately on purpose. The
+                // problem on this screen was always HEIGHT — a six-row month
+                // grid pushing the day's workouts off the bottom — and tightening
+                // both axes together took width away from a screen that had none
+                // to spare, leaving the cards nearly flush with the display edge.
+                .padding(.horizontal, 20)
+                .padding(.top, MADTheme.Spacing.md)
                 // The tab bar here is a real TabView bar, so SwiftUI already
                 // insets scroll content for it — the 100pt other screens
                 // hardcode was 100pt of dead space at the end of this one,
@@ -152,7 +158,8 @@ struct WorkoutsView: View {
 
             calendarLegend
         }
-        .padding(12)
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.vertical, 12)
         .cardStyle()
     }
 
@@ -325,14 +332,16 @@ struct WorkoutsView: View {
                                 WorkoutAttribution.sourceLabel(for: dayWorkouts[$0])
                             }
                         )
-                        .padding(MADTheme.Spacing.sm + 2)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
                         .madLiquidGlass()
                     }
                     .buttonStyle(ScaleButtonStyle())
                 }
             }
         }
-        .padding(12)
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.vertical, 12)
         .cardStyle()
     }
 
