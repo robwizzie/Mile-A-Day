@@ -1102,14 +1102,13 @@ class HealthKitManager: ObservableObject {
     
     /// Processes today's filtered workouts to calculate distance and update UI
     func processTodaysWorkouts(_ todaysWorkouts: [HKWorkout], dayStamp: String? = nil) {
-        var totalMiles: Double = 0.0
-
-        for workout in todaysWorkouts {
-            if let distance = workout.totalDistance {
-                let miles = distance.doubleValue(for: HKUnit.mile())
-                totalMiles += miles
-            }
-        }
+        // Counted ONCE per real activity. This used to be a plain sum over
+        // every HealthKit workout, which double-counts the same walk whenever a
+        // second app (Google Health, Strava, a watch platform) also wrote it —
+        // a 1.02 mi walk read as 1.98. The backend already excluded those, but
+        // this number never asked the backend, so nothing server-side could
+        // ever move it. See WorkoutDedup: same rule, same thresholds.
+        let totalMiles = WorkoutDedup.totalMiles(todaysWorkouts)
 
         DispatchQueue.main.async {
             #if os(watchOS)

@@ -325,10 +325,14 @@ struct WorkoutsView: View {
     }
 
     private func miles(on day: Date) -> Double {
-        if let index = healthManager.workoutIndex {
-            return index.totalMiles(for: day)
-        }
-        return workouts(on: day).reduce(0) { $0 + ($1.totalDistance?.doubleValue(for: .mile()) ?? 0) }
+        // The real HKWorkouts first, deduped. The index is consulted only when
+        // they aren't available: its WorkoutRecords carry no source app, so a
+        // walk two apps both recorded can't be collapsed there and the day
+        // reads high — which is how this header showed 2.94 for a day the
+        // dashboard called 1.98 and the workouts below it summed to 1.98.
+        let dayWorkouts = workouts(on: day)
+        if !dayWorkouts.isEmpty { return WorkoutDedup.totalMiles(dayWorkouts) }
+        return healthManager.workoutIndex?.totalMiles(for: day) ?? 0
     }
 
     private func milesText(for day: Date) -> String {
