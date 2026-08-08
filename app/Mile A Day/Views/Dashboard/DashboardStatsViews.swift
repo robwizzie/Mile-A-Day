@@ -103,8 +103,49 @@ struct RecentWorkoutsView: View {
     /// whole list. Drives the "Photo" badge AND hands the detail its photo
     /// instantly (no per-row re-scan).
     @State private var postsByWorkout: [String: PostItem] = [:]
+    /// Re-renders the Counted / Not counted chips when the user overrules a
+    /// duplicate from the detail sheet.
+    @ObservedObject private var dedupOverrides = WorkoutDedupOverrides.shared
 
     private static let pageSize: Int = 10
+
+    /// Which of these rows the daily totals actually count, and why not.
+    private struct CountState {
+        /// workout uuid → the recording that already covers it.
+        var excludedBy: [String: String] = [:]
+        /// Workouts on a day that contains a duplicate. Only these rows show a
+        /// Counted / Not counted chip — on an ordinary day the chip would be
+        /// on every row and mean nothing.
+        var labeled: Set<String> = []
+    }
+
+    /// Duplicate detection is a PER-DAY rule, so this flat list has to be
+    /// bucketed by local day before applying it — comparing a Tuesday walk
+    /// against a Thursday one would pair two unrelated workouts.
+    ///
+    /// Buckets the whole list, not the visible prefix: a day split across the
+    /// "show more" boundary would otherwise lose the partner that explains the
+    /// exclusion, and the row would say "not counted" with nothing to point at.
+    private var countState: CountState {
+        var state = CountState()
+        let calendar = Calendar.current
+        var byDay: [Date: [HKWorkout]] = [:]
+        for workout in workouts {
+            let day = calendar.startOfDay(
+                for: healthManager.getCorrectedLocalTime(for: workout))
+            byDay[day, default: []].append(workout)
+        }
+        for (_, dayWorkouts) in byDay {
+            let covers = WorkoutDedup.duplicateSources(in: dayWorkouts)
+            guard !covers.isEmpty else { continue }
+            for workout in dayWorkouts { state.labeled.insert(workout.uuid.uuidString) }
+            for (index, keeper) in covers {
+                state.excludedBy[dayWorkouts[index].uuid.uuidString] =
+                    WorkoutAttribution.sourceLabel(for: dayWorkouts[keeper])
+            }
+        }
+        return state
+    }
 
     var body: some View {
         // Section title comes from the collapsible wrapper on the dashboard,
@@ -115,15 +156,20 @@ struct RecentWorkoutsView: View {
                     .foregroundColor(.secondary)
                     .padding(.vertical)
             } else {
+                let counting = countState
                 LazyVStack(spacing: MADTheme.Spacing.md) {
                     ForEach(workouts.prefix(displayCount), id: \.uuid) { workout in
+                        let id = workout.uuid.uuidString
                         Button {
                             selectedWorkout = IdentifiableWorkout(workout: workout)
                         } label: {
                             WorkoutRow(
                                 workout: workout,
                                 showDate: true,
-                                hasPhoto: hasRealPhoto(postsByWorkout[workout.uuid.uuidString])
+                                hasPhoto: hasRealPhoto(postsByWorkout[id]),
+                                isCounted: counting.excludedBy[id] == nil,
+                                showsCountedState: counting.labeled.contains(id),
+                                countedInstead: counting.excludedBy[id]
                             )
                             .padding(MADTheme.Spacing.md)
                             .madLiquidGlass()

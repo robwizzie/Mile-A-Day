@@ -1775,6 +1775,49 @@ extension MADWatchBridge: WCSessionDelegate {
 
 // MARK: - Counting each real walk once
 
+/// Workouts the user has told us to count anyway, overruling duplicate detection.
+///
+/// The rule below is a guess — a good one, but a guess about two recordings the
+/// app can only see through timestamps and distances. Someone who walks a mile,
+/// stops, and walks a near-identical mile an hour later is not doing anything
+/// unusual, and no threshold can tell that apart from one walk written twice.
+/// So the verdict has to be reversible, and the reversal has to STICK: a sync,
+/// a relaunch or a recalibrate must not quietly re-apply a decision the user
+/// already overruled.
+///
+/// Local, and deliberately so. `DuplicateDecisionService` records the same
+/// choice server-side for streaks and the feed, but every distance this app
+/// draws is summed on-device from HealthKit and never asks the server — so a
+/// server-only override would leave the button looking broken, which is the
+/// exact failure that made the on-device rule necessary in the first place.
+/// Both are written; this is the one that moves the number on screen.
+final class WorkoutDedupOverrides: ObservableObject {
+    static let shared = WorkoutDedupOverrides()
+
+    private static let storageKey = "workoutDedupCountAnywayV1"
+    private let defaults = UserDefaults.standard
+
+    /// HKWorkout UUID strings the user has restored to their total.
+    @Published private(set) var countAnyway: Set<String>
+
+    private init() {
+        countAnyway = Set(defaults.stringArray(forKey: Self.storageKey) ?? [])
+    }
+
+    func isCountedAnyway(_ workoutId: String) -> Bool {
+        countAnyway.contains(workoutId)
+    }
+
+    func setCountAnyway(_ on: Bool, for workoutId: String) {
+        if on {
+            countAnyway.insert(workoutId)
+        } else {
+            countAnyway.remove(workoutId)
+        }
+        defaults.set(Array(countAnyway), forKey: Self.storageKey)
+    }
+}
+
 /// The same walk, recorded by two apps, counted once.
 ///
 /// Every third-party fitness platform — Google Health, Strava, Garmin, WHOOP —
@@ -1832,6 +1875,7 @@ enum WorkoutDedup {
     /// One workout, reduced to what the rule needs.
     private struct Candidate {
         let index: Int
+        let uuid: String
         let bundleId: String
         let start: Date
         let end: Date
@@ -1849,20 +1893,37 @@ enum WorkoutDedup {
     /// survivors AND show the user what was left out — never removing a workout
     /// silently is a requirement, not a nicety.
     static func duplicateIndices(in workouts: [HKWorkout]) -> Set<Int> {
-        var excluded = Set<Int>()
+        Set(duplicateSources(in: workouts).keys)
+    }
+
+    /// Excluded index → the index of the workout that already covers it.
+    ///
+    /// The pairing is the whole point: "not counted" on its own is the app
+    /// taking a walk away with no reason given. Naming the recording that
+    /// covers it turns that into a statement the user can check against their
+    /// own memory of the walk — and disagree with, if we got it wrong.
+    /// - Parameter applyingOverrides: pass `false` to ask what the RULE thinks,
+    ///   ignoring the user's decisions. The detail screen needs that to offer an
+    ///   undo — once an override is in force the workout is no longer excluded,
+    ///   so there'd otherwise be nothing left to explain what was undone.
+    static func duplicateSources(
+        in workouts: [HKWorkout], applyingOverrides: Bool = true
+    ) -> [Int: Int] {
+        var excluded: [Int: Int] = [:]
         guard workouts.count > 1 else { return excluded }
+        let restored = applyingOverrides ? WorkoutDedupOverrides.shared.countAnyway : []
 
         // Exact repeats first. Two entries with one UUID are one workout by
         // definition, whatever any distance rule says.
-        var seenUUIDs = Set<String>()
+        var firstIndexByUUID: [String: Int] = [:]
         var candidates: [Candidate] = []
         for (index, workout) in workouts.enumerated() {
             let uuid = workout.uuid.uuidString
-            if seenUUIDs.contains(uuid) {
-                excluded.insert(index)
+            if let first = firstIndexByUUID[uuid] {
+                excluded[index] = first
                 continue
             }
-            seenUUIDs.insert(uuid)
+            firstIndexByUUID[uuid] = index
 
             let duration = workout.duration
             guard duration > 0 else { continue }
@@ -1870,6 +1931,7 @@ enum WorkoutDedup {
             candidates.append(
                 Candidate(
                     index: index,
+                    uuid: uuid,
                     bundleId: bundle,
                     start: workout.startDate,
                     end: workout.endDate,
@@ -1891,11 +1953,14 @@ enum WorkoutDedup {
         }
 
         for (position, candidate) in ranked.enumerated() {
-            if excluded.contains(candidate.index) { continue }
+            if excluded[candidate.index] != nil { continue }
+            // The user already looked at this one and said it was a separate
+            // walk. That answer outranks the rule, permanently.
+            if restored.contains(candidate.uuid) { continue }
             for keeper in ranked[..<position] {
-                if excluded.contains(keeper.index) { continue }
+                if excluded[keeper.index] != nil { continue }
                 if isSameActivity(candidate, keeper) {
-                    excluded.insert(candidate.index)
+                    excluded[candidate.index] = keeper.index
                     break
                 }
             }

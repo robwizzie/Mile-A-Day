@@ -36,6 +36,9 @@ struct WorkoutDetailView: View {
     /// window lapses while this screen is on display.
     @ObservedObject private var freshWindow = FreshPostWindowManager.shared
     @State private var addToFeedError: String?
+    /// Observed so the banner flips the moment the user overrules duplicate
+    /// detection, without waiting for a HealthKit round trip.
+    @ObservedObject private var dedupOverrides = WorkoutDedupOverrides.shared
     @EnvironmentObject var healthManager: HealthKitManager
 
     private let workoutService = WorkoutService()
@@ -349,6 +352,119 @@ struct WorkoutDetailView: View {
         }
     }
 
+    // MARK: - Duplicate recording
+
+    /// The recording that already covers this one on its day, per the RULE —
+    /// computed ignoring the user's override so the banner can still explain
+    /// itself after they've overruled it.
+    private var duplicateOfLabel: String? {
+        let calendar = Calendar.current
+        let day = calendar.startOfDay(for: correctedEndTime)
+        let dayWorkouts = healthManager.cachedWorkouts
+            .filter {
+                calendar.isDate(
+                    healthManager.getCorrectedLocalTime(for: $0), inSameDayAs: day)
+            }
+            .sorted { $0.endDate < $1.endDate }
+        let covers = WorkoutDedup.duplicateSources(
+            in: dayWorkouts, applyingOverrides: false)
+        guard let index = dayWorkouts.firstIndex(where: { $0.uuid == workout.uuid }),
+              let keeper = covers[index]
+        else { return nil }
+        return WorkoutAttribution.sourceLabel(for: dayWorkouts[keeper])
+    }
+
+    private var isRestoredByUser: Bool {
+        dedupOverrides.isCountedAnyway(workout.uuid.uuidString)
+    }
+
+    /// States plainly that a walk isn't in the total, and hands back the
+    /// decision.
+    ///
+    /// Duplicate detection is a guess about two recordings the app knows only
+    /// through timestamps and distances — someone who walks a mile, stops, and
+    /// walks a near-identical mile an hour later trips it, and no threshold can
+    /// tell that apart from one walk written twice. Which is exactly why the
+    /// verdict is stated rather than applied silently, and why the way out is
+    /// one tap away from the explanation instead of buried in settings.
+    private var duplicateBanner: some View {
+        let restored = isRestoredByUser
+        let accent = restored ? MADTheme.Colors.success : Color.orange
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: restored ? "checkmark.circle.fill" : "doc.on.doc.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(restored
+                        ? "Counted — you said it's a separate walk"
+                        : "Not counted — recorded twice")
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                        .foregroundColor(.primary)
+                    Text(duplicateExplanation)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+
+            Button {
+                setCountAnyway(!restored)
+            } label: {
+                Text(restored
+                    ? "Undo — it was the same walk"
+                    : "This was a separate walk — count it")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 34)
+                    .background(Capsule().fill(accent.opacity(0.18)))
+                    .foregroundColor(accent)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(accent.opacity(0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(accent.opacity(0.3), lineWidth: 1)
+                )
+        )
+    }
+
+    private var duplicateExplanation: String {
+        let mine = WorkoutAttribution.sourceLabel(for: workout)
+        let keeper = duplicateOfLabel ?? "another app"
+        if isRestoredByUser {
+            return "\(mine) recorded this alongside your \(keeper) walk. "
+                + "You've told us they're different walks, so both count."
+        }
+        return "\(mine) recorded this at the same time as your \(keeper) walk, "
+            + "so it looks like one walk written twice. It's counted once."
+    }
+
+    /// Persist the user's decision, refresh what's on screen, and tell the
+    /// server — in that order, because the on-device number is the one they're
+    /// looking at and it must not wait on the network to move.
+    private func setCountAnyway(_ on: Bool) {
+        MADHaptics.tap()
+        dedupOverrides.setCountAnyway(on, for: workout.uuid.uuidString)
+        healthManager.fetchTodaysDistance()
+        Task {
+            guard let uid = UserManager.shared.currentUser.backendUserId else { return }
+            // Best effort: streaks and the feed should agree, but a failed call
+            // must not undo a decision the user already sees applied.
+            try? await DuplicateDecisionService.set(
+                userId: uid,
+                workoutId: workout.uuid.uuidString,
+                decision: on ? "count" : nil
+            )
+        }
+    }
+
     // MARK: - Vehicle warning
 
     private var vehicleWarningBanner: some View {
@@ -464,6 +580,12 @@ struct WorkoutDetailView: View {
             // Vehicle-speed warning — surfaces a likely drive so the user can remove it.
             if vehicleSuspicion != .none {
                 vehicleWarningBanner
+            }
+            // A walk two apps both recorded. Shown whenever the rule flagged it,
+            // INCLUDING after the user overruled it — otherwise the only way to
+            // change your mind back would be to remember you'd changed it.
+            if duplicateOfLabel != nil {
+                duplicateBanner
             }
         }
     }
