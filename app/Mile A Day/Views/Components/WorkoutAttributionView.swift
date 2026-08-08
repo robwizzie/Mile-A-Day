@@ -1,3 +1,4 @@
+import HealthKit
 import SwiftUI
 
 /// Where a workout came from, and whether it's counting — in one place.
@@ -57,6 +58,20 @@ struct WorkoutAttribution: Equatable {
                 bundleIdentifier: bundleId, sourceName: "")
         else { return MADTheme.Colors.madWhite.opacity(0.6) }
         return platform.tint
+    }
+}
+
+extension WorkoutAttribution {
+    /// The app that wrote a workout, named the way a sentence needs it.
+    ///
+    /// `displayName` is deliberately nil for Mile A Day and Apple — a chip
+    /// naming them would be wallpaper — but "same walk as your ___ recording"
+    /// still has to fill that blank, so fall back to HealthKit's own source
+    /// name ("Mile A Day", "Apple Watch", "Health").
+    static func sourceLabel(for workout: HKWorkout) -> String {
+        let source = workout.sourceRevision.source
+        return WorkoutAttribution(bundleId: source.bundleIdentifier).displayName
+            ?? source.name
     }
 }
 

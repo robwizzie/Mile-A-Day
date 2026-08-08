@@ -286,14 +286,26 @@ struct WorkoutsView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, MADTheme.Spacing.lg)
             } else {
-                ForEach(dayWorkouts, id: \.uuid) { workout in
+                // Which of these the header's total actually counts. The rows
+                // used to be identical whether a walk was in the total or not,
+                // so a day showing 1.02 above two walks of 0.96 and 1.02 looked
+                // like an arithmetic bug rather than a decision.
+                let covers = WorkoutDedup.duplicateSources(in: dayWorkouts)
+                ForEach(Array(dayWorkouts.enumerated()), id: \.element.uuid) { index, workout in
                     Button {
                         selectedWorkout = IdentifiableWorkout(workout: workout)
                     } label: {
                         WorkoutRow(
                             workout: workout,
                             showDate: false,
-                            hasPhoto: hasRealPhoto(postsByWorkout[workout.uuid.uuidString])
+                            hasPhoto: hasRealPhoto(postsByWorkout[workout.uuid.uuidString]),
+                            isCounted: covers[index] == nil,
+                            // Only label the state on days where it varies —
+                            // "Counted" on every row of every normal day is noise.
+                            showsCountedState: !covers.isEmpty,
+                            countedInstead: covers[index].map {
+                                WorkoutAttribution.sourceLabel(for: dayWorkouts[$0])
+                            }
                         )
                         .padding(MADTheme.Spacing.md)
                         .madLiquidGlass()
@@ -338,6 +350,7 @@ struct WorkoutsView: View {
     private func milesText(for day: Date) -> String {
         String(format: "%.2f mi", miles(on: day))
     }
+
 
     private enum DayStatus: Equatable {
         case none, partial, complete

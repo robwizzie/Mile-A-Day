@@ -254,6 +254,20 @@ struct WorkoutRow: View {
     /// Whether this run has a linked photo post — supplied by the list so we
     /// don't do a per-row network scan (the route probe below is cheap/local).
     var hasPhoto: Bool = false
+    // NOTE: new stored properties go BELOW the existing ones — Swift's
+    // memberwise init is declaration-ordered, so inserting above `hasPhoto`
+    // breaks every existing call site.
+    //
+    /// False when another recording of the same walk already covers this one,
+    /// so it isn't in the day's total. The row still shows the workout in
+    /// full — it happened, and it's the user's — but says so plainly.
+    var isCounted: Bool = true
+    /// Only true when the day actually contains a duplicate. Otherwise every
+    /// row on every ordinary day would wear a "Counted" chip that says nothing.
+    var showsCountedState: Bool = false
+    /// What already covers this one, e.g. "Mile A Day" — so the exclusion
+    /// names its reason instead of just happening.
+    var countedInstead: String? = nil
     @EnvironmentObject var healthManager: HealthKitManager
 
     /// True once we confirm the workout carries a GPS trace (cheap limit-1 probe).
@@ -318,7 +332,13 @@ struct WorkoutRow: View {
                     Text(workoutDistance)
                         .font(.system(size: 17, weight: .black, design: .rounded))
                         .monospacedDigit()
-                        .foregroundColor(MADTheme.Colors.primaryText)
+                        // Muted, never struck through: this distance is real and
+                        // the user walked it. It just isn't being added twice.
+                        .foregroundColor(
+                            isCounted
+                                ? MADTheme.Colors.primaryText
+                                : MADTheme.Colors.secondaryText
+                        )
                         .lineLimit(1)
                         .layoutPriority(1)
                 }
@@ -341,6 +361,8 @@ struct WorkoutRow: View {
                     hasPhoto: hasPhoto,
                     routeColor: workoutColor
                 )
+
+                provenanceLine
             }
             Spacer(minLength: MADTheme.Spacing.sm)
             VStack(alignment: .trailing, spacing: 2) {
@@ -363,6 +385,54 @@ struct WorkoutRow: View {
             let found = await healthManager.hasRouteData(for: workout)
             await MainActor.run { hasRoute = found }
         }
+    }
+
+    /// Where this workout came from, and whether it's in the day's total.
+    ///
+    /// Two apps recording one walk is normal once someone connects Google
+    /// Health or Strava, and counting it twice is wrong — but dropping one
+    /// without a word is worse than the wrong number, because the user is left
+    /// looking at a walk they definitely did and a total that disagrees. So the
+    /// row names the app and states the decision.
+    ///
+    /// It stays silent on the ordinary case: one first-party workout, nothing
+    /// excluded, nothing to explain. A badge on every row is wallpaper.
+    @ViewBuilder
+    private var provenanceLine: some View {
+        let attribution = WorkoutAttribution(
+            bundleId: workout.sourceRevision.source.bundleIdentifier)
+        if attribution.displayName != nil || showsCountedState {
+            HStack(spacing: 6) {
+                WorkoutSourceChip(attribution: attribution)
+                if showsCountedState {
+                    WorkoutTagChip(
+                        icon: isCounted ? "checkmark.circle.fill" : "minus.circle.fill",
+                        label: isCounted ? "Counted" : "Not counted",
+                        color: isCounted ? MADTheme.Colors.success : MADTheme.Colors.warning
+                    )
+                }
+            }
+            .padding(.top, 1)
+        }
+        if !isCounted {
+            Text(exclusionReason)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundColor(MADTheme.Colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 1)
+        }
+    }
+
+    /// "Google Health recorded the same walk as Mile A Day, so it's counted
+    /// once." Names both ends when we know them — a reason the user can check.
+    private var exclusionReason: String {
+        let mine = WorkoutAttribution(
+            bundleId: workout.sourceRevision.source.bundleIdentifier
+        ).displayName ?? workout.sourceRevision.source.name
+        guard let keeper = countedInstead else {
+            return "\(mine) recorded a walk you'd already logged, so it's counted once."
+        }
+        return "Same walk as your \(keeper) recording, so it's counted once."
     }
 
     /// Feed-style verb ("Ran", "Walked") for the headline.

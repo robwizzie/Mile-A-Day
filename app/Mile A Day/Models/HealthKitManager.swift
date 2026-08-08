@@ -1849,20 +1849,30 @@ enum WorkoutDedup {
     /// survivors AND show the user what was left out — never removing a workout
     /// silently is a requirement, not a nicety.
     static func duplicateIndices(in workouts: [HKWorkout]) -> Set<Int> {
-        var excluded = Set<Int>()
+        Set(duplicateSources(in: workouts).keys)
+    }
+
+    /// Excluded index → the index of the workout that already covers it.
+    ///
+    /// The pairing is the whole point: "not counted" on its own is the app
+    /// taking a walk away with no reason given. Naming the recording that
+    /// covers it turns that into a statement the user can check against their
+    /// own memory of the walk — and disagree with, if we got it wrong.
+    static func duplicateSources(in workouts: [HKWorkout]) -> [Int: Int] {
+        var excluded: [Int: Int] = [:]
         guard workouts.count > 1 else { return excluded }
 
         // Exact repeats first. Two entries with one UUID are one workout by
         // definition, whatever any distance rule says.
-        var seenUUIDs = Set<String>()
+        var firstIndexByUUID: [String: Int] = [:]
         var candidates: [Candidate] = []
         for (index, workout) in workouts.enumerated() {
             let uuid = workout.uuid.uuidString
-            if seenUUIDs.contains(uuid) {
-                excluded.insert(index)
+            if let first = firstIndexByUUID[uuid] {
+                excluded[index] = first
                 continue
             }
-            seenUUIDs.insert(uuid)
+            firstIndexByUUID[uuid] = index
 
             let duration = workout.duration
             guard duration > 0 else { continue }
@@ -1891,11 +1901,11 @@ enum WorkoutDedup {
         }
 
         for (position, candidate) in ranked.enumerated() {
-            if excluded.contains(candidate.index) { continue }
+            if excluded[candidate.index] != nil { continue }
             for keeper in ranked[..<position] {
-                if excluded.contains(keeper.index) { continue }
+                if excluded[keeper.index] != nil { continue }
                 if isSameActivity(candidate, keeper) {
-                    excluded.insert(candidate.index)
+                    excluded[candidate.index] = keeper.index
                     break
                 }
             }
