@@ -4,6 +4,10 @@ import HealthKit
 struct InsightsView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
+    /// The Road view's per-day distances are deduped in `body`, so overruling a
+    /// duplicate has to re-render here too — or this screen keeps showing the
+    /// number the Workouts screen has already stopped showing.
+    @ObservedObject private var dedupOverrides = WorkoutDedupOverrides.shared
     @Binding var showWorkouts: Bool
 
     var body: some View {

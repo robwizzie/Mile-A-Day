@@ -12,6 +12,10 @@ struct WorkoutsView: View {
     /// For the Trends mode (weekly chart + trend card moved here from the
     /// old dashboard week-view picker).
     @ObservedObject private var userManager = UserManager.shared
+    /// Re-renders the day list and the month totals when the user overrules a
+    /// duplicate — the counts here are recomputed in `body`, so without this
+    /// the header would keep the old number until something else moved.
+    @ObservedObject private var dedupOverrides = WorkoutDedupOverrides.shared
 
     private enum Mode: Hashable { case calendar, list, trends }
     @State private var mode: Mode = .calendar

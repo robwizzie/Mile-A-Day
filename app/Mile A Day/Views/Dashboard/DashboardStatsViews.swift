@@ -103,6 +103,9 @@ struct RecentWorkoutsView: View {
     /// whole list. Drives the "Photo" badge AND hands the detail its photo
     /// instantly (no per-row re-scan).
     @State private var postsByWorkout: [String: PostItem] = [:]
+    /// Re-renders the Counted / Not counted chips when the user overrules a
+    /// duplicate from the detail sheet.
+    @ObservedObject private var dedupOverrides = WorkoutDedupOverrides.shared
 
     private static let pageSize: Int = 10
 
