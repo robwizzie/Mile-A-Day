@@ -22,12 +22,12 @@ struct WorkoutAttribution: Equatable {
     let bundleId: String?
     /// True when this is a walk Mile A Day or Apple itself recorded — the
     /// sources a user already expects to be there.
-    var isFirstParty: Bool {
-        guard let bundleId, !bundleId.isEmpty else { return true }
-        let lower = bundleId.lowercased()
-        return lower.contains("mileaday") || lower.contains("mile-a-day")
-            || FitnessSourceCatalog.isAppleSource(bundleIdentifier: bundleId)
-    }
+    ///
+    /// Delegates to `WorkoutDedup` rather than testing the bundle id again
+    /// here: the same predicate decides which copy of a duplicated walk
+    /// SURVIVES, so a second implementation could badge a workout as
+    /// third-party while the arithmetic treated it as ours.
+    var isFirstParty: Bool { WorkoutDedup.isFirstParty(bundleId: bundleId) }
 
     /// "Google Health", "Strava"… or nil when there's nothing worth saying.
     var displayName: String? {
