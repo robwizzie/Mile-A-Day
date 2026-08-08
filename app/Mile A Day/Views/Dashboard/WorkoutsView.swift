@@ -61,6 +61,11 @@ struct WorkoutsView: View {
                     }
                 }
                 .padding(MADTheme.Spacing.md)
+                // Clear the floating tab bar. Without this the last workout of
+                // the selected day sits permanently underneath it — you can
+                // scroll to the end and still not see the row. Same 100pt every
+                // other tab screen uses (DashboardView, ProfileView).
+                .padding(.bottom, 100)
             }
         }
         .navigationTitle("Workouts")
