@@ -68,7 +68,7 @@ struct WorkoutsView: View {
                 // grid pushing the day's workouts off the bottom — and tightening
                 // both axes together took width away from a screen that had none
                 // to spare, leaving the cards nearly flush with the display edge.
-                .padding(.horizontal, 20)
+                .padding(.horizontal, MADTheme.Spacing.screenGutter)
                 .padding(.top, MADTheme.Spacing.md)
                 // The tab bar here is a real TabView bar, so SwiftUI already
                 // insets scroll content for it — the 100pt other screens

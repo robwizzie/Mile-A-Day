@@ -121,6 +121,19 @@ struct MADTheme {
         static let xl: CGFloat = 32
         static let xxl: CGFloat = 48
         static let xxxl: CGFloat = 64
+
+        /// Distance from the display edge to a full-width card.
+        ///
+        /// Its own value rather than reusing `md`, because it answers a
+        /// different question: `md` is how far apart two things inside a card
+        /// sit, this is how much of the screen a card is not allowed to have.
+        /// Scroll screens were reading as edge-to-edge at 16 — the cards are
+        /// light on a near-black background, so the gutter is the only thing
+        /// separating them from the bezel and it has to be seen to work.
+        ///
+        /// Change it HERE, not per screen: it's shared so the Workouts,
+        /// Insights and Dashboard scroll views can't drift apart again.
+        static let screenGutter: CGFloat = 20
     }
     
     // MARK: - Corner Radius
