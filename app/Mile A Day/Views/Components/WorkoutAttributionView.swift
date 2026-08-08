@@ -30,12 +30,17 @@ struct WorkoutAttribution: Equatable {
     /// third-party while the arithmetic treated it as ours.
     var isFirstParty: Bool { WorkoutDedup.isFirstParty(bundleId: bundleId) }
 
+    /// The catalog entry behind this workout, when we recognise the writer.
+    /// Carries the App Store id the chip uses to show the app's real icon.
+    var platform: FitnessSourcePlatform? {
+        guard let bundleId, !bundleId.isEmpty, !isFirstParty else { return nil }
+        return FitnessSourceCatalog.match(bundleIdentifier: bundleId, sourceName: "")
+    }
+
     /// "Google Health", "Strava"… or nil when there's nothing worth saying.
     var displayName: String? {
         guard let bundleId, !bundleId.isEmpty, !isFirstParty else { return nil }
-        if let platform = FitnessSourceCatalog.match(
-            bundleIdentifier: bundleId, sourceName: ""
-        ) {
+        if let platform = platform {
             return platform.name
         }
         // An app we don't have a catalog entry for still gets named rather than
@@ -45,19 +50,11 @@ struct WorkoutAttribution: Equatable {
     }
 
     var symbol: String {
-        guard let bundleId, !isFirstParty,
-            let platform = FitnessSourceCatalog.match(
-                bundleIdentifier: bundleId, sourceName: "")
-        else { return "app.badge" }
-        return platform.symbol
+        platform?.symbol ?? "app.badge"
     }
 
     var tint: Color {
-        guard let bundleId, !isFirstParty,
-            let platform = FitnessSourceCatalog.match(
-                bundleIdentifier: bundleId, sourceName: "")
-        else { return MADTheme.Colors.madWhite.opacity(0.6) }
-        return platform.tint
+        platform?.tint ?? MADTheme.Colors.madWhite.opacity(0.6)
     }
 }
 
@@ -78,12 +75,36 @@ extension WorkoutAttribution {
 /// A small "from Strava" chip. Renders nothing for first-party sources.
 struct WorkoutSourceChip: View {
     let attribution: WorkoutAttribution
+    @ObservedObject private var artwork = FitnessSourceArtwork.shared
+
+    /// The writing app's real icon, from Apple's storefront — see
+    /// `FitnessSourceArtwork` for why it isn't a bundled asset.
+    private var iconURL: URL? {
+        guard let platform = attribution.platform else { return nil }
+        return artwork.url(forAppStoreId: platform.appStoreId)
+    }
 
     var body: some View {
         if let name = attribution.displayName {
             HStack(spacing: 4) {
-                Image(systemName: attribution.symbol)
-                    .font(.system(size: 9, weight: .bold))
+                // The symbol holds the slot at the same size, so artwork
+                // arriving later swaps in place instead of reflowing the row.
+                Group {
+                    if let iconURL = iconURL {
+                        AsyncImage(url: iconURL) { image in
+                            image.resizable().scaledToFill()
+                        } placeholder: {
+                            Image(systemName: attribution.symbol)
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .frame(width: 12, height: 12)
+                        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                    } else {
+                        Image(systemName: attribution.symbol)
+                            .font(.system(size: 9, weight: .bold))
+                            .frame(width: 12, height: 12)
+                    }
+                }
                 Text(name)
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .lineLimit(1)
