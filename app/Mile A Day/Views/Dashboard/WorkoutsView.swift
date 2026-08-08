@@ -33,7 +33,10 @@ struct WorkoutsView: View {
         ZStack {
             MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
             ScrollView {
-                VStack(spacing: MADTheme.Spacing.lg) {
+                // md, not lg: the month grid plus a day's workouts is already
+                // more than a phone screen holds, and 24pt gutters between three
+                // cards were spending 48 of those points on air.
+                VStack(spacing: MADTheme.Spacing.md) {
                     Picker("View", selection: $mode) {
                         Text("Calendar").tag(Mode.calendar)
                         Text("List").tag(Mode.list)
@@ -61,11 +64,12 @@ struct WorkoutsView: View {
                     }
                 }
                 .padding(MADTheme.Spacing.md)
-                // Clear the floating tab bar. Without this the last workout of
-                // the selected day sits permanently underneath it — you can
-                // scroll to the end and still not see the row. Same 100pt every
-                // other tab screen uses (DashboardView, ProfileView).
-                .padding(.bottom, 100)
+                // The tab bar here is a real TabView bar, so SwiftUI already
+                // insets scroll content for it — the 100pt other screens
+                // hardcode was 100pt of dead space at the end of this one,
+                // making the screen feel longer than it is. This is just a
+                // resting gap under the last card.
+                .padding(.bottom, MADTheme.Spacing.md)
             }
         }
         .navigationTitle("Workouts")
@@ -93,13 +97,13 @@ struct WorkoutsView: View {
     private var calendarCard: some View {
         // One pass for the whole month, then every cell just reads its facts.
         let info = monthInfo
-        return VStack(spacing: MADTheme.Spacing.md) {
+        return VStack(spacing: MADTheme.Spacing.sm) {
             HStack {
                 Button { changeMonth(-1) } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.white)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 32, height: 30)
                         .contentShape(Rectangle())
                 }
                 Spacer()
@@ -117,7 +121,7 @@ struct WorkoutsView: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(canGoNext ? .white : .white.opacity(0.2))
-                        .frame(width: 36, height: 36)
+                        .frame(width: 32, height: 30)
                         .contentShape(Rectangle())
                 }
                 .disabled(!canGoNext)
@@ -126,13 +130,13 @@ struct WorkoutsView: View {
             HStack(spacing: 0) {
                 ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, sym in
                     Text(sym)
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundColor(.white.opacity(0.4))
                         .frame(maxWidth: .infinity)
                 }
             }
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 6) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 7), spacing: 4) {
                 ForEach(Array(monthCells.enumerated()), id: \.offset) { _, cell in
                     if let date = cell {
                         dayCell(
@@ -148,12 +152,17 @@ struct WorkoutsView: View {
 
             calendarLegend
         }
-        .padding()
+        .padding(12)
         .cardStyle()
     }
 
-    /// Height of a day cell: the 36pt disc plus the type-dot strip under it.
-    private static let cellHeight: CGFloat = 47
+    /// Height of a day cell: the disc plus the type-dot strip under it.
+    ///
+    /// A month needs up to SIX rows (August 2026 starts on a Saturday), so every
+    /// point here is spent six times over — which is why this card, not the
+    /// workout list, decides whether the selected day is visible at all.
+    private static let discSize: CGFloat = 33
+    private static let cellHeight: CGFloat = 40
 
     /// Without this, the dots and the camera badge are just decoration nobody
     /// can decode — the legend is what makes the month readable at a glance.
@@ -194,11 +203,11 @@ struct WorkoutsView: View {
         return Button {
             withAnimation(.easeInOut(duration: 0.15)) { selectedDay = date }
         } label: {
-            VStack(spacing: 4) {
+            VStack(spacing: 3) {
                 Text("\(calendar.component(.day, from: date))")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundColor(status == .none ? .white.opacity(0.45) : .white)
-                    .frame(width: 36, height: 36)
+                    .frame(width: Self.discSize, height: Self.discSize)
                     .background(Circle().fill(status.fill))
                     .overlay(
                         Circle().strokeBorder(
@@ -224,10 +233,10 @@ struct WorkoutsView: View {
                     ForEach(info.types, id: \.self) { type in
                         Circle()
                             .fill(MADTheme.workoutColor(type))
-                            .frame(width: 5, height: 5)
+                            .frame(width: 4, height: 4)
                     }
                 }
-                .frame(height: 5)
+                .frame(height: 4)
             }
             .frame(height: Self.cellHeight)
             .contentShape(Rectangle())
@@ -241,7 +250,7 @@ struct WorkoutsView: View {
     private var selectedDaySection: some View {
         let day = selectedDay ?? Date()
         let dayWorkouts = workouts(on: day)
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "figure.run")
                     .font(.system(size: 14, weight: .semibold))
@@ -316,14 +325,14 @@ struct WorkoutsView: View {
                                 WorkoutAttribution.sourceLabel(for: dayWorkouts[$0])
                             }
                         )
-                        .padding(MADTheme.Spacing.md)
+                        .padding(MADTheme.Spacing.sm + 2)
                         .madLiquidGlass()
                     }
                     .buttonStyle(ScaleButtonStyle())
                 }
             }
         }
-        .padding()
+        .padding(12)
         .cardStyle()
     }
 
