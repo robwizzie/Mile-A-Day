@@ -1531,7 +1531,9 @@ struct DashboardView: View {
             badgesSection
             statsAndHistorySection
         }
-        .padding(.horizontal, 16)
+        // Shared with Workouts and Insights — a card must not change width as
+        // you move between the three screens.
+        .padding(.horizontal, MADTheme.Spacing.screenGutter)
         .padding(.top, 0)
         .padding(.bottom, 100) // Extra padding for tab bar
         .clipped() // Prevent content overflow from causing horizontal jitter

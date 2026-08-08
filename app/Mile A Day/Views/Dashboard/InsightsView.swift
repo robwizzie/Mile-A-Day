@@ -27,7 +27,10 @@ struct InsightsView: View {
                     StatsGridView(user: userManager.currentUser, healthManager: healthManager)
                     RecentWorkoutsPreviewCard(healthManager: healthManager, showWorkouts: $showWorkouts)
                 }
-                .padding(MADTheme.Spacing.md)
+                // Same gutter as Workouts — these two screens sit one tap apart
+                // and a card that changes width between them reads as a bug.
+                .padding(.horizontal, MADTheme.Spacing.screenGutter)
+                .padding(.top, MADTheme.Spacing.md)
                 .padding(.bottom, 32)
             }
         }
