@@ -316,6 +316,7 @@ struct WorkoutsView: View {
                 // so a day showing 1.02 above two walks of 0.96 and 1.02 looked
                 // like an arithmetic bug rather than a decision.
                 let covers = WorkoutDedup.duplicateSources(in: dayWorkouts)
+                let excluded = WorkoutDedup.exclusions(in: dayWorkouts)
                 ForEach(Array(dayWorkouts.enumerated()), id: \.element.uuid) { index, workout in
                     Button {
                         selectedWorkout = IdentifiableWorkout(workout: workout)
@@ -324,13 +325,14 @@ struct WorkoutsView: View {
                             workout: workout,
                             showDate: false,
                             hasPhoto: hasRealPhoto(postsByWorkout[workout.uuid.uuidString]),
-                            isCounted: covers[index] == nil,
+                            isCounted: excluded[index] == nil,
                             // Only label the state on days where it varies —
                             // "Counted" on every row of every normal day is noise.
-                            showsCountedState: !covers.isEmpty,
+                            showsCountedState: !excluded.isEmpty,
                             countedInstead: covers[index].map {
                                 WorkoutAttribution.sourceLabel(for: dayWorkouts[$0])
-                            }
+                            },
+                            exclusionKind: excluded[index]
                         )
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)

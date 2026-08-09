@@ -113,6 +113,8 @@ struct RecentWorkoutsView: View {
     private struct CountState {
         /// workout uuid → the recording that already covers it.
         var excludedBy: [String: String] = [:]
+        /// workout uuid → why it isn't counted, so the row can say which.
+        var reasons: [String: WorkoutDedup.ExclusionReason] = [:]
         /// Workouts on a day that contains a duplicate. Only these rows show a
         /// Counted / Not counted chip — on an ordinary day the chip would be
         /// on every row and mean nothing.
@@ -136,10 +138,14 @@ struct RecentWorkoutsView: View {
             byDay[day, default: []].append(workout)
         }
         for (_, dayWorkouts) in byDay {
-            let covers = WorkoutDedup.duplicateSources(in: dayWorkouts)
-            guard !covers.isEmpty else { continue }
+            let excluded = WorkoutDedup.exclusions(in: dayWorkouts)
+            guard !excluded.isEmpty else { continue }
             for workout in dayWorkouts { state.labeled.insert(workout.uuid.uuidString) }
-            for (index, keeper) in covers {
+            for (index, reason) in excluded {
+                state.reasons[dayWorkouts[index].uuid.uuidString] = reason
+            }
+            // Only a duplicate has a partner to name; a refused source doesn't.
+            for (index, keeper) in WorkoutDedup.duplicateSources(in: dayWorkouts) {
                 state.excludedBy[dayWorkouts[index].uuid.uuidString] =
                     WorkoutAttribution.sourceLabel(for: dayWorkouts[keeper])
             }
@@ -167,9 +173,10 @@ struct RecentWorkoutsView: View {
                                 workout: workout,
                                 showDate: true,
                                 hasPhoto: hasRealPhoto(postsByWorkout[id]),
-                                isCounted: counting.excludedBy[id] == nil,
+                                isCounted: counting.reasons[id] == nil,
                                 showsCountedState: counting.labeled.contains(id),
-                                countedInstead: counting.excludedBy[id]
+                                countedInstead: counting.excludedBy[id],
+                                exclusionKind: counting.reasons[id]
                             )
                             .padding(MADTheme.Spacing.md)
                             .madLiquidGlass()

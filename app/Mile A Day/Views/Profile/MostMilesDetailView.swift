@@ -268,6 +268,10 @@ struct WorkoutRow: View {
     /// What already covers this one, e.g. "Mile A Day" — so the exclusion
     /// names its reason instead of just happening.
     var countedInstead: String? = nil
+    /// WHY it isn't counted. "We already counted this walk" and "you haven't
+    /// let this app add walks" are different messages, and showing the wrong
+    /// one makes the app look like it's inventing rules.
+    var exclusionKind: WorkoutDedup.ExclusionReason? = nil
     @EnvironmentObject var healthManager: HealthKitManager
 
     /// True once we confirm the workout carries a GPS trace (cheap limit-1 probe).
@@ -423,16 +427,25 @@ struct WorkoutRow: View {
         }
     }
 
-    /// "Google Health recorded the same walk as Mile A Day, so it's counted
-    /// once." Names both ends when we know them — a reason the user can check.
+    /// A reason the user can check against their own memory of the day.
     private var exclusionReason: String {
         let mine = WorkoutAttribution(
             bundleId: workout.sourceRevision.source.bundleIdentifier
         ).displayName ?? workout.sourceRevision.source.name
-        guard let keeper = countedInstead else {
-            return "\(mine) recorded a walk you'd already logged, so it's counted once."
+        switch exclusionKind {
+        case .sourceIgnored:
+            return "You've turned off workouts from \(mine), so this isn't in your total."
+        case .sourcePending:
+            // Deliberately not phrased as a problem with the walk — the app has
+            // simply never been told whether this app may add to their miles.
+            return "\(mine) started adding workouts on its own. "
+                + "Approve it in Fitness Connections if these are yours."
+        case .duplicate, .none:
+            guard let keeper = countedInstead else {
+                return "\(mine) recorded a walk you'd already logged, so it's counted once."
+            }
+            return "Same walk as your \(keeper) recording, so it's counted once."
         }
-        return "Same walk as your \(keeper) recording, so it's counted once."
     }
 
     /// Feed-style verb ("Ran", "Walked") for the headline.

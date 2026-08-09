@@ -61,6 +61,16 @@ struct FitnessConnectionsView: View {
     @State private var resolveMessage: String?
     @State private var activeSheet: ConnectionSheet?
     @State private var searchText = ""
+    /// Which apps may add to this user's miles. Observed so a toggle here
+    /// repaints the "waiting on you" copy in the same frame it's flipped.
+    @ObservedObject private var sourcePrefs = WorkoutSourcePreferences.shared
+    /// Needed to re-read today's distance the moment a source is turned on or
+    /// off — the number is summed on-device, so nothing else would move it.
+    ///
+    /// The shared instance, not `@EnvironmentObject`: this screen is reachable
+    /// from Settings, and an environment object that isn't injected is a launch
+    /// crash rather than a missing number.
+    private let healthManager = HealthKitManager.shared
 
     var body: some View {
         ScrollView {
@@ -387,17 +397,51 @@ struct FitnessConnectionsView: View {
 
             Spacer(minLength: MADTheme.Spacing.sm)
 
-            // Never a bare green check: a wired-up app that hasn't sent anything
-            // in a month reads as broken under one, and the user goes looking
-            // for a connection problem that isn't there.
-            Image(systemName: source.status.symbol)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(source.status.tint)
+            if source.isApple {
+                // Never a bare green check: a wired-up app that hasn't sent
+                // anything in a month reads as broken under one, and the user
+                // goes looking for a connection problem that isn't there.
+                Image(systemName: source.status.symbol)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(source.status.tint)
+            } else {
+                // Third-party sources get a switch, not a status light.
+                // "Sending data now" was only ever a statement about the other
+                // app; what a user actually needs to decide is whether it may
+                // add to THEIR miles — Fitbit auto-detects a walk to the shops
+                // and writes it as a workout, and nothing about that recording
+                // marks it as unwanted.
+                Toggle(
+                    "",
+                    isOn: Binding(
+                        get: { sourcePrefs.counts(bundleId: source.id) },
+                        set: { on in
+                            sourcePrefs.set(on ? .counted : .ignored, for: source.id)
+                            // Today's number is recomputed from HealthKit, so it
+                            // has to be re-read for the change to reach the
+                            // dashboard rather than waiting for the next sync.
+                            healthManager.fetchTodaysDistance()
+                        }
+                    )
+                )
+                .labelsHidden()
+                .tint(MADTheme.Colors.success)
+            }
         }
         .padding(.vertical, MADTheme.Spacing.sm)
     }
 
     private func subtitle(for source: DetectedFitnessSource) -> String {
+        // What the source is DOING matters less than whether it's allowed to
+        // change your miles, so consent state outranks recency in this line.
+        if !source.isApple {
+            if sourcePrefs.isPending(bundleId: source.id) {
+                return "Waiting on you — not counted yet"
+            }
+            if sourcePrefs.decision(for: source.id) == .ignored {
+                return "Not counted toward your miles"
+            }
+        }
         let workouts = source.workoutCount == 1 ? "1 workout" : "\(source.workoutCount) workouts"
         let miles = String(format: "%.1f mi", source.totalMiles)
         let recency = "last \(Self.relative(source.lastWorkoutDate))"
