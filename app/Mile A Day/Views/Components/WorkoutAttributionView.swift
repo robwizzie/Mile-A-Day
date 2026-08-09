@@ -75,6 +75,16 @@ extension WorkoutAttribution {
 /// A small "from Strava" chip. Renders nothing for first-party sources.
 struct WorkoutSourceChip: View {
     let attribution: WorkoutAttribution
+    /// Let the label truncate rather than hold its intrinsic width.
+    ///
+    /// Off by default — a chip that shrinks until "Strava" wraps mid-word is
+    /// worse than one that moves to its own line, which is why this is
+    /// `fixedSize` at all. But `fixedSize` publishes a width NOTHING above can
+    /// shrink, and alone among the row's chips this one's label is *data*: an
+    /// uncatalogued app falls back to its bundle-id leaf, which has no length
+    /// limit. Callers turn this on for whichever arrangement is their last
+    /// resort, so the row can always be made to fit the screen.
+    var allowsTruncation: Bool = false
     @ObservedObject private var artwork = FitnessSourceArtwork.shared
 
     /// The writing app's real icon, from Apple's storefront — see
@@ -113,7 +123,9 @@ struct WorkoutSourceChip: View {
             .padding(.vertical, 3)
             .background(Capsule().fill(attribution.tint.opacity(0.18)))
             .foregroundStyle(attribution.tint)
-            .fixedSize()
+            // Vertical stays fixed either way: the capsule must never be the
+            // thing that squeezes a one-line label into two.
+            .fixedSize(horizontal: !allowsTruncation, vertical: true)
         }
     }
 }
