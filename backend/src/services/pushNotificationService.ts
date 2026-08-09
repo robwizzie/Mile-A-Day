@@ -266,15 +266,7 @@ function sendToDevice(
             response: responseData?.slice(0, 500),
           },
         });
-        // Only delete on 410 Unregistered — that's APNs definitively saying the
-        // app was uninstalled, so the token is truly dead. Do NOT delete on
-        // 400 BadDeviceToken: that usually means an environment mismatch (a
-        // sandbox token reaching the prod host, or vice versa), not a dead
-        // token. Deleting on 400 nukes valid tokens any time the server is
-        // pointed at the wrong APNs environment — a recoverable misconfig
-        // becomes permanent token loss. Stale env-mismatched tokens are
-        // harmless noise; they age out as devices re-register.
-        if (statusCode === 410) {
+        if (isDeadToken(statusCode, responseData)) {
           removeInvalidToken(deviceToken).catch(() => {});
         }
         resolve(false);
@@ -294,6 +286,34 @@ function sendToDevice(
     req.write(apnsPayload);
     req.end();
   });
+}
+
+/**
+ * Is an APNs rejection about THIS token, or about the server's config?
+ *
+ * Prune on the reason string, NEVER on a bare status code. Every send now goes
+ * to the host matching the token's own recorded `environment`, so the failures
+ * that used to make 400 untrustworthy have their own distinct shapes: a wrong
+ * or environment-restricted APNs key is 403 (`InvalidProviderToken` /
+ * `BadEnvironmentKeyInToken`) and a wrong `APNS_BUNDLE_ID` is
+ * `DeviceTokenNotForTopic` — none of which reach this. Anything we don't
+ * recognise is left alone: deleting on a status code alone is how a
+ * recoverable misconfig turns into permanent token loss.
+ *
+ * A wrongly-pruned token costs one missed push — the app re-registers on the
+ * next launch (AppDelegate -> sendDeviceTokenToBackend). That also self-heals
+ * legacy rows with no `environment`, which default to production and so 400 if
+ * they're really sandbox tokens.
+ */
+export function isDeadToken(statusCode: number, responseData: string): boolean {
+  // 410 Unregistered: APNs definitively saying the app was uninstalled.
+  if (statusCode === 410) return true;
+  if (statusCode !== 400) return false;
+  try {
+    return JSON.parse(responseData)?.reason === "BadDeviceToken";
+  } catch {
+    return false; // ponytail: unparseable body — not evidence of anything
+  }
 }
 
 async function removeInvalidToken(deviceToken: string): Promise<void> {
@@ -612,9 +632,7 @@ function sendSilentPushToDevice(
         console.error(
           `[Push] Silent APNs error ${statusCode}: ${responseData}`,
         );
-        // 410-only, same rationale as the alert path: a 400 BadDeviceToken is
-        // usually an environment mismatch, not a dead token — don't delete on it.
-        if (statusCode === 410) {
+        if (isDeadToken(statusCode, responseData)) {
           removeInvalidToken(deviceToken).catch(() => {});
         }
         resolve(false);
