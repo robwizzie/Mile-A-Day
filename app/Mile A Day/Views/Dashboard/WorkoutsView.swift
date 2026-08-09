@@ -340,6 +340,7 @@ struct WorkoutsView: View {
                 // so a day showing 1.02 above two walks of 0.96 and 1.02 looked
                 // like an arithmetic bug rather than a decision.
                 let covers = WorkoutDedup.duplicateSources(in: dayWorkouts)
+                let excluded = WorkoutDedup.exclusions(in: dayWorkouts)
                 ForEach(Array(dayWorkouts.enumerated()), id: \.element.uuid) { index, workout in
                     Button {
                         selectedWorkout = IdentifiableWorkout(workout: workout)
@@ -348,13 +349,14 @@ struct WorkoutsView: View {
                             workout: workout,
                             showDate: false,
                             hasPhoto: hasRealPhoto(postsByWorkout[workout.uuid.uuidString]),
-                            isCounted: covers[index] == nil,
+                            isCounted: excluded[index] == nil,
                             // Only label the state on days where it varies —
                             // "Counted" on every row of every normal day is noise.
-                            showsCountedState: !covers.isEmpty,
+                            showsCountedState: !excluded.isEmpty,
                             countedInstead: covers[index].map {
                                 WorkoutAttribution.sourceLabel(for: dayWorkouts[$0])
-                            }
+                            },
+                            exclusionKind: excluded[index]
                         )
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
@@ -374,17 +376,33 @@ struct WorkoutsView: View {
     /// The workouts on a given local day, mapped from the timezone-aware index
     /// (falls back to filtering the cache by corrected local time).
     private func workouts(on day: Date) -> [HKWorkout] {
-        if let index = healthManager.workoutIndex {
-            let ids = Set(index.workouts(for: day).map { $0.id })
-            if !ids.isEmpty {
-                return healthManager.cachedWorkouts
-                    .filter { ids.contains($0.uuid.uuidString) }
-                    .sorted { $0.endDate < $1.endDate }
-            }
+        // UNION of both sources, never one or the other.
+        //
+        // This used to return the index's workouts whenever the index had ANY
+        // for the day, and fall back to the cache only when it had none. The
+        // index is incremental and lags — so a day whose newest workouts hadn't
+        // been indexed yet returned the OLD ones and silently dropped the rest.
+        // That is why this screen showed 1.26 mi over two walks on a day the
+        // dashboard summed to 4.54 over five: not a different rule, a shorter
+        // list. A partial answer is worse than either whole one, because both
+        // screens then look confidently right while disagreeing.
+        var seen = Set<String>()
+        var out: [HKWorkout] = []
+
+        let indexedIds = Set(
+            healthManager.workoutIndex?.workouts(for: day).map { $0.id } ?? [])
+        for workout in healthManager.cachedWorkouts {
+            let id = workout.uuid.uuidString
+            guard !seen.contains(id) else { continue }
+            let belongs = indexedIds.contains(id)
+                || calendar.isDate(
+                    healthManager.getCorrectedLocalTime(for: workout),
+                    inSameDayAs: day)
+            guard belongs else { continue }
+            seen.insert(id)
+            out.append(workout)
         }
-        return healthManager.cachedWorkouts
-            .filter { calendar.isDate(healthManager.getCorrectedLocalTime(for: $0), inSameDayAs: day) }
-            .sorted { $0.endDate < $1.endDate }
+        return out.sorted { $0.endDate < $1.endDate }
     }
 
     private func miles(on day: Date) -> Double {

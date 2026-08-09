@@ -1102,6 +1102,16 @@ class HealthKitManager: ObservableObject {
     
     /// Processes today's filtered workouts to calculate distance and update UI
     func processTodaysWorkouts(_ todaysWorkouts: [HKWorkout], dayStamp: String? = nil) {
+        // Approve whatever was already writing before this build, once. Done
+        // here rather than at launch because HealthKit answers nothing on a
+        // locked device, and grandfathering an empty list would make every real
+        // source look new — turning the consent prompt into noise exactly when
+        // it needs to be trusted.
+        WorkoutSourcePreferences.shared.grandfatherIfNeeded(
+            existingBundleIds: recentWorkouts.map {
+                $0.sourceRevision.source.bundleIdentifier
+            } + todaysWorkouts.map { $0.sourceRevision.source.bundleIdentifier }
+        )
         // Counted ONCE per real activity. This used to be a plain sum over
         // every HealthKit workout, which double-counts the same walk whenever a
         // second app (Google Health, Strava, a watch platform) also wrote it —
@@ -1775,6 +1785,83 @@ extension MADWatchBridge: WCSessionDelegate {
 
 // MARK: - Counting each real walk once
 
+/// Which apps are allowed to add to your miles.
+///
+/// Duplicate detection only catches a third-party recording that OVERLAPS one of
+/// ours. It cannot catch the other failure: Fitbit and friends auto-detect
+/// activity and write their own "Outdoor Walk" for a trip to the shops. Nothing
+/// overlaps, so the app reads it as a genuine separate walk and counts a mile
+/// the user never chose to log. That is "extra workouts added without them
+/// knowing", and it needs consent rather than a cleverer threshold — no
+/// timestamp comparison can tell an unwanted auto-detected walk from a real one.
+///
+/// **Nobody's existing total moves when this ships.** Sources already writing
+/// are grandfathered as approved at first launch (`grandfatherIfNeeded`), the
+/// same trick the backend's `dedupe_since` uses: the migration instant becomes
+/// the line, so history is untouched and only what comes AFTER needs an answer.
+/// A source that shows up later is `pending` — it does not count until asked,
+/// because counting first and apologising later is the bug.
+final class WorkoutSourcePreferences: ObservableObject {
+    static let shared = WorkoutSourcePreferences()
+
+    enum Decision: String {
+        case counted
+        case ignored
+    }
+
+    private static let decisionsKey = "workoutSourceDecisionsV1"
+    private static let grandfatheredKey = "workoutSourceGrandfatheredV1"
+    private let defaults = UserDefaults.standard
+
+    /// bundle id → the user's answer. Absent means never asked.
+    @Published private(set) var decisions: [String: String]
+
+    private init() {
+        decisions = defaults.dictionary(forKey: Self.decisionsKey) as? [String: String] ?? [:]
+    }
+
+    func decision(for bundleId: String) -> Decision? {
+        decisions[bundleId].flatMap(Decision.init(rawValue:))
+    }
+
+    /// First-party sources never need approval — Mile A Day's own recordings and
+    /// Apple's are the ones the user already expects to be there, and asking
+    /// about them would turn consent into a nuisance nobody reads.
+    func counts(bundleId: String) -> Bool {
+        if WorkoutDedup.isFirstParty(bundleId: bundleId) { return true }
+        return decision(for: bundleId) == .counted
+    }
+
+    /// True when we have never asked about this source, so it is neither
+    /// counting nor refused — it is waiting on the user.
+    func isPending(bundleId: String) -> Bool {
+        !WorkoutDedup.isFirstParty(bundleId: bundleId) && decision(for: bundleId) == nil
+    }
+
+    func set(_ decision: Decision, for bundleId: String) {
+        decisions[bundleId] = decision.rawValue
+        defaults.set(decisions, forKey: Self.decisionsKey)
+    }
+
+    /// Approve every source already writing workouts, ONCE, so upgrading to this
+    /// build never silently drops a mile someone already banked.
+    ///
+    /// Runs from the workout fetch, where the real source list is known. Doing
+    /// it at launch instead would grandfather an empty list on a locked device
+    /// (HealthKit queries error before first unlock) and then treat every real
+    /// source as new — the exact false-positive that would make the prompt
+    /// untrustworthy on the one occasion it matters.
+    func grandfatherIfNeeded(existingBundleIds: [String]) {
+        guard !defaults.bool(forKey: Self.grandfatheredKey) else { return }
+        guard !existingBundleIds.isEmpty else { return }
+        for bundleId in existingBundleIds where decisions[bundleId] == nil {
+            decisions[bundleId] = Decision.counted.rawValue
+        }
+        defaults.set(decisions, forKey: Self.decisionsKey)
+        defaults.set(true, forKey: Self.grandfatheredKey)
+    }
+}
+
 /// Workouts the user has told us to count anyway, overruling duplicate detection.
 ///
 /// The rule below is a guess — a good one, but a guess about two recordings the
@@ -1992,15 +2079,52 @@ enum WorkoutDedup {
         return overlap >= containmentRatio * a.duration && a.miles <= b.miles
     }
 
+    /// Why a workout isn't in the total. Nil means it is.
+    ///
+    /// One enum rather than two booleans because the two reasons need different
+    /// words on screen — "we already counted this walk" and "you haven't let
+    /// this app add walks" are not the same message, and showing the wrong one
+    /// makes the app look like it's inventing rules.
+    enum ExclusionReason: Equatable {
+        /// Another recording on the same day already covers it.
+        case duplicate
+        /// The user turned this source off.
+        case sourceIgnored
+        /// We have never asked whether this source may add to their miles.
+        case sourcePending
+    }
+
+    /// Why each workout in the array is or isn't counted, by index.
+    static func exclusions(in workouts: [HKWorkout]) -> [Int: ExclusionReason] {
+        var out: [Int: ExclusionReason] = [:]
+        let prefs = WorkoutSourcePreferences.shared
+        for (index, workout) in workouts.enumerated() {
+            let bundleId = workout.sourceRevision.source.bundleIdentifier
+            if isFirstParty(bundleId: bundleId) { continue }
+            switch prefs.decision(for: bundleId) {
+            case .counted: continue
+            case .ignored: out[index] = .sourceIgnored
+            case nil: out[index] = .sourcePending
+            }
+        }
+        // Duplicate detection runs over what's left: a workout already out on
+        // consent grounds must not also become the "keeper" that knocks out a
+        // real one, or refusing a source would delete a walk the user did.
+        for (index, _) in duplicateSources(in: workouts) where out[index] == nil {
+            out[index] = .duplicate
+        }
+        return out
+    }
+
     /// Total miles for a set of workouts, counting each real activity once.
     ///
     /// THE function for "how far did they go". Every surface that shows a day's
     /// distance should call this rather than summing the array itself — that's
     /// what stops the dashboard, the Road view and Insights from disagreeing.
     static func totalMiles(_ workouts: [HKWorkout]) -> Double {
-        let excluded = duplicateIndices(in: workouts)
+        let excluded = exclusions(in: workouts)
         var total = 0.0
-        for (index, workout) in workouts.enumerated() where !excluded.contains(index) {
+        for (index, workout) in workouts.enumerated() where excluded[index] == nil {
             total += workout.totalDistance?.doubleValue(for: .mile()) ?? 0
         }
         return total
@@ -2008,10 +2132,10 @@ enum WorkoutDedup {
 
     /// The workouts that actually count, in their original order.
     static func counting(_ workouts: [HKWorkout]) -> [HKWorkout] {
-        let excluded = duplicateIndices(in: workouts)
+        let excluded = exclusions(in: workouts)
         guard !excluded.isEmpty else { return workouts }
         return workouts.enumerated()
-            .filter { !excluded.contains($0.offset) }
+            .filter { excluded[$0.offset] == nil }
             .map(\.element)
     }
 }
