@@ -82,13 +82,27 @@ extension View {
 
 // Formatter for distance values
 extension Double {
-    // Format miles with appropriate decimal places
+    /// Miles truncated to 2 decimals — NEVER rounded up. `%.2f` rounds, so
+    /// 0.995 rendered as "1.00 mi" beside a 99% ring and no celebration: the
+    /// screen claimed a mile the user hadn't finished. A displayed "1.00"
+    /// must mean the mile is actually there. The epsilon absorbs binary
+    /// float error so a true 1.0 can never print as 0.99.
+    ///
+    /// Widget-extension files (`Widgets/`, `MileADayWidgets/`) can't see this
+    /// extension — they carry their own copy of the same formula; keep them
+    /// in sync.
+    var milesFloor2: Double {
+        (self * 100.0 + 1e-6).rounded(.down) / 100.0
+    }
+
+    /// Two-decimal display miles, truncated (no unit) — see `milesFloor2`.
+    var milesText: String {
+        String(format: "%.2f", milesFloor2)
+    }
+
+    // Format miles for display — truncated, see milesFloor2.
     var milesFormatted: String {
-        if self >= 1.0 {
-            return String(format: "%.2f mi", self)
-        } else {
-            return String(format: "%.2f mi", self)
-        }
+        String(format: "%.2f mi", milesFloor2)
     }
     
     var kmFormatted: String {

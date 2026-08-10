@@ -38,8 +38,13 @@ struct WorkoutRecapView: View {
         return min(totalDailyDistance / goalDistance, 1.0)
     }
 
+    /// What's left, rounded UP to the hundredth — the counterpart of the
+    /// floored distance displays: never promise the goal is closer than it
+    /// is. (The epsilon absorbs float error so an exact 0.01 can't ceil to
+    /// 0.02.)
     private var milesRemaining: Double {
-        max(goalDistance - totalDailyDistance, 0)
+        let raw = max(goalDistance - totalDailyDistance, 0)
+        return (raw * 100.0 - 1e-6).rounded(.up) / 100.0
     }
 
     private var formattedTime: String {
@@ -209,7 +214,7 @@ struct WorkoutRecapView: View {
 
     private var distanceSection: some View {
         VStack(spacing: 4) {
-            Text(String(format: "%.2f", distance))
+            Text(distance.milesText)
                 .font(.system(size: 72, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
 
@@ -230,7 +235,7 @@ struct WorkoutRecapView: View {
             RecapStatCell(icon: "clock.fill", label: "Time", value: formattedTime)
             RecapStatCell(icon: "speedometer", label: "Avg Pace", value: "\(formattedPace) /mi")
             RecapStatCell(icon: activityIcon, label: "Activity", value: activityName)
-            RecapStatCell(icon: "chart.bar.fill", label: "Daily Total", value: String(format: "%.2f mi", totalDailyDistance))
+            RecapStatCell(icon: "chart.bar.fill", label: "Daily Total", value: totalDailyDistance.milesFormatted)
         }
         .opacity(showStats ? 1 : 0)
         .offset(y: showStats ? 0 : 12)
@@ -252,7 +257,9 @@ struct WorkoutRecapView: View {
 
                 Spacer()
 
-                Text(String(format: "%.2f / %.2f mi", totalDailyDistance, goalDistance))
+                // Floored: "1.00 / 1.00" must never appear while goalMet is
+                // still false (0.995 used to render exactly that).
+                Text("\(totalDailyDistance.milesText) / \(goalDistance.milesText) mi")
                     .font(.subheadline)
                     .fontWeight(.bold)
                     .foregroundColor(.white)

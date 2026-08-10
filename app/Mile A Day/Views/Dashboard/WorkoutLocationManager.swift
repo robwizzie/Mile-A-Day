@@ -1000,7 +1000,7 @@ struct InProgressWorkoutBanner: View {
                         .fontWeight(.semibold)
                         .foregroundColor(.white)
 
-                    Text("\(String(format: "%.2f", currentDistance)) mi • \(formattedTime)")
+                    Text("\(currentDistance.milesText) mi • \(formattedTime)")
                         .font(.caption)
                         .foregroundColor(.white.opacity(0.8))
                 }

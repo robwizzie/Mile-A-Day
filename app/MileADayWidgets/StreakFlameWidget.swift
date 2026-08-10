@@ -1,6 +1,15 @@
 import WidgetKit
 import SwiftUI
 
+/// Display miles truncated to 2 decimals — NEVER rounded up, so a shown
+/// "1.00" always means the mile is actually there (0.995 used to round up
+/// beside an incomplete goal). Private copy of `Double.milesFloor2` in the
+/// main app's Extensions.swift — widget-extension targets can't see that
+/// file; keep the formula in sync.
+private func flooredMilesText(_ miles: Double) -> String {
+    String(format: "%.2f", (miles * 100.0 + 1e-6).rounded(.down) / 100.0)
+}
+
 // MARK: - Streak Flame Widget
 //
 // The dashboard's flame, on the home screen. It mirrors the user's chosen
@@ -512,7 +521,7 @@ private struct MediumFlameView: View {
             VStack(spacing: 0) {
                 FlameStat(
                     icon: "figure.run",
-                    value: Text(String(format: "%.2f", entry.miles)),
+                    value: Text(flooredMilesText(entry.miles)),
                     unit: "mi",
                     label: "Mileage",
                     tint: MADWidgetStyle.red,

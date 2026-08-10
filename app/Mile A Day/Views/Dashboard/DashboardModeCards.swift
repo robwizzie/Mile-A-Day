@@ -667,7 +667,7 @@ private struct HeroStatColumn: View {
         VStack(spacing: 0) {
             ModernHeroStatLine(
                 icon: "figure.run",
-                value: String(format: "%.2f", currentDistance),
+                value: currentDistance.milesText,
                 unit: "mi",
                 label: "Mileage",
                 tint: MADTheme.Colors.madRed
@@ -1458,7 +1458,12 @@ private struct FlameBuddyHeroCard: View {
         ModernMetricPill(
             icon: trustedDone ? "checkmark.circle.fill" : "figure.run",
             title: trustedDone ? "Logged" : "To go",
-            value: trustedDone ? "\(String(format: "%.2f", currentDistance)) mi" : "\(String(format: "%.2f", max(goalDistance - currentDistance, 0))) mi",
+            // Logged floors, "To go" ceils — mirrored so neither side can
+            // claim the goal is closer than it is (0.995 logged used to
+            // round up to "1.00 mi" on an incomplete day).
+            value: trustedDone
+                ? "\(currentDistance.milesText) mi"
+                : "\(((max(goalDistance - currentDistance, 0) * 100.0 - 1e-6).rounded(.up) / 100.0).milesText) mi",
             tint: trustedDone ? .green : statusColor
         )
         ModernMetricPill(
