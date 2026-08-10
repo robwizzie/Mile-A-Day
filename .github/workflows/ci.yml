@@ -78,11 +78,13 @@ jobs:
       # as 2.55 in production.
       - name: Cross-app duplicate containment check
         run: node scripts/dedupe-containment-check.mjs
-      # Device-token pruning is the one push path that DESTROYS state. Pinned
-      # so a server-side fault (bad key, wrong topic) can never be mistaken for
-      # a dead token and wipe real users' push registrations.
-      - name: Dead device-token pruning check
-        run: node scripts/dead-token-check.mjs
+      # Two prod-only push failures, neither reproducible without a shell there.
+      # APNS_KEY is pasted into a dashboard in four different shapes and one of
+      # them silently produced an unsignable PEM; device-token pruning is the
+      # one push path that DESTROYS state, so a server-side fault (bad key,
+      # wrong topic) must never read as a dead token and wipe registrations.
+      - name: APNs key + token-pruning check
+        run: node scripts/push-config-check.mjs
 
   website:
     name: Website (lint + build)

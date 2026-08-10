@@ -1,5 +1,59 @@
 /**
- * Device-token pruning check.
+ * Push configuration + device-token pruning checks.
+ *
+ * Both halves guard failures that only reproduce in production, where there's
+ * no shell to inspect anything and every guess costs a deploy.
+ *
+ * No DB, no network — both functions are pure.
+ *
+ * Usage: node scripts/push-config-check.mjs
+ */
+import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
+import jwt from "jsonwebtoken";
+import {
+  isDeadToken,
+  toPem,
+} from "../dist/services/pushNotificationService.js";
+
+/* ── Part 1: APNS_KEY normalization ───────────────────────────────────
+ *
+ * `toPem` has to accept every shape an env var arrives in when it's pasted
+ * into a hosting dashboard. It once stripped whitespace BEFORE the PEM armour,
+ * so the space-containing markers stopped matching and a full `.p8` paste got
+ * re-wrapped with its own armour nested inside. jsonwebtoken reported that as
+ * "secretOrPrivateKey must be an asymmetric key when using ES256", which sent
+ * a whole APNs key rotation down the wrong path for a day.
+ *
+ * Signing for real is the assertion — a string that merely LOOKS like PEM is
+ * exactly what shipped last time.
+ */
+const { privateKey } = generateKeyPairSync("ec", {
+  namedCurve: "prime256v1", // same curve as an Apple .p8
+  privateKeyEncoding: { type: "pkcs8", format: "pem" },
+});
+const bodyOnly = privateKey.replace(/-----[^-]+-----/g, "").trim();
+
+for (const [shape, value] of [
+  ["whole .p8 file, real newlines", privateKey],
+  ["base64 body only", bodyOnly],
+  ["literal \\n escapes", privateKey.replace(/\n/g, "\\n")],
+  ["body with stray indentation", `  ${bodyOnly.replace(/\n/g, "\n\t")}  `],
+  ["trailing newline + spaces", `${privateKey}\n  `],
+]) {
+  assert.doesNotThrow(
+    () =>
+      jwt.sign({}, toPem(value), {
+        algorithm: "ES256",
+        keyid: "ABC1234567",
+        issuer: "TEAM123456",
+        expiresIn: "1h",
+      }),
+    `APNS_KEY pasted as "${shape}" must produce a signable ES256 key`,
+  );
+}
+
+/* ── Part 2: device-token pruning ─────────────────────────────────────
  *
  * `isDeadToken` decides whether an APNs rejection deletes a row from
  * device_tokens. Get it wrong in the permissive direction and a server-side
@@ -12,13 +66,7 @@
  * So the rule is reason-string-based, and these assertions pin it: the two
  * shapes that mean "this token is dead" prune, and every shape that means
  * "the SERVER is misconfigured" must survive.
- *
- * No DB, no network — the function is pure.
- *
- * Usage: node scripts/dead-token-check.mjs
  */
-import assert from "node:assert/strict";
-import { isDeadToken } from "../dist/services/pushNotificationService.js";
 
 const r = (reason) => JSON.stringify({ reason });
 
@@ -78,4 +126,4 @@ assert.equal(
 );
 assert.equal(isDeadToken(200, r("BadDeviceToken")), false, "200 never prunes");
 
-console.log("dead-token-check: OK");
+console.log("push-config-check: OK");

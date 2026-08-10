@@ -54,17 +54,35 @@ let apnsKey: string | null = null;
 let apnsToken: string | null = null;
 let apnsTokenExpiry = 0;
 
+/**
+ * Normalize whatever landed in APNS_KEY into a PEM jsonwebtoken can sign with.
+ *
+ * Accepts the whole `.p8` file, just the base64 body, real newlines, or
+ * literal `\n` escapes — an env var pasted into a dashboard arrives in all
+ * four shapes and there is no shell in prod to inspect which one you got.
+ *
+ * Strip the armour BEFORE collapsing whitespace. The markers contain spaces,
+ * so a whitespace-first pass turns `-----BEGIN PRIVATE KEY-----` into
+ * `-----BEGINPRIVATEKEY-----`, the marker regex then misses, and the body is
+ * re-wrapped with the old armour still nested inside. jsonwebtoken reports
+ * that as "secretOrPrivateKey must be an asymmetric key when using ES256",
+ * which reads like a bad key rather than a paste that needed trimming — and
+ * it only reproduces in prod, where a whole key rotation gets blamed instead.
+ */
+export function toPem(rawKey: string): string {
+  const body = rawKey
+    .replace(/-----[^-]+-----/g, "") // any armour: PRIVATE KEY, EC PRIVATE KEY…
+    .replace(/\\n/g, "")
+    .replace(/\s/g, "");
+  return `-----BEGIN PRIVATE KEY-----\n${body}\n-----END PRIVATE KEY-----\n`;
+}
+
 function loadApnsKey(): string | null {
   if (apnsKey) return apnsKey;
 
   // Option 1: Key contents passed directly via env var (for Coolify/cloud)
   if (APNS_KEY) {
-    let raw = APNS_KEY.replace(/\\n/g, "").replace(/\s/g, "");
-    // Strip PEM headers if present, then re-add them
-    raw = raw
-      .replace(/-----BEGIN PRIVATE KEY-----/g, "")
-      .replace(/-----END PRIVATE KEY-----/g, "");
-    apnsKey = `-----BEGIN PRIVATE KEY-----\n${raw}\n-----END PRIVATE KEY-----\n`;
+    apnsKey = toPem(APNS_KEY);
     return apnsKey;
   }
 
@@ -95,14 +113,27 @@ function getApnsToken(): string | null {
   // Refresh token every 50 minutes (APNs tokens valid for 60 min)
   if (apnsToken && now < apnsTokenExpiry) return apnsToken;
 
-  apnsToken = jwt.sign({}, key, {
-    algorithm: "ES256",
-    keyid: APNS_KEY_ID,
-    issuer: APNS_TEAM_ID,
-    expiresIn: "1h",
-  });
-  apnsTokenExpiry = now + 50 * 60;
-  return apnsToken;
+  // A malformed APNS_KEY makes jwt.sign THROW. This runs inside sendToDevice's
+  // Promise executor, so an unusable key used to reject the whole fan-out and
+  // surface as "Error sending hype: secretOrPrivateKey must be an asymmetric
+  // key when using ES256" — i.e. a push misconfig failing the user's action.
+  // Degrade to "push disabled" instead: the hype is still recorded.
+  try {
+    const signed = jwt.sign({}, key, {
+      algorithm: "ES256",
+      keyid: APNS_KEY_ID,
+      issuer: APNS_TEAM_ID,
+      expiresIn: "1h",
+    });
+    apnsToken = signed;
+    apnsTokenExpiry = now + 50 * 60;
+    return signed;
+  } catch (err: any) {
+    console.error(
+      `[Push] APNs key unusable — check APNS_KEY/APNS_KEY_ID: ${err?.message}`,
+    );
+    return null;
+  }
 }
 
 export type NotificationType =
