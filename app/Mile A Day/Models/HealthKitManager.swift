@@ -1868,6 +1868,21 @@ final class TrackedWorkoutLedger {
         return entries[workoutId] != nil
     }
 
+    /// Replace the receipt with a number the USER chose — the one caller that
+    /// may lower it. The monotonic rule exists to stop the PIPELINE talking
+    /// the number down; a deliberate edit on the edit screen is the user
+    /// talking it down, and the receipt fighting them (flooring the display
+    /// back to the tracked value forever) would turn the safety net into a
+    /// bug. No-op for workouts the tracker never measured: an edit must not
+    /// mint a receipt.
+    func userOverride(workoutId: String, miles: Double) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard entries[workoutId] != nil, miles > 0 else { return }
+        entries[workoutId] = Entry(miles: miles, recordedAt: Date())
+        persistLocked()
+    }
+
     /// Caller must hold `lock`.
     private func persistLocked() {
         let encoder = JSONEncoder()

@@ -1709,11 +1709,20 @@ struct WorkoutTrackingView: View {
             // Check if we've reached the goal (using total daily distance).
             // `currentDistance` is monotonic and IS the saved number, so a
             // celebration fired here can never be taken back by the finish.
+            //
+            // Through isGoalCompleted (0.95 tolerance), NOT a raw `>= goal`:
+            // the server scores the day at DAILY_GOAL_TOLERANCE and every
+            // other surface mirrors it, so the tracker was the one place
+            // holding users to a STRICTER bar than the thing that actually
+            // decides the streak. Lenient by rule: celebrate the moment the
+            // streak is genuinely safe, never later.
             // Only show completion if:
             // 1. We haven't shown it yet
-            // 2. The goal wasn't already completed when we started (startingDistance < goalDistance)
-            // 3. We've now reached the goal with total daily distance
-            if !hasShownCompletion && startingDistance < goalDistance && totalDailyDistance >= goalDistance {
+            // 2. The goal wasn't already completed when we started
+            // 3. Total daily distance now completes it (server rule)
+            if !hasShownCompletion && goalDistance > 0
+                && !ProgressCalculator.isGoalCompleted(current: startingDistance, goal: goalDistance)
+                && ProgressCalculator.isGoalCompleted(current: totalDailyDistance, goal: goalDistance) {
                 hasShownCompletion = true // Mark as shown so it doesn't loop
 
                 // Show completion celebration
@@ -2110,7 +2119,9 @@ struct WorkoutTrackingView: View {
         // its prompt. But when the goal ISN'T met yet, keep leftover snaps so a
         // photo taken on an earlier sub-goal effort survives into the workout
         // that finally finishes the mile (24h prune still bounds staleness).
-        if startingDistance >= goalDistance {
+        // Same completion rule as everywhere else (0.95 tolerance): a day the
+        // server already counts as done makes this workout "extra".
+        if ProgressCalculator.isGoalCompleted(current: startingDistance, goal: goalDistance) {
             MidRunPhotoStash.clear()
             midRunSnapCount = 0
         } else {
@@ -2600,7 +2611,10 @@ struct WorkoutTrackingView: View {
 
         // If the goal was already met before this workout (post-goal extra
         // miles), don't fire the "mile complete" island alert mid-session.
-        if goalDistance > 0 && totalDailyDistance >= goalDistance {
+        // Same tolerance as the alert itself, or a day starting at 0.96 of
+        // the goal would re-celebrate a mile the server already counted.
+        if goalDistance > 0,
+           ProgressCalculator.isGoalCompleted(current: totalDailyDistance, goal: goalDistance) {
             hasSentGoalAlert = true
         }
 
@@ -2651,9 +2665,11 @@ struct WorkoutTrackingView: View {
             // Goal crossed during THIS workout → one celebratory alert update
             // that briefly expands the Dynamic Island / lights up the watch.
             // freshTotalDaily rides the monotonic saved-verbatim estimator,
-            // so this "streak safe" promise can never be walked back.
+            // so this "streak safe" promise can never be walked back — and it
+            // fires on the server's own completion rule (0.95 tolerance), so
+            // "your streak is safe" is said exactly when it becomes true.
             let goalJustCompleted = goalDistance > 0
-                && freshTotalDaily >= goalDistance
+                && ProgressCalculator.isGoalCompleted(current: freshTotalDaily, goal: goalDistance)
                 && !hasSentGoalAlert
 
             // Throttle: push on goal-cross, when distance moved ≥ 0.01 mi, or
