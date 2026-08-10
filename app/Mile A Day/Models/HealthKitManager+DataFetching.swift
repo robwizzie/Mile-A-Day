@@ -3,6 +3,20 @@ import HealthKit
 
 extension HealthKitManager {
 
+    /// Drop the "cache is recent, skip the fetch" claim so the next
+    /// `fetchAllWorkoutData()` actually re-reads HealthKit.
+    ///
+    /// `needsNewWorkoutFetch()` holds `cachedWorkouts` fresh for an hour, which
+    /// is right for idle refreshes and wrong the instant we KNOW a new workout
+    /// exists: the Workouts screen sums that cache, so a walk you just finished
+    /// was missing from its day total for up to an hour while the dashboard
+    /// (which queries directly) already counted it. Two screens, two numbers,
+    /// and the newer one lower.
+    func invalidateWorkoutCacheFreshness() {
+        lastWorkoutCacheUpdate = nil
+        UserDefaults.standard.removeObject(forKey: "lastWorkoutCacheUpdate")
+    }
+
     // Function to fetch all workout data in one call
     func fetchAllWorkoutData() {
         #if !os(watchOS)
@@ -204,10 +218,7 @@ extension HealthKitManager {
         // Calculate total lifetime miles
         var totalMiles: Double = 0.0
         for workout in cachedWorkouts {
-            if let distance = workout.totalDistance {
-                let miles = distance.doubleValue(for: HKUnit.mile())
-                totalMiles += miles
-            }
+            totalMiles += workout.madDistanceMiles
         }
 
         // Calculate most miles in one day
@@ -218,10 +229,7 @@ extension HealthKitManager {
         for (_, dayWorkouts) in workoutsByDay {
             var totalMilesForDay: Double = 0.0
             for workout in dayWorkouts {
-                if let distance = workout.totalDistance {
-                    let miles = distance.doubleValue(for: HKUnit.mile())
-                    totalMilesForDay += miles
-                }
+                totalMilesForDay += workout.madDistanceMiles
             }
 
             if totalMilesForDay > mostMilesInDay {
@@ -355,10 +363,7 @@ extension HealthKitManager {
 
             for (date, dayWorkouts) in workoutsByDay {
                 let totalMiles = dayWorkouts.reduce(0.0) { total, workout in
-                    if let distance = workout.totalDistance {
-                        return total + distance.doubleValue(for: HKUnit.mile())
-                    }
-                    return total
+                    total + workout.madDistanceMiles
                 }
 
                 // Use same threshold as streak (>= 0.95 miles)
@@ -409,10 +414,7 @@ extension HealthKitManager {
 
         for (date, workouts) in correctedWorkoutsByDay {
             let totalMiles = workouts.reduce(0.0) { total, workout in
-                if let distance = workout.totalDistance {
-                    return total + distance.doubleValue(for: HKUnit.mile())
-                }
-                return total
+                total + workout.madDistanceMiles
             }
 
             updatedMileGoals[date] = totalMiles >= 0.95

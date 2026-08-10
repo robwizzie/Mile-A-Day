@@ -205,8 +205,7 @@ class WorkoutService: ObservableObject {
 
     /// Get distance in miles from a workout
     private func distanceInMiles(from workout: HKWorkout) -> Double {
-        guard let distance = workout.totalDistance else { return 0 }
-        return distance.doubleValue(for: HKUnit.mile())
+        workout.madDistanceMiles
     }
 
     /// Get split data for a workout using the shared SplitCalculator.

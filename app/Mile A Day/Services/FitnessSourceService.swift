@@ -155,7 +155,7 @@ final class FitnessSourceService {
         for workout in workouts {
             let source = workout.sourceRevision.source
             let bundle = source.bundleIdentifier
-            let miles = workout.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
+            let miles = workout.madDistanceMiles
 
             if var existing = byBundle[bundle] {
                 existing.count += 1

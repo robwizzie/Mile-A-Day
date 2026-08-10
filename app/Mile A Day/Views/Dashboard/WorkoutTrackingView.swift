@@ -2318,17 +2318,54 @@ struct WorkoutTrackingView: View {
         // Async chain: add distance sample → end collection → finish workout →
         // attach GPS route → cleanup. Every step proceeds regardless of whether
         // the previous step failed.
-        let addCompletion: (Bool, Error?) -> Void = { _, _ in
-            builder.endCollection(withEnd: endDate) { _, _ in
+        let addCompletion: (Bool, Error?) -> Void = { added, addError in
+            // The distance sample's fate used to be discarded here (`{ _, _ in`).
+            // It can genuinely fail — Workouts share access granted while
+            // "Walking + Running Distance" is denied is one tap apart in
+            // Settings — and the workout then saved with NO distance at all,
+            // silently, with the tracked number gone forever. It isn't gone
+            // now: the ledger below is what every screen reads.
+            if !added {
+                print("[WorkoutTracking] ⚠️ Distance sample rejected: \(String(describing: addError)) — the tracked \(String(format: "%.2f", finalDistance)) mi stands via the ledger")
+            }
+            builder.endCollection(withEnd: endDate) { _, endError in
+                if let endError {
+                    print("[WorkoutTracking] ⚠️ endCollection failed: \(endError)")
+                }
                 builder.finishWorkout { workout, error in
                     let saved = (workout != nil && error == nil)
+                    // THE receipt. Written before anything reads the workout
+                    // back, so no surface — and no sync — can report a smaller
+                    // number than the one the user watched being measured.
+                    if let workout, saved {
+                        TrackedWorkoutLedger.shared.record(
+                            workoutId: workout.uuid.uuidString, miles: finalDistance)
+                    }
                     let finalize = {
                         DispatchQueue.main.async {
                             self.finishCleanup(workoutSaved: saved)
                             if saved {
+                                // Force the workout cache to refetch. It holds
+                                // itself fresh for an hour, so the Workouts
+                                // screen would otherwise show today WITHOUT the
+                                // walk that just finished — a day total that
+                                // visibly drops the moment you stop tracking.
+                                self.healthManager.invalidateWorkoutCacheFreshness()
                                 self.healthManager.fetchAllWorkoutData()
                             }
                         }
+                    }
+                    // Whatever HealthKit ended up storing, the server must hear
+                    // the tracked number. The route branch below already
+                    // re-uploads; this covers everything else (indoor sessions,
+                    // a route that failed to write, a rejected distance sample)
+                    // where the observer-raced first upload read HealthKit
+                    // before this receipt existed.
+                    if let workout, saved,
+                       abs((workout.totalDistance?.doubleValue(for: .mile()) ?? 0) - finalDistance) > 0.005,
+                       routeLocations.count < 2 {
+                        let workoutId = workout.uuid
+                        Task { await WorkoutSyncService.shared.uploadWorkout(withId: workoutId) }
                     }
                     // Write the tracked GPS trace as the workout's
                     // HKWorkoutRoute, then re-upload THIS workout with the

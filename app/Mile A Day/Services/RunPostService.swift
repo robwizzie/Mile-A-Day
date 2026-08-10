@@ -53,7 +53,7 @@ enum RunPostService {
         guard segments.filter({ WorkoutFeedFloor.isSubstantive($0) }).count > 1 else { return nil }
 
         let distance = segments.reduce(0.0) {
-            $0 + ($1.totalDistance?.doubleValue(for: .mile()) ?? 0)
+            $0 + $1.madDistanceMiles
         }
         let duration = segments.reduce(0.0) { $0 + $1.duration }
         // Pace divides by MOVING time where legs recorded it (per-leg elapsed
@@ -94,7 +94,7 @@ enum RunPostService {
         let hk = HealthKitManager.shared
 
         if let workout = hk.todaysWorkouts.first(where: { $0.uuid.uuidString == workoutId }) {
-            let distance = workout.totalDistance?.doubleValue(for: .mile()) ?? 0
+            let distance = workout.madDistanceMiles
             let pace = workoutPaceSecondsPerMile(distance: distance, duration: paceDuration(of: workout))
             let calories = workoutCalories(workout)
             return RunStatsInput(
@@ -236,7 +236,7 @@ enum RunPostService {
         var total = 0.0
         var lastSubstantive: HKWorkout?
         for workout in workouts {
-            total += workout.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
+            total += workout.madDistanceMiles
             if WorkoutFeedFloor.isSubstantive(workout) { lastSubstantive = workout }
             // The anchor is the last REAL workout at or before the crossing
             // point — so when a phantom is what tips the day over, the run that

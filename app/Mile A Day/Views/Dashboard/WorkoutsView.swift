@@ -339,8 +339,11 @@ struct WorkoutsView: View {
                 // used to be identical whether a walk was in the total or not,
                 // so a day showing 1.02 above two walks of 0.96 and 1.02 looked
                 // like an arithmetic bug rather than a decision.
-                let covers = WorkoutDedup.duplicateSources(in: dayWorkouts)
-                let excluded = WorkoutDedup.exclusions(in: dayWorkouts)
+                // Resolved together: read separately and the "counted instead"
+                // label can name a recording that is itself out of the total.
+                let breakdown = WorkoutDedup.breakdown(in: dayWorkouts)
+                let covers = breakdown.coveredBy
+                let excluded = breakdown.reasons
                 ForEach(Array(dayWorkouts.enumerated()), id: \.element.uuid) { index, workout in
                     Button {
                         selectedWorkout = IdentifiableWorkout(workout: workout)

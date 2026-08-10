@@ -32,7 +32,7 @@ struct WeeklyRecapStats {
         let cal = Calendar.current
 
         for workout in workouts {
-            let miles = workout.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
+            let miles = workout.madDistanceMiles
             totalMiles += miles
             days.insert(cal.startOfDay(for: workout.startDate))
             if miles >= 0.95 {

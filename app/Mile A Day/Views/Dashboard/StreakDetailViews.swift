@@ -430,10 +430,7 @@ struct CurrentStreakMostMilesDetailView: View {
         var maxMiles = 0.0
         for (date, workouts) in workoutsByDay {
             let dayMiles = workouts.reduce(0.0) { total, workout in
-                if let distance = workout.totalDistance {
-                    return total + distance.doubleValue(for: HKUnit.mile())
-                }
-                return total
+                total + workout.madDistanceMiles
             }
             if dayMiles > maxMiles {
                 maxMiles = dayMiles

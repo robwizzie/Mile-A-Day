@@ -149,9 +149,9 @@ struct IdentifiableWorkout: Identifiable {
 // HKWorkout extension for easier data access
 extension HKWorkout {
     var formattedDistance: String {
-        guard let distance = totalDistance else { return "Unknown" }
-        let miles = distance.doubleValue(for: HKUnit.mile())
-        return miles.milesFormatted
+        guard totalDistance != nil || TrackedWorkoutLedger.shared.isTracked(uuid.uuidString)
+        else { return "Unknown" }
+        return madDistanceMiles.milesFormatted
     }
     
     var formattedDuration: String {
@@ -213,9 +213,8 @@ extension HKWorkout {
     // This gives us the average pace for the entire workout, which is appropriate for workout summaries
     // NOTE: For fastest mile calculations, use HealthKitManager.getWorkoutSplitTimes() to get per-mile splits
     var pace: String {
-        guard let distance = totalDistance else { return "N/A" }
         return workoutPaceText(
-            distanceMiles: distance.doubleValue(for: HKUnit.mile()),
+            distanceMiles: madDistanceMiles,
             durationSeconds: duration
         )
     }
@@ -306,7 +305,7 @@ enum WorkoutFeedFloor {
 
     static func isSubstantive(_ workout: HKWorkout) -> Bool {
         isSubstantive(
-            distance: workout.totalDistance?.doubleValue(for: .mile()) ?? 0,
+            distance: workout.madDistanceMiles,
             duration: workout.duration
         )
     }

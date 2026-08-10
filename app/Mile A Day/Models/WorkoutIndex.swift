@@ -376,7 +376,7 @@ struct WorkoutRecord: Codable, Identifiable {
         }
 
         self.timezoneOffset = timezoneOffset
-        self.distance = workout.totalDistance?.doubleValue(for: .mile()) ?? 0.0
+        self.distance = workout.madDistanceMiles
         self.duration = workout.duration
 
         if workout.workoutActivityType == .running {

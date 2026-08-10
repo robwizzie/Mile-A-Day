@@ -18,10 +18,7 @@ extension HealthKitManager {
         log("[HealthKit] Calculating qualifying workout days from timezone-corrected data...")
         let daysWithQualifyingWorkouts = correctedWorkoutsByDay.compactMap { (date, workouts) -> Date? in
             let totalMilesForDay = workouts.reduce(0.0) { total, workout in
-                if let distance = workout.totalDistance {
-                    return total + distance.doubleValue(for: HKUnit.mile())
-                }
-                return total
+                total + workout.madDistanceMiles
             }
 
             if totalMilesForDay >= 0.95 {
@@ -41,10 +38,7 @@ extension HealthKitManager {
 
         for (_, workouts) in correctedWorkoutsByDay {
             let totalMilesForDay = workouts.reduce(0.0) { total, workout in
-                if let distance = workout.totalDistance {
-                    return total + distance.doubleValue(for: HKUnit.mile())
-                }
-                return total
+                total + workout.madDistanceMiles
             }
 
             if totalMilesForDay > correctedMostMilesInDay {
@@ -123,10 +117,7 @@ extension HealthKitManager {
 
         // Calculate total miles and most miles (these are fast)
         let totalMiles = streakWorkouts.reduce(0.0) { total, workout in
-            if let distance = workout.totalDistance {
-                return total + distance.doubleValue(for: HKUnit.mile())
-            }
-            return total
+            total + workout.madDistanceMiles
         }
 
         let workoutsByDay = Dictionary(grouping: streakWorkouts) { workout in
@@ -136,10 +127,7 @@ extension HealthKitManager {
         var mostMiles = 0.0
         for (_, workouts) in workoutsByDay {
             let dayMiles = workouts.reduce(0.0) { total, workout in
-                if let distance = workout.totalDistance {
-                    return total + distance.doubleValue(for: HKUnit.mile())
-                }
-                return total
+                total + workout.madDistanceMiles
             }
             mostMiles = max(mostMiles, dayMiles)
         }
@@ -214,15 +202,12 @@ extension HealthKitManager {
         let tolerance: TimeInterval = 0.5 // 30 seconds tolerance
 
         for workout in streakWorkouts {
-            if let distance = workout.totalDistance {
-                let miles = distance.doubleValue(for: HKUnit.mile())
-                if miles >= 0.95 {
-                    let avgPace = workout.duration / 60.0 / miles
-                    // If average pace is close to all-time fastest, this workout likely contains it
-                    if abs(avgPace - fastestMilePace) <= tolerance {
-                        return workout
-                    }
-                }
+            let miles = workout.madDistanceMiles
+            guard miles >= 0.95 else { continue }
+            let avgPace = workout.duration / 60.0 / miles
+            // If average pace is close to all-time fastest, this workout likely contains it
+            if abs(avgPace - fastestMilePace) <= tolerance {
+                return workout
             }
         }
 
@@ -237,10 +222,7 @@ extension HealthKitManager {
         }
 
         let newQualifyingWorkouts = newWorkouts.filter { workout in
-            if let distance = workout.totalDistance {
-                return distance.doubleValue(for: HKUnit.mile()) >= 0.95
-            }
-            return false
+            return workout.madDistanceMiles >= 0.95
         }
 
         if !newQualifyingWorkouts.isEmpty {
@@ -252,10 +234,7 @@ extension HealthKitManager {
 
     func calculateFastestMileForWorkouts(_ workouts: [HKWorkout]) -> TimeInterval {
         let qualifyingWorkouts = workouts.filter { workout in
-            if let distance = workout.totalDistance {
-                return distance.doubleValue(for: HKUnit.mile()) >= 0.95
-            }
-            return false
+            return workout.madDistanceMiles >= 0.95
         }
 
         guard !qualifyingWorkouts.isEmpty else { return 0.0 }
@@ -287,10 +266,7 @@ extension HealthKitManager {
         }
 
         let qualifyingWorkouts = cachedWorkouts.filter { workout in
-            if let distance = workout.totalDistance {
-                return distance.doubleValue(for: HKUnit.mile()) >= 0.95
-            }
-            return false
+            return workout.madDistanceMiles >= 0.95
         }
 
         var fastestWorkouts: [HKWorkout] = []
@@ -324,10 +300,7 @@ extension HealthKitManager {
         }
 
         let qualifyingWorkouts = streakWorkouts.filter { workout in
-            if let distance = workout.totalDistance {
-                return distance.doubleValue(for: HKUnit.mile()) >= 0.95
-            }
-            return false
+            return workout.madDistanceMiles >= 0.95
         }
 
         var fastestWorkouts: [HKWorkout] = []
