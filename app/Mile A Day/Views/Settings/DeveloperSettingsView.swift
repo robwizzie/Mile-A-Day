@@ -666,7 +666,7 @@ struct DeveloperSettingsView: View {
         let isoFormatter = ISO8601DateFormatter()
         json["workoutId"] = workout.uuid.uuidString
         json["workoutType"] = workout.workoutActivityType.rawValue
-        json["totalDistance"] = workout.totalDistance?.doubleValue(for: .mile()) ?? 0
+        json["totalDistance"] = workout.madDistanceMiles
         json["totalDistanceMeters"] = workout.totalDistance?.doubleValue(for: .meter()) ?? 0
         json["duration"] = workout.duration
         json["startDate"] = isoFormatter.string(from: workout.startDate)

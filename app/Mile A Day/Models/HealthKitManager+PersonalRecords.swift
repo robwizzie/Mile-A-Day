@@ -127,11 +127,7 @@ extension HealthKitManager {
 
             // Process workouts that are at least 0.95 miles
             let qualifyingWorkouts = workouts.filter { workout in
-                if let distance = workout.totalDistance {
-                    let miles = distance.doubleValue(for: HKUnit.mile())
-                    return miles >= 0.95
-                }
-                return false
+                return workout.madDistanceMiles >= 0.95
             }
 
             // Process each qualifying workout to get the fastest mile time
@@ -197,10 +193,7 @@ extension HealthKitManager {
             var totalMilesForDay: Double = 0.0
 
             for workout in dayWorkouts {
-                if let distance = workout.totalDistance {
-                    let miles = distance.doubleValue(for: HKUnit.mile())
-                    totalMilesForDay += miles
-                }
+                totalMilesForDay += workout.madDistanceMiles
             }
 
             if totalMilesForDay > finalMostMilesInDay {
@@ -247,8 +240,7 @@ extension HealthKitManager {
         if cachedFastestMilePace > 0, let lastUpdate = lastWorkoutCacheUpdate {
             // We have a cached pace - only process workouts added since last calculation
             workoutsToProcess = cachedWorkouts.filter { workout in
-                guard let distance = workout.totalDistance else { return false }
-                let miles = distance.doubleValue(for: HKUnit.mile())
+                let miles = workout.madDistanceMiles
                 return miles >= 0.95 && workout.endDate > lastUpdate
             }
 
@@ -261,11 +253,7 @@ extension HealthKitManager {
         } else {
             // No cached pace - process all qualifying workouts
             workoutsToProcess = cachedWorkouts.filter { workout in
-                if let distance = workout.totalDistance {
-                    let miles = distance.doubleValue(for: HKUnit.mile())
-                    return miles >= 0.95
-                }
-                return false
+                return workout.madDistanceMiles >= 0.95
             }
 
             log("[HealthKit] FULL CALCULATION: Processing all \(workoutsToProcess.count) qualifying workouts")
@@ -307,13 +295,7 @@ extension HealthKitManager {
     func calculateFastestMileTime(from workout: HKWorkout, completion: @escaping (TimeInterval?) -> Void) {
 
         // VALIDATION: Check workout has minimum required distance
-        guard let distance = workout.totalDistance else {
-            log("[HealthKit] ⚠️ Workout has no distance data")
-            completion(nil)
-            return
-        }
-
-        let miles = distance.doubleValue(for: HKUnit.mile())
+        let miles = workout.madDistanceMiles
         guard miles >= 0.95 else {
             log("[HealthKit] ⚠️ Workout distance \(String(format: "%.2f", miles)) miles is below 0.95 mile threshold")
             completion(nil)

@@ -278,8 +278,7 @@ struct FastestPaceDetailView: View {
         // Find qualifying workouts and check their average pace
         let tolerance: TimeInterval = 0.5 // 30 seconds tolerance for average pace matching
         let qualifying = healthManager.cachedWorkouts.filter { workout in
-            guard let distance = workout.totalDistance else { return false }
-            let miles = distance.doubleValue(for: HKUnit.mile())
+            let miles = workout.madDistanceMiles
             guard miles >= 0.95 else { return false }
             let avgPace = workout.duration / 60.0 / miles
             return avgPace <= pace + tolerance

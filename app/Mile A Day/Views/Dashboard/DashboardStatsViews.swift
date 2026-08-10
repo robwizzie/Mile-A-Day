@@ -138,14 +138,18 @@ struct RecentWorkoutsView: View {
             byDay[day, default: []].append(workout)
         }
         for (_, dayWorkouts) in byDay {
-            let excluded = WorkoutDedup.exclusions(in: dayWorkouts)
+            // One resolution for both answers — the reason and the recording it
+            // points at have to come from the same pass or the label can name a
+            // walk that is itself out of the total.
+            let breakdown = WorkoutDedup.breakdown(in: dayWorkouts)
+            let excluded = breakdown.reasons
             guard !excluded.isEmpty else { continue }
             for workout in dayWorkouts { state.labeled.insert(workout.uuid.uuidString) }
             for (index, reason) in excluded {
                 state.reasons[dayWorkouts[index].uuid.uuidString] = reason
             }
             // Only a duplicate has a partner to name; a refused source doesn't.
-            for (index, keeper) in WorkoutDedup.duplicateSources(in: dayWorkouts) {
+            for (index, keeper) in breakdown.coveredBy {
                 state.excludedBy[dayWorkouts[index].uuid.uuidString] =
                     WorkoutAttribution.sourceLabel(for: dayWorkouts[keeper])
             }

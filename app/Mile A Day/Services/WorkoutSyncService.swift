@@ -730,7 +730,10 @@ class WorkoutSyncService: ObservableObject {
 
             let workoutType = getWorkoutType(from: workout.workoutActivityType)
             let calories = await activeEnergyKilocalories(for: workout)
-            let distance = workout.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
+            // `madDistanceMiles`, never the raw HealthKit total: the server
+            // (and therefore the feed, streaks and every friend's screen) has to
+            // agree with the number this phone showed while measuring the walk.
+            let distance = workout.madDistanceMiles
 
             var workoutDict: [String: Any] = [
                 "workoutId": workout.uuid.uuidString,

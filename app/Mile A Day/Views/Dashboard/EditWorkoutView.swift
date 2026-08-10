@@ -217,6 +217,11 @@ struct EditWorkoutView: View {
             // Register as edited so the WorkoutIndex flags it
             ManualWorkoutRegistry.markEdited(workoutId)
 
+            // A deliberate edit outranks the tracker's receipt — without this,
+            // `madDistanceMiles` would floor the display back to the tracked
+            // value and the edit would silently never take on any local screen.
+            TrackedWorkoutLedger.shared.userOverride(workoutId: workoutId, miles: distance)
+
             // Force full index rebuild to pick up the source change
             WorkoutIndex.clear()
             healthManager.workoutIndex = nil

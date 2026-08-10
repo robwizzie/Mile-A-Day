@@ -194,7 +194,7 @@ struct DashboardView: View {
     private func buildWorkoutBreakdowns() -> [WorkoutBreakdown] {
         var byType: [HKWorkoutActivityType: (distance: Double, duration: TimeInterval)] = [:]
         for workout in healthManager.todaysWorkouts {
-            let miles = workout.totalDistance?.doubleValue(for: .mile()) ?? 0
+            let miles = workout.madDistanceMiles
             let existing = byType[workout.workoutActivityType] ?? (0, 0)
             byType[workout.workoutActivityType] = (existing.distance + miles, existing.duration + workout.duration)
         }
@@ -212,7 +212,7 @@ struct DashboardView: View {
     /// Get the most recent workout as a breakdown
     private func buildLatestWorkout() -> WorkoutBreakdown? {
         guard let latest = healthManager.todaysWorkouts.sorted(by: { $0.endDate > $1.endDate }).first else { return nil }
-        let miles = latest.totalDistance?.doubleValue(for: .mile()) ?? 0
+        let miles = latest.madDistanceMiles
         return WorkoutBreakdown(
             type: workoutTypeString(latest.workoutActivityType),
             distance: miles,

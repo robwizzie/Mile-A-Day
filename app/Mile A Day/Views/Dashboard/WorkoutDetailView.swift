@@ -113,7 +113,7 @@ struct WorkoutDetailView: View {
     }
 
     private var distanceMiles: Double {
-        workout.totalDistance?.doubleValue(for: .mile()) ?? 0
+        workout.madDistanceMiles
     }
 
     /// Look up the source from the WorkoutIndex by matching UUID

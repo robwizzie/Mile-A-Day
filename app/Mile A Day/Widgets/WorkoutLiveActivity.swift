@@ -2,6 +2,15 @@ import ActivityKit
 import WidgetKit
 import SwiftUI
 
+/// Display miles truncated to 2 decimals — NEVER rounded up, so a shown
+/// "1.00" always means the mile is actually there (0.995 used to round up
+/// beside an incomplete goal). Private copy of `Double.milesFloor2` in the
+/// main app's Extensions.swift — widget-extension targets can't see that
+/// file; keep the formula in sync.
+private func flooredMilesText(_ miles: Double) -> String {
+    String(format: "%.2f", (miles * 100.0 + 1e-6).rounded(.down) / 100.0)
+}
+
 // MARK: - Activity Attributes
 
 struct WorkoutActivityAttributes: ActivityAttributes {
@@ -138,7 +147,7 @@ struct WorkoutLiveActivity: Widget {
                                 .foregroundColor(.white.opacity(0.9))
                         }
 
-                        Text(String(format: "%.2f mi", context.state.distance))
+                        Text("\(flooredMilesText(context.state.distance)) mi")
                             .font(.system(size: 24, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                     }
@@ -244,7 +253,7 @@ struct WorkoutLiveActivity: Widget {
                         } else {
                             HStack {
                                 if context.state.totalDailyDistance > context.state.distance {
-                                    Text("Daily: \(String(format: "%.2f", context.state.totalDailyDistance)) mi")
+                                    Text("Daily: \(flooredMilesText(context.state.totalDailyDistance)) mi")
                                         .font(.caption2)
                                         .foregroundColor(.white.opacity(0.7))
                                 }
@@ -348,7 +357,7 @@ struct WorkoutLiveActivityView: View {
 
                 // Distance
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(String(format: "%.2f", context.state.distance))
+                    Text(flooredMilesText(context.state.distance))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
 
@@ -359,7 +368,7 @@ struct WorkoutLiveActivityView: View {
 
                 // Daily total if different
                 if context.state.totalDailyDistance > context.state.distance {
-                    Text("Daily: \(String(format: "%.2f", context.state.totalDailyDistance)) mi")
+                    Text("Daily: \(flooredMilesText(context.state.totalDailyDistance)) mi")
                         .font(.caption2)
                         .foregroundColor(.white.opacity(0.6))
                 }

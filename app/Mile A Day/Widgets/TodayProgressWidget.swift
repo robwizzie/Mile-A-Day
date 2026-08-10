@@ -1,6 +1,15 @@
 import WidgetKit
 import SwiftUI
 
+/// Display miles truncated to 2 decimals — NEVER rounded up, so a shown
+/// "1.00" always means the mile is actually there (0.995 used to round up
+/// beside an incomplete goal). Private copy of `Double.milesFloor2` in the
+/// main app's Extensions.swift — widget-extension targets can't see that
+/// file; keep the formula in sync.
+private func flooredMilesText(_ miles: Double) -> String {
+    String(format: "%.2f", (miles * 100.0 + 1e-6).rounded(.down) / 100.0)
+}
+
 // MARK: - Shared MAD widget styling
 // One visual family for all home-screen widgets: the app's dark gradient with
 // a soft red glow, brand-gradient rings, and small-caps section labels —
@@ -302,7 +311,7 @@ struct CircularProgressView: View {
                 .scaleEffect(0.8)
             
             VStack(spacing: 1) {
-                Text(String(format: "%.2f", milesCompleted))
+                Text(flooredMilesText(milesCompleted))
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundColor(streakCompleted ? .white : .primary)
                 Text("mi")
@@ -329,7 +338,7 @@ struct RectangularProgressView: View {
                     .font(.caption)
                     .fontWeight(.medium)
                 Spacer()
-                Text(String(format: "%.2f/%.1f", milesCompleted, goal))
+                Text("\(flooredMilesText(milesCompleted))/\(String(format: "%.1f", goal))")
                     .font(.caption)
                     .fontWeight(.bold)
             }
@@ -360,7 +369,7 @@ struct InlineProgressView: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "figure.run")
-            Text(String(format: "%.2f/%.1f mi", milesCompleted, goal))
+            Text("\(flooredMilesText(milesCompleted))/\(String(format: "%.1f", goal)) mi")
                 .fontWeight(.medium)
             if streakCompleted {
                 Image(systemName: "checkmark.circle.fill")
@@ -417,7 +426,7 @@ struct HomeScreenProgressView: View {
                 MADWidgetLabel(icon: "figure.run", text: "TODAY'S MILE")
 
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(String(format: "%.2f", milesCompleted))
+                    Text(flooredMilesText(milesCompleted))
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)

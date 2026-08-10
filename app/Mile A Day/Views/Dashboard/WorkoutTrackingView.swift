@@ -1140,7 +1140,10 @@ struct WorkoutTrackingView: View {
                 .foregroundColor(.white.opacity(0.7))
                 .tracking(1.5)
 
-            Text(String(format: "%.2f", currentDistance))
+            // Floored, never rounded up: a "1.00" here before the ring hits
+            // 100% and the celebration fires reads as the app refusing to
+            // count a finished mile (0.995 used to render exactly that).
+            Text(currentDistance.milesText)
                 .font(.system(size: 80, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
                 .contentTransition(.numericText())
@@ -1151,7 +1154,7 @@ struct WorkoutTrackingView: View {
 
             if startingDistance > 0 {
                 VStack(spacing: 4) {
-                    Text("Daily Total: \(String(format: "%.2f", totalDailyDistance)) mi")
+                    Text("Daily Total: \(totalDailyDistance.milesText) mi")
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .foregroundColor(.white.opacity(0.6))
@@ -1507,7 +1510,7 @@ struct WorkoutTrackingView: View {
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
 
-                Text("\(String(format: "%.2f", startingDistance)) miles reached")
+                Text("\(startingDistance.milesText) miles reached")
                     .font(.title3)
                     .foregroundColor(.white.opacity(0.9))
             }
@@ -1709,6 +1712,14 @@ struct WorkoutTrackingView: View {
             // Check if we've reached the goal (using total daily distance).
             // `currentDistance` is monotonic and IS the saved number, so a
             // celebration fired here can never be taken back by the finish.
+            //
+            // At the FULL goal, deliberately — a raw compare, not the 0.95
+            // scoring tolerance (product rule). The tolerance exists so a
+            // near-miss never BREAKS a streak; it is a safety net, not the
+            // finish line, and celebrating at 0.95 would teach users to stop
+            // short of the goal they set. Displays are floored to 2 decimals
+            // (`milesText`), so the screen can never contradict this by
+            // showing a rounded-up "1.00" before the celebration fires.
             // Only show completion if:
             // 1. We haven't shown it yet
             // 2. The goal wasn't already completed when we started (startingDistance < goalDistance)
@@ -2318,17 +2329,54 @@ struct WorkoutTrackingView: View {
         // Async chain: add distance sample → end collection → finish workout →
         // attach GPS route → cleanup. Every step proceeds regardless of whether
         // the previous step failed.
-        let addCompletion: (Bool, Error?) -> Void = { _, _ in
-            builder.endCollection(withEnd: endDate) { _, _ in
+        let addCompletion: (Bool, Error?) -> Void = { added, addError in
+            // The distance sample's fate used to be discarded here (`{ _, _ in`).
+            // It can genuinely fail — Workouts share access granted while
+            // "Walking + Running Distance" is denied is one tap apart in
+            // Settings — and the workout then saved with NO distance at all,
+            // silently, with the tracked number gone forever. It isn't gone
+            // now: the ledger below is what every screen reads.
+            if !added {
+                print("[WorkoutTracking] ⚠️ Distance sample rejected: \(String(describing: addError)) — the tracked \(String(format: "%.2f", finalDistance)) mi stands via the ledger")
+            }
+            builder.endCollection(withEnd: endDate) { _, endError in
+                if let endError {
+                    print("[WorkoutTracking] ⚠️ endCollection failed: \(endError)")
+                }
                 builder.finishWorkout { workout, error in
                     let saved = (workout != nil && error == nil)
+                    // THE receipt. Written before anything reads the workout
+                    // back, so no surface — and no sync — can report a smaller
+                    // number than the one the user watched being measured.
+                    if let workout, saved {
+                        TrackedWorkoutLedger.shared.record(
+                            workoutId: workout.uuid.uuidString, miles: finalDistance)
+                    }
                     let finalize = {
                         DispatchQueue.main.async {
                             self.finishCleanup(workoutSaved: saved)
                             if saved {
+                                // Force the workout cache to refetch. It holds
+                                // itself fresh for an hour, so the Workouts
+                                // screen would otherwise show today WITHOUT the
+                                // walk that just finished — a day total that
+                                // visibly drops the moment you stop tracking.
+                                self.healthManager.invalidateWorkoutCacheFreshness()
                                 self.healthManager.fetchAllWorkoutData()
                             }
                         }
+                    }
+                    // Whatever HealthKit ended up storing, the server must hear
+                    // the tracked number. The route branch below already
+                    // re-uploads; this covers everything else (indoor sessions,
+                    // a route that failed to write, a rejected distance sample)
+                    // where the observer-raced first upload read HealthKit
+                    // before this receipt existed.
+                    if let workout, saved,
+                       abs((workout.totalDistance?.doubleValue(for: .mile()) ?? 0) - finalDistance) > 0.005,
+                       routeLocations.count < 2 {
+                        let workoutId = workout.uuid
+                        Task { await WorkoutSyncService.shared.uploadWorkout(withId: workoutId) }
                     }
                     // Write the tracked GPS trace as the workout's
                     // HKWorkoutRoute, then re-upload THIS workout with the
@@ -2614,7 +2662,10 @@ struct WorkoutTrackingView: View {
             // Goal crossed during THIS workout → one celebratory alert update
             // that briefly expands the Dynamic Island / lights up the watch.
             // freshTotalDaily rides the monotonic saved-verbatim estimator,
-            // so this "streak safe" promise can never be walked back.
+            // so this "streak safe" promise can never be walked back. At the
+            // FULL goal, matching the on-screen celebration — the 0.95
+            // tolerance is the server's never-break-a-streak safety net, not
+            // the finish line.
             let goalJustCompleted = goalDistance > 0
                 && freshTotalDaily >= goalDistance
                 && !hasSentGoalAlert

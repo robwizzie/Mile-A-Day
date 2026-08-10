@@ -283,11 +283,10 @@ struct WorkoutRow: View {
     }
 
     private var workoutDistance: String {
-        if let distance = workout.totalDistance {
-            let miles = distance.doubleValue(for: .mile())
-            return miles.milesFormatted
-        }
-        return "Unknown"
+        guard workout.totalDistance != nil
+            || TrackedWorkoutLedger.shared.isTracked(workout.uuid.uuidString)
+        else { return "Unknown" }
+        return workout.madDistanceMiles.milesFormatted
     }
 
     private var workoutDuration: String {
@@ -309,8 +308,7 @@ struct WorkoutRow: View {
 
     /// "18:27 /mi" when distance + duration allow it.
     private var paceText: String? {
-        guard let distance = workout.totalDistance else { return nil }
-        let miles = distance.doubleValue(for: .mile())
+        let miles = workout.madDistanceMiles
         guard miles > 0, workout.duration > 0 else { return nil }
         return "\(RunStatsStickerView.paceText(workout.duration / miles)) /mi"
     }

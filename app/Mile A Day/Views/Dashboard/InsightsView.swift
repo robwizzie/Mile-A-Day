@@ -1275,7 +1275,7 @@ private struct RoadWorkoutSummaryRow: View {
     }
 
     private var distance: Double {
-        workout.totalDistance?.doubleValue(for: .mile()) ?? 0
+        workout.madDistanceMiles
     }
 
     private var durationText: String {

@@ -50,7 +50,7 @@ struct WorkoutRecord: Codable, Identifiable {
         }
         
         self.timezoneOffset = timezoneOffset
-        self.distance = workout.totalDistance?.doubleValue(for: .mile()) ?? 0.0
+        self.distance = workout.madDistanceMiles
         self.duration = workout.duration
         
         switch workout.workoutActivityType {
@@ -954,12 +954,10 @@ class HealthKitManager: ObservableObject {
         var totalMiles: Double = 0
 
         for workout in todaysWorkouts {
-            if let distance = workout.totalDistance {
-                let miles = distance.doubleValue(for: HKUnit.mile())
-                if miles > 0 {
-                    totalDuration += workout.duration
-                    totalMiles += miles
-                }
+            let miles = workout.madDistanceMiles
+            if miles > 0 {
+                totalDuration += workout.duration
+                totalMiles += miles
             }
         }
 
@@ -973,9 +971,8 @@ class HealthKitManager: ObservableObject {
     /// Today's walking distance in miles (sum of walking-type workouts only).
     var todaysWalkingDistance: Double {
         todaysWorkouts.reduce(0.0) { sum, workout in
-            guard workout.workoutActivityType == .walking,
-                  let distance = workout.totalDistance else { return sum }
-            return sum + distance.doubleValue(for: HKUnit.mile())
+            guard workout.workoutActivityType == .walking else { return sum }
+            return sum + workout.madDistanceMiles
         }
     }
 
@@ -984,14 +981,12 @@ class HealthKitManager: ObservableObject {
         var fastestPace: TimeInterval = .infinity
 
         for workout in todaysWorkouts {
-            if let distance = workout.totalDistance {
-                let miles = distance.doubleValue(for: HKUnit.mile())
-                if miles >= 0.3 { // Only consider workouts with meaningful distance
-                    let pace = (workout.duration / 60.0) / miles
-                    // Sanity check: pace should be between 2:00/mi and 30:00/mi
-                    if pace >= 2.0 && pace < fastestPace {
-                        fastestPace = pace
-                    }
+            let miles = workout.madDistanceMiles
+            if miles >= 0.3 { // Only consider workouts with meaningful distance
+                let pace = (workout.duration / 60.0) / miles
+                // Sanity check: pace should be between 2:00/mi and 30:00/mi
+                if pace >= 2.0 && pace < fastestPace {
+                    fastestPace = pace
                 }
             }
         }
@@ -1022,8 +1017,7 @@ class HealthKitManager: ObservableObject {
     
     // Get distance in miles from a workout
     func distanceInMiles(from workout: HKWorkout) -> Double {
-        guard let distance = workout.totalDistance else { return 0 }
-        return distance.doubleValue(for: HKUnit.mile())
+        workout.madDistanceMiles
     }
     
     // MARK: - New Methods for Enhanced Tracking
@@ -1048,10 +1042,7 @@ class HealthKitManager: ObservableObject {
             var totalMiles: Double = 0.0
             
             for workout in workouts {
-                if let distance = workout.totalDistance {
-                    let miles = distance.doubleValue(for: HKUnit.mile())
-                    totalMiles += miles
-                }
+                totalMiles += workout.madDistanceMiles
             }
             
             DispatchQueue.main.async {
@@ -1107,10 +1098,15 @@ class HealthKitManager: ObservableObject {
         // locked device, and grandfathering an empty list would make every real
         // source look new — turning the consent prompt into noise exactly when
         // it needs to be trusted.
+        // ...and only once the 30-day list has actually arrived. Today's
+        // workouts are not the source list: an app that wrote yesterday but not
+        // yet today doesn't appear in them, so drawing the line off that is the
+        // same silent mile-loss as drawing it off nothing.
         WorkoutSourcePreferences.shared.grandfatherIfNeeded(
             existingBundleIds: recentWorkouts.map {
                 $0.sourceRevision.source.bundleIdentifier
-            } + todaysWorkouts.map { $0.sourceRevision.source.bundleIdentifier }
+            } + todaysWorkouts.map { $0.sourceRevision.source.bundleIdentifier },
+            listIsComplete: hasLoadedRecentWorkoutsOnce
         )
         // Counted ONCE per real activity. This used to be a plain sum over
         // every HealthKit workout, which double-counts the same walk whenever a
@@ -1552,7 +1548,7 @@ class HealthKitManager: ObservableObject {
             var qualifying: Set<Date> = []
             for (date, dayWorkouts) in byDay {
                 let miles = dayWorkouts.reduce(0.0) { sum, w in
-                    sum + (w.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0)
+                    sum + w.madDistanceMiles
                 }
                 if miles >= 0.95 { qualifying.insert(date) }
             }
@@ -1783,6 +1779,134 @@ extension MADWatchBridge: WCSessionDelegate {
     #endif
 }
 
+// MARK: - The number we showed you
+
+/// A receipt for every workout this app's own tracker measured: the distance
+/// that was on screen at the moment the user pressed Finish.
+///
+/// The tracker's number used to be handed to HealthKit and then thrown away.
+/// From that point on, every surface re-derived the distance from HealthKit and
+/// the on-device counting rules — a different pipeline with different failure
+/// modes — so "0.34 while walking, 0.22 once it saved" had nothing standing in
+/// its way. The write can fail silently (Workouts share access granted but
+/// Walking + Running Distance denied, and `HKWorkoutBuilder.add`'s error was
+/// discarded), the workout can miss a stale read cache, and the counting rules
+/// can vote it out of a day's total.
+///
+/// So we keep the receipt. `HKWorkout.madDistanceMiles` never returns less than
+/// it, which makes the invariant structural rather than a property of five
+/// pipelines all behaving: what the tracker showed is the floor for what every
+/// screen — and the server — is allowed to show afterwards.
+///
+/// Deliberately only ever RAISES, and only for workouts this app measured
+/// itself. A third-party recording is untouched, and a HealthKit value that is
+/// somehow larger (an edit, a correction) still wins.
+///
+/// Lives here rather than in its own file because `WorkoutDedup` below consults
+/// it and both are compiled into the Watch target — see the note above
+/// `WorkoutDedup`. Same rule: no dependencies beyond Foundation + HealthKit.
+final class TrackedWorkoutLedger {
+    static let shared = TrackedWorkoutLedger()
+
+    /// How long a receipt is kept. Long enough to cover every screen that can
+    /// still show the workout (the 30-day recent list, the month calendar),
+    /// short enough that the store stays a few KB.
+    private static let retention: TimeInterval = 90 * 24 * 60 * 60
+    private static let storageKey = "com.mileaday.trackedWorkoutDistancesV1"
+
+    private struct Entry: Codable {
+        let miles: Double
+        let recordedAt: Date
+    }
+
+    private let defaults = UserDefaults.standard
+    /// Read on every row render, so it stays in memory rather than re-decoding.
+    /// Guarded by `lock`: the write lands on `finishWorkout`'s completion queue
+    /// while the reads come from HealthKit's own query queues and the main
+    /// thread, so an unsynchronised dictionary here is a data race, not a
+    /// theoretical one.
+    private var entries: [String: Entry]
+    private let lock = NSLock()
+
+    private init() {
+        entries = Self.decode(defaults.data(forKey: Self.storageKey)) ?? [:]
+    }
+
+    private static func decode(_ data: Data?) -> [String: Entry]? {
+        guard let data else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode([String: Entry].self, from: data)
+    }
+
+    /// Stamp what the tracker showed. Monotonic per workout — a later write can
+    /// only raise the receipt, so nothing downstream can be talked back down.
+    func record(workoutId: String, miles: Double) {
+        guard miles > 0 else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        if let existing = entries[workoutId], existing.miles >= miles { return }
+        entries[workoutId] = Entry(miles: miles, recordedAt: Date())
+        let cutoff = Date().addingTimeInterval(-Self.retention)
+        entries = entries.filter { $0.value.recordedAt >= cutoff }
+        persistLocked()
+    }
+
+    /// What the tracker showed for this workout, if this app measured it.
+    func miles(forWorkoutId workoutId: String) -> Double? {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries[workoutId]?.miles
+    }
+
+    /// Whether this app's own tracker measured this workout. The counting rules
+    /// use it to make sure a walk the user watched being recorded can never be
+    /// voted out of their own total by another app's copy of it.
+    func isTracked(_ workoutId: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries[workoutId] != nil
+    }
+
+    /// Replace the receipt with a number the USER chose — the one caller that
+    /// may lower it. The monotonic rule exists to stop the PIPELINE talking
+    /// the number down; a deliberate edit on the edit screen is the user
+    /// talking it down, and the receipt fighting them (flooring the display
+    /// back to the tracked value forever) would turn the safety net into a
+    /// bug. No-op for workouts the tracker never measured: an edit must not
+    /// mint a receipt.
+    func userOverride(workoutId: String, miles: Double) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard entries[workoutId] != nil, miles > 0 else { return }
+        entries[workoutId] = Entry(miles: miles, recordedAt: Date())
+        persistLocked()
+    }
+
+    /// Caller must hold `lock`.
+    private func persistLocked() {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(entries) else { return }
+        defaults.set(data, forKey: Self.storageKey)
+    }
+}
+
+extension HKWorkout {
+    /// THE distance for this workout, in miles.
+    ///
+    /// Every surface that shows or sums a workout's distance goes through this
+    /// rather than reading `totalDistance` itself. For anything this app didn't
+    /// record it IS `totalDistance`; for a walk our own tracker measured it can
+    /// never be less than the number the tracker showed while measuring it.
+    var madDistanceMiles: Double {
+        let stored = totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
+        guard let tracked = TrackedWorkoutLedger.shared.miles(forWorkoutId: uuid.uuidString)
+        else { return stored }
+        return max(stored, tracked)
+    }
+}
+
 // MARK: - Counting each real walk once
 
 /// Which apps are allowed to add to your miles.
@@ -1811,17 +1935,55 @@ final class WorkoutSourcePreferences: ObservableObject {
 
     private static let decisionsKey = "workoutSourceDecisionsV1"
     private static let grandfatheredKey = "workoutSourceGrandfatheredV1"
+    private static let grandfatheredAtKey = "workoutSourceGrandfatheredAtV1"
     private let defaults = UserDefaults.standard
 
     /// bundle id → the user's answer. Absent means never asked.
     @Published private(set) var decisions: [String: String]
 
+    /// The instant this app started asking about new sources. Everything
+    /// recorded before it counts, whatever we know about its source — see
+    /// `countsWithoutAsking`. Nil until the line has been drawn.
+    private(set) var grandfatheredAt: Date?
+
     private init() {
         decisions = defaults.dictionary(forKey: Self.decisionsKey) as? [String: String] ?? [:]
+        grandfatheredAt = defaults.object(forKey: Self.grandfatheredAtKey) as? Date
+        if grandfatheredAt == nil, defaults.bool(forKey: Self.grandfatheredKey) {
+            // Grandfathered by the earlier build, which recorded no line. Draw
+            // it now: everything already recorded counts (which un-does any
+            // source that build missed and has been quietly subtracting since),
+            // and only what arrives from here on has to be asked about.
+            let line = Date()
+            grandfatheredAt = line
+            defaults.set(line, forKey: Self.grandfatheredAtKey)
+        }
     }
 
     func decision(for bundleId: String) -> Decision? {
         decisions[bundleId].flatMap(Decision.init(rawValue:))
+    }
+
+    /// Whether a workout predates the moment this app started asking about new
+    /// sources — in which case it counts, whatever we do or don't know about
+    /// the app that wrote it. Consent governs what shows up from now on, never
+    /// miles someone already banked.
+    ///
+    /// This is what makes the feature safe to be wrong about. Grandfathering by
+    /// bundle id alone depends on having seen every source in the exact instant
+    /// the flag was set — off a list filled by a separate async query that
+    /// returns nothing on a locked device. Miss a source in that instant and it
+    /// stayed `pending` forever, quietly subtracting itself from every daily
+    /// total that had been counting it for months, with nothing on screen to
+    /// explain the drop. A timestamp can't be missed. (Same line the backend's
+    /// `dedupe_since` draws, for the same reason.)
+    ///
+    /// Before the line exists, everything is "before" it: nothing has been
+    /// established as new yet, and counting is the only answer that can't lose
+    /// a mile.
+    func isBeforeGrandfatherLine(_ recordedAt: Date) -> Bool {
+        guard let line = grandfatheredAt else { return true }
+        return recordedAt < line
     }
 
     /// First-party sources never need approval — Mile A Day's own recordings and
@@ -1851,13 +2013,22 @@ final class WorkoutSourcePreferences: ObservableObject {
     /// (HealthKit queries error before first unlock) and then treat every real
     /// source as new — the exact false-positive that would make the prompt
     /// untrustworthy on the one occasion it matters.
-    func grandfatherIfNeeded(existingBundleIds: [String]) {
+    ///
+    /// - Parameter listIsComplete: false while the 30-day recent-workouts query
+    ///   still hasn't come back. Today's workouts alone are NOT the source list
+    ///   — a source that wrote yesterday and not yet today is invisible in it —
+    ///   so drawing the line off that partial answer is the same mistake as
+    ///   drawing it off an empty one, just harder to notice.
+    func grandfatherIfNeeded(existingBundleIds: [String], listIsComplete: Bool) {
         guard !defaults.bool(forKey: Self.grandfatheredKey) else { return }
-        guard !existingBundleIds.isEmpty else { return }
+        guard listIsComplete, !existingBundleIds.isEmpty else { return }
         for bundleId in existingBundleIds where decisions[bundleId] == nil {
             decisions[bundleId] = Decision.counted.rawValue
         }
+        let line = Date()
+        grandfatheredAt = line
         defaults.set(decisions, forKey: Self.decisionsKey)
+        defaults.set(line, forKey: Self.grandfatheredAtKey)
         defaults.set(true, forKey: Self.grandfatheredKey)
     }
 }
@@ -1971,6 +2142,9 @@ enum WorkoutDedup {
         /// Mile A Day's own recording. Preferred survivor: it's the copy that
         /// carries the GPS route, which is also the server's first tiebreak.
         let isFirstParty: Bool
+        /// Measured by THIS app's tracker, with the user watching the number
+        /// climb. Outranks everything and is never excluded — see `ranked`.
+        let isTracked: Bool
     }
 
     /// Indices of workouts that should NOT be counted, because another workout
@@ -1993,8 +2167,13 @@ enum WorkoutDedup {
     ///   ignoring the user's decisions. The detail screen needs that to offer an
     ///   undo — once an override is in force the workout is no longer excluded,
     ///   so there'd otherwise be nothing left to explain what was undone.
+    /// - Parameter skipping: indices already out of the total for a DIFFERENT
+    ///   reason (an un-approved source). They take no part: a recording that
+    ///   isn't counted must not be the "keeper" that knocks a counted one out,
+    ///   or the walk leaves the total twice over and lands in it zero times.
     static func duplicateSources(
-        in workouts: [HKWorkout], applyingOverrides: Bool = true
+        in workouts: [HKWorkout], applyingOverrides: Bool = true,
+        skipping: Set<Int> = []
     ) -> [Int: Int] {
         var excluded: [Int: Int] = [:]
         guard workouts.count > 1 else { return excluded }
@@ -2005,6 +2184,7 @@ enum WorkoutDedup {
         var firstIndexByUUID: [String: Int] = [:]
         var candidates: [Candidate] = []
         for (index, workout) in workouts.enumerated() {
+            guard !skipping.contains(index) else { continue }
             let uuid = workout.uuid.uuidString
             if let first = firstIndexByUUID[uuid] {
                 excluded[index] = first
@@ -2023,17 +2203,21 @@ enum WorkoutDedup {
                     start: workout.startDate,
                     end: workout.endDate,
                     duration: duration,
-                    miles: workout.totalDistance?.doubleValue(for: .mile()) ?? 0,
-                    isFirstParty: isFirstParty(bundleId: bundle)
+                    miles: workout.madDistanceMiles,
+                    isFirstParty: isFirstParty(bundleId: bundle),
+                    isTracked: TrackedWorkoutLedger.shared.isTracked(uuid)
                 )
             )
         }
 
         // Preferred survivor sorts FIRST, so a later candidate is only ever
-        // dropped in favour of a better one. Mile A Day's copy wins (it has the
-        // route); then the longer distance, since a fragment can't be longer
-        // than the walk that contains it.
+        // dropped in favour of a better one. A walk our own tracker measured
+        // wins outright — the user watched that number being taken, and no
+        // other app's copy of it may replace it in their own total. Then Mile A
+        // Day's copy generally (it has the route); then the longer distance,
+        // since a fragment can't be longer than the walk that contains it.
         let ranked = candidates.sorted {
+            if $0.isTracked != $1.isTracked { return $0.isTracked }
             if $0.isFirstParty != $1.isFirstParty { return $0.isFirstParty }
             if $0.miles != $1.miles { return $0.miles > $1.miles }
             return $0.index < $1.index
@@ -2041,6 +2225,10 @@ enum WorkoutDedup {
 
         for (position, candidate) in ranked.enumerated() {
             if excluded[candidate.index] != nil { continue }
+            // Never drop a walk this app measured itself. Ranking first already
+            // makes it the keeper in any pair; this is the belt to that braces,
+            // so no future tiebreak can quietly make the tracked walk the loser.
+            if candidate.isTracked { continue }
             // The user already looked at this one and said it was a separate
             // walk. That answer outranks the rule, permanently.
             if restored.contains(candidate.uuid) { continue }
@@ -2094,8 +2282,10 @@ enum WorkoutDedup {
         case sourcePending
     }
 
-    /// Why each workout in the array is or isn't counted, by index.
-    static func exclusions(in workouts: [HKWorkout]) -> [Int: ExclusionReason] {
+    /// Workouts kept out of the total because of their SOURCE, by index.
+    /// Nothing to do with duplicates — this is only "has the user let this app
+    /// add to their miles yet".
+    static func consentExclusions(in workouts: [HKWorkout]) -> [Int: ExclusionReason] {
         var out: [Int: ExclusionReason] = [:]
         let prefs = WorkoutSourcePreferences.shared
         for (index, workout) in workouts.enumerated() {
@@ -2103,17 +2293,45 @@ enum WorkoutDedup {
             if isFirstParty(bundleId: bundleId) { continue }
             switch prefs.decision(for: bundleId) {
             case .counted: continue
+            // An explicit "don't count this app" applies to everything it ever
+            // wrote — that answer is the user's, and it outranks the line.
             case .ignored: out[index] = .sourceIgnored
-            case nil: out[index] = .sourcePending
+            case nil:
+                // Never asked. Only what arrived AFTER we started asking waits
+                // on an answer; anything older was already in their total and
+                // must not quietly leave it.
+                if prefs.isBeforeGrandfatherLine(workout.startDate) { continue }
+                out[index] = .sourcePending
             }
         }
-        // Duplicate detection runs over what's left: a workout already out on
-        // consent grounds must not also become the "keeper" that knocks out a
-        // real one, or refusing a source would delete a walk the user did.
-        for (index, _) in duplicateSources(in: workouts) where out[index] == nil {
-            out[index] = .duplicate
-        }
         return out
+    }
+
+    /// Why each workout is or isn't counted, AND what covers the ones that
+    /// aren't — resolved together, because the two answers have to agree. Read
+    /// them separately and the label can name a "keeper" that is itself out of
+    /// the total.
+    static func breakdown(
+        in workouts: [HKWorkout]
+    ) -> (reasons: [Int: ExclusionReason], coveredBy: [Int: Int]) {
+        var reasons = consentExclusions(in: workouts)
+        // Duplicate detection runs over what's LEFT — the array minus the
+        // consent exclusions, not the whole array. It used to be handed
+        // everything, so an un-approved copy could still be chosen as the
+        // keeper: the approved recording was marked `.duplicate` of it, the
+        // un-approved one stayed `.sourcePending`, and the walk vanished from
+        // the day entirely. That is a daily total going DOWN for no reason a
+        // user could see.
+        let coveredBy = duplicateSources(in: workouts, skipping: Set(reasons.keys))
+        for (index, _) in coveredBy where reasons[index] == nil {
+            reasons[index] = .duplicate
+        }
+        return (reasons, coveredBy)
+    }
+
+    /// Why each workout in the array is or isn't counted, by index.
+    static func exclusions(in workouts: [HKWorkout]) -> [Int: ExclusionReason] {
+        breakdown(in: workouts).reasons
     }
 
     /// Total miles for a set of workouts, counting each real activity once.
@@ -2125,7 +2343,7 @@ enum WorkoutDedup {
         let excluded = exclusions(in: workouts)
         var total = 0.0
         for (index, workout) in workouts.enumerated() where excluded[index] == nil {
-            total += workout.totalDistance?.doubleValue(for: .mile()) ?? 0
+            total += workout.madDistanceMiles
         }
         return total
     }
