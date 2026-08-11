@@ -380,7 +380,26 @@ const CAP_EXEMPT_TYPES: NotificationType[] = [
   // didn't post. That has to reach you — a throttled tag is the one case
   // where the in-app row lands and the person never learns they're on it.
   "coauthor_invite",
+  // Hypes and nudges are unlimited AS A PRODUCT — one friend deliberately
+  // tapping another, which is the app's whole social loop. Capping them here
+  // made "unlimited" a lie the sender couldn't see: hypeService says as much
+  // ("Hypes are unlimited as a product"), admins bypass every send-side limit
+  // via hasUnlimitedActions, and then the recipient's 18/day budget silently
+  // swallowed the push anyway.
+  //
+  // Their abuse backstops live on the SEND side, where they can tell who's
+  // doing it, and both survive this: HYPE_DAILY_ABUSE_CEILING (50/sender/day,
+  // plus dedupe on contextful hypes) and nudges' 1-per-friend-per-24h. So the
+  // worst case is bounded per sender, and the recipient still has the hype
+  // toggle, per-friend muting, blocking and quiet hours.
+  "hype_received",
+  "friend_nudge",
 ];
+
+/** Single source of truth for "the daily cap does not apply to this type". */
+export function isCapExempt(type: NotificationType): boolean {
+  return CAP_EXEMPT_TYPES.includes(type);
+}
 
 // High-priority types bypass throttling
 const HIGH_PRIORITY_TYPES: NotificationType[] = [
@@ -424,6 +443,9 @@ async function logNotificationSent(
   userId: string,
   type: NotificationType,
 ): Promise<void> {
+  // notification_log exists ONLY as the daily-cap ledger — getDailyNotificationCount
+  // is its sole reader (plus a 30-day cleanup). Whether a push should charge the
+  // budget at all is the caller's call: see `chargesBudget` in sendPush.
   await db.query(
     "INSERT INTO notification_log (user_id, type) VALUES ($1, $2)",
     [userId, type],
@@ -456,7 +478,15 @@ async function isUserInQuietHours(userId: string): Promise<boolean> {
 export async function sendPush(
   userId: string,
   payload: PushPayload,
+  opts: { bypassDailyCap?: boolean } = {},
 ): Promise<void> {
+  // ONE expression for "does this push consume a unit of the 18/day budget",
+  // read by every notification_log write below so the throttle check and the
+  // ledger can never disagree. Two ways to not charge:
+  //   - cap-exempt type: it isn't subject to the cap, so it must not eat it
+  //     either, or a busy day of hypes starves the reminders the cap rations.
+  //   - a flush: the row was already charged when it was queued (see FLUSH_OPTS).
+  const chargesBudget = !opts.bypassDailyCap && !isCapExempt(payload.type);
   // Check user's custom quiet hours
   if (!HIGH_PRIORITY_TYPES.includes(payload.type)) {
     const inQuiet = await isUserInQuietHours(userId);
@@ -474,7 +504,7 @@ export async function sendPush(
           payload.title,
         ],
       );
-      await logNotificationSent(userId, payload.type);
+      if (chargesBudget) await logNotificationSent(userId, payload.type);
       // Still store in inbox so user can see it later
       storeInAppNotification(userId, payload).catch((err) =>
         console.error("[Push] Error storing in-app notification:", err.message),
@@ -485,8 +515,9 @@ export async function sendPush(
     // Smart throttling: check daily cap
     const dailyCount = await getDailyNotificationCount(userId);
     if (
+      !opts.bypassDailyCap &&
       dailyCount >= DAILY_NOTIFICATION_CAP &&
-      !CAP_EXEMPT_TYPES.includes(payload.type)
+      !isCapExempt(payload.type)
     ) {
       console.log(
         `[Push] Throttled "${payload.type}" for user ${userId} (${dailyCount}/${DAILY_NOTIFICATION_CAP} today)`,
@@ -501,7 +532,7 @@ export async function sendPush(
           payload.title,
         ],
       );
-      await logNotificationSent(userId, payload.type);
+      if (chargesBudget) await logNotificationSent(userId, payload.type);
       // Still store in inbox
       storeInAppNotification(userId, payload).catch((err) =>
         console.error("[Push] Error storing in-app notification:", err.message),
@@ -539,7 +570,7 @@ export async function sendPush(
 
   const sent = results.filter(Boolean).length;
   if (sent > 0) {
-    await logNotificationSent(userId, payload.type);
+    if (chargesBudget) await logNotificationSent(userId, payload.type);
     console.log(
       `[Push] Sent "${payload.type}" to user ${userId} (${sent}/${tokens.length} devices)`,
     );
@@ -765,6 +796,27 @@ interface PendingNotification {
   competition_name: string;
 }
 
+/**
+ * For the `otherNotifs` half of the flush ONLY — deferred delivery of rows that
+ * already paid, not new traffic.
+ *
+ * Those rows can only have come from sendPush's own quiet-hours or throttle
+ * branch, and both call logNotificationSent before returning. Charging again at
+ * flush double-bills the same notifications and can swallow the catch-up.
+ *
+ * It also repairs an exemption hole: a multi-item flush collapses everything
+ * into ONE `competition_updates` digest, so a queued hype's cap exemption is
+ * lost the moment it's folded in. Relabelling the digest would be worse — the
+ * client routes on `type`, and a digest typed `hype_received` taps through to
+ * the wrong screen.
+ *
+ * Do NOT extend this to the competition digest: those rows arrive uncharged
+ * from sendOrQueueCompetitionNotification. The split is exact because the two
+ * halves partition on competition_started/finished, which is precisely the set
+ * that producer emits.
+ */
+const FLUSH_OPTS = { bypassDailyCap: true } as const;
+
 export async function flushBatchedNotifications(): Promise<void> {
   const pending = await db.query<PendingNotification>(
     `SELECT id, user_id, type, competition_id, competition_name
@@ -826,6 +878,11 @@ export async function flushBatchedNotifications(): Promise<void> {
         type = "competition_finished";
       }
 
+      // NO FLUSH_OPTS here, deliberately: competition_started/finished are the
+      // one kind queued by sendOrQueueCompetitionNotification, which inserts
+      // straight into pending_notifications without charging the ledger. They
+      // are also HIGH_PRIORITY, so sendPush's own queueing branches never see
+      // them — this digest is their FIRST charge, not a second one.
       await sendPush(userId, { title, body, type });
     }
 
@@ -834,18 +891,26 @@ export async function flushBatchedNotifications(): Promise<void> {
       if (otherNotifs.length === 1) {
         // Single throttled notification: send it directly
         const n = otherNotifs[0];
-        await sendPush(userId, {
-          title: n.competition_name || "Notification", // competition_name stores the original title
-          body: `You have a notification you missed`,
-          type: (n.type as NotificationType) || "competition_updates",
-        });
+        await sendPush(
+          userId,
+          {
+            title: n.competition_name || "Notification", // competition_name stores the original title
+            body: `You have a notification you missed`,
+            type: (n.type as NotificationType) || "competition_updates",
+          },
+          FLUSH_OPTS,
+        );
       } else {
         // Multiple: send digest
-        await sendPush(userId, {
-          title: "Catch up on activity",
-          body: `You have ${otherNotifs.length} notifications from while you were away`,
-          type: "competition_updates",
-        });
+        await sendPush(
+          userId,
+          {
+            title: "Catch up on activity",
+            body: `You have ${otherNotifs.length} notifications from while you were away`,
+            type: "competition_updates",
+          },
+          FLUSH_OPTS,
+        );
       }
     }
   }

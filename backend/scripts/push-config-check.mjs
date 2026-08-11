@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
 import jwt from "jsonwebtoken";
 import {
+  isCapExempt,
   isDeadToken,
   toPem,
 } from "../dist/services/pushNotificationService.js";
@@ -125,5 +126,49 @@ assert.equal(
   "body parses to null: must not throw on property access",
 );
 assert.equal(isDeadToken(200, r("BadDeviceToken")), false, "200 never prunes");
+
+/* ── Part 3: which types the daily cap applies to ─────────────────────
+ *
+ * `isCapExempt` gates two things that have to agree: whether the 18/day cap
+ * throttles a push, AND whether that push consumes the budget. Exempting a
+ * type without the second half means a busy day of hypes silently starves the
+ * reminders the cap exists to ration; exempting too much means no cap at all.
+ *
+ * So both directions are pinned. The person-to-person types must stay exempt —
+ * they're unlimited as a product and bounded by SEND-side limits instead
+ * (HYPE_DAILY_ABUSE_CEILING, nudges' 1-per-friend-per-24h).
+ */
+for (const type of [
+  "mention",
+  "coauthor_invite",
+  "hype_received",
+  "friend_nudge",
+]) {
+  assert.equal(
+    isCapExempt(type),
+    true,
+    `${type} is one person addressing another — the daily cap must not eat it`,
+  );
+}
+
+// The chatter the cap exists for. If these ever go exempt, there is no cap.
+for (const type of [
+  "friend_activity",
+  "friend_post",
+  "daily_reminder",
+  "badge_earned",
+  "friend_badge_earned",
+  "friend_personal_best",
+  "friend_challenge_completed",
+  "lead_change",
+  "competition_milestone",
+  "friend_request_reminder",
+]) {
+  assert.equal(
+    isCapExempt(type),
+    false,
+    `${type} is automated chatter — it must stay under the daily cap`,
+  );
+}
 
 console.log("push-config-check: OK");
