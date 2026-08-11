@@ -323,13 +323,23 @@ struct AskForMileSheet: View {
     @State private var askedIds: Set<String> = []
     @State private var busyId: String?
     @State private var errorText: String?
+    @State private var isLoadingFriends = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
                     header
-                    if friendService.friends.isEmpty {
+                    // An empty cache is NOT proof of no friends: this sheet
+                    // opens from the Dashboard, and FriendService only loads
+                    // when the Friends tab has been visited. Saying "add a
+                    // friend first" to someone with forty of them is the same
+                    // bug as a silent CTA.
+                    if friendService.friends.isEmpty && isLoadingFriends {
+                        ProgressView()
+                            .tint(.white)
+                            .padding(.top, 30)
+                    } else if friendService.friends.isEmpty {
                         Text("Add a friend first — an Assist always takes two people.")
                             .font(.system(size: 13, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.5))
@@ -360,6 +370,12 @@ struct AskForMileSheet: View {
                     Button("Done") { dismiss() }
                         .foregroundColor(.white.opacity(0.7))
                 }
+            }
+            .task {
+                guard friendService.friends.isEmpty else { return }
+                isLoadingFriends = true
+                await friendService.refreshAllData()
+                isLoadingFriends = false
             }
         }
     }

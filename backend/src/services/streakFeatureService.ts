@@ -782,9 +782,11 @@ export async function respondToAssistOffer(
     recipient_id: string;
     initiator: string;
     target_date: string;
+    donor_date: string | null;
   }>(
     `SELECT id, donor_id, recipient_id, initiator,
-            to_char(target_date, 'YYYY-MM-DD') AS target_date
+            to_char(target_date, 'YYYY-MM-DD') AS target_date,
+            to_char(donor_date, 'YYYY-MM-DD') AS donor_date
      FROM streak_assist_offers
      WHERE id = $1 AND status = 'pending'`,
     [offerId],
@@ -829,15 +831,28 @@ export async function respondToAssistOffer(
   );
   if (!check.ok) return { status: check.reason };
 
-  // The donor's mile: already committed when they offered, charged now when
-  // they're the one accepting a request.
+  // The donor's mile, re-checked from scratch either way — a workout can be
+  // edited or deleted between the offer and the answer, and a pending offer
+  // must not be able to write coverage the donor no longer has miles for.
   if (offer.initiator === "recipient") {
+    // Nothing committed yet: this accept is what charges today's mile.
     const budget = await getDonationBudget(
       offer.donor_id,
       ex.donorRow,
       ex.donorToday,
     );
     if (budget.remaining < 1) return { status: "no_miles" };
+  } else {
+    // Already committed, so THIS row is inside `used` — the question is
+    // whether that day's miles still cover everything promised from them.
+    // Bucketed on the offer's own donor_date, not today: an offer answered
+    // after midnight is still backed by the mile that was actually run.
+    const budget = await getDonationBudget(
+      offer.donor_id,
+      ex.donorRow,
+      offer.donor_date ?? ex.donorToday,
+    );
+    if (budget.allowed < budget.used) return { status: "no_miles" };
   }
 
   const inserted = await insertCoverage(
