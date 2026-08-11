@@ -24,9 +24,11 @@ const db = PostgresService.getInstance();
  *                       jogs don't tick it). Held at 7. Spent automatically by
  *                       the sweep when a miss can't be (or wasn't) Double
  *                       Downed.
- *   🤝 Streak Assist  — meter: 20 miles run/walked BEYOND the daily goal.
- *                       Held at 20. Spent on YOUR OWN broken day, but only
- *                       with a friend's donated mile — see below.
+ *   🤝 Streak Assist  — meter: TIME, not effort. One every 30 days, counted
+ *                       from the day you last spent one; never spent one and
+ *                       you're already holding it. Spent on YOUR OWN broken
+ *                       day, but only with a friend's donated mile — see
+ *                       below.
  *
  * The Assist is the one token you cannot spend alone. It costs two things from
  * two people: the RECIPIENT's held token, and one mile the DONOR ran past
@@ -35,10 +37,12 @@ const db = PostgresService.getInstance();
  * run, or ask a friend for one — but it always takes both answers, so a
  * streak_assist coverage row can only appear after an accept.
  *
- * Meters are DERIVED — counted from workouts since the token's last-used date
- * — never stored, so retries/edits/deletes can't drift a counter. The window
- * opens at GREATEST(last use, enrollment − 30d lookback, today − 90d), which
- * both grants retroactive credit at enrollment and bounds the query.
+ * Meters are DERIVED — never stored, so retries/edits/deletes can't drift a
+ * counter. Double Down and Streak Save count workouts since the token's
+ * last-used date, over a window opening at GREATEST(last use, enrollment −
+ * 365d, today − 365d), which both grants retroactive credit at enrollment and
+ * bounds the query. The Assist counts DAYS since its last use instead, so it
+ * reads no workouts at all.
  *
  * Everything here no-ops unless the user has the (new-build-only) enrollment
  * stamp — and freezes entirely if the STREAK_FEATURES_DISABLED kill switch is
@@ -49,7 +53,11 @@ const db = PostgresService.getInstance();
 // most likely to need tuning after launch.
 export const DOUBLE_DOWN_TARGET_DAYS = 14;
 export const STREAK_SAVE_TARGET_RUN_DAYS = 7;
-export const STREAK_ASSIST_TARGET_MILES = 20;
+// The Assist is the one meter that isn't earned by running. It's a 30-day
+// allowance measured from the last spend, so a new account holds one on day
+// one (nothing spent yet) and spending one starts a visible countdown. That
+// also makes it the only meter needing no query at all — just two dates.
+export const STREAK_ASSIST_TARGET_DAYS = 30;
 // Double Down completion threshold mirrors the 0.95 display tolerance.
 const DOUBLE_DOWN_GOAL_MULTIPLIER = 2;
 const DOUBLE_DOWN_TOLERANCE = 0.05;
@@ -90,6 +98,30 @@ function dateOnly(value: string | Date | null): string | null {
   return String(value).slice(0, 10);
 }
 
+/**
+ * Days of the Assist allowance accrued: the whole earn rule, in two dates.
+ *
+ * Never spent one → already at target, which is deliberate. A brand-new
+ * account is exactly the case with no history to earn from, and the first
+ * miss is the one most worth catching; making them wait 30 days for their
+ * first token would mean the feature simply doesn't exist for a new user's
+ * first month.
+ *
+ * Clamped at 0 because `streak_assist_last_used` is stamped in the SPENDER's
+ * local today, which can legitimately read a day ahead of a caller further
+ * west — a negative here would render as a countdown longer than 30.
+ */
+function assistDaysElapsed(
+  lastUsed: string | null,
+  userToday: string,
+): number {
+  if (!lastUsed) return STREAK_ASSIST_TARGET_DAYS;
+  const from = Date.parse(`${lastUsed.slice(0, 10)}T00:00:00Z`);
+  const to = Date.parse(`${userToday}T00:00:00Z`);
+  if (Number.isNaN(from) || Number.isNaN(to)) return 0;
+  return Math.max(0, Math.round((to - from) / 86_400_000));
+}
+
 /** Window floor for one meter: last use vs enrollment lookback vs hard bound. */
 function meterFloor(
   lastUsed: string | null,
@@ -128,44 +160,32 @@ export async function getMeters(
     enrolledAt,
     userToday,
   );
-  const assistFloor = meterFloor(
-    row.streak_assist_last_used,
-    enrolledAt,
-    userToday,
-  );
   const goalMiles = Number(row.goal_miles) || 1.0;
 
   const rows = await db.query<{
     dd_days: string | number;
     save_days: string | number;
-    assist_miles: string | number;
   }>(
     `SELECT
       (SELECT COUNT(*) FROM (
         SELECT local_date FROM workouts
         WHERE user_id = $1 AND deleted_at IS NULL AND exclusion_reason IS NULL
-          AND local_date > $2::date AND local_date <= $5::date
+          AND local_date > $2::date AND local_date <= $4::date
         GROUP BY local_date HAVING SUM(distance) >= 0.95
       ) dd) AS dd_days,
       (SELECT COUNT(*) FROM (
         SELECT local_date FROM workouts
         WHERE user_id = $1 AND deleted_at IS NULL AND exclusion_reason IS NULL
           AND workout_type = 'running'
-          AND local_date > $3::date AND local_date <= $5::date
+          AND local_date > $3::date AND local_date <= $4::date
         GROUP BY local_date HAVING SUM(distance) >= 0.95
-      ) sv) AS save_days,
-      COALESCE((SELECT SUM(GREATEST(day_total - $6::double precision, 0)) FROM (
-        SELECT SUM(distance) AS day_total FROM workouts
-        WHERE user_id = $1 AND deleted_at IS NULL AND exclusion_reason IS NULL
-          AND local_date > $4::date AND local_date <= $5::date
-        GROUP BY local_date
-      ) a), 0) AS assist_miles`,
-    [userId, ddFloor, saveFloor, assistFloor, userToday, goalMiles],
+      ) sv) AS save_days`,
+    [userId, ddFloor, saveFloor, userToday],
   );
 
   const ddDays = Number(rows[0]?.dd_days ?? 0);
   const saveDays = Number(rows[0]?.save_days ?? 0);
-  const assistMiles = Number(rows[0]?.assist_miles ?? 0);
+  const assistDays = assistDaysElapsed(row.streak_assist_last_used, userToday);
 
   return {
     double_down: {
@@ -181,12 +201,9 @@ export async function getMeters(
       last_used: row.streak_save_last_used,
     },
     streak_assist: {
-      progress: Math.min(
-        Math.round(assistMiles * 100) / 100,
-        STREAK_ASSIST_TARGET_MILES,
-      ),
-      target: STREAK_ASSIST_TARGET_MILES,
-      held: assistMiles >= STREAK_ASSIST_TARGET_MILES,
+      progress: Math.min(assistDays, STREAK_ASSIST_TARGET_DAYS),
+      target: STREAK_ASSIST_TARGET_DAYS,
+      held: assistDays >= STREAK_ASSIST_TARGET_DAYS,
       last_used: row.streak_assist_last_used,
     },
     goalMiles,
@@ -1166,11 +1183,11 @@ export interface AssistableFriend {
  * friend with a broken streak and no token can't be helped this way, and the
  * list would just advertise a POST that 409s.
  *
- * ONE query for up to 50 friends (their local today, their last 4 days, their
- * Assist meter and any standing offer, all as LATERALs) and then at most one
- * `streakEndingAt` per actual candidate. The previous version walked five
- * queries per friend before it could rule any of them out, which was ~250 for
- * a list that is usually empty.
+ * ONE query for up to 50 friends (their local today, their last 4 days and any
+ * standing offer, as LATERALs; the Assist allowance is a plain date predicate)
+ * and then at most one `streakEndingAt` per actual candidate. The previous
+ * version walked five queries per friend before it could rule any of them out,
+ * which was ~250 for a list that is usually empty.
  *
  * `self_recovery` is deliberately NOT computed here — it needs two more meters
  * per friend and only matters once someone is looking at a specific rescue.
@@ -1190,7 +1207,6 @@ export async function getAssistableFriends(
     profile_image_url: string | null;
     friend_today: string;
     ok_days: string[] | null;
-    assist_miles: string | number;
     offer_id: string | null;
     offer_status: string | null;
     offer_target: string | null;
@@ -1198,7 +1214,6 @@ export async function getAssistableFriends(
     `SELECT u.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
             to_char(t.today, 'YYYY-MM-DD') AS friend_today,
             ok.days AS ok_days,
-            COALESCE(am.miles, 0) AS assist_miles,
             o.id AS offer_id, o.status AS offer_status,
             o.target_date AS offer_target
      FROM friendships f
@@ -1223,21 +1238,6 @@ export async function getAssistableFriends(
        ) x
      ) ok ON TRUE
      LEFT JOIN LATERAL (
-       -- The friend's Assist meter, inlined: same window floor as meterFloor().
-       SELECT COALESCE(SUM(GREATEST(a.day_total - COALESCE(u.goal_miles, 1.0), 0)), 0) AS miles
-       FROM (
-         SELECT SUM(w.distance) AS day_total FROM workouts w
-          WHERE w.user_id = u.user_id AND w.deleted_at IS NULL
-            AND w.exclusion_reason IS NULL
-            AND w.local_date > GREATEST(
-                  COALESCE(u.streak_assist_last_used, DATE '1970-01-01'),
-                  u.streak_features_at::date - ${ENROLL_LOOKBACK_DAYS},
-                  t.today - ${METER_WINDOW_DAYS})
-            AND w.local_date <= t.today
-          GROUP BY w.local_date
-       ) a
-     ) am ON TRUE
-     LEFT JOIN LATERAL (
        -- Carries its target_date out so the caller can check it against the
        -- day actually in play: yesterday's ACCEPTED offer must not read as
        -- "already offered" for a fresh day this friend needs covering.
@@ -1249,6 +1249,12 @@ export async function getAssistableFriends(
      ) o ON TRUE
      WHERE f.user_id = $1 AND f.status = 'accepted'
        AND u.streak_features_at IS NOT NULL
+       -- Holding an Assist is now just a date: never spent one, or spent one
+       -- at least ${STREAK_ASSIST_TARGET_DAYS} days ago. Same rule as
+       -- assistDaysElapsed(), cheap enough to state right here instead of
+       -- inlining a meter subquery per friend.
+       AND (u.streak_assist_last_used IS NULL
+            OR u.streak_assist_last_used <= t.today - ${STREAK_ASSIST_TARGET_DAYS})
        AND NOT EXISTS (
          SELECT 1 FROM user_blocks b
          WHERE (b.blocker_id = $1 AND b.blocked_id = u.user_id)
@@ -1260,7 +1266,6 @@ export async function getAssistableFriends(
 
   const out: AssistableFriend[] = [];
   for (const row of rows) {
-    if (Number(row.assist_miles) < STREAK_ASSIST_TARGET_MILES) continue;
     const okDays = new Set(row.ok_days ?? []);
     const ok = (d: string) => okDays.has(d);
     const pick = pickTargetDay(row.friend_today, ok);

@@ -91,10 +91,8 @@ final class StreakTokensState: ObservableObject {
             let d = Int(new.streak_save.progress) - Int(old.streak_save.progress)
             if d > 0 { gains["streak_save"] = "+\(d) run day\(d == 1 ? "" : "s")" }
         }
-        if !new.streak_assist.held {
-            let d = new.streak_assist.progress - old.streak_assist.progress
-            if d >= 0.05 { gains["streak_assist"] = String(format: "+%.1f mi", d) }
-        }
+        // No Assist chip: its meter is a calendar now, so it would fire a
+        // "+1 day" every single day for a number the countdown already shows.
         guard !gains.isEmpty else { return }
         meterGains = gains
         gainsClearTask?.cancel()
@@ -244,7 +242,7 @@ final class StreakTokensState: ObservableObject {
                 progress: 7, target: 7, held: true, last_used: nil
             ),
             streak_assist: StreakTokenMeter(
-                progress: 12.5, target: 20, held: true, last_used: nil
+                progress: 30, target: 30, held: true, last_used: nil
             ),
             frozen_dates: [],
             natural_streak: true,

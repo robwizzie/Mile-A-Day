@@ -634,7 +634,7 @@ struct GoalCompletedCelebrationView: View {
                         progress: payload.streak_assist.fraction,
                         caption: payload.streak_assist.held
                             ? "Ready"
-                            : String(format: "%.1f/%.0f mi", payload.streak_assist.progress, payload.streak_assist.target)
+                            : payload.streak_assist.assistCaption
                     )
                 }
             }

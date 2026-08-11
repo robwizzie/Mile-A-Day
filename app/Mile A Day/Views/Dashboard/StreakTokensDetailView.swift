@@ -73,7 +73,7 @@ enum StreakTokenKind {
         case .save:
             return "Run your full mile on 7 days. Running only — walks don't tick this one."
         case .assist:
-            return "Go a total of 20 miles beyond your daily goal, over any number of days. Holding one is half of a save — a friend's spare mile is the other half."
+            return "One every 30 days — the countdown starts the day you spend one, so a brand-new account is already holding its first. Holding one is half of a save; a friend's spare mile is the other half."
         }
     }
 }
@@ -292,7 +292,7 @@ struct StreakTokensCard: View {
                             progress: payload.streak_assist.fraction,
                             caption: payload.streak_assist.held
                                 ? "Available"
-                                : String(format: "%.1f/%.0f mi", payload.streak_assist.progress, payload.streak_assist.target)
+                                : payload.streak_assist.assistCaption
                         )
                     }
 
@@ -612,7 +612,7 @@ struct StreakTokensDetailView: View {
                                 unit: "days"
                             )
                             tokenCard(kind: .save, meter: payload.streak_save, unit: "run days")
-                            tokenCard(kind: .assist, meter: payload.streak_assist, unit: "mi over goal")
+                            tokenCard(kind: .assist, meter: payload.streak_assist, unit: "days")
 
                             naturalCard(payload.natural_streak)
                             savedDaysCard

@@ -14,7 +14,7 @@ import SwiftUI
 ///     how much further to run, so "why don't I have the option" has a visible
 ///     answer instead of the CTA silently not rendering.
 ///  3. **Friend has a day but no token** → a muted line saying they need to
-///     bank 20 miles past their own goal first.
+///     wait out the 30 days since they last spent one.
 ///  4. **Offer already in flight** → "Mile offered", waiting on them.
 ///  5. **Friend's build is too old / nothing to cover** → an explanation, or
 ///     nothing at all.
@@ -78,7 +78,7 @@ struct SaveFriendStreakView: View {
             case .friendNeedsToken:
                 infoPill(
                     icon: "lock.circle",
-                    text: "\(friendName) hasn't banked a Streak Assist yet — they need 20 miles past their own goal to hold one"
+                    text: "\(friendName) used their Streak Assist recently — they get the next one 30 days after the last."
                 )
             case .beyondRescue(let multiDay):
                 infoPill(

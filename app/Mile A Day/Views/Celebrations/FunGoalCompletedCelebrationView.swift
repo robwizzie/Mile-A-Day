@@ -263,7 +263,7 @@ struct FunGoalCompletedCelebrationView: View {
                 HStack(spacing: 0) {
                     tokenCell(kind: .doubleDown, held: payload.double_down.held, progress: payload.double_down.fraction, caption: payload.double_down.held ? "Ready" : "\(Int(payload.double_down.progress))/\(Int(payload.double_down.target))")
                     tokenCell(kind: .save, held: payload.streak_save.held, progress: payload.streak_save.fraction, caption: payload.streak_save.held ? "Ready" : "\(Int(payload.streak_save.progress))/\(Int(payload.streak_save.target))")
-                    tokenCell(kind: .assist, held: payload.streak_assist.held, progress: payload.streak_assist.fraction, caption: payload.streak_assist.held ? "Ready" : String(format: "%.1f/%.0f mi", payload.streak_assist.progress, payload.streak_assist.target))
+                    tokenCell(kind: .assist, held: payload.streak_assist.held, progress: payload.streak_assist.fraction, caption: payload.streak_assist.assistCaption)
                 }
             }
         }

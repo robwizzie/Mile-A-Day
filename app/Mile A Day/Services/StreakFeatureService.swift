@@ -14,6 +14,16 @@ struct StreakTokenMeter: Codable {
         guard target > 0 else { return 0 }
         return min(max(progress / target, 0), 1)
     }
+
+    /// Caption for the Streak Assist meter, which counts DAYS since the last
+    /// one was spent rather than miles run. One helper because four surfaces
+    /// (the token card and all three goal celebrations) print it, and they had
+    /// already drifted into four copies of the same format string.
+    var assistCaption: String {
+        if held { return "Ready" }
+        let daysLeft = Int(max(0, (target - progress).rounded(.up)))
+        return daysLeft == 1 ? "1 day to go" : "\(daysLeft) days to go"
+    }
 }
 
 /// A day the server says still counts (token-covered), with which token did it

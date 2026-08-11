@@ -107,7 +107,7 @@ enum WhatsNewCatalog {
                 WhatsNewFeature(
                     icon: "lifepreserver",
                     title: "Save a friend's streak",
-                    blurb: "Go 20 miles past your goal to earn an Assist, then rescue a friend the day after their streak breaks.",
+                    blurb: "You hold a Streak Assist every 30 days. Spending it takes a mile a friend ran past their goal — ask, or donate one of yours.",
                     tint: MADTheme.Colors.madRed
                 ),
                 WhatsNewFeature(
