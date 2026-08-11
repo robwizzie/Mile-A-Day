@@ -25,8 +25,15 @@ const db = PostgresService.getInstance();
  *                       the sweep when a miss can't be (or wasn't) Double
  *                       Downed.
  *   🤝 Streak Assist  — meter: 20 miles run/walked BEYOND the daily goal.
- *                       Held at 20. Spent manually on a friend whose streak
- *                       broke yesterday.
+ *                       Held at 20. Spent on YOUR OWN broken day, but only
+ *                       with a friend's donated mile — see below.
+ *
+ * The Assist is the one token you cannot spend alone. It costs two things from
+ * two people: the RECIPIENT's held token, and one mile the DONOR ran past
+ * their own goal that day (two friends in a day = two miles past goal, three =
+ * three). Either side may open the exchange — donate a mile you've already
+ * run, or ask a friend for one — but it always takes both answers, so a
+ * streak_assist coverage row can only appear after an accept.
  *
  * Meters are DERIVED — counted from workouts since the token's last-used date
  * — never stored, so retries/edits/deletes can't drift a counter. The window
@@ -57,6 +64,10 @@ const METER_WINDOW_DAYS = 365;
 const MIN_NOTIFY_PRIOR_STREAK = 3;
 // A break stays rescuable for this many days after the missed day.
 const ASSIST_RESCUE_WINDOW_DAYS = 2;
+// One donation per whole mile past the donor's goal that day. Same 0.05 grace
+// as Double Down, so a GPS-shy 1.98 still buys the second one.
+const DONATION_MILE_COST = 1;
+const DONATION_TOLERANCE = DOUBLE_DOWN_TOLERANCE;
 
 export interface MeterState {
   progress: number;
@@ -416,9 +427,9 @@ async function recordBreak(
   if (rows.length === 0) return "none"; // already stamped by an earlier run
 
   if (prior >= MIN_NOTIFY_PRIOR_STREAK) {
-    notifyAssistHolders(userId, missedDay, prior).catch((e: any) =>
+    notifyBrokenTokenHolder(userId, missedDay, prior).catch((e: any) =>
       console.error(
-        "[StreakFeatures] assist-opportunity notify failed:",
+        "[StreakFeatures] assist-available notify failed:",
         e?.message ?? e,
       ),
     );
@@ -426,63 +437,48 @@ async function recordBreak(
   return "break";
 }
 
-/** Push "you can save them" to enrolled friends currently holding an Assist. */
-async function notifyAssistHolders(
+/**
+ * Tell the person who just broke that they hold the token to fix it.
+ *
+ * This push used to fan out to every friend holding an Assist. That made sense
+ * when a friend could spend their own token unilaterally; now the token is the
+ * BROKEN user's and the friend's half is a mile they may not have run yet, so
+ * a 7am blast to the whole friend list would ask most of them for something
+ * they can't give. The one person who can always act is the recipient — they
+ * ask, and the ask reaches friends who are actually holding a spare mile.
+ */
+async function notifyBrokenTokenHolder(
   brokenUserId: string,
   missedDay: string,
   priorStreak: number,
 ): Promise<void> {
-  const nameRows = await db.query<{
-    username: string | null;
-    first_name: string | null;
-  }>(`SELECT username, first_name FROM users WHERE user_id = $1`, [
-    brokenUserId,
-  ]);
-  const display =
-    nameRows[0]?.username || nameRows[0]?.first_name || "A friend";
+  const row = await getStreakFeatureRow(brokenUserId);
+  if (!row?.streak_features_at) return;
+  const userToday = await getUserLocalToday(brokenUserId);
+  const meters = await getMeters(brokenUserId, row, userToday);
+  if (!meters.streak_assist.held) return;
 
-  const friends = await db.query<{ friend_id: string }>(
-    `SELECT f.friend_id
-     FROM friendships f
-     JOIN users fu ON fu.user_id = f.friend_id
-     WHERE f.user_id = $1 AND f.status = 'accepted'
-       AND fu.streak_features_at IS NOT NULL
-       AND NOT EXISTS (
-         SELECT 1 FROM user_blocks b
-         WHERE (b.blocker_id = $1 AND b.blocked_id = f.friend_id)
-            OR (b.blocker_id = f.friend_id AND b.blocked_id = $1)
-       )`,
-    [brokenUserId],
-  );
-
-  for (const { friend_id } of friends) {
-    try {
-      const row = await getStreakFeatureRow(friend_id);
-      if (!row?.streak_features_at) continue;
-      const friendToday = await getUserLocalToday(friend_id);
-      const meters = await getMeters(friend_id, row, friendToday);
-      if (!meters.streak_assist.held) continue;
-      await sendPush(friend_id, {
-        title: `\u{1F525} ${display}'s ${priorStreak}-day streak just broke`,
-        body: "You're holding a Streak Assist — you can save it from their profile today.",
-        type: "streak_assist_opportunity",
-        data: {
-          user_id: brokenUserId,
-          local_date: missedDay,
-          prior_streak: String(priorStreak),
-        },
-      });
-    } catch (err: any) {
-      console.error(
-        `[StreakFeatures] opportunity push to ${friend_id} failed:`,
-        err?.message ?? err,
-      );
-    }
-  }
+  await sendPush(brokenUserId, {
+    title: `\u{1F91D} Your ${priorStreak}-day streak needs a hand`,
+    body: "You're holding a Streak Assist. Ask a friend to donate a mile and it's saved.",
+    type: "streak_assist_available",
+    data: {
+      local_date: missedDay,
+      prior_streak: String(priorStreak),
+    },
+  });
 }
 
-export type GiveAssistResult =
-  | { status: "ok"; restored_streak: number }
+export type AssistExchangeResult =
+  | {
+      status: "ok";
+      offer_id: string;
+      target_date: string;
+      /** What the recipient's streak becomes/stays once the day is covered. */
+      restored_streak: number;
+      /** True once coverage was actually written (accept), false for a pending offer. */
+      applied: boolean;
+    }
   | {
       status:
         | "disabled"
@@ -490,33 +486,27 @@ export type GiveAssistResult =
         | "friend_not_enrolled"
         | "forbidden"
         | "no_token"
-        | "no_recent_break"
+        | "friend_no_token"
+        | "no_miles"
+        | "no_savable_day"
         | "window_passed"
         | "gap_too_wide"
-        | "already_saved";
+        | "already_saved"
+        | "already_pending"
+        | "not_found";
     };
 
-/**
- * Spend the giver's Streak Assist to restore a friend's just-broken streak.
- * Guards mirror the story-reaction pattern: accepted friendship, no block in
- * either direction — plus BOTH sides must be enrolled (covering an un-enrolled
- * user's day would change streak math the legacy walk can't see).
- */
-export async function giveStreakAssist(
-  giverId: string,
+type AssistExchangeError = Exclude<
+  AssistExchangeResult,
+  { status: "ok" }
+>["status"];
+
+/** Accepted friendship in the caller's direction, with no block either way. */
+async function friendshipAllowed(
+  userId: string,
   friendId: string,
-): Promise<GiveAssistResult> {
-  if (!streakFeaturesGloballyEnabled()) return { status: "disabled" };
-  if (giverId === friendId) return { status: "forbidden" };
-
-  const [giverRow, friendRow] = await Promise.all([
-    getStreakFeatureRow(giverId),
-    getStreakFeatureRow(friendId),
-  ]);
-  if (!giverRow?.streak_features_at) return { status: "not_enrolled" };
-  if (!friendRow?.streak_features_at) return { status: "friend_not_enrolled" };
-
-  const allowed = await db.query(
+): Promise<boolean> {
+  const rows = await db.query(
     `SELECT 1 FROM friendships f
      WHERE f.user_id = $1 AND f.friend_id = $2 AND f.status = 'accepted'
        AND NOT EXISTS (
@@ -524,81 +514,483 @@ export async function giveStreakAssist(
          WHERE (b.blocker_id = $1 AND b.blocked_id = $2)
             OR (b.blocker_id = $2 AND b.blocked_id = $1)
        )`,
-    [giverId, friendId],
+    [userId, friendId],
   );
-  if (allowed.length === 0) return { status: "forbidden" };
+  return rows.length > 0;
+}
 
-  const giverToday = await getUserLocalToday(giverId);
-  const giverMeters = await getMeters(giverId, giverRow, giverToday);
-  if (!giverMeters.streak_assist.held) return { status: "no_token" };
+export interface DonationBudget {
+  goal_miles: number;
+  today_miles: number;
+  /** Whole miles past goal today — one buys one friend's day. */
+  allowed: number;
+  /** Already committed from today's miles (pending offers + accepted ones). */
+  used: number;
+  remaining: number;
+}
 
-  const friendToday = await getUserLocalToday(friendId);
-  const events = await db.query<{ local_date: string; prior_streak: number }>(
-    `SELECT to_char(local_date, 'YYYY-MM-DD') AS local_date, prior_streak
-     FROM streak_events e
-     WHERE e.user_id = $1 AND e.kind = 'break' AND e.local_date >= $2::date
-       -- An already-covered break is settled; without this filter a stale row
-       -- shadows the live break and the caller gets 'already_saved' for a day
-       -- nobody is trying to save.
-       AND NOT EXISTS (
-         SELECT 1 FROM streak_coverage sc
-         WHERE sc.user_id = e.user_id AND sc.local_date = e.local_date
-       )
-     ORDER BY e.local_date DESC LIMIT 1`,
-    [friendId, dateStrMinus(friendToday, ASSIST_RESCUE_WINDOW_DAYS + 1)],
+/**
+ * How many friends the donor can still cover today. The mile is the donor's
+ * whole half of the exchange, so it is spent at OFFER time, not at accept:
+ * an offer nobody has answered yet still holds its mile, or one runner could
+ * offer the same mile to five friends and have all five accept it.
+ *
+ * Bucketed by the donor's own local date, so an offer left unanswered
+ * overnight stops charging tomorrow's miles (it dies with its target day
+ * anyway — see `pendingOfferRows`).
+ */
+export async function getDonationBudget(
+  donorId: string,
+  row: StreakFeatureUserRow,
+  donorToday: string,
+): Promise<DonationBudget> {
+  const goalMiles = Number(row.goal_miles) || 1.0;
+  const todayMiles = await getMilesOnLocalDate(donorId, donorToday);
+  const allowed = Math.max(
+    0,
+    Math.floor(
+      (todayMiles - goalMiles + DONATION_TOLERANCE) / DONATION_MILE_COST,
+    ),
   );
-  const liveBreak =
-    events[0] ??
-    (await getLiveAssistableBreak(friendId, friendToday, friendRow));
-  if (!liveBreak) return { status: "no_recent_break" };
-  const missedDay = liveBreak.local_date;
-  if (missedDay < dateStrMinus(friendToday, ASSIST_RESCUE_WINDOW_DAYS)) {
-    return { status: "window_passed" };
+  const usedRows = await db.query<{ n: string }>(
+    `SELECT COUNT(*) AS n FROM streak_assist_offers
+     WHERE donor_id = $1 AND donor_date = $2::date
+       AND status IN ('pending', 'accepted')`,
+    [donorId, donorToday],
+  );
+  const used = Number(usedRows[0]?.n ?? 0);
+  return {
+    goal_miles: goalMiles,
+    today_miles: Math.round(todayMiles * 100) / 100,
+    allowed,
+    used,
+    remaining: Math.max(0, allowed - used),
+  };
+}
+
+/**
+ * Re-check that a target day is still worth (and legal to) cover, against the
+ * recipient's own clock. Every advertisement of an exchange runs this, and so
+ * does the accept — a day can be covered, run, or age out of the window
+ * between an offer being made and answered.
+ */
+async function validateTarget(
+  recipientId: string,
+  recipientRow: StreakFeatureUserRow,
+  targetDate: string,
+): Promise<
+  | { ok: true; restored_streak: number }
+  | { ok: false; reason: "no_savable_day" | "window_passed" | "gap_too_wide" }
+> {
+  const recipientToday = await getUserLocalToday(recipientId);
+  if (targetDate < dateStrMinus(recipientToday, ASSIST_RESCUE_WINDOW_DAYS)) {
+    return { ok: false, reason: "window_passed" };
+  }
+  const target = await getSavableTarget(
+    recipientId,
+    recipientToday,
+    recipientRow,
+  );
+  if (!target) return { ok: false, reason: "no_savable_day" };
+  if (target.local_date !== targetDate) {
+    // They moved on: ran the day, or slipped a further day back. Either way
+    // this offer is about a date that is no longer the one in play.
+    return {
+      ok: false,
+      reason: target.local_date > targetDate ? "no_savable_day" : "gap_too_wide",
+    };
+  }
+  return { ok: true, restored_streak: target.restored_streak };
+}
+
+/** Both halves of the exchange, resolved and checked. */
+async function loadExchange(
+  donorId: string,
+  recipientId: string,
+): Promise<
+  | { ok: false; status: AssistExchangeError }
+  | {
+      ok: true;
+      donorRow: StreakFeatureUserRow;
+      recipientRow: StreakFeatureUserRow;
+      donorToday: string;
+      target: SavableTarget;
+    }
+> {
+  if (!streakFeaturesGloballyEnabled()) return { ok: false, status: "disabled" };
+  if (donorId === recipientId) return { ok: false, status: "forbidden" };
+
+  const [donorRow, recipientRow] = await Promise.all([
+    getStreakFeatureRow(donorId),
+    getStreakFeatureRow(recipientId),
+  ]);
+  if (!donorRow?.streak_features_at)
+    return { ok: false, status: "not_enrolled" };
+  if (!recipientRow?.streak_features_at)
+    return { ok: false, status: "friend_not_enrolled" };
+  if (!(await friendshipAllowed(donorId, recipientId)))
+    return { ok: false, status: "forbidden" };
+
+  const [donorToday, recipientToday] = await Promise.all([
+    getUserLocalToday(donorId),
+    getUserLocalToday(recipientId),
+  ]);
+
+  // The recipient's token is the half that pays for the coverage row.
+  const recipientMeters = await getMeters(
+    recipientId,
+    recipientRow,
+    recipientToday,
+  );
+  if (!recipientMeters.streak_assist.held)
+    return { ok: false, status: "friend_no_token" };
+
+  const target = await getSavableTarget(
+    recipientId,
+    recipientToday,
+    recipientRow,
+  );
+  if (!target) return { ok: false, status: "no_savable_day" };
+
+  return { ok: true, donorRow, recipientRow, donorToday, target };
+}
+
+async function displayName(userId: string): Promise<string> {
+  const rows = await db.query<{
+    username: string | null;
+    first_name: string | null;
+  }>(`SELECT username, first_name FROM users WHERE user_id = $1`, [userId]);
+  return rows[0]?.username || rows[0]?.first_name || "A friend";
+}
+
+/**
+ * Donor side: commit one of today's spare miles to a friend who is holding a
+ * token and has a day worth saving. Creates a PENDING offer — the friend's
+ * token is theirs to spend, so nothing is covered until they say yes.
+ */
+export async function offerStreakAssist(
+  donorId: string,
+  recipientId: string,
+): Promise<AssistExchangeResult> {
+  const ex = await loadExchange(donorId, recipientId);
+  if (!ex.ok) return { status: ex.status };
+
+  const budget = await getDonationBudget(donorId, ex.donorRow, ex.donorToday);
+  if (budget.remaining < 1) return { status: "no_miles" };
+
+  const rows = await db.query<{ id: string }>(
+    `INSERT INTO streak_assist_offers
+       (donor_id, recipient_id, initiator, donor_date, target_date)
+     VALUES ($1, $2, 'donor', $3::date, $4::date)
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [donorId, recipientId, ex.donorToday, ex.target.local_date],
+  );
+  if (rows.length === 0) return { status: "already_pending" };
+
+  const display = await displayName(donorId);
+  const dayWord = ex.target.kind === "today" ? "today" : "the day you missed";
+  sendPush(recipientId, {
+    title: `\u{1F91D} ${display} ran you a mile`,
+    body: `They went a mile past their goal for you. Use your Streak Assist to save ${dayWord}?`,
+    type: "streak_assist_offer",
+    data: {
+      offer_id: rows[0].id,
+      user_id: donorId,
+      local_date: ex.target.local_date,
+      restored_streak: String(ex.target.restored_streak),
+    },
+  }).catch((e: any) =>
+    console.error("[StreakFeatures] offer push failed:", e?.message ?? e),
+  );
+
+  return {
+    status: "ok",
+    offer_id: rows[0].id,
+    target_date: ex.target.local_date,
+    restored_streak: ex.target.restored_streak,
+    applied: false,
+  };
+}
+
+/**
+ * Recipient side: ask a friend to donate a mile. The donor's mile is only
+ * committed if and when they accept, so `donor_date` stays NULL here — an
+ * unanswered ask costs nobody anything and doesn't eat the friend's budget.
+ */
+export async function requestStreakAssist(
+  recipientId: string,
+  donorId: string,
+): Promise<AssistExchangeResult> {
+  const ex = await loadExchange(donorId, recipientId);
+  if (!ex.ok) {
+    // Same guard set, but the caller is the one holding (or missing) the token.
+    return { status: ex.status === "friend_no_token" ? "no_token" : ex.status };
   }
 
-  // The bridge must reconnect: every day between the miss and the friend's
-  // today has to be intact, or covering one day still leaves a hole (tokens
-  // never partially bridge).
-  const facts = await recentDayFacts(friendId, missedDay);
-  let cursor = dateStrMinus(friendToday, 1);
-  while (cursor > missedDay) {
-    if (!facts.qualified.has(cursor) && !facts.covered.has(cursor)) {
-      return { status: "gap_too_wide" };
-    }
-    cursor = dateStrMinus(cursor, 1);
+  const rows = await db.query<{ id: string }>(
+    `INSERT INTO streak_assist_offers
+       (donor_id, recipient_id, initiator, target_date)
+     VALUES ($1, $2, 'recipient', $3::date)
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [donorId, recipientId, ex.target.local_date],
+  );
+  if (rows.length === 0) return { status: "already_pending" };
+
+  const display = await displayName(recipientId);
+  sendPush(donorId, {
+    title: `\u{1F91D} ${display} needs a mile`,
+    body: `Run a mile past your goal today and you can save their ${ex.target.restored_streak}-day streak.`,
+    type: "streak_assist_request",
+    data: {
+      offer_id: rows[0].id,
+      user_id: recipientId,
+      local_date: ex.target.local_date,
+      restored_streak: String(ex.target.restored_streak),
+    },
+  }).catch((e: any) =>
+    console.error("[StreakFeatures] request push failed:", e?.message ?? e),
+  );
+
+  return {
+    status: "ok",
+    offer_id: rows[0].id,
+    target_date: ex.target.local_date,
+    restored_streak: ex.target.restored_streak,
+    applied: false,
+  };
+}
+
+/**
+ * Answer whichever half of an exchange is waiting on you. Declining just
+ * closes the row (freeing the donor's mile); accepting re-validates BOTH
+ * halves from scratch — an offer can sit unanswered while the recipient runs
+ * the day, or the donor's miles get re-synced downward — and only then writes
+ * the coverage row.
+ */
+export async function respondToAssistOffer(
+  userId: string,
+  offerId: string,
+  accept: boolean,
+): Promise<AssistExchangeResult> {
+  if (!streakFeaturesGloballyEnabled()) return { status: "disabled" };
+
+  const rows = await db.query<{
+    id: string;
+    donor_id: string;
+    recipient_id: string;
+    initiator: string;
+    target_date: string;
+  }>(
+    `SELECT id, donor_id, recipient_id, initiator,
+            to_char(target_date, 'YYYY-MM-DD') AS target_date
+     FROM streak_assist_offers
+     WHERE id = $1 AND status = 'pending'`,
+    [offerId],
+  );
+  const offer = rows[0];
+  if (!offer) return { status: "not_found" };
+
+  // Only the side that DIDN'T open it gets to answer.
+  const responder = offer.initiator === "donor" ? offer.recipient_id : offer.donor_id;
+  if (responder !== userId) return { status: "forbidden" };
+
+  if (!accept) {
+    await db.query(
+      `UPDATE streak_assist_offers
+       SET status = 'declined', resolved_at = NOW()
+       WHERE id = $1 AND status = 'pending'`,
+      [offerId],
+    );
+    return {
+      status: "ok",
+      offer_id: offerId,
+      target_date: offer.target_date,
+      restored_streak: 0,
+      applied: false,
+    };
+  }
+
+  const ex = await loadExchange(offer.donor_id, offer.recipient_id);
+  if (!ex.ok) {
+    return {
+      status:
+        ex.status === "friend_no_token" && userId === offer.recipient_id
+          ? "no_token"
+          : ex.status,
+    };
+  }
+
+  const check = await validateTarget(
+    offer.recipient_id,
+    ex.recipientRow,
+    offer.target_date,
+  );
+  if (!check.ok) return { status: check.reason };
+
+  // The donor's mile: already committed when they offered, charged now when
+  // they're the one accepting a request.
+  if (offer.initiator === "recipient") {
+    const budget = await getDonationBudget(
+      offer.donor_id,
+      ex.donorRow,
+      ex.donorToday,
+    );
+    if (budget.remaining < 1) return { status: "no_miles" };
   }
 
   const inserted = await insertCoverage(
-    friendId,
-    missedDay,
+    offer.recipient_id,
+    offer.target_date,
     "streak_assist",
-    giverToday,
-    giverId,
+    ex.donorToday,
+    offer.donor_id,
   );
   if (!inserted) return { status: "already_saved" };
 
+  const recipientToday = await getUserLocalToday(offer.recipient_id);
   await db.query(
+    // The RECIPIENT's token pays for the coverage — resetting their meter
+    // window is what spends it.
     `UPDATE users SET streak_assist_last_used = $1::date WHERE user_id = $2`,
-    [giverToday, giverId],
+    [recipientToday, offer.recipient_id],
   );
-  const restored = await refreshCurrentStreak(friendId);
+  await db.query(
+    `UPDATE streak_assist_offers
+     SET status = 'accepted', resolved_at = NOW(), donor_date = COALESCE(donor_date, $2::date)
+     WHERE id = $1`,
+    [offerId, ex.donorToday],
+  );
+  // Any other offer aimed at the day just covered is dead — close it so it
+  // stops holding its donor's mile.
+  await db.query(
+    `UPDATE streak_assist_offers
+     SET status = 'expired', resolved_at = NOW()
+     WHERE recipient_id = $1 AND target_date = $2::date AND status = 'pending'`,
+    [offer.recipient_id, offer.target_date],
+  );
 
-  const giverName = await db.query<{
+  const restored = await refreshCurrentStreak(offer.recipient_id);
+
+  const [donorName, recipientName] = await Promise.all([
+    displayName(offer.donor_id),
+    displayName(offer.recipient_id),
+  ]);
+  // Tell the side that wasn't here. When the recipient accepted, the donor
+  // learns their mile landed; when the donor accepted a request, the recipient
+  // learns their streak is back.
+  const notifyId =
+    userId === offer.recipient_id ? offer.donor_id : offer.recipient_id;
+  const push: Parameters<typeof sendPush>[1] =
+    notifyId === offer.donor_id
+      ? {
+          title: `\u{1F91D} ${recipientName} used your mile`,
+          body: `Their ${restored}-day streak is back because you ran the extra one.`,
+          type: "streak_assist_accepted",
+          data: { user_id: offer.recipient_id, local_date: offer.target_date },
+        }
+      : {
+          title: `\u{1F91D} ${donorName} saved your streak!`,
+          body: `Your ${restored}-day streak is back — go keep it alive.`,
+          type: "streak_assisted",
+          data: { user_id: offer.donor_id, local_date: offer.target_date },
+        };
+  sendPush(notifyId, push).catch((e: any) =>
+    console.error("[StreakFeatures] accept push failed:", e?.message ?? e),
+  );
+
+  return {
+    status: "ok",
+    offer_id: offerId,
+    target_date: offer.target_date,
+    restored_streak: restored,
+    applied: true,
+  };
+}
+
+export interface PendingAssistOffer {
+  offer_id: string;
+  /** 'donor' — someone offered you a mile; 'recipient' — someone asked for one. */
+  initiator: string;
+  /** The other person. */
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  profile_image_url: string | null;
+  target_date: string;
+  restored_streak: number;
+  created_at: string;
+}
+
+/**
+ * Offers waiting on THIS user's answer — the app-entry popup. Rides on the
+ * status payload rather than its own endpoint, since every surface that would
+ * show it already refreshes status.
+ *
+ * Dead offers are filtered here rather than swept: an offer is only as alive
+ * as its target day, and `validateTarget` is the same check the accept runs,
+ * so nothing can be listed that the accept would then refuse.
+ */
+export async function getPendingAssistOffers(
+  userId: string,
+): Promise<PendingAssistOffer[]> {
+  const rows = await db.query<{
+    id: string;
+    initiator: string;
+    donor_id: string;
+    recipient_id: string;
+    other_id: string;
     username: string | null;
     first_name: string | null;
-  }>(`SELECT username, first_name FROM users WHERE user_id = $1`, [giverId]);
-  const display =
-    giverName[0]?.username || giverName[0]?.first_name || "A friend";
-  sendPush(friendId, {
-    title: `\u{1F91D} ${display} saved your streak!`,
-    body: `Your ${restored}-day streak is back — go keep it alive.`,
-    type: "streak_assisted",
-    data: { user_id: giverId, local_date: missedDay },
-  }).catch((e: any) =>
-    console.error("[StreakFeatures] assisted push failed:", e?.message ?? e),
+    profile_image_url: string | null;
+    target_date: string;
+    created_at: string;
+  }>(
+    `SELECT o.id, o.initiator, o.donor_id, o.recipient_id,
+            u.user_id AS other_id, u.username, u.first_name, u.profile_image_url,
+            to_char(o.target_date, 'YYYY-MM-DD') AS target_date,
+            to_char(o.created_at, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at
+     FROM streak_assist_offers o
+     JOIN users u ON u.user_id = CASE WHEN o.initiator = 'donor'
+                                      THEN o.donor_id ELSE o.recipient_id END
+     WHERE o.status = 'pending'
+       AND ((o.initiator = 'donor' AND o.recipient_id = $1)
+         OR (o.initiator = 'recipient' AND o.donor_id = $1))
+       AND o.target_date >= (CURRENT_DATE - ${ASSIST_RESCUE_WINDOW_DAYS + 1})
+       AND NOT EXISTS (
+         SELECT 1 FROM user_blocks b
+         WHERE (b.blocker_id = $1 AND b.blocked_id = u.user_id)
+            OR (b.blocker_id = u.user_id AND b.blocked_id = $1)
+       )
+     ORDER BY o.created_at DESC
+     LIMIT 10`,
+    [userId],
   );
 
-  return { status: "ok", restored_streak: restored };
+  const live: PendingAssistOffer[] = [];
+  for (const row of rows) {
+    const recipientRow = await getStreakFeatureRow(row.recipient_id);
+    if (!recipientRow?.streak_features_at) continue;
+    const check = await validateTarget(
+      row.recipient_id,
+      recipientRow,
+      row.target_date,
+    );
+    if (!check.ok) continue;
+    live.push({
+      offer_id: row.id,
+      initiator: row.initiator,
+      user_id: row.other_id,
+      username: row.username,
+      first_name: row.first_name,
+      profile_image_url: row.profile_image_url,
+      target_date: row.target_date,
+      restored_streak: check.restored_streak,
+      created_at: row.created_at,
+    });
+  }
+  return live;
 }
 
 /** Idempotent enrollment stamp — the new build calls this once on launch. */
@@ -717,82 +1109,99 @@ export interface AssistableFriend {
   first_name: string | null;
   last_name: string | null;
   profile_image_url: string | null;
-  broke_date: string;
+  /** The day a donated mile would cover. */
+  target_date: string;
+  /** 'missed' — already lost; 'today' — they still have hours to run it. */
+  target_kind: SavableTarget["kind"];
   prior_streak: number;
   /** The streak the friend ENDS UP with once this day is covered. */
   restored_streak: number;
-  self_recovery: SelfRecovery;
+  /** This caller's standing offer to them: 'none' | 'pending' | 'accepted'. */
+  offer_status: string;
+  offer_id: string | null;
 }
 
 /**
- * Friends with a fresh, still-uncovered break the caller could rescue.
- * Approximate window here (the give call re-validates strictly against each
- * friend's own local today).
+ * Friends who are holding an Assist token and have a day a donated mile could
+ * cover — the friends-list donate section. Both halves are checked here: a
+ * friend with a broken streak and no token can't be helped this way, and the
+ * list would just advertise a POST that 409s.
+ *
+ * ONE query for up to 50 friends (their local today, their last 4 days, their
+ * Assist meter and any standing offer, all as LATERALs) and then at most one
+ * `streakEndingAt` per actual candidate. The previous version walked five
+ * queries per friend before it could rule any of them out, which was ~250 for
+ * a list that is usually empty.
+ *
+ * `self_recovery` is deliberately NOT computed here — it needs two more meters
+ * per friend and only matters once someone is looking at a specific rescue.
+ * `getFriendRescueStatus` (the profile/confirm read) carries it.
+ *
+ * ponytail: capped at 50 friends; whoever needs a 51st can donate from the
+ * friend's profile, which reads live.
  */
 export async function getAssistableFriends(
   userId: string,
 ): Promise<AssistableFriend[]> {
-  const eventRows = await db.query<
-    Omit<AssistableFriend, "restored_streak" | "self_recovery">
-  >(
-    `SELECT e.user_id, u.username, u.first_name, u.last_name,
-            u.profile_image_url,
-            to_char(e.local_date, 'YYYY-MM-DD') AS broke_date,
-            e.prior_streak
-     FROM streak_events e
-     JOIN users u ON u.user_id = e.user_id
-     WHERE e.kind = 'break'
-       AND e.local_date >= (CURRENT_DATE - ${ASSIST_RESCUE_WINDOW_DAYS + 1})
-       AND e.prior_streak >= 1
-       AND u.streak_features_at IS NOT NULL
-       AND e.user_id IN (
-         SELECT friend_id FROM friendships
-         WHERE user_id = $1 AND status = 'accepted'
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM streak_coverage sc
-         WHERE sc.user_id = e.user_id AND sc.local_date = e.local_date
-       )
-       AND NOT EXISTS (
-         SELECT 1 FROM user_blocks b
-         WHERE (b.blocker_id = $1 AND b.blocked_id = e.user_id)
-            OR (b.blocker_id = e.user_id AND b.blocked_id = $1)
-       )
-     ORDER BY e.created_at DESC
-     LIMIT 20`,
-    [userId],
-  );
-
-  // A stamped break says nothing about where the friend has got to since —
-  // project each one so the CTA can promise the streak they'd actually land on.
-  const stampedRows: AssistableFriend[] = [];
-  for (const row of eventRows) {
-    const detail = await stampedBreakDetail(row.user_id, row.broke_date);
-    // Don't advertise a rescue the give call would refuse.
-    if (!detail.bridged || !detail.inWindow) continue;
-    stampedRows.push({
-      ...row,
-      // Live value, not the stamped snapshot — see stampedBreakDetail. Also
-      // what the client falls back to when it can't read restored_streak.
-      prior_streak: detail.prior,
-      restored_streak: detail.restored,
-      // The sweep only stamps a break once no token of the friend's own could
-      // cover it, so there is nothing left for them to self-recover with.
-      self_recovery: null,
-    });
-  }
-
-  const seen = new Set(eventRows.map((row) => row.user_id));
-  const friendRows = await db.query<{
+  const rows = await db.query<{
     user_id: string;
     username: string | null;
     first_name: string | null;
     last_name: string | null;
     profile_image_url: string | null;
+    friend_today: string;
+    ok_days: string[] | null;
+    assist_miles: string | number;
+    offer_id: string | null;
+    offer_status: string | null;
   }>(
-    `SELECT u.user_id, u.username, u.first_name, u.last_name, u.profile_image_url
+    `SELECT u.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
+            to_char(t.today, 'YYYY-MM-DD') AS friend_today,
+            ok.days AS ok_days,
+            COALESCE(am.miles, 0) AS assist_miles,
+            o.id AS offer_id, o.status AS offer_status
      FROM friendships f
      JOIN users u ON u.user_id = f.friend_id
+     CROSS JOIN LATERAL (
+       SELECT (NOW() + (COALESCE((
+         SELECT w.timezone_offset FROM workouts w
+         WHERE w.user_id = u.user_id
+         ORDER BY w.device_end_date DESC LIMIT 1
+       ), 0) || ' minutes')::interval)::date AS today
+     ) t
+     LEFT JOIN LATERAL (
+       SELECT array_agg(x.d) AS days FROM (
+         SELECT to_char(w.local_date, 'YYYY-MM-DD') AS d FROM workouts w
+          WHERE w.user_id = u.user_id AND w.deleted_at IS NULL
+            AND w.exclusion_reason IS NULL
+            AND w.local_date > t.today - 4 AND w.local_date <= t.today
+          GROUP BY w.local_date HAVING SUM(w.distance) >= 0.95
+         UNION
+         SELECT to_char(sc.local_date, 'YYYY-MM-DD') FROM streak_coverage sc
+          WHERE sc.user_id = u.user_id AND sc.local_date > t.today - 4
+       ) x
+     ) ok ON TRUE
+     LEFT JOIN LATERAL (
+       -- The friend's Assist meter, inlined: same window floor as meterFloor().
+       SELECT COALESCE(SUM(GREATEST(a.day_total - COALESCE(u.goal_miles, 1.0), 0)), 0) AS miles
+       FROM (
+         SELECT SUM(w.distance) AS day_total FROM workouts w
+          WHERE w.user_id = u.user_id AND w.deleted_at IS NULL
+            AND w.exclusion_reason IS NULL
+            AND w.local_date > GREATEST(
+                  COALESCE(u.streak_assist_last_used, DATE '1970-01-01'),
+                  u.streak_features_at::date - ${ENROLL_LOOKBACK_DAYS},
+                  t.today - ${METER_WINDOW_DAYS})
+            AND w.local_date <= t.today
+          GROUP BY w.local_date
+       ) a
+     ) am ON TRUE
+     LEFT JOIN LATERAL (
+       SELECT id, status FROM streak_assist_offers
+        WHERE donor_id = $1 AND recipient_id = u.user_id
+          AND status IN ('pending', 'accepted')
+        ORDER BY created_at DESC LIMIT 1
+     ) o ON TRUE
      WHERE f.user_id = $1 AND f.status = 'accepted'
        AND u.streak_features_at IS NOT NULL
        AND NOT EXISTS (
@@ -804,81 +1213,120 @@ export async function getAssistableFriends(
     [userId],
   );
 
-  const liveRows: AssistableFriend[] = [];
-  for (const friend of friendRows) {
-    if (seen.has(friend.user_id)) continue;
-    const row = await getStreakFeatureRow(friend.user_id);
-    if (!row?.streak_features_at) continue;
-    const friendToday = await getUserLocalToday(friend.user_id);
-    const liveBreak = await getLiveAssistableBreak(
-      friend.user_id,
-      friendToday,
-      row,
+  const out: AssistableFriend[] = [];
+  for (const row of rows) {
+    if (Number(row.assist_miles) < STREAK_ASSIST_TARGET_MILES) continue;
+    const okDays = new Set(row.ok_days ?? []);
+    const ok = (d: string) => okDays.has(d);
+    const pick = pickTargetDay(row.friend_today, ok);
+    if (!pick) continue;
+
+    const prior = await streakEndingAt(
+      row.user_id,
+      dateStrMinus(pick.local_date, 1),
     );
-    if (!liveBreak) continue;
-    liveRows.push({
-      ...friend,
-      broke_date: liveBreak.local_date,
-      prior_streak: liveBreak.prior_streak,
-      restored_streak: liveBreak.restored_streak,
-      self_recovery: liveBreak.self_recovery,
+    if (prior < 1) continue;
+
+    out.push({
+      user_id: row.user_id,
+      username: row.username,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      profile_image_url: row.profile_image_url,
+      target_date: pick.local_date,
+      target_kind: pick.kind,
+      prior_streak: prior,
+      restored_streak: projectRestoredStreak(
+        pick.local_date,
+        row.friend_today,
+        prior,
+        ok,
+      ),
+      offer_status: row.offer_status ?? "none",
+      offer_id: row.offer_id,
     });
   }
-
-  return [...stampedRows, ...liveRows].slice(0, 20);
+  // A day already lost is more urgent than one they can still go run.
+  out.sort((a, b) =>
+    a.target_kind === b.target_kind ? 0 : a.target_kind === "missed" ? -1 : 1,
+  );
+  return out.slice(0, 20);
 }
 
 export interface FriendRescueStatus {
-  /** A break exists that spending an Assist right now would repair. */
+  /** The caller could donate a mile to this friend right now. */
   available: boolean;
-  /** Present whenever `available` — the day that would be covered. */
-  missed_date?: string;
+  /** Present whenever there's a day in play — what a mile would cover. */
+  target_date?: string;
+  /** 'missed' — already lost; 'today' — they can still go run it. */
+  target_kind?: SavableTarget["kind"];
   /** The run that ended at the miss (what broke). */
   prior_streak?: number;
   /** What the friend's streak becomes once it's covered. */
   restored_streak?: number;
   /** The friend's own token that could still fix this. Informational only. */
   self_recovery?: SelfRecovery;
-  /** Whether the CALLER can actually spend an Assist right now. */
-  viewer_holds_assist: boolean;
-  /** The caller's Assist meter, so a locked CTA can show how far off it is. */
-  viewer_meter: { progress: number; target: number };
+  /** The friend holds the Assist token this would spend. */
+  friend_holds_assist: boolean;
+  /** The caller's miles past goal today, and what's left of them. */
+  viewer_budget: DonationBudget;
+  /** An exchange already in flight between these two: 'pending' | 'accepted'. */
+  offer_status?: string;
+  offer_id?: string;
   /**
    * Why nothing is offered, when `available` is false.
    *
    * `gap_too_wide` / `window_passed` mean a break EXISTS but no single
-   * coverage row can bring it back — distinct from `no_recent_break`, which
+   * coverage row can bring it back — distinct from `no_savable_day`, which
    * means there's nothing wrong with them at all. The client renders those two
    * as an explanation rather than as silence: "no rescue possible" and "this
    * feature is broken" looked identical before, which is how a friend three
    * days into a gap read as a bug.
+   *
+   * `friend_no_token` and `no_miles` are the two halves of the price, and both
+   * are recoverable — the friend can bank 20 extra miles, the caller can go
+   * run one more today — so they're reported as state, not as failure.
    */
   reason?:
     | "disabled"
     | "not_enrolled"
     | "friend_not_enrolled"
     | "forbidden"
-    | "no_recent_break"
+    | "no_savable_day"
     | "gap_too_wide"
     | "window_passed"
+    | "friend_no_token"
+    | "no_miles"
     | "self";
 }
+
+const EMPTY_BUDGET: DonationBudget = {
+  goal_miles: 0,
+  today_miles: 0,
+  allowed: 0,
+  used: 0,
+  remaining: 0,
+};
 
 const NO_RESCUE = (
   reason: FriendRescueStatus["reason"],
 ): FriendRescueStatus => ({
   available: false,
-  viewer_holds_assist: false,
-  viewer_meter: { progress: 0, target: STREAK_ASSIST_TARGET_MILES },
+  friend_holds_assist: false,
+  viewer_budget: EMPTY_BUDGET,
   reason,
 });
 
 /**
  * Everything one friend's profile needs to render (or explain the absence of)
- * the Save Streak CTA. Deliberately a per-friend read rather than a field on
- * the status payload: the profile needs it for a friend the caller might not
- * be able to rescue YET, and `getAssistableFriends` is an N+1 walk that only
- * pays for itself when the caller is already holding a token.
+ * the Donate a Mile CTA. Deliberately a per-friend read rather than a field on
+ * the status payload: the profile needs it for a friend the caller can't help
+ * YET, and it answers for a friend who isn't in the (token-holders-only)
+ * assistable list at all.
+ *
+ * The CTA is only `available` when BOTH halves are in hand — the friend's
+ * token and the caller's spare mile — but every other field is still filled
+ * in, so the button can say which half is missing instead of vanishing.
  */
 export async function getFriendRescueStatus(
   viewerId: string,
@@ -894,14 +1342,7 @@ export async function getFriendRescueStatus(
   if (!viewerRow?.streak_features_at) return NO_RESCUE("not_enrolled");
 
   const viewerToday = await getUserLocalToday(viewerId);
-  const viewerMeters = await getMeters(viewerId, viewerRow, viewerToday);
-  const base = {
-    viewer_holds_assist: viewerMeters.streak_assist.held,
-    viewer_meter: {
-      progress: viewerMeters.streak_assist.progress,
-      target: viewerMeters.streak_assist.target,
-    },
-  };
+  const budget = await getDonationBudget(viewerId, viewerRow, viewerToday);
 
   // How far gone is this friend's streak? Computed once and reused for every
   // "no, and here's why" answer below. The profile renders NOTHING when a
@@ -912,107 +1353,110 @@ export async function getFriendRescueStatus(
   const dayOk = (d: string) => facts.qualified.has(d) || facts.covered.has(d);
   const d1 = dateStrMinus(friendToday, 1);
   const d2 = dateStrMinus(friendToday, 2);
-  const d3 = dateStrMinus(friendToday, 3);
-  // The only two shapes a single missed day can take (yesterday, or the day
-  // before with yesterday made up). Anything else is a multi-day hole that no
-  // single coverage row can bridge.
-  const singleDayMiss =
-    (!dayOk(d1) && dayOk(d2)) || (dayOk(d1) && !dayOk(d2) && dayOk(d3));
   const multiDayGap = !dayOk(d1) && !dayOk(d2);
 
   // An un-enrolled friend can't be covered (their streak walk is the legacy
   // one and would never see the coverage row). Report that only when they
-  // ACTUALLY have a break, so the profile can say "they need the update" at the
-  // one moment it matters instead of on every friend who hasn't updated.
+  // ACTUALLY have a day in play, so the profile can say "they need the update"
+  // at the one moment it matters instead of on every friend who hasn't updated.
   if (!friendRow?.streak_features_at) {
     return {
-      ...base,
       available: false,
-      reason: singleDayMiss
+      friend_holds_assist: false,
+      viewer_budget: budget,
+      reason: pickTargetDay(friendToday, dayOk)
         ? "friend_not_enrolled"
         : multiDayGap
           ? "gap_too_wide"
-          : "no_recent_break",
+          : "no_savable_day",
     };
   }
 
-  const allowed = await db.query(
-    `SELECT 1 FROM friendships f
-     WHERE f.user_id = $1 AND f.friend_id = $2 AND f.status = 'accepted'
-       AND NOT EXISTS (
-         SELECT 1 FROM user_blocks b
-         WHERE (b.blocker_id = $1 AND b.blocked_id = $2)
-            OR (b.blocker_id = $2 AND b.blocked_id = $1)
-       )`,
-    [viewerId, friendId],
-  );
-  if (allowed.length === 0)
-    return { ...base, available: false, reason: "forbidden" };
-
-  // `prior_streak` deliberately not selected: stampedBreakDetail re-derives it.
-  const stamped = await db.query<{ local_date: string }>(
-    `SELECT to_char(e.local_date, 'YYYY-MM-DD') AS local_date
-     FROM streak_events e
-     WHERE e.user_id = $1 AND e.kind = 'break'
-       AND e.local_date >= $2::date
-       AND NOT EXISTS (
-         SELECT 1 FROM streak_coverage sc
-         WHERE sc.user_id = e.user_id AND sc.local_date = e.local_date
-       )
-     ORDER BY e.local_date DESC LIMIT 1`,
-    [friendId, dateStrMinus(friendToday, ASSIST_RESCUE_WINDOW_DAYS)],
-  );
-
-  let breakInfo: LiveBreak | null = null;
-  // Set when a break EXISTS but can't be rescued — the difference between
-  // "nothing to do here" and "too late", which the user has to be told.
-  let blocked: FriendRescueStatus["reason"] = undefined;
-  if (stamped[0]) {
-    const detail = await stampedBreakDetail(friendId, stamped[0].local_date);
-    if (!detail.bridged) {
-      // Checked before the window: a second missed day is the more
-      // fundamental reason, and the more useful thing to say.
-      blocked = "gap_too_wide";
-    } else if (!detail.inWindow) {
-      blocked = "window_passed";
-    } else {
-      breakInfo = {
-        local_date: stamped[0].local_date,
-        prior_streak: detail.prior,
-        restored_streak: detail.restored,
-        self_recovery: null,
-      };
-    }
-  } else {
-    breakInfo = await getLiveAssistableBreak(friendId, friendToday, friendRow);
+  if (!(await friendshipAllowed(viewerId, friendId))) {
+    return {
+      available: false,
+      friend_holds_assist: false,
+      viewer_budget: budget,
+      reason: "forbidden",
+    };
   }
 
-  if (
-    !breakInfo ||
-    breakInfo.local_date < dateStrMinus(friendToday, ASSIST_RESCUE_WINDOW_DAYS)
-  ) {
+  const friendMeters = await getMeters(friendId, friendRow, friendToday);
+  const base = {
+    friend_holds_assist: friendMeters.streak_assist.held,
+    viewer_budget: budget,
+  };
+
+  const target = await getSavableTarget(friendId, friendToday, friendRow);
+  if (!target) {
     return {
       ...base,
       available: false,
-      // A multi-day hole with no stamped event (the sweep never reached it, or
-      // the break predates the query window) still has to explain itself —
-      // that's the JoePo case, three missed days and a silent profile.
-      reason: blocked ?? (multiDayGap ? "gap_too_wide" : "no_recent_break"),
+      reason: multiDayGap ? "gap_too_wide" : "no_savable_day",
     };
   }
+  if (target.local_date < dateStrMinus(friendToday, ASSIST_RESCUE_WINDOW_DAYS)) {
+    return { ...base, available: false, reason: "window_passed" };
+  }
 
-  return {
+  const existing = await db.query<{ id: string; status: string }>(
+    `SELECT id, status FROM streak_assist_offers
+     WHERE donor_id = $1 AND recipient_id = $2 AND target_date = $3::date
+       AND status IN ('pending', 'accepted')
+     ORDER BY created_at DESC LIMIT 1`,
+    [viewerId, friendId, target.local_date],
+  );
+
+  const detail = {
     ...base,
-    available: true,
-    missed_date: breakInfo.local_date,
-    prior_streak: breakInfo.prior_streak,
-    restored_streak: breakInfo.restored_streak,
-    self_recovery: breakInfo.self_recovery,
+    target_date: target.local_date,
+    target_kind: target.kind,
+    prior_streak: target.prior_streak,
+    restored_streak: target.restored_streak,
+    self_recovery: target.self_recovery,
+    offer_status: existing[0]?.status,
+    offer_id: existing[0]?.id,
   };
+
+  if (!friendMeters.streak_assist.held) {
+    return { ...detail, available: false, reason: "friend_no_token" };
+  }
+  if (budget.remaining < 1) {
+    return { ...detail, available: false, reason: "no_miles" };
+  }
+  return { ...detail, available: existing.length === 0 };
 }
 
-interface LiveBreak {
+/**
+ * Which single day (if any) an Assist may cover, given what's intact around
+ * the user's today. Pure, so the per-user read and the batched friends list
+ * decide it from the same three shapes instead of drifting apart — the list
+ * feeds it a preloaded set, the read feeds it a live query.
+ */
+function pickTargetDay(
+  userToday: string,
+  ok: (d: string) => boolean,
+): {
   local_date: string;
+  kind: SavableTarget["kind"];
+  ddWindowOpen: boolean;
+} | null {
+  const d1 = dateStrMinus(userToday, 1);
+  const d2 = dateStrMinus(userToday, 2);
+  const d3 = dateStrMinus(userToday, 3);
+  if (!ok(d1) && ok(d2))
+    return { local_date: d1, kind: "missed", ddWindowOpen: true };
+  if (ok(d1) && !ok(d2) && ok(d3))
+    return { local_date: d2, kind: "missed", ddWindowOpen: false };
+  if (ok(d1) && !ok(userToday))
+    return { local_date: userToday, kind: "today", ddWindowOpen: false };
+  return null;
+}
+
+interface SavableTarget {
+  local_date: string;
+  /** 'missed' — the day is already lost; 'today' — still winnable by running. */
+  kind: "missed" | "today";
   prior_streak: number;
   restored_streak: number;
   self_recovery: SelfRecovery;
@@ -1041,50 +1485,54 @@ function projectRestoredStreak(
 }
 
 /**
- * A break the user hasn't recovered from, derived live (i.e. before/without a
- * stamped `streak_events` row).
+ * The one day an Assist could cover for this user right now, derived live
+ * (i.e. before/without a stamped `streak_events` row).
  *
- * Deliberately does NOT hide the rescue while the user still holds a Double
- * Down or a Streak Save. It used to, and that left a dead zone: the sweep sees
- * an open Double Down window, returns "waiting", and for the rest of that day
- * the streak reads broken everywhere while no friend can do anything about it.
- * The token they hold is reported as `self_recovery` instead, so the giver's
- * confirmation sheet can say so and they decide.
+ * Three shapes, in priority order — a lost day always outranks a pending one:
+ *   - yesterday missed, older streak intact → the classic break.
+ *   - yesterday made up but the day before missed → the hole a Double Down
+ *     window left behind.
+ *   - nothing missed, but TODAY isn't run yet → bank today. Not a rescue but
+ *     the same machinery: this is what lets a runner hand off a spare mile in
+ *     the evening to someone who is about to lose a streak at midnight, rather
+ *     than everyone waiting for the break to actually happen.
+ *
+ * Deliberately does NOT hide a break while the user still holds a Double Down
+ * or a Streak Save. It used to, and that left a dead zone: the sweep sees an
+ * open Double Down window, returns "waiting", and for the rest of that day the
+ * streak reads broken everywhere while nobody can do anything about it. The
+ * token they hold is reported as `self_recovery` instead, and the confirmation
+ * sheet says so. A `today` target has no self-recovery to report — the way out
+ * is to go run, which is not a token.
  */
-async function getLiveAssistableBreak(
+async function getSavableTarget(
   userId: string,
   userToday: string,
   row: StreakFeatureUserRow,
-): Promise<LiveBreak | null> {
-  const d1 = dateStrMinus(userToday, 1);
-  const d2 = dateStrMinus(userToday, 2);
-  const d3 = dateStrMinus(userToday, 3);
+): Promise<SavableTarget | null> {
   const facts = await recentDayFacts(userId, dateStrMinus(userToday, 4));
   const ok = (d: string) => facts.qualified.has(d) || facts.covered.has(d);
 
-  let missedDay: string | null = null;
-  let ddWindowOpen = false;
-  if (!ok(d1) && ok(d2)) {
-    missedDay = d1;
-    ddWindowOpen = true;
-  } else if (ok(d1) && !ok(d2) && ok(d3)) {
-    missedDay = d2;
-  } else {
-    return null;
-  }
+  const pick = pickTargetDay(userToday, ok);
+  if (!pick) return null;
+  const { local_date: missedDay, kind, ddWindowOpen } = pick;
 
-  const meters = await getMeters(userId, row, userToday);
-  const selfRecovery: SelfRecovery =
-    ddWindowOpen && meters.double_down.held
-      ? "double_down"
-      : meters.streak_save.held
-        ? "streak_save"
-        : null;
+  let selfRecovery: SelfRecovery = null;
+  if (kind === "missed") {
+    const meters = await getMeters(userId, row, userToday);
+    selfRecovery =
+      ddWindowOpen && meters.double_down.held
+        ? "double_down"
+        : meters.streak_save.held
+          ? "streak_save"
+          : null;
+  }
 
   const prior = await streakEndingAt(userId, dateStrMinus(missedDay, 1));
   if (prior < 1) return null;
   return {
     local_date: missedDay,
+    kind,
     prior_streak: prior,
     restored_streak: projectRestoredStreak(missedDay, userToday, prior, ok),
     self_recovery: selfRecovery,

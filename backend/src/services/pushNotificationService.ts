@@ -185,7 +185,17 @@ export type NotificationType =
   // kill switch; none are high-priority, so quiet hours apply automatically).
   | "streak_double_down"
   | "streak_saved"
-  | "streak_assist_opportunity"
+  // An Assist takes both sides now — the recipient's token and a mile the
+  // donor ran past their goal — so these four carry the exchange:
+  // `available` tells the broken user they hold the token, `offer` and
+  // `request` are the two ways it opens, and `accepted` tells the donor their
+  // mile landed. (`streak_assist_opportunity` is retired: it fanned out to
+  // every token-holding friend, which under the new rules asks most of them
+  // for a mile they haven't run.)
+  | "streak_assist_available"
+  | "streak_assist_offer"
+  | "streak_assist_request"
+  | "streak_assist_accepted"
   | "streak_assisted"
   // Buddy Walks & Runs (gated by BUDDY_SESSIONS + per-user buddy_enrolled_at).
   // Only buddy_invite is high-priority — the rest are follow-ups about a

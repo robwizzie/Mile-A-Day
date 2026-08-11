@@ -18,6 +18,8 @@ import {
   streakFeaturesStatusController,
   friendRescueStatusController,
   giveStreakAssistController,
+  requestStreakAssistController,
+  respondToAssistOfferController,
 } from "../controllers/streakFeaturesController.js";
 
 const upload = multer({
@@ -41,6 +43,14 @@ router.post("/streak-features/enable", enableStreakFeaturesController);
 router.get("/streak-features/status", streakFeaturesStatusController);
 router.get("/streak-features/rescue/:friendId", friendRescueStatusController);
 router.post("/streak-features/assist/:friendId", giveStreakAssistController);
+router.post(
+  "/streak-features/assist-request/:friendId",
+  requestStreakAssistController,
+);
+router.post(
+  "/streak-features/assist-offers/:offerId",
+  respondToAssistOfferController,
+);
 
 router.get("/search", searchUsers);
 router.get("/check-username", checkUsername);

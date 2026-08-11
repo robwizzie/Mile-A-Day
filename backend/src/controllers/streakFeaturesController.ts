@@ -5,8 +5,15 @@ import {
   getStreakFeaturesPayload,
   getAssistableFriends,
   getFriendRescueStatus,
-  giveStreakAssist,
+  getDonationBudget,
+  getPendingAssistOffers,
+  offerStreakAssist,
+  requestStreakAssist,
+  respondToAssistOffer,
+  AssistExchangeResult,
 } from "../services/streakFeatureService.js";
+import { getStreakFeatureRow } from "../services/streakFeatureCore.js";
+import { getUserLocalToday } from "../services/workoutService.js";
 import {
   streakFeaturesGloballyEnabled,
   coverageActiveFor,
@@ -50,17 +57,28 @@ export async function streakFeaturesStatusController(
     const payload = await getStreakFeaturesPayload(userId, streak, start);
     if (!payload) return res.status(200).json({ active: false });
 
-    // Only surface rescuable friends to a caller actually holding an Assist —
-    // the friends-page CTA is meaningless (and noisy) otherwise.
-    const assistableFriends = payload.streak_assist.held
-      ? await getAssistableFriends(userId)
-      : [];
+    const row = await getStreakFeatureRow(userId);
+    const userToday = await getUserLocalToday(userId);
+
+    // Donating no longer costs the caller a token, so the list is no longer
+    // gated on holding one — it's gated on the FRIEND holding one (inside
+    // getAssistableFriends). The caller's spare miles decide whether the CTA
+    // is live or locked, which the client renders from donation_budget.
+    const [assistableFriends, donationBudget, pendingOffers] = await Promise.all(
+      [
+        getAssistableFriends(userId),
+        getDonationBudget(userId, row!, userToday),
+        getPendingAssistOffers(userId),
+      ],
+    );
 
     res.status(200).json({
       active: true,
       streak,
       ...payload,
       assistable_friends: assistableFriends,
+      donation_budget: donationBudget,
+      pending_offers: pendingOffers,
     });
   } catch (error: any) {
     console.error("Error getting streak-features status:", error.message);
@@ -92,9 +110,42 @@ export async function friendRescueStatusController(
 }
 
 /**
- * POST /users/streak-features/assist/:friendId — spend a held Streak Assist
- * to restore the friend's just-broken streak. Status strings map 1:1 to HTTP
- * so the client can show a precise reason.
+ * Status strings map 1:1 to HTTP so the client can show a precise reason:
+ * 403 is "you may not", 409 is "not right now".
+ */
+function sendExchangeResult(res: Response, result: AssistExchangeResult) {
+  switch (result.status) {
+    case "ok":
+      return res.status(200).json({
+        ok: true,
+        offer_id: result.offer_id,
+        target_date: result.target_date,
+        restored_streak: result.restored_streak,
+        applied: result.applied,
+      });
+    case "no_token":
+    case "friend_no_token":
+    case "no_miles":
+    case "no_savable_day":
+    case "window_passed":
+    case "gap_too_wide":
+    case "already_saved":
+    case "already_pending":
+      return res.status(409).json({ error: result.status });
+    case "not_found":
+      return res.status(404).json({ error: result.status });
+    case "disabled":
+    case "not_enrolled":
+    case "friend_not_enrolled":
+    case "forbidden":
+      return res.status(403).json({ error: result.status });
+  }
+}
+
+/**
+ * POST /users/streak-features/assist/:friendId — donate one of today's miles
+ * past goal to a friend holding an Assist. Creates a PENDING offer: the token
+ * that pays for the coverage is theirs, so they get the last word.
  */
 export async function giveStreakAssistController(
   req: AuthenticatedRequest,
@@ -104,28 +155,55 @@ export async function giveStreakAssistController(
     if (!streakFeaturesGloballyEnabled()) {
       return res.status(403).json({ error: "not_available" });
     }
-    const result = await giveStreakAssist(req.userId!, req.params.friendId);
-    switch (result.status) {
-      case "ok":
-        return res
-          .status(200)
-          .json({ ok: true, restored_streak: result.restored_streak });
-      case "already_saved":
-        return res.status(409).json({ error: "already_saved" });
-      case "no_token":
-        return res.status(409).json({ error: "no_token" });
-      case "no_recent_break":
-      case "window_passed":
-      case "gap_too_wide":
-        return res.status(409).json({ error: result.status });
-      case "disabled":
-      case "not_enrolled":
-      case "friend_not_enrolled":
-      case "forbidden":
-        return res.status(403).json({ error: result.status });
-    }
+    const result = await offerStreakAssist(req.userId!, req.params.friendId);
+    return sendExchangeResult(res, result);
   } catch (error: any) {
-    console.error("Error giving streak assist:", error.message);
-    res.status(500).json({ error: "Error giving streak assist" });
+    console.error("Error offering streak assist:", error.message);
+    res.status(500).json({ error: "Error offering streak assist" });
+  }
+}
+
+/**
+ * POST /users/streak-features/assist-request/:friendId — ask a friend to run
+ * you a mile. Costs them nothing until they accept.
+ */
+export async function requestStreakAssistController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    if (!streakFeaturesGloballyEnabled()) {
+      return res.status(403).json({ error: "not_available" });
+    }
+    const result = await requestStreakAssist(req.userId!, req.params.friendId);
+    return sendExchangeResult(res, result);
+  } catch (error: any) {
+    console.error("Error requesting streak assist:", error.message);
+    res.status(500).json({ error: "Error requesting streak assist" });
+  }
+}
+
+/**
+ * POST /users/streak-features/assist-offers/:offerId — answer the half of an
+ * exchange that's waiting on you. `{ "accept": true }` writes the coverage.
+ */
+export async function respondToAssistOfferController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    if (!streakFeaturesGloballyEnabled()) {
+      return res.status(403).json({ error: "not_available" });
+    }
+    const accept = req.body?.accept === true;
+    const result = await respondToAssistOffer(
+      req.userId!,
+      req.params.offerId,
+      accept,
+    );
+    return sendExchangeResult(res, result);
+  } catch (error: any) {
+    console.error("Error responding to streak assist offer:", error.message);
+    res.status(500).json({ error: "Error responding to offer" });
   }
 }

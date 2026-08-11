@@ -1268,6 +1268,60 @@ export const streakEvents = pgTable(
   ],
 );
 
+/**
+ * A pending Streak Assist between two friends. Coverage costs TWO things now:
+ * the recipient's own Assist token and one mile the donor ran past their goal
+ * that day — so neither side can spend it alone, and both have to say yes.
+ *
+ * `initiator` says who has to answer: 'donor' means the mile was offered and
+ * the recipient responds; 'recipient' means help was requested and the donor
+ * responds. `donor_date` is the donor's local day the mile came from, which is
+ * also the budget bucket (one donation per mile past goal, per day) — NULL on
+ * an unanswered request because the donor hasn't committed a mile to it yet.
+ *
+ * Nothing expires these rows: an offer is dead the moment its target_date
+ * falls out of the recipient's rescue window, which every read re-derives.
+ */
+export const streakAssistOffers = pgTable(
+  "streak_assist_offers",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    donorId: text("donor_id").notNull(),
+    recipientId: text("recipient_id").notNull(),
+    initiator: varchar({ length: 12 }).notNull(),
+    donorDate: date("donor_date"),
+    targetDate: date("target_date").notNull(),
+    status: varchar({ length: 12 }).default("pending").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    resolvedAt: timestamp("resolved_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.donorId],
+      foreignColumns: [users.userId],
+      name: "streak_assist_offers_donor_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.recipientId],
+      foreignColumns: [users.userId],
+      name: "streak_assist_offers_recipient_id_fkey",
+    }).onDelete("cascade"),
+    uniqueIndex("streak_assist_offers_pending_key")
+      .on(table.donorId, table.recipientId, table.targetDate)
+      .where(sql`((status)::text = 'pending'::text)`),
+    index("streak_assist_offers_recipient_idx").on(
+      table.recipientId,
+      table.status,
+    ),
+    index("streak_assist_offers_donor_idx").on(table.donorId, table.donorDate),
+  ],
+);
+
 export const notificationAudienceSettings = pgTable(
   "notification_audience_settings",
   {
