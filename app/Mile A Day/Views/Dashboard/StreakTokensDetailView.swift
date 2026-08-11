@@ -62,7 +62,7 @@ enum StreakTokenKind {
         case .save:
             return "Life happens — if you miss a day and can't Double Down, this covers it automatically."
         case .assist:
-            return "Save a friend's streak the day after it breaks — be their hero."
+            return "Covers a day you missed — but only when a friend donates a mile they ran past their own goal. Ask, and it's theirs to give."
         }
     }
 
@@ -73,7 +73,7 @@ enum StreakTokenKind {
         case .save:
             return "Run your full mile on 7 days. Running only — walks don't tick this one."
         case .assist:
-            return "Go a total of 20 miles beyond your daily goal, over any number of days."
+            return "Go a total of 20 miles beyond your daily goal, over any number of days. Holding one is half of a save — a friend's spare mile is the other half."
         }
     }
 }
@@ -234,8 +234,12 @@ struct PureFlameBadge: View {
 /// off. Tapping opens the explainer.
 struct StreakTokensCard: View {
     @ObservedObject var tokensState = StreakTokensState.shared
+    /// Supplied by MainTabView's environment — the ask sheet lists friends.
+    @EnvironmentObject private var friendService: FriendService
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showDetail = false
+    @State private var showDonateSheet = false
+    @State private var showAskSheet = false
     /// Drives the slow breathing pulse on earned medallions.
     @State private var pulse = false
 
@@ -304,6 +308,30 @@ struct StreakTokensCard: View {
                         .foregroundColor(.orange)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
+
+                    // The two halves of an Assist, each shown only when this
+                    // user is holding one of them: the token needs someone
+                    // else's mile, and a spare mile needs someone else's token.
+                    if let day = payload.my_savable_day {
+                        assistActionRow(
+                            icon: "hand.raised.fill",
+                            tint: MADTheme.Colors.madRed,
+                            text: day.isToday
+                                ? "Ask a friend for a mile to bank today"
+                                : "Ask a friend for a mile — back to \(day.restored_streak) days"
+                        ) { showAskSheet = true }
+                    }
+                    let spare = tokensState.donationBudget?.remaining ?? 0
+                    if spare > 0,
+                       tokensState.assistableFriends.contains(where: { !$0.alreadyOffered }) {
+                        assistActionRow(
+                            icon: "figure.run",
+                            tint: .green,
+                            text: spare == 1
+                                ? "You have a spare mile — save a friend's streak"
+                                : "You have \(spare) spare miles — save a friend's streak"
+                        ) { showDonateSheet = true }
+                    }
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 18)
@@ -314,7 +342,47 @@ struct StreakTokensCard: View {
             .sheet(isPresented: $showDetail) {
                 StreakTokensDetailView()
             }
+            .sheet(isPresented: $showDonateSheet) {
+                DonateMileSheet()
+            }
+            .sheet(isPresented: $showAskSheet) {
+                if let day = tokensState.payload?.my_savable_day {
+                    AskForMileSheet(savableDay: day, friendService: friendService)
+                }
+            }
         }
+    }
+
+    /// A tappable line inside the card. It's a Button nested in the card's own
+    /// Button — SwiftUI routes the tap to the innermost one, so the rest of the
+    /// card still opens the explainer.
+    private func assistActionRow(
+        icon: String,
+        tint: Color,
+        text: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            MADHaptics.tap()
+            action()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .bold))
+                Text(text)
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .opacity(0.6)
+            }
+            .foregroundColor(tint)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func readyCount(for payload: StreakFeaturesPayload) -> Int {
@@ -876,7 +944,7 @@ struct PureFlameInfoSheet: View {
                     ruleRow(
                         icon: "lifepreserver",
                         tint: MADTheme.Colors.madRed,
-                        text: "Saving a friend's streak never dims your own flame."
+                        text: "Donating a mile to a friend never dims your own flame — only the day THEY get covered rests theirs."
                     )
                 }
                 .padding(.horizontal, MADTheme.Spacing.lg)

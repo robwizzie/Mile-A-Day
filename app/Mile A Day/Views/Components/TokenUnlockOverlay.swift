@@ -149,7 +149,7 @@ struct TokenUnlockOverlay: View {
         case .save:
             return "If you ever miss a day, this covers it automatically."
         case .assist:
-            return "A friend's streak breaks? You can now save it from their row on the Friends tab."
+            return "If you miss a day, this covers it — as soon as a friend donates a mile they ran past their goal. Ask from your Streak Tokens card."
         }
     }
 

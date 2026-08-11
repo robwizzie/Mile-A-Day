@@ -1,24 +1,27 @@
 import SwiftUI
 
-/// Spending a Streak Assist on a friend, as a self-contained CTA.
+/// Donating a mile to a friend's Streak Assist, as a self-contained CTA.
 ///
-/// Shared by the friends list row and the friend's profile so both surfaces
-/// promise the same thing and take the same confirmation. States:
+/// An Assist costs two things from two people: the FRIEND's held token, and one
+/// mile this user ran past their own goal today. So this button never spends
+/// anything on its own — it offers, and the friend accepts. States:
 ///
-///  1. **Rescuable + token held** → the "Save Streak · Back to N days" pill.
-///     N is where the friend LANDS (`restored_streak`), not the run that ended
-///     at the miss — those differ by every day they've kept since. Tapping
-///     opens a confirmation naming the day it covers and that same number.
-///     Nothing is spent until it's confirmed.
-///  2. **Rescuable, no token yet** → a locked pill showing the Assist meter, so
-///     "why don't I have the option" has a visible answer instead of the CTA
-///     silently not rendering.
-///  3. **Rescuable, friend's build is too old** → a muted line saying so.
-///  4. **Nothing to rescue** → renders nothing.
+///  1. **Both halves in hand** → the "Donate a Mile · Saves N days" pill. N is
+///     where the friend LANDS (`restored_streak`), not the run that ended at
+///     the miss — those differ by every day they've kept since. Tapping opens a
+///     confirmation naming the day it covers and that same number.
+///  2. **Friend has a day, you're out of spare miles** → a locked pill saying
+///     how much further to run, so "why don't I have the option" has a visible
+///     answer instead of the CTA silently not rendering.
+///  3. **Friend has a day but no token** → a muted line saying they need to
+///     bank 20 miles past their own goal first.
+///  4. **Offer already in flight** → "Mile offered", waiting on them.
+///  5. **Friend's build is too old / nothing to cover** → an explanation, or
+///     nothing at all.
 ///
 /// The friend may still be holding a token that fixes this for free (an open
 /// Double Down window, or a Streak Save the morning sweep will consume). That
-/// doesn't hide the CTA — it's said plainly in the confirmation, and the giver
+/// doesn't hide the CTA — it's said plainly in the confirmation, and the donor
 /// decides.
 struct SaveFriendStreakView: View {
     let friendId: String
@@ -30,7 +33,7 @@ struct SaveFriendStreakView: View {
     /// in ONE status call). Supplying it skips the per-friend fetch — without
     /// this a 60-friend list would fire 60 requests to draw at most one pill.
     var preloaded: FriendRescueStatus? = nil
-    /// Fired after a successful save, with the friend's restored streak.
+    /// Fired once the offer is made, with the streak it would restore.
     var onSaved: (Int) -> Void = { _ in }
 
     enum Style { case compact, prominent }
@@ -72,6 +75,11 @@ struct SaveFriendStreakView: View {
                     icon: "arrow.down.circle",
                     text: "\(friendName) needs the latest update to be saved"
                 )
+            case .friendNeedsToken:
+                infoPill(
+                    icon: "lock.circle",
+                    text: "\(friendName) hasn't banked a Streak Assist yet — they need 20 miles past their own goal to hold one"
+                )
             case .beyondRescue(let multiDay):
                 infoPill(
                     icon: "clock.arrow.circlepath",
@@ -80,17 +88,15 @@ struct SaveFriendStreakView: View {
                         : "\(friendName)'s miss is too old to rescue — Assists reach back 2 days"
                 )
             case .available(let status):
-                if status.viewer_holds_assist {
-                    saveButton(status)
-                } else {
-                    lockedPill(status)
-                }
+                saveButton(status)
+            case .needsMiles(let status):
+                lockedPill(status)
             case .saving:
                 pill(background: MADTheme.Colors.redGradient) {
                     ProgressView().tint(.white).scaleEffect(0.6)
                 }
-            case .saved(let streak):
-                savedPill(streak)
+            case .offered:
+                offeredPill()
             }
         }
         .task(id: taskKey) { await model.load(friendId: friendId, preloaded: preloaded) }
@@ -99,7 +105,7 @@ struct SaveFriendStreakView: View {
             isPresented: $showingConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Save Streak") { save() }
+            Button("Donate My Mile") { save() }
             Button("Not now", role: .cancel) {}
         } message: {
             Text(confirmationMessage)
@@ -117,15 +123,15 @@ struct SaveFriendStreakView: View {
                 HStack(spacing: 6) {
                     TokenMedallion(kind: .assist, held: true, size: style == .compact ? 18 : 20)
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("Save Streak")
+                        Text("Donate a Mile")
                             .font(.system(size: style == .compact ? 11 : 12, weight: .heavy, design: .rounded))
                             .lineLimit(1)
                         // Says where they LAND, not what's being spent. A bare
-                        // "5 days" under "Save Streak" reads as "this saves 5
+                        // "5 days" under the title reads as "this saves 5
                         // days"; the number is actually the streak they end up
                         // on — their run before the miss, plus the covered day,
                         // plus every day they've kept since.
-                        Text("Back to \(Self.dayCount(status.streakAfterSave))")
+                        Text("Saves \(Self.dayCount(status.streakAfterSave))")
                             .font(.system(size: style == .compact ? 9 : 10, weight: .bold, design: .rounded))
                             .opacity(0.85)
                             .lineLimit(1)
@@ -139,27 +145,29 @@ struct SaveFriendStreakView: View {
         .buttonStyle(ScaleButtonStyle())
     }
 
-    /// Rescuable, but the caller hasn't earned the Assist yet. Showing the meter
-    /// beats showing nothing: the absence of a CTA is otherwise indistinguishable
-    /// from the feature being broken.
+    /// The friend is ready to be saved, but this user hasn't run their spare
+    /// mile yet. Showing exactly how much further beats showing nothing: the
+    /// absence of a CTA is otherwise indistinguishable from a broken feature —
+    /// and unlike a 20-mile meter, this one is closable today.
     private func lockedPill(_ status: FriendRescueStatus) -> some View {
-        let meter = status.viewer_meter
-        let remaining = max(0, (meter?.target ?? 20) - (meter?.progress ?? 0))
+        let toGo = status.viewer_budget?.milesToNext ?? 1
         return pill(background: nil) {
             HStack(spacing: 6) {
                 TokenMedallion(
                     kind: .assist,
                     held: false,
-                    progress: meter?.fraction ?? 0,
+                    progress: max(0, min(1, 1 - toGo)),
                     size: style == .compact ? 18 : 20
                 )
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Streak Assist")
+                    Text("Donate a Mile")
                         .font(.system(size: style == .compact ? 11 : 12, weight: .heavy, design: .rounded))
                         .lineLimit(1)
-                    Text(String(format: "%.1f mi to go", remaining))
+                    Text(String(format: "%.2f mi further today", toGo))
                         .font(.system(size: style == .compact ? 9 : 10, weight: .bold, design: .rounded))
                         .opacity(0.7)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
             }
             .foregroundColor(.white.opacity(0.6))
@@ -189,11 +197,13 @@ struct SaveFriendStreakView: View {
         )
     }
 
-    private func savedPill(_ streak: Int) -> some View {
+    /// The mile is committed and it's their move now — deliberately NOT a
+    /// "Saved!" checkmark, which is the lie the one-sided version used to tell.
+    private func offeredPill() -> some View {
         HStack(spacing: 5) {
-            Image(systemName: "checkmark.seal.fill")
+            Image(systemName: "paperplane.fill")
                 .font(.system(size: 12, weight: .bold))
-            Text("Saved · \(streak)-day streak")
+            Text("Mile offered")
                 .font(.system(size: style == .compact ? 11 : 12, weight: .heavy, design: .rounded))
                 .lineLimit(1)
         }
@@ -229,26 +239,28 @@ struct SaveFriendStreakView: View {
     /// Re-runs the task when the friend changes OR the host hands down a fresh
     /// preloaded rescue (e.g. the status refresh drops one that's been saved).
     private var taskKey: String {
-        "\(friendId)|\(preloaded?.missed_date ?? "")|\(preloaded == nil ? "fetch" : "given")"
+        "\(friendId)|\(preloaded?.target_date ?? "")|\(preloaded == nil ? "fetch" : "given")"
     }
 
     private var confirmationTitle: String {
-        "Save \(friendName)'s streak?"
+        "Donate a mile to \(friendName)?"
     }
 
     private var confirmationMessage: String {
         guard case .available(let status) = model.phase else { return "" }
         var lines: [String] = []
-        let missed = SaveFriendStreakView.dayLabel(status.missed_date)
+        let day = SaveFriendStreakView.dayLabel(status.target_date)
         lines.append(
-            "You'll spend your Streak Assist to cover \(missed) — the day \(friendName) missed — bringing them back to a \(status.streakAfterSave)-day streak."
+            status.isToday
+                ? "One of the miles you ran past your goal today goes to \(friendName). If they accept, it banks today for them and their streak stays at \(status.streakAfterSave) days."
+                : "One of the miles you ran past your goal today goes to \(friendName). If they accept, it covers \(day) — the day they missed — bringing them back to a \(status.streakAfterSave)-day streak."
         )
+        lines.append("They spend their own Streak Assist to take it, so nothing happens until they say yes.")
         if status.self_recovery == "double_down" {
-            lines.append("\(friendName) can still win this back themselves today with a Double Down run, so your Assist may not be needed.")
+            lines.append("\(friendName) can still win this back themselves today with a Double Down run, so your mile may not be needed.")
         } else if status.self_recovery == "streak_save" {
-            lines.append("\(friendName) is holding a Streak Save that will cover this automatically tomorrow morning, so your Assist may not be needed.")
+            lines.append("\(friendName) is holding a Streak Save that will cover this automatically tomorrow morning, so your mile may not be needed.")
         }
-        lines.append("Streak Assists are earned by banking 20 miles beyond your own daily goal.")
         return lines.joined(separator: "\n\n")
     }
 
@@ -273,33 +285,40 @@ struct SaveFriendStreakView: View {
 
     private func save() {
         // Explicit @MainActor: `onSaved` hosts mutate @State (the profile's
-        // toast, the row's saved-chip set) and this isn't called from an
+        // toast, the row's offered-chip set) and this isn't called from an
         // isolated context.
         Task { @MainActor in
-            let restored = await model.save(friendId: friendId)
+            let restored = await model.offerMile(friendId: friendId)
             if let restored { onSaved(restored) }
         }
     }
 }
 
-/// Fetch + spend state for one friend's rescue. Kept off the hosting views so
+/// Fetch + offer state for one friend's rescue. Kept off the hosting views so
 /// the profile and the friends list can't drift apart on when they refresh.
 @MainActor
 final class SaveFriendStreakModel: ObservableObject {
     enum Phase {
         case idle
-        /// Nothing to rescue (or we couldn't tell) — the CTA stays out of the way.
+        /// Nothing to cover (or we couldn't tell) — the CTA stays out of the way.
         case unavailable
-        /// They DO have a coverable miss, but their build predates streak
+        /// They DO have a coverable day, but their build predates streak
         /// tokens, so nothing can be written on their behalf.
         case friendNeedsUpdate
+        /// They have a day in play but haven't banked an Assist to spend on
+        /// it, so a donated mile would have nothing to pair with.
+        case friendNeedsToken
         /// Their streak IS broken, but no single covered day brings it back —
         /// a multi-day hole, or a miss older than the rescue window. Shown as
         /// an explanation, because silence here reads as a broken feature.
         case beyondRescue(multiDay: Bool)
+        /// Both halves in hand — the live CTA.
         case available(FriendRescueStatus)
+        /// Their half is ready; this user just hasn't run the spare mile yet.
+        case needsMiles(FriendRescueStatus)
         case saving
-        case saved(Int)
+        /// Mile committed, waiting on them.
+        case offered
     }
 
     @Published private(set) var phase: Phase = .idle
@@ -318,9 +337,9 @@ final class SaveFriendStreakModel: ObservableObject {
     }
 
     func load(friendId: String, preloaded: FriendRescueStatus? = nil) async {
-        // A completed save is terminal for this view's lifetime — refetching
-        // would flip it back to "nothing to rescue" and blink the chip away.
-        if case .saved = phase { return }
+        // A sent offer is terminal for this view's lifetime — refetching would
+        // flip it back to "nothing to cover" and blink the chip away.
+        if case .offered = phase { return }
         if let preloaded {
             phase = Self.resolvePhase(for: preloaded)
             return
@@ -335,8 +354,13 @@ final class SaveFriendStreakModel: ObservableObject {
     }
 
     private static func resolvePhase(for status: FriendRescueStatus) -> Phase {
+        if status.alreadyOffered { return .offered }
         if status.available { return .available(status) }
         if status.friendNotEnrolled { return .friendNeedsUpdate }
+        // Order matters: both halves can be missing at once, and the one the
+        // USER can do something about today is the one worth showing.
+        if status.needsMoreMiles { return .needsMiles(status) }
+        if status.friendHasNoToken { return .friendNeedsToken }
         switch status.reason {
         case "gap_too_wide": return .beyondRescue(multiDay: true)
         case "window_passed": return .beyondRescue(multiDay: false)
@@ -344,22 +368,22 @@ final class SaveFriendStreakModel: ObservableObject {
         }
     }
 
-    /// Returns the restored streak on success, nil on failure.
-    func save(friendId: String) async -> Int? {
+    /// Commits one of today's spare miles. Returns the streak the friend would
+    /// land on, or nil on failure — nothing is covered until THEY accept.
+    func offerMile(friendId: String) async -> Int? {
         guard case .available(let status) = phase else { return nil }
         phase = .saving
         do {
-            let result = try await StreakFeatureService.assist(friendId: friendId)
-            let restored = result.restored_streak ?? status.streakAfterSave
-            phase = .saved(restored)
+            _ = try await StreakFeatureService.offerAssist(friendId: friendId)
+            phase = .offered
             MADHaptics.success()
-            // Meters and the friends-list rescue list both move after a spend.
+            // The budget and the donatable list both move after an offer.
             await StreakTokensState.shared.refreshStatus()
-            return restored
+            return status.streakAfterSave
         } catch {
-            // Someone else may have saved them first, or the window closed —
-            // re-read rather than leaving a CTA that can't succeed.
-            print("[SaveStreak] assist failed: \(error.localizedDescription)")
+            // They may have run the day, or someone else's mile got there
+            // first — re-read rather than leaving a CTA that can't succeed.
+            print("[SaveStreak] offer failed: \(error.localizedDescription)")
             MADHaptics.warning()
             phase = .idle
             await load(friendId: friendId)

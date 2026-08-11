@@ -66,8 +66,7 @@ struct NotificationInboxView: View {
                 // they'd only ever surface under All (nothing else matches
                 // the streak_ prefix).
                 return type.hasPrefix("friend_")
-                    || type == "streak_assist_opportunity"
-                    || type == "streak_assisted"
+                    || type.hasPrefix("streak_assist")
             case .comps:
                 return type.hasPrefix("competition_") || type == "lead_change" || type == "clash_tie"
             case .achievements:
@@ -702,13 +701,20 @@ struct NotificationInboxView: View {
         case "badge_earned", "personal_best":
             // Your own award — the trophy case is on your profile.
             switchTab(4)
-        case "streak_assist_opportunity":
-            // The push copy says "save it from their profile" — land on the
-            // broken friend's profile, where SaveFriendStreakView fetches a
-            // fresh rescue status. (The Friends-tab row button also works but
-            // depends on a tokensState refresh that a tab switch alone
-            // doesn't guarantee.) Legacy rows without an actor fall back to
-            // the Friends tab.
+        case "streak_assist_offer", "streak_assist_request":
+            // Both halves of an exchange are answered from the sheet MainTabView
+            // hosts off `pendingOffers`, so all this has to do is make sure the
+            // list is fresh — the sheet presents itself the moment it isn't
+            // empty, on whichever tab the user lands on.
+            switchTab(0)
+            Task { await StreakTokensState.shared.refreshStatus() }
+        case "streak_assist_available":
+            // "You're holding an Assist, go ask someone." The ask lives on the
+            // Dashboard token card, which reads my_savable_day from status.
+            switchTab(0)
+            Task { await StreakTokensState.shared.refreshStatus() }
+        case "streak_assist_accepted":
+            // Your donated mile landed on their streak — go look at them.
             openActorProfileOrFriends(notification)
         default:
             // Streak token outcomes, reminders, recaps, and any future type:
@@ -997,6 +1003,12 @@ struct NotificationInboxView: View {
         case "competition_milestone": return ("star.fill", .yellow)
         case "streak_broken": return ("flame.fill", .red)
         case "streak_lost": return ("flame", .orange)
+        // The Assist exchange: an open hand while a half is still waiting on
+        // someone, a seal once it actually landed.
+        case "streak_assist_offer", "streak_assist_request", "streak_assist_available":
+            return ("hand.raised.fill", .red)
+        case "streak_assisted", "streak_assist_accepted":
+            return ("checkmark.seal.fill", .green)
         case "goal_reached": return ("checkmark.seal.fill", .green)
         case "personal_best": return ("medal.fill", .yellow)
         case "lead_change": return ("arrow.up.right", .green)

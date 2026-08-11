@@ -59,6 +59,8 @@ struct MainTabView: View {
     /// here rather than inside a tab so it works from wherever the user is and
     /// survives a cold launch (the link may arrive before any tab is mounted).
     @StateObject private var postDeepLink = PostDeepLink.shared
+    /// Streak-token state, for the two Assist sheets hosted at this root.
+    @ObservedObject private var tokensState = StreakTokensState.shared
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -366,6 +368,34 @@ struct MainTabView: View {
         }
         .sheet(isPresented: $reviewManager.isPresented, onDismiss: handleReviewSheetDismiss) {
             ReviewPromptView(manager: reviewManager)
+        }
+        // A Streak Assist waiting on this user's answer. Hosted HERE, not on
+        // the Dashboard, for the same reason the celebrations are: a sheet
+        // presented from a tab the user isn't looking at either never appears
+        // or appears somewhere they didn't expect — and an offer dies with the
+        // day it's trying to save.
+        .sheet(
+            isPresented: Binding(
+                get: { !tokensState.pendingOffers.isEmpty },
+                set: { if !$0 { tokensState.pendingOffers = [] } }
+            )
+        ) {
+            StreakAssistOfferSheet(
+                offers: tokensState.pendingOffers,
+                onResolved: { offer in
+                    tokensState.pendingOffers.removeAll { $0.offer_id == offer.offer_id }
+                }
+            )
+        }
+        // "You ran a spare mile and someone can use it" — once a day, on the
+        // refresh right after the run that earned it.
+        .sheet(
+            isPresented: Binding(
+                get: { tokensState.donationPrompt != nil },
+                set: { if !$0 { tokensState.donationPrompt = nil } }
+            )
+        ) {
+            DonateMileSheet()
         }
         .sheet(
             isPresented: Binding(

@@ -49,26 +49,84 @@ struct StreakFeaturesPayload: Codable {
     let frozen_dates: [CoveredDate]
     let natural_streak: Bool
     let streak_at_risk: Bool
+    /// The user's OWN day a friend's donated mile could cover — only sent when
+    /// they're holding the token that pays for it. This is the trigger for
+    /// "ask a friend"; nothing else on the payload can tell whether one
+    /// covered day would actually reconnect the streak.
+    let my_savable_day: SavableDay?
 }
 
-/// A friend whose just-broken streak the user can rescue right now.
+/// A day an Assist could cover, and where the streak lands if it does.
+struct SavableDay: Codable, Equatable {
+    let local_date: String
+    /// "missed" — already lost; "today" — still winnable by going for a run.
+    let kind: String
+    let restored_streak: Int
+
+    var isToday: Bool { kind == "today" }
+}
+
+/// How many friends the user can cover today. One whole mile past your own
+/// goal buys one — two friends means two miles past, and so on.
+struct DonationBudget: Codable, Equatable {
+    let goal_miles: Double
+    let today_miles: Double
+    let allowed: Int
+    let used: Int
+    let remaining: Int
+
+    /// Miles still to run before the NEXT donation unlocks.
+    var milesToNext: Double {
+        max(0, goal_miles + Double(used + 1) - today_miles)
+    }
+}
+
+/// An exchange waiting on this user's answer.
+struct PendingAssistOffer: Codable, Identifiable, Equatable {
+    let offer_id: String
+    /// "donor" — they offered you a mile, you spend your token.
+    /// "recipient" — they asked YOU for a mile.
+    let initiator: String
+    let user_id: String
+    let username: String?
+    let first_name: String?
+    let profile_image_url: String?
+    let target_date: String
+    let restored_streak: Int
+    let created_at: String?
+
+    var id: String { offer_id }
+    /// True when the ball is in this user's court to spend their own token.
+    var isIncomingMile: Bool { initiator == "donor" }
+
+    var displayName: String {
+        if let username, !username.isEmpty { return username }
+        if let first_name, !first_name.isEmpty { return first_name }
+        return "A friend"
+    }
+}
+
+/// A friend holding an Assist token with a day a donated mile could cover.
 struct AssistableFriend: Codable, Identifiable {
     let user_id: String
     let username: String?
     let first_name: String?
     let last_name: String?
     let profile_image_url: String?
-    let broke_date: String
+    let target_date: String
+    /// "missed" — already lost; "today" — they can still go run it.
+    let target_kind: String
     let prior_streak: Int
-    /// What their streak becomes once the miss is covered — the number the CTA
+    /// What their streak becomes once the day is covered — the number the CTA
     /// promises. Optional so a backend that predates it still decodes.
     let restored_streak: Int?
-    /// "double_down" | "streak_save" when the friend still holds a token that
-    /// could fix this themselves; nil otherwise. Never blocks the assist — the
-    /// confirmation just says so before a token is spent.
-    let self_recovery: String?
+    /// This user's standing offer to them: "none" | "pending" | "accepted".
+    let offer_status: String?
+    let offer_id: String?
 
     var id: String { user_id }
+    var alreadyOffered: Bool { offer_status == "pending" || offer_status == "accepted" }
+    var isToday: Bool { target_kind == "today" }
 
     var displayName: String {
         if let username, !username.isEmpty { return username }
@@ -82,32 +140,36 @@ struct AssistableFriend: Codable, Identifiable {
 }
 
 /// GET /users/streak-features/rescue/:friendId — everything one friend's
-/// profile needs to render (or explain the absence of) the Save Streak CTA.
+/// profile needs to render (or explain the absence of) the Donate a Mile CTA.
+///
+/// An Assist needs BOTH halves, so `available` false is usually "which half is
+/// missing", not "nothing here": `friend_no_token` (they haven't banked 20
+/// extra miles) and `no_miles` (you haven't run one past your goal today) both
+/// still carry the day and the projection, so the button can say what to do.
 struct FriendRescueStatus: Codable {
     let available: Bool
-    let missed_date: String?
+    let target_date: String?
+    let target_kind: String?
     let prior_streak: Int?
     let restored_streak: Int?
     let self_recovery: String?
-    let viewer_holds_assist: Bool
-    let viewer_meter: Meter?
+    let friend_holds_assist: Bool
+    let viewer_budget: DonationBudget?
+    let offer_status: String?
+    let offer_id: String?
     let reason: String?
 
-    struct Meter: Codable {
-        let progress: Double
-        let target: Double
-
-        var fraction: Double {
-            guard target > 0 else { return 0 }
-            return min(max(progress / target, 0), 1)
-        }
-    }
-
     var streakAfterSave: Int { restored_streak ?? ((prior_streak ?? 0) + 1) }
+    var isToday: Bool { target_kind == "today" }
+    var alreadyOffered: Bool { offer_status == "pending" || offer_status == "accepted" }
 
     /// The friend hasn't got the token-capable build, so nothing can be done
     /// for them yet — worth saying out loud rather than showing nothing.
     var friendNotEnrolled: Bool { reason == "friend_not_enrolled" }
+    /// They have a day in play but haven't banked an Assist to spend on it.
+    var friendHasNoToken: Bool { reason == "friend_no_token" }
+    /// The user hasn't run their spare mile yet today.
+    var needsMoreMiles: Bool { reason == "no_miles" }
 }
 
 /// GET /users/streak-features/status. `active` false = feature off server-side
@@ -121,7 +183,10 @@ struct StreakFeaturesStatus: Codable {
     let frozen_dates: [CoveredDate]?
     let natural_streak: Bool?
     let streak_at_risk: Bool?
+    let my_savable_day: SavableDay?
     let assistable_friends: [AssistableFriend]?
+    let donation_budget: DonationBudget?
+    let pending_offers: [PendingAssistOffer]?
 }
 
 // MARK: - Service
@@ -226,14 +291,40 @@ enum StreakFeatureService {
 
     struct AssistResponse: Decodable {
         let ok: Bool?
+        let offer_id: String?
+        let target_date: String?
         let restored_streak: Int?
+        /// False for a pending offer, true once coverage was actually written.
+        let applied: Bool?
     }
 
-    /// Spend a held Streak Assist to restore a friend's just-broken streak.
-    static func assist(friendId: String) async throws -> AssistResponse {
+    /// Donate one of today's miles past goal to a friend. This does NOT cover
+    /// anything yet — the token that pays for the coverage is theirs, so they
+    /// get the last word.
+    static func offerAssist(friendId: String) async throws -> AssistResponse {
         try await APIClient.fancyFetch(
             endpoint: "/users/streak-features/assist/\(friendId)",
             method: .POST,
+            responseType: AssistResponse.self
+        )
+    }
+
+    /// Ask a friend to run you a mile. Costs them nothing until they accept.
+    static func requestAssist(friendId: String) async throws -> AssistResponse {
+        try await APIClient.fancyFetch(
+            endpoint: "/users/streak-features/assist-request/\(friendId)",
+            method: .POST,
+            responseType: AssistResponse.self
+        )
+    }
+
+    /// Answer the half of an exchange waiting on you. Accepting is what writes
+    /// the coverage row and spends the recipient's token.
+    static func respondToOffer(offerId: String, accept: Bool) async throws -> AssistResponse {
+        try await APIClient.fancyFetch(
+            endpoint: "/users/streak-features/assist-offers/\(offerId)",
+            method: .POST,
+            body: try JSONSerialization.data(withJSONObject: ["accept": accept]),
             responseType: AssistResponse.self
         )
     }

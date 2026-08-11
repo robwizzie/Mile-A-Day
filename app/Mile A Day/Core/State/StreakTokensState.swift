@@ -21,8 +21,16 @@ final class StreakTokensState: ObservableObject {
     private init() {}
 
     @Published var payload: StreakFeaturesPayload?
-    /// Friends the user can rescue right now (from the status endpoint).
+    /// Friends holding an Assist token with a day a donated mile would cover.
     @Published var assistableFriends: [AssistableFriend] = []
+    /// Miles past goal today, and how many of them are still unspent.
+    @Published var donationBudget: DonationBudget?
+    /// Exchanges waiting on THIS user's answer — drives the app-entry sheet.
+    @Published var pendingOffers: [PendingAssistOffer] = []
+    /// Set once per day when a run leaves spare miles AND someone could use
+    /// them, so the offer is made while the run is still fresh. Cleared by the
+    /// sheet's dismiss.
+    @Published var donationPrompt: DonationBudget?
     /// DEBUG preview: while true, refreshStatus() is a no-op so server state
     /// can't clobber the injected sample data. Never persisted.
     @Published var isPreviewingSampleData = false
@@ -151,6 +159,33 @@ final class StreakTokensState: ObservableObject {
         }
     }
 
+    private static let donationPromptDayKey = "streakAssistDonationPromptDay"
+
+    /// "You've run a spare mile and someone can use it" — offered once a day,
+    /// on the refresh that first sees both halves. Stamped by DAY rather than
+    /// by launch so a second run doesn't re-ask, and so it survives the app
+    /// being killed between the run and the next open.
+    ///
+    /// Deliberately silent when there's nothing to spend it on: a prompt to
+    /// donate with no eligible friend is just noise about a feature.
+    @MainActor
+    private func noteDonationOpportunity() {
+        guard let budget = donationBudget, budget.remaining > 0,
+              assistableFriends.contains(where: { !$0.alreadyOffered })
+        else { return }
+        let today = Self.dayStamp()
+        guard UserDefaults.standard.string(forKey: Self.donationPromptDayKey) != today
+        else { return }
+        UserDefaults.standard.set(today, forKey: Self.donationPromptDayKey)
+        donationPrompt = budget
+    }
+
+    private static func dayStamp() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+
     /// Refresh meters + rescuable friends from the status endpoint (used by
     /// surfaces that need fresher data than the last stats fetch, e.g. the
     /// friends page assist banner).
@@ -165,6 +200,8 @@ final class StreakTokensState: ObservableObject {
                   let assist = status.streak_assist
             else {
                 assistableFriends = []
+                donationBudget = nil
+                pendingOffers = []
                 StreakFeatureService.applyStatsPayload(nil)
                 return
             }
@@ -174,9 +211,13 @@ final class StreakTokensState: ObservableObject {
                 streak_assist: assist,
                 frozen_dates: status.frozen_dates ?? [],
                 natural_streak: status.natural_streak ?? true,
-                streak_at_risk: status.streak_at_risk ?? false
+                streak_at_risk: status.streak_at_risk ?? false,
+                my_savable_day: status.my_savable_day
             )
             assistableFriends = status.assistable_friends ?? []
+            donationBudget = status.donation_budget
+            pendingOffers = status.pending_offers ?? []
+            noteDonationOpportunity()
             // Route through applyStatsPayload → apply() so the payload is
             // published, held flags are diffed, gain chips fire, and the
             // coverage store stays in sync — one path for every payload.
@@ -207,7 +248,10 @@ final class StreakTokensState: ObservableObject {
             ),
             frozen_dates: [],
             natural_streak: true,
-            streak_at_risk: true
+            streak_at_risk: true,
+            my_savable_day: SavableDay(
+                local_date: "2026-07-21", kind: "missed", restored_streak: 18
+            )
         )
         assistableFriends = [
             AssistableFriend(
@@ -216,10 +260,41 @@ final class StreakTokensState: ObservableObject {
                 first_name: "Dave",
                 last_name: nil,
                 profile_image_url: nil,
-                broke_date: "2026-07-20",
+                target_date: "2026-07-20",
+                target_kind: "missed",
                 prior_streak: 42,
                 restored_streak: 44,
-                self_recovery: nil
+                offer_status: nil,
+                offer_id: nil
+            ),
+            AssistableFriend(
+                user_id: "preview-friend-2",
+                username: "sam",
+                first_name: "Sam",
+                last_name: nil,
+                profile_image_url: nil,
+                target_date: "2026-07-21",
+                target_kind: "today",
+                prior_streak: 9,
+                restored_streak: 10,
+                offer_status: nil,
+                offer_id: nil
+            ),
+        ]
+        donationBudget = DonationBudget(
+            goal_miles: 1, today_miles: 3.2, allowed: 2, used: 0, remaining: 2
+        )
+        pendingOffers = [
+            PendingAssistOffer(
+                offer_id: "preview-offer",
+                initiator: "donor",
+                user_id: "preview-friend",
+                username: "davey",
+                first_name: "Dave",
+                profile_image_url: nil,
+                target_date: "2026-07-21",
+                restored_streak: 18,
+                created_at: nil
             )
         ]
     }
@@ -229,6 +304,9 @@ final class StreakTokensState: ObservableObject {
         isPreviewingSampleData = false
         payload = nil
         assistableFriends = []
+        donationBudget = nil
+        pendingOffers = []
+        donationPrompt = nil
         Task { await refreshStatus() }
     }
     #endif

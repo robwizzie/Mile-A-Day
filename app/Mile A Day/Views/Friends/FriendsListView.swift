@@ -210,40 +210,45 @@ struct FriendsListView: View {
 
     // MARK: - Streak Assist (in-row rescue)
 
-    /// The rescue for this friend, if one is open: their streak broke within
-    /// the window, I'm holding an Assist, and I haven't just saved them.
+    /// The donation for this friend, if one is open: they're holding an Assist
+    /// with a day in play, and I haven't already offered them a mile.
     ///
     /// Shaped into the same payload the profile CTA fetches per friend, so both
     /// surfaces render one component with one confirmation. This list already
-    /// has every rescue from the single status call — handing it down keeps a
-    /// long friends list at zero extra requests.
+    /// has every candidate from the single status call — handing it down keeps
+    /// a long friends list at zero extra requests.
+    ///
+    /// The list is no longer gated on ME holding a token (the friend's token is
+    /// what pays now), so it's gated on my spare miles instead: with none left
+    /// the row still renders, locked, saying how much further to run.
     private func assistRescue(for friend: BackendUser) -> FriendRescueStatus? {
-        guard tokensState.payload?.streak_assist.held == true else { return nil }
         guard !savedFriendIds.contains(friend.user_id) else { return nil }
         guard let rescue = tokensState.assistableFriends.first(where: { $0.user_id == friend.user_id })
         else { return nil }
-        let meter = tokensState.payload?.streak_assist
+        let budget = tokensState.donationBudget
+        let outOfMiles = (budget?.remaining ?? 0) < 1
         return FriendRescueStatus(
-            available: true,
-            missed_date: rescue.broke_date,
+            available: !rescue.alreadyOffered && !outOfMiles,
+            target_date: rescue.target_date,
+            target_kind: rescue.target_kind,
             prior_streak: rescue.prior_streak,
             restored_streak: rescue.restored_streak,
-            self_recovery: rescue.self_recovery,
-            viewer_holds_assist: true,
-            viewer_meter: .init(
-                progress: meter?.progress ?? 0,
-                target: meter?.target ?? 20
-            ),
-            reason: nil
+            self_recovery: nil,
+            friend_holds_assist: true,
+            viewer_budget: budget,
+            offer_status: rescue.offer_status,
+            offer_id: rescue.offer_id,
+            reason: rescue.alreadyOffered ? nil : (outOfMiles ? "no_miles" : nil)
         )
     }
 
-    /// Post-rescue confirmation chip in the same slot.
+    /// Post-offer confirmation chip in the same slot. "Offered", not "Saved" —
+    /// the friend still has to spend their token to take the mile.
     private var savedChip: some View {
         HStack(spacing: 4) {
-            Image(systemName: "checkmark.seal.fill")
+            Image(systemName: "paperplane.fill")
                 .font(.system(size: 11, weight: .bold))
-            Text("Saved!")
+            Text("Mile offered")
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
         }
         .foregroundColor(.green)
@@ -1088,7 +1093,7 @@ struct FriendsListView: View {
 
             // Action slot (where hype used to live). A rescuable broken streak
             // and today's unrun mile are different problems, so when a friend
-            // has both, both show — Save Streak leads (restoring yesterday is
+            // has both, both show — Donate a Mile leads (restoring yesterday is
             // the time-boxed one) and the nudge shrinks to its bell.
             HStack(spacing: 6) {
                 if let rescue = assistRescue(for: friend) {

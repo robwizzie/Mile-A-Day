@@ -1024,6 +1024,17 @@ export interface StreakFeaturesPayload {
   }[];
   natural_streak: boolean;
   streak_at_risk: boolean;
+  /**
+   * The caller's OWN day a donated mile could cover, if any. Present so the
+   * client can offer "ask a friend for a mile" at the one moment it means
+   * something — without it the app has to guess from the streak number, which
+   * says nothing about whether a single coverage row would reconnect.
+   */
+  my_savable_day: {
+    local_date: string;
+    kind: SavableTarget["kind"];
+    restored_streak: number;
+  } | null;
 }
 
 /**
@@ -1093,6 +1104,19 @@ export async function getStreakFeaturesPayload(
     frozen_dates: coverage,
     natural_streak: natural,
     streak_at_risk: atRisk,
+    // Only worth reporting when they're holding the token that would pay for
+    // it — an ask they can't complete is worse than no ask.
+    my_savable_day: meters.streak_assist.held
+      ? await getSavableTarget(userId, userToday, row).then((t) =>
+          t
+            ? {
+                local_date: t.local_date,
+                kind: t.kind,
+                restored_streak: t.restored_streak,
+              }
+            : null,
+        )
+      : null,
   };
 }
 
@@ -1154,12 +1178,14 @@ export async function getAssistableFriends(
     assist_miles: string | number;
     offer_id: string | null;
     offer_status: string | null;
+    offer_target: string | null;
   }>(
     `SELECT u.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
             to_char(t.today, 'YYYY-MM-DD') AS friend_today,
             ok.days AS ok_days,
             COALESCE(am.miles, 0) AS assist_miles,
-            o.id AS offer_id, o.status AS offer_status
+            o.id AS offer_id, o.status AS offer_status,
+            o.target_date AS offer_target
      FROM friendships f
      JOIN users u ON u.user_id = f.friend_id
      CROSS JOIN LATERAL (
@@ -1197,7 +1223,11 @@ export async function getAssistableFriends(
        ) a
      ) am ON TRUE
      LEFT JOIN LATERAL (
-       SELECT id, status FROM streak_assist_offers
+       -- Carries its target_date out so the caller can check it against the
+       -- day actually in play: yesterday's ACCEPTED offer must not read as
+       -- "already offered" for a fresh day this friend needs covering.
+       SELECT id, status, to_char(target_date, 'YYYY-MM-DD') AS target_date
+       FROM streak_assist_offers
         WHERE donor_id = $1 AND recipient_id = u.user_id
           AND status IN ('pending', 'accepted')
         ORDER BY created_at DESC LIMIT 1
@@ -1242,8 +1272,10 @@ export async function getAssistableFriends(
         prior,
         ok,
       ),
-      offer_status: row.offer_status ?? "none",
-      offer_id: row.offer_id,
+      // Only an offer aimed at THIS day counts as already offered.
+      offer_status:
+        row.offer_target === pick.local_date ? (row.offer_status ?? "none") : "none",
+      offer_id: row.offer_target === pick.local_date ? row.offer_id : null,
     });
   }
   // A day already lost is more urgent than one they can still go run.

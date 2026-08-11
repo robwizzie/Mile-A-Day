@@ -549,8 +549,8 @@ struct UserProfileDetailView: View {
                 style: .prominent,
                 onSaved: { restored in
                     showProfileNudgeFeedback(NudgeFeedback(
-                        icon: "checkmark.seal.fill",
-                        message: "Saved \(user.displayName)'s streak — back to \(restored) days!",
+                        icon: "paperplane.fill",
+                        message: "Mile offered — \(user.displayName) can use it to get back to \(restored) days.",
                         isError: false
                     ))
                     // Their flame (and today's card) should read the restored
