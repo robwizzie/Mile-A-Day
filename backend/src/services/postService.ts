@@ -2007,6 +2007,24 @@ export const UNIFIED_FEED_SQL = `
 				-- idx_workouts_feed_candidates matches this WHERE exactly, and the
 				-- PERF note above rules out anything heavier inside candidates.
 				AND w.feed_role IN ('daily_mile', 'extra')
+				-- HOLD a just-synced workout off OTHER viewers' feeds for the
+				-- CAMERA window (same GREATEST anchor as getPostWindowStatus, so
+				-- a late Watch sync is held from ARRIVAL, not from a
+				-- device_end_date that's already past): if the owner shoots a pic
+				-- right after the walk, the photo and the route land together as
+				-- ONE card instead of a route card that a photo post replaces
+				-- mid-scroll. Deliberately the 10-minute camera tier and NOT the
+				-- all-day photo tier — holding every card until midnight to
+				-- catch a possible library post would gut the feed's liveness
+				-- for the rarer case; a later library post simply lands as its
+				-- own card, exactly as it did before this hold existed. The
+				-- owner always sees their own workout immediately, and the
+				-- friend pushes defer the same 10 minutes (notificationService),
+				-- so a push can never point at a held card. Cheap arithmetic on
+				-- already-read columns — no extra probe.
+				AND (c.uid = $1
+					OR GREATEST(w.device_end_date, COALESCE(w.created_at, w.device_end_date))
+						<= NOW() - ${POST_WINDOW_MS} * INTERVAL '1 millisecond')
 				-- These two NOT EXISTS were ONE clause with an OR between
 				-- p2.workout_id and p2.coauthor_workout_id. Splitting them is the
 				-- identity NOT EXISTS(A OR B) = NOT EXISTS(A) AND NOT EXISTS(B),

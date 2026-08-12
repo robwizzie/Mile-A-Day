@@ -181,6 +181,37 @@ assert.deepEqual(
   "post opened directly matches the same post in the feed, field for field",
 );
 
+// --- Fresh-workout hold. A just-synced workout with no post (Alice's) stays
+// off FRIENDS' feeds while its 10-minute photo window is open, so a photo
+// posted in the window lands together with the route instead of after it.
+// The owner keeps seeing their own workout the whole time.
+const bobFeedFresh = await getUnifiedFeed(BOB, 20, null);
+assert.ok(
+  !bobFeedFresh.some((e) => e.kind === "workout" && e.user_id === ALICE),
+  "a friend's just-synced workout card is held while its photo window is open",
+);
+assert.ok(
+  (await getUnifiedFeed(ALICE, 20, null)).some(
+    (e) => e.kind === "workout" && e.user_id === ALICE,
+  ),
+  "the owner still sees their own fresh workout immediately",
+);
+// Age the sync past the window (both columns — GREATEST anchors the hold):
+// the card must now appear for friends, and stays visible for the rest of
+// this suite exactly as it did before the hold existed.
+await db.query(
+  `UPDATE workouts
+	 SET created_at = created_at - INTERVAL '11 minutes',
+		 device_end_date = device_end_date - INTERVAL '11 minutes'
+	 WHERE workout_id = 'ci-workout-alice'`,
+);
+assert.ok(
+  (await getUnifiedFeed(BOB, 20, null)).some(
+    (e) => e.kind === "workout" && e.user_id === ALICE,
+  ),
+  "the held card appears for friends once the photo window lapses",
+);
+
 // Stories rail as Alice: Bob's fresh story must appear.
 const rail = await getStoriesRail(ALICE);
 assert.ok(
@@ -1092,6 +1123,17 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
   const carlEntries = async () =>
     (await getUnifiedFeed(BOB, 50, null)).filter((e) => e.user_id === CARL);
 
+  // Fresh syncs are HELD off friends' feeds for the photo window (asserted
+  // up top). Carl's device_end_dates sit months in the past, but the hold
+  // anchors on GREATEST(device_end_date, created_at) — so age created_at
+  // after each upload for these assertions to read the settled card state.
+  const ageCarlPastPostWindow = () =>
+    db.query(
+      `UPDATE workouts SET created_at = created_at - INTERVAL '11 minutes'
+			 WHERE user_id = $1 AND created_at > NOW() - INTERVAL '10 minutes'`,
+      [CARL],
+    );
+
   // A 0.00-mile 3-second accident, then a mile built from three short walks.
   await uploadWorkouts(CARL, [
     at("ci-role-junk", 0.0, 3, 6),
@@ -1099,6 +1141,7 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     at("ci-role-b", 0.33, 400, 9),
     at("ci-role-c", 0.4, 500, 10),
   ]);
+  await ageCarlPastPostWindow();
   assert.deepEqual(
     await rolesOf(),
     {
@@ -1148,6 +1191,7 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
 
   // Anything after the mile stands on its own, with its OWN distance.
   await uploadWorkouts(CARL, [at("ci-role-extra", 2.0, 1800, 14)]);
+  await ageCarlPastPostWindow();
   entries = await carlEntries();
   assert.equal(entries.length, 2, "a run after the mile gets its own card");
   const extra = entries.find((e) => e.workout_id === "ci-role-extra");
@@ -1216,135 +1260,138 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     "a post with no linked workout keeps its stats (not nulled by the rollup join)",
   );
 
-
-// ─── Friend ghosts ────────────────────────────────────────────────────────
-//
-// The ghost picker offers a friend's fastest mile as a target. Every rule that
-// keeps that honest is a WHERE clause, so each one gets an assertion: this is
-// the query that decides whose time a stranger can chase.
-{
-  const ghostWorkout = async (userId, id, type, splitDistance, splitPace) => {
-    await db.query(
-      `INSERT INTO workouts (user_id, workout_id, distance, local_date, date,
+  // ─── Friend ghosts ────────────────────────────────────────────────────────
+  //
+  // The ghost picker offers a friend's fastest mile as a target. Every rule that
+  // keeps that honest is a WHERE clause, so each one gets an assertion: this is
+  // the query that decides whose time a stranger can chase.
+  {
+    const ghostWorkout = async (userId, id, type, splitDistance, splitPace) => {
+      await db.query(
+        `INSERT INTO workouts (user_id, workout_id, distance, local_date, date,
                              timezone_offset, workout_type, device_end_date,
                              calories, total_duration)
        VALUES ($1, $2, 1.0, $3, $4, 0, $5, $6, 50, 600)
        ON CONFLICT (workout_id) DO NOTHING`,
-      // `date` and `local_date` are DATE columns; `device_end_date` is
-      // timestamptz. Reusing one param for a date and a timestamptz is a
-      // param-type conflict, not a coercion.
-      [userId, id, localDate, localDate, type, nowIso],
-    );
-    await db.query(
-      `INSERT INTO workout_splits (workout_id, split_number, split_duration,
+        // `date` and `local_date` are DATE columns; `device_end_date` is
+        // timestamptz. Reusing one param for a date and a timestamptz is a
+        // param-type conflict, not a coercion.
+        [userId, id, localDate, localDate, type, nowIso],
+      );
+      await db.query(
+        `INSERT INTO workout_splits (workout_id, split_number, split_duration,
                                    split_distance, split_pace)
        VALUES ($1, 1, $2, $3, $2)
        ON CONFLICT (workout_id, split_number) DO UPDATE
          SET split_distance = EXCLUDED.split_distance,
              split_pace = EXCLUDED.split_pace`,
-      [id, splitPace, splitDistance],
+        [id, splitPace, splitDistance],
+      );
+    };
+
+    await ghostWorkout(BOB, "ci-ghost-bob-run", "running", 1.0, 540);
+    await ghostWorkout(DANA, "ci-ghost-dana-run", "running", 1.0, 500);
+
+    let ghosts = await getFriendGhosts(ALICE, "running");
+    let ids = ghosts.map((g) => g.user_id);
+    assert.ok(ids.includes(BOB), "a friend's mile is offered as a ghost");
+    assert.equal(
+      ghosts.find((g) => g.user_id === BOB).mile_seconds,
+      540,
+      "the ghost time is the friend's fastest mile split, in seconds",
     );
-  };
 
-  await ghostWorkout(BOB, "ci-ghost-bob-run", "running", 1.0, 540);
-  await ghostWorkout(DANA, "ci-ghost-dana-run", "running", 1.0, 500);
+    // DANA is Alice's friend too, and faster — the list is a leaderboard.
+    assert.deepEqual(
+      ghosts.map((g) => g.mile_seconds),
+      [...ghosts.map((g) => g.mile_seconds)].sort((a, b) => a - b),
+      "ghosts come back fastest-first",
+    );
 
-  let ghosts = await getFriendGhosts(ALICE, "running");
-  let ids = ghosts.map((g) => g.user_id);
-  assert.ok(ids.includes(BOB), "a friend's mile is offered as a ghost");
-  assert.equal(
-    ghosts.find((g) => g.user_id === BOB).mile_seconds,
-    540,
-    "the ghost time is the friend's fastest mile split, in seconds",
-  );
+    // A non-friend is never offered. CARL is Bob's friend, not Alice's.
+    await ghostWorkout(CARL, "ci-ghost-carl-run", "running", 1.0, 400);
+    ghosts = await getFriendGhosts(ALICE, "running");
+    assert.ok(
+      !ghosts.some((g) => g.user_id === CARL),
+      "a non-friend's mile is never offered, however fast",
+    );
 
-  // DANA is Alice's friend too, and faster — the list is a leaderboard.
-  assert.deepEqual(
-    ghosts.map((g) => g.mile_seconds),
-    [...ghosts.map((g) => g.mile_seconds)].sort((a, b) => a - b),
-    "ghosts come back fastest-first",
-  );
+    // Activity type: a RUN split must never become a WALK ghost.
+    const walkGhosts = await getFriendGhosts(ALICE, "walking");
+    assert.ok(
+      !walkGhosts.some((g) => g.user_id === BOB),
+      "a friend's run mile is not offered as a walk ghost",
+    );
 
-  // A non-friend is never offered. CARL is Bob's friend, not Alice's.
-  await ghostWorkout(CARL, "ci-ghost-carl-run", "running", 1.0, 400);
-  ghosts = await getFriendGhosts(ALICE, "running");
-  assert.ok(
-    !ghosts.some((g) => g.user_id === CARL),
-    "a non-friend's mile is never offered, however fast",
-  );
+    // The 0.999 floor: a 0.96-mile split is an extrapolated partial, not a mile.
+    await ghostWorkout(DANA, "ci-ghost-dana-partial", "walking", 0.96, 300);
+    assert.ok(
+      !(await getFriendGhosts(ALICE, "walking")).some(
+        (g) => g.user_id === DANA,
+      ),
+      "a sub-0.999 split is excluded (extrapolated partial, unbeatable)",
+    );
 
-  // Activity type: a RUN split must never become a WALK ghost.
-  const walkGhosts = await getFriendGhosts(ALICE, "walking");
-  assert.ok(
-    !walkGhosts.some((g) => g.user_id === BOB),
-    "a friend's run mile is not offered as a walk ghost",
-  );
-
-  // The 0.999 floor: a 0.96-mile split is an extrapolated partial, not a mile.
-  await ghostWorkout(DANA, "ci-ghost-dana-partial", "walking", 0.96, 300);
-  assert.ok(
-    !(await getFriendGhosts(ALICE, "walking")).some((g) => g.user_id === DANA),
-    "a sub-0.999 split is excluded (extrapolated partial, unbeatable)",
-  );
-
-  // Blocks hide the mile in BOTH directions.
-  await db.query(
-    `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)
+    // Blocks hide the mile in BOTH directions.
+    await db.query(
+      `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)
      ON CONFLICT DO NOTHING`,
-    [BOB, ALICE],
-  );
-  assert.ok(
-    !(await getFriendGhosts(ALICE, "running")).some((g) => g.user_id === BOB),
-    "a block hides the blocker's mile from the blocked user",
-  );
-  assert.ok(
-    !(await getFriendGhosts(BOB, "running")).some((g) => g.user_id === ALICE),
-    "a block hides the mile in the other direction too",
-  );
-  await db.query(`DELETE FROM user_blocks WHERE blocker_id = $1`, [BOB]);
+      [BOB, ALICE],
+    );
+    assert.ok(
+      !(await getFriendGhosts(ALICE, "running")).some((g) => g.user_id === BOB),
+      "a block hides the blocker's mile from the blocked user",
+    );
+    assert.ok(
+      !(await getFriendGhosts(BOB, "running")).some((g) => g.user_id === ALICE),
+      "a block hides the mile in the other direction too",
+    );
+    await db.query(`DELETE FROM user_blocks WHERE blocker_id = $1`, [BOB]);
 
-  // workout_visibility = 'private' removes you from being raceable. This is
-  // the privacy control the feature reuses instead of minting a new toggle.
-  await updateNotificationPreferences(BOB, { workout_visibility: "private" });
-  assert.ok(
-    !(await getFriendGhosts(ALICE, "running")).some((g) => g.user_id === BOB),
-    "a 'private' user is not offered as a ghost",
-  );
-  await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
+    // workout_visibility = 'private' removes you from being raceable. This is
+    // the privacy control the feature reuses instead of minting a new toggle.
+    await updateNotificationPreferences(BOB, { workout_visibility: "private" });
+    assert.ok(
+      !(await getFriendGhosts(ALICE, "running")).some((g) => g.user_id === BOB),
+      "a 'private' user is not offered as a ghost",
+    );
+    await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
 
-  // A soft-deleted workout stops supplying the number.
-  await db.query(
-    `UPDATE workouts SET deleted_at = NOW() WHERE workout_id = 'ci-ghost-bob-run'`,
-  );
-  assert.ok(
-    !(await getFriendGhosts(ALICE, "running")).some((g) => g.user_id === BOB),
-    "a soft-deleted workout stops supplying a ghost time",
-  );
-  await db.query(
-    `UPDATE workouts SET deleted_at = NULL WHERE workout_id = 'ci-ghost-bob-run'`,
-  );
+    // A soft-deleted workout stops supplying the number.
+    await db.query(
+      `UPDATE workouts SET deleted_at = NOW() WHERE workout_id = 'ci-ghost-bob-run'`,
+    );
+    assert.ok(
+      !(await getFriendGhosts(ALICE, "running")).some((g) => g.user_id === BOB),
+      "a soft-deleted workout stops supplying a ghost time",
+    );
+    await db.query(
+      `UPDATE workouts SET deleted_at = NULL WHERE workout_id = 'ci-ghost-bob-run'`,
+    );
 
-  // A sub-4:01 mile is a car, not a person. It must not become anyone's
-  // ghost, PR, leaderboard entry or badge — the floor is shared, so this
-  // asserts the one surface and documents the rule for the rest.
-  await ghostWorkout(BOB, "ci-ghost-bob-car", "running", 1.0, 140);
-  const carGhosts = await getFriendGhosts(ALICE, "running");
-  assert.equal(
-    carGhosts.find((g) => g.user_id === BOB)?.mile_seconds,
-    540,
-    "a 2:20 mile is ignored; the real 9:00 stays the ghost",
-  );
-  await db.query(
-    `DELETE FROM workout_splits WHERE workout_id = 'ci-ghost-bob-run'`,
-  );
-  assert.ok(
-    !(await getFriendGhosts(ALICE, "running")).some((g) => g.user_id === BOB),
-    "with only the sub-4:01 split left, they drop out entirely",
-  );
+    // A sub-4:01 mile is a car, not a person. It must not become anyone's
+    // ghost, PR, leaderboard entry or badge — the floor is shared, so this
+    // asserts the one surface and documents the rule for the rest.
+    await ghostWorkout(BOB, "ci-ghost-bob-car", "running", 1.0, 140);
+    const carGhosts = await getFriendGhosts(ALICE, "running");
+    assert.equal(
+      carGhosts.find((g) => g.user_id === BOB)?.mile_seconds,
+      540,
+      "a 2:20 mile is ignored; the real 9:00 stays the ghost",
+    );
+    await db.query(
+      `DELETE FROM workout_splits WHERE workout_id = 'ci-ghost-bob-run'`,
+    );
+    assert.ok(
+      !(await getFriendGhosts(ALICE, "running")).some((g) => g.user_id === BOB),
+      "with only the sub-4:01 split left, they drop out entirely",
+    );
 
-  await db.query(`DELETE FROM workout_splits WHERE workout_id LIKE 'ci-ghost-%'`);
-  await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-ghost-%'`);
-}
+    await db.query(
+      `DELETE FROM workout_splits WHERE workout_id LIKE 'ci-ghost-%'`,
+    );
+    await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-ghost-%'`);
+  }
 
   await db.query(`DELETE FROM posts WHERE user_id = $1`, [CARL]);
   await db.query(`DELETE FROM workouts WHERE user_id = $1`, [CARL]);

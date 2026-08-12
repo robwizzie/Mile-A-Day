@@ -439,29 +439,28 @@ async function notifyFriendsOfWorkoutEvent(
       return;
     }
 
-    // Same recipient pool as mile-completion: friends + active-competition co-participants.
-    const allowedRecipients = await getFriendActivityRecipientPool(
-      userId,
-      outgoing,
-      eventType,
-      activity,
+    // Defer + merge, same as the mile-completion push: the workout's feed
+    // card is HELD off friends' feeds for the 10-minute photo window
+    // (UNIFIED_FEED_SQL), so an immediate push would point at a card that
+    // isn't there yet. Queued for the window's close instead — by then the
+    // card is live, with the photo riding along if one was posted. The
+    // pending-send cron (drainDueScheduled) recomputes the recipient pool
+    // at delivery; the milestone claim above keeps this once-per-workout.
+    await db.query(
+      `INSERT INTO pending_friend_notifications
+			 (user_id, event_type, activity_type, workout_id, payload, local_date, send_after_at)
+			 VALUES ($1, $2, $3, $4, $5::jsonb, $6::date, NOW() + INTERVAL '10 minutes')
+			 ON CONFLICT (user_id, event_type, workout_id)
+			 WHERE workout_id IS NOT NULL AND status = 'pending' DO NOTHING`,
+      [
+        userId,
+        eventType,
+        activity,
+        workoutId,
+        JSON.stringify(payload),
+        workout.local_date,
+      ],
     );
-    if (allowedRecipients.length === 0) return;
-
-    for (const recipientId of allowedRecipients) {
-      sendPush(recipientId, payload).catch((err) =>
-        console.error(
-          `[Push] Error sending ${eventType} notification:`,
-          err.message,
-        ),
-      );
-    }
-
-    if (allowedRecipients.length > 0) {
-      console.log(
-        `[Notifications] Sent ${eventType} (${activity}) to ${allowedRecipients.length} recipients of ${user.username}`,
-      );
-    }
   } catch (err: any) {
     console.error(
       `[Notifications] Error notifying friends of ${eventType}:`,
