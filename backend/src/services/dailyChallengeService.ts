@@ -1,10 +1,11 @@
 import { PostgresService } from "./DbService.js";
-import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
+import { MIN_PLAUSIBLE_MILE_SECONDS, countedWorkoutSql } from "./mileTime.js";
 import {
   DailyChallenge,
   TodaysChallengeResponse,
   ChallengeCompletionsResponse,
   ChallengeCompletionHistoryItem,
+  ChallengeMissedDayItem,
   FriendTodayChallengeResponse,
   NewChallengeCompletion,
   DailyChallengeType,
@@ -116,7 +117,144 @@ export async function getCompletions(
       completions.map((c) => c.localDate),
     ),
     completions,
+    missed: await missedDaysInWindow(
+      userId,
+      new Set(completions.map((c) => c.localDate)),
+    ),
   };
+}
+
+/** Days the history grid draws, matching the client's "LAST 14 DAYS". */
+const HISTORY_WINDOW_DAYS = 14;
+
+/**
+ * The recent days that went by without a completion, each carrying the
+ * challenge that was on offer — so a missed square can say WHAT was missed
+ * instead of just being empty.
+ *
+ * Nothing stores "the challenge user X was served on date D": selection is a
+ * pure function of the date and the user's eligibility, re-derived on every
+ * read (see selectChallengeForUser). So this re-walks the same rotation for
+ * each empty day, with two deliberate departures:
+ *
+ *  - Eligibility (friend count, feed feature, rival availability) is resolved
+ *    ONCE and reused for every day in the window, rather than per day. The
+ *    honest alternative — reconstructing what each signal was a week ago —
+ *    isn't recorded anywhere, and re-querying per day would multiply the cost
+ *    of a history read by 14 for a strictly cosmetic label.
+ *  - A `h2h_matchups` row is BELIEVED over the walk. That row is only ever
+ *    written for a user whose selection actually landed on the duel that day,
+ *    which makes it the one stored record of a past day's challenge — and it
+ *    covers the case the re-derivation is least able to reproduce, since the
+ *    rotation sequence itself has changed over time (head_to_head now appears
+ *    twice per cycle).
+ *
+ * Today is never "missed" — it is still winnable — and neither is any day
+ * before the account existed.
+ */
+async function missedDaysInWindow(
+  userId: string,
+  completedDates: Set<string>,
+): Promise<ChallengeMissedDayItem[]> {
+  const catalog = await db.query<ChallengeRow>(
+    `SELECT challenge_key, title, description_template, icon, gradient_start, gradient_end, type
+		FROM daily_challenges
+		WHERE active = TRUE
+		ORDER BY rotation_index ASC`,
+  );
+  if (catalog.length === 0) return [];
+
+  // The window: yesterday back through day 13, bounded below by the account's
+  // own start. `created_at` was backfilled from each user's first upload
+  // (migration 0013), so this doesn't claim someone missed challenges before
+  // they were here.
+  const windowRows = await db.query<{ local_date: string }>(
+    `WITH bounds AS (
+			SELECT
+				(NOW() + (COALESCE(
+					(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
+					0) || ' minutes')::interval)::date AS today,
+				(SELECT created_at::date FROM users WHERE user_id = $1) AS joined
+		)
+		SELECT d::date::text AS local_date
+		FROM bounds, GENERATE_SERIES(
+			GREATEST(bounds.today - ($2::int - 1), COALESCE(bounds.joined, bounds.today - ($2::int - 1))),
+			bounds.today - 1,
+			INTERVAL '1 day'
+		) AS d
+		ORDER BY d DESC`,
+    [userId, HISTORY_WINDOW_DAYS],
+  );
+  const openDays = windowRows
+    .map((r) => r.local_date)
+    .filter((d) => !completedDates.has(d));
+  if (openDays.length === 0) return [];
+
+  // Resolved once for the whole window (see the note above).
+  let friendCount: number | null = null;
+  let hasFeed: boolean | null = null;
+  let h2hOk: boolean | null = null;
+
+  // Days this user was actually pinned into a duel — stored truth.
+  const duelRows = await db.query<{ local_date: string }>(
+    `SELECT local_date::text AS local_date FROM h2h_matchups
+		WHERE user_id = $1 AND local_date = ANY($2::date[])`,
+    [userId, openDays],
+  );
+  const duelDays = new Set(duelRows.map((r) => r.local_date));
+  const h2hRow =
+    duelDays.size > 0
+      ? (catalog.find((c) => c.challenge_key === "head_to_head") ?? null)
+      : null;
+
+  const missed: ChallengeMissedDayItem[] = [];
+  for (const localDate of openDays) {
+    let row: ChallengeRow | null = duelDays.has(localDate) ? h2hRow : null;
+    if (!row) {
+      let friendlessOnH2hDay = false;
+      const picked = await walkRotation(
+        catalog,
+        localDate,
+        async (candidate) => {
+          if (SOCIAL_CHALLENGE_KEYS.has(candidate.challenge_key)) {
+            friendCount ??= await getAcceptedFriendCount(userId);
+            if (friendCount === 0) {
+              if (candidate.challenge_key === "head_to_head") {
+                friendlessOnH2hDay = true;
+              }
+              return false;
+            }
+          }
+          if (candidate.challenge_key === "head_to_head") {
+            h2hOk ??= await hasH2hRivalCandidates(userId);
+            if (!h2hOk) return false;
+          }
+          if (FEED_CHALLENGE_KEYS.has(candidate.challenge_key)) {
+            hasFeed ??= await userHasFeedFeature(userId);
+            if (!hasFeed) return false;
+          }
+          return true;
+        },
+      );
+      row = friendlessOnH2hDay
+        ? ((await getChallengeRowByKey(ADD_FRIEND_CHALLENGE_KEY)) ?? picked)
+        : picked;
+    }
+    if (!row) continue;
+    missed.push({
+      localDate,
+      challengeKey: row.challenge_key,
+      title: row.title,
+      // The raw template: {avg_pace} personalization is a TODAY concept (it
+      // reads the user's current best), and back-filling it onto a past day
+      // would advertise a target that day never set.
+      description: row.description_template,
+      icon: row.icon,
+      gradientStart: row.gradient_start,
+      gradientEnd: row.gradient_end,
+    });
+  }
+  return missed;
 }
 
 export async function getTodaysCompletion(
@@ -382,7 +520,8 @@ async function computeProgress(
       }>(
         `SELECT
 					(SELECT MIN(s.split_pace) FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					 WHERE w.user_id = $1 AND w.local_date = $2 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95)::text AS min_pace,
+					 WHERE w.user_id = $1 AND w.local_date = $2 AND ${countedWorkoutSql("w")}
+					   AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95)::text AS min_pace,
 					(SELECT COALESCE(SUM(distance),0) FROM workouts WHERE user_id = $1 AND local_date = $2 AND deleted_at IS NULL AND exclusion_reason IS NULL)::text AS day_total`,
         [userId, localDate],
       );
@@ -448,11 +587,13 @@ async function computeProgress(
         `WITH prior AS (
 					SELECT MIN(s.split_pace) AS p
 					FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					WHERE w.user_id = $1 AND w.local_date < $2 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
+					WHERE w.user_id = $1 AND w.local_date < $2 AND ${countedWorkoutSql("w")}
+						AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
 				), today AS (
 					SELECT MIN(s.split_pace) AS p
 					FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					WHERE w.user_id = $1 AND w.local_date = $2 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
+					WHERE w.user_id = $1 AND w.local_date = $2 AND ${countedWorkoutSql("w")}
+						AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
 				)
 				SELECT prior.p::text AS prior_min, today.p::text AS today_min FROM prior, today`,
         [userId, localDate],
@@ -595,6 +736,7 @@ async function evaluatePredicate(
 						SELECT 1 FROM workout_splits s
 						  JOIN workouts w ON w.workout_id = s.workout_id
 						WHERE w.user_id = $1 AND w.local_date = $2
+						  AND ${countedWorkoutSql("w")}
 						  AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}
 						  AND s.split_distance >= 0.95
 						  AND s.split_pace / 60.0 <= 12.0
@@ -617,11 +759,13 @@ async function evaluatePredicate(
         `WITH prior AS (
 					SELECT MIN(s.split_pace) AS p
 					FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					WHERE w.user_id = $1 AND w.local_date < $2 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
+					WHERE w.user_id = $1 AND w.local_date < $2 AND ${countedWorkoutSql("w")}
+						AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
 				), today AS (
 					SELECT MIN(s.split_pace) AS p
 					FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					WHERE w.user_id = $1 AND w.local_date = $2 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
+					WHERE w.user_id = $1 AND w.local_date = $2 AND ${countedWorkoutSql("w")}
+						AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
 				)
 				SELECT prior.p::text AS prior_min, today.p::text AS today_min FROM prior, today`,
         [userId, localDate],
@@ -1187,7 +1331,8 @@ async function renderDescription(
   const rows = await db.query<{ min_pace: string | null }>(
     `SELECT MIN(s.split_pace)::text AS min_pace
 		FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-		WHERE w.user_id = $1 AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95`,
+		WHERE w.user_id = $1 AND ${countedWorkoutSql("w")}
+			AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95`,
     [userId],
   );
   const secPerMile = rows[0]?.min_pace ? parseFloat(rows[0].min_pace) : 0;

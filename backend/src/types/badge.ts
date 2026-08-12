@@ -110,10 +110,31 @@ export interface ChallengeCompletionHistoryItem {
   completedAt: string;
 }
 
+/**
+ * A day inside the history window that went by without its challenge being
+ * completed. Carries the challenge itself so the grid can show WHAT was
+ * missed rather than a bare empty square.
+ */
+export interface ChallengeMissedDayItem {
+  localDate: string;
+  challengeKey: string;
+  title: string;
+  description: string;
+  icon: string;
+  gradientStart: string;
+  gradientEnd: string;
+}
+
 export interface ChallengeCompletionsResponse {
   totalCompleted: number;
   currentStreak: number;
   completions: ChallengeCompletionHistoryItem[];
+  /**
+   * Additive: the recent days with no completion, newest first. Absent from
+   * older servers and ignored by older clients, so the grid degrades to the
+   * empty squares it drew before.
+   */
+  missed: ChallengeMissedDayItem[];
 }
 
 export interface FriendTodayChallengeResponse {

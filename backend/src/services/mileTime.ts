@@ -38,6 +38,24 @@ export function realMileSplitSql(paceCol: string): string {
   return `${paceCol} >= ${MIN_PLAUSIBLE_MILE_SECONDS}`;
 }
 
+/**
+ * SQL predicate for "this workout COUNTS" — not deleted, and not excluded by
+ * the duplicate/vehicle/consent passes (`exclusion_reason`).
+ *
+ * Every query that SUMs `distance` already spells this out inline, but the
+ * ones that reach workouts through `workout_splits` did not: a Strava copy of
+ * a run that HealthKit already recorded, or a drive classified `vehicle_speed`,
+ * still owned the fastest split. So the same ride that was kept out of the
+ * user's miles could win Speed Round, and — because `beat_your_pace` compares
+ * against the all-time best split BEFORE the day — could raise the bar
+ * permanently and make that challenge unwinnable.
+ *
+ * `alias` is a table alias from the caller's own query, never request input.
+ */
+export function countedWorkoutSql(alias: string): string {
+  return `${alias}.deleted_at IS NULL AND ${alias}.exclusion_reason IS NULL`;
+}
+
 /** The same check for values already in JS. */
 export function isPlausibleMileSeconds(seconds: unknown): boolean {
   const value = Number(seconds);

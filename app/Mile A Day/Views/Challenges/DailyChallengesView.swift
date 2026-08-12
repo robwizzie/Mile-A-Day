@@ -5,7 +5,16 @@ struct DailyChallengesView: View {
     @ObservedObject var userManager: UserManager
 
     @State private var completions: [ChallengeCompletion] = ChallengeService.shared.allCompletions()
+    /// Recent days that went by uncompleted, each carrying the challenge that
+    /// was on offer — server-derived, since nothing records which challenge a
+    /// past day served. Empty on older servers, where the grid falls back to
+    /// the bare day numbers it drew before.
+    @State private var missedDays: [ChallengeCompletion] =
+        (ChallengeService.shared as? RemoteChallengeService)?.allMissedDays() ?? []
     @State private var selectedHistoryCompletion: ChallengeCompletion?
+    /// A missed day opened from the grid. Separate from the completed sheet's
+    /// item so the sheet can say "not completed" without a completion to show.
+    @State private var selectedMissedDay: ChallengeCompletion?
     @State private var todaysChallenge: DailyChallenge?
     @State private var tomorrowsChallenge: DailyChallenge?
     @State private var todayProgress: Double = 0
@@ -77,11 +86,22 @@ struct DailyChallengesView: View {
             ChallengeCompletionDetailSheet(completion: completion, healthManager: healthManager)
                 .presentationDetents([.medium, .large])
         }
+        // A second item-sheet on its own node: two presentations on one node
+        // silently drop one (ios.md).
+        .sheet(item: $selectedMissedDay) { missed in
+            ChallengeCompletionDetailSheet(
+                completion: missed,
+                healthManager: healthManager,
+                wasMissed: true
+            )
+            .presentationDetents([.medium, .large])
+        }
     }
 
     private func refresh() {
         completions = ChallengeService.shared.allCompletions()
         if let remote = ChallengeService.shared as? RemoteChallengeService {
+            missedDays = remote.allMissedDays()
             todaysChallenge = remote.todayChallenge
             tomorrowsChallenge = remote.tomorrowChallenge
             todayProgress = remote.todayProgress
@@ -434,7 +454,11 @@ struct DailyChallengesView: View {
             ) {
                 ForEach(days, id: \.date) { day in
                     HistoryDayCell(day: day) {
-                        if let c = day.completion { selectedHistoryCompletion = c }
+                        if let c = day.completion {
+                            selectedHistoryCompletion = c
+                        } else if let m = day.missed {
+                            selectedMissedDay = m
+                        }
                     }
                 }
             }
@@ -479,9 +503,21 @@ struct DailyChallengesView: View {
         let lookup: [Date: ChallengeCompletion] = Dictionary(
             uniqueKeysWithValues: completions.map { (calendar.startOfDay(for: $0.date), $0) }
         )
+        let missedLookup: [Date: ChallengeCompletion] = Dictionary(
+            missedDays.map { (calendar.startOfDay(for: $0.date), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         return (0..<14).reversed().compactMap { offset -> HistoryDay? in
             guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
-            return HistoryDay(date: date, isToday: offset == 0, completion: lookup[date])
+            let completion = lookup[date]
+            return HistoryDay(
+                date: date,
+                isToday: offset == 0,
+                completion: completion,
+                // Only ever set on a day with no completion, so the cell can
+                // never be asked to draw both.
+                missed: completion == nil ? missedLookup[date] : nil
+            )
         }
     }
 }
@@ -492,6 +528,8 @@ private struct HistoryDay {
     let date: Date
     let isToday: Bool
     let completion: ChallengeCompletion?
+    /// The challenge this day offered when it wasn't completed.
+    var missed: ChallengeCompletion? = nil
 }
 
 private struct HistoryDayCell: View {
@@ -520,6 +558,13 @@ private struct HistoryDayCell: View {
                         Image(systemName: c.icon)
                             .font(.system(size: 14, weight: .bold))
                             .foregroundColor(.white)
+                    } else if let missed = day.missed {
+                        // What was on offer that day, dimmed. A bare number
+                        // said only "nothing here"; the icon says which
+                        // challenge went by — and tapping names it.
+                        Image(systemName: missed.icon)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.35))
                     } else {
                         Text(dayNumber)
                             .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -534,7 +579,14 @@ private struct HistoryDayCell: View {
             }
         }
         .buttonStyle(PlainButtonStyle())
-        .disabled(day.completion == nil)
+        .disabled(day.completion == nil && day.missed == nil)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        if let c = day.completion { return "\(c.title), completed" }
+        if let m = day.missed { return "\(m.title), not completed" }
+        return dayNumber
     }
 }
 
