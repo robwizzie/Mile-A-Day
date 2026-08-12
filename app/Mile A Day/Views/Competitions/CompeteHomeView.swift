@@ -30,7 +30,9 @@ struct CompeteHomeView: View {
     let onCreateBlank: () -> Void
     let onEdit: (Competition) -> Void
     let onError: (String) -> Void
-    let onOpenWeekly: (WeeklyChallengeResponse) -> Void
+    /// No payload: the shell reads the same shared service when it presents,
+    /// so handing it back a copy would just be a second source of truth.
+    let onOpenWeekly: () -> Void
 
     /// The always-on half of the tab: there's a challenge every week whether or
     /// not anyone has started a competition. Defaulted rather than private so
@@ -91,7 +93,7 @@ struct CompeteHomeView: View {
         ScrollViewReader { proxy in
             List {
                 if let weekly = weeklyService.current {
-                    WeeklyChallengeHeroCard(response: weekly) { onOpenWeekly(weekly) }
+                    WeeklyChallengeHeroCard(response: weekly) { onOpenWeekly() }
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 4, trailing: 14))
