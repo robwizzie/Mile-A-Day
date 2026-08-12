@@ -570,6 +570,75 @@ struct ModeRecordRow: View {
     }
 }
 
+/// Your head-to-head record against one person.
+struct RivalRow: View {
+    let rival: CompetitionRecord.Rival
+
+    /// Green when you're up, red when you're down, neutral when level or when
+    /// every meeting was decided by somebody else.
+    private var tint: Color {
+        if rival.wins > rival.losses { return .green }
+        if rival.losses > rival.wins { return MADTheme.Colors.madRed }
+        return .white.opacity(0.6)
+    }
+
+    /// A competition a third party won is a meeting but not a result, so the
+    /// W–L can legitimately be 0–0 with several meetings behind it.
+    private var subtitle: String {
+        let decided = rival.wins + rival.losses
+        if decided == 0 {
+            return rival.meetings == 1
+                ? "1 competition together"
+                : "\(rival.meetings) competitions together"
+        }
+        if rival.meetings > decided {
+            return "\(rival.meetings) together · \(decided) decided between you"
+        }
+        return rival.meetings == 1 ? "1 competition" : "\(rival.meetings) competitions"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            AvatarView(
+                name: rival.displayName,
+                imageURL: rival.profile_image_url,
+                size: 38
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(rival.displayName)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+
+                Text(subtitle)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+
+            Text(rival.recordText)
+                .font(.system(size: 15, weight: .heavy, design: .rounded))
+                .foregroundColor(tint)
+                // Data-driven, but short and bounded — never let it truncate in
+                // favour of the name.
+                .fixedSize()
+        }
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+                )
+        )
+    }
+}
+
 // MARK: - Section header
 
 /// Shared section label for the Compete/Record scroll views, with an optional

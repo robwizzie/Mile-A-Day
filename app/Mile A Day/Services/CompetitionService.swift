@@ -15,6 +15,11 @@ class CompetitionService: ObservableObject {
     @Published private(set) var hasLoadedOnce = false
     @Published var errorMessage: String?
 
+    /// Server-computed win/loss record. Nil until the first successful fetch —
+    /// and on any build talking to a server that predates the endpoint, which
+    /// is why the Record tab keeps a client-side derivation to fall back to.
+    @Published private(set) var record: CompetitionRecord?
+
     // MARK: - Private Properties
     private let baseURL = AppConfig.baseURL
     private var authToken: String?
@@ -343,6 +348,48 @@ class CompetitionService: ObservableObject {
         print("[CompetitionService] Loaded \(invites.count) invites")
     }
 
+    /// Fetch the server-computed win/loss record.
+    ///
+    /// Never throws. A server deploy and an App Store rollout are weeks apart
+    /// in both directions, so this build can easily be talking to a server with
+    /// no `/competitions/record` route — a 404 there has to leave the Record
+    /// tab on its client-side derivation, not surface an error.
+    ///
+    /// Cached to UserDefaults so the tab has real numbers on cold launch rather
+    /// than counting up from whatever one page of competitions happens to hold.
+    func loadRecord() async {
+        do {
+            let fetched: CompetitionRecord = try await makeRequest(
+                endpoint: "/competitions/record",
+                responseType: CompetitionRecord.self
+            )
+            record = fetched
+            cacheRecord(fetched)
+        } catch {
+            print("[CompetitionService] Record unavailable: \(error.localizedDescription)")
+            // Keep whatever we already had — a transient failure shouldn't
+            // blank a record that was correct a minute ago.
+            if record == nil { record = cachedRecord() }
+        }
+    }
+
+    /// Per-user so a device that switches accounts never shows the other's record.
+    private var recordCacheKey: String? {
+        guard let userId = UserDefaults.standard.string(forKey: "backendUserId") else { return nil }
+        return "competitionRecordV1_\(userId)"
+    }
+
+    private func cacheRecord(_ record: CompetitionRecord) {
+        guard let key = recordCacheKey, let data = try? JSONEncoder().encode(record) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    private func cachedRecord() -> CompetitionRecord? {
+        guard let key = recordCacheKey,
+              let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(CompetitionRecord.self, from: data)
+    }
+
     /// Invite a user to a competition
     func inviteUser(competitionId: String, userId: String) async throws {
         print("[CompetitionService] Inviting user \(userId) to competition \(competitionId)")
@@ -487,6 +534,11 @@ class CompetitionService: ObservableObject {
                 for try await _ in group {}
             }
             hasLoadedOnce = true
+
+            // Deliberately outside the group and deliberately not thrown from:
+            // the record is a nice-to-have, and a server that doesn't serve it
+            // yet must not turn a working competitions refresh into an error.
+            await loadRecord()
 
         } catch is CancellationError {
             // The hosting view was torn down mid-refresh. Keep existing data and

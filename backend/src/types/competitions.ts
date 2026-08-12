@@ -59,3 +59,69 @@ export interface Competition {
   teams?: CompetitionTeams | null;
   users: CompetitionUser[];
 }
+
+// MARK: - Competition record (GET /competitions/record)
+
+export interface CompetitionRecordTally {
+  wins: number;
+  losses: number;
+  total: number;
+  podiums: number;
+  /**
+   * How many of `total` actually carry a placement. `competition_users.placement`
+   * was added after launch, so competitions resolved before it read NULL — they
+   * count toward wins/losses (which come from `competitions.winner`, always
+   * stamped) but can't contribute a podium. Surfaced so the client can say
+   * "3 podiums of 41 recorded" rather than implying a wrong number.
+   */
+  podiums_known_of: number;
+}
+
+export interface CompetitionRecordByType {
+  type: CompetitionType;
+  wins: number;
+  losses: number;
+  total: number;
+}
+
+export interface CompetitionRival {
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  profile_image_url: string | null;
+  /** Competitions we both finished where I placed first. */
+  wins: number;
+  /** ...where they did. */
+  losses: number;
+  /**
+   * Every finished competition we were both in. A competition a THIRD party
+   * won counts here and in neither `wins` nor `losses` — it happened, but it
+   * wasn't a result between us.
+   */
+  meetings: number;
+  last_competed_on: string | null;
+}
+
+export interface CompetitionRecentResult {
+  competition_id: string;
+  competition_name: string;
+  type: CompetitionType;
+  end_date: string | null;
+  /** NULL for competitions resolved before the placement column existed. */
+  placement: number | null;
+  participant_count: number;
+  winner_user_id: string | null;
+  won: boolean;
+}
+
+export interface CompetitionRecordResponse {
+  record: CompetitionRecordTally;
+  win_rate: number;
+  current_win_streak: number;
+  best_win_streak: number;
+  by_type: CompetitionRecordByType[];
+  rivals: CompetitionRival[];
+  recent: CompetitionRecentResult[];
+  /** True when the user has more finished competitions than the read's cap. */
+  truncated: boolean;
+}

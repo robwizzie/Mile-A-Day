@@ -25,22 +25,45 @@ struct CompeteRecordView: View {
             .sorted { ($0.end_date ?? "") > ($1.end_date ?? "") }
     }
 
-    private var hasRecord: Bool { trophyService.totalCompetitions > 0 }
+    /// The server's record when we have it, the client-side derivation when we
+    /// don't. Not a nicety: this build can be talking to a server that predates
+    /// the endpoint, and the tab still has to show a record.
+    private var serverRecord: CompetitionRecord? { competitionService.record }
+
+    private var wins: Int { serverRecord?.record.wins ?? trophyService.wins }
+    private var losses: Int { serverRecord?.record.losses ?? trophyService.losses }
+    private var podiums: Int { serverRecord?.record.podiums ?? trophyService.podiums }
+    private var winStreak: Int {
+        serverRecord?.current_win_streak ?? trophyService.currentWinStreak
+    }
+
+    /// Per-mode tallies, normalized so the grid renders the same either way.
+    private var modeRecords: [CompetitionModeRecord] {
+        guard let serverRecord else { return trophyService.byMode }
+        return serverRecord.by_type.map {
+            CompetitionModeRecord(type: $0.type, wins: $0.wins, losses: $0.losses)
+        }
+    }
+
+    private var hasRecord: Bool { wins + losses > 0 }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
                 RecordHeroCard(
-                    wins: trophyService.wins,
-                    losses: trophyService.losses,
-                    podiums: trophyService.podiums,
-                    currentStreak: trophyService.currentWinStreak,
-                    // Everything here comes from the competitions already in
-                    // memory rather than a full server-side history.
-                    isPartial: true
+                    wins: wins,
+                    losses: losses,
+                    podiums: podiums,
+                    currentStreak: winStreak,
+                    // Only the client-side derivation is partial — it can only
+                    // see the one page of competitions the tab loaded.
+                    isPartial: serverRecord == nil
                 )
 
                 if hasRecord {
+                    if let rivals = serverRecord?.rivals, !rivals.isEmpty {
+                        rivalsSection(rivals)
+                    }
                     modeBreakdown
                     trophyShelf
                     history
@@ -59,6 +82,33 @@ struct CompeteRecordView: View {
         }
     }
 
+    /// Best mode by win rate, from whichever source is in play.
+    private var strongestMode: CompetitionModeRecord? {
+        modeRecords
+            .filter { $0.total > 0 }
+            .max { lhs, rhs in
+                let l = Double(lhs.wins) / Double(lhs.total)
+                let r = Double(rhs.wins) / Double(rhs.total)
+                return l == r ? lhs.total < rhs.total : l < r
+            }
+    }
+
+    // MARK: - Rivals
+
+    /// Who you've actually played, and how it's gone. Server-only — the client
+    /// derivation has no view of who else was in each competition's standings.
+    private func rivalsSection(_ rivals: [CompetitionRecord.Rival]) -> some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            CompeteSectionHeader(title: "Rivals", systemImage: "person.2.fill", accent: MADTheme.Colors.madRed)
+
+            VStack(spacing: 8) {
+                ForEach(rivals.prefix(8)) { rival in
+                    RivalRow(rival: rival)
+                }
+            }
+        }
+    }
+
     // MARK: - By mode
 
     private var modeBreakdown: some View {
@@ -66,7 +116,7 @@ struct CompeteRecordView: View {
             CompeteSectionHeader(title: "By mode", systemImage: "chart.bar.fill", accent: MADTheme.Colors.madRed)
 
             VStack(spacing: 12) {
-                ForEach(trophyService.byMode) { record in
+                ForEach(modeRecords) { record in
                     ModeRecordRow(record: record)
                 }
             }
@@ -80,7 +130,7 @@ struct CompeteRecordView: View {
                     )
             )
 
-            if let strongest = trophyService.strongestMode, strongest.wins > 0 {
+            if let strongest = strongestMode, strongest.wins > 0 {
                 HStack(spacing: 8) {
                     Image(systemName: "sparkles")
                         .font(.system(size: 12, weight: .bold))
