@@ -39,6 +39,11 @@ struct PostRunPhotoPromptView: View {
     /// App-wide type language: walks blue, runs red.
     private var accent: Color { MADTheme.workoutColor(workoutType) }
 
+    /// May a fresh shot still be taken for THIS run? Scoped to the workout so a
+    /// later walk's window can't quietly re-offer the camera on an old prompt.
+    private var cameraOpen: Bool { freshWindow.isCameraOpen(forWorkout: workoutId) }
+    private var noun: String { isWalk ? "walk" : "run" }
+
     var body: some View {
         ZStack {
             LinearGradient(colors: [Color(red: 0.08, green: 0.06, blue: 0.10), .black],
@@ -73,10 +78,11 @@ struct PostRunPhotoPromptView: View {
                     midRunSnapStrip
                 }
 
-                // Countdown pill — the posting window is open for this run. A
-                // real deadline, not just a nudge: sharing closes with it, and
-                // the next walk or run is what opens the next one.
-                if freshWindow.isOpen(forWorkout: workoutId) {
+                // Countdown pill — the CAMERA is open for this run. A real
+                // deadline for shooting, but not for sharing: a photo from this
+                // walk stays postable all day, which the pill says so the timer
+                // reads as an invitation rather than a threat.
+                if freshWindow.isCameraOpen(forWorkout: workoutId) {
                     countdownPill
                         .opacity(appeared ? 1 : 0)
                 }
@@ -96,37 +102,53 @@ struct PostRunPhotoPromptView: View {
 
                 Spacer()
 
+                // Camera first while it's open; once it closes the library
+                // takes the primary slot rather than the screen going away.
+                // Either way the run still gets its card if they Skip.
                 VStack(spacing: MADTheme.Spacing.sm) {
-                    Button {
-                        composerLaunch = ComposerLaunch(image: nil)
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "camera.fill")
-                            Text(midRunSnaps.isEmpty ? "Take a photo" : "Take a new photo")
+                    if cameraOpen {
+                        Button {
+                            composerLaunch = ComposerLaunch(image: nil)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "camera.fill")
+                                Text(midRunSnaps.isEmpty ? "Take a photo" : "Take a new photo")
+                            }
+                            .frame(maxWidth: .infinity)
                         }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .madPrimaryButton(fullWidth: true)
+                        .madPrimaryButton(fullWidth: true)
 
-                    // Use a photo captured on this walk with the system camera.
-                    Button {
-                        showLibraryImport = true
-                    } label: {
-                        HStack(spacing: 7) {
-                            Image(systemName: "photo.badge.plus")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text("Choose from this \(isWalk ? "walk" : "run")")
-                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        // Use a photo captured on this walk with the system camera.
+                        Button {
+                            showLibraryImport = true
+                        } label: {
+                            HStack(spacing: 7) {
+                                Image(systemName: "photo.badge.plus")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text("Choose from this \(isWalk ? "walk" : "run")")
+                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            }
+                            .foregroundColor(.white.opacity(0.9))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(
+                                Capsule().fill(Color.white.opacity(0.1))
+                                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                            )
                         }
-                        .foregroundColor(.white.opacity(0.9))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(
-                            Capsule().fill(Color.white.opacity(0.1))
-                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
-                        )
+                        .buttonStyle(.plain)
+                    } else {
+                        Button {
+                            showLibraryImport = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "photo.badge.plus")
+                                Text("Choose from this \(isWalk ? "walk" : "run")")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .madPrimaryButton(fullWidth: true)
                     }
-                    .buttonStyle(.plain)
 
                     Button { skip() } label: {
                         Text("Skip")
@@ -162,13 +184,15 @@ struct PostRunPhotoPromptView: View {
             midRunSnaps = MidRunPhotoStash.entries()
             // This prompt is the LAST celebration in the queue (priority 9), so
             // a slow walk through goal/badges/leaderboard — or a backgrounded
-            // app — can outlast the 10-minute posting window. Offering a camera
-            // then would spend the user's effort on a publish the server
-            // refuses. Take the skip path instead: the run still gets its
-            // route/stats card, which is an `is_auto` post and exempt from the
-            // window. Deferred a tick because resolving a celebration from
-            // inside its own onAppear mutates the manager mid-update.
-            guard freshWindow.isOpen else {
+            // app — can easily outlast the 10-minute camera window. That no
+            // longer means there's nothing to offer: the walk's own photos are
+            // still postable, so the screen stays and swaps its primary button
+            // (see `cameraOpen`). Only a day with no qualifying workout at all
+            // takes the skip path, where the run still gets its route/stats
+            // card — an `is_auto` post, exempt from both tiers. Deferred a tick
+            // because resolving a celebration from inside its own onAppear
+            // mutates the manager mid-update.
+            guard freshWindow.canPostToday else {
                 DispatchQueue.main.async { skip() }
                 return
             }
@@ -216,45 +240,60 @@ struct PostRunPhotoPromptView: View {
 
     private var headline: String {
         if midRunSnaps.isEmpty {
-            return isWalk ? "Capture your walk" : "Capture your run"
+            return cameraOpen
+                ? (isWalk ? "Capture your walk" : "Capture your run")
+                : "Add a photo from your \(noun)"
         }
-        return "Use a photo from your \(isWalk ? "walk" : "run")?"
+        return "Use a photo from your \(noun)?"
     }
 
     private var subheadline: String {
         if midRunSnaps.isEmpty {
-            return "Snap a photo for your story — it disappears in 24 hours. Your run's route and stats post to the feed either way."
+            return cameraOpen
+                ? "Snap a photo for your story — it disappears in 24 hours. Your \(noun)'s route and stats post to the feed either way."
+                : "The camera closes 10 minutes after you finish, but any photo you took on this \(noun) can still go up today. Route and stats post either way."
         }
         let count = midRunSnaps.count
+        let alt = cameraOpen ? ", or take a fresh one" : ""
         return count == 1
-            ? "You snapped a photo out there — tap it to share it, or take a fresh one."
-            : "You snapped \(count) photos out there — tap your favorite to share it, or take a fresh one."
+            ? "You snapped a photo out there — tap it to share it\(alt)."
+            : "You snapped \(count) photos out there — tap your favorite to share it\(alt)."
     }
 
     // MARK: - Fresh-window countdown
 
-    /// Self-ticking countdown for the run's 10-minute posting window. Uses the
+    /// Self-ticking countdown for the run's 10-minute CAMERA window. Uses the
     /// native `Text(timerInterval:)` (no manual timer) so it stays cheap.
+    ///
+    /// The caption under it is load-bearing, not decoration: a bare countdown
+    /// on a sharing screen reads as "post now or lose it", which is exactly the
+    /// pressure this change exists to remove.
     private var countdownPill: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "bolt.fill")
-                .font(.system(size: 11, weight: .bold))
-            Text("Share this run — closes in")
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-            Text(
-                timerInterval: (freshWindow.windowOpenedAt ?? Date())...freshWindow.windowEndDate,
-                countsDown: true
-            )
-            .font(.system(size: 13, weight: .bold, design: .rounded))
-            .monospacedDigit()
-            .lineLimit(1)
-            .fixedSize()
+        VStack(spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 11, weight: .bold))
+                Text("Camera closes in")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                Text(
+                    timerInterval: (freshWindow.windowOpenedAt ?? Date())...freshWindow.windowEndDate,
+                    countsDown: true
+                )
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize()
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Capsule().fill(accent.opacity(0.9)))
+            .shadow(color: accent.opacity(0.4), radius: 8, y: 2)
+
+            Text("Photos from this \(noun) stay postable all day.")
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
         }
-        .foregroundColor(.white)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(Capsule().fill(accent.opacity(0.9)))
-        .shadow(color: accent.opacity(0.4), radius: 8, y: 2)
     }
 
     // MARK: - Hero (no mid-run snaps)
@@ -263,7 +302,9 @@ struct PostRunPhotoPromptView: View {
         ZStack {
             Circle().fill(accent.opacity(0.18)).frame(width: 150, height: 150)
             Circle().strokeBorder(accent.opacity(0.4), lineWidth: 1).frame(width: 150, height: 150)
-            Image(systemName: "camera.fill")
+            // Follows the primary action: shutter while the camera is open,
+            // camera roll once it isn't.
+            Image(systemName: cameraOpen ? "camera.fill" : "photo.on.rectangle.angled")
                 .font(.system(size: 54, weight: .semibold))
                 .foregroundStyle(LinearGradient(colors: [.white, accent],
                                                 startPoint: .top, endPoint: .bottom))

@@ -252,15 +252,18 @@ struct BuddyRecapView: View {
     }
 
     /// The post flow's front door — opens the crew-and-routes wizard
-    /// (BuddyPostWizardView), which owns the composer hand-off. Posting
-    /// follows the same 10-minute rule as every other photo post, and a recap
-    /// is reachable long after the walk (deep link, notification, a screen
-    /// left open) — so the CTA reflects the window rather than 403-ing on
-    /// tap, and it says what closed rather than just going grey, since this
-    /// is the screen's primary action.
+    /// (BuddyPostWizardView), which owns the composer hand-off. Gated on the
+    /// DAY tier, not the ten-minute camera countdown (ios.md: only an
+    /// affordance that literally opens the shutter takes `isCameraOpen`) — a
+    /// buddy recap is exactly the screen someone opens once they're home, and
+    /// the composer it leads to offers the walk's photos when the camera has
+    /// closed. A recap is also reachable long after the walk (deep link,
+    /// notification, a screen left open), so the CTA reflects the window
+    /// rather than 403-ing on tap, and says what's missing rather than just
+    /// going grey, since this is the screen's primary action.
     @ViewBuilder
     private func postSection(_ session: BuddySessionState) -> some View {
-        if freshWindow.isOpen {
+        if freshWindow.canPostToday {
             Button {
                 MADHaptics.action()
                 wizardSession = session
@@ -296,7 +299,7 @@ struct BuddyRecapView: View {
             }
             .buttonStyle(.plain)
         } else {
-            Text("Photos share in the 10 minutes after a walk — that window has closed.")
+            Text("Finish a walk or run today to share a photo from it.")
                 .font(MADTheme.Typography.caption)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
                 .multilineTextAlignment(.center)

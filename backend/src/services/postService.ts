@@ -1116,12 +1116,40 @@ export async function getOwnedWorkoutRollupDistance(
 }
 
 /**
- * How long after a qualifying walk/run a photo may be posted.
+ * How long after a qualifying walk/run a photo may be CAPTURED and posted.
+ *
+ * This bounds the live camera only. A photo the user already took on the walk
+ * and picks out of their camera roll is not on a clock — see
+ * `photoSourceRequiresCameraWindow`.
  *
  * The client owns the same number (`FreshPostWindowManager.duration`) and runs
  * the visible countdown off it — keep the two equal.
  */
 export const POST_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * Where the photo being posted came from, as declared by the client.
+ *
+ *  - `camera`   — shot just now with the in-app camera. Held to the ten
+ *                 minutes: that's the whole claim the countdown makes.
+ *  - `library`  — picked out of the camera roll. The client's importer only
+ *                 ever SHOWS photos whose library creation time falls inside
+ *                 the workout, so it's still a photo of the walk; the user just
+ *                 got to it later. Open for the rest of the day.
+ *  - `existing` — a photo already posted (a story being promoted onto the
+ *                 feed). It was captured under whichever rule applied then, so
+ *                 re-charging it the camera window would only punish the user
+ *                 for having shared to their story first.
+ *
+ * Absent or unrecognised means an older build that predates the split, and
+ * those only ever post live captures — so the default is the camera window,
+ * i.e. exactly the behaviour those builds already ship against.
+ */
+export type PostPhotoSource = "camera" | "library" | "existing";
+
+export function photoSourceRequiresCameraWindow(source: unknown): boolean {
+  return source !== "library" && source !== "existing";
+}
 
 /**
  * Slack past the visible window, server-side only and never shown to the user.
@@ -1136,8 +1164,18 @@ export const POST_WINDOW_MS = 10 * 60 * 1000;
 export const POST_WINDOW_GRACE_MS = 2 * 60 * 1000;
 
 export interface PostWindowStatus {
-  /** May a deliberate photo post be created right now? Includes the grace. */
-  open: boolean;
+  /**
+   * May a LIVE CAPTURE be posted right now? The ten-minute window, plus the
+   * private grace. This is what the visible countdown counts down to.
+   */
+  cameraOpen: boolean;
+  /**
+   * May a photo be posted at all? True for the rest of the day once a
+   * qualifying walk or run has landed — that's what a camera-roll pick and a
+   * story promotion answer to. False all day for someone who hasn't moved,
+   * which is the rule that actually keeps the feed about moving.
+   */
+  photoOpen: boolean;
   /** The qualifying workout whose window is the most recent one today. */
   workoutId: string | null;
   /** When that window opened, and when it closes for DISPLAY (no grace). */
@@ -1148,7 +1186,8 @@ export interface PostWindowStatus {
 }
 
 const CLOSED_WINDOW: PostWindowStatus = {
-  open: false,
+  cameraOpen: false,
+  photoOpen: false,
   workoutId: null,
   openedAt: null,
   closesAt: null,
@@ -1156,12 +1195,24 @@ const CLOSED_WINDOW: PostWindowStatus = {
 };
 
 /**
- * The photo-posting window for a user's day.
+ * The photo-posting window for a user's day. TWO tiers, not one.
  *
  * A photo post has to belong to a walk or run — that is the whole point of the
  * feed, and an unbounded composer turns it into a general-purpose photo stream
- * that happens to sit next to some mileage. So posting opens for ten minutes
- * when a qualifying workout lands and closes with it.
+ * that happens to sit next to some mileage. But "belongs to the walk" is a
+ * claim about the PHOTO, and only one of the two ways to get a photo needs a
+ * clock to make that claim:
+ *
+ *  - The live camera claims "this is happening now", so it's bounded to ten
+ *    minutes (`cameraOpen`). Past that the claim isn't true any more.
+ *  - A camera-roll pick claims "I took this on the walk", which the client
+ *    proves by capture time, not by how fast the user got to their phone. It
+ *    stays open for the rest of the day (`photoOpen`). Being made to choose
+ *    between finishing your cooldown and keeping your photo was the whole
+ *    complaint — nothing about the photo changes at minute eleven.
+ *
+ * Both tiers still require a qualifying workout today, so neither is a way to
+ * post without moving.
  *
  * "Qualifying" is already computed and maintained for us: `feed_role` is
  * `daily_mile` on the workout that reached the day's goal and `extra` on every
@@ -1204,7 +1255,11 @@ export async function getPostWindowStatus(
 
   const closesAt = openedAt.getTime() + POST_WINDOW_MS;
   return {
-    open: now < closesAt + POST_WINDOW_GRACE_MS,
+    cameraOpen: now < closesAt + POST_WINDOW_GRACE_MS,
+    // A qualifying workout exists for this local day, which is the entire
+    // condition — the row we just found IS it. It stops being true when the
+    // day rolls over, since `localDate` is what scopes the query.
+    photoOpen: true,
     workoutId: row.workout_id,
     openedAt: openedAt.toISOString(),
     closesAt: new Date(closesAt).toISOString(),
@@ -1952,13 +2007,18 @@ export const UNIFIED_FEED_SQL = `
 				-- idx_workouts_feed_candidates matches this WHERE exactly, and the
 				-- PERF note above rules out anything heavier inside candidates.
 				AND w.feed_role IN ('daily_mile', 'extra')
-				-- HOLD a just-synced workout off OTHER viewers' feeds while its
-				-- 10-minute photo window is open (same GREATEST anchor as
-				-- getPostWindowStatus, so a late Watch sync is held from ARRIVAL,
-				-- not from a device_end_date that's already past): if the owner
-				-- posts a pic, the photo and the route land together as ONE card
-				-- instead of a route card that a photo post replaces mid-scroll.
-				-- The owner always sees their own workout immediately, and the
+				-- HOLD a just-synced workout off OTHER viewers' feeds for the
+				-- CAMERA window (same GREATEST anchor as getPostWindowStatus, so
+				-- a late Watch sync is held from ARRIVAL, not from a
+				-- device_end_date that's already past): if the owner shoots a pic
+				-- right after the walk, the photo and the route land together as
+				-- ONE card instead of a route card that a photo post replaces
+				-- mid-scroll. Deliberately the 10-minute camera tier and NOT the
+				-- all-day photo tier — holding every card until midnight to
+				-- catch a possible library post would gut the feed's liveness
+				-- for the rarer case; a later library post simply lands as its
+				-- own card, exactly as it did before this hold existed. The
+				-- owner always sees their own workout immediately, and the
 				-- friend pushes defer the same 10 minutes (notificationService),
 				-- so a push can never point at a held card. Cheap arithmetic on
 				-- already-read columns — no extra probe.
