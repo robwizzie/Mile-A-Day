@@ -421,6 +421,12 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             guard let self else { return }
             self.pollMotionWitnesses()
             self.refreshAutoPauseState()
+            // Live Activity freshness rides this heartbeat, NOT the tracker
+            // view's timer — that one stops on lock and on dismiss, which is
+            // exactly when the lock screen was flipping to TRACKING
+            // INTERRUPTED over a workout that was accruing fine. Self-throttled
+            // to ~60s.
+            WorkoutLiveActivityKeepAlive.beat()
         }
         // .common, not the default mode: a default-mode timer stalls while the
         // tracking screen is being scrolled, which is exactly when the user is

@@ -28,28 +28,43 @@ struct ManualWorkoutRegistry {
     private static let editedKey = "com.mileaday.editedWorkoutIds"
 
     static func markManual(_ workoutId: String) {
-        var ids = manualIds
-        ids.insert(workoutId)
-        UserDefaults.standard.set(Array(ids), forKey: manualKey)
-        print("[ManualWorkoutRegistry] ✅ Marked \(workoutId.prefix(8)) as manual. Total manual: \(ids.count)")
+        var manual = manualIds
+        var edited = editedIds
+        manual.insert(workoutId)
+        edited.remove(workoutId)
+        UserDefaults.standard.set(Array(manual), forKey: manualKey)
+        UserDefaults.standard.set(Array(edited), forKey: editedKey)
+        print("[ManualWorkoutRegistry] ✅ Marked \(workoutId.prefix(8)) as manual. Total manual: \(manual.count)")
     }
 
     static func markEdited(_ workoutId: String) {
-        var ids = editedIds
-        ids.insert(workoutId)
-        UserDefaults.standard.set(Array(ids), forKey: editedKey)
+        var edited = editedIds
+        var manual = manualIds
+        edited.insert(workoutId)
+        manual.remove(workoutId)
+        UserDefaults.standard.set(Array(edited), forKey: editedKey)
+        UserDefaults.standard.set(Array(manual), forKey: manualKey)
+    }
+
+    static func markHealthKit(_ workoutId: String) {
+        var manual = manualIds
+        var edited = editedIds
+        manual.remove(workoutId)
+        edited.remove(workoutId)
+        UserDefaults.standard.set(Array(manual), forKey: manualKey)
+        UserDefaults.standard.set(Array(edited), forKey: editedKey)
     }
 
     static func sourceFor(_ workoutId: String) -> WorkoutSource? {
         let manual = manualIds
         let edited = editedIds
-        if edited.contains(workoutId) {
-            print("[ManualWorkoutRegistry] Found \(workoutId.prefix(8)) in edited set")
-            return .edited
-        }
         if manual.contains(workoutId) {
             print("[ManualWorkoutRegistry] Found \(workoutId.prefix(8)) in manual set")
             return .manual
+        }
+        if edited.contains(workoutId) {
+            print("[ManualWorkoutRegistry] Found \(workoutId.prefix(8)) in edited set")
+            return .edited
         }
         return nil
     }
@@ -120,6 +135,15 @@ struct WorkoutIndex: Codable {
     /// Total lifetime miles (sum of all workout distances)
     var totalLifetimeMiles: Double
 
+    /// Per-day totals after local source consent + duplicate collapse.
+    ///
+    /// `WorkoutRecord` intentionally stays lightweight for lookup/detail, but
+    /// records alone do not carry enough source metadata to identify a Google
+    /// Health/Fitbit/etc duplicate later. We compute this while the real
+    /// `HKWorkout`s are in hand, persist it, and make every aggregate read it.
+    /// Nil only exists for v1 caches; those are rejected by `load()` and rebuilt.
+    var countedMilesByDate: [String: Double]?
+
     init() {
         self.workoutsByDate = [:]
         self.qualifyingDays = Set()
@@ -127,9 +151,10 @@ struct WorkoutIndex: Codable {
         self.lastUpdated = Date.distantPast
         self.latestWorkoutDate = nil
         self.latestWorkoutUUID = nil
-        self.version = 1
+        self.version = 2
         self.totalWorkouts = 0
         self.totalLifetimeMiles = 0.0
+        self.countedMilesByDate = [:]
     }
 
     // MARK: - Computed Properties
@@ -192,7 +217,9 @@ struct WorkoutIndex: Codable {
 
     /// Get total miles for a specific date
     func totalMiles(for date: Date) -> Double {
-        return workouts(for: date).reduce(0) { $0 + $1.distance }
+        let key = dateKey(from: date)
+        if let counted = countedMilesByDate?[key] { return counted }
+        return workoutsByDate[key]?.reduce(0) { $0 + $1.distance } ?? 0
     }
     
     /// Get all dates with workouts (sorted)
@@ -202,15 +229,24 @@ struct WorkoutIndex: Codable {
     
     /// Pre-computed max miles in a single day (for badges and progress)
     var mostMilesInOneDay: Double {
-        workoutsByDate.values.reduce(0.0) { best, records in
-            let dayMiles = records.reduce(0.0) { $0 + $1.distance }
-            return max(best, dayMiles)
+        guard let countedMilesByDate else {
+            return workoutsByDate.values.reduce(0.0) { best, records in
+                let dayMiles = records.reduce(0.0) { $0 + $1.distance }
+                return max(best, dayMiles)
+            }
         }
+        return countedMilesByDate.values.max() ?? 0
     }
 
     /// The date key (yyyy-MM-dd) of the day with the most miles
     var mostMilesInOneDayDateKey: String? {
-        workoutsByDate.max(by: { lhs, rhs in
+        if let countedMilesByDate, !countedMilesByDate.isEmpty {
+            return countedMilesByDate.max(by: { lhs, rhs in
+                if lhs.value == rhs.value { return lhs.key < rhs.key }
+                return lhs.value < rhs.value
+            })?.key
+        }
+        return workoutsByDate.max(by: { lhs, rhs in
             let lhsMiles = lhs.value.reduce(0.0) { $0 + $1.distance }
             let rhsMiles = rhs.value.reduce(0.0) { $0 + $1.distance }
             return lhsMiles < rhsMiles
@@ -235,7 +271,7 @@ struct WorkoutIndex: Codable {
             guard let date = calendar.date(byAdding: .day, value: offset, to: calendar.startOfDay(for: weekStart)) else { continue }
             let dayMiles = totalMiles(for: date)
             weekMiles += dayMiles
-            if hasQualifyingWorkout(on: date) {
+            if dayMiles >= 0.95 {
                 daysCompleted += 1
             }
         }
@@ -295,6 +331,11 @@ struct WorkoutIndex: Codable {
 
         do {
             let index = try decoder.decode(WorkoutIndex.self, from: data)
+            guard index.version >= 2, index.countedMilesByDate != nil else {
+                workoutIndexLog("[WorkoutIndex] Cached v1 index has raw daily totals; rebuilding")
+                UserDefaults.standard.removeObject(forKey: indexKey)
+                return nil
+            }
             workoutIndexLog("[WorkoutIndex] ✅ Loaded index: \(index.totalWorkouts) workouts, \(index.currentStreak) day streak")
             return index
         } catch {
@@ -439,4 +480,3 @@ struct WorkoutRecord: Codable, Identifiable {
     }
 }
 #endif
-

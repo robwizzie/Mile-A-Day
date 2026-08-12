@@ -36,6 +36,7 @@ struct FriendOutLiveRow: View {
     let onJoin: (() -> Void)?
     let onHype: (() -> Void)?
     var hyped: Bool = false
+    var hypeBusy: Bool = false
     var busy: Bool = false
 
     private var accent: Color {
@@ -119,23 +120,31 @@ struct FriendOutLiveRow: View {
         HStack(spacing: 8) {
             if let onHype {
                 Button {
-                    guard !hyped else { return }
+                    guard !hyped, !hypeBusy else { return }
                     onHype()
                 } label: {
-                    Image(systemName: hyped ? "hands.clap.fill" : "hands.clap")
-                        .font(.system(size: 15, weight: .semibold))
-                        .frame(width: 38, height: 34)
-                        .background(
-                            Capsule().fill(
-                                hyped
-                                    ? MADTheme.Colors.warning.opacity(0.30)
-                                    : MADTheme.Colors.madWhite.opacity(0.12))
-                        )
-                        .foregroundStyle(
-                            hyped ? MADTheme.Colors.warning : MADTheme.Colors.madWhite)
+                    Group {
+                        if hypeBusy {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(MADTheme.Colors.madWhite)
+                        } else {
+                            Image(systemName: hyped ? "hands.clap.fill" : "hands.clap")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                    }
+                    .frame(width: 38, height: 34)
+                    .background(
+                        Capsule().fill(
+                            hyped
+                                ? MADTheme.Colors.warning.opacity(0.30)
+                                : MADTheme.Colors.madWhite.opacity(0.12))
+                    )
+                    .foregroundStyle(
+                        hyped ? MADTheme.Colors.warning : MADTheme.Colors.madWhite)
                 }
                 .buttonStyle(.plain)
-                .disabled(hyped)
+                .disabled(hyped || hypeBusy)
             }
 
             if let onJoin, canJoin {

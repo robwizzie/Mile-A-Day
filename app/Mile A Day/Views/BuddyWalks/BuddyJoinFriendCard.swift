@@ -33,6 +33,7 @@ struct BuddyJoinFriendCard: View {
     /// nothing happened.
     @State private var askedUserIds: Set<String> = []
     @State private var hypedUserIds: Set<String> = []
+    @State private var sendingHypeUserIds: Set<String> = []
     @State private var expanded = false
 
     private static let collapseThreshold = 3
@@ -96,6 +97,7 @@ struct BuddyJoinFriendCard: View {
             onJoin: { Task { await act(friend) } },
             onHype: { Task { await hype(friend) } },
             hyped: hypedUserIds.contains(friend.userId),
+            hypeBusy: sendingHypeUserIds.contains(friend.userId),
             busy: busyUserId == friend.userId
         )
     }
@@ -121,11 +123,14 @@ struct BuddyJoinFriendCard: View {
     /// tracking screen through LivePresenceService's hype poll. The local_date
     /// has to be THEIRS, not the viewer's — the server keys on the walker's day.
     private func hype(_ friend: FriendOutNow) async {
-        guard !hypedUserIds.contains(friend.userId) else { return }
+        guard !hypedUserIds.contains(friend.userId),
+              !sendingHypeUserIds.contains(friend.userId) else { return }
         // Optimistic: a clap that waits on the network reads as a dead button,
         // and the failure path below puts it back.
         hypedUserIds.insert(friend.userId)
+        sendingHypeUserIds.insert(friend.userId)
         MADHaptics.success()
+        defer { sendingHypeUserIds.remove(friend.userId) }
         do {
             if let localDate = friend.localDate {
                 _ = try await HypeService.sendHype(
@@ -141,6 +146,10 @@ struct BuddyJoinFriendCard: View {
                 // context-less path still reaches them.
                 _ = try await HypeService.sendHype(targetUserId: friend.userId)
             }
+        } catch APIError.conflict {
+            // Already hyped this live mile today. Keep the button locked so a
+            // refresh or re-render cannot turn the conflict into a spam button.
+            hypedUserIds.insert(friend.userId)
         } catch {
             hypedUserIds.remove(friend.userId)
             MADHaptics.error()

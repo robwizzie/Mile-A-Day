@@ -22,6 +22,7 @@ extension ChallengeService {
         guard let remote = shared as? RemoteChallengeService else { return }
         await remote.refreshToday(userId: userId)
         await remote.refreshCompletions(userId: userId)
+        await remote.refreshMatchups(userId: userId)
     }
 }
 

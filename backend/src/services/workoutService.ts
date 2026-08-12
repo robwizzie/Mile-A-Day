@@ -129,14 +129,23 @@ export async function uploadWorkouts(
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       ON CONFLICT (workout_id)
       DO UPDATE SET
-        distance = EXCLUDED.distance,
+        distance = CASE
+          WHEN workouts.original_distance IS NOT NULL THEN workouts.distance
+          ELSE EXCLUDED.distance
+        END,
         local_date = EXCLUDED.local_date,
         date = EXCLUDED.date,
         timezone_offset = EXCLUDED.timezone_offset,
-        workout_type = EXCLUDED.workout_type,
+        workout_type = CASE
+          WHEN workouts.original_distance IS NOT NULL THEN workouts.workout_type
+          ELSE EXCLUDED.workout_type
+        END,
         device_end_date = EXCLUDED.device_end_date,
         calories = EXCLUDED.calories,
-        total_duration = EXCLUDED.total_duration,
+        total_duration = CASE
+          WHEN workouts.original_duration IS NOT NULL THEN workouts.total_duration
+          ELSE EXCLUDED.total_duration
+        END,
         moving_seconds = EXCLUDED.moving_seconds,
         -- COALESCE, not overwrite: a re-upload from a path that doesn't carry
         -- HealthKit metadata (fullSync, recalibrate) must never erase a win
@@ -1662,7 +1671,12 @@ export async function getUsersWithManualWorkouts(
 export async function updateWorkout(
   userId: string,
   workoutId: string,
-  updates: { distance?: number; totalDuration?: number; workoutType?: string },
+  updates: {
+    distance?: number;
+    totalDuration?: number;
+    workoutType?: string;
+    source?: "healthkit" | "manual" | "edited";
+  },
 ) {
   const current = await db.query(
     "SELECT distance, total_duration, original_distance FROM workouts WHERE workout_id = $1 AND user_id = $2",
@@ -1680,7 +1694,7 @@ export async function updateWorkout(
 			distance = COALESCE($3, distance),
 			total_duration = COALESCE($4, total_duration),
 			workout_type = COALESCE($5, workout_type),
-			source = 'edited',
+			source = COALESCE($8, 'edited'),
 			original_distance = COALESCE(original_distance, $6),
 			original_duration = COALESCE(original_duration, $7)
 		WHERE workout_id = $1 AND user_id = $2
@@ -1693,6 +1707,7 @@ export async function updateWorkout(
       updates.workoutType ?? null,
       row.distance,
       row.total_duration,
+      updates.source ?? null,
     ],
   );
 

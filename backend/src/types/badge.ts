@@ -13,12 +13,7 @@ export type BadgeCategory =
   | "ghost";
 export type BadgeRarity = "common" | "rare" | "legendary";
 export type DailyChallengeType =
-  | "pace"
-  | "distance"
-  | "time"
-  | "activity"
-  | "steps"
-  | "social";
+  "pace" | "distance" | "time" | "activity" | "steps" | "social";
 
 export interface Badge {
   badgeId: string;
@@ -129,6 +124,57 @@ export interface FriendTodayChallengeResponse {
   gradientEnd?: string | null;
   /** Present only when the friend's today challenge is Head-to-Head. */
   opponent?: ChallengeOpponent | null;
+}
+
+/**
+ * One finished Head-to-Head duel, from the requesting user's side.
+ *
+ * `result` is the RACE (who logged more miles, at the 2-decimal precision the
+ * duel was scored at); `completed` is the AWARD (whether this duel inserted
+ * the day's challenge completion — winning also requires hitting your own
+ * goal). The two can disagree and both are true: "you out-ran them but didn't
+ * finish your mile" shows a W with no trophy.
+ */
+export interface MatchupHistoryItem {
+  localDate: string;
+  rival: {
+    userId: string;
+    username: string | null;
+    profileImageUrl: string | null;
+  };
+  myMiles: number;
+  rivalMiles: number;
+  result: "won" | "lost" | "tied";
+  mutual: boolean;
+  completed: boolean;
+}
+
+/** All-time duel record against one rival. */
+export interface MatchupRivalRecord {
+  userId: string;
+  username: string | null;
+  profileImageUrl: string | null;
+  wins: number;
+  losses: number;
+  ties: number;
+  /** Most recent duel against this rival (yyyy-MM-dd). */
+  lastLocalDate: string;
+}
+
+export interface MatchupHistoryResponse {
+  record: { wins: number; losses: number; ties: number; total: number };
+  /** Consecutive duel wins counted back from the most recent resolved duel. */
+  currentWinStreak: number;
+  bestWinStreak: number;
+  /** Sorted by number of duels together, most first. */
+  rivals: MatchupRivalRecord[];
+  /** Newest first. */
+  matchups: MatchupHistoryItem[];
+  /**
+   * TRUE when the history hit the server's safety cap, meaning `record`,
+   * streaks and `rivals` cover only the newest window rather than all time.
+   */
+  truncated: boolean;
 }
 
 export interface NewChallengeCompletion {

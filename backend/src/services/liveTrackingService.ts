@@ -36,13 +36,13 @@ export interface LiveFriend {
 }
 
 /**
- * A friend who is out right now, as seen from the DASHBOARD.
+ * A friend who is out right now, as seen from the Friends tab.
  *
  * Same presence source as `LiveFriend`, plus the buddy-room fields, because the
  * two questions are asked at different moments and only one of them was
- * answerable before. `heartbeat` tells you who else is out while YOU are
- * already walking; this tells you before you've started — which is the moment
- * the answer can actually change what you do.
+ * answerable before. `heartbeat` tells the tracker who else is out while YOU
+ * are already walking; this tells the Friends tab before you've started —
+ * which is the moment the answer can actually change what you do.
  *
  * The buddy fields are null for a friend walking solo, and a solo walker is the
  * single best person to start a buddy walk with, so the client renders both:
@@ -60,6 +60,10 @@ export interface FriendOutNow {
   distance_miles: number;
   /** THEIR daily goal, so progress is drawn against the right target. */
   goal_miles: number;
+  /** The friend's current local date, so a Friends-tab hype can land on the
+   * active walk/run screen through the same mile-context path as heartbeat
+   * hypes. */
+  local_date: string;
   /** Non-null only when they're in a buddy room with space left. */
   buddy_session_id: string | null;
   buddy_join_code: string | null;
@@ -104,6 +108,7 @@ export async function startSession(
        workout_type = EXCLUDED.workout_type,
        started_at = NOW(),
        last_seen_at = NOW(),
+       distance_miles = 0,
        ended_at = NULL
      RETURNING session_id,
        to_char(started_at AT TIME ZONE 'UTC', ${ISO_TS}) AS started_at`,
@@ -261,6 +266,15 @@ export async function friendsOutNow(userId: string): Promise<FriendOutNow[]> {
             -- THEIR goal, not the viewer's. A friend on a 2-mile goal rendered
             -- against a 1-mile bar reads as finished when they're halfway.
             u.goal_miles::float AS goal_miles,
+            to_char(
+              (NOW() + (COALESCE(
+                (SELECT w2.timezone_offset FROM workouts w2
+                 WHERE w2.user_id = f.friend_id
+                 ORDER BY w2.device_end_date DESC LIMIT 1),
+                0
+              ) || ' minutes')::interval)::date,
+              'YYYY-MM-DD'
+            ) AS local_date,
             room.id AS buddy_session_id,
             room.join_code AS buddy_join_code,
             room.mode AS buddy_mode,

@@ -767,12 +767,13 @@ export async function updateWorkout(req: Request, res: Response) {
 
   try {
     const { userId, workoutId } = req.params;
-    const { distance, totalDuration, workoutType } = req.body;
+    const { distance, totalDuration, workoutType, source } = req.body;
 
     if (
       distance === undefined &&
       totalDuration === undefined &&
-      workoutType === undefined
+      workoutType === undefined &&
+      source === undefined
     ) {
       return res.status(400).json({ error: "No fields to update provided" });
     }
@@ -795,6 +796,15 @@ export async function updateWorkout(req: Request, res: Response) {
         .json({ error: "Duration must be a positive number" });
     }
 
+    if (
+      source !== undefined &&
+      !["healthkit", "manual", "edited"].includes(source)
+    ) {
+      return res
+        .status(400)
+        .json({ error: "Source must be healthkit, manual, or edited" });
+    }
+
     const user = await getUser({ userId });
     if (!user) {
       return res.status(400).json({ error: `No user found with ID ${userId}` });
@@ -804,6 +814,7 @@ export async function updateWorkout(req: Request, res: Response) {
       distance,
       totalDuration,
       workoutType,
+      source,
     });
 
     if (!updated) {

@@ -379,33 +379,7 @@ struct WorkoutsView: View {
     /// The workouts on a given local day, mapped from the timezone-aware index
     /// (falls back to filtering the cache by corrected local time).
     private func workouts(on day: Date) -> [HKWorkout] {
-        // UNION of both sources, never one or the other.
-        //
-        // This used to return the index's workouts whenever the index had ANY
-        // for the day, and fall back to the cache only when it had none. The
-        // index is incremental and lags — so a day whose newest workouts hadn't
-        // been indexed yet returned the OLD ones and silently dropped the rest.
-        // That is why this screen showed 1.26 mi over two walks on a day the
-        // dashboard summed to 4.54 over five: not a different rule, a shorter
-        // list. A partial answer is worse than either whole one, because both
-        // screens then look confidently right while disagreeing.
-        var seen = Set<String>()
-        var out: [HKWorkout] = []
-
-        let indexedIds = Set(
-            healthManager.workoutIndex?.workouts(for: day).map { $0.id } ?? [])
-        for workout in healthManager.cachedWorkouts {
-            let id = workout.uuid.uuidString
-            guard !seen.contains(id) else { continue }
-            let belongs = indexedIds.contains(id)
-                || calendar.isDate(
-                    healthManager.getCorrectedLocalTime(for: workout),
-                    inSameDayAs: day)
-            guard belongs else { continue }
-            seen.insert(id)
-            out.append(workout)
-        }
-        return out.sorted { $0.endDate < $1.endDate }
+        healthManager.cachedWorkouts(onLocalDay: day)
     }
 
     private func miles(on day: Date) -> Double {
@@ -414,13 +388,11 @@ struct WorkoutsView: View {
         // walk two apps both recorded can't be collapsed there and the day
         // reads high — which is how this header showed 2.94 for a day the
         // dashboard called 1.98 and the workouts below it summed to 1.98.
-        let dayWorkouts = workouts(on: day)
-        if !dayWorkouts.isEmpty { return WorkoutDedup.totalMiles(dayWorkouts) }
-        return healthManager.workoutIndex?.totalMiles(for: day) ?? 0
+        healthManager.countedMiles(onLocalDay: day)
     }
 
     private func milesText(for day: Date) -> String {
-        String(format: "%.2f mi", miles(on: day))
+        miles(on: day).milesFormatted
     }
 
 

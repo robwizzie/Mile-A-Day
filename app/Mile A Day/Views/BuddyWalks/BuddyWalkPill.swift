@@ -15,19 +15,26 @@ extension Notification.Name {
     static let madOpenBuddyLobby = Notification.Name("MAD_OpenBuddyLobby")
 }
 
-/// Secondary entry point to Buddy Walks, sitting under the start button.
+/// An unanswered buddy invite, sitting under the start button.
 ///
-/// Deliberately secondary. Starting a solo mile is the app's core action and
-/// stays exactly one tap — this must never become a step in that flow. It also
-/// hides itself entirely when a workout is already in progress, since you
-/// cannot join a buddy walk mid-mile (the single-workout lock would refuse).
+/// This used to be the standing "Walk with a buddy" entry point. Starting one
+/// now lives inside the Start Mile wizard, next to Run and Walk — which is both
+/// more discoverable and, unlike this pill, present on BOTH dashboard styles.
+///
+/// What can't move is an INVITE. Someone waiting on an answer is time-critical
+/// in a way that browsing to a feature isn't, and it would be invisible until
+/// the user happened to tap Start Mile. So the pill survives for exactly that
+/// case and renders nothing otherwise.
+///
+/// Still hidden while a workout is in progress: you cannot join a buddy walk
+/// mid-mile, and the single-workout lock would refuse.
 struct BuddyWalkPill: View {
     let hasActiveWorkout: Bool
 
     @ObservedObject private var buddy = BuddySessionService.shared
 
     var body: some View {
-        if !hasActiveWorkout {
+        if !hasActiveWorkout, inviteCount > 0 {
             Button {
                 MADHaptics.tap()
                 NotificationCenter.default.post(name: .madStartBuddyWalk, object: nil)
@@ -41,13 +48,11 @@ struct BuddyWalkPill: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
 
-                    if inviteCount > 0 {
-                        Text("\(inviteCount)")
-                            .font(.system(size: 11, weight: .black, design: .rounded))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(MADTheme.Colors.madRed))
-                    }
+                    Text("\(inviteCount)")
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(MADTheme.Colors.madRed))
 
                     Spacer(minLength: 0)
 
@@ -73,7 +78,6 @@ struct BuddyWalkPill: View {
     private var inviteCount: Int { buddy.invites.count }
 
     private var title: String {
-        if inviteCount > 0 { return inviteCount == 1 ? "Buddy walk invite" : "Buddy walk invites" }
-        return "Walk with a buddy"
+        inviteCount == 1 ? "Buddy walk invite" : "Buddy walk invites"
     }
 }

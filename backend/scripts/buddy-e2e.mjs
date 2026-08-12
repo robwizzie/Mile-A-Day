@@ -747,7 +747,24 @@ async function main() {
     solo && solo.buddy_session_id === null,
     JSON.stringify(solo),
   );
+  check(
+    "a solo walker carries their local hype date",
+    typeof solo?.local_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(solo.local_date),
+    JSON.stringify(solo),
+  );
   check("you are never in your own friends-out list", !outIds.includes("u_host"));
+
+  await pool.query(
+    `UPDATE live_tracking_sessions SET distance_miles = 1.06 WHERE user_id = 'u_pal'`,
+  );
+  await api(pal, "POST", "/live/start", { workout_type: "walking" });
+  out = await api(host, "GET", "/live/friends-out");
+  const restarted = (out.body?.friends ?? []).find((f) => f.user_id === "u_pal");
+  check(
+    "starting a new live session resets stale live miles",
+    restarted?.distance_miles === 0,
+    JSON.stringify(restarted),
+  );
 
   // Opting out of being seen must hide them.
   await pool.query(

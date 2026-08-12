@@ -12,6 +12,8 @@ struct DailyChallengesView: View {
     @State private var isTodayComplete: Bool = false
     @State private var opponent: ChallengeOpponent?
     @State private var challengeStreak: Int = ChallengeService.shared.currentChallengeStreak()
+    @State private var matchupHistory: RemoteChallengeService.MatchupHistoryDTO? =
+        (ChallengeService.shared as? RemoteChallengeService)?.matchupHistory
 
     private static let milestones: [(threshold: Int, id: String, name: String)] = [
         (1,   "challenge_1",   "Challenge Accepted"),
@@ -50,6 +52,9 @@ struct DailyChallengesView: View {
                         tomorrowPreviewCard(tomorrow)
                     }
                     statsRow
+                    if let history = matchupHistory, !history.matchups.isEmpty {
+                        matchupsSection(history)
+                    }
                     medalsGallery
                     historySection
                 }
@@ -82,6 +87,7 @@ struct DailyChallengesView: View {
             todayProgress = remote.todayProgress
             isTodayComplete = remote.todayCompleted
             opponent = remote.todayOpponent
+            matchupHistory = remote.matchupHistory
         }
         challengeStreak = ChallengeService.shared.currentChallengeStreak()
     }
@@ -199,7 +205,11 @@ struct DailyChallengesView: View {
                 .frame(height: 8)
 
                 if challenge.key == "head_to_head", let opp = opponent {
-                    HeadToHeadStrip(opponent: opp, accent: challenge.gradient.first ?? .orange)
+                    HeadToHeadStrip(
+                        opponent: opp,
+                        accent: challenge.gradient.first ?? .orange,
+                        myMilesOverride: healthManager.todaysDistance
+                    )
                 }
 
                 HStack(spacing: 6) {
@@ -274,6 +284,86 @@ struct DailyChallengesView: View {
                         .stroke(.white.opacity(0.1), lineWidth: 1)
                 )
         )
+    }
+
+    // MARK: - Head-to-Head record
+
+    /// Compact all-time duel record + the most recent result, tappable into the
+    /// full `MatchupHistoryView`. Hidden entirely until the first duel resolves.
+    private func matchupsSection(_ history: RemoteChallengeService.MatchupHistoryDTO) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("HEAD-TO-HEAD")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.6))
+                Spacer()
+                if history.currentWinStreak > 1 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("\(history.currentWinStreak) in a row")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(.orange)
+                }
+            }
+
+            NavigationLink {
+                MatchupHistoryView(userManager: userManager)
+            } label: {
+                VStack(spacing: 10) {
+                    HStack(spacing: 0) {
+                        miniRecordColumn(value: history.record.wins, label: "W", color: .green)
+                        miniRecordColumn(value: history.record.losses, label: "L", color: .orange)
+                        miniRecordColumn(value: history.record.ties, label: "T", color: .yellow)
+                    }
+
+                    if let latest = history.matchups.first {
+                        MatchupDuelRow(matchup: latest)
+                    }
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "chart.bar.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(history.record.total == 1 ? "View your 1 duel" : "View all \(history.record.total) duels")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundColor(MADTheme.Colors.madRed)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(MADTheme.Colors.madRed.opacity(0.12))
+                    )
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.white.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(.white.opacity(0.1), lineWidth: 1)
+                )
+        )
+    }
+
+    private func miniRecordColumn(value: Int, label: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Text("\(value)")
+                .font(.system(size: 24, weight: .heavy, design: .rounded))
+                .foregroundColor(color)
+            Text(label)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundColor(color.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Medal Gallery

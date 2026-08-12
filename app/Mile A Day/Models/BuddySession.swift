@@ -411,9 +411,9 @@ struct JoinableFriendSessionsResponse: Codable {
     let sessions: [JoinableFriendSession]
 }
 
-/// A friend who is out walking or running RIGHT NOW, seen from the dashboard.
+/// A friend who is out walking or running RIGHT NOW, seen from the Friends tab.
 ///
-/// Supersedes `JoinableFriendSession` for the dashboard card: that one could
+/// Supersedes `JoinableFriendSession` for the Friends-tab card: that one could
 /// only ever see friends already inside a buddy room, which meant a friend
 /// walking solo — the single best person to start a walk with — was invisible.
 /// This comes from live presence, so it sees both, and the buddy fields are

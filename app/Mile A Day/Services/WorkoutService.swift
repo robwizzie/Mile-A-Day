@@ -453,7 +453,8 @@ class WorkoutService: ObservableObject {
         workoutId: String,
         distance: Double?,
         totalDuration: Double?,
-        workoutType: String?
+        workoutType: String?,
+        source: WorkoutSource? = nil
     ) async throws -> RecentWorkout {
         guard let currentUserId = getCurrentUserId() else {
             throw WorkoutServiceError.notAuthenticated
@@ -463,6 +464,7 @@ class WorkoutService: ObservableObject {
         if let distance = distance { body["distance"] = distance }
         if let totalDuration = totalDuration { body["totalDuration"] = totalDuration }
         if let workoutType = workoutType { body["workoutType"] = workoutType }
+        if let source { body["source"] = source.rawValue }
 
         let requestBody = try JSONSerialization.data(withJSONObject: body)
 

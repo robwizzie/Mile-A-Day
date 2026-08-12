@@ -22,6 +22,15 @@ struct WorkoutTrackingView: View {
     /// countdown), the roster strip appears above the metrics, and the existing
     /// 1 Hz tick also reports progress to the backend.
     var buddySessionId: String? = nil
+    /// Tells the presenter this cover adopted a buddy session mid-flight — the
+    /// wizard's buddy card path, where setup and lobby run INSIDE the cover
+    /// (see `BuddyWizardFlowModifier`) instead of the user being bounced out
+    /// to the dashboard's sheets. The dashboard mirrors the id into
+    /// `activeBuddySessionId`, which is what its dismiss handler reads to
+    /// offer the group recap — and on the next render `buddySessionId` above
+    /// arrives non-nil, making the adopted and handed-in paths
+    /// indistinguishable from then on.
+    var onBuddySessionAdopted: ((String) -> Void)? = nil
     @Environment(\.dismiss) var dismiss
 
     // Shared singleton — tracking keeps running when this view is dismissed
@@ -62,6 +71,8 @@ struct WorkoutTrackingView: View {
     @State private var recapDuration: TimeInterval = 0
     @State private var recapStartingDistance: Double = 0
     @State private var recapGoalDistance: Double = 0
+    @State private var recapWorkoutId: String?
+    @State private var recapWasIndoor = false
     /// Quarter splits vs the ghost, snapshotted before tracking tears down.
     @State private var recapRaceSplits: [BestEffortStore.RaceSplit] = []
     @State private var recapGhostName: String = "your ghost"
@@ -121,7 +132,6 @@ struct WorkoutTrackingView: View {
     @ObservedObject private var livePresence = LivePresenceService.shared
     /// Published coach lines, echoed on screen under the delta chip.
     @ObservedObject private var coach = GhostCoach.shared
-    @State private var showFriendsOutSheet = false
     @State private var hypeToast: String?
     @AppStorage("hasAnsweredLivePresenceConsent") private var hasAnsweredLivePresenceConsent = false
     @State private var showPresenceConsent = false
@@ -159,6 +169,26 @@ struct WorkoutTrackingView: View {
     /// through, since the hand-off below skips the whole pre-start wizard
     /// where the solo race steps live. Read once on the buddy hand-off.
     @AppStorage("buddyGhostArmedV1") private var buddyGhostArmed = false
+    /// Drops the buddy card's NEW pill once it's been opened once.
+    @AppStorage("hasOpenedBuddyStartOnce") private var hasOpenedBuddyStartOnce = false
+    /// The buddy flow presented from INSIDE this cover (the wizard's buddy
+    /// card). Bindings for `BuddyWizardFlowModifier`, which puts each on its
+    /// own presentation node.
+    @State private var showBuddyStartSheet = false
+    @State private var showBuddyLobby = false
+    /// Session adopted by the in-cover lobby hand-off. `buddySessionId` is the
+    /// presenter's copy and only arrives non-nil a render after
+    /// `onBuddySessionAdopted` fires — this one is set synchronously, so the
+    /// hand-off can start tracking without waiting on that round trip.
+    @State private var adoptedBuddySessionId: String?
+
+    /// Non-nil while this workout is a buddy walk, whichever door it came in
+    /// through: handed in by the presenter (the lobby ran over the dashboard)
+    /// or adopted mid-cover (the lobby ran in here, over the wizard). Every
+    /// buddy check in this file reads THIS, never `buddySessionId` raw.
+    private var effectiveBuddySessionId: String? {
+        buddySessionId ?? adoptedBuddySessionId
+    }
 
     private var raceActivityKey: String {
         selectedActivityType == .running ? "running" : "walking"
@@ -323,25 +353,34 @@ struct WorkoutTrackingView: View {
                 switch glyph {
                 case .symbol(let name):
                     Image(systemName: name)
-                        .font(.system(size: 60))
+                        .font(.system(size: 52))
                 case .ghost:
-                    GhostSprite(size: 62, glancesBack: true)
+                    GhostSprite(size: 56, glancesBack: true)
                 }
             }
             .foregroundColor(.white)
-            .frame(height: 72)
+            .frame(height: 62)
 
             Text(title)
-                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .font(.system(size: 30, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
 
             Text(subtitle)
                 .font(.title3)
                 .foregroundColor(.white.opacity(0.8))
                 .multilineTextAlignment(.center)
+                // Wraps rather than clips at large Dynamic Type sizes, where
+                // `.title3` grows well past the width these questions assume.
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 32)
+        // 24, matching the option cards' 20pt gutter closely enough to read as
+        // one column — the header used to be inset a further 12pt on each side,
+        // which is what pushed "Select how you'll complete your mile" onto
+        // three lines on a small phone.
+        .padding(.horizontal, 24)
     }
 
     /// Which pre-start step is on screen, derived from the flags so the
@@ -379,37 +418,54 @@ struct WorkoutTrackingView: View {
                 ghostOptionsBody
                     .transition(wizardTransition)
             } else {
-                VStack(spacing: 40) {
-                    Spacer()
+                // Centred when it fits, scrollable when it doesn't.
+                //
+                // The steps used to be Spacer-padded into a fixed frame, which
+                // was fine at two option cards and is not at three: on a 375pt
+                // phone the activity step's content is taller than the screen,
+                // and a plain VStack answers that by silently clipping the
+                // bottom card. `minHeight: geo.size.height` keeps the Spacers
+                // doing the centring on every phone that has the room, and
+                // hands the overflow to the ScrollView on the ones that don't.
+                GeometryReader { geo in
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 28) {
+                            Spacer(minLength: 8)
 
-                    // Both animated regions sit in a ZStack so the outgoing and
-                    // incoming copies OVERLAP. In a VStack they'd each be
-                    // allocated their own row mid-transition and everything
-                    // below would jump — the exact thing this restructure is
-                    // meant to stop.
-                    ZStack {
-                        // Crossfades in place rather than sliding: the question
-                        // is part of the frame, so moving it is what made the
-                        // whole screen feel like it swapped.
-                        wizardHeader(
-                            glyph: glyph(for: step),
-                            title: title(for: step),
-                            subtitle: subtitle(for: step)
-                        )
-                        .id(step)
-                        .transition(.opacity)
+                            // Both animated regions sit in a ZStack so the
+                            // outgoing and incoming copies OVERLAP. In a VStack
+                            // they'd each be allocated their own row
+                            // mid-transition and everything below would jump —
+                            // the exact thing this restructure is meant to stop.
+                            ZStack {
+                                // Crossfades in place rather than sliding: the
+                                // question is part of the frame, so moving it is
+                                // what made the whole screen feel like it
+                                // swapped.
+                                wizardHeader(
+                                    glyph: glyph(for: step),
+                                    title: title(for: step),
+                                    subtitle: subtitle(for: step)
+                                )
+                                .id(step)
+                                .transition(.opacity)
+                            }
+
+                            ZStack {
+                                VStack(spacing: 16) { options(for: step) }
+                                    .id(step)
+                                    .transition(wizardTransition)
+                            }
+                            // 20, not 32. The option cards are the widest thing
+                            // on this screen and the titles inside them are the
+                            // tightest fit, so the gutter is the cheapest 24pt
+                            // to give back.
+                            .padding(.horizontal, 20)
+
+                            Spacer(minLength: 8)
+                        }
+                        .frame(minHeight: geo.size.height)
                     }
-
-                    Spacer()
-
-                    ZStack {
-                        VStack(spacing: 20) { options(for: step) }
-                            .id(step)
-                            .transition(wizardTransition)
-                    }
-                    .padding(.horizontal, 32)
-
-                    Spacer()
                 }
             }
         }
@@ -484,6 +540,7 @@ struct WorkoutTrackingView: View {
             workoutOptionButton(icon: "figure.walk", title: "Walk", subtitle: "Track as a walking workout") {
                 selectActivity(.walking)
             }
+            buddyOptionButton
 
         case .location:
             workoutOptionButton(icon: "location.fill", title: "Outdoor", subtitle: "Uses GPS for accurate tracking") {
@@ -743,7 +800,7 @@ struct WorkoutTrackingView: View {
 
                         // Buddy Walk roster sits ABOVE your own metrics: the
                         // crew is context, your distance is still the subject.
-                        if buddySessionId != nil, let session = buddyService.session {
+                        if effectiveBuddySessionId != nil, let session = buddyService.session {
                             BuddyRosterStrip(
                                 session: session,
                                 currentUserId: buddyService.currentUserId
@@ -756,8 +813,6 @@ struct WorkoutTrackingView: View {
                         progressRing(diameter: ringDiameter(for: screen.size.height))
 
                         timeDisplay
-
-                        friendsOutPulseRow
 
                         Spacer(minLength: 0)
                     }
@@ -802,11 +857,6 @@ struct WorkoutTrackingView: View {
             // cadence would otherwise sit on the moment.
             lastActivityPushDate = .distantPast
             updateLiveActivity()
-        }
-        .sheet(isPresented: $showFriendsOutSheet) {
-            FriendsOutSheet(friends: livePresence.friendsOut)
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
         }
     }
 
@@ -1389,77 +1439,6 @@ struct WorkoutTrackingView: View {
         .background(Capsule().fill((ahead ? Color.green : Color.orange).opacity(0.15)))
     }
 
-    // MARK: - Live presence UI
-
-    /// Subtle pulse when at least one friend is also out right now. Appears
-    /// organically, disappears quietly; tap for the list + a Hype button per
-    /// friend. Real-time presence is the feature — keep it calm, not loud.
-    @ViewBuilder
-    private var friendsOutPulseRow: some View {
-        if !livePresence.friendsOut.isEmpty {
-            Button {
-                MADHaptics.action()
-                showFriendsOutSheet = true
-            } label: {
-                HStack(spacing: 10) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.green.opacity(0.35))
-                            .frame(width: 10, height: 10)
-                            .scaleEffect(1.9)
-                            .opacity(0.55)
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 10, height: 10)
-                    }
-                    .pulseGlow(color: .green, maxScale: 1.6)
-
-                    HStack(spacing: -8) {
-                        ForEach(livePresence.friendsOut.prefix(3)) { friend in
-                            AvatarView(
-                                name: friend.displayName,
-                                imageURL: friend.profile_image_url,
-                                size: 28
-                            )
-                            .overlay(Circle().strokeBorder(Color.white.opacity(0.7), lineWidth: 1.5))
-                        }
-                    }
-
-                    Text(friendsOutLabel)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.92))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-
-                    Spacer(minLength: 4)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.white.opacity(0.5))
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    Capsule()
-                        .fill(Color.white.opacity(0.12))
-                        .overlay(Capsule().strokeBorder(Color.green.opacity(0.35), lineWidth: 1))
-                )
-                .padding(.horizontal, 32)
-            }
-            .buttonStyle(.plain)
-            .transition(.opacity.combined(with: .scale))
-        }
-    }
-
-    private var friendsOutLabel: String {
-        let friends = livePresence.friendsOut
-        guard let first = friends.first else { return "" }
-        if friends.count == 1 {
-            return "\(first.firstNameOrUsername) is out right now"
-        }
-        return "\(first.firstNameOrUsername) + \(friends.count - 1) more are out"
-    }
-
     private var stopButton: some View {
         Button(action: { showStopConfirmation = true }) {
             HStack(spacing: 12) {
@@ -1571,10 +1550,18 @@ struct WorkoutTrackingView: View {
             accessory: { optionChevron }, action: action)
     }
 
+    /// Fixed so every card's title starts on the same x — including the buddy
+    /// card, whose leading slot is a pile of faces rather than a symbol.
+    ///
+    /// 46, not the original 50: the text column on a 375pt phone is the tight
+    /// dimension on this screen, and every point spent here is a point the
+    /// titles don't get.
+    static let optionGlyphWidth: CGFloat = 46
+
     private func optionGlyph(_ icon: String) -> some View {
         Image(systemName: icon)
-            .font(.system(size: 32))
-            .frame(width: 50)
+            .font(.system(size: 30))
+            .frame(width: Self.optionGlyphWidth)
     }
 
     /// The wizard's option card.
@@ -1600,18 +1587,35 @@ struct WorkoutTrackingView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 16) {
+            HStack(spacing: 14) {
                 leading()
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
+                        // The title is the one thing here that CANNOT wrap or
+                        // clip: at 28pt "Just Track It" wants ~190pt and a
+                        // 375pt phone leaves the text column ~189pt, so it was
+                        // breaking to two lines (or truncating once the badge
+                        // took its share). Scaling is the right trade — a
+                        // title a few percent smaller reads fine, a title
+                        // reading "Just Track…" does not.
                         Text(title)
                             .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .allowsTightening(true)
                         if let badge {
                             Text(badge)
                                 .font(.system(size: 9, weight: .black, design: .rounded))
                                 .tracking(0.8)
                                 .foregroundColor(.black.opacity(0.8))
+                                .lineLimit(1)
+                                // Safe here where `.fixedSize` normally isn't:
+                                // every badge is a short literal ("NEW",
+                                // "2 INVITES"), never open-ended data, so it
+                                // can't publish a minimum width that starves
+                                // the row.
+                                .fixedSize()
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
                                 .background(Capsule().fill(Color.yellow))
@@ -1621,15 +1625,19 @@ struct WorkoutTrackingView: View {
                         .font(.subheadline)
                         .opacity(0.9)
                         .multilineTextAlignment(.leading)
+                        // Wraps to as many lines as it needs instead of
+                        // truncating — which is why the subtitles were never
+                        // the ones getting cut off.
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Spacer(minLength: 8)
+                Spacer(minLength: 6)
 
                 accessory()
             }
             .foregroundColor(.white)
-            .padding(24)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 20)
             .background(
                 RoundedRectangle(cornerRadius: 20)
                     .fill(Color.white.opacity(featured ? 0.24 : 0.15))
@@ -1646,6 +1654,48 @@ struct WorkoutTrackingView: View {
         Image(systemName: "chevron.right")
             .font(.title2)
             .fontWeight(.semibold)
+    }
+
+    /// The third card on the activity step: do this mile WITH someone.
+    ///
+    /// Featured, because it's the only option here that isn't just a HealthKit
+    /// activity type. Live "friends out right now" belongs on the Friends tab,
+    /// so the Dashboard keeps this as a generic buddy entry point plus invite
+    /// count only.
+    ///
+    /// The whole flow stays INSIDE this cover: setup sheet and lobby present
+    /// over the wizard (`BuddyWizardFlowModifier` on the body), so Cancel and
+    /// Leave land back on this step and the countdown starts tracking in
+    /// place — no bouncing out to the dashboard and back.
+    @ViewBuilder
+    private var buddyOptionButton: some View {
+        // Hidden mid-buddy-walk — this tracker is already in one.
+        if effectiveBuddySessionId == nil {
+            workoutOptionButton(
+                leading: { optionGlyph("figure.2") },
+                title: "With a Buddy",
+                subtitle: BuddyStartPrompt.subtitle(invites: buddyService.invites),
+                featured: true,
+                badge: BuddyStartPrompt.badge(
+                    invites: buddyService.invites,
+                    hasStartedOnce: hasOpenedBuddyStartOnce
+                ),
+                accessory: { optionChevron }
+            ) {
+                MADHaptics.tap()
+                hasOpenedBuddyStartOnce = true
+                // Mirrors BuddyFlowModifier's notification handler: a room
+                // already waiting (an accepted invite, a live session) goes
+                // straight to the lobby — there is nothing left to configure.
+                // Re-enterable only: a session THIS user already finished must
+                // never route back toward the lobby's instant hand-off.
+                if buddyService.canReenterLiveSession {
+                    showBuddyLobby = true
+                } else {
+                    showBuddyStartSheet = true
+                }
+            }
+        }
     }
 
     var body: some View {
@@ -1680,8 +1730,14 @@ struct WorkoutTrackingView: View {
                     startingDistance: recapStartingDistance,
                     goalDistance: recapGoalDistance,
                     streak: userManager.currentUser.streak,
+                    healthManager: healthManager,
+                    workoutId: recapWorkoutId,
+                    isIndoor: recapWasIndoor,
                     raceSplits: recapRaceSplits,
                     raceGhostName: recapGhostName,
+                    onDistanceAdjusted: { newDistance in
+                        recapDistance = newDistance
+                    },
                     onDismiss: { dismiss() }
                 )
             } else {
@@ -1788,32 +1844,13 @@ struct WorkoutTrackingView: View {
             // Guard: skip if we're currently ending a workout or already tracking.
             guard !isStopping, !isTracking else { return }
 
-            // Buddy Walk hand-off. The lobby already ran the server-synced
-            // countdown, so there is nothing left to pick and nothing left to
-            // count down — start moving immediately.
+            // Buddy Walk hand-off — see startBuddyWorkoutIfReady().
             //
             // Deliberately checked BEFORE the recovery branch's early return but
             // AFTER its guards: a recoverable workout on disk always wins, since
             // that's a workout already in progress and starting a second one
             // would fail the lock anyway.
-            if buddySessionId != nil, !hasAutoStartedBuddyWorkout,
-               InProgressWorkoutStore.load()?.isActive != true {
-                hasAutoStartedBuddyWorkout = true
-                selectedActivityType =
-                    (buddyService.session?.isRunning ?? false) ? .running : .walking
-                selectedLocationType = .outdoor
-                clearPreStartSteps()
-                // Ghost race, armed from the lobby. This branch skips the whole
-                // pre-start wizard, which is the only place the solo race steps
-                // live — so without this a buddy walk could never race, even
-                // though it already feeds BestEffortStore on finish.
-                // Everything downstream (resolvedGhost, the delta chip, the
-                // 1-mile freeze, the celebration) only ever needed raceArmed.
-                raceArmed = buddyGhostArmed
-                isTracking = true
-                startWorkout()
-                return
-            }
+            if startBuddyWorkoutIfReady() { return }
 
             guard let saved = InProgressWorkoutStore.load(), saved.isActive else { return }
 
@@ -1830,6 +1867,18 @@ struct WorkoutTrackingView: View {
             if let locationType = HKWorkoutSessionLocationType(rawValue: saved.locationTypeRawValue) {
                 selectedLocationType = locationType
             }
+
+            // Celebrations are one-shot per WORKOUT, but their flags are
+            // @State — one-shot per PRESENTATION. This view is destroyed
+            // whenever the cover dismisses, so returning to a workout that had
+            // already crossed the goal re-armed both, and the first distance
+            // tick replayed the success haptic + overlay: a buzz on EVERY
+            // return after 100%. Seed them from the state being restored —
+            // anything already earned counts as already shown. Milestones not
+            // yet reached stay armed and still fire exactly once.
+            hasReachedPreviousProgress =
+                startingDistance > 0 && saved.currentDistance >= startingDistance
+            hasShownCompletion = startingDistance + saved.currentDistance >= goalDistance
 
             // Jump directly into the tracking UI
             clearPreStartSteps()
@@ -1863,6 +1912,52 @@ struct WorkoutTrackingView: View {
             startWorkoutTimer()
             startLiveActivity()
         }
+        .modifier(
+            BuddyWizardFlowModifier(
+                showStartSheet: $showBuddyStartSheet,
+                showLobby: $showBuddyLobby,
+                onStarted: { session in
+                    adoptedBuddySessionId = session.id
+                    onBuddySessionAdopted?(session.id)
+                    startBuddyWorkoutIfReady()
+                }
+            )
+        )
+    }
+
+    /// The buddy hand-off: the lobby already ran the server-synced countdown,
+    /// so there is nothing left to pick and nothing left to count down — start
+    /// moving immediately.
+    ///
+    /// Reached from two places: `.onAppear`, for a session handed in by the
+    /// presenter (the lobby ran over the dashboard), and the in-cover lobby's
+    /// `onStarted`, for one adopted over the wizard. Both can fire for the
+    /// same session — a dismissing cover re-runs `.onAppear` — which is what
+    /// the one-shot flag is for.
+    ///
+    /// Ghost race: this hand-off skips the whole pre-start wizard, which is
+    /// the only place the solo race steps live — so without reading the
+    /// lobby's armed flag a buddy walk could never race, even though it
+    /// already feeds BestEffortStore on finish. Everything downstream
+    /// (resolvedGhost, the delta chip, the 1-mile freeze, the celebration)
+    /// only ever needed raceArmed.
+    @discardableResult
+    private func startBuddyWorkoutIfReady() -> Bool {
+        guard effectiveBuddySessionId != nil, !hasAutoStartedBuddyWorkout,
+              !isStopping, !isTracking,
+              // Defense in depth behind the lobby/entry-point guards: never
+              // auto-start a mile for a session THIS user already finished.
+              buddyService.session?.me(buddyService.currentUserId)?.status != .finished,
+              InProgressWorkoutStore.load()?.isActive != true else { return false }
+        hasAutoStartedBuddyWorkout = true
+        selectedActivityType =
+            (buddyService.session?.isRunning ?? false) ? .running : .walking
+        selectedLocationType = .outdoor
+        clearPreStartSteps()
+        raceArmed = buddyGhostArmed
+        isTracking = true
+        startWorkout()
+        return true
     }
 
     // MARK: - Pre-start navigation
@@ -2010,6 +2105,9 @@ struct WorkoutTrackingView: View {
                     Text("Share when I'm out")
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundColor(Color(red: 0.5, green: 0.15, blue: 0.2))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.horizontal, 12)
                         .frame(maxWidth: .infinity)
                         .frame(height: 54)
                         .background(RoundedRectangle(cornerRadius: 16).fill(.white))
@@ -2022,6 +2120,9 @@ struct WorkoutTrackingView: View {
                     Text("Not now")
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
                         .foregroundColor(.white.opacity(0.85))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.horizontal, 12)
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
                         .background(
@@ -2096,6 +2197,8 @@ struct WorkoutTrackingView: View {
         // Resolve the ghost the user armed on the location step (resolved
         // once, so a best set MID-session doesn't morph the target).
         raceFinalDelta = nil
+        recapWorkoutId = nil
+        recapWasIndoor = false
         if raceArmed, let ghost = resolvedGhost {
             raceGhost = ghost.effort
             raceGhostName = ghost.shortName
@@ -2213,7 +2316,7 @@ struct WorkoutTrackingView: View {
             // adding a second timer. The service throttles this to one network
             // call every 5s, and that call's response carries the whole roster
             // back — so an actively-tracking client never polls separately.
-            if buddySessionId != nil {
+            if effectiveBuddySessionId != nil {
                 let distance = currentDistance
                 let elapsed = elapsedTime
                 Task { @MainActor in
@@ -2270,12 +2373,13 @@ struct WorkoutTrackingView: View {
         recapDuration = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
         recapStartingDistance = startingDistance
         recapGoalDistance = goalDistance
+        recapWasIndoor = selectedLocationType == .indoor
 
         // Buddy Walk: report the RECONCILED final distance (not the raw live
         // sum) and mark this participant done, so the standings everyone sees
         // match the number this phone is about to save to HealthKit. The
         // server later replaces even this with the synced HKWorkout.
-        if buddySessionId != nil {
+        if effectiveBuddySessionId != nil {
             let reportedDistance = finalDistance
             let reportedDuration = recapDuration
             Task { @MainActor in
@@ -2300,6 +2404,13 @@ struct WorkoutTrackingView: View {
         let routeLocations = WorkoutRouteCleanup.cleaned(
             (InProgressWorkoutStore.load()?.routePoints ?? []).map { $0.toCLLocation() }
         )
+
+        // The user has ENDED this workout — record that synchronously, before
+        // the async HealthKit save. finishCleanup() clears the store only at
+        // the end of that chain, and locking or swipe-killing the app right
+        // after tapping End left `isActive` true — so the next launch
+        // auto-presented the tracker and made the same mile get ended again.
+        InProgressWorkoutStore.markEnded()
 
         // Stop timer and location tracking
         timer?.invalidate()
@@ -2351,6 +2462,9 @@ struct WorkoutTrackingView: View {
                     if let workout, saved {
                         TrackedWorkoutLedger.shared.record(
                             workoutId: workout.uuid.uuidString, miles: finalDistance)
+                        DispatchQueue.main.async {
+                            self.recapWorkoutId = workout.uuid.uuidString
+                        }
                     }
                     let finalize = {
                         DispatchQueue.main.async {
@@ -2783,4 +2897,3 @@ struct WorkoutTrackingView: View {
         }
     }
 }
-

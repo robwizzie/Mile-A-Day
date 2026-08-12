@@ -15,11 +15,17 @@ struct WorkoutRecapView: View {
     let startingDistance: Double  // Miles already done today before this workout
     let goalDistance: Double      // Daily goal in miles
     let streak: Int               // Current streak in days
+    let healthManager: HealthKitManager
+    var workoutId: String? = nil
+    var isIndoor: Bool = false
     /// Quarter-by-quarter against the ghost, empty when this wasn't a race.
     /// Defaulted so every existing construction site is unaffected.
     var raceSplits: [BestEffortStore.RaceSplit] = []
     var raceGhostName: String = "your ghost"
+    var onDistanceAdjusted: ((Double) -> Void)? = nil
     let onDismiss: () -> Void
+
+    @State private var treadmillBaselineDistance: Double?
 
     // Staggered entrance
     @State private var showHero = false
@@ -143,6 +149,18 @@ struct WorkoutRecapView: View {
 
                     statsGrid
 
+                    if isIndoor, let workoutId {
+                        TreadmillDistanceAdjustmentCard(
+                            workoutId: workoutId,
+                            recordedDistance: treadmillBaselineDistance ?? distance,
+                            currentDistance: distance,
+                            duration: duration,
+                            workoutType: activityName == "Run" ? "running" : "walking",
+                            healthManager: healthManager,
+                            onSaved: onDistanceAdjusted
+                        )
+                    }
+
                     raceBreakdown
 
                     goalCard
@@ -155,6 +173,9 @@ struct WorkoutRecapView: View {
             doneButton
         }
         .onAppear {
+            if treadmillBaselineDistance == nil {
+                treadmillBaselineDistance = distance
+            }
             MADHaptics.success()
             withAnimation(.spring(response: 0.55, dampingFraction: 0.7)) { showHero = true }
             withAnimation(.easeOut(duration: 0.35).delay(0.2)) { showDistance = true }
@@ -348,6 +369,212 @@ struct WorkoutRecapView: View {
         .padding(.top, 8)
         .padding(.bottom, 40)
         .buttonStyle(PlainButtonStyle())
+    }
+}
+
+private struct TreadmillDistanceAdjustmentCard: View {
+    let workoutId: String
+    let recordedDistance: Double
+    let currentDistance: Double
+    let duration: TimeInterval
+    let workoutType: String
+    let healthManager: HealthKitManager
+    var onSaved: ((Double) -> Void)?
+
+    @StateObject private var workoutService = WorkoutService()
+    @State private var distanceString = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+    @State private var showManualFlagConfirmation = false
+    @State private var showEditSheet = false
+    @FocusState private var distanceFieldFocused: Bool
+
+    private var enteredDistance: Double? {
+        Double(distanceString.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private var addsMoreThan25Percent: Bool {
+        guard recordedDistance > 0, let enteredDistance else { return false }
+        return enteredDistance > recordedDistance * 1.25
+    }
+
+    private var canSave: Bool {
+        guard let enteredDistance, enteredDistance > 0, enteredDistance < 100 else { return false }
+        return abs(enteredDistance - currentDistance) > 0.001 && !isSaving
+    }
+
+    private var formattedTime: String {
+        let totalSeconds = Int(duration)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("Treadmill Distance", systemImage: "figure.walk.motion")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                Text("\(currentDistance.milesText) mi")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+                    .monospacedDigit()
+            }
+
+            HStack(spacing: 10) {
+                TextField("0.00", text: $distanceString)
+                    .keyboardType(.decimalPad)
+                    .textInputAutocapitalization(.never)
+                    .focused($distanceFieldFocused)
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .monospacedDigit()
+                    .padding(.horizontal, 12)
+                    .frame(height: 48)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.white.opacity(0.14))
+                    )
+
+                Text("mi")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.65))
+
+                Button {
+                    distanceFieldFocused = false
+                    saveTapped()
+                } label: {
+                    if isSaving {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 16, weight: .bold))
+                    }
+                }
+                .frame(width: 48, height: 48)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(canSave ? Color.green.opacity(0.9) : Color.white.opacity(0.14))
+                )
+                .foregroundColor(.white)
+                .disabled(!canSave)
+            }
+
+            HStack {
+                Label(formattedTime, systemImage: "clock.fill")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.72))
+                    .monospacedDigit()
+
+                Spacer()
+
+                Button("Edit") {
+                    distanceFieldFocused = false
+                    showEditSheet = true
+                }
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+            }
+
+            if addsMoreThan25Percent {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12, weight: .bold))
+                    Text("Adding more than 25% will mark this workout as manually entered.")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .foregroundColor(.orange)
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.orange)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                )
+        )
+        .onAppear {
+            if distanceString.isEmpty {
+                distanceString = String(format: "%.2f", currentDistance)
+            }
+        }
+        .alert("Mark as manual?", isPresented: $showManualFlagConfirmation) {
+            Button("Save as Manual", role: .destructive) {
+                Task { await saveDistance(source: .manual) }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This treadmill distance adds more than 25% to the recorded workout, so it will be visible as a manual entry.")
+        }
+        .sheet(isPresented: $showEditSheet) {
+            EditWorkoutView(
+                workoutId: workoutId,
+                currentDistance: currentDistance,
+                currentDuration: duration,
+                currentWorkoutType: workoutType
+            )
+            .environmentObject(healthManager)
+        }
+    }
+
+    private func saveTapped() {
+        if addsMoreThan25Percent {
+            showManualFlagConfirmation = true
+        } else {
+            Task { await saveDistance(source: .healthkit) }
+        }
+    }
+
+    private func saveDistance(source: WorkoutSource) async {
+        guard let enteredDistance else { return }
+        isSaving = true
+        errorMessage = nil
+
+        do {
+            _ = try await workoutService.updateWorkout(
+                workoutId: workoutId,
+                distance: enteredDistance,
+                totalDuration: nil,
+                workoutType: nil,
+                source: source
+            )
+
+            switch source {
+            case .manual:
+                ManualWorkoutRegistry.markManual(workoutId)
+            case .edited:
+                ManualWorkoutRegistry.markEdited(workoutId)
+            case .healthkit:
+                ManualWorkoutRegistry.markHealthKit(workoutId)
+            }
+            TrackedWorkoutLedger.shared.userOverride(workoutId: workoutId, miles: enteredDistance)
+            WorkoutIndex.clear()
+            healthManager.workoutIndex = nil
+            healthManager.isIndexBuilding = false
+            healthManager.fetchAllWorkoutData()
+            onSaved?(enteredDistance)
+            isSaving = false
+        } catch {
+            isSaving = false
+            errorMessage = error.localizedDescription
+        }
     }
 }
 

@@ -667,26 +667,24 @@ class WorkoutSyncService: ObservableObject {
     }
 
     /// Cap uploaded routes to a drawing-friendly polyline; the backend stores
-    /// them verbatim (with its own backstop) and feeds them back to feed cards.
-    private static let maxRoutePoints = 150
+    /// them verbatim and feeds them back to feed cards. 300 matches the
+    /// server's MAX_ROUTE_POINTS — sending more triggers its uniform-stride
+    /// backstop, which clips corners (exactly what the Douglas-Peucker
+    /// downsample below exists to avoid).
+    private static let maxRoutePoints = 300
     /// Don't fetch routes for oversized batches — that's a backfill, not a
     /// fresh run, and per-workout route queries would drag the whole upload.
     private static let maxRouteFetchBatch = 25
 
     /// The workout's GPS trace as [[lat, lng], ...], downsampled to
-    /// `maxRoutePoints` and rounded to ~1m precision. Nil when the workout has
-    /// no route (indoor/manual).
+    /// `maxRoutePoints` (corner-preserving Douglas-Peucker, never a uniform
+    /// stride — see WorkoutRouteCleanup) and rounded to ~1m precision. Nil
+    /// when the workout has no route (indoor/manual).
     private func simplifiedRoute(for workout: HKWorkout) async -> [[Double]]? {
         let locations = await HealthKitManager.shared.fetchAllRouteLocations(for: workout)
         guard locations.count >= 2 else { return nil }
 
-        let sampled: [CLLocation]
-        if locations.count > Self.maxRoutePoints {
-            let stride = Double(locations.count - 1) / Double(Self.maxRoutePoints - 1)
-            sampled = (0..<Self.maxRoutePoints).map { locations[Int((Double($0) * stride).rounded())] }
-        } else {
-            sampled = locations
-        }
+        let sampled = WorkoutRouteCleanup.simplified(locations, toMaxPoints: Self.maxRoutePoints)
         return sampled.map { location in
             [
                 (location.coordinate.latitude * 100_000).rounded() / 100_000,

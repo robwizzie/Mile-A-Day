@@ -18,10 +18,11 @@ struct EditWorkoutView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var showDiscardConfirmation = false
+    @State private var showManualFlagConfirmation = false
     @FocusState private var distanceFieldFocused: Bool
 
     private var distance: Double? {
-        Double(distanceString)
+        Double(distanceString.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     private var totalDuration: TimeInterval {
@@ -29,16 +30,40 @@ struct EditWorkoutView: View {
     }
 
     private var hasChanges: Bool {
-        guard let d = distance else { return false }
-        let distChanged = abs(d - currentDistance) > 0.001
-        let durChanged = abs(totalDuration - currentDuration) > 1
-        let typeChanged = workoutType != currentWorkoutType
-        return distChanged || durChanged || typeChanged
+        distanceChanged || durationChanged || typeChanged
     }
 
     private var isValid: Bool {
         guard let d = distance, d > 0, d < 100 else { return false }
         return totalDuration > 0
+    }
+
+    private var distanceChanged: Bool {
+        guard let d = distance else { return false }
+        return abs(d - currentDistance) > 0.001
+    }
+
+    private var durationChanged: Bool {
+        abs(totalDuration - currentDuration) > 1
+    }
+
+    private var typeChanged: Bool {
+        workoutType != currentWorkoutType
+    }
+
+    private var addsMoreThan25Percent: Bool {
+        guard currentDistance > 0, let d = distance else { return false }
+        return d > currentDistance * 1.25
+    }
+
+    private var editSource: WorkoutSource {
+        if addsMoreThan25Percent {
+            return .manual
+        }
+        if distanceChanged && !durationChanged && !typeChanged {
+            return .healthkit
+        }
+        return .edited
     }
 
     var body: some View {
@@ -92,12 +117,11 @@ struct EditWorkoutView: View {
                     Text("Duration")
                 }
 
-                // Warning
                 Section {
                     HStack(spacing: 6) {
-                        Image(systemName: "pencil.circle.fill")
+                        Image(systemName: editSource == .manual ? "exclamationmark.triangle.fill" : "pencil.circle.fill")
                             .foregroundColor(.orange)
-                        Text("Edited workouts are flagged so friends can see the data was changed.")
+                        Text(editWarningText)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -121,7 +145,7 @@ struct EditWorkoutView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         distanceFieldFocused = false
-                        Task { await saveEdit() }
+                        saveTapped()
                     }
                     .disabled(!isValid || !hasChanges || isSaving)
                     .fontWeight(.semibold)
@@ -166,6 +190,25 @@ struct EditWorkoutView: View {
             Button("Discard", role: .destructive) { dismiss() }
             Button("Keep Editing", role: .cancel) { }
         }
+        .alert("Mark as manual?", isPresented: $showManualFlagConfirmation) {
+            Button("Save as Manual", role: .destructive) {
+                Task { await saveEdit(source: .manual) }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This edit adds more than 25% to the recorded distance, so it will be visible as a manual entry.")
+        }
+    }
+
+    private var editWarningText: String {
+        switch editSource {
+        case .manual:
+            return "Adding more than 25% marks this workout as manually entered."
+        case .edited:
+            return "Changing time or type marks this workout as manually edited."
+        case .healthkit:
+            return "Distance corrections within 25% are not flagged as manual."
+        }
     }
 
     private func cancelTapped() {
@@ -200,7 +243,15 @@ struct EditWorkoutView: View {
         }
     }
 
-    private func saveEdit() async {
+    private func saveTapped() {
+        if editSource == .manual {
+            showManualFlagConfirmation = true
+        } else {
+            Task { await saveEdit(source: editSource) }
+        }
+    }
+
+    private func saveEdit(source: WorkoutSource) async {
         guard let distance = distance else { return }
 
         isSaving = true
@@ -211,11 +262,18 @@ struct EditWorkoutView: View {
                 workoutId: workoutId,
                 distance: distance,
                 totalDuration: totalDuration,
-                workoutType: workoutType
+                workoutType: workoutType,
+                source: source
             )
 
-            // Register as edited so the WorkoutIndex flags it
-            ManualWorkoutRegistry.markEdited(workoutId)
+            switch source {
+            case .manual:
+                ManualWorkoutRegistry.markManual(workoutId)
+            case .edited:
+                ManualWorkoutRegistry.markEdited(workoutId)
+            case .healthkit:
+                ManualWorkoutRegistry.markHealthKit(workoutId)
+            }
 
             // A deliberate edit outranks the tracker's receipt — without this,
             // `madDistanceMiles` would floor the display back to the tracked

@@ -666,8 +666,15 @@ struct BuddyLobbyView: View {
 
     /// Hand the session to the tracker exactly once, the instant the shared
     /// countdown elapses.
+    ///
+    /// Never for a participant who already FINISHED: the session stays
+    /// `active` while friends are still walking, so any route that lands a
+    /// finished user back in this lobby (a buddy push, the invite pill, the
+    /// wizard card) would otherwise hand them straight into a brand-new
+    /// tracking session for a mile they already ended.
     private func handOffIfStarted() {
         guard !hasHandedOff, let session, session.status == .active else { return }
+        guard session.me(buddy.currentUserId)?.status != .finished else { return }
         guard let startedAt = session.startedAtDate, startedAt <= now else { return }
         hasHandedOff = true
         MADHaptics.success()

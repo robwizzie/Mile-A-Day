@@ -61,7 +61,7 @@ export async function liveTrackingHeartbeat(
 
 /**
  * Friends out right now, for a caller who isn't tracking. Unlike the heartbeat
- * this needs no session — it's read from the dashboard, before you start.
+ * this needs no session — it's read from the Friends tab, before you start.
  */
 export async function liveFriendsOut(req: AuthenticatedRequest, res: Response) {
   try {

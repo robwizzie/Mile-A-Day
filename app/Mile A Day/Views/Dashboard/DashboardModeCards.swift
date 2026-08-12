@@ -220,9 +220,6 @@ struct ModernDashboardBody: View {
             DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
 
             BuddyWalkPill(hasActiveWorkout: hasActiveWorkout)
-            BuddyJoinFriendCard(hasActiveWorkout: hasActiveWorkout) {
-                NotificationCenter.default.post(name: .madOpenBuddyLobby, object: nil)
-            }
 
             HStack(alignment: .top, spacing: 12) {
                 ModernStepsTile(healthManager: healthManager, userManager: userManager)
@@ -1030,7 +1027,11 @@ private struct ModernChallengeRow: View {
             progressRow
 
             if challenge.key == "head_to_head", let opponent {
-                HeadToHeadStrip(opponent: opponent, accent: accentColor)
+                HeadToHeadStrip(
+                    opponent: opponent,
+                    accent: accentColor,
+                    myMilesOverride: healthManager.todaysDistance
+                )
             }
 
             tomorrowRow
@@ -1645,9 +1646,6 @@ private struct FunStartCard: View {
         VStack(spacing: 10) {
             DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
             BuddyWalkPill(hasActiveWorkout: hasActiveWorkout)
-            BuddyJoinFriendCard(hasActiveWorkout: hasActiveWorkout) {
-                NotificationCenter.default.post(name: .madOpenBuddyLobby, object: nil)
-            }
         }
     }
 }

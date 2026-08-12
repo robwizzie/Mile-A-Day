@@ -195,6 +195,25 @@ enum InProgressWorkoutStore {
         print("[InProgressWorkoutStore] 🗑️ Cleared workout state and lock")
     }
 
+    /// Flip the persisted workout to ended WITHOUT dropping the payload.
+    ///
+    /// Called synchronously the moment the user commits to End Workout —
+    /// BEFORE the async HealthKit save begins. `clear()` only runs in
+    /// `finishCleanup`, at the far end of that async chain, and a user who
+    /// ends a mile and immediately locks or swipe-kills the app never gets
+    /// there: the store stayed `isActive`, so the next launch auto-presented
+    /// the tracker with a workout they had already ended — and Ending it a
+    /// second time could even double-save the walk to HealthKit when the
+    /// first save had in fact landed. An ended-but-uncleared state is ignored
+    /// by recovery and the launch auto-present (both key on `isActive`), and
+    /// the staleness sweep disposes of it.
+    static func markEnded() {
+        guard var state = load() else { return }
+        state.isActive = false
+        save(state)
+        print("[InProgressWorkoutStore] 🏁 Marked workout ended (payload kept for in-flight save)")
+    }
+
     // MARK: - State Queries
 
     /// Check if there is a recoverable workout

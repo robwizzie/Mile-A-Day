@@ -44,11 +44,8 @@ enum WeekDataProvider {
             let miles: Double
             if isFuture {
                 miles = goalDistance
-            } else if let index = healthManager.workoutIndex {
-                miles = index.totalMiles(for: startOfDay)
             } else {
-                let goalMet = healthManager.dailyMileGoals[startOfDay] ?? false
-                miles = goalMet ? max(goalDistance, 1.0) : 0.0
+                miles = healthManager.countedMiles(onLocalDay: startOfDay)
             }
             let label = dayFormatter.string(from: date)
             let shortLabel = String(label.prefix(1))
@@ -390,7 +387,7 @@ struct WeeklyMileChartView: View {
             f.dateFormat = "MMM d"
             return f
         }()
-        let distText = data.isFuture ? "—" : String(format: "%.2f mi", data.distance)
+        let distText = data.isFuture ? "—" : data.distance.milesFormatted
         let dateText = dateFormatter.string(from: data.date)
 
         let tooltipWidth: CGFloat = 90

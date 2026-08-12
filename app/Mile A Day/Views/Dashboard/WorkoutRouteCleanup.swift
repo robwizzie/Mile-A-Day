@@ -73,9 +73,28 @@ enum WorkoutRouteCleanup {
         return out
     }
 
+    /// Corner-preserving downsample to at most `maxPoints`: Douglas-Peucker
+    /// with the tolerance doubled until the result fits the budget. This is
+    /// what the sync upload uses instead of a uniform stride — a stride
+    /// spends points evenly along the trace regardless of shape, so a street
+    /// corner that falls between two samples simply disappears, which is what
+    /// made feed routes read rounder than the HealthKit original.
+    static func simplified(_ points: [CLLocation], toMaxPoints maxPoints: Int) -> [CLLocation] {
+        guard maxPoints >= 2, points.count > maxPoints else { return points }
+        var tolerance = 2.0
+        var result = simplified(points, toleranceMeters: tolerance)
+        // Terminates: once the tolerance exceeds the route's largest
+        // deviation, Douglas-Peucker returns just the endpoints.
+        while result.count > maxPoints {
+            tolerance *= 2
+            result = simplified(result, toleranceMeters: tolerance)
+        }
+        return result
+    }
+
     /// Iterative Douglas-Peucker on a local flat-earth projection — meters of
     /// perpendicular error, fine at walk/run route scale.
-    private static func simplified(_ points: [CLLocation], toleranceMeters: Double) -> [CLLocation] {
+    static func simplified(_ points: [CLLocation], toleranceMeters: Double) -> [CLLocation] {
         guard points.count > 2 else { return points }
         let midLatitudeRadians = points[points.count / 2].coordinate.latitude * .pi / 180
         let metersPerDegreeLatitude = 111_132.0

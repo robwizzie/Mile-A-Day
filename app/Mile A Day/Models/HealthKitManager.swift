@@ -2033,15 +2033,17 @@ final class WorkoutSourcePreferences: ObservableObject {
     }
 }
 
-/// Workouts the user has told us to count anyway, overruling duplicate detection.
+/// Workouts the user has told us to count or not count, overruling automatic
+/// source consent + duplicate detection.
 ///
 /// The rule below is a guess — a good one, but a guess about two recordings the
 /// app can only see through timestamps and distances. Someone who walks a mile,
 /// stops, and walks a near-identical mile an hour later is not doing anything
 /// unusual, and no threshold can tell that apart from one walk written twice.
-/// So the verdict has to be reversible, and the reversal has to STICK: a sync,
-/// a relaunch or a recalibrate must not quietly re-apply a decision the user
-/// already overruled.
+/// Google Health can also invent a workout that looks real enough to count.
+/// So the verdict has to be reversible in BOTH directions, and the reversal has
+/// to STICK: a sync, a relaunch or a recalibrate must not quietly re-apply a
+/// decision the user already overruled.
 ///
 /// Local, and deliberately so. `DuplicateDecisionService` records the same
 /// choice server-side for streaks and the feed, but every distance this app
@@ -2052,27 +2054,57 @@ final class WorkoutSourcePreferences: ObservableObject {
 final class WorkoutDedupOverrides: ObservableObject {
     static let shared = WorkoutDedupOverrides()
 
-    private static let storageKey = "workoutDedupCountAnywayV1"
+    private static let countKey = "workoutDedupCountAnywayV1"
+    private static let excludeKey = "workoutDedupExcludeAnywayV1"
     private let defaults = UserDefaults.standard
 
     /// HKWorkout UUID strings the user has restored to their total.
     @Published private(set) var countAnyway: Set<String>
+    /// HKWorkout UUID strings the user has removed from their total.
+    @Published private(set) var excludeAnyway: Set<String>
 
     private init() {
-        countAnyway = Set(defaults.stringArray(forKey: Self.storageKey) ?? [])
+        countAnyway = Set(defaults.stringArray(forKey: Self.countKey) ?? [])
+        excludeAnyway = Set(defaults.stringArray(forKey: Self.excludeKey) ?? [])
     }
 
     func isCountedAnyway(_ workoutId: String) -> Bool {
         countAnyway.contains(workoutId)
     }
 
+    func isExcludedAnyway(_ workoutId: String) -> Bool {
+        excludeAnyway.contains(workoutId)
+    }
+
     func setCountAnyway(_ on: Bool, for workoutId: String) {
         if on {
             countAnyway.insert(workoutId)
+            excludeAnyway.remove(workoutId)
         } else {
             countAnyway.remove(workoutId)
         }
-        defaults.set(Array(countAnyway), forKey: Self.storageKey)
+        persist()
+    }
+
+    func setExcludeAnyway(_ on: Bool, for workoutId: String) {
+        if on {
+            excludeAnyway.insert(workoutId)
+            countAnyway.remove(workoutId)
+        } else {
+            excludeAnyway.remove(workoutId)
+        }
+        persist()
+    }
+
+    func clearDecision(for workoutId: String) {
+        countAnyway.remove(workoutId)
+        excludeAnyway.remove(workoutId)
+        persist()
+    }
+
+    private func persist() {
+        defaults.set(Array(countAnyway), forKey: Self.countKey)
+        defaults.set(Array(excludeAnyway), forKey: Self.excludeKey)
     }
 }
 
@@ -2276,6 +2308,8 @@ enum WorkoutDedup {
     enum ExclusionReason: Equatable {
         /// Another recording on the same day already covers it.
         case duplicate
+        /// The user said not to count this exact workout.
+        case userExcluded
         /// The user turned this source off.
         case sourceIgnored
         /// We have never asked whether this source may add to their miles.
@@ -2288,7 +2322,14 @@ enum WorkoutDedup {
     static func consentExclusions(in workouts: [HKWorkout]) -> [Int: ExclusionReason] {
         var out: [Int: ExclusionReason] = [:]
         let prefs = WorkoutSourcePreferences.shared
+        let overrides = WorkoutDedupOverrides.shared
         for (index, workout) in workouts.enumerated() {
+            let id = workout.uuid.uuidString
+            if overrides.isExcludedAnyway(id) {
+                out[index] = .userExcluded
+                continue
+            }
+            if overrides.isCountedAnyway(id) { continue }
             let bundleId = workout.sourceRevision.source.bundleIdentifier
             if isFirstParty(bundleId: bundleId) { continue }
             switch prefs.decision(for: bundleId) {

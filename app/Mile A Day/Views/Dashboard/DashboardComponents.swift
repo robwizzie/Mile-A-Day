@@ -713,7 +713,11 @@ struct DailyChallengeCard: View {
 
             // Head-to-Head: show the live "you vs rival" strip.
             if challenge.key == "head_to_head", let opp = opponent {
-                HeadToHeadStrip(opponent: opp, accent: primaryColor)
+                HeadToHeadStrip(
+                    opponent: opp,
+                    accent: primaryColor,
+                    myMilesOverride: healthManager.todaysDistance
+                )
             }
 
             // Footer: tomorrow preview (incomplete) OR celebration (complete)
@@ -1004,7 +1008,7 @@ struct ChallengersStrip: View {
                                 .font(.system(size: 9, weight: .semibold, design: .rounded))
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
-                            Text("\(String(format: "%.2f", challenger.miles))")
+                            Text(challenger.miles.milesText)
                                 .font(.system(size: 10, weight: .heavy, design: .rounded))
                                 .foregroundColor(ahead ? .orange : .primary.opacity(0.6))
                                 .monospacedDigit()
@@ -1040,21 +1044,23 @@ struct ChallengersStrip: View {
 struct HeadToHeadStrip: View {
     let opponent: ChallengeOpponent
     let accent: Color
+    var myMilesOverride: Double? = nil
 
     private var myName: String {
         UserManager.shared.currentUser.username ?? UserManager.shared.currentUser.name
     }
     private var myImage: String? { UserManager.shared.currentUser.profileImageUrl }
     private var rivalName: String { opponent.username ?? "Rival" }
-    private var tied: Bool { abs(opponent.myMiles - opponent.miles) < 0.01 }
-    private var leading: Bool { opponent.myMiles > opponent.miles && !tied }
+    private var myMiles: Double { myMilesOverride ?? opponent.myMiles }
+    private var tied: Bool { abs(myMiles - opponent.miles) < 0.01 }
+    private var leading: Bool { myMiles > opponent.miles && !tied }
 
     private var statusText: String {
         if tied { return "Dead even" }
         if leading {
-            return "You lead by \(String(format: "%.2f", opponent.myMiles - opponent.miles)) mi"
+            return "You lead by \((myMiles - opponent.miles).milesText) mi"
         }
-        return "Behind by \(String(format: "%.2f", opponent.miles - opponent.myMiles)) mi"
+        return "Behind by \((opponent.miles - myMiles).milesText) mi"
     }
 
     private var statusColor: Color { tied ? .yellow : (leading ? .green : .orange) }
@@ -1067,7 +1073,7 @@ struct HeadToHeadStrip: View {
             if !opponent.challengers.isEmpty {
                 ChallengersStrip(
                     challengers: opponent.challengers,
-                    myMiles: opponent.myMiles
+                    myMiles: myMiles
                 )
             }
         }
@@ -1076,7 +1082,7 @@ struct HeadToHeadStrip: View {
     private var duelStrip: some View {
         VStack(spacing: 6) {
             HStack(spacing: 10) {
-                side(name: "You", image: myImage, miles: opponent.myMiles,
+                side(name: "You", image: myImage, miles: myMiles,
                      highlight: leading, color: accent)
 
                 VStack(spacing: 2) {
@@ -1129,7 +1135,7 @@ struct HeadToHeadStrip: View {
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .foregroundColor(.primary)
                 .lineLimit(1)
-            Text("\(String(format: "%.2f", miles)) mi")
+            Text("\(miles.milesText) mi")
                 .font(.system(size: 13, weight: .heavy, design: .rounded))
                 .foregroundColor(highlight ? color : .primary.opacity(0.75))
                 .monospacedDigit()
@@ -1978,17 +1984,17 @@ struct WeeklyTrendCard: View {
     }
 
     private var thisWeek: (miles: Double, daysCompleted: Int) {
-        healthManager.workoutIndex?.weekTotal(startingOn: thisWeekStart, dayCount: daysElapsed) ?? (0, 0)
+        healthManager.countedWeekTotal(startingOn: thisWeekStart, dayCount: daysElapsed)
     }
 
     /// Compare only the same number of elapsed days from last week for fairness
     private var lastWeekSamePeriod: (miles: Double, daysCompleted: Int) {
-        healthManager.workoutIndex?.weekTotal(startingOn: lastWeekStart, dayCount: daysElapsed) ?? (0, 0)
+        healthManager.countedWeekTotal(startingOn: lastWeekStart, dayCount: daysElapsed)
     }
 
     /// Full last week totals for context
     private var lastWeekFull: (miles: Double, daysCompleted: Int) {
-        healthManager.workoutIndex?.weekTotal(startingOn: lastWeekStart) ?? (0, 0)
+        healthManager.countedWeekTotal(startingOn: lastWeekStart)
     }
 
     private var milesChange: Double {

@@ -1,5 +1,10 @@
 import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
+import {
+  MatchupHistoryItem,
+  MatchupHistoryResponse,
+  MatchupRivalRecord,
+} from "../types/badge.js";
 import { localNowSql } from "./dailyResetTime.js";
 import {
   ChallengeRow,
@@ -798,6 +803,150 @@ export async function notifyPendingWinners(): Promise<void> {
       );
     }
   }
+}
+
+// ─── Matchup history (past duels) ───────────────────────────────────
+
+/**
+ * Safety valve, not pagination: Head-to-Head appears once per rotation cycle,
+ * so 1000 duels is roughly two decades of play. ALL aggregates (record,
+ * streaks, rivals) are computed over this window — when the cap is actually
+ * hit the response says so via `truncated` instead of quietly under-counting.
+ */
+const MATCHUP_HISTORY_LIMIT = 1000;
+
+/**
+ * Every resolved duel for the user, newest first, plus the all-time records
+ * built from them. Miles are RE-DERIVED from workouts at read time (the same
+ * 2-decimal rounding resolveOne scores at) rather than trusted to a stored
+ * number — late syncs and edits after resolution self-heal this way, exactly
+ * like `prior_streak` reads do. The stored `won` flag rides along as
+ * `completed` so clients can mark the days that actually awarded the
+ * challenge.
+ *
+ * Duels against a user with an active block in either direction are hidden
+ * whole — same rule as buildChallengers.
+ */
+export async function getMatchupHistory(
+  userId: string,
+): Promise<MatchupHistoryResponse> {
+  const rows = await db.query<{
+    local_date: string;
+    rival_id: string;
+    mutual: boolean;
+    won: boolean | null;
+    username: string | null;
+    profile_image_url: string | null;
+    my_miles: string | null;
+    rival_miles: string | null;
+  }>(
+    `SELECT m.local_date::text AS local_date, m.rival_id, m.mutual, m.won,
+			u.username, u.profile_image_url,
+			COALESCE((
+				SELECT SUM(w.distance) FROM workouts w
+				WHERE w.user_id = m.user_id AND w.local_date = m.local_date
+					AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+			), 0)::text AS my_miles,
+			COALESCE((
+				SELECT SUM(w.distance) FROM workouts w
+				WHERE w.user_id = m.rival_id AND w.local_date = m.local_date
+					AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+			), 0)::text AS rival_miles
+		FROM h2h_matchups m
+		JOIN users u ON u.user_id = m.rival_id
+		WHERE m.user_id = $1 AND m.resolved_at IS NOT NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM user_blocks b
+				WHERE (b.blocker_id = $1 AND b.blocked_id = m.rival_id)
+					OR (b.blocker_id = m.rival_id AND b.blocked_id = $1)
+			)
+		ORDER BY m.local_date DESC
+		LIMIT ${MATCHUP_HISTORY_LIMIT}`,
+    [userId],
+  );
+
+  const matchups: MatchupHistoryItem[] = rows.map((r) => {
+    // Same rounding as resolveOne/standing: 2dp is the truth that decided it.
+    const mine = Math.round((parseFloat(r.my_miles ?? "0") || 0) * 100) / 100;
+    const theirs =
+      Math.round((parseFloat(r.rival_miles ?? "0") || 0) * 100) / 100;
+    return {
+      localDate: r.local_date,
+      rival: {
+        userId: r.rival_id,
+        username: r.username,
+        profileImageUrl: r.profile_image_url,
+      },
+      myMiles: mine,
+      rivalMiles: theirs,
+      result: mine > theirs ? "won" : mine < theirs ? "lost" : "tied",
+      mutual: r.mutual === true,
+      completed: r.won === true,
+    };
+  });
+
+  const record = { wins: 0, losses: 0, ties: 0, total: matchups.length };
+  for (const m of matchups) {
+    if (m.result === "won") record.wins++;
+    else if (m.result === "lost") record.losses++;
+    else record.ties++;
+  }
+
+  // Win streaks over the duel SEQUENCE, not calendar days — duels aren't daily.
+  let currentWinStreak = 0;
+  for (const m of matchups) {
+    if (m.result !== "won") break;
+    currentWinStreak++;
+  }
+  let bestWinStreak = 0;
+  let run = 0;
+  for (const m of matchups) {
+    run = m.result === "won" ? run + 1 : 0;
+    if (run > bestWinStreak) bestWinStreak = run;
+  }
+
+  // Newest-first walk: the first row seen for a rival carries their freshest
+  // username/avatar and the last-duel date.
+  const rivalMap = new Map<string, MatchupRivalRecord>();
+  for (const m of matchups) {
+    let rec = rivalMap.get(m.rival.userId);
+    if (!rec) {
+      rec = {
+        userId: m.rival.userId,
+        username: m.rival.username,
+        profileImageUrl: m.rival.profileImageUrl,
+        wins: 0,
+        losses: 0,
+        ties: 0,
+        lastLocalDate: m.localDate,
+      };
+      rivalMap.set(m.rival.userId, rec);
+    }
+    if (m.result === "won") rec.wins++;
+    else if (m.result === "lost") rec.losses++;
+    else rec.ties++;
+  }
+  const rivals = [...rivalMap.values()].sort(
+    (a, b) =>
+      b.wins + b.losses + b.ties - (a.wins + a.losses + a.ties) ||
+      b.lastLocalDate.localeCompare(a.lastLocalDate),
+  );
+
+  const truncated = rows.length === MATCHUP_HISTORY_LIMIT;
+  if (truncated) {
+    console.warn(
+      `[H2H] Matchup history for ${userId} hit the ${MATCHUP_HISTORY_LIMIT}-row cap; aggregates cover the newest window only.`,
+    );
+  }
+
+  return {
+    record,
+    currentWinStreak,
+    bestWinStreak,
+    rivals,
+    matchups,
+    truncated,
+  };
 }
 
 // ─── Local SQL helpers (mirrors of dailyChallengeService's) ─────────

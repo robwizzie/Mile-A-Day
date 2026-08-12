@@ -121,6 +121,10 @@ struct WorkoutDetailView: View {
         healthManager.workoutRecord(forUUID: workout.uuid.uuidString)?.source ?? .healthkit
     }
 
+    private var workoutId: String {
+        workout.uuid.uuidString
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -354,18 +358,46 @@ struct WorkoutDetailView: View {
 
     // MARK: - Duplicate recording
 
-    /// The recording that already covers this one on its day, per the RULE —
-    /// computed ignoring the user's override so the banner can still explain
-    /// itself after they've overruled it.
-    private var duplicateOfLabel: String? {
+    private enum WorkoutCountDecision: Hashable {
+        case automatic
+        case counted
+        case notCounted
+    }
+
+    private var countDecision: WorkoutCountDecision {
+        if dedupOverrides.isExcludedAnyway(workoutId) { return .notCounted }
+        if dedupOverrides.isCountedAnyway(workoutId) { return .counted }
+        return .automatic
+    }
+
+    private var dayWorkoutsForCounting: [HKWorkout] {
         let calendar = Calendar.current
         let day = calendar.startOfDay(for: correctedEndTime)
-        let dayWorkouts = healthManager.cachedWorkouts
+        return healthManager.cachedWorkouts
             .filter {
                 calendar.isDate(
                     healthManager.getCorrectedLocalTime(for: $0), inSameDayAs: day)
             }
             .sorted { $0.endDate < $1.endDate }
+    }
+
+    private var currentExclusionReason: WorkoutDedup.ExclusionReason? {
+        let dayWorkouts = dayWorkoutsForCounting
+        guard let index = dayWorkouts.firstIndex(where: { $0.uuid == workout.uuid }) else {
+            return nil
+        }
+        return WorkoutDedup.breakdown(in: dayWorkouts).reasons[index]
+    }
+
+    private var isCountedInTotal: Bool {
+        currentExclusionReason == nil
+    }
+
+    /// The recording that already covers this one on its day, per the RULE —
+    /// computed ignoring the user's override so the banner can still explain
+    /// itself after they've overruled it.
+    private var duplicateOfLabel: String? {
+        let dayWorkouts = dayWorkoutsForCounting
         let covers = WorkoutDedup.duplicateSources(
             in: dayWorkouts, applyingOverrides: false)
         guard let index = dayWorkouts.firstIndex(where: { $0.uuid == workout.uuid }),
@@ -374,54 +406,46 @@ struct WorkoutDetailView: View {
         return WorkoutAttribution.sourceLabel(for: dayWorkouts[keeper])
     }
 
-    private var isRestoredByUser: Bool {
-        dedupOverrides.isCountedAnyway(workout.uuid.uuidString)
-    }
+    private var countingControl: some View {
+        let decision = countDecision
+        let counted = isCountedInTotal
+        let accent: Color = {
+            switch decision {
+            case .counted:
+                return MADTheme.Colors.success
+            case .notCounted:
+                return Color.orange
+            case .automatic:
+                return counted ? MADTheme.Colors.success : Color.orange
+            }
+        }()
 
-    /// States plainly that a walk isn't in the total, and hands back the
-    /// decision.
-    ///
-    /// Duplicate detection is a guess about two recordings the app knows only
-    /// through timestamps and distances — someone who walks a mile, stops, and
-    /// walks a near-identical mile an hour later trips it, and no threshold can
-    /// tell that apart from one walk written twice. Which is exactly why the
-    /// verdict is stated rather than applied silently, and why the way out is
-    /// one tap away from the explanation instead of buried in settings.
-    private var duplicateBanner: some View {
-        let restored = isRestoredByUser
-        let accent = restored ? MADTheme.Colors.success : Color.orange
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Image(systemName: restored ? "checkmark.circle.fill" : "doc.on.doc.fill")
+                Image(systemName: counted ? "checkmark.circle.fill" : "minus.circle.fill")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(accent)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(restored
-                        ? "Counted — you said it's a separate walk"
-                        : "Not counted — recorded twice")
+                    Text(countingTitle)
                         .font(.system(size: 13, weight: .heavy, design: .rounded))
                         .foregroundColor(.primary)
-                    Text(duplicateExplanation)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                    Text(countingExplanation)
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundColor(.secondary)
+                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .frame(minHeight: 48, alignment: .center)
                 Spacer(minLength: 0)
             }
 
-            Button {
-                setCountAnyway(!restored)
-            } label: {
-                Text(restored
-                    ? "Undo — it was the same walk"
-                    : "This was a separate walk — count it")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 34)
-                    .background(Capsule().fill(accent.opacity(0.18)))
-                    .foregroundColor(accent)
+            HStack(spacing: 8) {
+                countDecisionButton("Auto", decision: .automatic, accent: accent)
+                countDecisionButton("Count", decision: .counted, accent: MADTheme.Colors.success)
+                countDecisionButton("Don't count", decision: .notCounted, accent: Color.orange)
             }
-            .buttonStyle(.plain)
         }
         .padding(12)
         .frame(maxWidth: .infinity)
@@ -433,36 +457,96 @@ struct WorkoutDetailView: View {
                         .strokeBorder(accent.opacity(0.3), lineWidth: 1)
                 )
         )
+        .transaction { transaction in
+            transaction.animation = nil
+        }
+    }
+
+    private func countDecisionButton(_ title: String, decision: WorkoutCountDecision, accent: Color) -> some View {
+        let selected = countDecision == decision
+        return Button {
+            setCountDecision(decision)
+        } label: {
+            Text(title)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .frame(maxWidth: .infinity)
+                .frame(height: 34)
+                .background(Capsule().fill(selected ? accent.opacity(0.22) : Color.primary.opacity(0.07)))
+                .foregroundColor(selected ? accent : .secondary)
+        }
+        .buttonStyle(.plain)
+        .transaction { transaction in
+            transaction.animation = nil
+        }
+    }
+
+    private var countingTitle: String {
+        switch countDecision {
+        case .counted:
+            return "Counted — you chose this workout"
+        case .notCounted:
+            return "Not counted — you chose to skip it"
+        case .automatic:
+            return isCountedInTotal ? "Counted automatically" : "Not counted automatically"
+        }
+    }
+
+    private var countingExplanation: String {
+        let mine = WorkoutAttribution.sourceLabel(for: workout)
+        switch countDecision {
+        case .counted:
+            return "\(mine) adds \(distanceMiles.milesFormatted) to your totals, even if automatic rules would skip it."
+        case .notCounted:
+            return "\(mine) stays visible here, but its \(distanceMiles.milesFormatted) is removed from your totals."
+        case .automatic:
+            switch currentExclusionReason {
+            case .duplicate:
+                return duplicateExplanation
+            case .sourceIgnored:
+                return "You've turned off workouts from \(mine), so this is not in your total."
+            case .sourcePending:
+                return "\(mine) started adding workouts on its own. Approve it in Fitness Connections if these are yours."
+            case .userExcluded:
+                return "\(mine) is not counted because you chose to skip it."
+            case .none:
+                return "\(mine) adds \(distanceMiles.milesFormatted) to your totals."
+            }
+        }
+    }
+
+    private func setCountDecision(_ decision: WorkoutCountDecision) {
+        MADHaptics.tap()
+        let remoteDecision: String?
+        switch decision {
+        case .automatic:
+            dedupOverrides.clearDecision(for: workoutId)
+            remoteDecision = nil
+        case .counted:
+            dedupOverrides.setCountAnyway(true, for: workoutId)
+            remoteDecision = "count"
+        case .notCounted:
+            dedupOverrides.setExcludeAnyway(true, for: workoutId)
+            remoteDecision = "exclude"
+        }
+
+        healthManager.fetchTodaysDistance()
+        Task {
+            guard let uid = UserManager.shared.currentUser.backendUserId else { return }
+            try? await DuplicateDecisionService.set(
+                userId: uid,
+                workoutId: workoutId,
+                decision: remoteDecision
+            )
+        }
     }
 
     private var duplicateExplanation: String {
         let mine = WorkoutAttribution.sourceLabel(for: workout)
         let keeper = duplicateOfLabel ?? "another app"
-        if isRestoredByUser {
-            return "\(mine) recorded this alongside your \(keeper) walk. "
-                + "You've told us they're different walks, so both count."
-        }
         return "\(mine) recorded this at the same time as your \(keeper) walk, "
             + "so it looks like one walk written twice. It's counted once."
-    }
-
-    /// Persist the user's decision, refresh what's on screen, and tell the
-    /// server — in that order, because the on-device number is the one they're
-    /// looking at and it must not wait on the network to move.
-    private func setCountAnyway(_ on: Bool) {
-        MADHaptics.tap()
-        dedupOverrides.setCountAnyway(on, for: workout.uuid.uuidString)
-        healthManager.fetchTodaysDistance()
-        Task {
-            guard let uid = UserManager.shared.currentUser.backendUserId else { return }
-            // Best effort: streaks and the feed should agree, but a failed call
-            // must not undo a decision the user already sees applied.
-            try? await DuplicateDecisionService.set(
-                userId: uid,
-                workoutId: workout.uuid.uuidString,
-                decision: on ? "count" : nil
-            )
-        }
     }
 
     // MARK: - Vehicle warning
@@ -584,9 +668,7 @@ struct WorkoutDetailView: View {
             // A walk two apps both recorded. Shown whenever the rule flagged it,
             // INCLUDING after the user overruled it — otherwise the only way to
             // change your mind back would be to remember you'd changed it.
-            if duplicateOfLabel != nil {
-                duplicateBanner
-            }
+            countingControl
         }
     }
 

@@ -126,6 +126,21 @@ final class BuddySessionService: ObservableObject {
         return session.status == .lobby || session.status == .active
     }
 
+    /// True when the user can still RE-ENTER the live session — waiting in the
+    /// lobby or out moving. Distinct from `hasLiveSession` on purpose: after
+    /// THIS user taps Finish the session usually stays `active` (friends are
+    /// still walking), and every entry point that routed "live session" into
+    /// the lobby was funnelling a finished participant back into tracking —
+    /// the lobby's hand-off fires instantly for a long-started session, so
+    /// reopening the app "put me back into the buddy walk and made me end the
+    /// mile again". Finished is terminal for the session: the server's join
+    /// upsert only lifts invited/left/declined back to joined, never finished.
+    var canReenterLiveSession: Bool {
+        guard hasLiveSession, let session else { return false }
+        guard let me = session.me(currentUserId) else { return false }
+        return me.status != .finished && me.status != .left && me.status != .declined
+    }
+
     var activeSessionId: String? {
         guard let session, session.status == .active else { return nil }
         return session.id
@@ -187,9 +202,9 @@ final class BuddySessionService: ObservableObject {
     /// Everyone who is out right now — in a buddy room or walking on their own.
     ///
     /// Reads live presence rather than buddy rooms, which is what makes solo
-    /// walkers visible at all. Silent on failure and cleared on error: this
-    /// drives an optional dashboard card, and a stale offer to join a walk that
-    /// already ended is worse than no card.
+    /// walkers visible at all. Silent on failure and preserves the last good
+    /// list: an explicit empty response means nobody is out, but a transient
+    /// refresh failure should not make an active friend's tracker vanish.
     func refreshFriendsOutNow() async {
         guard currentUserId != nil else { return }
         do {
@@ -197,7 +212,7 @@ final class BuddySessionService: ObservableObject {
                 "/live/friends-out", responseType: FriendsOutNowResponse.self
             ).friends
         } catch {
-            friendsOutNow = []
+            print("[BuddySessionService] refreshFriendsOutNow failed: \(error)")
         }
     }
 

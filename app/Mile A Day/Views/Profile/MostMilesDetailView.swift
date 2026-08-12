@@ -464,6 +464,8 @@ struct WorkoutRow: View {
             bundleId: workout.sourceRevision.source.bundleIdentifier
         ).displayName ?? workout.sourceRevision.source.name
         switch exclusionKind {
+        case .userExcluded:
+            return "You marked this \(mine) workout as not counted."
         case .sourceIgnored:
             return "You've turned off workouts from \(mine), so this isn't in your total."
         case .sourcePending:

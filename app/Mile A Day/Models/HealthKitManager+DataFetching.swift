@@ -215,22 +215,20 @@ extension HealthKitManager {
     /// Recalculates all stats using cached + new workouts
     func recalculateStatsWithAllWorkouts() {
 
-        // Calculate total lifetime miles
-        var totalMiles: Double = 0.0
-        for workout in cachedWorkouts {
-            totalMiles += workout.madDistanceMiles
+        // Calculate total lifetime miles by local day, after duplicate/source
+        // exclusions. A raw all-time sum counts Google Health/Fitbit duplicate
+        // workouts twice even though today's dashboard does not.
+        let workoutsByDay = groupWorkoutsByDeviceDay(workouts: cachedWorkouts)
+        let totalMiles = workoutsByDay.values.reduce(0.0) { total, dayWorkouts in
+            total + WorkoutDedup.totalMiles(dayWorkouts)
         }
 
         // Calculate most miles in one day
-        let workoutsByDay = groupWorkoutsByDeviceDay(workouts: cachedWorkouts)
         var mostMilesInDay: Double = 0.0
         var mostMilesWorkouts: [HKWorkout] = []
 
         for (_, dayWorkouts) in workoutsByDay {
-            var totalMilesForDay: Double = 0.0
-            for workout in dayWorkouts {
-                totalMilesForDay += workout.madDistanceMiles
-            }
+            let totalMilesForDay = WorkoutDedup.totalMiles(dayWorkouts)
 
             if totalMilesForDay > mostMilesInDay {
                 mostMilesInDay = totalMilesForDay
@@ -362,9 +360,7 @@ extension HealthKitManager {
             var dailyMileGoals: [Date: Bool] = [:]
 
             for (date, dayWorkouts) in workoutsByDay {
-                let totalMiles = dayWorkouts.reduce(0.0) { total, workout in
-                    total + workout.madDistanceMiles
-                }
+                let totalMiles = WorkoutDedup.totalMiles(dayWorkouts)
 
                 // Use same threshold as streak (>= 0.95 miles)
                 dailyMileGoals[date] = totalMiles >= 0.95
@@ -413,9 +409,7 @@ extension HealthKitManager {
         var updatedMileGoals: [Date: Bool] = [:]
 
         for (date, workouts) in correctedWorkoutsByDay {
-            let totalMiles = workouts.reduce(0.0) { total, workout in
-                total + workout.madDistanceMiles
-            }
+            let totalMiles = WorkoutDedup.totalMiles(workouts)
 
             updatedMileGoals[date] = totalMiles >= 0.95
 
@@ -528,5 +522,58 @@ extension HealthKitManager {
         }
 
         return workoutsByDay
+    }
+
+    /// Workouts for a local day, using the real HKWorkout cache where possible
+    /// and the timezone-aware index only as an ID hint. This is the local source
+    /// of truth for visible daily totals: actual workouts carry source app
+    /// metadata, so `WorkoutDedup` can collapse Google Health/Fitbit/etc copies.
+    func cachedWorkouts(onLocalDay day: Date) -> [HKWorkout] {
+        let calendar = Calendar.current
+        let target = calendar.startOfDay(for: day)
+        let indexedIds = Set(workoutIndex?.workouts(for: target).map { $0.id } ?? [])
+
+        var seen = Set<String>()
+        var out: [HKWorkout] = []
+        for workout in cachedWorkouts {
+            let id = workout.uuid.uuidString
+            #if !os(watchOS)
+            if DeletedWorkoutRegistry.contains(id) { continue }
+            #endif
+            guard !seen.contains(id) else { continue }
+            let belongs = indexedIds.contains(id)
+                || calendar.isDate(getCorrectedLocalTime(for: workout), inSameDayAs: target)
+            guard belongs else { continue }
+            seen.insert(id)
+            out.append(workout)
+        }
+        return out.sorted { $0.endDate < $1.endDate }
+    }
+
+    /// Counted miles for one local day. Prefer real HKWorkouts because they can
+    /// be deduped; fall back to the v2 index's persisted deduped daily total.
+    func countedMiles(onLocalDay day: Date, fallbackToIndex: Bool = true) -> Double {
+        let workouts = cachedWorkouts(onLocalDay: day)
+        if !workouts.isEmpty { return WorkoutDedup.totalMiles(workouts) }
+        if Calendar.current.isDateInToday(day), hasFreshTodaysDistance {
+            return todaysDistance
+        }
+        guard fallbackToIndex else { return 0 }
+        return workoutIndex?.totalMiles(for: day) ?? 0
+    }
+
+    func countedWeekTotal(startingOn weekStart: Date, dayCount: Int = 7) -> (miles: Double, daysCompleted: Int) {
+        let calendar = Calendar.current
+        var miles = 0.0
+        var daysCompleted = 0
+        for offset in 0..<dayCount {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: calendar.startOfDay(for: weekStart)) else {
+                continue
+            }
+            let dayMiles = countedMiles(onLocalDay: day)
+            miles += dayMiles
+            if dayMiles >= 0.95 { daysCompleted += 1 }
+        }
+        return (miles, daysCompleted)
     }
 }

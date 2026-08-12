@@ -654,7 +654,13 @@ struct DashboardView: View {
                     userManager: userManager,
                     goalDistance: activeState?.goalDistance ?? currentState.goal,
                     startingDistance: activeState?.startingDistance ?? currentState.distance,
-                    buddySessionId: activeBuddySessionId
+                    buddySessionId: activeBuddySessionId,
+                    // The wizard's buddy card runs setup + lobby INSIDE the
+                    // cover. Mirroring the adopted session here is what makes
+                    // the dismiss handler above offer the group recap, and on
+                    // the next render the tracker's own buddySessionId arrives
+                    // non-nil — one path from then on.
+                    onBuddySessionAdopted: { activeBuddySessionId = $0 }
                 )
             }
             // Buddy Walks flow: pill → start sheet → lobby (synced countdown) →
@@ -1009,20 +1015,19 @@ struct DashboardView: View {
         }
     }
 
-    /// Total miles this week (Sun–today) from the local workout index, for
-    /// the streak widget's status line.
+    /// Total miles this week (Sun–today), after local duplicate/source
+    /// exclusions, for the streak widget's status line.
     private func currentWeekMiles() -> Double {
-        guard let index = healthManager.workoutIndex else { return 0 }
         let calendar = Calendar.current
         let today = Date()
         let weekday = calendar.component(.weekday, from: today)
         guard let startOfWeek = calendar.date(
             byAdding: .day, value: -(weekday - 1), to: calendar.startOfDay(for: today)
         ) else { return 0 }
-        return index.workoutsByDate.values
-            .flatMap { $0 }
-            .filter { $0.localDate >= startOfWeek }
-            .reduce(0) { $0 + $1.distance }
+        return healthManager.countedWeekTotal(
+            startingOn: startOfWeek,
+            dayCount: weekday
+        ).miles
     }
 
     private func applyHealthDataToUserManager() {
@@ -1430,8 +1435,15 @@ struct DashboardView: View {
                 } else if let sessionId {
                     try await buddyService.join(sessionId: sessionId)
                 }
-                if buddyService.hasLiveSession {
+                if buddyService.canReenterLiveSession {
                     showBuddyLobby = true
+                } else if let session = buddyService.session,
+                          session.me(buddyService.currentUserId)?.status == .finished {
+                    // The tapped push led to a walk THIS user already finished
+                    // (friends may still be moving). The lobby would hand them
+                    // straight back into tracking — the "it made me end my
+                    // mile again" bug — so land on the result instead.
+                    buddyRecapSessionId = session.id
                 }
             } catch {
                 buddyService.errorMessage =

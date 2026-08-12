@@ -1,4 +1,5 @@
 import SwiftUI
+import HealthKit
 
 struct ProfileView: View {
     @Environment(\.appStateManager) var appStateManager
@@ -7,6 +8,7 @@ struct ProfileView: View {
     /// Streak-token state — drives the Pure Flame (natural streak) seal and
     /// the profile token shelf.
     @ObservedObject private var tokensState = StreakTokensState.shared
+    @ObservedObject private var dedupOverrides = WorkoutDedupOverrides.shared
     @State private var showTokenSheet = false
     @State private var showPureFlameInfo = false
 
@@ -36,14 +38,14 @@ struct ProfileView: View {
     @State private var receivedHypes: [ReceivedHype] = []
     @State private var hasLoadedHypes = false
 
-    // Recent workouts for the rolling "Last 7 Days" chart on the Activity tab.
-    // Same data + component the friend profile uses, so both read identically.
+    // Counted local workouts for the rolling "Last 7 Days" chart on the
+    // Activity tab. Friend profiles still use server rows; your own profile can
+    // use richer HealthKit metadata to hide Google Health duplicate rows.
     @State private var ownWorkouts: [FriendWorkout] = []
-    // Server-exact per-day totals for the chart — the capped workout list
-    // undercounts heavy-logging weeks (see Last7DaysChart).
+    // Locally deduped per-day totals for the chart. The server can still hold
+    // older Google Health duplicate rows, so your own profile should trust the
+    // HealthKit-backed local dedupe path instead.
     @State private var ownDayTotals: [FriendDayMiles]?
-    /// Days a token carried, so the chart can show them as saved not missed.
-    @State private var ownCoveredDays: [CoveredDate]?
 
     // Section tabs — mirrors UserProfileDetailView's structure so navigating
     // between own profile and friend profile feels consistent. Own profile
@@ -170,7 +172,19 @@ struct ProfileView: View {
             await loadReceivedHypes()
         }
         .task {
-            await loadOwnWorkouts()
+            refreshOwnLocalLast7Activity()
+        }
+        .onChange(of: healthManager.cachedWorkouts.count) {
+            refreshOwnLocalLast7Activity()
+        }
+        .onChange(of: healthManager.todaysDistance) {
+            refreshOwnLocalLast7Activity()
+        }
+        .onChange(of: dedupOverrides.countAnyway) {
+            refreshOwnLocalLast7Activity()
+        }
+        .onChange(of: dedupOverrides.excludeAnyway) {
+            refreshOwnLocalLast7Activity()
         }
         .navigationDestination(isPresented: $isShowingBadgeDetail) {
             // Match the BadgesView navigation-push presentation so tapping a
@@ -236,11 +250,11 @@ struct ProfileView: View {
                 userId: userManager.currentUser.backendUserId,
                 isSelf: true
             )
-            if !ownWorkouts.isEmpty {
+            if !ownWorkouts.isEmpty || !(ownDayTotals?.isEmpty ?? true) {
                 Last7DaysChart(
                     workouts: ownWorkouts,
                     dayTotals: ownDayTotals,
-                    coveredDays: ownCoveredDays,
+                    coveredDays: tokensState.payload?.frozen_dates,
                     isSelf: true
                 )
             }
@@ -417,26 +431,103 @@ struct ProfileView: View {
         }
     }
 
-    /// Pulls the user's own recent workouts (detail rows for the chart's
-    /// tap panel) plus the server's exact per-day totals — a fixed workout
-    /// limit can't cover the week for multi-run days, so the bars must come
-    /// from `last_7_day_miles`, same as the friend profile.
-    private func loadOwnWorkouts() async {
-        guard let userId = userManager.currentUser.backendUserId else { return }
-        do {
-            let workouts = try await friendService.fetchRecentWorkouts(for: userId, limit: 20)
-            await MainActor.run { ownWorkouts = workouts }
-        } catch {
-            print("[ProfileView] loadOwnWorkouts failed: \(error)")
+    private func refreshOwnLocalLast7Activity() {
+        let activity = makeOwnLocalLast7Activity()
+        ownDayTotals = activity.dayTotals
+        ownWorkouts = activity.workouts
+    }
+
+    private func makeOwnLocalLast7Activity() -> (dayTotals: [FriendDayMiles], workouts: [FriendWorkout]) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let days = (0..<7).reversed().compactMap { offset in
+            calendar.date(byAdding: .day, value: -offset, to: today)
         }
-        do {
-            let stats = try await friendService.fetchFriendStats(for: userId)
-            await MainActor.run {
-                ownDayTotals = stats.last7DayMiles
-                ownCoveredDays = stats.coveredDays
+        let daysToInclude = Set(days)
+
+        var grouped: [Date: [HKWorkout]] = [:]
+        var seenIds = Set<String>()
+
+        for workout in healthManager.cachedWorkouts {
+            let id = workout.uuid.uuidString
+            #if !os(watchOS)
+            if DeletedWorkoutRegistry.contains(id) { continue }
+            #endif
+            guard seenIds.insert(id).inserted else { continue }
+
+            let localDay = calendar.startOfDay(for: healthManager.getCorrectedLocalTime(for: workout))
+            guard daysToInclude.contains(localDay) else { continue }
+            grouped[localDay, default: []].append(workout)
+        }
+
+        var detailRows: [FriendWorkout] = []
+        let userId = userManager.currentUser.backendUserId ?? userManager.currentUser.id.uuidString
+
+        let dayTotals = days.map { day in
+            let dayMiles: Double
+            if let workouts = grouped[day], !workouts.isEmpty {
+                let sorted = workouts.sorted { $0.endDate < $1.endDate }
+                dayMiles = WorkoutDedup.totalMiles(sorted)
+                detailRows.append(contentsOf: WorkoutDedup.counting(sorted).map { workout in
+                    FriendWorkout(
+                        id: workout.uuid.uuidString,
+                        userId: userId,
+                        date: Self.localDayFormatter.string(from: day),
+                        distance: workout.madDistanceMiles,
+                        totalDuration: workout.duration,
+                        workoutType: Self.workoutTypeName(for: workout),
+                        deviceEndDate: Self.isoFormatter.string(from: workout.endDate),
+                        calories: nil,
+                        source: nil,
+                        hasRoute: false,
+                        hasPhoto: false,
+                        sourceBundleId: workout.sourceRevision.source.bundleIdentifier,
+                        exclusionReason: nil,
+                        duplicateDecision: nil
+                    )
+                })
+            } else if calendar.isDateInToday(day), healthManager.hasFreshTodaysDistance {
+                dayMiles = healthManager.todaysDistance
+            } else {
+                dayMiles = healthManager.workoutIndex?.totalMiles(for: day) ?? 0
             }
-        } catch {
-            print("[ProfileView] loadOwnDayTotals failed: \(error)")
+
+            return FriendDayMiles(
+                date: Self.localDayFormatter.string(from: day),
+                miles: dayMiles
+            )
+        }
+
+        return (dayTotals, detailRows)
+    }
+
+    private static let localDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static func workoutTypeName(for workout: HKWorkout) -> String {
+        switch workout.workoutActivityType {
+        case .running:
+            return "running"
+        case .walking:
+            return "walking"
+        case .cycling:
+            return "cycling"
+        case .hiking:
+            return "hiking"
+        default:
+            return "other"
         }
     }
 

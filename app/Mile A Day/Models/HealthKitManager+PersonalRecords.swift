@@ -190,11 +190,7 @@ extension HealthKitManager {
 
         // Calculate most miles in a day
         for (_, dayWorkouts) in workoutsByDay {
-            var totalMilesForDay: Double = 0.0
-
-            for workout in dayWorkouts {
-                totalMilesForDay += workout.madDistanceMiles
-            }
+            let totalMilesForDay = WorkoutDedup.totalMiles(dayWorkouts)
 
             if totalMilesForDay > finalMostMilesInDay {
                 finalMostMilesInDay = totalMilesForDay

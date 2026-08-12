@@ -391,11 +391,10 @@ enum RunPostService {
             cg.setLineWidth(16)
             cg.setLineJoin(.round)
             cg.setLineCap(.round)
-            // Same centripetal Catmull-Rom smoothing the live feed overlay
-            // uses, so the baked image matches what friends swipe to on the
-            // feed slide.
+            // Same straight polyline the live feed overlay draws, so the baked
+            // image matches what friends swipe to on the feed slide.
             let screenPoints = coordinates.map { snapshot.point(for: $0) }
-            cg.addPath(RouteSmoothing.smoothedPath(through: screenPoints))
+            cg.addPath(RoutePolyline.path(through: screenPoints))
             cg.strokePath()
 
             drawDot(cg, at: snapshot.point(for: coordinates.first!), color: .systemGreen)

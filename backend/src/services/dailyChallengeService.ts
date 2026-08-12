@@ -998,8 +998,8 @@ async function buildOpponent(
     userId: pin.rivalId,
     username: info?.username ?? null,
     profileImageUrl: info?.profile_image_url ?? null,
-    miles: Math.round(rivalMiles * 100) / 100,
-    myMiles: Math.round(myMiles * 100) / 100,
+    miles: rivalMiles,
+    myMiles,
     mutual: pin.mutual,
     challengers: await buildChallengers(userId, localDate, pin.rivalId),
   };
@@ -1056,7 +1056,7 @@ async function buildChallengers(
     userId: r.user_id,
     username: r.username,
     profileImageUrl: r.profile_image_url,
-    miles: Math.round((parseFloat(r.miles ?? "0") || 0) * 100) / 100,
+    miles: parseFloat(r.miles ?? "0") || 0,
   }));
 }
 

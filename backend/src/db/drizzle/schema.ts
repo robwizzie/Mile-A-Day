@@ -971,6 +971,13 @@ export const h2hMatchups = pgTable(
     }),
   },
   (table) => [
+    // Matchup-history reads walk one user's duels newest-first; the PK leads
+    // with local_date so it can't serve a user-only filter.
+    index("idx_h2h_matchups_user_date").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.localDate.desc().nullsFirst(),
+    ),
     foreignKey({
       columns: [table.userId],
       foreignColumns: [users.userId],

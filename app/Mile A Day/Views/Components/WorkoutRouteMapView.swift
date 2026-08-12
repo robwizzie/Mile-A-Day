@@ -274,7 +274,7 @@ private struct RoutePath: Shape {
     let points: [CGPoint]
 
     func path(in rect: CGRect) -> Path {
-        // Smoothed identically to the baked auto-post image (RunPostService).
-        Path(RouteSmoothing.smoothedPath(through: points))
+        // Drawn identically to the baked auto-post image (RunPostService).
+        Path(RoutePolyline.path(through: points))
     }
 }

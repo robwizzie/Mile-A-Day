@@ -213,14 +213,16 @@ private struct RoadToMilestoneCard: View {
 
     private var nodes: [RoadDayNode] {
         let milestones = Dictionary(uniqueKeysWithValues: StreakMilestone.allCases.map { ($0.days, $0) })
-        let today = Calendar.current.startOfDay(for: Date())
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
         let current = max(streak, 0)
         let bottomDay = current == 0 ? 0 : 1
+        let localDays = RoadLocalDayIndex(healthManager: healthManager, calendar: calendar)
 
         return stride(from: topDay, through: bottomDay, by: -1).map { day in
             let isFuture = day > current
-            let date = isFuture ? nil : Calendar.current.date(byAdding: .day, value: day - current, to: today)
-            let resolved = date.map { dayData(for: $0, dayNumber: day) } ?? RoadDayData(distance: 0, activity: .future, workouts: [])
+            let date = isFuture ? nil : calendar.date(byAdding: .day, value: day - current, to: today)
+            let resolved = date.map { dayData(for: $0, dayNumber: day, localDays: localDays) } ?? RoadDayData(distance: 0, activity: .future, workouts: [])
             let milestone = milestones[day]
 
             return RoadDayNode(
@@ -239,45 +241,14 @@ private struct RoadToMilestoneCard: View {
         }
     }
 
-    private func dayData(for date: Date, dayNumber: Int) -> RoadDayData {
+    private func dayData(for date: Date, dayNumber: Int, localDays: RoadLocalDayIndex) -> RoadDayData {
         let records = healthManager.workoutIndex?.workouts(for: date) ?? []
-        let workouts = workouts(on: date, matching: records)
-        // Deduped, like every other day total. Summing the array directly is
-        // what let this view disagree with the dashboard about the same day.
-        let workoutDistance = WorkoutDedup.totalMiles(workouts)
-        let indexedDistance = records.reduce(0) { $0 + $1.distance }
-        let todaysDistance = dayNumber == streak ? healthManager.todaysDistance : 0
-
-        // The real HKWorkouts WIN when we have them, rather than being max()'d
-        // against the other two.
-        //
-        // max() was the bug behind this view showing a bigger number than the
-        // dashboard for the same day: the index sums WorkoutRecords, which carry
-        // no source and so can't be deduped, and taking the largest of three
-        // measurements guarantees the LEAST deduplicated one is displayed.
-        // Whichever source is richest should decide, and that's the workouts.
-        // The other two stay as fallbacks for days whose HKWorkouts aren't
-        // loaded — max() between them is fine, they're both un-deduped.
-        let measuredDistance = workouts.isEmpty
-            ? max(indexedDistance, todaysDistance)
-            : max(workoutDistance, todaysDistance)
+        let workouts = localDays.workouts(on: date)
+        let measuredDistance = localDays.countedMiles(on: date, healthManager: healthManager)
         let distance = measuredDistance > 0 ? measuredDistance : (dayNumber < streak ? goalMiles : 0)
         let activity = activityType(for: dayNumber, records: records, workouts: workouts, distance: distance)
 
         return RoadDayData(distance: distance, activity: activity, workouts: workouts)
-    }
-
-    private func workouts(on date: Date, matching records: [WorkoutRecord]) -> [HKWorkout] {
-        let ids = Set(records.map(\.id))
-        if !ids.isEmpty {
-            let matched = healthManager.cachedWorkouts.filter { ids.contains($0.uuid.uuidString) }
-            if !matched.isEmpty { return matched }
-        }
-
-        let calendar = Calendar.current
-        return healthManager.cachedWorkouts.filter {
-            calendar.isDate(healthManager.getCorrectedLocalTime(for: $0), inSameDayAs: date)
-        }
     }
 
     private func activityType(for day: Int, records: [WorkoutRecord], workouts: [HKWorkout], distance: Double) -> RoadActivity {
@@ -304,6 +275,55 @@ private struct RoadDayData {
     let distance: Double
     let activity: RoadActivity
     let workouts: [HKWorkout]
+}
+
+private struct RoadLocalDayIndex {
+    private let calendar: Calendar
+    private let workoutsByDay: [Date: [HKWorkout]]
+    private let countedMilesByDay: [Date: Double]
+
+    init(healthManager: HealthKitManager, calendar: Calendar) {
+        self.calendar = calendar
+
+        var grouped: [Date: [HKWorkout]] = [:]
+        var seenIds = Set<String>()
+
+        for workout in healthManager.cachedWorkouts {
+            let id = workout.uuid.uuidString
+            #if !os(watchOS)
+            if DeletedWorkoutRegistry.contains(id) { continue }
+            #endif
+            guard seenIds.insert(id).inserted else { continue }
+
+            let localDay = calendar.startOfDay(for: healthManager.getCorrectedLocalTime(for: workout))
+            grouped[localDay, default: []].append(workout)
+        }
+
+        var miles: [Date: Double] = [:]
+        for (day, workouts) in grouped {
+            let sorted = workouts.sorted { $0.endDate < $1.endDate }
+            grouped[day] = sorted
+            miles[day] = WorkoutDedup.totalMiles(sorted)
+        }
+
+        self.workoutsByDay = grouped
+        self.countedMilesByDay = miles
+    }
+
+    func workouts(on day: Date) -> [HKWorkout] {
+        workoutsByDay[calendar.startOfDay(for: day)] ?? []
+    }
+
+    func countedMiles(on day: Date, healthManager: HealthKitManager) -> Double {
+        let localDay = calendar.startOfDay(for: day)
+        if let counted = countedMilesByDay[localDay] {
+            return counted
+        }
+        if calendar.isDateInToday(localDay), healthManager.hasFreshTodaysDistance {
+            return healthManager.todaysDistance
+        }
+        return healthManager.workoutIndex?.totalMiles(for: localDay) ?? 0
+    }
 }
 
 private struct RoadMilestoneGoal {
@@ -1001,7 +1021,7 @@ private struct RoadDayButton: View {
         if node.isFuture {
             return "Day \(node.day), locked"
         }
-        return "Day \(node.day), \(node.activityLabel), \(String(format: "%.2f", node.distance)) miles"
+        return "Day \(node.day), \(node.activityLabel), \(node.distance.milesText) miles"
     }
 }
 
@@ -1099,7 +1119,7 @@ private struct RoadDayDot: View {
                 .font(.system(size: 10, weight: .black, design: .rounded))
                 .tracking(1.4)
                 .foregroundColor(.white.opacity(0.78))
-            Text(String(format: "%.2f", node.distance))
+            Text(node.distance.milesText)
                 .font(.system(size: 30, weight: .black, design: .rounded))
                 .monospacedDigit()
                 .foregroundColor(.white)
@@ -1213,7 +1233,7 @@ private struct RoadDayDetailSheet: View {
                         }
 
                         HStack(spacing: 10) {
-                            RoadDetailStat(title: "Distance", value: day.isFuture ? "--" : String(format: "%.2f mi", day.distance))
+                            RoadDetailStat(title: "Distance", value: day.isFuture ? "--" : day.distance.milesFormatted)
                             RoadDetailStat(title: "Type", value: day.activityLabel)
                         }
 
@@ -1318,7 +1338,7 @@ private struct RoadWorkoutSummaryRow: View {
                         .font(.system(size: 16, weight: .black, design: .rounded))
                         .foregroundColor(.white)
                     Spacer()
-                    Text(String(format: "%.2f mi", distance))
+                    Text(distance.milesFormatted)
                         .font(.system(size: 14, weight: .black, design: .rounded))
                         .foregroundColor(MADTheme.workoutColor(typeKey))
                 }

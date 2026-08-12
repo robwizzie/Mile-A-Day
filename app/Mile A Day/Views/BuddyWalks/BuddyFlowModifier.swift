@@ -66,8 +66,11 @@ struct BuddyFlowModifier: ViewModifier {
             }
             .onReceive(NotificationCenter.default.publisher(for: .madStartBuddyWalk)) { _ in
                 // An invite already waiting goes straight to the lobby; there is
-                // nothing left to configure.
-                if BuddySessionService.shared.hasLiveSession {
+                // nothing left to configure. Re-enterable only — a session THIS
+                // user already finished stays `active` while friends walk on,
+                // and the lobby hands a long-started session straight into
+                // tracking, which is how a finished walk restarted itself.
+                if BuddySessionService.shared.canReenterLiveSession {
                     showLobby = true
                 } else {
                     showStartSheet = true
@@ -100,14 +103,9 @@ struct BuddyFlowModifier: ViewModifier {
                 // "Who's coming?" for a round trip every single time. Prefetched,
                 // it opens populated, which is most of what made setup feel slow.
                 async let sessions: Void = BuddySessionService.shared.refreshMySessions()
-                // "Alex is walking right now" — pulled, never pushed, so this
-                // is the only thing that surfaces the offer. Reads live
-                // presence, so a friend out on their OWN shows up too, not
-                // just friends already inside a buddy room.
-                async let friendsOut: Void = BuddySessionService.shared.refreshFriendsOutNow()
                 async let candidates: Void = BuddySessionService.shared.loadCandidates()
                 async let routines: Void = BuddySessionService.shared.loadRoutines()
-                _ = await (sessions, friendsOut, candidates, routines)
+                _ = await (sessions, candidates, routines)
 
                 // The `.onReceive` pair above only fires for values published
                 // AFTER this mounts. On a cold launch the link is already

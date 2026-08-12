@@ -17,9 +17,7 @@ extension HealthKitManager {
         // Calculate streak with timezone-corrected data
         log("[HealthKit] Calculating qualifying workout days from timezone-corrected data...")
         let daysWithQualifyingWorkouts = correctedWorkoutsByDay.compactMap { (date, workouts) -> Date? in
-            let totalMilesForDay = workouts.reduce(0.0) { total, workout in
-                total + workout.madDistanceMiles
-            }
+            let totalMilesForDay = WorkoutDedup.totalMiles(workouts)
 
             if totalMilesForDay >= 0.95 {
                 return date
@@ -37,9 +35,7 @@ extension HealthKitManager {
         var correctedMostMilesWorkouts: [HKWorkout] = []
 
         for (_, workouts) in correctedWorkoutsByDay {
-            let totalMilesForDay = workouts.reduce(0.0) { total, workout in
-                total + workout.madDistanceMiles
-            }
+            let totalMilesForDay = WorkoutDedup.totalMiles(workouts)
 
             if totalMilesForDay > correctedMostMilesInDay {
                 correctedMostMilesInDay = totalMilesForDay
@@ -116,19 +112,17 @@ extension HealthKitManager {
         let streakWorkouts = getWorkoutsForCurrentStreak(streakDays: currentStreakDays)
 
         // Calculate total miles and most miles (these are fast)
-        let totalMiles = streakWorkouts.reduce(0.0) { total, workout in
-            total + workout.madDistanceMiles
-        }
-
         let workoutsByDay = Dictionary(grouping: streakWorkouts) { workout in
             Calendar.current.startOfDay(for: workout.startDate)
         }
 
+        let totalMiles = workoutsByDay.values.reduce(0.0) { total, workouts in
+            total + WorkoutDedup.totalMiles(workouts)
+        }
+
         var mostMiles = 0.0
         for (_, workouts) in workoutsByDay {
-            let dayMiles = workouts.reduce(0.0) { total, workout in
-                total + workout.madDistanceMiles
-            }
+            let dayMiles = WorkoutDedup.totalMiles(workouts)
             mostMiles = max(mostMiles, dayMiles)
         }
 

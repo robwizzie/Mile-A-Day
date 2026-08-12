@@ -54,25 +54,35 @@ extension HealthKitManager {
 
         index.workoutsByDate = workoutsByDate
 
-        // Calculate qualifying days
+        // Calculate deduped daily totals + qualifying days from the real
+        // HKWorkouts while source metadata is available. The persisted
+        // WorkoutRecords alone cannot distinguish a Google Health duplicate
+        // from the Mile A Day/Apple copy that should survive.
+        let workoutsById = Dictionary(uniqueKeysWithValues: allWorkouts.map { ($0.uuid.uuidString, $0) })
+        var countedMilesByDate: [String: Double] = [:]
         var qualifyingDays: Set<String> = []
         for (dateKey, records) in workoutsByDate {
-            let totalMiles = records.reduce(0) { $0 + $1.distance }
+            let dayWorkouts = records.compactMap { workoutsById[$0.id] }
+            let totalMiles = dayWorkouts.isEmpty
+                ? records.reduce(0) { $0 + $1.distance }
+                : WorkoutDedup.totalMiles(dayWorkouts)
+            countedMilesByDate[dateKey] = totalMiles
             if totalMiles >= 0.95 {
                 qualifyingDays.insert(dateKey)
             }
         }
+        index.countedMilesByDate = countedMilesByDate
         index.qualifyingDays = qualifyingDays
 
         // Calculate streak
-        index.currentStreak = workoutProcessor.calculateStreak(from: allRecords)
+        index.currentStreak = index.activeStreak()
 
         // Set metadata and calculate total miles
         index.lastUpdated = Date()
         index.latestWorkoutDate = allWorkouts.first?.endDate
         index.latestWorkoutUUID = allWorkouts.first?.uuid.uuidString
         index.totalWorkouts = allRecords.count
-        index.totalLifetimeMiles = allRecords.reduce(0.0) { $0 + $1.distance }
+        index.totalLifetimeMiles = countedMilesByDate.values.reduce(0, +)
 
         // Save index
         index.save()
@@ -93,10 +103,9 @@ extension HealthKitManager {
 
             // Update dailyMileGoals from index for calendar
             var goals: [Date: Bool] = [:]
-            for (dateKey, records) in finalWorkoutsByDate {
+            for dateKey in finalWorkoutsByDate.keys {
                 if let date = dateFromKey(dateKey) {
-                    let totalMiles = records.reduce(0) { $0 + $1.distance }
-                    goals[date] = totalMiles >= 0.95
+                    goals[date] = finalIndex.totalMiles(for: date) >= 0.95
                 }
             }
             self.dailyMileGoals = goals
@@ -184,10 +193,9 @@ extension HealthKitManager {
             // stored snapshot is only refreshed when a new workout arrives.
             await MainActor.run {
                 var goals: [Date: Bool] = [:]
-                for (dateKey, records) in currentIndex.workoutsByDate {
+                for dateKey in currentIndex.workoutsByDate.keys {
                     if let date = dateFromKey(dateKey) {
-                        let totalMiles = records.reduce(0) { $0 + $1.distance }
-                        goals[date] = totalMiles >= 0.95
+                        goals[date] = currentIndex.totalMiles(for: date) >= 0.95
                     }
                 }
                 self.dailyMileGoals = goals
@@ -208,10 +216,9 @@ extension HealthKitManager {
             // isn't persisted and the displayed streak must be derived as of NOW.
             await MainActor.run {
                 var goals: [Date: Bool] = [:]
-                for (dateKey, records) in currentIndex.workoutsByDate {
+                for dateKey in currentIndex.workoutsByDate.keys {
                     if let date = dateFromKey(dateKey) {
-                        let totalMiles = records.reduce(0) { $0 + $1.distance }
-                        goals[date] = totalMiles >= 0.95
+                        goals[date] = currentIndex.totalMiles(for: date) >= 0.95
                     }
                 }
                 self.dailyMileGoals = goals
@@ -236,23 +243,43 @@ extension HealthKitManager {
             }
             updatedIndex.workoutsByDate[key]?.append(record)
 
-            // Update qualifying days
-            let totalMiles = updatedIndex.workoutsByDate[key]!.reduce(0) { $0 + $1.distance }
+        }
+
+        // Recompute deduped totals for every day touched by the 48h lookback.
+        // Fetch all HKWorkouts for the day, not just the new rows: duplicate
+        // survivorship depends on the whole day shape.
+        var countedMilesByDate = updatedIndex.countedMilesByDate ?? [:]
+        let touchedKeys = Set(newRecords.map { dateKey(from: $0.localDate) })
+        for key in touchedKeys {
+            let records = updatedIndex.workoutsByDate[key] ?? []
+            let uuids = records.compactMap { UUID(uuidString: $0.id) }
+            let dayWorkouts = await withCheckedContinuation { continuation in
+                fetchWorkoutsByUUIDs(uuids) { workouts in
+                    continuation.resume(returning: workouts)
+                }
+            }
+            let totalMiles = dayWorkouts.isEmpty
+                ? records.reduce(0) { $0 + $1.distance }
+                : WorkoutDedup.totalMiles(dayWorkouts)
+            countedMilesByDate[key] = totalMiles
             if totalMiles >= 0.95 {
                 updatedIndex.qualifyingDays.insert(key)
+            } else {
+                updatedIndex.qualifyingDays.remove(key)
             }
         }
+        updatedIndex.countedMilesByDate = countedMilesByDate
 
         // Recalculate streak (fast - only checks recent days)
         let allRecords = updatedIndex.workoutsByDate.values.flatMap { $0 }
-        updatedIndex.currentStreak = workoutProcessor.calculateStreak(from: allRecords)
+        updatedIndex.currentStreak = updatedIndex.activeStreak()
 
         // Update metadata and recalculate total miles
         updatedIndex.lastUpdated = Date()
         updatedIndex.latestWorkoutDate = newWorkouts.first?.endDate
         updatedIndex.latestWorkoutUUID = newWorkouts.first?.uuid.uuidString
         updatedIndex.totalWorkouts = allRecords.count
-        updatedIndex.totalLifetimeMiles = allRecords.reduce(0.0) { $0 + $1.distance }
+        updatedIndex.totalLifetimeMiles = countedMilesByDate.values.reduce(0, +)
 
         // Save and publish
         updatedIndex.save()
@@ -270,10 +297,9 @@ extension HealthKitManager {
 
             // Update dailyMileGoals from index
             var goals: [Date: Bool] = [:]
-            for (dateKey, records) in finalUpdatedWorkoutsByDate {
+            for dateKey in finalUpdatedWorkoutsByDate.keys {
                 if let date = dateFromKey(dateKey) {
-                    let totalMiles = records.reduce(0) { $0 + $1.distance }
-                    goals[date] = totalMiles >= 0.95
+                    goals[date] = finalUpdatedIndex.totalMiles(for: date) >= 0.95
                 }
             }
             self.dailyMileGoals = goals

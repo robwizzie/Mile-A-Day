@@ -1,0 +1,1 @@
+CREATE INDEX "idx_h2h_matchups_user_date" ON "h2h_matchups" USING btree ("user_id","local_date" DESC NULLS FIRST);

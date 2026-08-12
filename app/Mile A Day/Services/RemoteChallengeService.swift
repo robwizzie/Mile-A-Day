@@ -18,6 +18,9 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
     /// Backend user the `todayKey` snapshot belongs to — restoring another
     /// account's challenge state on a shared install must never happen.
     private let todayUserKey = "remoteChallengeTodayUserV1"
+    private let matchupsKey = "remoteChallengeMatchupsV1"
+    /// Same shared-install guard as `todayUserKey`, for the matchup snapshot.
+    private let matchupsUserKey = "remoteChallengeMatchupsUserV1"
 
     private(set) var todayChallenge: DailyChallenge?
     private(set) var todayProgress: Double = 0
@@ -27,6 +30,9 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
     private(set) var tomorrowLocalDate: String?
     /// Today's Head-to-Head rival, if the challenge is `head_to_head`.
     private(set) var todayOpponent: ChallengeOpponent?
+    /// Past Head-to-Head duels + all-time records. Unlike the today snapshot
+    /// this has no date gate — yesterday's history is still true today.
+    private(set) var matchupHistory: MatchupHistoryDTO?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -34,6 +40,7 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         // immediately (and offline) instead of a loading placeholder until the
         // network round-trip completes.
         loadTodaySnapshot()
+        loadMatchupsSnapshot()
     }
 
     // MARK: - ChallengeServiceProtocol (sync)
@@ -156,6 +163,26 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         }
     }
 
+    /// Fetch the Head-to-Head duel history (past matchups + all-time records).
+    func refreshMatchups(userId: String) async {
+        do {
+            let response: MatchupHistoryDTO = try await APIClient.fancyFetch(
+                endpoint: "/users/\(userId)/challenges/matchups",
+                responseType: MatchupHistoryDTO.self
+            )
+            await MainActor.run {
+                self.matchupHistory = response
+                self.saveMatchupsSnapshot(response: response, userId: userId)
+                NotificationCenter.default.post(name: ChallengeService.changedNotification, object: nil)
+            }
+        } catch is CancellationError {
+            // Hosting task was cancelled (view disappeared / userId changed).
+        } catch {
+            if (error as? URLError)?.code == .cancelled { return }
+            print("[RemoteChallengeService] refreshMatchups failed: \(error)")
+        }
+    }
+
     /// Completion status for a friend's today-challenge (friend profile view).
     static func fetchFriendToday(userId: String) async throws -> FriendTodayDTO {
         try await APIClient.fancyFetch(
@@ -204,6 +231,24 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         tomorrowChallenge = response.tomorrowChallenge?.toDailyChallenge()
         tomorrowLocalDate = response.tomorrowLocalDate
         todayOpponent = response.opponent?.toOpponent()
+    }
+
+    private func saveMatchupsSnapshot(response: MatchupHistoryDTO, userId: String) {
+        if let data = try? JSONEncoder().encode(response) {
+            defaults.set(data, forKey: matchupsKey)
+            defaults.set(userId, forKey: matchupsUserKey)
+        }
+    }
+
+    /// Restore the last matchup-history response for the signed-in user so the
+    /// record card renders instantly (and offline). History only grows, so a
+    /// stale snapshot is merely incomplete, never wrong-day like `todayKey`.
+    private func loadMatchupsSnapshot() {
+        guard let data = defaults.data(forKey: matchupsKey) else { return }
+        guard let snapshotUser = defaults.string(forKey: matchupsUserKey),
+              let currentUser = defaults.string(forKey: "backendUserId"),
+              snapshotUser == currentUser else { return }
+        matchupHistory = try? JSONDecoder().decode(MatchupHistoryDTO.self, from: data)
     }
 
     private static func currentLocalDateString() -> String {
@@ -326,6 +371,66 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         let totalCompleted: Int
         let currentStreak: Int
         let completions: [CompletionItemDTO]
+    }
+
+    // MARK: Matchup history (past Head-to-Head duels)
+
+    struct MatchupRivalDTO: Codable, Equatable {
+        let userId: String
+        let username: String?
+        let profileImageUrl: String?
+
+        var displayName: String { username ?? "A friend" }
+    }
+
+    /// One finished duel. `result` is the race (who logged more miles);
+    /// `completed` is whether the day's challenge was actually awarded
+    /// (winning also required hitting your own goal).
+    struct MatchupItemDTO: Codable, Equatable, Identifiable {
+        let localDate: String
+        let rival: MatchupRivalDTO
+        let myMiles: Double
+        let rivalMiles: Double
+        let result: String   // "won" | "lost" | "tied"
+        let mutual: Bool
+        let completed: Bool
+
+        var id: String { localDate }
+        var won: Bool { result == "won" }
+        var tied: Bool { result == "tied" }
+    }
+
+    /// All-time record against one rival.
+    struct MatchupRivalRecordDTO: Codable, Equatable, Identifiable {
+        let userId: String
+        let username: String?
+        let profileImageUrl: String?
+        let wins: Int
+        let losses: Int
+        let ties: Int
+        let lastLocalDate: String
+
+        var id: String { userId }
+        var displayName: String { username ?? "A friend" }
+        var total: Int { wins + losses + ties }
+    }
+
+    struct MatchupRecordDTO: Codable, Equatable {
+        let wins: Int
+        let losses: Int
+        let ties: Int
+        let total: Int
+    }
+
+    struct MatchupHistoryDTO: Codable, Equatable {
+        let record: MatchupRecordDTO
+        let currentWinStreak: Int
+        let bestWinStreak: Int
+        let rivals: [MatchupRivalRecordDTO]
+        let matchups: [MatchupItemDTO]
+        /// TRUE when the server capped the window (aggregates aren't all-time).
+        /// Optional: a server predating the field simply doesn't send it.
+        let truncated: Bool?
     }
 
     struct FriendTodayDTO: Codable {
