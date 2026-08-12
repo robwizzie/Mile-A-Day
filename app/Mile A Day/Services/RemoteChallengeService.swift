@@ -145,7 +145,8 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
                     challengeKey: item.challengeKey,
                     title: item.title,
                     icon: item.icon,
-                    description: ""
+                    description: "",
+                    localDate: item.localDate
                 )
             }
             await MainActor.run {
@@ -188,6 +189,16 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         try await APIClient.fancyFetch(
             endpoint: "/users/\(userId)/challenges/today",
             responseType: FriendTodayDTO.self
+        )
+    }
+
+    /// How a past completion was earned (duel scores, the shared photo, hyped
+    /// friends, pace/steps numbers). Fetched lazily when a completion sheet
+    /// opens; the sheet degrades to its generic layout when this fails.
+    static func fetchCompletionDetail(userId: String, localDate: String) async throws -> CompletionDetailDTO {
+        try await APIClient.fancyFetch(
+            endpoint: "/users/\(userId)/challenges/\(localDate)/detail",
+            responseType: CompletionDetailDTO.self
         )
     }
 
@@ -446,5 +457,106 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         let gradientStart: String?
         let gradientEnd: String?
         let opponent: OpponentDTO?
+    }
+
+    // MARK: Completion detail (how a past challenge was completed)
+
+    /// Minimal user reference inside a completion detail.
+    struct CompletionFriendDTO: Codable {
+        let userId: String
+        let username: String?
+        let profileImageUrl: String?
+
+        var displayName: String { username ?? "A friend" }
+    }
+
+    struct CompletionH2hRecordDTO: Codable {
+        let wins: Int
+        let losses: Int
+        let ties: Int
+    }
+
+    /// The finished duel behind a head_to_head completion.
+    struct CompletionH2hDTO: Codable {
+        let rival: CompletionFriendDTO
+        let myMiles: Double
+        let rivalMiles: Double
+        let result: String   // "won" | "lost" | "tied"
+        let mutual: Bool
+        /// All-time resolved-duel record against this rival.
+        let record: CompletionH2hRecordDTO
+    }
+
+    /// The photo post behind a share_journey completion (`mediaUrl` is signed).
+    struct CompletionPostDTO: Codable {
+        let postId: String
+        let mediaUrl: String
+        let caption: String?
+        // Backend timestamptz carries fractional seconds the shared .iso8601
+        // decoder can't parse — keep it a String and parse via BuddyDate.
+        let createdAt: String?
+    }
+
+    /// Who was hyped (hype_squad) or nudged (wingman) that day.
+    struct CompletionSocialDTO: Codable {
+        let friends: [CompletionFriendDTO]
+        /// Total hypes/nudges sent; can exceed `friends.count` (repeats, cap).
+        let totalActions: Int
+    }
+
+    struct CompletionStepsDTO: Codable {
+        let steps: Int
+        let goalSteps: Int
+    }
+
+    struct CompletionPaceDTO: Codable {
+        let bestPaceSecondsPerMile: Double?
+        let targetPaceSecondsPerMile: Double?
+    }
+
+    struct CompletionDistanceDTO: Codable {
+        let miles: Double
+        let targetMiles: Double
+        /// "walking" when only walk miles counted (walk_it_out); else "all".
+        let scope: String?
+    }
+
+    struct CompletionTimeWindowDTO: Codable {
+        let window: String   // "early" | "late"
+        /// Wall-clock finish in the workout's own timezone, "HH:MM" 24h.
+        let finishedLocalTime: String?
+        let qualifyingMiles: Double?
+    }
+
+    struct CompletionActivityDTO: Codable {
+        let workoutCount: Int
+        let runMiles: Double
+        let walkMiles: Double
+        let variant: String?   // cross_train only: "walk_today" | "run_today" | "mixed"
+    }
+
+    /// `GET /users/:id/challenges/:localDate/detail` — at most one section is
+    /// populated, matching the challenge family. Sections re-derive from live
+    /// rows server-side, so any of them can be nil (deleted post, blocked
+    /// rival) even for a real completion.
+    struct CompletionDetailDTO: Codable {
+        let localDate: String
+        let challengeKey: String
+        let title: String
+        let description: String?
+        let icon: String
+        let gradientStart: String?
+        let gradientEnd: String?
+        // String for the same fractional-seconds reason as CompletionPostDTO.
+        let completedAt: String?
+        let h2h: CompletionH2hDTO?
+        let post: CompletionPostDTO?
+        let social: CompletionSocialDTO?
+        let steps: CompletionStepsDTO?
+        let pace: CompletionPaceDTO?
+        let distance: CompletionDistanceDTO?
+        let timeWindow: CompletionTimeWindowDTO?
+        let activity: CompletionActivityDTO?
+        let friend: CompletionFriendDTO?
     }
 }

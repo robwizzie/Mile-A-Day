@@ -74,8 +74,8 @@ struct DailyChallengesView: View {
             refresh()
         }
         .sheet(item: $selectedHistoryCompletion) { completion in
-            HistoryCompletionSheet(completion: completion)
-                .presentationDetents([.medium])
+            ChallengeCompletionDetailSheet(completion: completion, healthManager: healthManager)
+                .presentationDetents([.medium, .large])
         }
     }
 
@@ -538,30 +538,3 @@ private struct HistoryDayCell: View {
     }
 }
 
-private struct HistoryCompletionSheet: View {
-    let completion: ChallengeCompletion
-
-    var body: some View {
-        ZStack {
-            MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
-            VStack(spacing: 16) {
-                Image(systemName: completion.icon)
-                    .font(.system(size: 44, weight: .semibold))
-                    .foregroundColor(.green)
-                    .padding(.top, 32)
-                Text(completion.title)
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                Text(completion.description)
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                Text(completion.date.formattedShortDate)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.5))
-                Spacer()
-            }
-        }
-    }
-}

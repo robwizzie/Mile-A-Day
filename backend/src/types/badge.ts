@@ -13,7 +13,12 @@ export type BadgeCategory =
   | "ghost";
 export type BadgeRarity = "common" | "rare" | "legendary";
 export type DailyChallengeType =
-  "pace" | "distance" | "time" | "activity" | "steps" | "social";
+  | "pace"
+  | "distance"
+  | "time"
+  | "activity"
+  | "steps"
+  | "social";
 
 export interface Badge {
   badgeId: string;
@@ -175,6 +180,104 @@ export interface MatchupHistoryResponse {
    * streaks and `rivals` cover only the newest window rather than all time.
    */
   truncated: boolean;
+}
+
+// ─── Completion detail (how a past challenge was completed) ─────────
+
+/** Minimal user reference rendered inside a completion detail. */
+export interface ChallengeFriendRef {
+  userId: string;
+  username: string | null;
+  profileImageUrl: string | null;
+}
+
+/** The finished duel behind a head_to_head completion. */
+export interface ChallengeH2hDetail {
+  rival: ChallengeFriendRef;
+  /** Re-derived from workouts at read time, 2-decimal rounded like scoring. */
+  myMiles: number;
+  rivalMiles: number;
+  result: "won" | "lost" | "tied";
+  mutual: boolean;
+  /** All-time resolved-duel record against THIS rival. */
+  record: { wins: number; losses: number; ties: number };
+}
+
+/** The photo post behind a share_journey completion. `mediaUrl` is signed. */
+export interface ChallengePostDetail {
+  postId: string;
+  mediaUrl: string;
+  caption: string | null;
+  createdAt: string;
+}
+
+/** Who was hyped (hype_squad) or nudged (wingman) that day. */
+export interface ChallengeSocialDetail {
+  /** Distinct friends, capped server-side; `totalActions` is uncapped. */
+  friends: ChallengeFriendRef[];
+  totalActions: number;
+}
+
+export interface ChallengeStepsDetail {
+  steps: number;
+  goalSteps: number;
+}
+
+export interface ChallengePaceDetail {
+  /** Fastest qualifying mile split that day, in seconds per mile. */
+  bestPaceSecondsPerMile: number | null;
+  /** The pace to beat: 720 for speed_round; prior best + 30s for beat_your_pace. */
+  targetPaceSecondsPerMile: number | null;
+}
+
+export interface ChallengeDistanceDetail {
+  miles: number;
+  targetMiles: number;
+  /** 'walking' when only walk miles counted (walk_it_out). */
+  scope: "all" | "walking";
+}
+
+export interface ChallengeTimeWindowDetail {
+  window: "early" | "late";
+  /** Wall-clock finish of the qualifying workout in ITS timezone, "HH:MM" 24h. */
+  finishedLocalTime: string | null;
+  qualifyingMiles: number | null;
+}
+
+export interface ChallengeActivityDetail {
+  workoutCount: number;
+  runMiles: number;
+  walkMiles: number;
+  /** Which cross-train variant that day asked for (cross_train only). */
+  variant: "walk_today" | "run_today" | "mixed" | null;
+}
+
+/**
+ * How a past daily challenge was completed. Exactly one of the optional
+ * sections is populated, matching the challenge family; every section is
+ * re-derived from source tables at read time (nothing extra is stored at
+ * award time), so a section can come back null when the underlying rows are
+ * gone (deleted post, blocked rival) — clients fall back to the generic
+ * header + workouts view.
+ */
+export interface ChallengeCompletionDetailResponse {
+  localDate: string;
+  challengeKey: string;
+  title: string;
+  description: string;
+  icon: string;
+  gradientStart: string;
+  gradientEnd: string;
+  completedAt: string | null;
+  h2h: ChallengeH2hDetail | null;
+  post: ChallengePostDetail | null;
+  social: ChallengeSocialDetail | null;
+  steps: ChallengeStepsDetail | null;
+  pace: ChallengePaceDetail | null;
+  distance: ChallengeDistanceDetail | null;
+  timeWindow: ChallengeTimeWindowDetail | null;
+  activity: ChallengeActivityDetail | null;
+  friend: ChallengeFriendRef | null;
 }
 
 export interface NewChallengeCompletion {
