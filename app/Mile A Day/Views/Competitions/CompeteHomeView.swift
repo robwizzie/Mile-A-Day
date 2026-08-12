@@ -30,6 +30,12 @@ struct CompeteHomeView: View {
     let onCreateBlank: () -> Void
     let onEdit: (Competition) -> Void
     let onError: (String) -> Void
+    let onOpenWeekly: (WeeklyChallengeResponse) -> Void
+
+    /// The always-on half of the tab: there's a challenge every week whether or
+    /// not anyone has started a competition. Defaulted rather than private so
+    /// the memberwise init stays internal for the shell to call.
+    @ObservedObject var weeklyService: WeeklyChallengeService = .shared
 
     @State private var pendingDeleteId: String?
     @State private var pendingLeaveId: String?
@@ -84,6 +90,13 @@ struct CompeteHomeView: View {
     var body: some View {
         ScrollViewReader { proxy in
             List {
+                if let weekly = weeklyService.current {
+                    WeeklyChallengeHeroCard(response: weekly) { onOpenWeekly(weekly) }
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 4, trailing: 14))
+                }
+
                 if showInviteHandledNote {
                     inviteHandledNote
                 }
@@ -126,6 +139,12 @@ struct CompeteHomeView: View {
             .refreshable {
                 await competitionService.refreshAllData()
                 trophyService.updateTrophies(from: competitionService.competitions)
+                await weeklyService.refresh()
+            }
+            .task {
+                // The weekly challenge is served on read, so this is also what
+                // stamps the user's row for the week if the Monday cron hasn't.
+                await weeklyService.refresh()
             }
             .onChange(of: scrollTarget) { _, _ in
                 consumeScrollTarget(proxy)

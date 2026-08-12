@@ -28,7 +28,9 @@ struct CompetitionsListView: View {
     @State private var pendingStartType: CompetitionType?
 
     @State private var selectedCompetition: Competition?
+    @State private var showingWeeklyChallenge = false
     @State private var showingTrophyCase = false
+    @ObservedObject private var weeklyService = WeeklyChallengeService.shared
     @State private var competitionToEdit: Competition?
     @State private var actionError: String?
 
@@ -92,7 +94,8 @@ struct CompetitionsListView: View {
                             onStartPreset: { createRequest = CreateRequest(preset: $0) },
                             onCreateBlank: { createRequest = CreateRequest() },
                             onEdit: { competitionToEdit = $0 },
-                            onError: { actionError = $0 }
+                            onError: { actionError = $0 },
+                            onOpenWeekly: { showingWeeklyChallenge = true }
                         )
                         .id("compete-segment")
                     }
@@ -124,6 +127,13 @@ struct CompetitionsListView: View {
             }
             .sheet(item: $competitionToEdit) { competition in
                 EditCompetitionWrapper(initial: competition, service: competitionService)
+            }
+            .sheet(isPresented: $showingWeeklyChallenge) {
+                NavigationStack {
+                    if let weekly = weeklyService.current {
+                        WeeklyChallengeDetailView(response: weekly, service: weeklyService)
+                    }
+                }
             }
         }
         .background(MADTheme.Colors.appBackgroundGradient)

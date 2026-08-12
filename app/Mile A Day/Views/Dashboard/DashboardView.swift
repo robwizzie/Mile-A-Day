@@ -51,6 +51,9 @@ struct DashboardView: View {
     @State private var isRefreshing = false
     @State private var showWorkoutUploadAlert = false
     @StateObject private var celebrationManager = CelebrationManager.shared
+    /// This week's challenge. Shared with the Compete tab, so a refresh on
+    /// either surface updates both.
+    @StateObject private var weeklyChallengeService = WeeklyChallengeService.shared
     @Environment(\.scenePhase) private var scenePhase
     /// Controls presentation of the in‑progress workout tracking UI.
     @State private var showWorkoutView = false
@@ -1058,6 +1061,7 @@ struct DashboardView: View {
         // Pull-to-refresh only touched HealthKit + pace, so the friend-request
         // attention row would go stale under the very gesture used to clear it.
         await friendService.refreshAllData()
+        await weeklyChallengeService.refresh()
         // The HealthKit fetches above are fire-and-forget; hold the
         // pull-to-refresh spinner briefly so fresh values have a chance to
         // land before it dismisses — previously it vanished instantly and
@@ -1538,6 +1542,7 @@ struct DashboardView: View {
         VStack(spacing: 22) {
             gettingStartedSection
             dailyChallengeSection
+            weeklyChallengeSection
             friendActivitySection
             activeCompetitionSection
             badgesSection
@@ -1907,6 +1912,29 @@ struct DashboardView: View {
             DailyChallengeCard(healthManager: healthManager, userManager: userManager)
         }
         .buttonStyle(PlainButtonStyle())
+    }
+
+    // MARK: - Weekly Challenge Section
+
+    /// The weekly challenge, beside the daily one. Its home is the Compete tab,
+    /// but this is where people actually find it — the dashboard is the screen
+    /// they open, and a feature nobody discovers may as well not exist.
+    @ViewBuilder
+    private var weeklyChallengeSection: some View {
+        if let weekly = weeklyChallengeService.current {
+            NavigationLink {
+                WeeklyChallengeDetailView(
+                    response: weekly,
+                    service: weeklyChallengeService
+                )
+            } label: {
+                WeeklyChallengeHeroCard(response: weekly, compact: true) {}
+                    // The card's own button is inert here; the NavigationLink
+                    // owns the tap.
+                    .allowsHitTesting(false)
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
     }
 
     // MARK: - Friend Activity Section

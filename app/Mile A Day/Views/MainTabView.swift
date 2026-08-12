@@ -209,6 +209,13 @@ struct MainTabView: View {
                      "competition_finished", "competition_updates", "competition_nudge":
                     await competitionService.refreshAllData()
                     selectedTab = 1
+                case "weekly_challenge_new", "weekly_challenge_nudge",
+                     "weekly_challenge_complete":
+                    // The weekly challenge lives at the top of Compete. Refresh
+                    // first so the card the user was just told about is the one
+                    // they land on.
+                    await WeeklyChallengeService.shared.refresh()
+                    selectedTab = 1
                 case "buddy_invite", "buddy_joined", "buddy_started":
                     // Park the session id so the Dashboard opens the lobby even
                     // on a cold launch, where DashboardView doesn't exist yet.
@@ -482,6 +489,12 @@ struct MainTabView: View {
             case "competition_invite", "competition_accepted", "competition_started",
                  "competition_finished", "competition_updates", "competition_nudge":
                 await competitionService.refreshAllData()
+                selectedTab = 1
+            // Mirrors the live handler above — cold launch is a separate code
+            // path and dropping it would break the push for a killed app.
+            case "weekly_challenge_new", "weekly_challenge_nudge",
+                 "weekly_challenge_complete":
+                await WeeklyChallengeService.shared.refresh()
                 selectedTab = 1
             case "buddy_invite", "buddy_joined", "buddy_started":
                 // Only the type survives a cold launch — the session id isn't
