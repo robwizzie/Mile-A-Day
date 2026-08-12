@@ -246,17 +246,21 @@ struct BuddyRecapView: View {
         .frame(height: 6)
     }
 
-    /// Sharing follows the same 10-minute rule as every other photo post, and a
-    /// recap is reachable long after the walk (deep link, notification, a
-    /// screen left open). So the CTA reflects the window rather than 403-ing on
-    /// tap — and it says what closed rather than just going grey, since this is
-    /// the screen's primary action.
+    /// Sharing follows the same rule as every other photo post — a qualifying
+    /// walk or run today — and a recap is reachable long after the walk (deep
+    /// link, notification, a screen left open). So the CTA reflects that rather
+    /// than 403-ing on tap, and it says what's missing rather than just going
+    /// grey, since this is the screen's primary action.
+    ///
+    /// It survives the ten-minute camera countdown on purpose: a buddy recap is
+    /// exactly the screen someone opens once they're home, and the composer it
+    /// leads to now offers the walk's photos when the camera has closed.
     @ViewBuilder
     private func shareButton(_ session: BuddySessionState) -> some View {
-        if freshWindow.isOpen {
+        if freshWindow.canPostToday {
             shareCTA(session)
         } else {
-            Text("Photos share in the 10 minutes after a walk — that window has closed.")
+            Text("Finish a walk or run today to share a photo from it.")
                 .font(MADTheme.Typography.caption)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
                 .multilineTextAlignment(.center)

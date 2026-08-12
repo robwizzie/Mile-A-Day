@@ -28,6 +28,7 @@ import {
   getOwnedWorkoutDistance,
   getOwnedWorkoutRollupDistance,
   getPostWindowStatus,
+  photoSourceRequiresCameraWindow,
   POST_WINDOW_MS,
   lockUnearnedPhotos,
   ALLOWED_STORY_REACTIONS,
@@ -135,6 +136,7 @@ export async function createPostController(
     coauthor_user_ids,
     buddy_session_id,
     posted_live,
+    photo_source,
   } = req.body ?? {};
 
   try {
@@ -199,11 +201,13 @@ export async function createPostController(
       });
     }
 
-    // A photo belongs to the walk or run that earned it: posting is open for
-    // ten minutes after a qualifying workout lands (the one that reached the
-    // goal, then each additional one) and closes with that window. Without it
-    // the feed drifts into an all-day photo stream that happens to sit next to
-    // some mileage.
+    // A photo belongs to the walk or run that earned it. Which clock that
+    // requires depends on where the photo came from (see PostPhotoSource):
+    // a live capture is held to the ten minutes after a qualifying workout
+    // lands, while a photo picked out of the camera roll — already proven by
+    // its capture time to be FROM the walk — is good for the rest of the day.
+    // Both still require a qualifying workout today, so neither is a route to
+    // posting without moving.
     //
     // Two deliberate exemptions:
     //  - Auto posts. They're the generated route/stats card the app writes when
@@ -218,9 +222,19 @@ export async function createPostController(
       (await userSupports(userId, CLIENT_FEATURES.postWindowV1))
     ) {
       const postWindow = await getPostWindowStatus(userId, goal.localDate);
-      if (!postWindow.open) {
+      const needsCamera = photoSourceRequiresCameraWindow(photo_source);
+      const allowed = needsCamera
+        ? postWindow.cameraOpen
+        : postWindow.photoOpen;
+      if (!allowed) {
+        // The error STRING is load-bearing: shipped builds match on
+        // `post_window_closed` and have copy for it. `reason` is the additive
+        // half — it tells a build that knows about the split which of the two
+        // gates closed, so it can offer the camera roll instead of a dead end.
         return res.status(403).json({
           error: "post_window_closed",
+          reason: needsCamera ? "camera_window_closed" : "no_workout_today",
+          photo_open: postWindow.photoOpen,
           window_seconds: Math.round(POST_WINDOW_MS / 1000),
         });
       }
@@ -772,11 +786,16 @@ export async function updatePostController(
     }
 
     // Promoting a story onto the feed puts a photo on the feed, so it answers
-    // to the same 10-minute window as creating one — otherwise it's a way
-    // around the rule: share a story inside the window, then promote it from
-    // the profile grid whenever you like. The story viewer's own "Add to feed"
-    // routes through createPost and is already held to this; the two are the
-    // same user action on two screens and can't disagree.
+    // to the same rule as creating one — the story viewer's own "Add to feed"
+    // routes through createPost, and the two are the same user action on two
+    // screens and can't disagree.
+    //
+    // That rule is the DAY tier, not the camera countdown. The photo was
+    // already captured under whichever gate applied when it was taken, so
+    // re-charging it the ten minutes would only mean that sharing to your
+    // story first cost you the ability to keep it — which is a penalty for
+    // using the feature, not a rule about freshness. What still has to hold is
+    // that a qualifying walk or run happened today.
     //
     // Caption edits stay ungated. Fixing a typo isn't posting a photo, and a
     // post that's already on the feed shouldn't freeze at whatever text it
@@ -789,9 +808,11 @@ export async function updatePostController(
       const postWindow = goal.completed
         ? await getPostWindowStatus(userId, goal.localDate)
         : null;
-      if (!postWindow?.open) {
+      if (!postWindow?.photoOpen) {
         return res.status(403).json({
           error: "post_window_closed",
+          reason: "no_workout_today",
+          photo_open: false,
           window_seconds: Math.round(POST_WINDOW_MS / 1000),
         });
       }
@@ -980,6 +1001,11 @@ export async function getTermsStatusController(
  * Reports the DISPLAY window (`seconds_remaining` hits 0 at the ten-minute
  * mark); the create path's grace is deliberately not published, so a client
  * counting down to zero is never the reason a post is refused.
+ *
+ * `open` is the CAMERA tier and keeps its original meaning, because that is
+ * what shipped builds read it as. `camera_open` is the same value under the
+ * name the split gave it, and `photo_open` is the day tier — a camera-roll
+ * pick or a story promotion is allowed whenever that one is true.
  */
 export async function getPostWindowController(
   req: AuthenticatedRequest,
@@ -994,7 +1020,9 @@ export async function getPostWindowController(
       ? await getPostWindowStatus(userId, goal.localDate)
       : null;
     res.status(200).json({
-      open: postWindow?.open ?? false,
+      open: postWindow?.cameraOpen ?? false,
+      camera_open: postWindow?.cameraOpen ?? false,
+      photo_open: postWindow?.photoOpen ?? false,
       workout_id: postWindow?.workoutId ?? null,
       opened_at: postWindow?.openedAt ?? null,
       closes_at: postWindow?.closesAt ?? null,

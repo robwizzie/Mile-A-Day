@@ -277,9 +277,10 @@ struct WorkoutDetailView: View {
                         .foregroundColor(.primary)
                     Spacer()
                     // Promoting a story puts a photo on the feed, so it answers
-                    // to the same 10-minute window as posting one — offering it
-                    // after the window has closed would only earn a 403.
-                    if post.share_to_feed == false, freshWindow.isOpen {
+                    // to the same rule as posting one: a qualifying walk/run
+                    // today. Not the camera countdown — that bounds capture,
+                    // and this photo was captured long before this tap.
+                    if post.share_to_feed == false, freshWindow.canPostToday {
                         addToFeedPill
                     }
                 }
@@ -345,7 +346,7 @@ struct WorkoutDetailView: View {
                 await fetchLinkedPost()
             } catch let APIError.apiError(message) where message == "post_window_closed" {
                 await MainActor.run {
-                    addToFeedError = "Photos reach the feed in the 10 minutes after a walk or run, and that window has closed."
+                    addToFeedError = "Feed posts belong to the day's walk or run, and today's has rolled over."
                 }
             } catch {
                 await MainActor.run {

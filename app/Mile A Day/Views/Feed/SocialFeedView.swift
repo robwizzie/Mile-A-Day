@@ -120,15 +120,19 @@ struct SocialFeedView: View {
         )
     }
 
-    /// The second half: a photo may only go out during the 10-minute window
-    /// that opens when a qualifying walk/run lands. Completing the mile is what
-    /// makes posting possible at all; this is what keeps a post attached to the
-    /// activity that earned it instead of to some point later in the day.
+    /// The second half: a photo has to belong to a walk or run, so posting
+    /// opens when one lands and stays open for the rest of the day. Completing
+    /// the mile is what makes posting possible at all; this is what keeps a
+    /// post attached to an activity rather than to nothing.
+    ///
+    /// Note this is the DAY tier, not the ten-minute countdown. The countdown
+    /// bounds the CAMERA (see `PostComposerView`) — the composer is reachable
+    /// after it, just with the camera roll leading instead of the shutter.
     ///
     /// Mirrored authoritatively on the server (`post_window_closed`), so this
     /// only decides what the UI offers — never whether a post is allowed.
     private var canPostNow: Bool {
-        mileDone && freshWindow.isOpen
+        mileDone && freshWindow.canPostToday
     }
 
     /// Server-day formatter: Postgres emits Gregorian "yyyy-MM-dd" — pin the
@@ -327,7 +331,9 @@ struct SocialFeedView: View {
                         myImageURL: userManager.currentUser.profileImageUrl,
                         canPost: canPostNow,
                         hasSharedWorkout: alreadySharedWorkout,
-                        windowOpen: freshWindow.isOpen,
+                        // The ring tracks the CAMERA countdown only; posting
+                        // itself outlives it, so the "+" stays unlocked.
+                        windowOpen: freshWindow.isCameraOpen,
                         windowOpenedAt: freshWindow.windowOpenedAt,
                         isGroupViewable: { canViewStories(of: $0) },
                         isGroupUnviewed: { isGroupUnviewed(of: $0) },
@@ -576,10 +582,10 @@ struct SocialFeedView: View {
         } message: {
             Text("One post per walk or run — that's the reward. Do another walk or run to share again, or delete a post or story to swap the shot.")
         }
-        .alert("That moment has passed", isPresented: $showWindowClosedHint) {
+        .alert("Go for a walk or run first", isPresented: $showWindowClosedHint) {
             Button("Got it", role: .cancel) {}
         } message: {
-            Text("Photos share in the 10 minutes after a walk or run — that's what keeps this feed about moving. Head out again and the window reopens. 🏃")
+            Text("Photos here belong to a walk or run. Finish one and you can post a photo from it for the rest of the day — the in-app camera is the part that's only open for 10 minutes. 🏃")
         }
     }
 
@@ -723,9 +729,12 @@ struct SocialFeedView: View {
     /// The compose FAB. Hidden entirely once the mile is done AND already
     /// shared — one post per walk/run, so there's nothing to add. Otherwise it
     /// reads as unlocked only while a post can actually go out: the mile is
-    /// done AND the walk's 10-minute window is still open. It stays visible but
+    /// done AND a qualifying walk/run has landed today. It stays visible but
     /// locked the rest of the time so tapping it can explain itself, which is
     /// the same thing it already did before the mile was finished.
+    ///
+    /// The countdown ring is the CAMERA's, and it's the only thing here that
+    /// expires: when it runs out the ring simply goes, and the "+" stays a "+".
     @ViewBuilder
     private var composeButton: some View {
         if !(mileDone && alreadySharedWorkout) {
@@ -740,7 +749,8 @@ struct SocialFeedView: View {
                     // Countdown ring around the FAB — now a deadline, not just
                     // a nudge, so it runs whenever the window is what's open.
                     .overlay {
-                        if canPostNow, let openedAt = freshWindow.windowOpenedAt {
+                        if canPostNow, freshWindow.isCameraOpen,
+                           let openedAt = freshWindow.windowOpenedAt {
                             FreshWindowRing(openedAt: openedAt, color: .white, lineWidth: 3)
                                 .padding(-5)
                         }
@@ -896,10 +906,9 @@ struct SocialFeedView: View {
         // Reachable from the rail's own-story cell even after the FAB hides —
         // enforce one-share-per-workout at the entry point too.
         guard !alreadySharedWorkout else { showAlreadySharedHint = true; return }
-        // The window can lapse between the tap and here (the FAB is a render
-        // behind an expiry the timer hasn't published yet), and it's also the
-        // only guard on the rail's own-story cell. Read the clock, not the UI.
-        guard freshWindow.isOpen else { showWindowClosedHint = true; return }
+        // The day can roll over between the tap and here, and this is also the
+        // only guard on the rail's own-story cell. Read the state, not the UI.
+        guard freshWindow.canPostToday else { showWindowClosedHint = true; return }
         // The cache also covers acceptance that happened OUTSIDE this view
         // (post-run composer gate) after our one-shot loadTermsStatus ran.
         if termsAccepted == true || PostService.termsAcceptedCached {
@@ -910,21 +919,29 @@ struct SocialFeedView: View {
         }
     }
 
-    /// Reconcile the local posting window against the server's.
+    /// Reconcile the local posting state against the server's.
     ///
     /// The local one opens from a Dashboard observer watching HealthKit, so a
-    /// workout that landed while the app was closed leaves this device with no
-    /// window if the user opens straight to the Feed tab — the composer would
-    /// sit locked through the exact ten minutes it should be inviting. The
-    /// server derives the same window from its own workout rows and doesn't
-    /// have that blind spot. Adopt-only: the local clock still owns closing.
+    /// workout that landed while the app was closed leaves this device with
+    /// nothing recorded if the user opens straight to the Feed tab — and the
+    /// composer sits locked on a day they definitely walked. The server derives
+    /// both tiers from its own workout rows and doesn't have that blind spot.
+    /// Adopt-only: the local clock still owns closing the camera.
+    ///
+    /// Gated on `photoOpen`, not the countdown: this device most often needs
+    /// the DAY tier (a morning walk it never saw), which the old window-only
+    /// check silently dropped the moment the ten minutes were up.
     private func syncPostWindow() async {
         guard let status = try? await PostService.postWindow(),
-              status.open,
+              status.photoOpen,
               let workoutId = status.workout_id,
               let openedAt = status.openedAtDate else { return }
         await MainActor.run {
-            freshWindow.adopt(workoutId: workoutId, openedAt: openedAt)
+            freshWindow.adopt(
+                workoutId: workoutId,
+                openedAt: openedAt,
+                cameraOpen: status.cameraOpen
+            )
         }
     }
 

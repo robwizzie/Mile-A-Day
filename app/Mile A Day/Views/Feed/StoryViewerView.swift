@@ -673,14 +673,17 @@ private struct StoryGroupPlayerView: View {
     /// doesn't count — replacing it is the point) — otherwise "Add to feed"
     /// would be offered only to 409 on tap.
     ///
-    /// Also hidden once the walk's posting window has closed: promoting creates
-    /// a feed post, which the server holds to the same 10-minute rule, so the
-    /// pill would be offered only to 403 for exactly the same reason.
+    /// Also hidden when no qualifying walk/run has landed today: promoting
+    /// creates a feed post, which the server holds to the same day rule, so
+    /// the pill would be offered only to 403. Deliberately NOT gated on the
+    /// camera countdown — the photo was already captured under whatever rule
+    /// applied then, and charging it the ten minutes again would mean sharing
+    /// to your story first cost you the ability to keep it.
     private func canPromote(_ post: PostItem) -> Bool {
         post.share_to_feed != true
             && post.workout_on_feed != true
             && !promotedIds.contains(post.post_id)
-            && freshWindow.isOpen
+            && freshWindow.canPostToday
     }
 
     private func addToFeedPill(_ post: PostItem) -> some View {
@@ -846,7 +849,9 @@ private struct StoryGroupPlayerView: View {
                 shareToFeed: true,
                 shareToStory: false,
                 stats: post.stats_snapshot,
-                isAuto: false
+                isAuto: false,
+                // Already-captured photo — the day tier, not the camera clock.
+                photoSource: .existing
             )
             await MainActor.run {
                 promotedIds.insert(post.post_id)
@@ -859,11 +864,11 @@ private struct StoryGroupPlayerView: View {
                 promoteError = "This workout already has a feed post. Delete it first to share this photo instead."
             }
         } catch let APIError.apiError(message) where message == "post_window_closed" {
-            // Backstop for a window that lapsed between render and tap —
+            // Backstop for a day that rolled over between render and tap —
             // canPromote hides the pill, but the story viewer can sit open.
             await MainActor.run {
                 paused = true
-                promoteError = "Photos share in the 10 minutes after a walk or run, and that window just closed. Your story stays up for 24 hours."
+                promoteError = "Feed posts belong to the day's walk or run, and today's has rolled over. Your story stays up for 24 hours."
             }
         } catch {
             print("[StoryViewer] ❌ Add to feed failed: \(error)")
