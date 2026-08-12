@@ -678,20 +678,24 @@ final class MADCameraController {
 
     /// The richest camera for a position: prefer a virtual (fused-lens) device
     /// so zoom is continuous across lenses and 0.5× (ultra-wide) is reachable,
-    /// then fall back through to the plain wide lens. Front cameras have no
-    /// ultra-wide, so they get the wide lens directly.
+    /// then fall back through to the plain wide lens. The front gets its own
+    /// probe order: no iPhone front has an ultra-wide LENS, but a fused front
+    /// device would arrive here for free, and configureZoom turns any
+    /// zoom-OUT reach the attached device reports into a wide stop.
     private static func bestCamera(for position: AVCaptureDevice.Position) -> AVCaptureDevice? {
-        guard position == .back else {
-            return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
-        }
-        let preferred: [AVCaptureDevice.DeviceType] = [
-            .builtInTripleCamera,    // ultra-wide + wide + tele  → 0.5×, 1×, 2×/3×
-            .builtInDualWideCamera,  // ultra-wide + wide         → 0.5×, 1×
-            .builtInDualCamera,      // wide + tele               → 1×, 2×
-            .builtInWideAngleCamera, // wide only                 → 1× + digital
-        ]
+        let preferred: [AVCaptureDevice.DeviceType] = position == .back
+            ? [
+                .builtInTripleCamera,    // ultra-wide + wide + tele  → 0.5×, 1×, 2×/3×
+                .builtInDualWideCamera,  // ultra-wide + wide         → 0.5×, 1×
+                .builtInDualCamera,      // wide + tele               → 1×, 2×
+                .builtInWideAngleCamera, // wide only                 → 1× + digital
+            ]
+            : [
+                .builtInDualWideCamera,  // none shipped yet — picked up if one ever is
+                .builtInWideAngleCamera,
+            ]
         for type in preferred {
-            if let device = AVCaptureDevice.default(type, for: .video, position: .back) {
+            if let device = AVCaptureDevice.default(type, for: .video, position: position) {
                 return device
             }
         }
@@ -719,7 +723,17 @@ final class MADCameraController {
         maxDisplayZoom = maxRaw / referenceZoom
 
         var options: [CGFloat] = []
-        if hasUltraWide { options.append(0.5) }
+        if hasUltraWide {
+            options.append(0.5)
+        } else if minDisplayZoom <= 0.9 {
+            // Not just rear ultra-wides: any attached camera that reports
+            // zoom-OUT reach below 1× earns a one-tap wide stop — which is
+            // what puts "0.5×" on FRONT cameras whose sensor allows the
+            // native app's expanded selfie framing. Labeled by what the
+            // hardware actually offers (nearest tenth, never below 0.5);
+            // pinch could always reach this range, the pill makes it a tap.
+            options.append(max(0.5, (minDisplayZoom * 10).rounded() / 10))
+        }
         options.append(1.0)
         if maxDisplayZoom >= 2 { options.append(2.0) }
 
