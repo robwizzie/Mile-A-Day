@@ -1,4 +1,5 @@
 import SwiftUI
+import HealthKit
 
 // MARK: - Challenge Completion Detail Sheet
 //
@@ -14,19 +15,57 @@ import SwiftUI
 struct ChallengeCompletionDetailSheet: View {
     let completion: ChallengeCompletion
     @ObservedObject var healthManager: HealthKitManager
+    /// Opened from a MISSED day: same challenge, same day's workouts, but
+    /// there is no completion to describe. The header says so and the
+    /// server's "how you did it" fetch is skipped — it answers 404 for a day
+    /// with no completion row, and a spinner ending in nothing reads as
+    /// broken. What the day DID hold (the walks, the miles) still renders,
+    /// which is usually the interesting part of a missed day.
+    var wasMissed: Bool = false
 
     @State private var detail: RemoteChallengeService.CompletionDetailDTO?
     @State private var isLoadingDetail = false
     @State private var hasFetchedDetail = false
 
-    // MARK: Local workout data (same source the old sheet used)
+    // MARK: Local workout data
 
-    private var workouts: [WorkoutRecord] {
-        healthManager.workoutIndex?.workouts(for: completion.date) ?? []
+    /// The day's real HKWorkouts — the only form `WorkoutDedup` can reason
+    /// about, and what makes the numbers here agree with every other surface.
+    private var dayWorkouts: [HKWorkout] {
+        healthManager.cachedWorkouts(onLocalDay: completion.date)
     }
 
+    /// Workouts the app does NOT count toward this day: a cross-app duplicate
+    /// (the same walk arriving from Strava and HealthKit), a source the user
+    /// hasn't approved, or one they excluded by hand. Listing them here made
+    /// the card contradict itself — two 1.02 mi rows under a 1.02 mi total —
+    /// and made the day look longer than the dashboard says it was. Managing
+    /// them stays in the Workouts screen, which labels them rather than
+    /// hiding them; a challenge card only ever shows what counted.
+    private var excludedWorkoutIds: Set<String> {
+        let day = dayWorkouts
+        let reasons = WorkoutDedup.breakdown(in: day).reasons
+        return Set(reasons.keys.compactMap {
+            day.indices.contains($0) ? day[$0].uuid.uuidString : nil
+        })
+    }
+
+    private var workouts: [WorkoutRecord] {
+        let indexed = healthManager.workoutIndex?.workouts(for: completion.date) ?? []
+        let excluded = excludedWorkoutIds
+        // Empty set → nothing to filter (also the cache-miss case for an old
+        // day, where the index is all we have and dropping rows would be a
+        // guess). Degrades to the previous behaviour instead of hiding a walk.
+        guard !excluded.isEmpty else { return indexed }
+        return indexed.filter { !excluded.contains($0.id) }
+    }
+
+    /// `countedMiles` is the app-wide "how far did they go on this day" — the
+    /// same call the dashboard, Insights and the Road view make, deduped and
+    /// with the index fallback. Summing the rows here instead is what put a
+    /// different number on this card than on the dashboard for the same day.
     private var totalDistance: Double {
-        workouts.reduce(0) { $0 + $1.distance }
+        healthManager.countedMiles(onLocalDay: completion.date)
     }
 
     private var totalDuration: TimeInterval {
@@ -68,7 +107,7 @@ struct ChallengeCompletionDetailSheet: View {
 
     @MainActor
     private func loadDetail() async {
-        guard !hasFetchedDetail else { return }
+        guard !wasMissed, !hasFetchedDetail else { return }
         hasFetchedDetail = true
         guard let userId = UserManager.shared.currentUser.backendUserId else { return }
         let localDate = completion.localDate ?? Self.ymdFormatter.string(from: completion.date)
@@ -104,16 +143,31 @@ struct ChallengeCompletionDetailSheet: View {
             ZStack {
                 Circle()
                     .fill(
-                        LinearGradient(
-                            colors: [.green, Color(red: 0.18, green: 0.78, blue: 0.42)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+                        wasMissed
+                            ? LinearGradient(
+                                colors: [.white.opacity(0.16), .white.opacity(0.08)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                            : LinearGradient(
+                                colors: [.green, Color(red: 0.18, green: 0.78, blue: 0.42)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                     )
                     .frame(width: 64, height: 64)
                 Image(systemName: completion.icon)
                     .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundColor(wasMissed ? .white.opacity(0.65) : .white)
+            }
+            if wasMissed {
+                Text("NOT COMPLETED")
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .tracking(1.1)
+                    .foregroundColor(.white.opacity(0.6))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(.white.opacity(0.1)))
             }
             Text(completion.title)
                 .font(.system(size: 22, weight: .heavy, design: .rounded))
@@ -172,7 +226,10 @@ struct ChallengeCompletionDetailSheet: View {
 
     private var daySummaryCard: some View {
         HStack(spacing: 12) {
-            statTile(value: String(format: "%.2f mi", totalDistance), label: "Miles", icon: "figure.run")
+            // Floored, like every other mile the app prints — `%.2f` rounds,
+            // so a 0.995 day read "1.00 mi" here while the dashboard showed
+            // 0.99 for the same walk.
+            statTile(value: totalDistance.milesFormatted, label: "Miles", icon: "figure.run")
             statTile(value: formatDuration(totalDuration), label: "Time", icon: "clock.fill")
             if let pace = averagePace {
                 statTile(value: formatPaceMinutes(pace), label: "Avg pace", icon: "speedometer")
@@ -248,7 +305,7 @@ struct ChallengeCompletionDetailSheet: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
-                Text(String(format: "%.2f mi", record.distance))
+                Text(record.distance.milesFormatted)
                     .font(.system(size: 14, weight: .heavy, design: .rounded))
                     .foregroundColor(.white)
                 Text(formatDuration(record.duration))
@@ -269,10 +326,16 @@ struct ChallengeCompletionDetailSheet: View {
             Image(systemName: "figure.walk.motion")
                 .font(.system(size: 32))
                 .foregroundColor(.white.opacity(0.3))
-            Text("No workout details for this day")
+            Text(wasMissed
+                 ? "No workouts on this day"
+                 : "No workout details for this day")
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
                 .foregroundColor(.white.opacity(0.7))
-            Text("HealthKit history may not be cached this far back.")
+            // On a missed day the likely answer is simply "there weren't any",
+            // so don't blame the cache for it.
+            Text(wasMissed
+                 ? "Nothing was recorded against this challenge."
+                 : "HealthKit history may not be cached this far back.")
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.45))
                 .multilineTextAlignment(.center)
@@ -692,7 +755,10 @@ private struct DistanceCompletionCard: View {
         VStack(alignment: .leading, spacing: 10) {
             detailLabel("DISTANCE")
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(String(format: "%.2f mi", distance.miles))
+                // A raw server sum, not a resolver-rounded duel score — so it
+                // floors like every other mile the app prints (see duelSide
+                // for the one number that deliberately doesn't).
+                Text(distance.miles.milesFormatted)
                     .font(.system(size: 30, weight: .heavy, design: .rounded))
                     .foregroundColor(.white)
                     .monospacedDigit()
@@ -750,7 +816,7 @@ private struct TimeWindowCompletionCard: View {
             Spacer()
 
             if let miles = timeWindow.qualifyingMiles {
-                Text(String(format: "%.2f mi", miles))
+                Text(miles.milesFormatted)
                     .font(.system(size: 14, weight: .heavy, design: .rounded))
                     .foregroundColor(.white.opacity(0.8))
                     .monospacedDigit()
@@ -808,8 +874,8 @@ private struct ActivityCompletionCard: View {
             detailLabel(isCrossTrain ? "YOUR MIX" : "YOUR DAY")
 
             HStack(spacing: 12) {
-                activityTile(icon: "figure.run", title: "Run", value: String(format: "%.2f mi", activity.runMiles))
-                activityTile(icon: "figure.walk", title: "Walk", value: String(format: "%.2f mi", activity.walkMiles))
+                activityTile(icon: "figure.run", title: "Run", value: activity.runMiles.milesFormatted)
+                activityTile(icon: "figure.walk", title: "Walk", value: activity.walkMiles.milesFormatted)
                 if !isCrossTrain {
                     activityTile(icon: "number", title: "Workouts", value: "\(activity.workoutCount)")
                 }

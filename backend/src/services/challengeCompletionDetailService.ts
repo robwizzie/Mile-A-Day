@@ -1,5 +1,8 @@
 import { PostgresService } from "./DbService.js";
-import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
+import {
+  MIN_PLAUSIBLE_MILE_SECONDS,
+  countedWorkoutSql,
+} from "./mileTime.js";
 import {
   ChallengeCompletionDetailResponse,
   ChallengeFriendRef,
@@ -454,6 +457,7 @@ async function bestSplitPace(
     `SELECT MIN(s.split_pace)::text AS min_pace
 		FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
 		WHERE w.user_id = $1 AND w.local_date = $2::date
+			AND ${countedWorkoutSql("w")}
 			AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95`,
     [userId, localDate],
   );
@@ -477,11 +481,13 @@ async function beatYourPaceDetail(
     `WITH prior AS (
 			SELECT MIN(s.split_pace) AS p
 			FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-			WHERE w.user_id = $1 AND w.local_date < $2::date AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
+			WHERE w.user_id = $1 AND w.local_date < $2::date AND ${countedWorkoutSql("w")}
+				AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
 		), today AS (
 			SELECT MIN(s.split_pace) AS p
 			FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-			WHERE w.user_id = $1 AND w.local_date = $2::date AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
+			WHERE w.user_id = $1 AND w.local_date = $2::date AND ${countedWorkoutSql("w")}
+				AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
 		)
 		SELECT prior.p::text AS prior_min, today.p::text AS today_min FROM prior, today`,
     [userId, localDate],

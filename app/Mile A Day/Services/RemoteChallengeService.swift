@@ -14,6 +14,7 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
 
     private let defaults: UserDefaults
     private let completionsKey = "remoteChallengeCompletionsV1"
+    private let missedKey = "remoteChallengeMissedV1"
     private let todayKey = "remoteChallengeTodayV1"
     /// Backend user the `todayKey` snapshot belongs to — restoring another
     /// account's challenge state on a shared install must never happen.
@@ -149,8 +150,24 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
                     localDate: item.localDate
                 )
             }
+            // A missed day is the same "a challenge was on this date" shape as
+            // a completion, so it reuses ChallengeCompletion rather than
+            // growing a parallel model — what distinguishes the two is which
+            // list a date is in, and the grid reads exactly that.
+            let missed: [ChallengeCompletion] = (response.missed ?? []).compactMap { item in
+                guard let date = iso.date(from: item.localDate) ?? Self.parseYmd(item.localDate) else { return nil }
+                return ChallengeCompletion(
+                    date: date,
+                    challengeKey: item.challengeKey,
+                    title: item.title,
+                    icon: item.icon,
+                    description: item.description,
+                    localDate: item.localDate
+                )
+            }
             await MainActor.run {
                 self.save(completions)
+                self.saveMissed(missed)
                 NotificationCenter.default.post(name: ChallengeService.changedNotification, object: nil)
             }
         } catch is CancellationError {
@@ -209,6 +226,31 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         encoder.dateEncodingStrategy = .iso8601
         if let data = try? encoder.encode(completions) {
             defaults.set(data, forKey: completionsKey)
+        }
+    }
+
+    private func saveMissed(_ missed: [ChallengeCompletion]) {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        if let data = try? encoder.encode(missed) {
+            defaults.set(data, forKey: missedKey)
+        }
+    }
+
+    /// The recent days that went by without their challenge being completed.
+    /// Server-derived (selection isn't recorded anywhere), so this is empty
+    /// until the first refresh and on servers that don't send it.
+    func allMissedDays() -> [ChallengeCompletion] {
+        guard let data = defaults.data(forKey: missedKey) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? decoder.decode([ChallengeCompletion].self, from: data)) ?? []
+    }
+
+    func missedDay(on date: Date) -> ChallengeCompletion? {
+        let target = Calendar.current.startOfDay(for: date)
+        return allMissedDays().first {
+            Calendar.current.isDate($0.date, inSameDayAs: target)
         }
     }
 
@@ -382,6 +424,22 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         let totalCompleted: Int
         let currentStreak: Int
         let completions: [CompletionItemDTO]
+        /// Days in the history window that went by uncompleted, each carrying
+        /// the challenge that was on offer. Optional: absent from servers
+        /// older than this field, where the grid just draws empty squares.
+        let missed: [MissedDayDTO]?
+    }
+
+    /// One missed day. Same shape as a completion minus the completion —
+    /// enough for the history grid to say WHAT was missed.
+    struct MissedDayDTO: Codable {
+        let localDate: String
+        let challengeKey: String
+        let title: String
+        let description: String
+        let icon: String
+        let gradientStart: String
+        let gradientEnd: String
     }
 
     // MARK: Matchup history (past Head-to-Head duels)

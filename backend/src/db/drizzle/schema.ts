@@ -935,6 +935,49 @@ export const userChallengeCompletions = pgTable(
   ],
 );
 
+/**
+ * Which daily challenge a user was actually SERVED on a date.
+ *
+ * Selection is otherwise a pure function of the date and the user's
+ * eligibility, re-derived on every read — which means history stops being
+ * reproducible the moment the rotation changes (head_to_head moving to twice
+ * per cycle already did). Stamped on the user's own first read of a day, so a
+ * missed day can name what they saw rather than what the rotation would pick
+ * for that date today. Absent for days they never opened the app: they saw no
+ * challenge then, so there is nothing to contradict and the reader falls back
+ * to re-derivation.
+ */
+export const userDailyChallenges = pgTable(
+  "user_daily_challenges",
+  {
+    userId: text("user_id").notNull(),
+    localDate: date("local_date").notNull(),
+    challengeKey: text("challenge_key").notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "string",
+    })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "user_daily_challenges_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.challengeKey],
+      foreignColumns: [dailyChallenges.challengeKey],
+      name: "user_daily_challenges_challenge_key_fkey",
+    }),
+    primaryKey({
+      columns: [table.userId, table.localDate],
+      name: "user_daily_challenges_pkey",
+    }),
+  ],
+);
+
 export const h2hMatchups = pgTable(
   "h2h_matchups",
   {
