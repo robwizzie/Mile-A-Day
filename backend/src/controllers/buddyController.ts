@@ -15,6 +15,8 @@ import {
   declineSession,
   enrollUser,
   finishParticipation,
+  getBuddyHistory,
+  getBuddyHistoryTotals,
   getInviteCandidates,
   getJoinableFriendSessions,
   getMySessions,
@@ -34,6 +36,12 @@ import {
   listRecurringWalks,
   updateRecurringWalk,
 } from "../services/buddyRecurringService.js";
+import {
+  lockUnearnedPhotos,
+  type ViewerGoalGate,
+} from "../services/postService.js";
+import { getDailyGoalStatus } from "../services/workoutService.js";
+import { signMediaUrlsDeep } from "../services/mediaSigningService.js";
 
 /**
  * Buddy Walks & Runs controllers.
@@ -63,6 +71,21 @@ function handleError(res: Response, error: unknown, logLabel: string): void {
   }
   console.error(`Error ${logLabel}:`, error);
   res.status(500).json({ error: `Error ${logLabel}` });
+}
+
+/**
+ * The viewer's mile status, used to gate today's photos. Mirrors the copy in
+ * postsController — fail-OPEN, so a stats hiccup briefly over-shows rather than
+ * blanking every photo on the screen.
+ */
+async function viewerPhotoGate(userId: string): Promise<ViewerGoalGate> {
+  try {
+    const goal = await getDailyGoalStatus(userId);
+    return { completed: goal.completed, localDate: goal.localDate };
+  } catch (error) {
+    console.error("[buddy viewerPhotoGate] goal status failed:", error);
+    return { completed: true, localDate: "" };
+  }
 }
 
 /** Sentinel for "the client sent a scheduled start we won't accept". */
@@ -536,5 +559,84 @@ export async function partnersController(
     res.json({ partners: await getBuddyPartners(req.userId!) });
   } catch (error) {
     handleError(res, error, "loading buddy partners");
+  }
+}
+
+/**
+ * GET /buddy/history?limit&before&friendId — the walks you've already taken.
+ *
+ * Self-scoped on the token. `before` is the `cursor` from the last entry of the
+ * previous page (or `next_before`), never a hand-built timestamp — it is
+ * emitted in the URL-safe ISO form the feed uses, because a raw
+ * `timestamptz::text` carries a '+' that Express decodes as a space.
+ *
+ * Totals ride along with the FIRST page only: they describe the whole archive,
+ * not the page, so re-sending them while paginating is pure weight.
+ *
+ * Media urls are signed here, like every other endpoint that returns one — the
+ * DB stores bare paths.
+ */
+export async function historyController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const rawLimit = Number(req.query.limit);
+    const before =
+      typeof req.query.before === "string" && req.query.before.length > 0
+        ? req.query.before
+        : null;
+    const friendId =
+      typeof req.query.friendId === "string" && req.query.friendId.length > 0
+        ? req.query.friendId
+        : null;
+
+    const { sessions, next_before } = await getBuddyHistory(req.userId!, {
+      limit: Number.isFinite(rawLimit) ? rawLimit : undefined,
+      before,
+      friendId,
+    });
+
+    // A photo taken TODAY by someone else is still behind the app-wide
+    // "finish your mile to see today's photos" gate — the history screen is
+    // not a way around it. lockUnearnedPhotos keys on the poster and the
+    // post's local_date, so every older walk passes through untouched. A
+    // withheld photo is DROPPED here rather than shipped blank: the feed draws
+    // a deliberate locked card in its place, and there is nothing to draw a
+    // lock on in a history thumbnail strip.
+    const gate = await viewerPhotoGate(req.userId!);
+    for (const session of sessions) {
+      const gated = lockUnearnedPhotos(
+        session.photos.map((photo) => ({
+          ...photo,
+          local_date: session.local_date,
+          is_auto: false,
+        })),
+        req.userId!,
+        gate,
+      );
+      session.photos = gated
+        .filter((photo) => !!photo.media_url)
+        .map(({ post_id, user_id, media_url, caption }) => ({
+          post_id,
+          user_id,
+          media_url: media_url ?? "",
+          caption,
+        }));
+    }
+
+    res.json(
+      signMediaUrlsDeep({
+        sessions,
+        next_before,
+        // Absent on later pages; the client keeps what page 1 gave it.
+        totals: before
+          ? undefined
+          : await getBuddyHistoryTotals(req.userId!, friendId),
+      }),
+    );
+  } catch (error) {
+    handleError(res, error, "loading buddy history");
   }
 }

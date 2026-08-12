@@ -37,6 +37,8 @@ struct BuddyStartSheet: View {
     /// Weekdays this walk repeats on, 0 = Sunday (matching the server's
     /// EXTRACT(DOW)). Empty = a one-off, which is the default.
     @State private var repeatDays: Set<Int> = []
+    /// The archive of walks already taken, from the "You've walked with" header.
+    @State private var showHistory = false
 
     /// Last setup, restored on open.
     ///
@@ -141,6 +143,16 @@ struct BuddyStartSheet: View {
                 Button("OK", role: .cancel) { errorText = nil }
             } message: {
                 Text(errorText ?? "")
+            }
+            .sheet(isPresented: $showHistory) {
+                // "Walk with Sam again" from inside the setup form means
+                // exactly "tick Sam", not "open another setup form".
+                BuddyWalksHistoryView(onWalkAgain: { userId in
+                    guard let userId,
+                        buddy.candidates.contains(where: { $0.userId == userId })
+                    else { return }
+                    selected.insert(userId)
+                })
             }
         }
     }
@@ -285,7 +297,25 @@ struct BuddyStartSheet: View {
     private var partnersSection: some View {
         if !buddy.partners.isEmpty {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                sectionTitle("You've walked with")
+                HStack {
+                    sectionTitle("You've walked with")
+                    Spacer()
+                    // The counts below are a summary of an archive that, until
+                    // this link, had nowhere to be opened from.
+                    Button {
+                        MADHaptics.tap()
+                        showHistory = true
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text("See all")
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                }
                 VStack(spacing: 0) {
                     ForEach(Array(buddy.partners.prefix(5).enumerated()), id: \.element.id) {
                         index, partner in

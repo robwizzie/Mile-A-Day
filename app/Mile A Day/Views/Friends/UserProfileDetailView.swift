@@ -466,6 +466,16 @@ struct UserProfileDetailView: View {
                     ownerImageURL: user.profile_image_url
                 )
             }
+            // "12 walks together" — the number is only interesting next to the
+            // person it's about, and the row opens the history already filtered
+            // to them. Friends only, matching the today-progress card above:
+            // buddy walks are a friends-only feature, so offering one to a
+            // stranger's profile is a button that can't work. Own profile gets
+            // the full section instead.
+            if !isCurrentUser(), friendService.isFriend(user) {
+                BuddyWalksTogetherRow(
+                    userId: user.user_id, displayName: user.displayName)
+            }
             HallOfStreaksSection(userId: user.user_id, isSelf: isCurrentUser())
             if !friendWorkouts.isEmpty {
                 VStack(spacing: MADTheme.Spacing.md) {

@@ -95,6 +95,18 @@ enum BuddyMode: String, Codable, CaseIterable, Identifiable {
     var goalOptions: [Double] {
         self == .raceTime ? [10, 15, 20, 30, 45, 60] : [1, 2, 3, 5, 10]
     }
+
+    /// An unrecognized future mode decodes as `.together` rather than failing
+    /// the whole payload — the same survival rule the two status enums below
+    /// already follow, and it matters more here: mode rides on every session
+    /// AND on every row of the walk history, so one unknown value would take
+    /// out an entire page rather than one card. `together` is the safe landing
+    /// spot because it is the mode that asserts the least: no goal, no winner,
+    /// no scoring claim about a walk this build can't score.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = BuddyMode(rawValue: raw) ?? .together
+    }
 }
 
 /// How a session came to exist. Sent at create time purely so we can measure
@@ -588,4 +600,223 @@ struct BuddyPartner: Codable, Identifiable, Equatable {
 
 struct BuddyPartnersResponse: Codable {
     let partners: [BuddyPartner]
+}
+
+// MARK: - History
+
+/// A photo somebody posted from a past walk.
+///
+/// The server resolves these through the SAME post-access guard the feed and
+/// comments use, so a photo that left the feed leaves the history with it —
+/// having walked with someone is not standing permission to see their photos.
+struct BuddyWalkPhoto: Codable, Identifiable, Equatable {
+    let postId: String
+    let userId: String
+    let mediaUrl: String
+    let caption: String?
+
+    var id: String { postId }
+
+    /// The DB stores bare paths and the server signs them at read; resolving
+    /// against the API host is `ProfileImageService.fullImageURL`'s job, the
+    /// same helper `PostItem.mediaURL` uses. A raw `URL(string:)` here would
+    /// produce a relative url that loads nothing.
+    var url: URL? { ProfileImageService.fullImageURL(for: mediaUrl) }
+
+    enum CodingKeys: String, CodingKey {
+        case postId = "post_id"
+        case userId = "user_id"
+        case mediaUrl = "media_url"
+        case caption
+    }
+}
+
+/// One person on a past walk.
+///
+/// `username`/`firstName`/`profileImageUrl` come back nil when the viewer can
+/// no longer see that profile (the friendship ended). Their miles still count
+/// toward the walk's total — the walk happened — so the row renders
+/// anonymously rather than disappearing.
+struct BuddyWalkParticipant: Codable, Identifiable, Equatable {
+    let userId: String
+    let username: String?
+    let firstName: String?
+    let profileImageUrl: String?
+    let distanceMiles: Double
+    let durationSeconds: Int
+    let place: Int?
+    let isHost: Bool
+
+    var id: String { userId }
+
+    /// True when the viewer can still see who this was.
+    var isNamed: Bool {
+        (firstName?.isEmpty == false) || (username?.isEmpty == false)
+    }
+
+    var displayName: String {
+        if let firstName, !firstName.isEmpty { return firstName }
+        if let username, !username.isEmpty { return username }
+        return "A friend"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case username
+        case firstName = "first_name"
+        case profileImageUrl = "profile_image_url"
+        case distanceMiles = "distance_miles"
+        case durationSeconds = "duration_seconds"
+        case place
+        case isHost = "is_host"
+    }
+}
+
+/// A walk you've already taken, as the history screen draws it.
+struct BuddyWalkRecord: Codable, Identifiable, Equatable {
+    let id: String
+    let mode: BuddyMode
+    let activityType: String
+    let goalValue: Double?
+    /// `date` column, so a plain string is safe (see BuddyDate for the
+    /// timestamptz ones below).
+    let localDate: String
+    let startedAtRaw: String?
+    let endedAtRaw: String?
+    let winnerUserId: String?
+    let groupDistanceMiles: Double
+    let myDistanceMiles: Double
+    let myDurationSeconds: Int
+    let myPlace: Int?
+    let participants: [BuddyWalkParticipant]
+    let photos: [BuddyWalkPhoto]
+    /// Keyset cursor. Pass the LAST record's cursor as `before` for the next
+    /// page — never a hand-built timestamp.
+    let cursor: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case mode
+        case activityType = "activity_type"
+        case goalValue = "goal_value"
+        case localDate = "local_date"
+        case startedAtRaw = "started_at"
+        case endedAtRaw = "ended_at"
+        case winnerUserId = "winner_user_id"
+        case groupDistanceMiles = "group_distance_miles"
+        case myDistanceMiles = "my_distance_miles"
+        case myDurationSeconds = "my_duration_seconds"
+        case myPlace = "my_place"
+        case participants
+        case photos
+        case cursor
+    }
+
+    // MARK: Derived
+
+    var startedAtDate: Date? { BuddyDate.parse(startedAtRaw) }
+    var endedAtDate: Date? { BuddyDate.parse(endedAtRaw) }
+
+    var isRunning: Bool { activityType == "running" }
+    var accentColor: Color { MADTheme.workoutColor(isRunning ? "running" : "walking") }
+
+    /// Everyone but the viewer. The walk's identity is who you were with.
+    func others(excluding viewerId: String?) -> [BuddyWalkParticipant] {
+        participants.filter { $0.userId != viewerId }
+    }
+
+    /// "You and Sam" / "You, Sam and 2 others" — the line that names the walk.
+    func crewText(excluding viewerId: String?) -> String {
+        let names = others(excluding: viewerId).map(\.displayName)
+        switch names.count {
+        case 0: return "On your own"
+        case 1: return "You and \(names[0])"
+        case 2: return "You, \(names[0]) and \(names[1])"
+        default:
+            return "You, \(names[0]) and \(names.count - 1) others"
+        }
+    }
+
+    /// Wall-clock length of the walk. Falls back to the viewer's own recorded
+    /// duration when the session never stamped an end (a swept-abandoned room).
+    var durationSeconds: Int {
+        if let start = startedAtDate, let end = endedAtDate {
+            let span = Int(end.timeIntervalSince(start))
+            if span > 0 { return span }
+        }
+        return myDurationSeconds
+    }
+
+    /// "42m" / "1h 08m". Never "0m" — a walk that took no time reads as broken.
+    var durationText: String {
+        let seconds = max(durationSeconds, 60)
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        return hours > 0 ? "\(hours)h \(String(format: "%02d", minutes))m" : "\(minutes)m"
+    }
+
+    /// The walk's calendar day.
+    ///
+    /// `local_date` is a LABEL ("2026-08-11"), not an instant, so it is parsed
+    /// in the DEVICE's zone — which is the zone everything downstream then
+    /// renders and compares in (`isDateInToday`, `.formatted`). Parsing it as
+    /// ET or UTC and then formatting locally is the bug HallOfStreaksSection
+    /// documents: the two zones disagree and every date prints one day early
+    /// across the Americas.
+    var date: Date? { BuddyWalkRecord.dayFormatter.date(from: localDate) }
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        // POSIX so a non-Gregorian device calendar can't reinterpret the
+        // fixed format; time zone deliberately left at the system default.
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter
+    }()
+
+    var dayText: String {
+        guard let date else { return localDate }
+        if Calendar.current.isDateInToday(date) { return "Today" }
+        if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
+        return date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+    }
+
+    /// "AUGUST 2026" — the timeline's section header.
+    var monthKey: String {
+        guard let date else { return "" }
+        return date.formatted(.dateTime.month(.wide).year()).uppercased()
+    }
+}
+
+/// Lifetime shared-walk totals, as the history screen's headline.
+struct BuddyHistoryTotals: Codable, Equatable {
+    let walks: Int
+    /// The viewer's OWN miles — see `BuddyPartner` for why a pooled figure
+    /// would disagree with itself from the other side.
+    let miles: Double
+    let partners: Int
+    let firstWalkDate: String?
+    let lastWalkDate: String?
+
+    enum CodingKeys: String, CodingKey {
+        case walks
+        case miles
+        case partners
+        case firstWalkDate = "first_walk_date"
+        case lastWalkDate = "last_walk_date"
+    }
+}
+
+/// `totals` rides the FIRST page only — it describes the whole archive, not the
+/// page, so the client keeps what page 1 gave it while paginating.
+struct BuddyHistoryResponse: Codable {
+    let sessions: [BuddyWalkRecord]
+    let nextBefore: String?
+    let totals: BuddyHistoryTotals?
+
+    enum CodingKeys: String, CodingKey {
+        case sessions
+        case nextBefore = "next_before"
+        case totals
+    }
 }

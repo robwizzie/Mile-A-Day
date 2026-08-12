@@ -78,6 +78,12 @@ jobs:
       # as 2.55 in production.
       - name: Cross-app duplicate containment check
         run: node scripts/dedupe-containment-check.mjs
+      # The buddy history archive. Everything that can go wrong with a
+      # per-viewer archive goes wrong silently — a walk missing from the list,
+      # an un-friended name still rendering, a photo reachable here that the
+      # feed would refuse, a cursor that repeats a row on page 2.
+      - name: Buddy history visibility + paging check
+        run: node scripts/buddy-history-check.mjs
       # Two prod-only push failures, neither reproducible without a shell there.
       # APNS_KEY is pasted into a dashboard in four different shapes and one of
       # them silently produced an unsignable PEM; device-token pruning is the

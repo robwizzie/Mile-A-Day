@@ -170,6 +170,74 @@ export interface BuddySessionState {
   group_distance_miles: number;
 }
 
+// ─── History ────────────────────────────────────────────────────────────
+//
+// The archive of walks you've already taken. Everything here is DERIVED from
+// the same participant rows the live session wrote — no new writes, no counters
+// to drift, and a walk taken before this screen existed shows up in it.
+
+/** One person on a past walk, as the history screen draws them. */
+export interface BuddyHistoryParticipant {
+  user_id: string;
+  /**
+   * Null when the viewer can no longer see this person's profile (the
+   * friendship ended). The walk still happened and their miles still count
+   * toward the group total — but "we walked together once" is not permanent
+   * access to someone's name and photo, so the client renders them anonymously.
+   */
+  username: string | null;
+  first_name: string | null;
+  profile_image_url: string | null;
+  /** Reconciled distance where it exists, live distance otherwise. */
+  distance_miles: number;
+  duration_seconds: number;
+  place: number | null;
+  is_host: boolean;
+}
+
+/** A photo from a past walk. Media urls are signed by the controller. */
+export interface BuddyHistoryPhoto {
+  post_id: string;
+  user_id: string;
+  media_url: string;
+  caption: string | null;
+  photo_locked?: boolean;
+}
+
+/** One finished buddy walk, newest first on the history screen. */
+export interface BuddyHistoryEntry {
+  id: string;
+  mode: BuddyMode;
+  activity_type: string;
+  goal_value: number | null;
+  local_date: string;
+  started_at: string | null;
+  ended_at: string | null;
+  winner_user_id: string | null;
+  /** Pooled distance across everyone who finished — including anyone the
+   * viewer can't see, so the number matches what the recap showed on the day. */
+  group_distance_miles: number;
+  my_distance_miles: number;
+  my_duration_seconds: number;
+  my_place: number | null;
+  participants: BuddyHistoryParticipant[];
+  photos: BuddyHistoryPhoto[];
+  /** Keyset cursor for the next page. */
+  cursor: string;
+}
+
+/** Lifetime shared-walk totals, shown as the history screen's headline. */
+export interface BuddyHistoryTotals {
+  walks: number;
+  /** The VIEWER's own miles across those walks — see getBuddyPartners for why
+   * a pooled figure would disagree with itself from the other side. */
+  miles: number;
+  /** Distinct people you've finished a walk with. */
+  partners: number;
+  first_walk_date: string | null;
+  last_walk_date: string | null;
+}
+
 export type BuddyEventKind =
   | "created"
   /** Host changed the lobby's mode/goal/activity/schedule before starting. */

@@ -18,6 +18,8 @@ struct BuddyRecapView: View {
     /// Item-presented (ios.md): the wizard needs the loaded session, and an
     /// isPresented flag beside separate state can race to a stale value.
     @State private var wizardSession: BuddySessionState?
+    /// Every walk you've taken with these people, from the link below.
+    @State private var showHistory = false
 
     var body: some View {
         NavigationStack {
@@ -32,6 +34,7 @@ struct BuddyRecapView: View {
                             headline(session)
                             standings(session)
                             postSection(session)
+                            historyLink(session)
                             Color.clear.frame(height: MADTheme.Spacing.lg)
                         }
                         .padding(MADTheme.Spacing.md)
@@ -55,6 +58,12 @@ struct BuddyRecapView: View {
                     }
                 }
             }
+        }
+        // On the NavigationStack, NOT the ScrollView that already carries the
+        // wizard's fullScreenCover — two presentations on one node and SwiftUI
+        // silently drops one (ios.md).
+        .sheet(isPresented: $showHistory) {
+            BuddyWalksHistoryView()
         }
         .task { await load() }
     }
@@ -306,6 +315,34 @@ struct BuddyRecapView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, MADTheme.Spacing.md)
         }
+    }
+
+    /// "This one and 11 more" — the walk just taken, put in the context of the
+    /// ones before it. The recap is the moment the history is most worth
+    /// opening: you have just finished a walk with this person, so the
+    /// accumulating total is at its most persuasive right here.
+    ///
+    /// A plain link rather than a card: the post CTA above is this screen's
+    /// primary action and must stay the loudest thing on it.
+    private func historyLink(_ session: BuddySessionState) -> some View {
+        Button {
+            MADHaptics.tap()
+            showHistory = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "figure.2")
+                    .font(.system(size: 13, weight: .semibold))
+                Text("See all your walks together")
+                    .font(MADTheme.Typography.smallBold)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .foregroundStyle(session.accentColor)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, MADTheme.Spacing.sm)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Copy

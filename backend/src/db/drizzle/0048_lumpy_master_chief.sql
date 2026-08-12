@@ -1,0 +1,1 @@
+CREATE INDEX "idx_post_coauthors_buddy_session" ON "post_coauthors" USING btree ("buddy_session_id");
