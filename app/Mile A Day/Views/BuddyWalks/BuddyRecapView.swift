@@ -15,7 +15,9 @@ struct BuddyRecapView: View {
 
     @State private var recap: BuddyRecapResponse?
     @State private var isLoading = true
-    @State private var showComposer = false
+    /// Item-presented (ios.md): the wizard needs the loaded session, and an
+    /// isPresented flag beside separate state can race to a stale value.
+    @State private var wizardSession: BuddySessionState?
 
     var body: some View {
         NavigationStack {
@@ -29,10 +31,13 @@ struct BuddyRecapView: View {
                         VStack(spacing: MADTheme.Spacing.lg) {
                             headline(session)
                             standings(session)
-                            shareButton(session)
+                            postSection(session)
                             Color.clear.frame(height: MADTheme.Spacing.lg)
                         }
                         .padding(MADTheme.Spacing.md)
+                    }
+                    .fullScreenCover(item: $wizardSession) { session in
+                        BuddyPostWizardView(session: session)
                     }
                 } else {
                     Text("Couldn't load the recap.")
@@ -246,15 +251,50 @@ struct BuddyRecapView: View {
         .frame(height: 6)
     }
 
-    /// Sharing follows the same 10-minute rule as every other photo post, and a
-    /// recap is reachable long after the walk (deep link, notification, a
-    /// screen left open). So the CTA reflects the window rather than 403-ing on
-    /// tap — and it says what closed rather than just going grey, since this is
-    /// the screen's primary action.
+    /// The post flow's front door — opens the crew-and-routes wizard
+    /// (BuddyPostWizardView), which owns the composer hand-off. Posting
+    /// follows the same 10-minute rule as every other photo post, and a recap
+    /// is reachable long after the walk (deep link, notification, a screen
+    /// left open) — so the CTA reflects the window rather than 403-ing on
+    /// tap, and it says what closed rather than just going grey, since this
+    /// is the screen's primary action.
     @ViewBuilder
-    private func shareButton(_ session: BuddySessionState) -> some View {
+    private func postSection(_ session: BuddySessionState) -> some View {
         if freshWindow.isOpen {
-            shareCTA(session)
+            Button {
+                MADHaptics.action()
+                wizardSession = session
+            } label: {
+                HStack(spacing: MADTheme.Spacing.md) {
+                    ZStack {
+                        Circle()
+                            .fill(MADTheme.Colors.madWhite.opacity(0.18))
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(session.isRunning ? "Post this run" : "Post this walk")
+                            .font(MADTheme.Typography.bodyBold)
+                        Text("Everyone's on it — see the crew and routes first")
+                            .font(MADTheme.Typography.caption)
+                            .opacity(0.85)
+                    }
+                    Spacer(minLength: MADTheme.Spacing.sm)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .bold))
+                        .opacity(0.85)
+                }
+                .foregroundStyle(MADTheme.Colors.madWhite)
+                .padding(MADTheme.Spacing.md)
+                .background(
+                    RoundedRectangle(
+                        cornerRadius: MADTheme.CornerRadius.large, style: .continuous
+                    )
+                    .fill(session.accentColor)
+                )
+            }
+            .buttonStyle(.plain)
         } else {
             Text("Photos share in the 10 minutes after a walk — that window has closed.")
                 .font(MADTheme.Typography.caption)
@@ -263,70 +303,6 @@ struct BuddyRecapView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, MADTheme.Spacing.md)
         }
-    }
-
-    /// Post the walk as one collab crediting everyone who finished it.
-    ///
-    /// The participants are passed through rather than picked: the whole point
-    /// of a buddy recap is that you didn't do it alone, so making the poster
-    /// re-select the people they just walked with would be busywork. The
-    /// server still validates every id (accepted friend, no block) and quietly
-    /// drops any that fail, so a stale roster degrades instead of erroring.
-    private func shareCTA(_ session: BuddySessionState) -> some View {
-        Button {
-            MADHaptics.action()
-            showComposer = true
-        } label: {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: "square.and.arrow.up")
-                Text("Share this walk")
-            }
-            .font(MADTheme.Typography.bodyBold)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, MADTheme.Spacing.md)
-            .background(Capsule().fill(session.accentColor))
-            .foregroundStyle(MADTheme.Colors.madWhite)
-        }
-        .buttonStyle(.plain)
-        .fullScreenCover(isPresented: $showComposer) {
-            PostComposerView(
-                stats: composerStats(session),
-                buddyCoauthorIds: coauthorIds(session),
-                buddySessionId: session.id
-            ) { _ in
-                showComposer = false
-            }
-        }
-    }
-
-    /// Everyone who finished except the poster.
-    private func coauthorIds(_ session: BuddySessionState) -> [String] {
-        session.participants
-            .filter { $0.status == .finished && $0.userId != buddy.currentUserId }
-            .map(\.userId)
-    }
-
-    /// The poster's OWN numbers — a collab post still shows one person's run,
-    /// and using the group total here would credit everyone's miles to whoever
-    /// happened to tap share.
-    private func composerStats(_ session: BuddySessionState) -> RunStatsInput {
-        let me = session.me(buddy.currentUserId)
-        let distance = me?.bestDistance ?? 0
-        let duration = Double(me?.durationSeconds ?? 0)
-        return RunStatsInput(
-            distance: distance,
-            paceSecondsPerMile: distance > 0 && duration > 0 ? duration / distance : nil,
-            durationSeconds: duration > 0 ? duration : nil,
-            streak: UserManager.shared.currentUser.streak,
-            calories: nil,
-            steps: nil,
-            // Links the post to the real workout once it has synced. Nil until
-            // then, which just means the post isn't tied to a run — better than
-            // guessing at an id and colliding with the one-post-per-workout
-            // constraint.
-            workoutId: me?.workoutId,
-            dateText: nil
-        )
     }
 
     // MARK: - Copy

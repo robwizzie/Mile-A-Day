@@ -49,8 +49,16 @@ struct PostShareStepView: View {
 
                     destinationSection
                     // Collabs are a feed concept — only offered once the chosen
-                    // destination actually includes the feed.
-                    if vm.destination?.toFeed == true { coauthorRow }
+                    // destination actually includes the feed. A buddy-walk post
+                    // arrives with its crew already settled by the wizard, so it
+                    // gets the read-only crew row, never the manual picker.
+                    if vm.destination?.toFeed == true {
+                        if vm.buddyCoauthorIds.isEmpty {
+                            coauthorRow
+                        } else {
+                            buddyCrewRow
+                        }
+                    }
                     if vm.hasRoute { routeToggle }
 
                     if let error = vm.errorMessage {
@@ -312,6 +320,44 @@ struct PostShareStepView: View {
     }
 
     // MARK: - Co-poster
+
+    /// Buddy-walk posts: the crew was settled on the wizard's first step, so
+    /// this row just states who's riding along — no picker, no X buttons.
+    /// (Un-crediting someone you walked with belongs to them: they get the
+    /// "Remove me" action on the tag notification.)
+    private var buddyCrewRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "person.2.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(MADTheme.Colors.madRed)
+            Text(buddyCrewLine)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .fill(Color.white.opacity(0.06))
+        )
+    }
+
+    private var buddyCrewLine: String {
+        let names = vm.buddyCrewNames
+        switch names.count {
+        case 0:
+            // Ids without names (shouldn't happen from the wizard) — still
+            // say the post is a group one rather than showing a picker.
+            return "Posting with your crew"
+        case 1:
+            return "Posting with \(names[0])"
+        case 2:
+            return "Posting with \(names[0]) and \(names[1])"
+        default:
+            return "Posting with \(names[0]), \(names[1]) and \(names.count - 2) more"
+        }
+    }
 
     /// "Ran it together?" — pick ONE friend to co-post with. They're invited
     /// on share and the post goes dual-author once they accept.
