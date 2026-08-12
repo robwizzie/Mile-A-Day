@@ -11,6 +11,11 @@ struct ChallengeCompletion: Codable, Identifiable, Equatable {
     let title: String
     let icon: String
     let description: String
+    /// The server's own "yyyy-MM-dd" for this completion, kept verbatim so the
+    /// detail endpoint can be addressed without re-deriving a date string from
+    /// `date` (which is device-local and could shift across timezones).
+    /// Optional: blobs persisted before this field decode as nil and fall back.
+    let localDate: String?
 
     init(
         id: UUID = UUID(),
@@ -18,7 +23,8 @@ struct ChallengeCompletion: Codable, Identifiable, Equatable {
         challengeKey: String,
         title: String,
         icon: String,
-        description: String
+        description: String,
+        localDate: String? = nil
     ) {
         self.id = id
         self.date = Calendar.current.startOfDay(for: date)
@@ -26,5 +32,6 @@ struct ChallengeCompletion: Codable, Identifiable, Equatable {
         self.title = title
         self.icon = icon
         self.description = description
+        self.localDate = localDate
     }
 }

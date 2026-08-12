@@ -5,6 +5,8 @@ import {
   getCompletions,
   getTodaysCompletion,
 } from "../services/dailyChallengeService.js";
+import { getCompletionDetail } from "../services/challengeCompletionDetailService.js";
+import { signMediaUrlsDeep } from "../services/mediaSigningService.js";
 import { areFriends } from "../services/friendshipService.js";
 import { getMatchupHistory } from "../services/h2hMatchupService.js";
 import { PostgresService } from "../services/DbService.js";
@@ -66,6 +68,39 @@ export async function getCompletionsForUser(
     return res
       .status(500)
       .json({ error: "Error getting challenge completions: " + err.message });
+  }
+}
+
+/**
+ * How a past completion was earned — duel scores, the shared photo, who was
+ * hyped/nudged, pace/distance/steps numbers. Fetched lazily when a completion
+ * sheet opens. 404 when the date has no completion. The post section carries
+ * a media url, so the payload is signed on the way out.
+ */
+export async function getCompletionDetailForUser(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!hasRequiredKeys(["userId", "localDate"], req, res)) return;
+
+  const localDate = req.params.localDate;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(localDate)) {
+    return res.status(400).json({ error: "localDate must be YYYY-MM-DD" });
+  }
+
+  try {
+    const detail = await getCompletionDetail(req.params.userId, localDate);
+    if (!detail) {
+      return res
+        .status(404)
+        .json({ error: "No challenge completion for this date" });
+    }
+    return res.status(200).json(signMediaUrlsDeep(detail));
+  } catch (err: any) {
+    console.error("Error getting challenge completion detail:", err.message);
+    return res.status(500).json({
+      error: "Error getting challenge completion detail: " + err.message,
+    });
   }
 }
 
