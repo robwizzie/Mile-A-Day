@@ -52,6 +52,28 @@ export function dayOfYear(ymd: string): number {
 }
 
 /**
+ * The sequence the daily walk actually traverses: the catalog rows in
+ * rotation_index order, with head_to_head occurring a SECOND time roughly
+ * half a cycle away from the first. Head-to-Head is the catalog's favorite,
+ * so it shows up twice per rotation instead of once — done here, in the one
+ * sequence both the per-user selection and the batch matchmaker walk, rather
+ * than as a second catalog row: a `head_to_head_2` key would flow into
+ * completions and pushes that shipped builds route by the exact string.
+ */
+export function rotationSequence(rows: ChallengeRow[]): ChallengeRow[] {
+  const first = rows.findIndex((r) => r.challenge_key === "head_to_head");
+  // A catalog too small to repeat into (or with no h2h at all) walks as-is.
+  if (first < 0 || rows.length < 4) return rows;
+  const seq = [...rows];
+  // Insert half a (post-insert) cycle before the first occurrence so the two
+  // land as evenly spaced as an integer split allows.
+  const cycle = rows.length + 1;
+  const at = (first - Math.floor(cycle / 2) + cycle) % cycle;
+  seq.splice(at, 0, rows[first]);
+  return seq;
+}
+
+/**
  * The base pick is deterministic by date (so friends on the same day tend to
  * share a challenge); an ineligible pick deterministically advances to the
  * next eligible challenge in the rotation. Falls back to the base pick if
@@ -62,12 +84,13 @@ export async function walkRotation(
   localDate: string,
   isEligible: (row: ChallengeRow) => Promise<boolean> | boolean,
 ): Promise<ChallengeRow> {
-  const baseIdx = dayOfYear(localDate) % rows.length;
-  for (let i = 0; i < rows.length; i++) {
-    const candidate = rows[(baseIdx + i) % rows.length];
+  const seq = rotationSequence(rows);
+  const baseIdx = dayOfYear(localDate) % seq.length;
+  for (let i = 0; i < seq.length; i++) {
+    const candidate = seq[(baseIdx + i) % seq.length];
     if (await isEligible(candidate)) return candidate;
   }
-  return rows[baseIdx];
+  return seq[baseIdx];
 }
 
 /**

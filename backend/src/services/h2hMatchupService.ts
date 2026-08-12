@@ -119,7 +119,9 @@ export async function getOrAssignRival(
   if (friends.length === 0) return null;
 
   // Prefer a recently-active rival (same 7-days-before-date signal as the
-  // matchmaker's leftover ranking), then the day's edge score.
+  // matchmaker's leftover ranking), then the day's edge score. Same
+  // fresh-faces-first penalty as the matchmaker: last two duel days' rivals
+  // rank behind everyone else, but stay pickable when they're all there is.
   const candidateIds = friends.map((f) => f.friend_id);
   const activeRows = await db.query<{ user_id: string }>(
     `SELECT DISTINCT user_id FROM workouts
@@ -129,12 +131,21 @@ export async function getOrAssignRival(
     [candidateIds, localDate],
   );
   const recentlyActive = new Set(activeRows.map((r) => r.user_id));
+  const recentRivalRows = await db.query<{ rival_id: string }>(
+    `SELECT rival_id FROM h2h_matchups
+		WHERE user_id = $1 AND local_date < $2::date
+		ORDER BY local_date DESC LIMIT 2`,
+    [userId, localDate],
+  );
+  const recentRivals = recentRivalRows.map((r) => r.rival_id);
 
   let rivalId = candidateIds[0];
   let bestTier = Number.POSITIVE_INFINITY;
   let bestScore = Number.POSITIVE_INFINITY;
   for (const c of candidateIds) {
-    const t = recentlyActive.has(c) ? 0 : 1;
+    const t =
+      (recentlyActive.has(c) ? 0 : 1) +
+      recentRivals.filter((r) => r === c).length * 4;
     const s = edgeScore(userId, c, localDate);
     const better =
       t < bestTier ||
@@ -230,6 +241,12 @@ type PoolClient = Awaited<ReturnType<PostgresService["getClient"]>>;
  * Leftover pool users get a one-sided rival: their best-scored allowed pool
  * neighbor (someone also dueling today) if any, else their best-scored
  * allowed friend overall.
+ *
+ * Fresh faces first: a candidate who was this user's rival on either of their
+ * last two duel days carries a repeat PENALTY (see recentRivalPenalty) that
+ * sorts them behind every fresh candidate — "you got the same rival two weeks
+ * running" is the outcome this exists to prevent. A penalty, never a filter:
+ * someone whose only eligible friend is last time's rival still gets a duel.
  */
 async function computeAndInsertMatchups(
   client: PoolClient,
@@ -353,7 +370,37 @@ async function computeAndInsertMatchups(
   );
   if (pool.size === 0) return;
 
+  // Each pool user's rivals from their most recent TWO duel days before this
+  // one (matchup days, not calendar days — h2h runs twice a rotation now).
+  // History is fixed for the whole day, so the penalty is as deterministic as
+  // the edge score it tie-breaks against.
+  const recentRows = (
+    await client.query<{ user_id: string; rival_id: string }>(
+      `SELECT user_id, rival_id FROM (
+				SELECT user_id, rival_id,
+					ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY local_date DESC) AS rn
+				FROM h2h_matchups
+				WHERE user_id = ANY($1::text[]) AND local_date < $2::date
+			) recent WHERE rn <= 2`,
+      [[...pool], localDate],
+    )
+  ).rows;
+  const recentRivals = new Map<string, string[]>();
+  for (const r of recentRows) {
+    const list = recentRivals.get(r.user_id);
+    if (list) list.push(r.rival_id);
+    else recentRivals.set(r.user_id, [r.rival_id]);
+  }
+  /** 0 = fresh face, 1 = rival on one of the last two duel days, 2 = both. */
+  const recentRivalPenalty = (uid: string, candidate: string): number => {
+    let n = 0;
+    for (const r of recentRivals.get(uid) ?? []) if (r === candidate) n++;
+    return n;
+  };
+
   // Mutual pairs need BOTH directions allowed — each side must see the other.
+  // Repeat-free edges pair first; a rematch only happens between users no
+  // fresh edge could pair.
   const scored = edges
     .filter(
       (e) =>
@@ -365,11 +412,17 @@ async function computeAndInsertMatchups(
     .map((e) => ({
       a: e.user_id,
       b: e.friend_id,
+      penalty:
+        recentRivalPenalty(e.user_id, e.friend_id) +
+        recentRivalPenalty(e.friend_id, e.user_id),
       score: edgeScore(e.user_id, e.friend_id, localDate),
     }))
     .sort(
       (x, y) =>
-        x.score - y.score || x.a.localeCompare(y.a) || x.b.localeCompare(y.b),
+        x.penalty - y.penalty ||
+        x.score - y.score ||
+        x.a.localeCompare(y.a) ||
+        x.b.localeCompare(y.b),
     );
 
   const rivalOf = new Map<string, { rivalId: string; mutual: boolean }>();
@@ -401,7 +454,12 @@ async function computeAndInsertMatchups(
     let bestScore = Number.POSITIVE_INFINITY;
     for (const c of neighbors.get(uid) ?? []) {
       if (!allows(uid, c)) continue;
-      const t = (recentlyActive.has(c) ? 0 : 2) + (pool.has(c) ? 0 : 1);
+      // +4 per recent-rival hit: worse than every fresh tier (max 3), so a
+      // rematch is only picked when no fresh candidate exists at all.
+      const t =
+        (recentlyActive.has(c) ? 0 : 2) +
+        (pool.has(c) ? 0 : 1) +
+        recentRivalPenalty(uid, c) * 4;
       const s = edgeScore(uid, c, localDate);
       const better =
         t < bestTier ||
