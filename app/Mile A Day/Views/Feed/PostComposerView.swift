@@ -126,9 +126,25 @@ enum PostComposeOutcome {
     case published(toFeed: Bool, toStory: Bool)
 }
 
+/// Where the photo on the canvas came from. Declared to the server, which holds
+/// the two sources to two different clocks: a live capture to the ten minutes
+/// after the walk, a camera-roll pick to the rest of the day (it's already
+/// proven to be FROM the walk by when it was shot — see
+/// `WorkoutPhotoImportPicker`). Mirrors `PostPhotoSource` in postService.ts.
+enum PostPhotoSource: String {
+    case camera
+    case library
+    /// A photo that's already been posted, being promoted onto the feed.
+    case existing
+}
+
 @MainActor
 final class PostComposerViewModel: ObservableObject {
     @Published var pickedImage: UIImage?
+    /// How `pickedImage` was obtained, so publish can declare it. Set by
+    /// whichever affordance produced the photo; seeded to `.camera` for an
+    /// `initialImage`, which is always a mid-run snap taken with our camera.
+    @Published var photoSource: PostPhotoSource = .camera
     @Published var caption: String = ""
     /// Where the post goes. Starts nil ON PURPOSE — the user must make the
     /// story/feed/both choice themselves before Share enables, so nobody
@@ -202,6 +218,11 @@ final class PostComposerViewModel: ObservableObject {
         // Seed a pre-chosen photo (mid-run snap) AFTER all stored properties
         // are initialized — the @Published setter touches self.
         self.pickedImage = initialImage
+        // A mid-run snap was shot DURING the walk and is already in the camera
+        // roll, so it's the library tier, not a live capture. Labelling it
+        // `.camera` would let the ten-minute countdown reject a photo whose
+        // whole claim to the walk is the timestamp it already carries.
+        if initialImage != nil { self.photoSource = .library }
     }
 
     var canPublish: Bool {
@@ -325,7 +346,8 @@ final class PostComposerViewModel: ObservableObject {
                 coauthorUserId: destination.toFeed ? coauthor?.user_id : nil,
                 coauthorUserIds: destination.toFeed && !buddyCoauthorIds.isEmpty
                     ? buddyCoauthorIds : nil,
-                buddySessionId: destination.toFeed ? buddySessionId : nil
+                buddySessionId: destination.toFeed ? buddySessionId : nil,
+                photoSource: photoSource
             )
             if stickerEnabled {
                 // Remember the user's overlay style — but merge back any stats
@@ -364,12 +386,15 @@ final class PostComposerViewModel: ObservableObject {
             }
             return false
         } catch let APIError.apiError(message) where message == "post_window_closed" {
-            // The walk's 10-minute window lapsed while this composer was open —
-            // most often a long edit, or a photo picked from the library after
-            // the fact. The local window is already closed too (the server
-            // allows a grace on top of it), so there's nothing to retry: say
-            // what earns the next one.
-            errorMessage = "Photos share in the 10 minutes after a walk or run, and that window just closed. Head out again to unlock the next one."
+            // Only a LIVE capture can hit this now: the camera's ten minutes
+            // lapsed while this composer sat open (a long edit, or the photo
+            // was shot with seconds to spare). There's nothing to retry with
+            // this shot, but the camera roll is still open all day — and the
+            // photo is already in it, because the camera saves every capture.
+            // So point at the door that's still open instead of a dead end.
+            errorMessage = photoSource == .camera
+                ? "The camera closes 10 minutes after a walk or run, and that just passed. Your shot is saved in Photos — tap Change and pick it from this walk to share it."
+                : "Finish a walk or run today to share a photo from it."
             return false
         } catch let APIError.apiError(message) where message == "terms_not_accepted" {
             // Stale local acceptance — clear the memo and re-gate.
@@ -668,6 +693,10 @@ struct PostComposerView: View {
 
     @StateObject private var vm: PostComposerViewModel
     @StateObject private var friendService = FriendService()
+    /// Drives the camera half of the screen. Taking a photo is bounded to the
+    /// ten minutes after the walk; picking one out of the camera roll isn't, so
+    /// this retires the capture affordances rather than locking the composer.
+    @ObservedObject private var freshWindow = FreshPostWindowManager.shared
     @State private var showCamera = false
     // Library import of a photo captured DURING this walk/run (window-filtered
     // for authenticity, same as the post-run prompt). Its cover rides the
@@ -739,6 +768,11 @@ struct PostComposerView: View {
                                     switch result {
                                     case .accepted(let image):
                                         vm.pickedImage = image
+                                        // Declares the day tier to the server —
+                                        // this photo is bounded by when it was
+                                        // SHOT, not by when it's posted.
+                                        vm.photoSource = .library
+                                        vm.errorMessage = nil
                                     case .failed:
                                         vm.errorMessage = "Couldn't load that photo. Try another one."
                                     case .cancelled:
@@ -828,7 +862,19 @@ struct PostComposerView: View {
             .toolbarBackground(.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .fullScreenCover(isPresented: $showCamera) {
-                MADCameraView(image: $vm.pickedImage)
+                // Stamp the source on the SET, not on opening the camera: a
+                // cancelled camera must not relabel a library photo already on
+                // the canvas as a live capture and re-charge it the countdown.
+                MADCameraView(image: Binding(
+                    get: { vm.pickedImage },
+                    set: { image in
+                        vm.pickedImage = image
+                        if image != nil {
+                            vm.photoSource = .camera
+                            vm.errorMessage = nil
+                        }
+                    }
+                ))
             }
             // A stale composite must never survive a trip back to the editor.
             .onChange(of: path) { _, newPath in
@@ -947,10 +993,21 @@ struct PostComposerView: View {
 
     // MARK: - Guidelines gate
 
-    /// Opening the camera never waits on the guidelines — see TermsState.
+    /// Opening the camera never waits on the guidelines — see TermsState. It
+    /// does wait on the ten-minute window: a capture past it can't be posted,
+    /// so offering the shutter would spend the user's moment on a publish the
+    /// server refuses.
     private func requestCamera() {
-        guard MADCameraView.isAvailable else { return }
+        guard MADCameraView.isAvailable, cameraAllowed else { return }
         showCamera = true
+    }
+
+    /// May a fresh capture still be taken? A composer with no linked workout
+    /// has no camera roll to fall back on (the importer needs a workout to
+    /// bound capture time), so it keeps the camera — the server's mile gate is
+    /// what stops it, exactly as before the split.
+    private var cameraAllowed: Bool {
+        vm.stats.workoutId == nil || freshWindow.isCameraOpen
     }
 
     private func resolveTermsIfNeeded() async {
@@ -1073,29 +1130,39 @@ struct PostComposerView: View {
     /// option vanished the moment a photo existed, so a user who'd picked the wrong
     /// mid-run snap had to go through the camera to get back. A `Menu` offers both.
     ///
+    /// Once the camera window closes the retake item drops out and the menu
+    /// collapses to a plain library button: swapping the photo is still
+    /// available all day, just not by shooting a new one.
+    ///
     /// `Menu` rides UIKit's context-menu machinery rather than the sheet/cover
     /// presentation slot, so it costs no cover node (see the cover comments above).
     @ViewBuilder
     private var changePhotoControl: some View {
         if vm.stats.workoutId != nil {
-            Menu {
-                Button { requestCamera() } label: {
-                    Label("Take a new photo", systemImage: "camera.fill")
+            if cameraAllowed {
+                Menu {
+                    Button { requestCamera() } label: {
+                        Label("Take a new photo", systemImage: "camera.fill")
+                    }
+                    Button { showLibraryImport = true } label: {
+                        Label("Choose from this walk or run", systemImage: "photo.on.rectangle")
+                    }
+                } label: {
+                    changePhotoPill(icon: "camera.fill")
                 }
+            } else {
                 Button { showLibraryImport = true } label: {
-                    Label("Choose from this walk or run", systemImage: "photo.on.rectangle")
+                    changePhotoPill(icon: "photo.on.rectangle")
                 }
-            } label: {
-                changePhotoPill
             }
         } else {
-            Button { requestCamera() } label: { changePhotoPill }
+            Button { requestCamera() } label: { changePhotoPill(icon: "camera.fill") }
         }
     }
 
-    private var changePhotoPill: some View {
+    private func changePhotoPill(icon: String) -> some View {
         HStack(spacing: 5) {
-            Image(systemName: "camera.fill")
+            Image(systemName: icon)
                 .font(.system(size: 12, weight: .bold))
             Text("Change")
                 .font(.system(size: 12, weight: .bold, design: .rounded))
@@ -1106,7 +1173,20 @@ struct PostComposerView: View {
         .background(Capsule().fill(.black.opacity(0.5)))
     }
 
+    /// The empty canvas. While the camera window runs it leads with the
+    /// shutter and shows how long is left; once that lapses the SAME slot leads
+    /// with the camera roll instead of going grey, because a photo from the
+    /// walk is still perfectly postable — only capturing a new one isn't.
+    @ViewBuilder
     private var photoPlaceholder: some View {
+        if cameraAllowed {
+            cameraPlaceholder
+        } else {
+            libraryPlaceholder
+        }
+    }
+
+    private var cameraPlaceholder: some View {
         Button { requestCamera() } label: {
             VStack(spacing: MADTheme.Spacing.md) {
                 ZStack {
@@ -1142,42 +1222,141 @@ struct PostComposerView: View {
                     .background(Capsule().fill(MADTheme.Colors.redGradient))
                     .padding(.top, 2)
                 }
+
+                // Say what the clock is for, right where the shutter is. It's
+                // a deadline on the CAMERA only — never on the post — so the
+                // line has to name what happens next, or a countdown reads as
+                // "post now or lose it".
+                if MADCameraView.isAvailable, vm.stats.workoutId != nil,
+                   freshWindow.isCameraOpen {
+                    cameraCountdownChip
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                    .fill(Color.white.opacity(0.05))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                            .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [7]))
-                            .foregroundColor(.white.opacity(0.2))
-                    )
-            )
+            .background(placeholderBackground)
         }
         .buttonStyle(.plain)
         .disabled(!MADCameraView.isAvailable)
     }
 
-    /// Secondary CTA in the empty state: pick a photo the user already took on
-    /// this walk/run (the window-filtered library importer). Styled to sit
-    /// below the camera placeholder without competing with it.
-    private var chooseFromLibraryButton: some View {
-        Button { showLibraryImport = true } label: {
-            HStack(spacing: 7) {
-                Image(systemName: "photo.badge.plus")
-                    .font(.system(size: 14, weight: .semibold))
-                Text("Choose a photo from this walk or run")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+    /// Countdown on the camera, with the reassurance attached. Uses the native
+    /// `Text(timerInterval:)` so it ticks without a timer of ours.
+    private var cameraCountdownChip: some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 5) {
+                // `timer` is SF Symbols 1 — deployment target is iOS 17, where
+                // a symbol added after SF Symbols 5 renders as a blank box.
+                Image(systemName: "timer")
+                    .font(.system(size: 11, weight: .bold))
+                Text("Camera closes in")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                Text(
+                    timerInterval: (freshWindow.windowOpenedAt ?? Date())...freshWindow.windowEndDate,
+                    countsDown: true
+                )
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize()
             }
-            .foregroundColor(.white.opacity(0.9))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(
-                Capsule().fill(Color.white.opacity(0.1))
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
-            )
+            .foregroundColor(.white.opacity(0.85))
+
+            Text("Photos from this \(activityNoun) stay postable all day.")
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.45))
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Capsule().fill(Color.white.opacity(0.08)))
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.top, 2)
+    }
+
+    /// The camera window has closed, so the camera roll leads. Deliberately not
+    /// a locked-out state: nothing has been lost, the entry point just moved.
+    private var libraryPlaceholder: some View {
+        Button { showLibraryImport = true } label: {
+            VStack(spacing: MADTheme.Spacing.md) {
+                ZStack {
+                    Circle()
+                        .fill(MADTheme.Colors.redGradient)
+                        .frame(width: 84, height: 84)
+                        .shadow(color: MADTheme.Colors.madRed.opacity(0.4), radius: 16, y: 6)
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 32, weight: .semibold))
+                        .foregroundColor(.white)
+                }
+
+                VStack(spacing: 4) {
+                    Text("Add a photo from your \(activityNoun)")
+                        .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                    Text("The camera closes 10 minutes after you finish — but any photo you took out there is still good to post today.")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, MADTheme.Spacing.lg)
+                }
+
+                HStack(spacing: 6) {
+                    Image(systemName: "photo.badge.plus").font(.system(size: 13, weight: .bold))
+                    Text("Choose a photo").font(.system(size: 14, weight: .bold, design: .rounded))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 18).padding(.vertical, 10)
+                .background(Capsule().fill(MADTheme.Colors.redGradient))
+                .padding(.top, 2)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(placeholderBackground)
         }
         .buttonStyle(.plain)
+    }
+
+    private var placeholderBackground: some View {
+        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+            .fill(Color.white.opacity(0.05))
+            .overlay(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [7]))
+                    .foregroundColor(.white.opacity(0.2))
+            )
+    }
+
+    /// "walk" / "run" for copy, from the workout this post is attached to.
+    private var activityNoun: String {
+        guard let wid = vm.stats.workoutId,
+              let workout = HealthKitManager.shared.todaysWorkouts
+                .first(where: { $0.uuid.uuidString == wid }) else { return "walk or run" }
+        return workout.workoutActivityType == .walking ? "walk" : "run"
+    }
+
+    /// Secondary CTA under the camera placeholder: pick a photo the user
+    /// already took on this walk/run (the capture-time-filtered importer).
+    /// Only shown while the camera still leads — once it closes, the library
+    /// IS the placeholder and a second button would just repeat it.
+    @ViewBuilder
+    private var chooseFromLibraryButton: some View {
+        if cameraAllowed {
+            Button { showLibraryImport = true } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "photo.badge.plus")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Choose a photo from this walk or run")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                }
+                .foregroundColor(.white.opacity(0.9))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(
+                    Capsule().fill(Color.white.opacity(0.1))
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                )
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     /// Accepted capture-time window for the library importer, from the linked

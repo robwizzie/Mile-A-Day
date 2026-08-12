@@ -277,9 +277,10 @@ struct ProfilePostsGridView: View {
             .buttonStyle(.plain)
 
             // Promoting a story puts a photo on the feed, so it answers to the
-            // same 10-minute window as posting one — offering it after the
-            // window has closed would only earn a 403.
-            if freshWindow.isOpen {
+            // same rule as posting one: a qualifying walk/run today. That's the
+            // DAY tier — the ten-minute countdown bounds the camera, and this
+            // photo was captured long before this tap.
+            if freshWindow.canPostToday {
                 Button { addToFeed(post) } label: {
                     HStack(spacing: 4) {
                         if addingToFeedIds.contains(post.post_id) {
@@ -329,7 +330,7 @@ struct ProfilePostsGridView: View {
                 await load()
             } catch let APIError.apiError(message) where message == "post_window_closed" {
                 await MainActor.run {
-                    addToFeedError = "Photos reach the feed in the 10 minutes after a walk or run, and that window has closed. Your story stays on your profile."
+                    addToFeedError = "Feed posts belong to the day's walk or run, and today's has rolled over. Your story stays on your profile."
                 }
             } catch {
                 await MainActor.run {

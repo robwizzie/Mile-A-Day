@@ -1,23 +1,25 @@
 import SwiftUI
 
 /// Horizontal rail of story rings at the top of the feed. The first cell is the
-/// viewer's "Your story" / add button (gated on completing the mile AND being
-/// inside a walk's 10-minute posting window); the rest are friends with active
-/// stories, unviewed rings highlighted.
+/// viewer's "Your story" / add button (gated on completing the mile AND having
+/// a qualifying walk/run today); the rest are friends with active stories,
+/// unviewed rings highlighted.
 struct StoriesRailView: View {
     let groups: [StoryGroup]
     let currentUserId: String?
     let myName: String
     let myImageURL: String?
-    /// Mile done AND inside a posting window — the feed owns the rule. Drives
-    /// the "+" vs lock badge on the viewer's own cell.
+    /// Mile done AND a qualifying walk/run today — the feed owns the rule.
+    /// Drives the "+" vs lock badge on the viewer's own cell.
     let canPost: Bool
     /// The viewer has already shared this workout — the "+" add badge hides
     /// (one post per walk/run); the ring still opens their own story.
     var hasSharedWorkout: Bool = false
-    /// Posting-window state (owned by the feed). When open, the "Your story"
-    /// cell wears a shrinking countdown ring — a live deadline, since posting
-    /// closes with it. `windowOpenedAt` anchors the self-ticking ring.
+    /// CAMERA-window state (owned by the feed). While it runs, the "Your story"
+    /// cell wears a shrinking countdown ring — the deadline for SHOOTING a new
+    /// photo, not for posting one. When it lapses the ring goes and the "+"
+    /// stays, because a photo from the walk is still postable all day.
+    /// `windowOpenedAt` anchors the self-ticking ring.
     var windowOpen: Bool = false
     var windowOpenedAt: Date? = nil
     /// Per-group viewing gate: viewing is earned per story DAY (yesterday's
@@ -83,8 +85,8 @@ struct StoriesRailView: View {
                     ring(unviewed: myGroup?.has_unviewed ?? false, dashed: myGroup == nil) {
                         AvatarView(name: myName, imageURL: myImageURL, size: 64)
                     }
-                    // Fresh-window countdown ring, just outside the avatar —
-                    // only while there's still something to post this window.
+                    // Camera countdown ring, just outside the avatar — only
+                    // while a fresh capture is still on the table.
                     .overlay {
                         if windowOpen && canPost && !hasSharedWorkout, let openedAt = windowOpenedAt {
                             FreshWindowRing(openedAt: openedAt,

@@ -455,20 +455,33 @@ struct TermsStatus: Decodable {
     var accepted_at: String?
 }
 
-/// `GET /posts/window` — the server's view of whether a photo can go out now.
+/// `GET /posts/window` — the server's view of what can go out now, in the same
+/// two tiers `FreshPostWindowManager` keeps: `camera_open` is the ten-minute
+/// countdown for a live capture, `photo_open` is the rest of the day for a
+/// photo already taken on the walk.
 ///
-/// The device's own countdown (`FreshPostWindowManager`) is what drives the UI;
-/// this exists to reconcile the cases it can't see, chiefly a workout that
-/// synced while the app was closed. `opened_at` is a backend `timestamptz`, so
-/// it's typed as a String and parsed with fractional seconds — the `.iso8601`
-/// decoder can't read those and would fail the whole payload.
+/// The device's own state is what drives the UI; this exists to reconcile the
+/// cases it can't see, chiefly a workout that synced while the app was closed.
+/// `opened_at` is a backend `timestamptz`, so it's typed as a String and parsed
+/// with fractional seconds — the `.iso8601` decoder can't read those and would
+/// fail the whole payload.
 struct PostWindowStatus: Decodable {
+    /// The camera tier under its original name. Kept because it's what the
+    /// field has always meant on the wire.
     let open: Bool
+    /// Both optional so a client that ships ahead of the server deploy decodes
+    /// rather than throwing; `cameraOpen`/`photoOpen` fall back to `open`,
+    /// which is the pre-split behaviour (one tier, the countdown).
+    let camera_open: Bool?
+    let photo_open: Bool?
     let workout_id: String?
     let opened_at: String?
     let closes_at: String?
     let seconds_remaining: Double
     let mile_completed: Bool
+
+    var cameraOpen: Bool { camera_open ?? open }
+    var photoOpen: Bool { photo_open ?? open }
 
     var openedAtDate: Date? { BuddyDate.parse(opened_at) }
 }
@@ -594,7 +607,12 @@ enum PostService {
         // post_coauthors rows and the legacy scalar columns, so a shipped
         // client still renders a coherent two-person collab.
         coauthorUserIds: [String]? = nil,
-        buddySessionId: String? = nil
+        buddySessionId: String? = nil,
+        // Where the photo came from. The server holds a live capture to the
+        // 10 minutes after the walk and a camera-roll pick (or a story being
+        // promoted) to the rest of the day. Omitted on the auto route/stats
+        // card, which is exempt from both.
+        photoSource: PostPhotoSource? = nil
     ) async throws -> PostItem {
         struct Body: Encodable {
             let media_url: String
@@ -608,6 +626,7 @@ enum PostService {
             let coauthor_user_id: String?
             let coauthor_user_ids: [String]?
             let buddy_session_id: String?
+            let photo_source: String?
         }
         let bodyData = try JSONEncoder().encode(
             Body(
@@ -621,7 +640,8 @@ enum PostService {
                 include_route: includeRoute,
                 coauthor_user_id: coauthorUserId,
                 coauthor_user_ids: coauthorUserIds,
-                buddy_session_id: buddySessionId
+                buddy_session_id: buddySessionId,
+                photo_source: photoSource?.rawValue
             )
         )
         return try await APIClient.fancyFetch(
