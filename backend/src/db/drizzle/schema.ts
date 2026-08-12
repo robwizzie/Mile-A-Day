@@ -464,6 +464,11 @@ export const notificationSettings = pgTable(
     shareLivePresence: boolean("share_live_presence").default(true),
     // weekly_recap_enabled: Sunday-evening "Your week" recap push + story card.
     weeklyRecapEnabled: boolean("weekly_recap_enabled").default(true),
+    // weekly_challenge_enabled: the Monday "new challenge" push, the mid-week
+    // nudge, and the completion celebration. Its OWN category rather than
+    // folded into competition_updates — otherwise muting competitions mutes
+    // this too, which isn't a real toggle (Guideline 4.5.4).
+    weeklyChallengeEnabled: boolean("weekly_challenge_enabled").default(true),
     // workout_visibility: who may see my workout CONTENT — routes and photos.
     // 'friends' (the default, and what every user effectively has today) =
     // accepted friends only, the same circle the feed uses. 'public' = any
@@ -2276,5 +2281,182 @@ export const buddyRecurringWalks = pgTable(
       "buddy_recurring_walks_minutes_check",
       sql`minutes_of_day >= 0 AND minutes_of_day <= 1439`,
     ),
+  ],
+);
+
+/**
+ * Catalog of weekly challenges. One THEME is served globally per ISO week
+ * (deterministic by week index, so friends share the week's event), but the
+ * TARGET is scaled per user from their own trailing four weeks — a flat global
+ * number is either trivial for a high-volume runner or impossible for a new
+ * one.
+ *
+ * `icon` must exist in SF Symbols 5: the app's deployment target is iOS 17 and
+ * a newer symbol renders as a blank box rather than falling back, which a
+ * build against a newer SDK will not catch.
+ *
+ * Seeded post-boot by `seedWeeklyChallenges()` rather than in a migration, so
+ * copy edits and new rows never need one.
+ */
+export const weeklyChallenges = pgTable(
+  "weekly_challenges",
+  {
+    challengeKey: text("challenge_key").primaryKey().notNull(),
+    title: text().notNull(),
+    // Supports {target} and {unit} substitution.
+    descriptionTemplate: text("description_template").notNull(),
+    icon: text().notNull(),
+    gradientStart: text("gradient_start").notNull(),
+    gradientEnd: text("gradient_end").notNull(),
+    metric: text().notNull(),
+    unit: text().notNull(),
+    // Floor, and the target for anyone without enough history to scale from.
+    baseTarget: doublePrecision("base_target").notNull(),
+    scaleMultiplier: doublePrecision("scale_multiplier").default(1.1).notNull(),
+    // Clamp band, expressed as multiples of base_target, so one freak week
+    // can't set an impossible target and a very high-volume user isn't handed
+    // something absurd.
+    scaleMinMultiplier: doublePrecision("scale_min_multiplier")
+      .default(1)
+      .notNull(),
+    scaleMaxMultiplier: doublePrecision("scale_max_multiplier")
+      .default(2.5)
+      .notNull(),
+    targetCeiling: doublePrecision("target_ceiling").notNull(),
+    // Rounding step, so the number stays legible (0.5 mi, 1000 steps, 1 day).
+    targetStep: doublePrecision("target_step").default(1).notNull(),
+    active: boolean().default(true).notNull(),
+    rotationIndex: integer("rotation_index").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique("weekly_challenges_rotation_index_key").on(table.rotationIndex),
+  ],
+);
+
+/**
+ * Which weekly challenge a user was SERVED, and — load-bearing — the target
+ * they were set.
+ *
+ * The target is FROZEN here on first serve (first-write-wins, same reason
+ * `user_daily_challenges` stamps the day's pick). Every read afterwards uses
+ * this value and never re-derives it. Without the freeze the target chases the
+ * runner as their trailing average moves, a change to the scaling formula
+ * silently rewrites history, and someone can be told "completed" on Monday and
+ * "not completed" on Thursday.
+ *
+ * Written on the user's own read and by the Monday cron — never from a friend's
+ * read, which resolves someone else's week.
+ */
+export const userWeeklyChallenges = pgTable(
+  "user_weekly_challenges",
+  {
+    userId: text("user_id").notNull(),
+    // Monday of the user's local week.
+    weekStart: date("week_start", { mode: "string" }).notNull(),
+    challengeKey: text("challenge_key").notNull(),
+    target: doublePrecision().notNull(),
+    // What the target was scaled from, for the "based on your last 4 weeks"
+    // explainer. Null when the user had no history and got base_target.
+    baseline: doublePrecision(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "user_weekly_challenges_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.challengeKey],
+      foreignColumns: [weeklyChallenges.challengeKey],
+      name: "user_weekly_challenges_challenge_key_fkey",
+    }),
+    primaryKey({
+      columns: [table.userId, table.weekStart],
+      name: "user_weekly_challenges_pkey",
+    }),
+  ],
+);
+
+/**
+ * A completed week. Separate from the daily tables because those hardcode
+ * one-per-day in their PK/UNIQUE — a weekly row keyed on a Monday would collide
+ * with that Monday's daily row.
+ */
+export const userWeeklyChallengeCompletions = pgTable(
+  "user_weekly_challenge_completions",
+  {
+    id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    weekStart: date("week_start", { mode: "string" }).notNull(),
+    challengeKey: text("challenge_key").notNull(),
+    // Snapshotted so history reads never depend on the served row surviving.
+    target: doublePrecision().notNull(),
+    finalValue: doublePrecision("final_value").notNull(),
+    completedAt: timestamp("completed_at", {
+      withTimezone: true,
+      mode: "string",
+    })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_uwcc_user_week").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.weekStart.desc().nullsFirst(),
+    ),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "user_weekly_challenge_completions_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.challengeKey],
+      foreignColumns: [weeklyChallenges.challengeKey],
+      name: "user_weekly_challenge_completions_challenge_key_fkey",
+    }),
+    unique("user_weekly_challenge_completions_user_id_week_start_key").on(
+      table.userId,
+      table.weekStart,
+    ),
+  ],
+);
+
+/**
+ * Claim-then-send log for the weekly pushes, one row per (user, week, kind).
+ *
+ * A separate table rather than a nullable timestamp column on
+ * `user_weekly_challenges` on purpose: `ADD COLUMN ts timestamptz DEFAULT now()`
+ * stores one DDL-time missing-value for every pre-existing row, so a cron
+ * gating on "not yet sent" would stay silent and then fire on the whole
+ * backlog at once.
+ */
+export const weeklyChallengePushLog = pgTable(
+  "weekly_challenge_push_log",
+  {
+    userId: text("user_id").notNull(),
+    weekStart: date("week_start", { mode: "string" }).notNull(),
+    // 'new' | 'nudge'
+    kind: text().notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "weekly_challenge_push_log_user_id_fkey",
+    }).onDelete("cascade"),
+    primaryKey({
+      columns: [table.userId, table.weekStart, table.kind],
+      name: "weekly_challenge_push_log_pkey",
+    }),
   ],
 );

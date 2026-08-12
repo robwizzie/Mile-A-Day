@@ -88,6 +88,18 @@ export const CLIENT_FEATURES = {
    * send this string from a build that does not actually render the lobby.
    */
   buddyWalksV1: "buddy_walks_v1",
+
+  /**
+   * The build renders the weekly challenge — the Compete-tab hero, the
+   * friends leaderboard and the history — and therefore has somewhere for a
+   * `weekly_challenge_*` push to open.
+   *
+   * Gated because these are BRAND NEW type strings. Unlike `lead_change`,
+   * which head-to-head deliberately reuses because every shipped build already
+   * routes it, there is no existing weekly route to piggyback on: an older
+   * build would show the banner and do nothing when tapped.
+   */
+  weeklyChallengeV1: "weekly_challenge_v1",
 } as const;
 
 export type ClientFeature =

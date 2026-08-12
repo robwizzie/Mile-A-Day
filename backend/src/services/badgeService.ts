@@ -8,6 +8,7 @@ import type {
   BadgeCategory,
 } from "../types/badge.js";
 import { evaluateChallengesForBatch } from "./dailyChallengeService.js";
+import { evaluateWeeklyChallengeForUser } from "./weeklyChallengeService.js";
 
 const db = PostgresService.getInstance();
 
@@ -151,6 +152,8 @@ async function computeSocialAggregates(userId: string): Promise<{
   buddySessionsWon: number;
   ghostsBeaten: number;
   bestGhostMargin: number;
+  weeklyChallengesCompleted: number;
+  bestWeeklyChallengeStreak: number;
 }> {
   const zero = {
     storyPostsCount: 0,
@@ -164,6 +167,8 @@ async function computeSocialAggregates(userId: string): Promise<{
     buddySessionsWon: 0,
     ghostsBeaten: 0,
     bestGhostMargin: 0,
+    weeklyChallengesCompleted: 0,
+    bestWeeklyChallengeStreak: 0,
   };
   try {
     const [
@@ -177,6 +182,7 @@ async function computeSocialAggregates(userId: string): Promise<{
       buddyPartners,
       buddyWon,
       ghosts,
+      weekly,
     ] = await Promise.all([
       db
         .query<{
@@ -289,6 +295,29 @@ async function computeSocialAggregates(userId: string): Promise<{
           [userId],
         )
         .catch(() => [{ count: "0", best: "0" }]),
+      // Weekly challenges completed, and the longest run of consecutive weeks.
+      // Gaps and islands over week_start: an ASC walk pairs with (d - rn * 7),
+      // the reverse pairing silently returns 1 for every real streak.
+      db
+        .query<{
+          count: string;
+          best: string | null;
+        }>(
+          `WITH weeks AS (
+             SELECT week_start FROM user_weekly_challenge_completions WHERE user_id = $1
+           ),
+           islands AS (
+             SELECT week_start,
+                    week_start - (ROW_NUMBER() OVER (ORDER BY week_start ASC) * 7)::int AS island
+             FROM weeks
+           ),
+           runs AS (SELECT COUNT(*) AS run FROM islands GROUP BY island)
+           SELECT
+             (SELECT COUNT(*) FROM weeks)::text AS count,
+             COALESCE((SELECT MAX(run) FROM runs), 0)::text AS best`,
+          [userId],
+        )
+        .catch(() => [{ count: "0", best: "0" }]),
     ]);
     return {
       storyPostsCount: parseInt(stories[0]?.count ?? "0", 10) || 0,
@@ -302,6 +331,8 @@ async function computeSocialAggregates(userId: string): Promise<{
       buddySessionsWon: parseInt(buddyWon[0]?.count ?? "0", 10) || 0,
       ghostsBeaten: parseInt(ghosts[0]?.count ?? "0", 10) || 0,
       bestGhostMargin: Math.floor(Number(ghosts[0]?.best ?? 0)) || 0,
+      weeklyChallengesCompleted: parseInt(weekly[0]?.count ?? "0", 10) || 0,
+      bestWeeklyChallengeStreak: parseInt(weekly[0]?.best ?? "0", 10) || 0,
     };
   } catch {
     return zero;
@@ -523,6 +554,21 @@ function evaluatePredicate(
       }
       return { earned: agg.ghostsBeaten >= req, aggregateOnly: true };
     }
+    case "weekly_challenge": {
+      // weekly_streak_* = consecutive weeks, everything else = total completed.
+      // Same badgeId-prefix family shape as `ghost` and `buddy` above.
+      if (req === null) return { earned: false, aggregateOnly: true };
+      if (badge.badgeId.startsWith("weekly_streak_")) {
+        return {
+          earned: agg.bestWeeklyChallengeStreak >= req,
+          aggregateOnly: true,
+        };
+      }
+      return {
+        earned: agg.weeklyChallengesCompleted >= req,
+        aggregateOnly: true,
+      };
+    }
     default:
       return { earned: false, aggregateOnly: true };
   }
@@ -538,8 +584,20 @@ export async function evaluateWorkoutRewards(
     userId,
     newWorkoutIds,
   );
+  // Weekly metrics are cumulative, so this recomputes the whole week rather
+  // than looking at what just arrived. Swallowed on failure: a weekly-challenge
+  // problem must never fail a workout upload.
+  const newWeeklyCompletion = await evaluateWeeklyChallengeForUser(
+    userId,
+  ).catch((error: any) => {
+    console.error(
+      "[WeeklyChallenges] Evaluation failed:",
+      error?.message ?? error,
+    );
+    return null;
+  });
   const { newlyEarnedBadges } = await evaluateForUser(userId, newWorkoutIds);
-  return { newlyEarnedBadges, newChallengeCompletions };
+  return { newlyEarnedBadges, newChallengeCompletions, newWeeklyCompletion };
 }
 
 /**
@@ -598,14 +656,16 @@ async function computeMaxEverStreak(userId: string): Promise<number> {
  * never revokes them. */
 function isWorkoutDerived(category: BadgeCategory): boolean {
   return !(
-    category === "story" ||
-    category === "hype" ||
-    category === "nudge" ||
-    category === "competition" ||
-    // Buddy medals derive from completed SESSIONS, not from workout history.
-    // Deleting a workout must not strip the medal for a walk you genuinely
-    // did with a friend — and the friend's copy of that session still exists.
-    category === "buddy"
+    (
+      category === "story" ||
+      category === "hype" ||
+      category === "nudge" ||
+      category === "competition" ||
+      // Buddy medals derive from completed SESSIONS, not from workout history.
+      // Deleting a workout must not strip the medal for a walk you genuinely
+      // did with a friend — and the friend's copy of that session still exists.
+      category === "buddy"
+    )
     // Ghost medals are deliberately NOT listed here: the win lives on the
     // workout row itself, so deleting that workout should take the medal
     // with it, exactly like a pace badge.
@@ -1008,6 +1068,69 @@ const EXTRA_BADGES: Array<{
     rarity: "legendary",
     requirement: 45,
     sortOrder: 964,
+  },
+  // Weekly challenges. `weekly_streak_*` reads the consecutive-weeks
+  // aggregate; the rest read the total completed. Icons are SF Symbols 5 or
+  // earlier — anything newer renders as a blank box on iOS 17.
+  {
+    badgeId: "weekly_1",
+    category: "weekly_challenge",
+    name: "Week One",
+    description: "Completed your first weekly challenge",
+    icon: "calendar.badge.checkmark",
+    rarity: "common",
+    requirement: 1,
+    sortOrder: 970,
+  },
+  {
+    badgeId: "weekly_5",
+    category: "weekly_challenge",
+    name: "Regular",
+    description: "Completed 5 weekly challenges",
+    icon: "calendar.badge.checkmark",
+    rarity: "common",
+    requirement: 5,
+    sortOrder: 971,
+  },
+  {
+    badgeId: "weekly_10",
+    category: "weekly_challenge",
+    name: "Every Week Counts",
+    description: "Completed 10 weekly challenges",
+    icon: "calendar.badge.checkmark",
+    rarity: "rare",
+    requirement: 10,
+    sortOrder: 972,
+  },
+  {
+    badgeId: "weekly_25",
+    category: "weekly_challenge",
+    name: "Season Veteran",
+    description: "Completed 25 weekly challenges",
+    icon: "calendar.badge.checkmark",
+    rarity: "legendary",
+    requirement: 25,
+    sortOrder: 973,
+  },
+  {
+    badgeId: "weekly_streak_4",
+    category: "weekly_challenge",
+    name: "Full Month",
+    description: "Completed the weekly challenge 4 weeks in a row",
+    icon: "flame.fill",
+    rarity: "rare",
+    requirement: 4,
+    sortOrder: 974,
+  },
+  {
+    badgeId: "weekly_streak_12",
+    category: "weekly_challenge",
+    name: "Unbroken",
+    description: "Completed the weekly challenge 12 weeks in a row",
+    icon: "flame.fill",
+    rarity: "legendary",
+    requirement: 12,
+    sortOrder: 975,
   },
 ];
 

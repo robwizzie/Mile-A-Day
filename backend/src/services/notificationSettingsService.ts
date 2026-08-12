@@ -29,6 +29,10 @@ export interface NotificationPreferences {
   share_route_maps: boolean; // show my GPS route maps on my feed entries/posts
   share_live_presence: boolean; // friends may see I'm out on a walk RIGHT NOW (never location)
   weekly_recap_enabled: boolean; // Sunday-evening weekly recap push + story card
+  // Monday "new challenge", the mid-week nudge, and the completion
+  // celebration. Its OWN category rather than folded into competition_updates:
+  // muting competitions must not silently mute this (Guideline 4.5.4).
+  weekly_challenge_enabled: boolean;
   h2h_close_friends_only: boolean; // Head-to-Head rivals only from my close friends
   // friend_request_reminder_enabled: the weekly "N people are waiting to be
   // your friend" nudge. Separate from the friend_request push itself, so
@@ -70,6 +74,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   share_route_maps: true,
   share_live_presence: true,
   weekly_recap_enabled: true,
+  weekly_challenge_enabled: true,
   h2h_close_friends_only: false,
   friend_request_reminder_enabled: true,
   buddy_invites_enabled: true,
@@ -108,6 +113,7 @@ export async function getNotificationPreferences(
     share_route_maps: row.share_route_maps ?? true,
     share_live_presence: row.share_live_presence ?? true,
     weekly_recap_enabled: row.weekly_recap_enabled ?? true,
+    weekly_challenge_enabled: row.weekly_challenge_enabled ?? true,
     h2h_close_friends_only: row.h2h_close_friends_only ?? false,
     friend_request_reminder_enabled:
       row.friend_request_reminder_enabled ?? true,
@@ -163,6 +169,10 @@ export async function updateNotificationPreferences(
     { key: "share_route_maps", value: prefs.share_route_maps },
     { key: "share_live_presence", value: prefs.share_live_presence },
     { key: "weekly_recap_enabled", value: prefs.weekly_recap_enabled },
+    {
+      key: "weekly_challenge_enabled",
+      value: prefs.weekly_challenge_enabled,
+    },
     { key: "h2h_close_friends_only", value: prefs.h2h_close_friends_only },
     {
       key: "friend_request_reminder_enabled",
@@ -404,7 +414,9 @@ export async function shouldSendNotification(
     // HIGH_PRIORITY_TYPES, so it bypasses quiet hours and the daily cap and
     // this pref is the only thing that can stop it. Overloading "hype" would
     // mean muting hypes to mute buddy invites — not a real toggle (4.5.4).
-    | "buddy",
+    | "buddy"
+    // Its own category on purpose — see weekly_challenge_enabled above.
+    | "weekly_challenge",
 ): Promise<boolean> {
   const prefs = await getNotificationPreferences(targetUserId);
 
@@ -427,6 +439,9 @@ export async function shouldSendNotification(
       break;
     case "competition_invite":
       if (!prefs.competition_invites_enabled) return false;
+      break;
+    case "weekly_challenge":
+      if (!prefs.weekly_challenge_enabled) return false;
       break;
     case "competition_update":
       if (!prefs.competition_updates_enabled) return false;
