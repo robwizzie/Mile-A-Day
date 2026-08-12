@@ -1,7 +1,7 @@
 import { PostgresService } from "./DbService.js";
 import { countedWorkoutSql, realMileSplitSql } from "./mileTime.js";
 import { DAILY_GOAL_TOLERANCE } from "./workoutService.js";
-import { walkSequence, weekOfEpoch } from "./challengeRotation.js";
+import { weekOfEpoch } from "./challengeRotation.js";
 import { getBlockedIds } from "./moderationService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { shouldSendNotification } from "./notificationSettingsService.js";
@@ -159,22 +159,38 @@ export async function selectChallengeForWeek(
   const rows = catalog ?? (await getCatalog());
   if (rows.length === 0) return null;
 
-  let hasSteps: boolean | null = null;
-  return walkSequence(rows, weekOfEpoch(weekStart), async (row) => {
-    if (row.metric !== "total_steps") return true;
-    if (hasSteps === null) {
-      const found = await db.query<{ ok: boolean }>(
-        `SELECT EXISTS (
-					SELECT 1 FROM daily_steps
-					WHERE user_id = $1 AND local_date >= ($2::date - 28)
-				) AS ok`,
-        [userId, weekStart],
-      );
-      hasSteps = found[0]?.ok === true;
+  // Straight modulo — no eligibility walk. Advancing to the next entry when a
+  // challenge doesn't fit would land on the row the FOLLOWING week is about to
+  // serve, and the user would get the same challenge two weeks running.
+  const pick =
+    rows[((weekOfEpoch(weekStart) % rows.length) + rows.length) % rows.length];
+
+  // A steps week is unwinnable for someone whose app has never synced steps, so
+  // they get a fixed off-rotation substitute instead — the same shape as the
+  // daily catalog's `add_friend`, and collision-free precisely because it sits
+  // outside the rotation.
+  if (pick.metric === "total_steps") {
+    const synced = await db.query<{ ok: boolean }>(
+      `SELECT EXISTS (
+				SELECT 1 FROM daily_steps
+				WHERE user_id = $1 AND local_date >= ($2::date - 28)
+			) AS ok`,
+      [userId, weekStart],
+    );
+    if (synced[0]?.ok !== true) {
+      return (await getChallengeByKey(STEPS_SUBSTITUTE_KEY)) ?? pick;
     }
-    return hasSteps;
-  });
+  }
+
+  return pick;
 }
+
+/**
+ * Shown in place of a steps week to users with no step data. Lives outside the
+ * rotation (`active = false`) so it can never be picked on its own and can
+ * never collide with the following week's entry.
+ */
+export const STEPS_SUBSTITUTE_KEY = "move_more";
 
 // MARK: - Target scaling
 
@@ -188,9 +204,20 @@ function roundToStep(value: number, step: number): number {
  *
  * `baseline` is their average of the SAME metric over the four complete weeks
  * before this one — the current week is excluded so today's running can't move
- * today's target. Clamped both ways: the floor keeps it worth doing, the
- * ceiling stops one unusual week (or a marathon) from setting something
- * unreachable.
+ * today's target.
+ *
+ * The result is roughly `baseline * scale_multiplier` (a ~10% stretch), bounded
+ * three ways:
+ *   - `base_target` pulls a light week UP, so the challenge stays worth doing;
+ *   - `scale_max_multiplier` caps how far above their own average anyone is
+ *     pushed, which is what stops `base_target` from handing a beginner a
+ *     number they have no chance at;
+ *   - `target_ceiling` is the absolute sanity cap.
+ *
+ * A worked example of why the bounds are multiples of the BASELINE rather than
+ * of `base_target`: with base 10 and a 2.5x cap anchored to base, everyone
+ * would top out at 25, so someone averaging 40 miles a week would be set a
+ * target comfortably below what they already do.
  */
 export function resolveTarget(
   row: WeeklyChallengeRow,
@@ -201,14 +228,22 @@ export function resolveTarget(
   }
 
   const raw = baseline * row.scale_multiplier;
-  const floor = row.base_target * row.scale_min_multiplier;
-  const ceiling = Math.min(
-    row.base_target * row.scale_max_multiplier,
+
+  // The clamps are multiples of the USER'S OWN baseline, not of base_target.
+  // Anchoring them to base_target caps everyone at the same number, which
+  // inverts the whole point: with a base of 10 and a 2.5x cap, someone
+  // averaging 40 miles a week would be set a target of 25 — comfortably less
+  // than they already do. `base_target` is only ever a FLOOR.
+  const lower = Math.max(row.base_target, baseline * row.scale_min_multiplier);
+  const upper = Math.min(
+    baseline * row.scale_max_multiplier,
     row.target_ceiling,
   );
-  const clamped = Math.min(Math.max(raw, floor), ceiling);
+
+  // A very strong user can push `lower` above `upper` once target_ceiling bites;
+  // the absolute ceiling wins, since it's the one that keeps the number sane.
   const target = roundToStep(
-    Math.max(clamped, row.base_target),
+    Math.min(Math.max(raw, Math.min(lower, upper)), upper),
     row.target_step,
   );
 
@@ -594,7 +629,7 @@ async function notifyWeeklyCompletion(
   ]);
   if (!supported || !allowed) return;
 
-  const streak = await getWeeklyStreak(userId);
+  const streak = await getWeeklyStreak(userId, completion.weekStart);
   const body =
     streak.current > 1
       ? `${completion.title} done — ${streak.current} weeks in a row.`
@@ -628,6 +663,7 @@ function minDate(a: string, b: string): string {
  */
 export async function getWeeklyStreak(
   userId: string,
+  currentWeekStart?: string,
 ): Promise<{ current: number; best: number }> {
   const rows = await db.query<{ week_start: string }>(
     `SELECT week_start::text AS week_start
@@ -654,6 +690,19 @@ export async function getWeeklyStreak(
     previous = row.week_start;
   }
   if (current === 0) current = run;
+
+  // The leading run is only CURRENT if it reaches the present. Without this,
+  // someone who completed twelve weeks straight and then stopped six months
+  // ago is still told they're on a twelve-week streak.
+  //
+  // Last week counts as current: the week is still in progress, so not having
+  // finished it yet is not a broken streak.
+  if (currentWeekStart) {
+    const newest = rows[0].week_start;
+    const stillAlive =
+      newest === currentWeekStart || newest === addDays(currentWeekStart, -7);
+    if (!stillAlive) current = 0;
+  }
 
   return { current, best };
 }
@@ -979,7 +1028,7 @@ export async function getWeeklyChallengeForUser(
 			WHERE user_id = $1 AND week_start = $2::date`,
       [userId, window.weekStart],
     ),
-    getWeeklyStreak(userId),
+    getWeeklyStreak(userId, window.weekStart),
     getWeeklyLeaderboard(
       userId,
       window.weekStart,
@@ -1123,6 +1172,8 @@ const WEEKLY_CATALOG: Array<
   Omit<WeeklyChallengeRow, "scale_min_multiplier" | "scale_max_multiplier"> & {
     scale_min_multiplier?: number;
     scale_max_multiplier?: number;
+    /** Defaults to true; false keeps a row out of the rotation entirely. */
+    active?: boolean;
   }
 > = [
   {
@@ -1305,6 +1356,24 @@ const WEEKLY_CATALOG: Array<
     target_step: 1,
     rotation_index: 11,
   },
+  // Off-rotation substitute — see STEPS_SUBSTITUTE_KEY. active = false keeps it
+  // out of getCatalog(), so it is only ever reachable by explicit key.
+  {
+    challenge_key: STEPS_SUBSTITUTE_KEY,
+    title: "Move More",
+    description_template: "Get a workout in on {target} different days.",
+    icon: "figure.walk",
+    gradient_start: "43C6AC",
+    gradient_end: "191654",
+    metric: "active_days",
+    unit: "days",
+    base_target: 4,
+    scale_multiplier: 1.1,
+    target_ceiling: 7,
+    target_step: 1,
+    rotation_index: 200,
+    active: false,
+  },
 ];
 
 /**
@@ -1341,7 +1410,7 @@ export async function seedWeeklyChallenges(): Promise<void> {
 					base_target, scale_multiplier, scale_min_multiplier,
 					scale_max_multiplier, target_ceiling, target_step,
 					active, rotation_index
-				) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,TRUE,$15)
+				) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$16,$15)
 				ON CONFLICT (challenge_key) DO UPDATE SET
 					title = EXCLUDED.title,
 					description_template = EXCLUDED.description_template,
@@ -1355,7 +1424,8 @@ export async function seedWeeklyChallenges(): Promise<void> {
 					scale_min_multiplier = EXCLUDED.scale_min_multiplier,
 					scale_max_multiplier = EXCLUDED.scale_max_multiplier,
 					target_ceiling = EXCLUDED.target_ceiling,
-					target_step = EXCLUDED.target_step`,
+					target_step = EXCLUDED.target_step,
+					active = EXCLUDED.active`,
         [
           row.challenge_key,
           row.title,
@@ -1372,6 +1442,7 @@ export async function seedWeeklyChallenges(): Promise<void> {
           row.target_ceiling,
           row.target_step,
           row.rotation_index,
+          row.active ?? true,
         ],
       );
     }

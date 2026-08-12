@@ -1420,23 +1420,48 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
 // and a metric arm missing countedWorkoutSql quietly counts a workout that is
 // excluded from the user's own miles. None of them throw, so they have to be
 // asserted against seeded numbers rather than read.
+//
+// Runs against its OWN user: Alice and Bob already carry workouts from the feed
+// assertions above, which would make every expected total a moving target.
 {
+  const WENDY = "ci-wendy";
+
+  await db.query(
+    `INSERT INTO users (user_id, email, apple_sub, username, first_name)
+     VALUES ($1, 'wendy@ci.local', 'ci-sub-wendy', 'ci_wendy', 'wendy')
+     ON CONFLICT (user_id) DO NOTHING`,
+    [WENDY],
+  );
+  // Pin to UTC so the seeded local_dates land in the week the service computes.
+  await db.query(
+    `INSERT INTO notification_settings (user_id, timezone_offset_minutes)
+     VALUES ($1, 0)
+     ON CONFLICT (user_id) DO UPDATE SET timezone_offset_minutes = 0`,
+    [WENDY],
+  );
+  await db.query(
+    `UPDATE notification_settings SET timezone_offset_minutes = 0 WHERE user_id = $1`,
+    [ALICE],
+  );
+  for (const [a, b] of [
+    [ALICE, WENDY],
+    [WENDY, ALICE],
+  ]) {
+    await db.query(
+      `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1, $2, 'accepted')
+       ON CONFLICT (user_id, friend_id) DO NOTHING`,
+      [a, b],
+    );
+  }
+
   await seedWeeklyChallenges();
 
-  // Pin both users to UTC so the seeded local_dates land in the week the
-  // service computes.
-  await db.query(
-    `UPDATE notification_settings SET timezone_offset_minutes = 0 WHERE user_id = ANY($1::text[])`,
-    [[ALICE, BOB]],
-  );
-
-  const win = await weekWindowForUser(ALICE);
+  const win = await weekWindowForUser(WENDY);
   const day = (offset) => {
     const d = new Date(`${win.weekStart}T00:00:00Z`);
     d.setUTCDate(d.getUTCDate() + offset);
     return d.toISOString().slice(0, 10);
   };
-
   const addWorkout = async (userId, id, date, distance, exclusion = null) => {
     await db.query(
       `INSERT INTO workouts (workout_id, user_id, distance, local_date, date,
@@ -1447,46 +1472,54 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
       [id, userId, distance, date, exclusion],
     );
   };
+  const round2 = (n) => Math.round(n * 100) / 100;
 
-  // Monday/Tuesday/Wednesday — three CONSECUTIVE days, 6.0 miles total.
-  await addWorkout(ALICE, "ci-wk-1", day(0), 2.0);
-  await addWorkout(ALICE, "ci-wk-2", day(1), 2.0);
-  await addWorkout(ALICE, "ci-wk-3", day(2), 2.0);
+  // Mon/Tue/Wed — three CONSECUTIVE days, 6.0 miles total.
+  await addWorkout(WENDY, "ci-wk-1", day(0), 2.0);
+  await addWorkout(WENDY, "ci-wk-2", day(1), 2.0);
+  await addWorkout(WENDY, "ci-wk-3", day(2), 2.0);
 
   assert.equal(
-    Math.round((await measure(ALICE, "total_distance", win.weekStart, win.weekEnd)) * 100) / 100,
+    round2(await measure(WENDY, "total_distance", win.weekStart, win.weekEnd)),
     6,
     "total_distance sums the week's counted workouts",
   );
   assert.equal(
-    await measure(ALICE, "consecutive_active_days", win.weekStart, win.weekEnd),
+    await measure(WENDY, "consecutive_active_days", win.weekStart, win.weekEnd),
     3,
-    "consecutive_active_days finds the 3-day run (island key must move opposite to the row numbering)",
+    "consecutive_active_days finds the 3-day run (the island key must move opposite to the row numbering, or this silently returns 1)",
   );
 
-  // A duplicate-source copy must not count — it doesn't count toward miles.
-  await addWorkout(ALICE, "ci-wk-dupe", day(3), 5.0, "duplicate_source");
+  // A duplicate-source copy must be invisible — it doesn't count toward miles,
+  // so it must not win a challenge either.
+  await addWorkout(WENDY, "ci-wk-dupe", day(3), 5.0, "duplicate_source");
   assert.equal(
-    Math.round((await measure(ALICE, "total_distance", win.weekStart, win.weekEnd)) * 100) / 100,
+    round2(await measure(WENDY, "total_distance", win.weekStart, win.weekEnd)),
     6,
     "an excluded workout is invisible to the weekly metric (countedWorkoutSql)",
   );
 
-  // mile_days uses the 0.95 tolerance, so a 0.96 day against a 1.0 goal counts.
-  await db.query(`UPDATE users SET goal_miles = 1.0 WHERE user_id = $1`, [BOB]);
-  await addWorkout(BOB, "ci-wk-b1", day(0), 0.96);
+  // mile_days uses the 0.95 tolerance, so a 0.96 day against a 1.0 goal counts
+  // here exactly as it does everywhere else in the app.
+  await db.query(`UPDATE users SET goal_miles = 1.0 WHERE user_id = $1`, [WENDY]);
   assert.equal(
-    await measure(BOB, "mile_days", win.weekStart, win.weekEnd),
-    1,
+    await measure(WENDY, "mile_days", win.weekStart, win.weekEnd),
+    3,
+    "the three 2-mile days are mile days",
+  );
+  await addWorkout(WENDY, "ci-wk-tol", day(5), 0.96);
+  assert.equal(
+    await measure(WENDY, "mile_days", win.weekStart, win.weekEnd),
+    4,
     "a 0.96 day counts against a 1.0 goal (DAILY_GOAL_TOLERANCE, not a raw >=)",
   );
 
   // The target is frozen on first serve: serving again must not move it, even
-  // though the user has run more in between.
-  const first = await serveWeek(ALICE, win.weekStart);
+  // though more miles have been run in between.
+  const first = await serveWeek(WENDY, win.weekStart);
   assert.ok(first, "a week is served");
-  await addWorkout(ALICE, "ci-wk-4", day(4), 8.0);
-  const second = await serveWeek(ALICE, win.weekStart);
+  await addWorkout(WENDY, "ci-wk-4", day(4), 8.0);
+  const second = await serveWeek(WENDY, win.weekStart);
   assert.equal(second.target, first.target, "the target is frozen at first serve");
   assert.equal(
     second.challenge.challenge_key,
@@ -1494,8 +1527,8 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     "and so is the challenge",
   );
 
-  // Clamps: a freak week can't set an impossible target, and no history falls
-  // back to the catalog's base.
+  // Clamps: no history falls back to the catalog base, and an absurd baseline
+  // can't produce an unreachable target.
   const row = first.challenge;
   assert.equal(
     resolveTarget(row, null).target,
@@ -1507,38 +1540,50 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     "an absurd baseline is capped at the ceiling",
   );
 
-  // Completion is once-only. Drop the frozen target under what Alice has run
-  // to simulate her finishing the week.
+  // Completion is once-only.
+  //
+  // The stamped row is rewritten to a known challenge rather than relying on
+  // whichever one this calendar week serves: half the catalog (steps, early/
+  // late runs, fast splits) measures zero against these seeded workouts, so the
+  // assertion would pass or fail depending on the date. Rewriting it also
+  // proves the evaluator reads the STAMPED challenge rather than re-picking.
+  await serveWeek(ALICE, win.weekStart);
   await db.query(
-    `UPDATE user_weekly_challenges SET target = 0.01 WHERE user_id = $1 AND week_start = $2::date`,
-    [ALICE, win.weekStart],
+    `UPDATE user_weekly_challenges
+       SET challenge_key = 'week_of_miles', target = 0.01
+     WHERE user_id = ANY($1::text[]) AND week_start = $2::date`,
+    [[WENDY, ALICE], win.weekStart],
   );
-  const awarded = await evaluateWeeklyChallengeForUser(ALICE);
-  assert.ok(awarded, "meeting the target awards the week");
+  assert.ok(
+    await evaluateWeeklyChallengeForUser(WENDY),
+    "meeting the target awards the week",
+  );
   assert.equal(
-    await evaluateWeeklyChallengeForUser(ALICE),
+    await evaluateWeeklyChallengeForUser(WENDY),
     null,
     "a second evaluation awards nothing (only the winning INSERT returns)",
   );
   const completions = await db.query(
     `SELECT COUNT(*)::int AS n FROM user_weekly_challenge_completions WHERE user_id = $1`,
-    [ALICE],
+    [WENDY],
   );
   assert.equal(completions[0].n, 1, "exactly one completion row");
 
-  // Leaderboard: friends only, and only those actually served.
-  await serveWeek(BOB, win.weekStart);
+  // Leaderboard: served friends only, on the challenge stamped above.
   const board = await getWeeklyLeaderboard(
     ALICE,
     win.weekStart,
     win.weekEnd,
-    first.challenge.challenge_key,
-    first.challenge.metric,
+    "week_of_miles",
+    "total_distance",
   );
   const ids = board.map((e) => e.user_id);
   assert.ok(ids.includes(ALICE), "the viewer is on their own board");
-  assert.ok(ids.includes(BOB), "an accepted friend is on the board");
-  assert.ok(!ids.includes(DANA), "someone never served has no frozen target, so no row");
+  assert.ok(ids.includes(WENDY), "an accepted friend is on the board");
+  assert.ok(
+    !ids.includes(DANA),
+    "a friend who was never served has no frozen target, so no row",
+  );
   assert.ok(
     board.every((e) => typeof e.target === "number" && e.target > 0),
     "every entry carries its OWN target — the board ranks on percent of it",
@@ -1547,17 +1592,20 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
   await db.query(
     `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)
      ON CONFLICT DO NOTHING`,
-    [ALICE, BOB],
-  );
-  const blockedBoard = await getWeeklyLeaderboard(
-    ALICE,
-    win.weekStart,
-    win.weekEnd,
-    first.challenge.challenge_key,
-    first.challenge.metric,
+    [ALICE, WENDY],
   );
   assert.ok(
-    !blockedBoard.map((e) => e.user_id).includes(BOB),
+    !(
+      await getWeeklyLeaderboard(
+        ALICE,
+        win.weekStart,
+        win.weekEnd,
+        "week_of_miles",
+        "total_distance",
+      )
+    )
+      .map((e) => e.user_id)
+      .includes(WENDY),
     "a blocked friend is off the board",
   );
   await db.query(`DELETE FROM user_blocks WHERE blocker_id LIKE 'ci-%'`);
@@ -1565,6 +1613,12 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
   await db.query(`DELETE FROM user_weekly_challenge_completions WHERE user_id LIKE 'ci-%'`);
   await db.query(`DELETE FROM user_weekly_challenges WHERE user_id LIKE 'ci-%'`);
   await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-wk-%'`);
+  await db.query(
+    `DELETE FROM friendships WHERE user_id = $1 OR friend_id = $1`,
+    [WENDY],
+  );
+  await db.query(`DELETE FROM notification_settings WHERE user_id = $1`, [WENDY]);
+  await db.query(`DELETE FROM users WHERE user_id = $1`, [WENDY]);
 }
 
 console.log("ci-smoke: all assertions passed");
