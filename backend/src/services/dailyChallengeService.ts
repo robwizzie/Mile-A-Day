@@ -44,6 +44,12 @@ export async function getTodaysChallenge(
   const challengeRow =
     completedRow ?? (await selectChallengeForUser(userId, localDate));
 
+  // What they were served today, for tomorrow's history. Deliberately not
+  // awaited: see stampServedChallenge.
+  stampServedChallenge(userId, localDate, challengeRow.challenge_key).catch(
+    (e) => console.error("[Challenges] stamp failed:", e?.message ?? e),
+  );
+
   // Head-to-Head: pin today's rival + live mileage so the UI can render the
   // duel. Built once and threaded through render/progress below.
   const opponent =
@@ -132,10 +138,19 @@ const HISTORY_WINDOW_DAYS = 14;
  * challenge that was on offer — so a missed square can say WHAT was missed
  * instead of just being empty.
  *
- * Nothing stores "the challenge user X was served on date D": selection is a
- * pure function of the date and the user's eligibility, re-derived on every
- * read (see selectChallengeForUser). So this re-walks the same rotation for
- * each empty day, with two deliberate departures:
+ * Three sources, in descending order of how much they can be trusted:
+ *
+ *  1. `user_daily_challenges` — what the user was actually SERVED that day
+ *     (see stampServedChallenge). Exact, and the only source immune to the
+ *     rotation changing underneath old dates. Present only from the day that
+ *     table shipped, and only for days the user opened the app or synced.
+ *  2. `h2h_matchups` — a pinned duel is written only for a user whose
+ *     selection landed on Head-to-Head, so the row itself is proof of that
+ *     day's challenge. Predates (1), which is what makes it worth keeping.
+ *  3. Re-deriving the rotation walk, below.
+ *
+ * The fallback re-walks the same rotation selection uses, with two deliberate
+ * departures:
  *
  *  - Eligibility (friend count, feed feature, rival availability) is resolved
  *    ONCE and reused for every day in the window, rather than per day. The
@@ -195,6 +210,24 @@ async function missedDaysInWindow(
   let hasFeed: boolean | null = null;
   let h2hOk: boolean | null = null;
 
+  // Stored truth, best first: what they were served, then a pinned duel.
+  // Joined rather than looked up in `catalog`: a served challenge is not
+  // necessarily an ACTIVE one — add_friend lives in the table with
+  // active = FALSE (selection injects it for friendless users), and retired
+  // challenges keep their rows so history stays readable.
+  const servedRows = await db.query<ChallengeRow & { local_date: string }>(
+    `SELECT udc.local_date::text AS local_date,
+			dc.challenge_key, dc.title, dc.description_template, dc.icon,
+			dc.gradient_start, dc.gradient_end, dc.type
+		FROM user_daily_challenges udc
+		JOIN daily_challenges dc ON dc.challenge_key = udc.challenge_key
+		WHERE udc.user_id = $1 AND udc.local_date = ANY($2::date[])`,
+    [userId, openDays],
+  );
+  const servedByDate = new Map<string, ChallengeRow>(
+    servedRows.map((r) => [r.local_date, r]),
+  );
+
   // Days this user was actually pinned into a duel — stored truth.
   const duelRows = await db.query<{ local_date: string }>(
     `SELECT local_date::text AS local_date FROM h2h_matchups
@@ -209,7 +242,9 @@ async function missedDaysInWindow(
 
   const missed: ChallengeMissedDayItem[] = [];
   for (const localDate of openDays) {
-    let row: ChallengeRow | null = duelDays.has(localDate) ? h2hRow : null;
+    let row: ChallengeRow | null =
+      servedByDate.get(localDate) ??
+      (duelDays.has(localDate) ? h2hRow : null);
     if (!row) {
       let friendlessOnH2hDay = false;
       const picked = await walkRotation(
@@ -358,6 +393,12 @@ export async function evaluateForDay(
   if (existing) return null;
 
   const challenge = await selectChallengeForUser(userId, localDate);
+  // The challenge this day's workouts are being scored against — the same
+  // fact the dashboard stamps, captured for users who sync without opening
+  // the app. Not awaited: a bookkeeping row must not fail a sync.
+  stampServedChallenge(userId, localDate, challenge.challenge_key).catch((e) =>
+    console.error("[Challenges] stamp failed:", e?.message ?? e),
+  );
   const goalMiles = await getGoalMiles(userId);
   const satisfied = await evaluatePredicate(
     userId,
@@ -1108,6 +1149,43 @@ async function selectChallengeForUser(
     if (substitute) return substitute;
   }
   return picked;
+}
+
+/**
+ * Record which challenge this user was SERVED on this date.
+ *
+ * Selection is otherwise re-derived from the date on every read, so history
+ * stops being reproducible the moment the rotation changes — moving
+ * head_to_head to twice per cycle already shifted what every past date would
+ * re-derive to. This is the durable answer for anything that later asks "what
+ * was the challenge that day".
+ *
+ * First write wins (`DO NOTHING`): the pick can flip mid-day when an
+ * eligibility signal changes (a friend accepted at noon makes Head-to-Head
+ * selectable), and what the user was FIRST shown is the honest record of the
+ * day — a later re-pick would rewrite history under them.
+ *
+ * Called from the paths where the challenge actually governed the user's day:
+ * their own dashboard read, and the sync-time evaluation that scores it.
+ * NOT from the friend-profile read, which resolves someone ELSE's challenge —
+ * a stranger opening your profile shouldn't be what stamps your day. Days the
+ * user never opened the app and never synced simply have no row, which is
+ * correct: they were shown nothing to contradict.
+ *
+ * Fire-and-forget at both call sites — the dashboard must not wait on a
+ * bookkeeping write, and losing one only falls back to re-derivation.
+ */
+async function stampServedChallenge(
+  userId: string,
+  localDate: string,
+  challengeKey: string,
+): Promise<void> {
+  await db.query(
+    `INSERT INTO user_daily_challenges (user_id, local_date, challenge_key)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id, local_date) DO NOTHING`,
+    [userId, localDate, challengeKey],
+  );
 }
 
 async function getChallengeRowByKey(key: string): Promise<ChallengeRow | null> {
