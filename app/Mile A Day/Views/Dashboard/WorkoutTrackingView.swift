@@ -1748,6 +1748,9 @@ struct WorkoutTrackingView: View {
             // Check if we've reached the previous progress point
             if !hasReachedPreviousProgress && startingDistance > 0 && newValue >= startingDistance {
                 hasReachedPreviousProgress = true
+                // Stamp the workout, not just this presentation — the @State
+                // flag dies with the cover and re-entry would buzz again.
+                InProgressWorkoutStore.markCelebrated(catchUp: true)
 
                 // Show notification that they've reached where they were
                 withAnimation {
@@ -1782,6 +1785,8 @@ struct WorkoutTrackingView: View {
             // 3. We've now reached the goal with total daily distance
             if !hasShownCompletion && startingDistance < goalDistance && totalDailyDistance >= goalDistance {
                 hasShownCompletion = true // Mark as shown so it doesn't loop
+                // Stamp the workout, not just this presentation — see above.
+                InProgressWorkoutStore.markCelebrated(completion: true)
 
                 // Show completion celebration
                 withAnimation {
@@ -1873,12 +1878,21 @@ struct WorkoutTrackingView: View {
             // whenever the cover dismisses, so returning to a workout that had
             // already crossed the goal re-armed both, and the first distance
             // tick replayed the success haptic + overlay: a buzz on EVERY
-            // return after 100%. Seed them from the state being restored —
-            // anything already earned counts as already shown. Milestones not
-            // yet reached stay armed and still fire exactly once.
-            hasReachedPreviousProgress =
-                startingDistance > 0 && saved.currentDistance >= startingDistance
-            hasShownCompletion = startingDistance + saved.currentDistance >= goalDistance
+            // return after 100%. Two restore sources, both required:
+            //  1. The persisted stamps — written the instant each celebration
+            //     fired, so they survive any lifecycle (this is the layer that
+            //     actually guarantees once-per-workout).
+            //  2. A derived fallback for pre-stamp blobs, compared against the
+            //     LIVE manager distance, not just the store's: the manager
+            //     keeps tracking while the cover is down and the store's
+            //     throttled copy can lag it — seeding below the live value
+            //     re-armed a milestone the next distance tick then "re-earned"
+            //     (the buzz on every return the stamps exist to kill).
+            let restoredDistance = max(saved.currentDistance, locationManager.liveDistance)
+            hasReachedPreviousProgress = saved.celebratedCatchUp == true
+                || (startingDistance > 0 && restoredDistance >= startingDistance)
+            hasShownCompletion = saved.celebratedCompletion == true
+                || startingDistance + restoredDistance >= goalDistance
 
             // Jump directly into the tracking UI
             clearPreStartSteps()

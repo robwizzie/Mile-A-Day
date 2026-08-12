@@ -22,6 +22,15 @@ struct InProgressWorkoutState: Codable {
     var routePoints: [WorkoutRoutePoint] // Location history for recovery
     var isUsingPedometer: Bool // Whether using pedometer vs GPS
     var liveActivityID: String? // Live Activity identifier for recovery
+    // One-shot celebration stamps, set the moment each in-tracker celebration
+    // (haptic + overlay) fires. The tracker view is destroyed on every cover
+    // dismissal, so a view-lifetime flag re-arms on each return — these make
+    // "already buzzed for this workout" a fact about the WORKOUT. Optional on
+    // purpose: synthesized Decodable ignores property defaults, so a
+    // non-optional addition would throw on the blob an older build persisted
+    // mid-workout (ios.md Codable trap).
+    var celebratedCatchUp: Bool?
+    var celebratedCompletion: Bool?
 
     init(
         isActive: Bool = false,
@@ -39,7 +48,9 @@ struct InProgressWorkoutState: Codable {
         lastSaveTime: Date = Date(),
         routePoints: [WorkoutRoutePoint] = [],
         isUsingPedometer: Bool = false,
-        liveActivityID: String? = nil
+        liveActivityID: String? = nil,
+        celebratedCatchUp: Bool? = nil,
+        celebratedCompletion: Bool? = nil
     ) {
         self.isActive = isActive
         self.isPaused = isPaused
@@ -57,6 +68,8 @@ struct InProgressWorkoutState: Codable {
         self.routePoints = routePoints
         self.isUsingPedometer = isUsingPedometer
         self.liveActivityID = liveActivityID
+        self.celebratedCatchUp = celebratedCatchUp
+        self.celebratedCompletion = celebratedCompletion
     }
 }
 
@@ -279,6 +292,17 @@ enum InProgressWorkoutStore {
     static func updateElapsedTime(_ elapsedTime: TimeInterval) {
         guard var state = load() else { return }
         state.elapsedTime = elapsedTime
+        save(state)
+    }
+
+    /// Stamp a fired celebration so no later presentation of the tracker can
+    /// replay its haptic/overlay. Write-through on fire: the buzz-on-every-
+    /// return bug was a view-lifetime one-shot being re-armed by the next
+    /// presentation of the cover.
+    static func markCelebrated(catchUp: Bool = false, completion: Bool = false) {
+        guard var state = load() else { return }
+        if catchUp { state.celebratedCatchUp = true }
+        if completion { state.celebratedCompletion = true }
         save(state)
     }
 
