@@ -13,6 +13,21 @@ struct CreateCompetitionView: View {
     /// already targeting that person — no friend-picker step needed.
     var preselectedFriend: BackendUser?
 
+    /// A one-tap configuration to start from (quick-start path). Applied once
+    /// when the sheet opens; everything stays editable afterwards.
+    var preset: CompetitionPreset?
+
+    /// Open the form on a specific mode, with that mode's normal defaults.
+    /// Used by the mode explainer's "Start one" CTA — the user has just read
+    /// how the mode works, so landing them on a different one is jarring.
+    /// Ignored when `preset` is set (a preset already names its type).
+    var initialType: CompetitionType?
+
+    /// Collapse the type-specific option sections behind a "Customize"
+    /// disclosure. Set by the quick-start path, where the preset has already
+    /// answered all of them and the only remaining question is who to invite.
+    var startsCollapsed: Bool = false
+
     // Form fields
     @State private var selectedFriends: Set<BackendUser> = []
     @State private var selectedType: CompetitionType = .apex
@@ -41,6 +56,17 @@ struct CreateCompetitionView: View {
     @State private var showFriendPicker = false
     @State private var showTypeSelector = false
     @State private var friendPickerFilter = ""
+
+    /// One-shot guard: `.task` can re-run and `onAppear` re-fires when a child
+    /// sheet dismisses, and re-applying the preset would silently undo edits
+    /// the user just made.
+    @State private var presetApplied = false
+    /// A preset waiting for its type-change defaults reset to run before its
+    /// own values land on top. See `applyPreset`.
+    @State private var pendingPreset: CompetitionPreset?
+    /// Whether the collapsed option sections are expanded. Starts open unless
+    /// the quick-start path asked for them closed.
+    @State private var showAdvanced = false
 
     var canCreate: Bool {
         !selectedFriends.isEmpty &&
@@ -148,36 +174,16 @@ struct CreateCompetitionView: View {
                         // Competition Type Selection
                         competitionTypeSection
 
-                        // Activity Selection
-                        activitySelectionSection
-
-                        // Goal Selection (not needed for Clash - whoever goes further wins)
-                        if needsGoal {
-                            goalSelectionSection
+                        // Everything from the activity toggles down is what a
+                        // preset has already answered. On the quick-start path
+                        // it collapses so the only open question is who to
+                        // invite; on the normal path it's expanded and the
+                        // form reads exactly as before.
+                        if showAdvanced {
+                            optionSections
                         } else {
-                            // Clash only needs a unit selector
-                            unitOnlySection
+                            customizeDisclosure
                         }
-
-                        // Type-Specific Options
-                        if needsInterval {
-                            intervalSection
-                        }
-
-                        // Targets: choose between a fixed duration and "first to X points"
-                        if needsTargetsEndMode {
-                            targetsEndModeSection
-                        }
-
-                        if needsFirstTo {
-                            firstToSection
-                        }
-
-                        // Duration (apex always; targets when not using "first to X")
-                        if needsDuration {
-                            durationSection
-                        }
-
                     }
                     .padding(.horizontal, MADTheme.Spacing.md)
                     .padding(.top, MADTheme.Spacing.md)
@@ -250,6 +256,22 @@ struct CreateCompetitionView: View {
                     }
                 }
             }
+            // One-shot: `onAppear` re-fires whenever a pushed destination
+            // (friend picker, type selector) pops back, and re-running this
+            // would undo the user's edits and re-collapse a disclosure they
+            // had opened.
+            .onAppear {
+                guard !presetApplied else { return }
+                presetApplied = true
+                showAdvanced = !startsCollapsed
+                if let preset {
+                    applyPreset(preset)
+                } else if let initialType {
+                    // Assigning the type is enough — the change handler fills
+                    // in that mode's defaults.
+                    selectedType = initialType
+                }
+            }
             .onChange(of: selectedType) { _, newType in
                 // Reset to sensible defaults for each type
                 switch newType {
@@ -278,6 +300,15 @@ struct CreateCompetitionView: View {
                 case .race:
                     goal = 20.0
                     hasEndDate = false
+                }
+
+                // A preset that changed the type lands its own values HERE,
+                // after the reset above — assigning them alongside the type
+                // would just be overwritten, since this fires on the next
+                // update rather than inline.
+                if let pending = pendingPreset, pending.type == newType {
+                    pendingPreset = nil
+                    applyPresetValues(pending)
                 }
             }
             .onChange(of: unit) { _, newUnit in
@@ -312,6 +343,123 @@ struct CreateCompetitionView: View {
         // The sheet can no longer be swiped away — an accidental slide-down
         // used to silently discard the whole form. Cancel is the explicit exit.
         .interactiveDismissDisabled()
+    }
+
+    // MARK: - Option Sections
+
+    /// The type-specific half of the form. Gating stays exactly where it was —
+    /// `needsGoal` / `needsInterval` / `needsTargetsEndMode` / `needsFirstTo` /
+    /// `needsDuration` remain the single source of truth for which of these
+    /// apply; the disclosure only decides whether they're on screen.
+    @ViewBuilder
+    var optionSections: some View {
+        activitySelectionSection
+
+        // Goal Selection (not needed for Clash - whoever goes further wins)
+        if needsGoal {
+            goalSelectionSection
+        } else {
+            // Clash only needs a unit selector
+            unitOnlySection
+        }
+
+        if needsInterval {
+            intervalSection
+        }
+
+        // Targets: choose between a fixed duration and "first to X points"
+        if needsTargetsEndMode {
+            targetsEndModeSection
+        }
+
+        if needsFirstTo {
+            firstToSection
+        }
+
+        // Duration (apex always; targets when not using "first to X")
+        if needsDuration {
+            durationSection
+        }
+    }
+
+    /// Collapsed stand-in for `optionSections`: a one-line summary of what the
+    /// preset chose, and a way in.
+    var customizeDisclosure: some View {
+        Button {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                showAdvanced = true
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(MADTheme.Colors.madRed)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Customize")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text(presetSummary)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.6))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer(minLength: 4)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    /// Plain-English recap of the collapsed settings, so a user who never opens
+    /// the disclosure still knows what they're about to start.
+    var presetSummary: String {
+        var parts: [String] = [selectedType.displayName]
+
+        if needsGoal && goal > 0 {
+            parts.append("\(unit == .steps ? String(Int(goal)) : String(format: "%.1f", goal)) \(unit.shortDisplayName)\(selectedType == .race ? " to win" : " goal")")
+        }
+        if needsFirstTo && firstTo > 0 {
+            parts.append(selectedType == .streaks
+                ? "\(firstTo) \(firstTo == 1 ? "life" : "lives")"
+                : "first to \(firstTo)")
+        }
+        if needsDuration, let duration = durationText {
+            parts.append(duration)
+        }
+        parts.append(selectedWorkouts.count == 2
+            ? "runs & walks"
+            : (selectedWorkouts.first.map { $0 == .run ? "runs only" : "walks only" } ?? "runs"))
+
+        return parts.joined(separator: " · ")
+    }
+
+    /// Duration in words, reusing `CompetitionOptions.durationFormatted`'s
+    /// vocabulary so the summary and the competition detail agree.
+    var durationText: String? {
+        guard durationHours > 0 else { return nil }
+        if durationHours < 24 { return "\(durationHours) hour\(durationHours == 1 ? "" : "s")" }
+        let days = durationHours / 24
+        switch days {
+        case 7: return "1 week"
+        case 14: return "2 weeks"
+        case 30: return "1 month"
+        default: return "\(days) day\(days == 1 ? "" : "s")"
+        }
     }
 
     // MARK: - Name Section
@@ -1175,6 +1323,44 @@ struct CreateCompetitionView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "d"
         return formatter.string(from: Date())
+    }
+
+    // MARK: - Presets
+
+    /// Seed the form from a quick-start preset.
+    ///
+    /// Split in two because assigning `selectedType` schedules the
+    /// type-defaults reset in `.onChange(of: selectedType)`, which runs on the
+    /// next update — after anything we set synchronously here. So when the type
+    /// actually changes we hand the rest off to that handler via
+    /// `pendingPreset`; when it doesn't change (the form already opens on
+    /// `.apex`) no reset fires at all and we apply directly.
+    private func applyPreset(_ preset: CompetitionPreset) {
+        if selectedType == preset.type {
+            applyPresetValues(preset)
+        } else {
+            pendingPreset = preset
+            selectedType = preset.type
+        }
+    }
+
+    private func applyPresetValues(_ preset: CompetitionPreset) {
+        unit = preset.unit
+        interval = preset.interval
+        selectedWorkouts = preset.activities
+        targetsUseFirstTo = preset.targetsUseFirstTo
+        // `firstTo` doubles as the streak LIVES count — createCompetition sends
+        // `lives: isStreaks ? firstTo : nil`, so a streaks preset that left this
+        // at 0 would create a competition nobody can survive a missed day in.
+        firstTo = preset.firstTo
+        if preset.goal > 0 {
+            goal = preset.goal
+        }
+        if let hours = preset.durationHours {
+            durationHours = hours
+            isCustomDuration = false
+            hasEndDate = true
+        }
     }
 
     // MARK: - Actions

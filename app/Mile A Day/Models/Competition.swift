@@ -518,6 +518,85 @@ enum CompetitionType: String, Codable, CaseIterable {
         }
     }
 
+    /// Five-word gist, for the mode gallery and card subtitles. `description`
+    /// is the full rules sentence and stays as-is (the create flow's type
+    /// selector renders it); this is the version you can read at a glance.
+    var tagline: String {
+        switch self {
+        case .streaks: return "Last one standing."
+        case .apex: return "Most miles wins."
+        case .targets: return "Hit your goal, bank a point."
+        case .clash: return "Win the day, take the point."
+        case .race: return "First to the finish line."
+        }
+    }
+
+    /// Exactly three steps, imperative, no jargon — the body of the mode
+    /// explainer. Kept to three because a fourth line stops being scannable,
+    /// which is the entire point of the sheet.
+    var howItWorks: [String] {
+        switch self {
+        case .streaks:
+            return [
+                "Everyone has to hit the same daily goal.",
+                "Miss a day and you spend one of your lives.",
+                "Run out of lives and you're out. Last one alive wins."
+            ]
+        case .apex:
+            return [
+                "Run and walk as normal for the set window.",
+                "Every counted mile adds to your total.",
+                "Highest total when the clock runs out wins."
+            ]
+        case .targets:
+            return [
+                "A goal is set for each day.",
+                "Everyone who hits it that day banks a point.",
+                "Most points at the end wins — you're racing the goal, not each other."
+            ]
+        case .clash:
+            return [
+                "Every day is its own mini-contest.",
+                "Whoever goes furthest that day takes the point.",
+                "First to the target score wins — or most points when time's up."
+            ]
+        case .race:
+            return [
+                "One distance is set as the finish line.",
+                "Every mile you log moves you toward it.",
+                "First person there wins. No clock, no daily goals."
+            ]
+        }
+    }
+
+    /// A worked example with real numbers. Abstract rules stop being abstract
+    /// the moment someone sees one round play out.
+    var example: String {
+        switch self {
+        case .streaks:
+            return "Everyone owes a mile a day with 3 lives. You miss Tuesday and Friday — two lives gone, one left. Dave misses four days and he's out."
+        case .apex:
+            return "Over one week you cover 12.4 mi and Dave covers 9.1. You win — it doesn't matter how you split it up."
+        case .targets:
+            return "The goal is 2 mi a day. You hit it Mon, Wed and Sat for 3 points; Dave hits it twice. You win 3–2."
+        case .clash:
+            return "Monday you run 3 mi to Dave's 2.6 — your point. Tuesday he runs 4 to your 1. First to 5 daily wins takes it."
+        case .race:
+            return "First to 20 mi. You're at 14.2 after five days, Dave's at 16.8. He needs 3.2 more; you need 5.8."
+        }
+    }
+
+    /// One line on the gallery card answering "should I pick this one?".
+    var bestFor: String {
+        switch self {
+        case .streaks: return "Best for holding each other accountable."
+        case .apex: return "Best for a whole-week push with 2–6 friends."
+        case .targets: return "Best when everyone's at a different fitness level."
+        case .clash: return "Best for a daily back-and-forth with one rival."
+        case .race: return "Best for a long-haul goal with no deadline."
+        }
+    }
+
     var gradient: [String] {
         switch self {
         case .streaks: return ["FF6B6B", "FF8E53"]
