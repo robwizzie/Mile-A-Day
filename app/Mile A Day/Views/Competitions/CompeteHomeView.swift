@@ -145,7 +145,7 @@ struct CompeteHomeView: View {
             }
             .task {
                 // The weekly challenge is served on read, so this is also what
-                // stamps the user's row for the week if the Monday cron hasn't.
+                // stamps the user's row for the week if the Sunday cron hasn't.
                 await weeklyService.refresh()
             }
             .onChange(of: scrollTarget) { _, _ in

@@ -52,14 +52,19 @@ export function dayOfYear(ymd: string): number {
 }
 
 /**
- * A fixed Monday, so week indices are stable forever. 2024-01-01 was a Monday.
- * Anchoring to a real Monday (rather than, say, the epoch) means every
+ * A fixed SUNDAY, so week indices are stable forever. 2023-12-31 was a Sunday.
+ * Anchoring to a real week start (rather than, say, the epoch) means every
  * `week_start` divides evenly and the index never drifts by a day.
+ *
+ * This moved back one day when weeks became Sunday-start. Because every
+ * `week_start` moved back by the same one day, `weekOfEpoch` returns the SAME
+ * index as before — the rotation did not reshuffle, and no week's challenge
+ * changed.
  */
-const WEEK_EPOCH_UTC = Date.UTC(2024, 0, 1);
+const WEEK_EPOCH_UTC = Date.UTC(2023, 11, 31);
 
 /**
- * Which week `weekStart` is, counting from a fixed Monday.
+ * Which week `weekStart` is, counting from a fixed Sunday.
  *
  * The weekly counterpart to `dayOfYear`: it seeds the same deterministic walk,
  * so the whole app sees one theme per calendar week. Deliberately NOT

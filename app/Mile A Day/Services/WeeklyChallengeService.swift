@@ -94,23 +94,31 @@ final class WeeklyChallengeService: ObservableObject {
         current = decoded
     }
 
-    /// This device's Monday, used only to decide whether a cached payload is
+    /// This device's Sunday, used only to decide whether a cached payload is
     /// still this week. The server is the authority on the actual window.
+    ///
+    /// Weeks run Sunday→Saturday. Derived by subtracting the weekday index
+    /// rather than going through `yearForWeekOfYear` — that route depends on the
+    /// calendar's `firstWeekday` and has awkward behaviour across year
+    /// boundaries, and this only ever needs "the Sunday on or before today".
     private static func currentWeekStart() -> String {
-        var calendar = Calendar(identifier: .iso8601)
+        var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone.current
         let now = Date()
-        let components = calendar.dateComponents(
-            [.yearForWeekOfYear, .weekOfYear],
-            from: now
-        )
-        let monday = calendar.date(from: components) ?? now
+        // Gregorian weekday: 1 = Sunday, so subtracting (weekday - 1) days lands
+        // on this week's Sunday, and on Sunday itself subtracts nothing.
+        let weekday = calendar.component(.weekday, from: now)
+        let start = calendar.date(
+            byAdding: .day,
+            value: -(weekday - 1),
+            to: calendar.startOfDay(for: now)
+        ) ?? now
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone.current
-        return formatter.string(from: monday)
+        return formatter.string(from: start)
     }
 }

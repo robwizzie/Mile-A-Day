@@ -113,7 +113,7 @@ struct NotificationPreferences: Codable {
         set { weeklyRecapEnabledRaw = newValue }
     }
 
-    /// The weekly challenge pushes: Monday's "new challenge", the mid-week
+    /// The weekly challenge pushes: Sunday's "new challenge", the Friday
     /// nudge, and the completion celebration.
     ///
     /// Its own switch rather than folded into the competition toggles — muting
