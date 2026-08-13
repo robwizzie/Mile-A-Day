@@ -15,12 +15,16 @@ import {
   METERS_PER_MILE,
   type BuddyActivityType,
   type BuddyEventKind,
+  type BuddyHistoryEntry,
+  type BuddyHistoryParticipant,
+  type BuddyHistoryTotals,
   type BuddyMode,
   type BuddyOrigin,
   type BuddyParticipantView,
   type BuddySessionRow,
   type BuddySessionState,
 } from "../types/buddy.js";
+import { buddySessionPhotos } from "./postService.js";
 
 const db = PostgresService.getInstance();
 
@@ -1654,4 +1658,257 @@ export async function getBuddyPartners(
       LIMIT $2`,
     [userId, Math.min(Math.max(limit, 1), 50)],
   );
+}
+
+// ─── History ────────────────────────────────────────────────────────────
+
+/**
+ * A walk only enters the archive once it's genuinely over AND was genuinely
+ * shared: the session completed, the viewer finished it, and at least one other
+ * person finished it too. A room the viewer opened and walked alone is a solo
+ * walk that happened to have a lobby — it belongs to the workout history, not
+ * to "walks together", and listing it would make the shared-miles number the
+ * screen leads with mean two different things at once.
+ *
+ * `$1` is the viewer; `friendParam` is the optional friend filter, passed in
+ * because the two callers number their parameters differently. The friend
+ * filter and the someone-else-was-there requirement are the SAME clause on
+ * purpose: filtering to a friend must still mean "a walk we finished
+ * together", not "a walk of mine they were invited to".
+ */
+const historyHasCompanionSql = (friendParam: string) => `EXISTS (
+  SELECT 1 FROM buddy_session_participants o
+   WHERE o.session_id = s.id
+     AND o.user_id <> $1
+     AND o.status = 'finished'
+     AND (${friendParam}::text IS NULL OR o.user_id = ${friendParam})
+     AND NOT EXISTS (
+       SELECT 1 FROM user_blocks b
+        WHERE (b.blocker_id = $1 AND b.blocked_id = o.user_id)
+           OR (b.blocker_id = o.user_id AND b.blocked_id = $1)
+     )
+)`;
+
+/** Ordering key. `ended_at` is stamped at close; `created_at` is the backstop
+ * for any historical row that closed before it was being written. */
+const HISTORY_SORT_KEY = `COALESCE(s.ended_at, s.created_at)`;
+
+interface HistorySessionRow {
+  id: string;
+  mode: BuddyMode;
+  activity_type: string;
+  goal_value: number | null;
+  local_date: string;
+  started_at: string | null;
+  ended_at: string | null;
+  winner_user_id: string | null;
+  group_distance_miles: number;
+  my_distance_miles: number;
+  my_duration_seconds: number;
+  my_place: number | null;
+  cursor: string;
+}
+
+/**
+ * Past buddy walks, newest first — the archive behind the history screen.
+ *
+ * Keyset paginated on `ended_at` (URL-safe ISO, same shape as the feed's
+ * cursor: a raw `timestamptz::text` carries a '+' that Express decodes as a
+ * space and the next page's cast 500s).
+ *
+ * Roster identity is re-gated per read, exactly as getBuddyPartners re-gates
+ * its names: a blocked participant is dropped from the roster entirely, and an
+ * un-friended one comes back with a null name so the client can draw them
+ * anonymously. Neither changes `group_distance_miles`, which stays what the
+ * recap said on the day — an archive that quietly restates a past walk's
+ * numbers because a friendship ended is worse than one that doesn't.
+ */
+export async function getBuddyHistory(
+  userId: string,
+  options: { limit?: number; before?: string | null; friendId?: string | null },
+): Promise<{ sessions: BuddyHistoryEntry[]; next_before: string | null }> {
+  const limit = Math.min(Math.max(options.limit ?? 20, 1), 40);
+  const before = options.before ?? null;
+  const friendId = options.friendId ?? null;
+
+  const rows = await db.query<HistorySessionRow>(
+    `SELECT s.id, s.mode, s.activity_type, s.goal_value, s.winner_user_id,
+            to_char(s.local_date, 'YYYY-MM-DD') AS local_date,
+            s.started_at, s.ended_at,
+            ROUND(COALESCE(me.final_distance_miles, me.distance_miles)::numeric, 3)::float
+              AS my_distance_miles,
+            me.duration_seconds AS my_duration_seconds,
+            me.place AS my_place,
+            (SELECT ROUND(
+                      COALESCE(SUM(COALESCE(o.final_distance_miles, o.distance_miles)), 0)::numeric,
+                      3)::float
+               FROM buddy_session_participants o
+              WHERE o.session_id = s.id AND o.status = 'finished'
+            ) AS group_distance_miles,
+            to_char(${HISTORY_SORT_KEY} AT TIME ZONE 'UTC',
+                    'YYYY-MM-DD"T"HH24:MI:SS.US') || 'Z' AS cursor
+       FROM buddy_session_participants me
+       JOIN buddy_sessions s ON s.id = me.session_id
+      WHERE me.user_id = $1
+        AND me.status = 'finished'
+        AND s.status = 'completed'
+        AND ($2::timestamptz IS NULL OR ${HISTORY_SORT_KEY} < $2::timestamptz)
+        AND ${historyHasCompanionSql("$4")}
+      ORDER BY ${HISTORY_SORT_KEY} DESC
+      LIMIT $3`,
+    [userId, before, limit, friendId],
+  );
+
+  if (rows.length === 0) return { sessions: [], next_before: null };
+
+  const sessionIds = rows.map((r) => r.id);
+  const [participants, photos] = await Promise.all([
+    loadHistoryParticipants(userId, sessionIds),
+    buddySessionPhotos(userId, sessionIds),
+  ]);
+
+  const bySession = new Map<string, BuddyHistoryParticipant[]>();
+  for (const p of participants) {
+    const list = bySession.get(p.session_id) ?? [];
+    list.push({
+      user_id: p.user_id,
+      username: p.username,
+      first_name: p.first_name,
+      profile_image_url: p.profile_image_url,
+      distance_miles: Number(p.distance_miles) || 0,
+      duration_seconds: Number(p.duration_seconds) || 0,
+      place: p.place,
+      is_host: p.is_host === true,
+    });
+    bySession.set(p.session_id, list);
+  }
+
+  const photosBySession = new Map<string, BuddyHistoryEntry["photos"]>();
+  for (const photo of photos) {
+    const list = photosBySession.get(photo.buddy_session_id) ?? [];
+    list.push({
+      post_id: photo.post_id,
+      user_id: photo.user_id,
+      media_url: photo.media_url,
+      caption: photo.caption,
+    });
+    photosBySession.set(photo.buddy_session_id, list);
+  }
+
+  const sessions: BuddyHistoryEntry[] = rows.map((row) => ({
+    id: row.id,
+    mode: row.mode,
+    activity_type: row.activity_type,
+    goal_value: row.goal_value === null ? null : Number(row.goal_value),
+    local_date: row.local_date,
+    started_at: row.started_at,
+    ended_at: row.ended_at,
+    winner_user_id: row.winner_user_id,
+    group_distance_miles: Number(row.group_distance_miles) || 0,
+    my_distance_miles: Number(row.my_distance_miles) || 0,
+    my_duration_seconds: Number(row.my_duration_seconds) || 0,
+    my_place: row.my_place,
+    participants: bySession.get(row.id) ?? [],
+    photos: photosBySession.get(row.id) ?? [],
+    cursor: row.cursor,
+  }));
+
+  // Only advertise another page when this one was full — a short page is the
+  // end of the archive, and handing back a cursor there makes the client spend
+  // a round trip to learn nothing.
+  const next_before =
+    rows.length === limit ? (rows[rows.length - 1]?.cursor ?? null) : null;
+
+  return { sessions, next_before };
+}
+
+interface HistoryParticipantRow extends BuddyHistoryParticipant {
+  session_id: string;
+}
+
+async function loadHistoryParticipants(
+  viewerId: string,
+  sessionIds: string[],
+): Promise<HistoryParticipantRow[]> {
+  return db.query<HistoryParticipantRow>(
+    `SELECT p.session_id, p.user_id,
+            ROUND(COALESCE(p.final_distance_miles, p.distance_miles)::numeric, 3)::float
+              AS distance_miles,
+            p.duration_seconds, p.place,
+            (p.user_id = s.host_user_id) AS is_host,
+            CASE WHEN vis.ok THEN u.username END AS username,
+            CASE WHEN vis.ok THEN u.first_name END AS first_name,
+            CASE WHEN vis.ok THEN u.profile_image_url END AS profile_image_url
+       FROM buddy_session_participants p
+       JOIN buddy_sessions s ON s.id = p.session_id
+       JOIN users u ON u.user_id = p.user_id
+       CROSS JOIN LATERAL (
+         SELECT (p.user_id = $1 OR EXISTS (
+                   SELECT 1 FROM friendships f
+                    WHERE f.user_id = $1 AND f.friend_id = p.user_id
+                      AND f.status = 'accepted'
+                 )) AS ok
+       ) vis
+      WHERE p.session_id = ANY($2::text[])
+        AND p.status = 'finished'
+        AND NOT EXISTS (
+          SELECT 1 FROM user_blocks b
+           WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
+              OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
+        )
+      ORDER BY p.session_id,
+               COALESCE(p.final_distance_miles, p.distance_miles) DESC`,
+    [viewerId, sessionIds],
+  );
+}
+
+/**
+ * Lifetime totals across the same set of walks the history lists — one query
+ * rather than counting the page, so the headline doesn't grow as you scroll.
+ *
+ * Scoped to the same friend filter when one is applied, so "you and Sam" reads
+ * consistently between the headline and the list under it.
+ */
+export async function getBuddyHistoryTotals(
+  userId: string,
+  friendId?: string | null,
+): Promise<BuddyHistoryTotals> {
+  const rows = await db.query<{
+    walks: number;
+    miles: number;
+    partners: number;
+    first_walk_date: string | null;
+    last_walk_date: string | null;
+  }>(
+    `WITH mine AS (
+       SELECT s.id, s.local_date,
+              COALESCE(me.final_distance_miles, me.distance_miles) AS miles
+         FROM buddy_session_participants me
+         JOIN buddy_sessions s ON s.id = me.session_id
+        WHERE me.user_id = $1
+          AND me.status = 'finished'
+          AND s.status = 'completed'
+          AND ${historyHasCompanionSql("$2")}
+     )
+     SELECT COUNT(*)::int AS walks,
+            ROUND(COALESCE(SUM(miles), 0)::numeric, 2)::float AS miles,
+            (SELECT COUNT(DISTINCT o.user_id)::int
+               FROM buddy_session_participants o
+              WHERE o.session_id IN (SELECT id FROM mine)
+                AND o.user_id <> $1
+                AND o.status = 'finished') AS partners,
+            to_char(MIN(local_date), 'YYYY-MM-DD') AS first_walk_date,
+            to_char(MAX(local_date), 'YYYY-MM-DD') AS last_walk_date
+       FROM mine`,
+    [userId, friendId ?? null],
+  );
+
+  const row = rows[0];
+  return {
+    walks: Number(row?.walks) || 0,
+    miles: Number(row?.miles) || 0,
+    partners: Number(row?.partners) || 0,
+    first_walk_date: row?.first_walk_date ?? null,
+    last_walk_date: row?.last_walk_date ?? null,
+  };
 }

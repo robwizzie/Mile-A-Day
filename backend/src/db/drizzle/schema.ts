@@ -2178,6 +2178,17 @@ export const postCoauthors = pgTable(
       table.userId.asc().nullsLast(),
       table.status.asc().nullsLast(),
     ),
+    // The buddy history screen looks posts up BY session ("what did we take a
+    // picture of on that walk"), which is the one direction this table had no
+    // index for — the FK alone doesn't create one. Deliberately NOT partial on
+    // `IS NOT NULL`: the lookup's predicate is `= ANY($1)`, and a partial index
+    // is only usable when the planner can prove the query implies its
+    // predicate, which is not worth betting a seq scan on for the handful of
+    // pages this saves.
+    index("idx_post_coauthors_buddy_session").using(
+      "btree",
+      table.buddySessionId.asc().nullsLast(),
+    ),
     foreignKey({
       columns: [table.postId],
       foreignColumns: [posts.postId],

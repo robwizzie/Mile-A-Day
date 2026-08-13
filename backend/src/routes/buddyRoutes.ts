@@ -17,6 +17,7 @@ import {
   startSessionController,
   createRoutineController,
   deleteRoutineController,
+  historyController,
   listRoutinesController,
   partnersController,
   updateRoutineController,
@@ -63,6 +64,9 @@ router.post("/sessions/:sessionId/finish", finishController);
 // Miles walked together, per friend. The number that makes a shared habit
 // feel like a thing you have rather than one you keep re-arranging.
 router.get("/partners", partnersController);
+// The walks themselves — the archive behind the history screen. Keyset
+// paginated; `?friendId=` narrows it to walks you finished with one person.
+router.get("/history", historyController);
 router.get("/recurring", listRoutinesController);
 router.post("/recurring", createRoutineController);
 router.patch("/recurring/:routineId", updateRoutineController);

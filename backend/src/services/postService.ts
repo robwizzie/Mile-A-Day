@@ -2592,6 +2592,74 @@ export async function visiblePostPreviews(
   );
 }
 
+/**
+ * A photo posted from a buddy walk, keyed back to the session it came from.
+ *
+ * Feeds the buddy history screen. The posts themselves are ordinary feed posts;
+ * what links them to a walk is the `buddy_session_id` the post wizard stamps on
+ * every `post_coauthors` row it writes. Visibility runs through
+ * `DIRECT_POST_ACCESS_SQL` — the SAME guard comments, mentions and inbox
+ * previews use — rather than "you were both on the walk": having walked with
+ * someone is not standing permission to see a photo they later took private,
+ * un-shared, or that a block has since put out of reach.
+ */
+export interface BuddySessionPhoto {
+  buddy_session_id: string;
+  post_id: string;
+  user_id: string;
+  media_url: string;
+  caption: string | null;
+  local_date: string | null;
+  is_auto: boolean;
+  /** Set by lockUnearnedPhotos when today's photo is withheld. */
+  photo_locked?: boolean;
+}
+
+/**
+ * Photos from the given buddy sessions that `viewerId` may see, at most
+ * `perSession` each (oldest first — the first photo posted is the one everyone
+ * recognises as "the" picture from that walk).
+ *
+ * Sign media urls before responding.
+ */
+export async function buddySessionPhotos(
+  viewerId: string,
+  sessionIds: string[],
+  perSession = 4,
+): Promise<BuddySessionPhoto[]> {
+  const ids = sessionIds.filter((id) => /^[0-9a-f]{1,32}$/i.test(id));
+  if (ids.length === 0) return [];
+  return db.query<BuddySessionPhoto>(
+    // The join fans out one row per credited participant, so the link set is
+    // collapsed to DISTINCT post ids BEFORE the per-session ranking — otherwise
+    // a 4-person walk's single photo would fill the whole per-session budget
+    // four times over. Aliased `pcb` because DIRECT_POST_ACCESS_SQL's own
+    // subqueries already use `pca`.
+    `WITH linked AS (
+			SELECT DISTINCT pcb.buddy_session_id, p.post_id, p.created_at
+			FROM post_coauthors pcb
+			JOIN posts p ON p.post_id = pcb.post_id
+			WHERE pcb.buddy_session_id = ANY($2::text[])
+				AND p.media_url IS NOT NULL AND p.media_url <> ''
+				AND ${DIRECT_POST_ACCESS_SQL}
+		), ranked AS (
+			SELECT l.buddy_session_id, p.post_id, p.user_id, p.media_url, p.caption,
+						 p.local_date::text AS local_date, p.is_auto,
+						 ROW_NUMBER() OVER (
+							 PARTITION BY l.buddy_session_id ORDER BY l.created_at ASC
+						 ) AS rn
+			FROM linked l
+			JOIN posts p ON p.post_id = l.post_id
+		)
+		SELECT buddy_session_id, post_id, user_id, media_url, caption, local_date,
+					 is_auto
+		FROM ranked
+		WHERE rn <= $3
+		ORDER BY buddy_session_id, rn`,
+    [viewerId, ids, Math.min(Math.max(perSession, 1), 10)],
+  );
+}
+
 /** The post's PRIMARY author if the viewer may see it — see visiblePostAuthors. */
 export async function visiblePostAuthor(
   viewerId: string,
