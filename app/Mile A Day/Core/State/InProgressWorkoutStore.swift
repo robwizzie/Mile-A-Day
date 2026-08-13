@@ -31,6 +31,12 @@ struct InProgressWorkoutState: Codable {
     // mid-workout (ios.md Codable trap).
     var celebratedCatchUp: Bool?
     var celebratedCompletion: Bool?
+    /// Same one-shot problem, different feedback channel: the goal-crossed
+    /// Live Activity update carries an `AlertConfiguration`, which the system
+    /// renders as a sound + vibration. Its view-lifetime flag re-armed on every
+    /// return to the tracker, so a walk past the goal buzzed again on each
+    /// re-entry even though the on-screen celebration correctly stayed quiet.
+    var alertedGoalComplete: Bool?
 
     init(
         isActive: Bool = false,
@@ -50,7 +56,8 @@ struct InProgressWorkoutState: Codable {
         isUsingPedometer: Bool = false,
         liveActivityID: String? = nil,
         celebratedCatchUp: Bool? = nil,
-        celebratedCompletion: Bool? = nil
+        celebratedCompletion: Bool? = nil,
+        alertedGoalComplete: Bool? = nil
     ) {
         self.isActive = isActive
         self.isPaused = isPaused
@@ -70,6 +77,7 @@ struct InProgressWorkoutState: Codable {
         self.liveActivityID = liveActivityID
         self.celebratedCatchUp = celebratedCatchUp
         self.celebratedCompletion = celebratedCompletion
+        self.alertedGoalComplete = alertedGoalComplete
     }
 }
 
@@ -296,13 +304,19 @@ enum InProgressWorkoutStore {
     }
 
     /// Stamp a fired celebration so no later presentation of the tracker can
-    /// replay its haptic/overlay. Write-through on fire: the buzz-on-every-
-    /// return bug was a view-lifetime one-shot being re-armed by the next
-    /// presentation of the cover.
-    static func markCelebrated(catchUp: Bool = false, completion: Bool = false) {
+    /// replay its haptic/overlay/alert. Write-through on fire: the buzz-on-
+    /// every-return bug was a view-lifetime one-shot being re-armed by the next
+    /// presentation of the cover. `goalAlert` covers the Live Activity's
+    /// alert-configured goal push, which buzzes the phone the same way.
+    static func markCelebrated(
+        catchUp: Bool = false,
+        completion: Bool = false,
+        goalAlert: Bool = false
+    ) {
         guard var state = load() else { return }
         if catchUp { state.celebratedCatchUp = true }
         if completion { state.celebratedCompletion = true }
+        if goalAlert { state.alertedGoalComplete = true }
         save(state)
     }
 
