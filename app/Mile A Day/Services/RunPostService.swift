@@ -252,8 +252,54 @@ enum RunPostService {
         return (lastSubstantive ?? workouts.last)?.uuid.uuidString
     }
 
+    /// The workout a Buddy Walk actually was, resolved LOCALLY.
+    ///
+    /// A buddy participant row carries a `workout_id`, but the server only
+    /// stamps it in `reconcileBuddySessions` once that person's HKWorkout has
+    /// synced — a minute or two after the walk ends, and the recap opens
+    /// *seconds* after. So in practice it was nil exactly when the post was
+    /// being made, and the buddy post went up with no workout link at all.
+    /// That single nil is what broke the "one post" guarantee: the server's
+    /// `workout_already_posted` rule keys on `workout_id`, so with none set the
+    /// run's slot stayed empty, the photo prompt still fired for it, skipping
+    /// that prompt laid a SECOND auto card over the same walk, and the card
+    /// could never be restated with the day's rollup.
+    ///
+    /// The device already knows the answer. Matching mirrors the server's own
+    /// reconciliation window (`device_end_date >= started_at`, started before
+    /// the session ended plus slack for a late Finish tap), newest first, and
+    /// skips sub-floor phantoms — the server gives those no feed card, so
+    /// linking a post to one would attach it to something that can't appear.
+    ///
+    /// Nil when nothing matches, which keeps today's behaviour (an unlinked
+    /// post) rather than guessing at an unrelated walk.
+    @MainActor
+    static func buddyWorkoutId(
+        reconciled: String?,
+        startedAt: Date?,
+        endedAt: Date?
+    ) -> String? {
+        if let reconciled, !reconciled.isEmpty { return reconciled }
+        guard let startedAt else { return nil }
+        let closedAt = (endedAt ?? Date()).addingTimeInterval(10 * 60)
+
+        return HealthKitManager.shared.todaysWorkouts
+            .filter { WorkoutFeedFloor.isSubstantive($0) }
+            .filter { $0.endDate >= startedAt && $0.startDate <= closedAt }
+            .max(by: { $0.endDate < $1.endDate })?
+            .uuid.uuidString
+    }
+
     /// Render the auto image (route map or stats card), upload it, and create the
     /// linked feed post. Called when the user skips the post-run photo prompt.
+    ///
+    /// Deliberately NOT gated on `PostedWorkoutRegistry`. The server already
+    /// refuses to let an auto card overwrite a deliberate post (`updateGuard`
+    /// is `is_auto` only, and the fall-through raises `workout_already_posted`,
+    /// which lands in the catch below), so there is no duplicate to prevent —
+    /// and a client-side guard would be WRONG in one real case: a photo shared
+    /// to a story only still consumes the run's one user-post slot, but leaves
+    /// the FEED with no card, which is exactly what this is for.
     @MainActor
     static func autoPostMile(workoutId: String, workoutType: String) async {
         let stats = todayStats(workoutId: workoutId)

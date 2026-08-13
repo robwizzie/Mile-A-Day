@@ -353,6 +353,22 @@ final class PostComposerViewModel: ObservableObject {
                 buddySessionId: destination.toFeed ? buddySessionId : nil,
                 photoSource: photoSource
             )
+            // The run now has the user's one deliberate post — the server will
+            // 409 `workout_already_posted` on a second, for a story-only share
+            // as much as a feed one, so this is recorded regardless of
+            // destination. Everything that would otherwise go on to offer this
+            // run again reads it: the post-run photo prompt (which is why a
+            // buddy walk posted through the recap wizard then got asked for a
+            // photo it already had), the recap's own CTA, and autoPostMile.
+            //
+            // ONE place, on purpose: every composer entry point in the app —
+            // the buddy wizard, the photo prompt, the feed FAB, a promoted
+            // story — publishes through this method, so putting it at any of
+            // the call sites would be the same bug waiting on the next door.
+            if let workoutId = stats.workoutId, !workoutId.isEmpty {
+                PostedWorkoutRegistry.markPosted(workoutId)
+                CelebrationManager.shared.resolvePhotoPrompt(forWorkout: workoutId)
+            }
             if stickerEnabled {
                 // Remember the user's overlay style — but merge back any stats
                 // that were remembered and merely had no data TODAY (init

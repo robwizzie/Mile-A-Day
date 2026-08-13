@@ -1179,9 +1179,12 @@ struct SocialFeedView: View {
             await MainActor.run {
                 feed.removeAll { $0.id == entry.id }
                 // Deleting a share frees that run's slot — drop any optimistic
-                // lock so the composer can re-open for it.
+                // lock so the composer can re-open for it, and the persisted
+                // record with it, or the buddy recap would keep reading
+                // "shared to the feed" for a post that no longer exists.
                 if let wid = entry.workout_id {
                     optimisticSharedWorkoutIds.remove(wid)
+                    PostedWorkoutRegistry.clear(wid)
                 }
             }
         } catch {}

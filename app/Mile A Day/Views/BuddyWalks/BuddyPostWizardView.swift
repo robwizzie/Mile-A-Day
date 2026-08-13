@@ -65,7 +65,20 @@ struct BuddyPostWizardView: View {
                         showComposer = false
                         // Published → the wizard's job is done; fall back to
                         // the recap. Cancelled → stay here, nothing is lost.
-                        if case .published = outcome { dismiss() }
+                        //
+                        // Deferred a beat, NOT called inline: closing the
+                        // composer and dismissing the wizard that presents it
+                        // are two presentation changes in one transaction, and
+                        // SwiftUI drops one of those (the same race the
+                        // history screen's `startWalk` and the composer's
+                        // stacked covers document). The one it dropped was
+                        // this dismiss — so a published post left the crew
+                        // screen sitting there afterwards, which reads as the
+                        // wizard asking to be filled in a second time.
+                        guard case .published = outcome else { return }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            dismiss()
+                        }
                     }
                 }
             }
@@ -137,10 +150,20 @@ struct BuddyPostWizardView: View {
 
                 Spacer(minLength: MADTheme.Spacing.sm)
 
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(session.accentColor.opacity(0.9))
-                    .accessibilityLabel("Included on the post")
+                // Everyone on this list is credited, including someone still
+                // walking — the glyph says which of those two they are without
+                // implying the still-out one is any less on the post.
+                Image(
+                    systemName: participant.status == .active
+                        ? "figure.walk.motion" : "checkmark.circle.fill"
+                )
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(session.accentColor.opacity(0.9))
+                .accessibilityLabel(
+                    participant.status == .active
+                        ? "Still out — included on the post"
+                        : "Included on the post"
+                )
             }
 
             routeView(for: participant)
@@ -245,13 +268,25 @@ struct BuddyPostWizardView: View {
     /// Everyone credited on the post, best distance first — the same people
     /// `coauthorIds()` sends (plus the poster), so what the wizard shows is
     /// exactly what the server is asked to write.
+    ///
+    /// EVERYONE WHO WAS ON THE WALK, not only those who have already tapped
+    /// Finish. This used to require `.finished`, and the recap opens the moment
+    /// THIS user's own workout ends — so on any walk where a friend was still
+    /// out (which is most of them, since two people rarely stop on the same
+    /// second) the crew was just the poster, `coauthorIds()` came back empty,
+    /// and the "one post, everyone on it" screen produced a solo post. Waiting
+    /// for stragglers is the wrong trade in the other direction too: coauthors
+    /// are settled at create time, so a slower friend would simply never be
+    /// credited. `.active` and `.finished` is the same membership every other
+    /// surface uses — the roster, the pooled total, the standings.
     private var crew: [BuddyParticipant] {
-        session.participants
-            .filter { $0.status == .finished }
+        session.activeParticipants
             .sorted { $0.bestDistance > $1.bestDistance }
     }
 
     /// Participants still actively moving when this recap snapshot was taken.
+    /// They ARE on the post — this note is about their numbers, not their
+    /// credit.
     private var stillOut: [BuddyParticipant] {
         session.participants.filter { $0.status == .active }
     }
@@ -262,7 +297,8 @@ struct BuddyPostWizardView: View {
             ? names.joined(separator: " and ")
             : "\(names.count) buddies"
         let verb = names.count == 1 ? "is" : "are"
-        return "\(list) \(verb) still out — a post made now won't include them."
+        return "\(list) \(verb) still out — still on the post, but the distance "
+            + "shown is where they'd got to when you finished."
     }
 
     // MARK: - Composer hand-off
@@ -279,10 +315,42 @@ struct BuddyPostWizardView: View {
         crew.filter { $0.userId != buddy.currentUserId }.map(\.displayName)
     }
 
+    /// The workout this buddy walk was, for THIS user.
+    ///
+    /// Resolved locally when the server hasn't reconciled yet, which — because
+    /// the recap opens seconds after the walk and reconciliation trails the
+    /// HealthKit sync by a minute or two — was essentially always. See
+    /// `RunPostService.buddyWorkoutId` for why an unlinked post is the thing
+    /// that broke "one post per walk".
+    private var myWorkoutId: String? {
+        RunPostService.buddyWorkoutId(
+            reconciled: session.me(buddy.currentUserId)?.workoutId,
+            startedAt: session.startedAtDate,
+            endedAt: session.endedAtDate
+        )
+    }
+
     /// The poster's OWN numbers — a collab post still shows one person's run,
-    /// and using the group total here would credit everyone's miles to
-    /// whoever happened to post.
+    /// and using the group total here would credit everyone's miles to whoever
+    /// happened to post.
+    ///
+    /// Built by `RunPostService.todayStats`, the SAME helper the solo photo
+    /// prompt and the feed composer use, rather than from the buddy session's
+    /// live figures. Two reasons, both bugs this used to have: the server
+    /// restates a daily-mile anchor's card with the day's rollup, so a
+    /// hand-built single-leg number reads as one figure in the composer and a
+    /// different one in the feed (and can trip `auto_post_stats_mismatch`); and
+    /// `currentUser.streak` must never be baked into a post — it is
+    /// quarantine-gated and deliberately lags a real break, so a post made
+    /// after a missed day claimed a streak its author no longer had (ios.md).
+    ///
+    /// Falls back to the session's own numbers only when no local workout can
+    /// be matched at all, so the post still says something true.
     private func composerStats() -> RunStatsInput {
+        if let workoutId = myWorkoutId {
+            return RunPostService.todayStats(workoutId: workoutId)
+        }
+
         let me = session.me(buddy.currentUserId)
         let distance = me?.bestDistance ?? 0
         let duration = Double(me?.durationSeconds ?? 0)
@@ -290,14 +358,11 @@ struct BuddyPostWizardView: View {
             distance: distance,
             paceSecondsPerMile: distance > 0 && duration > 0 ? duration / distance : nil,
             durationSeconds: duration > 0 ? duration : nil,
-            streak: UserManager.shared.currentUser.streak,
+            streak: UserManager.shared.freshBackendStreak
+                ?? UserManager.shared.currentUser.streak,
             calories: nil,
             steps: nil,
-            // Links the post to the real workout once it has synced. Nil until
-            // then, which just means the post isn't tied to a run — better
-            // than guessing at an id and colliding with the
-            // one-post-per-workout constraint.
-            workoutId: me?.workoutId,
+            workoutId: nil,
             dateText: nil
         )
     }

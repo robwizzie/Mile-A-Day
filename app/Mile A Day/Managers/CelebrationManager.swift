@@ -532,6 +532,17 @@ class CelebrationManager: ObservableObject {
                 print("[CelebrationManager] ⏭️  Photo prompt already shown for workout \(workoutId), skipping")
                 return
             }
+            // ...and never for a walk that has ALREADY been posted through some
+            // other door. "Prompted" and "posted" are different facts, and the
+            // buddy recap is the door that made the difference visible: its
+            // wizard publishes a real collab post, then this prompt — queued
+            // behind the goal celebration, and sitting UNDER the recap sheet
+            // the whole time — surfaced as the sheet dismissed and asked for a
+            // photo of the walk that had just been posted with one.
+            guard !PostedWorkoutRegistry.hasPost(for: workoutId) else {
+                print("[CelebrationManager] ⏭️  Workout \(workoutId) is already posted, skipping photo prompt")
+                return
+            }
         }
 
         // Comeback day-3/7 and record moments fire once per era, ever.
@@ -603,6 +614,38 @@ class CelebrationManager: ObservableObject {
             markComebackOrRecordShown(id: celebration.id)
         default:
             break
+        }
+    }
+
+    /// A real post just landed for `workoutId` — retire its photo prompt,
+    /// wherever that prompt currently is.
+    ///
+    /// The `addCelebration` guard alone is not enough, because the prompt is
+    /// usually ALREADY in flight by the time a post is made. The goal-completion
+    /// sequence enqueues it (priority 9, last) the moment the tracker cover
+    /// dismisses, while the buddy recap that leads to the post is a `.sheet`
+    /// presented over MainTabView — so the prompt sits fully rendered UNDERNEATH
+    /// the recap, and is revealed the instant the sheet goes away. That is the
+    /// "it asked for a photo after I'd already posted one" report: the prompt
+    /// was never re-shown, it had been waiting there all along.
+    ///
+    /// Deliberately does NOT go through `reportDroppedUnseen`: that notification
+    /// resets DashboardView's enqueue stamp so a cleared sequence can re-fire,
+    /// and re-firing here would replay the flame and the leaderboard for a goal
+    /// the user already celebrated.
+    func resolvePhotoPrompt(forWorkout workoutId: String) {
+        // Belt and braces with the registry: this survives even if the
+        // persisted list is trimmed past this id later.
+        markPromptedPhoto(for: workoutId)
+
+        celebrationQueue.removeAll { queued in
+            if case .postRunPhotoPrompt(let id, _) = queued { return id == workoutId }
+            return false
+        }
+
+        if let current = currentCelebration,
+           case .postRunPhotoPrompt(let id, _) = current, id == workoutId {
+            dismissCurrentCelebration()
         }
     }
 
