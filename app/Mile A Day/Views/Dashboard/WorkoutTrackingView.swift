@@ -1894,6 +1894,19 @@ struct WorkoutTrackingView: View {
             hasShownCompletion = saved.celebratedCompletion == true
                 || startingDistance + restoredDistance >= goalDistance
 
+            // The Live Activity's goal push is the THIRD one-shot and it was
+            // missed by the two above: it buzzes the phone via
+            // AlertConfiguration rather than MADHaptics, and `startLiveActivity`
+            // pre-arms `hasSentGoalAlert` only on the branch that CREATES an
+            // activity — a re-entry adopts the existing one and returns early,
+            // so the flag stayed false and the next 1 Hz tick re-fired "Mile
+            // complete!" with sound + vibration, on every return past the goal.
+            // Stamp-first, like the others; the derived arm covers a goal
+            // already met before this workout started (nothing left to cross,
+            // so nothing is due) and blobs written by pre-stamp builds.
+            hasSentGoalAlert = saved.alertedGoalComplete == true
+                || (goalDistance > 0 && startingDistance >= goalDistance)
+
             // Jump directly into the tracking UI
             clearPreStartSteps()
             isTracking = true
@@ -2741,6 +2754,7 @@ struct WorkoutTrackingView: View {
         // miles), don't fire the "mile complete" island alert mid-session.
         if goalDistance > 0 && totalDailyDistance >= goalDistance {
             hasSentGoalAlert = true
+            InProgressWorkoutStore.markCelebrated(goalAlert: true)
         }
 
         do {
@@ -2808,6 +2822,10 @@ struct WorkoutTrackingView: View {
             if shouldPush {
                 if goalJustCompleted {
                     hasSentGoalAlert = true
+                    // Stamp the WORKOUT, not just this presentation — the
+                    // @State flag dies with the cover and re-entry would
+                    // otherwise re-alert (sound + vibration) every time.
+                    InProgressWorkoutStore.markCelebrated(goalAlert: true)
                 }
                 lastActivityPushDate = Date()
                 lastPushedDistance = freshDistance
