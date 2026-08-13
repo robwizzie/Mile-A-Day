@@ -250,6 +250,11 @@ struct ProfileView: View {
                 userId: userManager.currentUser.backendUserId,
                 isSelf: true
             )
+            // Walks you've taken WITH people. On the Activity tab rather than
+            // Stats because it's a record of what happened, not a performance
+            // metric — and because it's the only place in the app outside the
+            // start sheet that says what a buddy walk is.
+            BuddyWalksSection()
             if !ownWorkouts.isEmpty || !(ownDayTotals?.isEmpty ?? true) {
                 Last7DaysChart(
                     workouts: ownWorkouts,

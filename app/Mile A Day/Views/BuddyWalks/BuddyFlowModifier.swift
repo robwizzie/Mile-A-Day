@@ -70,11 +70,21 @@ struct BuddyFlowModifier: ViewModifier {
                 // user already finished stays `active` while friends walk on,
                 // and the lobby hands a long-started session straight into
                 // tracking, which is how a finished walk restarted itself.
-                if BuddySessionService.shared.canReenterLiveSession {
-                    showLobby = true
-                } else {
-                    showStartSheet = true
+                let open: () -> Void = {
+                    if BuddySessionService.shared.canReenterLiveSession {
+                        showLobby = true
+                    } else {
+                        showStartSheet = true
+                    }
                 }
+                // Setting up a NEW walk closes the last one's recap first. The
+                // request reaches here from inside that recap ("walks together"
+                // → "walk again"), and a dismissal plus a presentation in one
+                // transaction race — SwiftUI drops one, which showed up as the
+                // button doing nothing at all.
+                guard recapSessionId != nil else { return open() }
+                recapSessionId = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: open)
             }
             // A buddy deep link or push can land before the dashboard exists
             // (cold launch), so the intent is parked on DeepLinkRouter and

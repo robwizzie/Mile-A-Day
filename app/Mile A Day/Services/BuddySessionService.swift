@@ -272,6 +272,45 @@ final class BuddySessionService: ObservableObject {
         }
     }
 
+    // MARK: - History
+
+    /// Percent-encoding for query VALUES. `.urlQueryAllowed` leaves '+'
+    /// literal and the backend's query parser decodes that as a SPACE, which
+    /// is what froze feed pagination after page one (PostService carries the
+    /// same set for the same reason). Cursors here are ISO "…Z" so they don't
+    /// contain a '+' today — encoding anyway means a future cursor format
+    /// can't quietly reintroduce the bug.
+    private static let queryValueAllowed: CharacterSet = {
+        var set = CharacterSet.urlQueryAllowed
+        set.remove(charactersIn: "+&=?")
+        return set
+    }()
+
+    private static func queryValue(_ raw: String) -> String {
+        raw.addingPercentEncoding(withAllowedCharacters: queryValueAllowed) ?? raw
+    }
+
+    /// Walks you've already taken, newest first.
+    ///
+    /// Stateless rather than @Published: the history screen filters by friend
+    /// and paginates, so a single shared array would mean two surfaces fighting
+    /// over one cursor. Pass the last record's `cursor` as `before` for the
+    /// next page; `totals` comes back on the first page only.
+    func loadHistory(
+        friendId: String? = nil,
+        before: String? = nil,
+        limit: Int = 20
+    ) async throws -> BuddyHistoryResponse {
+        var endpoint = "/buddy/history?limit=\(limit)"
+        if let before, !before.isEmpty {
+            endpoint += "&before=\(Self.queryValue(before))"
+        }
+        if let friendId, !friendId.isEmpty {
+            endpoint += "&friendId=\(Self.queryValue(friendId))"
+        }
+        return try await request(endpoint, responseType: BuddyHistoryResponse.self)
+    }
+
     // MARK: - Routines
 
     /// Standing walks this user has set up. Published so the list and the
