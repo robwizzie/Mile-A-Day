@@ -35,6 +35,8 @@ const {
   weekWindowForUser,
   serveWeek,
   measure,
+  measureBatch,
+  getCatalog,
   resolveTarget,
   evaluateWeeklyChallengeForUser,
   getWeeklyLeaderboard,
@@ -1456,6 +1458,25 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
 
   await seedWeeklyChallenges();
 
+  // Retiring a challenge and giving its rotation slot to the replacement is a
+  // unique-key handover, so the seeder has to vacate the slot before claiming
+  // it. If that ordering regresses the INSERT throws, the seeder swallows it
+  // (deliberately — a stale catalog beats a crash loop) and the new challenge
+  // just never appears.
+  const catalog = await getCatalog();
+  assert.equal(catalog.length, 12, "twelve active weekly challenges");
+  const bigDay = catalog.find((c) => c.challenge_key === "big_day");
+  assert.ok(bigDay, "Big Day is in the active rotation");
+  assert.equal(
+    bigDay.rotation_index,
+    7,
+    "and holds the slot Weekend Warrior vacated, so no other week's challenge moved",
+  );
+  assert.ok(
+    !catalog.some((c) => c.challenge_key === "weekend_warrior"),
+    "Weekend Warrior is retired (it named specific weekdays, which Sunday-start weeks broke)",
+  );
+
   const win = await weekWindowForUser(WENDY);
   const day = (offset) => {
     const d = new Date(`${win.weekStart}T00:00:00Z`);
@@ -1474,7 +1495,22 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
   };
   const round2 = (n) => Math.round(n * 100) / 100;
 
-  // Mon/Tue/Wed — three CONSECUTIVE days, 6.0 miles total.
+  // Weeks run SUNDAY→SATURDAY. Postgres's date_trunc('week') is ISO
+  // Monday-start, so the boundary is built by hand — and a wrong idiom fails
+  // silently (every read still returns SOME window, just shifted a day, which
+  // strands the week's stamped row). Assert the shape directly.
+  assert.equal(
+    new Date(`${win.weekStart}T00:00:00Z`).getUTCDay(),
+    0,
+    "the week starts on a Sunday",
+  );
+  assert.equal(
+    win.weekEnd,
+    day(6),
+    "and ends on the following Saturday, six days later",
+  );
+
+  // Sun/Mon/Tue — three CONSECUTIVE days, 6.0 miles total.
   await addWorkout(WENDY, "ci-wk-1", day(0), 2.0);
   await addWorkout(WENDY, "ci-wk-2", day(1), 2.0);
   await addWorkout(WENDY, "ci-wk-3", day(2), 2.0);
@@ -1499,9 +1535,42 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     "an excluded workout is invisible to the weekly metric (countedWorkoutSql)",
   );
 
+  // best_day_distance is the best DAY, not the best workout and not the week.
+  // A second walk on day 0 makes that day 3.5 while the week totals 7.5 and the
+  // excluded duplicate alone is 5.0 — so this one number fails three separate
+  // ways: a missing GROUP BY (would read 7.5), a MAX over workouts rather than
+  // days (2.0), and a missing countedWorkoutSql (5.0).
+  await addWorkout(WENDY, "ci-wk-best", day(0), 1.5);
+  assert.equal(
+    round2(
+      await measure(WENDY, "best_day_distance", win.weekStart, win.weekEnd),
+    ),
+    3.5,
+    "best_day_distance takes the biggest single DAY, summed across that day's counted workouts",
+  );
+  // measure() feeds the user's own card and measureBatch() feeds the friends
+  // leaderboard. If the two arms drift, a user's row on the board disagrees
+  // with the number on their own screen.
+  assert.equal(
+    round2(
+      (
+        await measureBatch(
+          [WENDY],
+          "best_day_distance",
+          win.weekStart,
+          win.weekEnd,
+        )
+      ).get(WENDY) ?? 0,
+    ),
+    3.5,
+    "measureBatch agrees with measure on best_day_distance",
+  );
+
   // mile_days uses the 0.95 tolerance, so a 0.96 day against a 1.0 goal counts
   // here exactly as it does everywhere else in the app.
-  await db.query(`UPDATE users SET goal_miles = 1.0 WHERE user_id = $1`, [WENDY]);
+  await db.query(`UPDATE users SET goal_miles = 1.0 WHERE user_id = $1`, [
+    WENDY,
+  ]);
   assert.equal(
     await measure(WENDY, "mile_days", win.weekStart, win.weekEnd),
     3,
@@ -1520,7 +1589,11 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
   assert.ok(first, "a week is served");
   await addWorkout(WENDY, "ci-wk-4", day(4), 8.0);
   const second = await serveWeek(WENDY, win.weekStart);
-  assert.equal(second.target, first.target, "the target is frozen at first serve");
+  assert.equal(
+    second.target,
+    first.target,
+    "the target is frozen at first serve",
+  );
   assert.equal(
     second.challenge.challenge_key,
     first.challenge.challenge_key,
@@ -1610,14 +1683,20 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
   );
   await db.query(`DELETE FROM user_blocks WHERE blocker_id LIKE 'ci-%'`);
 
-  await db.query(`DELETE FROM user_weekly_challenge_completions WHERE user_id LIKE 'ci-%'`);
-  await db.query(`DELETE FROM user_weekly_challenges WHERE user_id LIKE 'ci-%'`);
+  await db.query(
+    `DELETE FROM user_weekly_challenge_completions WHERE user_id LIKE 'ci-%'`,
+  );
+  await db.query(
+    `DELETE FROM user_weekly_challenges WHERE user_id LIKE 'ci-%'`,
+  );
   await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-wk-%'`);
   await db.query(
     `DELETE FROM friendships WHERE user_id = $1 OR friend_id = $1`,
     [WENDY],
   );
-  await db.query(`DELETE FROM notification_settings WHERE user_id = $1`, [WENDY]);
+  await db.query(`DELETE FROM notification_settings WHERE user_id = $1`, [
+    WENDY,
+  ]);
   await db.query(`DELETE FROM users WHERE user_id = $1`, [WENDY]);
 }
 

@@ -210,7 +210,7 @@ struct NotificationSettingsView: View {
                             description: "A Sunday summary of your week's miles, ready to share")
                         settingsDivider
                         settingsToggle("Weekly challenge", isOn: $prefs.weeklyChallengeEnabled,
-                            description: "Monday's new challenge, a mid-week nudge, and when you finish one")
+                            description: "Sunday's new challenge, a nudge before the week runs out, and when you finish one")
                     }
 
                     // Competition Notifications — collapsed behind a master

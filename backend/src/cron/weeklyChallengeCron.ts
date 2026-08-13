@@ -9,6 +9,7 @@ import {
 import {
   measure,
   serveWeek,
+  sundayWeekStartSql,
   weekWindowForUser,
 } from "../services/weeklyChallengeService.js";
 
@@ -18,6 +19,9 @@ interface DueUser {
   user_id: string;
   week_start: string;
 }
+
+/** The user's own wall clock, as a SQL expression. */
+const LOCAL_TS = "NOW() + (t.tz_offset || ' minutes')::interval";
 
 /**
  * Per-user-local-time predicate, the same shape `weeklyRecapCron` uses: resolve
@@ -44,7 +48,7 @@ function dueUsersSql(dow: number, hour: number, kind: string): string {
 		)
 		SELECT
 			t.user_id,
-			date_trunc('week', (NOW() + (t.tz_offset || ' minutes')::interval))::date::text AS week_start
+			${sundayWeekStartSql(LOCAL_TS)}::text AS week_start
 		FROM user_tz t
 		WHERE t.enabled = TRUE
 			AND t.tz_offset IS NOT NULL
@@ -56,7 +60,10 @@ function dueUsersSql(dow: number, hour: number, kind: string): string {
 			AND NOT EXISTS (
 				SELECT 1 FROM weekly_challenge_push_log l
 				WHERE l.user_id = t.user_id
-					AND l.week_start = date_trunc('week', (NOW() + (t.tz_offset || ' minutes')::interval))::date
+					-- Must be the SAME expression as the week_start selected
+					-- above, or the exactly-once claim stops matching its own
+					-- rows and every user gets re-announced hourly.
+					AND l.week_start = ${sundayWeekStartSql(LOCAL_TS)}
 					AND l.kind = '${kind}'
 			)
 		LIMIT 5000`;
@@ -82,7 +89,7 @@ async function claim(
 }
 
 /**
- * Monday morning: announce the week, and — importantly — SERVE it.
+ * Sunday morning: announce the week, and — importantly — SERVE it.
  *
  * Serving here rather than waiting for the user's first read is what fills the
  * friends leaderboard: a friend with no stamped row has no frozen target and
@@ -90,7 +97,7 @@ async function claim(
  * time as people happened to open the app.
  */
 export async function sendWeeklyChallengeAnnouncements(): Promise<void> {
-  const due = await db.query<DueUser>(dueUsersSql(1, 9, "new"));
+  const due = await db.query<DueUser>(dueUsersSql(0, 9, "new"));
 
   for (const user of due) {
     try {
@@ -136,6 +143,9 @@ export async function sendWeeklyChallengeAnnouncements(): Promise<void> {
  * Friday evening: a nudge, but only to people who have started and not
  * finished. Someone at zero gets nothing — a "you did nothing this week" push
  * is just mean, and it's the same reason the weekly recap skips empty weeks.
+ *
+ * Under Sunday→Saturday weeks Friday leaves two days (Fri + Sat) rather than
+ * three, which is why the copy never names a day count.
  */
 export async function sendWeeklyChallengeNudges(): Promise<void> {
   const due = await db.query<DueUser>(dueUsersSql(5, 18, "nudge"));

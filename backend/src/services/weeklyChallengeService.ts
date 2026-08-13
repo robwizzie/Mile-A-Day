@@ -10,9 +10,10 @@ import { CLIENT_FEATURES, userSupports } from "./clientFeatures.js";
 const db = PostgresService.getInstance();
 
 /**
- * Weekly challenges: one global theme per ISO week, with a per-user target.
+ * Weekly challenges: one global theme per week (Sunday→Saturday), with a
+ * per-user target.
  *
- * The theme is a pure function of the Monday date, so everyone eligible sees
+ * The theme is a pure function of the week-start date, so everyone eligible sees
  * the same challenge in the same week — that shared-event feeling is the whole
  * point of the friends leaderboard. The NUMBER is personal: a flat global
  * target is trivial for someone running 40 miles a week and impossible for
@@ -31,7 +32,11 @@ export type WeeklyMetric =
   | "total_steps"
   | "early_workouts"
   | "late_workouts"
+  // Retired from the rotation when weeks became Sunday-start (its two days
+  // stopped being contiguous), but kept: the retired catalog row still carries
+  // it, and the boot-time CHECK constraint is generated from these metrics.
   | "weekend_distance"
+  | "best_day_distance"
   | "total_minutes"
   | "fast_mile_splits"
   | "workout_count"
@@ -63,13 +68,33 @@ export interface WeekWindow {
 }
 
 /**
- * A user's local week, Monday-start.
+ * The Sunday that starts the week containing `tsExpr`, as a `date`.
  *
- * `date_trunc('week')` is ISO Monday-start in Postgres, and the timezone
- * COALESCE is the same one `weeklyRecapCron` uses — the stored preference
- * first, then the timezone of their most recent workout. Every read and write
- * in this module goes through here so the boundary can't drift between
- * surfaces.
+ * Weeks run Sunday→Saturday, so Sunday reads as the start of a new challenge.
+ * Postgres's `date_trunc('week')` is ISO **Monday**-start, hence the shift: move
+ * forward a day, truncate to the ISO week, move back. A Sunday, any mid-week
+ * day, and the following Saturday all resolve to the same Sunday.
+ *
+ * Exported because the cron has to compute the identical value — it selects the
+ * week AND matches `weekly_challenge_push_log` on it, and if those two ever
+ * disagree the exactly-once claim silently stops working.
+ *
+ * `tsExpr` is a SQL expression from the caller's own query, never request input.
+ */
+export function sundayWeekStartSql(tsExpr: string): string {
+  return `(date_trunc('week', (${tsExpr}) + interval '1 day') - interval '1 day')::date`;
+}
+
+/**
+ * A user's local week, SUNDAY-start (Sunday through Saturday).
+ *
+ * Postgres's `date_trunc('week')` is ISO Monday-start, so every call here goes
+ * through `sundayWeekStartSql` instead. The timezone COALESCE is the same one
+ * `weeklyRecapCron` uses — the stored preference first, then the timezone of
+ * their most recent workout.
+ *
+ * Every read and write in this module goes through this one helper so the
+ * boundary cannot drift between surfaces.
  */
 export async function weekWindowForUser(userId: string): Promise<WeekWindow> {
   const rows = await db.query<{
@@ -83,12 +108,15 @@ export async function weekWindowForUser(userId: string): Promise<WeekWindow> {
 				(SELECT w.timezone_offset FROM workouts w WHERE w.user_id = $1 ORDER BY w.device_end_date DESC LIMIT 1),
 				0
 			) AS offset_minutes
+		),
+		local AS (
+			SELECT (NOW() + (tz.offset_minutes || ' minutes')::interval) AS ts FROM tz
 		)
 		SELECT
-			date_trunc('week', NOW() + (tz.offset_minutes || ' minutes')::interval)::date::text AS week_start,
-			(date_trunc('week', NOW() + (tz.offset_minutes || ' minutes')::interval)::date + 6)::text AS week_end,
-			(NOW() + (tz.offset_minutes || ' minutes')::interval)::date::text AS local_today
-		FROM tz`,
+			${sundayWeekStartSql("local.ts")}::text AS week_start,
+			(${sundayWeekStartSql("local.ts")} + 6)::text AS week_end,
+			local.ts::date::text AS local_today
+		FROM local`,
     [userId],
   );
 
@@ -96,15 +124,15 @@ export async function weekWindowForUser(userId: string): Promise<WeekWindow> {
   // Only reachable if the user row vanished mid-request; fall back to UTC.
   if (!row) {
     const now = new Date();
-    const day = (now.getUTCDay() + 6) % 7; // Monday = 0
-    const monday = new Date(now);
-    monday.setUTCDate(now.getUTCDate() - day);
-    const sunday = new Date(monday);
-    sunday.setUTCDate(monday.getUTCDate() + 6);
+    // getUTCDay(): 0 = Sunday, which is already our week start.
+    const start = new Date(now);
+    start.setUTCDate(now.getUTCDate() - now.getUTCDay());
+    const end = new Date(start);
+    end.setUTCDate(start.getUTCDate() + 6);
     const ymd = (d: Date) => d.toISOString().slice(0, 10);
     return {
-      weekStart: ymd(monday),
-      weekEnd: ymd(sunday),
+      weekStart: ymd(start),
+      weekEnd: ymd(end),
       localToday: ymd(now),
     };
   }
@@ -320,6 +348,21 @@ export async function measure(
 			WHERE w.user_id = $1 AND w.local_date BETWEEN $2::date AND $3::date
 				AND EXTRACT(DOW FROM w.local_date) IN (0, 6)
 				AND ${countedWorkoutSql("w")}`,
+        params,
+      );
+
+    // The best single DAY, which is not the same as the longest single WORKOUT
+    // above: two short walks on one day add up here. Hence the per-day GROUP BY
+    // before the MAX — a bare SUM would return the whole week.
+    case "best_day_distance":
+      return scalar(
+        `SELECT COALESCE(MAX(day_total), 0) AS v FROM (
+				SELECT SUM(w.distance) AS day_total
+				FROM workouts w
+				WHERE w.user_id = $1 AND w.local_date BETWEEN $2::date AND $3::date
+					AND ${countedWorkoutSql("w")}
+				GROUP BY w.local_date
+			) days`,
         params,
       );
 
@@ -745,6 +788,17 @@ export async function measureBatch(
 				GROUP BY w.user_id`;
       break;
 
+    case "best_day_distance":
+      sql = `WITH day_totals AS (
+					SELECT w.user_id, w.local_date, SUM(w.distance) AS day_total
+					FROM workouts w
+					WHERE ${range} AND ${counted}
+					GROUP BY w.user_id, w.local_date
+				)
+				SELECT user_id, COALESCE(MAX(day_total), 0) AS v
+				FROM day_totals GROUP BY user_id`;
+      break;
+
     case "longest_single_workout":
       sql = `SELECT w.user_id, COALESCE(MAX(w.distance), 0) AS v
 				FROM workouts w WHERE ${range} AND ${counted} GROUP BY w.user_id`;
@@ -880,7 +934,7 @@ export interface WeeklyLeaderboardEntry {
  * Two deliberate exclusions:
  *   - Friends with no served row yet. They have no frozen target, and inventing
  *     one would show a number that changes the moment they open the app. The
- *     Monday cron stamps everyone it notifies, so the board fills in early.
+ *     Sunday cron stamps everyone it notifies, so the board fills in early.
  *   - Blocks, in both directions.
  *
  * Everyone is measured over the VIEWER's week window. Per-friend windows aren't
@@ -1282,17 +1336,17 @@ const WEEKLY_CATALOG: Array<
     rotation_index: 6,
   },
   {
-    challenge_key: "weekend_warrior",
-    title: "Weekend Warrior",
-    description_template: "Cover {target} miles across Saturday and Sunday.",
-    icon: "flame.fill",
+    challenge_key: "big_day",
+    title: "Big Day",
+    description_template: "Cover {target} miles in a single day.",
+    icon: "sun.max.fill",
     gradient_start: "FF512F",
     gradient_end: "F09819",
-    metric: "weekend_distance",
+    metric: "best_day_distance",
     unit: "miles",
     base_target: 4,
     scale_multiplier: 1.1,
-    target_ceiling: 30,
+    target_ceiling: 25,
     target_step: 0.5,
     rotation_index: 7,
   },
@@ -1374,6 +1428,32 @@ const WEEKLY_CATALOG: Array<
     rotation_index: 200,
     active: false,
   },
+  // RETIRED. Weeks run Sunday→Saturday now, which put this challenge's two days
+  // at opposite ends of the week instead of making them the contiguous finish,
+  // so `big_day` took its rotation slot.
+  //
+  // Kept in the array rather than deleted for two reasons: the row still exists
+  // in the database and `weekly_challenges_metric_check` is regenerated from
+  // these entries on every boot, so dropping it here would leave a CHECK that
+  // the surviving row violates; and a `challenge_key` foreign key means any row
+  // ever served it must still resolve. Retired keys sit at 100+, mirroring the
+  // daily catalog's `early_bird`/`walk_it_out`.
+  {
+    challenge_key: "weekend_warrior",
+    title: "Weekend Warrior",
+    description_template: "Cover {target} miles across Saturday and Sunday.",
+    icon: "flame.fill",
+    gradient_start: "FF512F",
+    gradient_end: "F09819",
+    metric: "weekend_distance",
+    unit: "miles",
+    base_target: 4,
+    scale_multiplier: 1.1,
+    target_ceiling: 30,
+    target_step: 0.5,
+    rotation_index: 107,
+    active: false,
+  },
 ];
 
 /**
@@ -1402,7 +1482,18 @@ export async function seedWeeklyChallenges(): Promise<void> {
 			CHECK (metric = ANY (ARRAY[${metrics.join(", ")}]::text[]))`,
     );
 
-    for (const row of WEEKLY_CATALOG) {
+    // Retired rows FIRST. `rotation_index` is unique, and a retired challenge
+    // hands its slot to whatever replaced it (Weekend Warrior → Big Day at 7).
+    // Seeding inactive entries first vacates the slot before the active row
+    // claims it, whatever order the array happens to be in — otherwise the
+    // insert hits a unique violation and the new challenge silently never
+    // lands.
+    const ordered = [
+      ...WEEKLY_CATALOG.filter((row) => row.active === false),
+      ...WEEKLY_CATALOG.filter((row) => row.active !== false),
+    ];
+
+    for (const row of ordered) {
       await db.query(
         `INSERT INTO weekly_challenges (
 					challenge_key, title, description_template, icon,
@@ -1425,6 +1516,7 @@ export async function seedWeeklyChallenges(): Promise<void> {
 					scale_max_multiplier = EXCLUDED.scale_max_multiplier,
 					target_ceiling = EXCLUDED.target_ceiling,
 					target_step = EXCLUDED.target_step,
+					rotation_index = EXCLUDED.rotation_index,
 					active = EXCLUDED.active`,
         [
           row.challenge_key,
