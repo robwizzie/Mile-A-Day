@@ -17,6 +17,7 @@ import postsRoutes from "./routes/postsRoutes.js";
 import blocksRoutes from "./routes/blocksRoutes.js";
 import badgesRoutes, { publicBadgesRouter } from "./routes/badgesRoutes.js";
 import dailyChallengesRoutes from "./routes/dailyChallengesRoutes.js";
+import weeklyChallengeRoutes from "./routes/weeklyChallengeRoutes.js";
 import dailyStepsRoutes from "./routes/dailyStepsRoutes.js";
 import leaderboardRoutes from "./routes/leaderboardRoutes.js";
 import liveTrackingRoutes from "./routes/liveTrackingRoutes.js";
@@ -37,10 +38,12 @@ import { startStoriesCron } from "./cron/storiesCron.js";
 import { startPendingSendCron } from "./cron/pendingSendCron.js";
 import { startWeeklyRecapCron } from "./cron/weeklyRecapCron.js";
 import { startBuddySessionCron } from "./cron/buddySessionCron.js";
+import { startWeeklyChallengeCron } from "./cron/weeklyChallengeCron.js";
 import { startH2hChallengeCron } from "./cron/h2hChallengeCron.js";
 import { startStreakFeaturesCron } from "./cron/streakFeaturesCron.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
+import { seedWeeklyChallenges } from "./services/weeklyChallengeService.js";
 import { PostgresService } from "./services/DbService.js";
 import {
   runPendingMigrations,
@@ -313,6 +316,7 @@ app.use("/admin", requireAdmin, adminRoutes);
 app.use("/users", userRoutes);
 app.use("/users", badgesRoutes);
 app.use("/users", dailyChallengesRoutes);
+app.use("/users", weeklyChallengeRoutes);
 app.use("/users", dailyStepsRoutes);
 app.use("/friends", friendRoutes);
 app.use("/workouts", workoutRoutes);
@@ -391,8 +395,12 @@ function startCrons() {
   startH2hChallengeCron();
   startStreakFeaturesCron();
   startBuddySessionCron();
+  startWeeklyChallengeCron();
   // Idempotently ensure the v2 social/app-function badges exist in the catalog.
   seedExtraBadges();
   // Idempotently ensure the v2 daily challenges (5K/10K/social) exist.
   seedExtraChallenges();
+  // Weekly challenge catalog. Seeded here rather than in a migration so a
+  // failure logs instead of boot-looping, and copy edits need no migration.
+  seedWeeklyChallenges();
 }

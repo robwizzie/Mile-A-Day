@@ -1,10 +1,11 @@
-import { PostgresService } from './DbService.js';
+import { PostgresService } from "./DbService.js";
+import { evaluateWeeklyChallengeForUser } from "./weeklyChallengeService.js";
 
 const db = PostgresService.getInstance();
 
 export interface UpsertDailyStepsResult {
-	steps: number;
-	updatedAt: string;
+  steps: number;
+  updatedAt: string;
 }
 
 /**
@@ -13,13 +14,13 @@ export interface UpsertDailyStepsResult {
  * — HealthKit can deliver late samples.
  */
 export async function upsertDailySteps(
-	userId: string,
-	localDate: string,
-	steps: number,
-	timezoneOffset: number
+  userId: string,
+  localDate: string,
+  steps: number,
+  timezoneOffset: number,
 ): Promise<UpsertDailyStepsResult> {
-	const rows = await db.query<{ steps: number; updated_at: string }>(
-		`INSERT INTO daily_steps (user_id, local_date, steps, timezone_offset)
+  const rows = await db.query<{ steps: number; updated_at: string }>(
+    `INSERT INTO daily_steps (user_id, local_date, steps, timezone_offset)
 		 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT (user_id, local_date)
 		 DO UPDATE SET
@@ -27,14 +28,25 @@ export async function upsertDailySteps(
 		     timezone_offset = EXCLUDED.timezone_offset,
 		     updated_at = NOW()
 		 RETURNING steps, updated_at::text AS updated_at`,
-		[userId, localDate, steps, timezoneOffset]
-	);
+    [userId, localDate, steps, timezoneOffset],
+  );
 
-	const row = rows[0];
-	return {
-		steps: row.steps,
-		updatedAt: row.updated_at,
-	};
+  const row = rows[0];
+
+  // A steps-based weekly challenge can be completed without any workout ever
+  // landing, so the workout-sync reward pass would never notice it.
+  // Fire-and-forget: a step upsert must not fail because of a challenge.
+  evaluateWeeklyChallengeForUser(userId).catch((error: any) => {
+    console.error(
+      "[WeeklyChallenges] Steps-path evaluation failed:",
+      error?.message ?? error,
+    );
+  });
+
+  return {
+    steps: row.steps,
+    updatedAt: row.updated_at,
+  };
 }
 
 /**
@@ -46,17 +58,19 @@ export async function upsertDailySteps(
  * No workout_type filter — daily_steps has no per-activity breakdown.
  */
 export async function getStepsDateRangeBatch(
-	userIds: string[],
-	startDate: string,
-	endDate?: string
+  userIds: string[],
+  startDate: string,
+  endDate?: string,
 ): Promise<{ user_id: string; local_date: string; total_distance: number }[]> {
-	if (userIds.length === 0) return [];
+  if (userIds.length === 0) return [];
 
-	const todaysDate = new Date().toISOString().split('T')[0];
-	const start = new Date(startDate).toISOString().split('T')[0];
-	const end = endDate ? new Date(endDate).toISOString().split('T')[0] : todaysDate;
+  const todaysDate = new Date().toISOString().split("T")[0];
+  const start = new Date(startDate).toISOString().split("T")[0];
+  const end = endDate
+    ? new Date(endDate).toISOString().split("T")[0]
+    : todaysDate;
 
-	const query = `
+  const query = `
 		SELECT
 			user_id,
 			TO_CHAR(local_date, 'YYYY-MM-DD') AS local_date,
@@ -69,5 +83,5 @@ export async function getStepsDateRangeBatch(
 		ORDER BY user_id, local_date ASC
 	`;
 
-	return await db.query(query, [userIds, start, end]);
+  return await db.query(query, [userIds, start, end]);
 }

@@ -57,9 +57,20 @@ enum ClientFeatures {
     /// invite now that the server-side `BUDDY_SESSIONS` flag defaults on.
     static let buddyWalksV1 = "buddy_walks_v1"
 
+    /// This build renders the weekly challenge — the Compete-tab hero, the
+    /// friends leaderboard and the history — so a `weekly_challenge_*` push has
+    /// somewhere to open.
+    ///
+    /// All three types are brand new strings. Unlike `lead_change`, which
+    /// head-to-head deliberately reuses because every shipped build already
+    /// routes it, there is no existing weekly route to piggyback on: without
+    /// this gate an older install would get a banner that does nothing.
+    static let weeklyChallengeV1 = "weekly_challenge_v1"
+
     /// Declared on registration. Add a string here only in the same build that
     /// actually implements the behavior.
     static let supported: [String] = [
         friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
+        weeklyChallengeV1,
     ]
 }

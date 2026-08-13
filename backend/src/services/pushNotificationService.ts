@@ -208,7 +208,14 @@ export type NotificationType =
   // A friend beat YOUR mile as their ghost. Deliberately not high-priority and
   // not cap-exempt: it's a flourish about someone else's workout, so quiet
   // hours and the daily cap both apply.
-  | "ghost_beaten";
+  | "ghost_beaten"
+  // Weekly challenge. Gated PER DEVICE on CLIENT_FEATURES.weeklyChallengeV1 —
+  // these are new type strings with no route on any shipped build, so an
+  // ungated send would arrive as a notification whose tap does nothing. None
+  // are high-priority, so quiet hours and the daily cap both apply.
+  | "weekly_challenge_new"
+  | "weekly_challenge_nudge"
+  | "weekly_challenge_complete";
 
 interface PushPayload {
   title: string;

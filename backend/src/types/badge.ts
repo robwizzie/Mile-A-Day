@@ -10,7 +10,8 @@ export type BadgeCategory =
   | "nudge"
   | "competition"
   | "buddy"
-  | "ghost";
+  | "ghost"
+  | "weekly_challenge";
 export type BadgeRarity = "common" | "rare" | "legendary";
 export type DailyChallengeType =
   | "pace"
@@ -311,6 +312,20 @@ export interface NewChallengeCompletion {
 export interface RewardEvaluationResult {
   newlyEarnedBadges: UserBadge[];
   newChallengeCompletions: NewChallengeCompletion[];
+  /**
+   * Set only on the sync that actually completed this week's challenge.
+   * Additive — shipped clients ignore unknown keys — and null on every build
+   * where the weekly feature isn't reachable.
+   */
+  newWeeklyCompletion?: NewWeeklyCompletion | null;
+}
+
+export interface NewWeeklyCompletion {
+  weekStart: string;
+  challengeKey: string;
+  title: string;
+  target: number;
+  finalValue: number;
 }
 
 export interface UserAggregates {
@@ -336,4 +351,7 @@ export interface UserAggregates {
   // biggest single margin, in seconds.
   ghostsBeaten: number;
   bestGhostMargin: number;
+  // Weekly challenges completed, and the longest run of consecutive weeks.
+  weeklyChallengesCompleted: number;
+  bestWeeklyChallengeStreak: number;
 }

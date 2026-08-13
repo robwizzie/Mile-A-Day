@@ -5,6 +5,7 @@ import { BadRequestError } from "../errors/Errors.js";
 import {
   createCompetition,
   getCompetition,
+  getCompetitionRecord,
   getCompetitions,
   sendCompetitionInvite,
   updateCompetitionInvite,
@@ -167,11 +168,9 @@ export async function getComp(req: AuthenticatedRequest, res: Response) {
     });
 
     if (!competition) {
-      return res
-        .status(404)
-        .json({
-          error: `No competition found with id: ${req.params.competitionId}`,
-        });
+      return res.status(404).json({
+        error: `No competition found with id: ${req.params.competitionId}`,
+      });
     }
 
     return res.status(200).json({ competition });
@@ -202,6 +201,23 @@ export async function getAllComps(req: AuthenticatedRequest, res: Response) {
   }
 }
 
+/**
+ * The caller's own competition record. Scoped to `req.userId` from the token
+ * rather than a `:userId` path param — there is nothing to mismatch, so this
+ * route can't produce the self-scoped-URL 403 drift that a cached id causes.
+ */
+export async function getCompRecord(req: AuthenticatedRequest, res: Response) {
+  try {
+    const record = await getCompetitionRecord(req.userId!);
+    res.status(200).json(record);
+  } catch (error: any) {
+    console.error("Error getting comp record:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error getting comp record: " + error.message });
+  }
+}
+
 export async function inviteUsersToComp(
   req: AuthenticatedRequest,
   res: Response,
@@ -223,11 +239,9 @@ export async function inviteUsersToComp(
     const competition = await getCompetition(competitionId);
 
     if (!competition) {
-      return res
-        .status(404)
-        .json({
-          error: `No competition found with id: ${req.params.competitionId}`,
-        });
+      return res.status(404).json({
+        error: `No competition found with id: ${req.params.competitionId}`,
+      });
     }
 
     if (
@@ -267,11 +281,9 @@ export async function inviteUsersToComp(
       ),
     );
 
-    res
-      .status(200)
-      .json({
-        message: `Successfully invited user ${inviteUserId} to competition ${competitionId}`,
-      });
+    res.status(200).json({
+      message: `Successfully invited user ${inviteUserId} to competition ${competitionId}`,
+    });
   } catch (error: any) {
     console.error("Error inviting user:", error.message);
     res.status(500).json({ error: "Error inviting user: " + error.message });
@@ -312,12 +324,10 @@ export async function removeUserFromComp(
 
     // Can only remove from lobby (not started yet)
     if (competition.start_date && competition.start_date <= getTodayET()) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Cannot remove users from a competition that has already started",
-        });
+      return res.status(400).json({
+        error:
+          "Cannot remove users from a competition that has already started",
+      });
     }
 
     // Check user is actually in the competition
@@ -327,11 +337,9 @@ export async function removeUserFromComp(
 
     await removeUserFromCompetition(competitionId, targetUserId);
 
-    res
-      .status(200)
-      .json({
-        message: `Successfully removed user ${targetUserId} from competition ${competitionId}`,
-      });
+    res.status(200).json({
+      message: `Successfully removed user ${targetUserId} from competition ${competitionId}`,
+    });
   } catch (error: any) {
     console.error("Error removing user from competition:", error.message);
     res.status(500).json({ error: "Error removing user: " + error.message });
@@ -380,11 +388,9 @@ export async function updateComp(req: AuthenticatedRequest, res: Response) {
       existingCompetition.start_date &&
       new Date(existingCompetition.start_date) <= new Date()
     ) {
-      return res
-        .status(400)
-        .json({
-          error: "Cannot update a competition that has already started",
-        });
+      return res.status(400).json({
+        error: "Cannot update a competition that has already started",
+      });
     }
 
     const updatedCompetition = await updateCompetition({
@@ -573,11 +579,9 @@ export function getCompInviteHandler(status: "accepted" | "declined") {
           (u) => u.user_id === req.userId! && u.invite_status === "pending",
         )
       ) {
-        return res
-          .status(400)
-          .json({
-            error: `User ${req.userId!} does not have a pending invite to competition ${competitionId}`,
-          });
+        return res.status(400).json({
+          error: `User ${req.userId!} does not have a pending invite to competition ${competitionId}`,
+        });
       }
 
       const updatedUserInfo = await updateCompetitionInvite(

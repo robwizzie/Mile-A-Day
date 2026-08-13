@@ -4,6 +4,9 @@ import {
   Competition,
   CompetitionActivity,
   CompetitionOptions,
+  CompetitionRecordByType,
+  CompetitionRecordResponse,
+  CompetitionRival,
   CompetitionType,
   CompetitionUser,
 } from "../types/competitions.js";
@@ -328,7 +331,11 @@ function attachTeamScores(competition: Competition): void {
 function teamAwareOutcome(
   competition: Competition,
   scores: UserData,
-): { winnerId: string; topScore: number; placements: Map<string, number> } | null {
+): {
+  winnerId: string;
+  topScore: number;
+  placements: Map<string, number>;
+} | null {
   const teams = competition.teams?.teams;
   if (!teams?.length) return null;
 
@@ -379,6 +386,217 @@ function teamAwareOutcome(
     topScore: entities[0].score,
     placements,
   };
+}
+
+/**
+ * How many finished competitions the record read walks. Beyond this the
+ * response reports `truncated` rather than growing without bound (same shape as
+ * the H2H matchup history).
+ */
+const RECORD_COMPETITION_LIMIT = 500;
+/** Opponents returned, most-met first. */
+const RECORD_RIVAL_LIMIT = 25;
+/** Finished competitions echoed back for the history strip. */
+const RECORD_RECENT_LIMIT = 10;
+
+const COMPETITION_TYPES: CompetitionType[] = [
+  "streaks",
+  "apex",
+  "clash",
+  "targets",
+  "race",
+];
+
+/**
+ * A user's win/loss record across every competition they finished.
+ *
+ * Reads `competitions` + `competition_users` ONLY — deliberately never
+ * `getUserScores`. Standings are recomputed live on every read, which is right
+ * for a competition you're looking at and completely wrong for a career total:
+ * recomputing every competition a user ever finished would make this the
+ * slowest route in the app. That's also why `recent[]` carries no score —
+ * scores aren't stored (`competition_users.progress` is vestigial) — and the
+ * detail screen already has the full picture when you tap through.
+ *
+ * "Finished" is `competitions.ended`, and the outcome is `competitions.winner`,
+ * which resolution stamps for every ended competition (including team play,
+ * where `teamAwareOutcome` writes the winning team's best member). So there is
+ * no tie state to model: a tie was already resolved to one winner server-side.
+ */
+export async function getCompetitionRecord(
+  userId: string,
+): Promise<CompetitionRecordResponse> {
+  const rows = await db.query<{
+    id: string;
+    competition_name: string;
+    type: CompetitionType;
+    end_date: string | null;
+    winner: string | null;
+    placement: number | null;
+    participant_count: string;
+  }>(
+    `SELECT
+			c.id,
+			c.competition_name,
+			c.type,
+			c.end_date::text AS end_date,
+			c.winner,
+			cu.placement,
+			(
+				SELECT COUNT(*)
+				FROM competition_users cu2
+				WHERE cu2.competition_id = c.id
+					AND cu2.invite_status = 'accepted'
+			)::text AS participant_count
+		FROM competitions c
+		JOIN competition_users cu
+			ON cu.competition_id = c.id
+			AND cu.user_id = $1
+			AND cu.invite_status = 'accepted'
+		WHERE c.ended = TRUE
+		ORDER BY c.end_date DESC NULLS LAST
+		LIMIT $2`,
+    [userId, RECORD_COMPETITION_LIMIT + 1],
+  );
+
+  const truncated = rows.length > RECORD_COMPETITION_LIMIT;
+  const finished = truncated ? rows.slice(0, RECORD_COMPETITION_LIMIT) : rows;
+
+  let wins = 0;
+  let podiums = 0;
+  let podiumsKnownOf = 0;
+  const byType = new Map<CompetitionType, CompetitionRecordByType>(
+    COMPETITION_TYPES.map((type) => [
+      type,
+      { type, wins: 0, losses: 0, total: 0 },
+    ]),
+  );
+
+  for (const row of finished) {
+    const won = row.winner !== null && row.winner === userId;
+    if (won) wins++;
+    if (row.placement !== null) {
+      podiumsKnownOf++;
+      if (row.placement >= 1 && row.placement <= 3) podiums++;
+    }
+
+    // A type outside the known five would mean the CHECK constraint changed;
+    // skip rather than invent a bucket.
+    const bucket = byType.get(row.type);
+    if (bucket) {
+      bucket.total++;
+      if (won) bucket.wins++;
+      else bucket.losses++;
+    }
+  }
+
+  const total = finished.length;
+  const losses = Math.max(0, total - wins);
+
+  // `finished` is already newest-first, so the current streak is the leading
+  // run of wins and the best is the longest run anywhere in it.
+  let currentWinStreak = 0;
+  let bestWinStreak = 0;
+  let run = 0;
+  for (const row of finished) {
+    if (row.winner !== null && row.winner === userId) {
+      run++;
+      if (run > bestWinStreak) bestWinStreak = run;
+    } else {
+      if (currentWinStreak === 0) currentWinStreak = run;
+      run = 0;
+    }
+  }
+  // Never broken: every finished competition was a win.
+  if (currentWinStreak === 0) currentWinStreak = run;
+
+  return {
+    record: {
+      wins,
+      losses,
+      total,
+      podiums,
+      podiums_known_of: podiumsKnownOf,
+    },
+    win_rate: total > 0 ? wins / total : 0,
+    current_win_streak: currentWinStreak,
+    best_win_streak: bestWinStreak,
+    by_type: COMPETITION_TYPES.map((type) => byType.get(type)!),
+    rivals: await getCompetitionRivals(
+      userId,
+      finished.map((row) => row.id),
+    ),
+    recent: finished.slice(0, RECORD_RECENT_LIMIT).map((row) => ({
+      competition_id: row.id,
+      competition_name: row.competition_name,
+      type: row.type,
+      end_date: row.end_date,
+      placement: row.placement,
+      participant_count: parseInt(row.participant_count, 10) || 0,
+      winner_user_id: row.winner,
+      won: row.winner !== null && row.winner === userId,
+    })),
+    truncated,
+  };
+}
+
+/**
+ * Who you've actually played against, and how it went.
+ *
+ * One set-based query over the competitions already resolved above, so this
+ * costs one round trip regardless of how many people you've competed with.
+ * Projects named user columns rather than `u.*`: this route returns other
+ * people's rows.
+ */
+async function getCompetitionRivals(
+  userId: string,
+  competitionIds: string[],
+): Promise<CompetitionRival[]> {
+  if (competitionIds.length === 0) return [];
+
+  const rows = await db.query<{
+    user_id: string;
+    username: string | null;
+    first_name: string | null;
+    profile_image_url: string | null;
+    wins: string;
+    losses: string;
+    meetings: string;
+    last_competed_on: string | null;
+  }>(
+    `SELECT
+			u.user_id,
+			u.username,
+			u.first_name,
+			u.profile_image_url,
+			COUNT(*) FILTER (WHERE c.winner = $1)::text AS wins,
+			COUNT(*) FILTER (WHERE c.winner = cu.user_id)::text AS losses,
+			COUNT(*)::text AS meetings,
+			MAX(c.end_date)::text AS last_competed_on
+		FROM competition_users cu
+		JOIN competitions c ON c.id = cu.competition_id
+		JOIN users u ON u.user_id = cu.user_id
+		WHERE cu.competition_id = ANY($2::text[])
+			AND cu.user_id <> $1
+			AND cu.invite_status = 'accepted'
+		GROUP BY u.user_id, u.username, u.first_name, u.profile_image_url
+		-- Order by the AGGREGATES, not the ::text aliases above: sorting the
+		-- text would rank "9" over "10".
+		ORDER BY COUNT(*) DESC, MAX(c.end_date) DESC NULLS LAST
+		LIMIT $3`,
+    [userId, competitionIds, RECORD_RIVAL_LIMIT],
+  );
+
+  return rows.map((row) => ({
+    user_id: row.user_id,
+    username: row.username,
+    first_name: row.first_name,
+    profile_image_url: row.profile_image_url,
+    wins: parseInt(row.wins, 10) || 0,
+    losses: parseInt(row.losses, 10) || 0,
+    meetings: parseInt(row.meetings, 10) || 0,
+    last_competed_on: row.last_competed_on,
+  }));
 }
 
 export async function getCompetitions(

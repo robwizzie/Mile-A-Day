@@ -113,6 +113,20 @@ struct NotificationPreferences: Codable {
         set { weeklyRecapEnabledRaw = newValue }
     }
 
+    /// The weekly challenge pushes: Monday's "new challenge", the mid-week
+    /// nudge, and the completion celebration.
+    ///
+    /// Its own switch rather than folded into the competition toggles — muting
+    /// competitions must not silently mute this (App Review 4.5.4). Same
+    /// optional-backing pattern as the rest: synthesized `Decodable` IGNORES
+    /// property defaults, so a non-optional addition would throw on every
+    /// existing install's saved blob and read to the user as a prefs reset.
+    private var weeklyChallengeEnabledRaw: Bool?
+    var weeklyChallengeEnabled: Bool {
+        get { weeklyChallengeEnabledRaw ?? true }
+        set { weeklyChallengeEnabledRaw = newValue }
+    }
+
     /// Do collabs friends tag me in join my profile's Posts grid? Off = they
     /// live in the Tagged tab only, Instagram-style. Grid ONLY — the tag stays
     /// live, the post stays in Tagged, and it still reaches my friends' feeds.

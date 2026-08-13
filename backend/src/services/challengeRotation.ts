@@ -52,6 +52,27 @@ export function dayOfYear(ymd: string): number {
 }
 
 /**
+ * A fixed Monday, so week indices are stable forever. 2024-01-01 was a Monday.
+ * Anchoring to a real Monday (rather than, say, the epoch) means every
+ * `week_start` divides evenly and the index never drifts by a day.
+ */
+const WEEK_EPOCH_UTC = Date.UTC(2024, 0, 1);
+
+/**
+ * Which week `weekStart` is, counting from a fixed Monday.
+ *
+ * The weekly counterpart to `dayOfYear`: it seeds the same deterministic walk,
+ * so the whole app sees one theme per calendar week. Deliberately NOT
+ * year-relative — a 52-week year doesn't divide evenly by a catalog of 12, and
+ * restarting the count each January would make the rotation jump.
+ */
+export function weekOfEpoch(weekStartYmd: string): number {
+  const [y, m, d] = weekStartYmd.split("-").map((n) => parseInt(n, 10));
+  const curr = Date.UTC(y, m - 1, d);
+  return Math.floor((curr - WEEK_EPOCH_UTC) / (86400000 * 7));
+}
+
+/**
  * The sequence the daily walk actually traverses: the catalog rows in
  * rotation_index order, with head_to_head occurring a SECOND time roughly
  * half a cycle away from the first. Head-to-Head is the catalog's favorite,
@@ -84,8 +105,26 @@ export async function walkRotation(
   localDate: string,
   isEligible: (row: ChallengeRow) => Promise<boolean> | boolean,
 ): Promise<ChallengeRow> {
-  const seq = rotationSequence(rows);
-  const baseIdx = dayOfYear(localDate) % seq.length;
+  return walkSequence(rotationSequence(rows), dayOfYear(localDate), isEligible);
+}
+
+/**
+ * The rotation walk itself, over an already-built sequence and an explicit
+ * seed.
+ *
+ * Extracted so the weekly challenge can reuse the eligibility-advancing walk
+ * without inheriting the daily specifics — `rotationSequence`'s Head-to-Head
+ * duplication and the day-of-year seed. `walkRotation` above still composes
+ * exactly those two things, so the daily path is unchanged.
+ */
+export async function walkSequence<T>(
+  seq: T[],
+  seed: number,
+  isEligible: (row: T) => Promise<boolean> | boolean,
+): Promise<T> {
+  // Guard the modulo: a negative seed (a week before the epoch) would index
+  // backwards out of the array.
+  const baseIdx = ((seed % seq.length) + seq.length) % seq.length;
   for (let i = 0; i < seq.length; i++) {
     const candidate = seq[(baseIdx + i) % seq.length];
     if (await isEligible(candidate)) return candidate;

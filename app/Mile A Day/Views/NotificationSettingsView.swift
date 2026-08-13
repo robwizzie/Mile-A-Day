@@ -208,6 +208,9 @@ struct NotificationSettingsView: View {
                         settingsDivider
                         settingsToggle("Weekly recap", isOn: $prefs.weeklyRecapEnabled,
                             description: "A Sunday summary of your week's miles, ready to share")
+                        settingsDivider
+                        settingsToggle("Weekly challenge", isOn: $prefs.weeklyChallengeEnabled,
+                            description: "Monday's new challenge, a mid-week nudge, and when you finish one")
                     }
 
                     // Competition Notifications — collapsed behind a master
@@ -553,6 +556,10 @@ struct NotificationSettingsView: View {
                     "share_route_maps": prefs.shareRouteMaps,
                     "share_live_presence": prefs.shareLivePresence,
                     "weekly_recap_enabled": prefs.weeklyRecapEnabled,
+                    // Must reach the server: these are sent by a cron and by
+                    // the sync path, so a local-only flag could never silence
+                    // them (App Review 4.5.4).
+                    "weekly_challenge_enabled": prefs.weeklyChallengeEnabled,
                     // Must reach the server: the profile grid is built by a SQL
                     // query, so a local-only flag would change nothing at all.
                     "tagged_posts_on_profile": prefs.taggedPostsOnProfile,
