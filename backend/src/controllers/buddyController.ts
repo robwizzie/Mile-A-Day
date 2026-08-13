@@ -4,13 +4,16 @@ import { BadRequestError } from "../errors/Errors.js";
 import { buddySessionsEnabled } from "../services/buddyFeatures.js";
 import {
   BUDDY_ACTIVITY_TYPES,
+  BUDDY_LOCATION_TYPES,
   BUDDY_MODES,
   BUDDY_ORIGINS,
   type BuddyActivityType,
+  type BuddyLocationType,
   type BuddyMode,
   type BuddyOrigin,
 } from "../types/buddy.js";
 import {
+  cancelSession,
   createSession,
   declineSession,
   enrollUser,
@@ -25,6 +28,8 @@ import {
   joinSession,
   leaveSession,
   recordProgress,
+  setBuddyWalkHidden,
+  setParticipantLocationType,
   setReady,
   getBuddyPartners,
   startSession,
@@ -294,6 +299,23 @@ export async function sessionStateController(
   }
 }
 
+/**
+ * An unrecognized `locationType` is a 400, never a silent drop: it decides
+ * which sensor the phone measures with, so quietly falling back to outdoor
+ * would hand a treadmill walker a GPS that cannot see them.
+ */
+const INVALID_LOCATION = Symbol("invalid_location_type");
+
+function parseLocationType(
+  raw: unknown,
+): BuddyLocationType | undefined | typeof INVALID_LOCATION {
+  if (raw === undefined || raw === null) return undefined;
+  if (BUDDY_LOCATION_TYPES.includes(raw as BuddyLocationType)) {
+    return raw as BuddyLocationType;
+  }
+  return INVALID_LOCATION;
+}
+
 export async function joinSessionController(
   req: AuthenticatedRequest,
   res: Response,
@@ -302,10 +324,15 @@ export async function joinSessionController(
   try {
     const code =
       typeof req.query.code === "string" ? req.query.code : req.body?.code;
+    const locationType = parseLocationType(req.body?.locationType);
+    if (locationType === INVALID_LOCATION) {
+      return res.status(400).json({ error: "invalid_location_type" });
+    }
     res.json(
       await joinSession(req.userId!, {
         sessionId: req.params.sessionId,
         code,
+        locationType,
       }),
     );
   } catch (error) {
@@ -323,9 +350,79 @@ export async function joinByCodeController(
     const code =
       typeof req.query.code === "string" ? req.query.code : req.body?.code;
     if (!code) return res.status(400).json({ error: "code_required" });
-    res.json(await joinSession(req.userId!, { code }));
+    const locationType = parseLocationType(req.body?.locationType);
+    if (locationType === INVALID_LOCATION) {
+      return res.status(400).json({ error: "invalid_location_type" });
+    }
+    res.json(await joinSession(req.userId!, { code, locationType }));
   } catch (error) {
     handleError(res, error, "joining buddy session by code");
+  }
+}
+
+/**
+ * PATCH /buddy/sessions/:sessionId/me — this participant's own settings.
+ *
+ * Participant-scoped, not host-scoped: everything here describes one person,
+ * so unlike the lobby PATCH beside it there is no `not_host` and no lobby-only
+ * restriction. Membership is checked in the service.
+ */
+export async function updateParticipantController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const locationType = parseLocationType(req.body?.locationType);
+    if (locationType === INVALID_LOCATION) {
+      return res.status(400).json({ error: "invalid_location_type" });
+    }
+    if (locationType === undefined) {
+      return res.status(400).json({ error: "nothing_to_update" });
+    }
+    res.json(
+      await setParticipantLocationType(
+        req.params.sessionId,
+        req.userId!,
+        locationType,
+      ),
+    );
+  } catch (error) {
+    handleError(res, error, "updating buddy participant");
+  }
+}
+
+/** POST /buddy/sessions/:sessionId/cancel — host calls the walk off. */
+export async function cancelSessionController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    res.json(await cancelSession(req.params.sessionId, req.userId!));
+  } catch (error) {
+    handleError(res, error, "cancelling buddy session");
+  }
+}
+
+/**
+ * DELETE /buddy/history/:sessionId — take a finished walk out of MY archive.
+ *
+ * A hide, not a delete, and scoped to the caller's own participant row: the
+ * walk is a shared event and erasing it would rewrite the other people's
+ * history too. `?hidden=false` puts it back.
+ */
+export async function deleteHistoryEntryController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const hidden = req.query.hidden !== "false" && req.body?.hidden !== false;
+    await setBuddyWalkHidden(req.userId!, req.params.sessionId, hidden);
+    res.json({ ok: true, hidden });
+  } catch (error) {
+    handleError(res, error, "hiding buddy walk");
   }
 }
 

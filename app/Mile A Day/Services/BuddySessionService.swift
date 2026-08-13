@@ -24,6 +24,9 @@ enum BuddyServiceError: LocalizedError {
         case "blocked": return "You can't join this buddy walk."
         case "not_host": return "Only the host can change this."
         case "session_not_editable": return "This walk already started."
+        case "session_not_cancellable":
+            return "This walk is already underway — finish or leave it instead."
+        case "walk_not_hideable": return "That walk isn't finished yet."
         case "not_a_participant": return "You're not in this buddy walk."
         case "goal_required": return "Pick a goal to continue."
         case "goal_too_large": return "That goal is a little too ambitious."
@@ -311,6 +314,28 @@ final class BuddySessionService: ObservableObject {
         return try await request(endpoint, responseType: BuddyHistoryResponse.self)
     }
 
+    /// Take one finished walk out of YOUR archive.
+    ///
+    /// Buddy walks get started by accident — a mis-tap on a friend's Join card,
+    /// a routine that fired on a day nobody went out — and until now those sat
+    /// in "Walks Together" forever, next to the walks that meant something,
+    /// dragging the one number the screen asks people to trust.
+    ///
+    /// A per-viewer HIDE server-side, never a delete: the walk belongs to
+    /// everyone who was on it, so removing the row would silently rewrite their
+    /// history too. Which also means this is reversible — `hidden: false` puts
+    /// it back.
+    func setWalkHidden(_ sessionId: String, hidden: Bool = true) async throws {
+        _ = try await request(
+            "/buddy/history/\(sessionId)?hidden=\(hidden)",
+            method: .DELETE,
+            responseType: BuddyOKResponse.self
+        )
+        // The partner counts are derived from the same walks, so a hidden walk
+        // has to leave them too or the two screens disagree.
+        await loadPartners()
+    }
+
     // MARK: - Routines
 
     /// Standing walks this user has set up. Published so the list and the
@@ -478,10 +503,20 @@ final class BuddySessionService: ObservableObject {
         return state
     }
 
-    func join(sessionId: String) async throws {
+    /// Join a walk — one that hasn't started, or one that's already running.
+    ///
+    /// The location type rides the join rather than following it as a second
+    /// call because a walk that is already underway hands the joiner straight
+    /// into the tracker: a follow-up PATCH would land after the workout had
+    /// already picked its instrument.
+    func join(
+        sessionId: String,
+        locationType: BuddyLocationType = BuddyLocationType.remembered
+    ) async throws {
         let state = try await request(
             "/buddy/sessions/\(sessionId)/join",
             method: .POST,
+            json: ["locationType": locationType.rawValue],
             responseType: BuddySessionState.self
         )
         apply(state)
@@ -489,15 +524,56 @@ final class BuddySessionService: ObservableObject {
         startPolling()
     }
 
-    func join(code: String) async throws {
+    func join(
+        code: String,
+        locationType: BuddyLocationType = BuddyLocationType.remembered
+    ) async throws {
         let state = try await request(
             "/buddy/sessions/join",
             method: .POST,
-            json: ["code": code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()],
+            json: [
+                "code": code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+                "locationType": locationType.rawValue,
+            ],
             responseType: BuddySessionState.self
         )
         apply(state)
         startPolling()
+    }
+
+    // MARK: - My own settings in this walk
+
+    /// This user's own indoor/outdoor answer for the session they're in.
+    ///
+    /// Falls back to the remembered default rather than a hardcoded outdoor, so
+    /// the lobby opens on the answer the treadmill user gives every day.
+    var myLocationType: BuddyLocationType {
+        session?.me(currentUserId)?.locationType ?? BuddyLocationType.remembered
+    }
+
+    /// Tell the server (and therefore everyone else's roster) where you are.
+    ///
+    /// Also remembered locally, because the tracker's hand-off reads it for the
+    /// NEXT walk before any session state exists.
+    func setLocationType(_ locationType: BuddyLocationType) async {
+        UserDefaults.standard.set(
+            locationType.rawValue, forKey: BuddyLocationType.storageKey)
+        guard let id = session?.id else { return }
+        do {
+            apply(
+                try await request(
+                    "/buddy/sessions/\(id)/me",
+                    method: .PATCH,
+                    json: ["locationType": locationType.rawValue],
+                    responseType: BuddySessionState.self
+                ))
+        } catch {
+            // Silent, and deliberately so: the local default above is what the
+            // tracker actually reads, so the user's own walk measures correctly
+            // either way. All a failure costs is the roster badge on other
+            // people's phones, and the next poll may well fix that too.
+            print("[BuddySessionService] setLocationType failed: \(error)")
+        }
     }
 
     func decline(sessionId: String) async {
@@ -534,6 +610,13 @@ final class BuddySessionService: ObservableObject {
             ))
     }
 
+    /// Step out of the walk. Valid in every phase — waiting in the lobby, mid
+    /// countdown, or a mile into a walk you'd rather finish on your own.
+    ///
+    /// Deliberately does NOT end the workout the tracker is recording: leaving
+    /// a buddy session is leaving the GROUP, and the miles keep counting toward
+    /// the streak exactly as a solo walk would. The session itself stays alive
+    /// server-side for as long as anyone else is still in it.
     func leave() async {
         guard let id = session?.id else { return }
         _ = try? await request(
@@ -543,6 +626,31 @@ final class BuddySessionService: ObservableObject {
         )
         stopPolling()
         session = nil
+    }
+
+    /// Host calls the whole walk off, for everyone.
+    ///
+    /// Only valid before anybody is moving — a lobby, or the shared countdown.
+    /// Past that the server answers `session_not_cancellable`, because one
+    /// person's cancel must never wipe miles other people are recording.
+    func cancel() async throws {
+        guard let id = session?.id else { return }
+        // The response carries `status: cancelled`, which `apply` recognises as
+        // terminal and stops polling on — so the room closes on every screen
+        // watching it, not just this one.
+        //
+        // Deliberately KEPT rather than nil'd: the lobby draws a "walk called
+        // off" panel from this status, and blanking it here would leave the
+        // presenting cover showing a spinner for the whole of its dismissal
+        // animation. Nothing offers a cancelled session to re-enter
+        // (`hasLiveSession` is lobby/active only) and the next
+        // `refreshMySessions` drops it.
+        apply(
+            try await request(
+                "/buddy/sessions/\(id)/cancel",
+                method: .POST,
+                responseType: BuddySessionState.self
+            ))
     }
 
     // MARK: - Progress

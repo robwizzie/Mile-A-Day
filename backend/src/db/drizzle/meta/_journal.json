@@ -351,6 +351,13 @@
       "when": 1786586184347,
       "tag": "0049_shallow_ben_parker",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1786588011440,
+      "tag": "0050_curved_talos",
+      "breakpoints": true
     }
   ]
 }
