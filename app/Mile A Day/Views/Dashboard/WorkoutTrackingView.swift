@@ -1966,7 +1966,14 @@ struct WorkoutTrackingView: View {
         hasAutoStartedBuddyWorkout = true
         selectedActivityType =
             (buddyService.session?.isRunning ?? false) ? .running : .walking
-        selectedLocationType = .outdoor
+        // NOT hardcoded outdoor any more. This line picks the INSTRUMENT —
+        // outdoor measures with GPS, which indoors never returns a fix that
+        // clears the 50m accuracy gate — so a buddy walker on a treadmill
+        // watched their distance sit at 0.00 for the whole session while
+        // everyone else's climbed. The lobby asks each participant for
+        // themselves (`BuddyLocationType`); this is where their answer lands.
+        selectedLocationType =
+            buddyService.myLocationType == .indoor ? .indoor : .outdoor
         clearPreStartSteps()
         raceArmed = buddyGhostArmed
         isTracking = true

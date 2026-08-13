@@ -84,6 +84,13 @@ jobs:
       # feed would refuse, a cursor that repeats a row on page 2.
       - name: Buddy history visibility + paging check
         run: node scripts/buddy-history-check.mjs
+      # Live membership. A late joiner landing in the wrong participant status
+      # is invisible on every roster, worth nothing toward a co-op goal, and
+      # has every progress report rejected — with nothing thrown anywhere. The
+      # same file pins cancel's two windows (a cancel reaching a live walk
+      # would wipe other people's miles) and the per-viewer history hide.
+      - name: Buddy live join/leave/cancel/hide check
+        run: node scripts/buddy-live-check.mjs
       # Two prod-only push failures, neither reproducible without a shell there.
       # APNS_KEY is pasted into a dashboard in four different shapes and one of
       # them silently produced an unsignable PEM; device-token pruning is the

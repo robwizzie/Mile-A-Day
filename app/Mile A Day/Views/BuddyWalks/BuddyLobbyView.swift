@@ -21,6 +21,29 @@ struct BuddyLobbyView: View {
     @State private var showSettings = false
     /// Friends with an invite request in flight, so their tile can show it.
     @State private var invitingIds: Set<String> = []
+    @State private var confirmCancel = false
+    @State private var errorText: String?
+
+    /// Nil until the first snapshot lands; then TRUE only for someone who
+    /// arrived at a walk that was already moving.
+    ///
+    /// This screen is the one every buddy session passes through, and it hands
+    /// off to the tracker the instant `started_at` is in the past — which for a
+    /// late joiner is immediately, on the first 0.1s tick. That's correct for
+    /// the person who was standing in the lobby when the host pressed Start,
+    /// and wrong for someone who just tapped Join on a walk an hour deep: they
+    /// get no lobby at all, so there is nowhere to ask them the one question
+    /// that decides whether their phone can measure them (treadmill or street).
+    /// So the hand-off waits on an explicit tap for them, and only for them.
+    @State private var needsJoinConfirm: Bool?
+
+    /// Optimistic copy of this user's own indoor/outdoor answer.
+    ///
+    /// The server value arrives on the response, which is a round trip after
+    /// the tap; without this the segmented control sits on the old choice for
+    /// long enough to read as a dead control. Never overwritten by a poll —
+    /// it's this user's own answer, and nothing else can contradict it.
+    @State private var pendingLocation: BuddyLocationType?
 
     /// Ghost race arming for THIS buddy walk.
     ///
@@ -50,7 +73,14 @@ struct BuddyLobbyView: View {
             MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
 
             if let session {
-                if let remaining = secondsUntilStart(session), remaining > 0 {
+                if session.status == .cancelled {
+                    // A cancel arrives through the POLL on everybody else's
+                    // phone, and `apply` keeps the session so the status is
+                    // readable — so without this branch a guest sits under
+                    // "Waiting for the host to start…" for a walk that no
+                    // longer exists, forever, since polling has stopped too.
+                    cancelledPanel(session)
+                } else if let remaining = secondsUntilStart(session), remaining > 0 {
                     countdown(remaining: remaining, session: session)
                 } else {
                     lobby(session)
@@ -61,13 +91,96 @@ struct BuddyLobbyView: View {
         }
         .onReceive(tick) { value in
             now = value
+            if let session { seedJoinGate(session) }
             handOffIfStarted()
         }
         .onAppear { buddy.startPolling() }
+        .alert(
+            "Buddy Walk",
+            isPresented: Binding(
+                get: { errorText != nil },
+                set: { if !$0 { errorText = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { errorText = nil }
+        } message: {
+            Text(errorText ?? "")
+        }
+    }
+
+    /// Decide ONCE, on the first snapshot, whether this user arrived late.
+    ///
+    /// Latched rather than derived, because the answer must not change when the
+    /// host presses Start while somebody is looking at the lobby — that person
+    /// was here first and should flow straight into the countdown.
+    private func seedJoinGate(_ session: BuddySessionState) {
+        guard needsJoinConfirm == nil else { return }
+        needsJoinConfirm =
+            session.status == .active
+            && (session.startedAtDate.map { $0 <= Date() } ?? true)
+    }
+
+    // MARK: - Cancelled
+
+    /// Where a called-off walk ends. Deliberately a screen with a button rather
+    /// than an automatic dismissal: a lobby that evaporates while you're
+    /// looking at it reads as a crash, and this is the only place the reason
+    /// gets said.
+    private func cancelledPanel(_ session: BuddySessionState) -> some View {
+        VStack(spacing: MADTheme.Spacing.md) {
+            ZStack {
+                Circle()
+                    .fill(MADTheme.Colors.madWhite.opacity(0.10))
+                    .frame(width: 76, height: 76)
+                Image(systemName: "xmark")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
+            }
+
+            Text("Walk called off")
+                .font(MADTheme.Typography.title2)
+                .foregroundStyle(MADTheme.Colors.madWhite)
+
+            Text(
+                session.isHost(buddy.currentUserId)
+                    ? "You cancelled this walk. Nobody's miles were affected."
+                    : "The host cancelled this walk before it started."
+            )
+            .font(MADTheme.Typography.body)
+            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.65))
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, MADTheme.Spacing.lg)
+
+            Button {
+                MADHaptics.tap()
+                // Clears the terminal session so the dashboard stops offering
+                // it as something to re-enter.
+                buddy.clearFinishedSession()
+                dismiss()
+            } label: {
+                Text("Done")
+                    .font(MADTheme.Typography.bodyBold)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, MADTheme.Spacing.sm + 2)
+                    .background(Capsule().fill(session.accentColor))
+                    .foregroundStyle(MADTheme.Colors.madWhite)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.top, MADTheme.Spacing.sm)
+        }
     }
 
     // MARK: - Countdown
 
+    /// The shared countdown — and the way out of it.
+    ///
+    /// It used to be an eight-second commitment with no brakes: once Start was
+    /// tapped there was no control on the screen at all, and the walk began.
+    /// "Wait, no" happens in exactly this window (wrong mode, wrong friend,
+    /// pressed by accident), so the host can call the whole thing off and
+    /// everyone else can step out — both of which the server still allows right
+    /// up until `started_at` passes.
     private func countdown(remaining: TimeInterval, session: BuddySessionState) -> some View {
         VStack(spacing: MADTheme.Spacing.lg) {
             Text("Starting together")
@@ -83,6 +196,64 @@ struct BuddyLobbyView: View {
             Text(session.mode.title)
                 .font(MADTheme.Typography.body)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
+
+            exitButton(session, compact: true)
+                .padding(.top, MADTheme.Spacing.md)
+        }
+    }
+
+    /// The one control that means "not this". Cancel for the host — it closes
+    /// the room for everybody — and Leave for everyone else, who can only take
+    /// themselves out of a walk that isn't theirs to call off.
+    private func exitButton(_ session: BuddySessionState, compact: Bool) -> some View {
+        let isHost = session.isHost(buddy.currentUserId)
+        return Button {
+            MADHaptics.tap()
+            if isHost {
+                confirmCancel = true
+            } else {
+                Task {
+                    await buddy.leave()
+                    dismiss()
+                }
+            }
+        } label: {
+            Text(isHost ? "Cancel walk" : "Leave")
+                .font(compact ? MADTheme.Typography.smallBold : MADTheme.Typography.body)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(isHost ? 0.75 : 0.6))
+                .padding(.horizontal, compact ? 18 : 0)
+                .padding(.vertical, compact ? 10 : 0)
+                // On the countdown this is the only control on screen and has
+                // to be findable at a glance; in the lobby it sits under the
+                // primary action and must not compete with it.
+                .background(
+                    Capsule()
+                        .fill(MADTheme.Colors.madWhite.opacity(compact ? 0.12 : 0))
+                )
+        }
+        .buttonStyle(.plain)
+        .confirmationDialog(
+            "Cancel this buddy walk?",
+            isPresented: $confirmCancel,
+            titleVisibility: .visible
+        ) {
+            Button("Cancel walk", role: .destructive) {
+                Task {
+                    do {
+                        try await buddy.cancel()
+                        MADHaptics.success()
+                        dismiss()
+                    } catch {
+                        MADHaptics.error()
+                        errorText =
+                            (error as? LocalizedError)?.errorDescription
+                            ?? "Couldn't cancel that walk."
+                    }
+                }
+            }
+            Button("Keep it", role: .cancel) {}
+        } message: {
+            Text("Everyone you invited will be told it's off. Nobody's miles are affected.")
         }
     }
 
@@ -107,6 +278,8 @@ struct BuddyLobbyView: View {
                 VStack(spacing: MADTheme.Spacing.lg) {
                     planHeader(session)
                     peopleCard(session)
+                    locationCard(session)
+                        .padding(.horizontal, MADTheme.Spacing.md)
                     ghostRaceRow(session)
                         .padding(.horizontal, MADTheme.Spacing.md)
                     Color.clear.frame(height: 4)
@@ -411,6 +584,86 @@ struct BuddyLobbyView: View {
         }
     }
 
+    // MARK: - Where am I?
+
+    /// This user's own indoor/outdoor answer.
+    ///
+    /// The buddy hand-off used to write `.outdoor` unconditionally, and that is
+    /// not a cosmetic default: it selects the INSTRUMENT. Outdoor measures with
+    /// GPS, and GPS indoors never returns a fix that clears the 50m accuracy
+    /// gate — so joining a shared walk from a treadmill meant watching your own
+    /// distance sit at 0.00 for the whole session while everyone else's climbed,
+    /// with the tracker looking perfectly alive the entire time.
+    ///
+    /// PER PERSON, and everyone sees it. The group's plan doesn't decide where
+    /// each of them is standing, and knowing that the friend whose pace looks
+    /// strange is on a treadmill is the difference between a bug and a fact.
+    private func locationCard(_ session: BuddySessionState) -> some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            HStack {
+                Text("Where are you?")
+                    .font(MADTheme.Typography.smallBold)
+                    .foregroundStyle(MADTheme.Colors.madWhite)
+                Spacer()
+                Text("Just for you")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.45))
+            }
+
+            HStack(spacing: 4) {
+                ForEach(BuddyLocationType.allCases) { option in
+                    locationChip(option, session: session)
+                }
+            }
+            .padding(4)
+            .background(Capsule().fill(MADTheme.Colors.madWhite.opacity(0.10)))
+
+            Text(selectedLocation.subtitle)
+                .font(MADTheme.Typography.caption)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(MADTheme.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(
+                cornerRadius: MADTheme.CornerRadius.extraLarge, style: .continuous
+            )
+            .fill(MADTheme.Colors.madWhite.opacity(0.06))
+        )
+    }
+
+    /// The answer to act on: this user's own tap if they've made one, otherwise
+    /// what the server has for them, otherwise the one they gave last time.
+    private var selectedLocation: BuddyLocationType {
+        pendingLocation ?? buddy.myLocationType
+    }
+
+    private func locationChip(_ option: BuddyLocationType, session: BuddySessionState)
+        -> some View
+    {
+        let isOn = selectedLocation == option
+        return Button {
+            guard !isOn else { return }
+            MADHaptics.tap()
+            withAnimation(MADTheme.Animation.quick) { pendingLocation = option }
+            Task { await buddy.setLocationType(option) }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: option.icon)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(option.title)
+                    .font(MADTheme.Typography.smallBold)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 40)
+            .background(Capsule().fill(isOn ? session.accentColor : .clear))
+            .foregroundStyle(
+                isOn ? MADTheme.Colors.madWhite : MADTheme.Colors.madWhite.opacity(0.6))
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: - Ghost race
 
     /// Race your own ghost alongside your buddies.
@@ -544,7 +797,14 @@ struct BuddyLobbyView: View {
 
     private func actions(_ session: BuddySessionState) -> some View {
         VStack(spacing: MADTheme.Spacing.sm) {
-            if session.isScheduledPending {
+            if needsJoinConfirm == true {
+                // Arrived at a walk already in progress. There is no Start to
+                // wait for and no countdown to share — the only thing left is
+                // this person saying they're ready, which is also what keeps
+                // them on this screen long enough to answer the indoor/outdoor
+                // question above.
+                joinNowPanel(session)
+            } else if session.isScheduledPending {
                 // A booked walk starts itself — the server promotes it on time
                 // whether or not anyone has the app open. The host still gets
                 // an override, because plans change and waiting for a clock you
@@ -580,15 +840,45 @@ struct BuddyLobbyView: View {
                     .padding(.vertical, MADTheme.Spacing.md)
             }
 
-            Button("Leave") {
-                Task {
-                    await buddy.leave()
-                    dismiss()
-                }
-            }
-            .font(MADTheme.Typography.body)
-            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+            exitButton(session, compact: false)
         }
+    }
+
+    /// The late arrival's Start button.
+    private func joinNowPanel(_ session: BuddySessionState) -> some View {
+        Button {
+            MADHaptics.emphasis()
+            // Nothing to call: the join already landed this user 'active'
+            // server-side. All this releases is the hand-off gate.
+            needsJoinConfirm = false
+        } label: {
+            VStack(spacing: 1) {
+                Text(session.isRunning ? "Start my run" : "Start my walk")
+                    .font(MADTheme.Typography.bodyBold)
+                Text(alreadyMovingNote(session))
+                    .font(MADTheme.Typography.caption)
+                    .opacity(0.85)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, MADTheme.Spacing.sm + 2)
+            .background(Capsule().fill(session.accentColor))
+            .foregroundStyle(MADTheme.Colors.madWhite)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// "Sam is already out — you'll start from here." Names who, because the
+    /// reason this person tapped Join was a specific friend.
+    private func alreadyMovingNote(_ session: BuddySessionState) -> String {
+        let others = session.activeParticipants
+            .filter { $0.userId != buddy.currentUserId }
+        guard let first = others.first else {
+            return "You'll start from here"
+        }
+        let who = others.count == 1
+            ? first.displayName
+            : "\(first.displayName) and \(others.count - 1) more"
+        return "\(who) already out — you'll start from here"
     }
 
     /// The waiting-for-a-booked-time state.
@@ -675,6 +965,15 @@ struct BuddyLobbyView: View {
     private func handOffIfStarted() {
         guard !hasHandedOff, let session, session.status == .active else { return }
         guard session.me(buddy.currentUserId)?.status != .finished else { return }
+        // Don't drop somebody into a workout while they're staring at "Cancel
+        // this buddy walk?". The countdown keeps ticking under the dialog, and
+        // handing off mid-decision means the screen answers the question for
+        // them. The server's own window is what decides whether the cancel
+        // actually lands; this only stops the UI racing the user.
+        guard !confirmCancel else { return }
+        // A late arrival taps their way in — see `needsJoinConfirm`. Nil means
+        // no snapshot has landed yet, so nothing has been decided.
+        guard needsJoinConfirm == false else { return }
         guard let startedAt = session.startedAtDate, startedAt <= now else { return }
         hasHandedOff = true
         MADHaptics.success()

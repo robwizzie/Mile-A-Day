@@ -1,7 +1,9 @@
 import { Router } from "express";
 import {
+  cancelSessionController,
   createSessionController,
   declineSessionController,
+  deleteHistoryEntryController,
   enrollController,
   finishController,
   inviteCandidatesController,
@@ -20,6 +22,7 @@ import {
   historyController,
   listRoutinesController,
   partnersController,
+  updateParticipantController,
   updateRoutineController,
   updateSessionController,
 } from "../controllers/buddyController.js";
@@ -51,9 +54,17 @@ router.post("/sessions/:sessionId/decline", declineSessionController);
 router.post("/sessions/:sessionId/leave", leaveSessionController);
 router.post("/sessions/:sessionId/ready", readyController);
 router.post("/sessions/:sessionId/start", startSessionController);
+// Host-only: call the walk off entirely, while it's still a lobby or still in
+// the shared countdown. The exit that didn't exist — Leave abandoned a room
+// that then sat open for hours, still invited, still due to auto-start.
+router.post("/sessions/:sessionId/cancel", cancelSessionController);
 // Host-only, lobby-only: change mode/goal/activity/schedule or add invitees
 // after the room exists, so a change of plan doesn't mean a new join code.
 router.patch("/sessions/:sessionId", updateSessionController);
+// PARTICIPANT-scoped, any phase: indoor vs outdoor is one person's answer
+// about where they are, not the host's about what the group is doing — so no
+// `not_host` and no lobby-only guard, unlike the PATCH above it.
+router.patch("/sessions/:sessionId/me", updateParticipantController);
 router.post("/sessions/:sessionId/progress", progressController);
 router.post("/sessions/:sessionId/finish", finishController);
 
@@ -67,6 +78,10 @@ router.get("/partners", partnersController);
 // The walks themselves — the archive behind the history screen. Keyset
 // paginated; `?friendId=` narrows it to walks you finished with one person.
 router.get("/history", historyController);
+// Take one finished walk out of YOUR archive (a mis-tapped join, a routine
+// that fired on a day nobody went out). A per-viewer hide, never a delete —
+// the walk belongs to everybody who was on it. `?hidden=false` undoes it.
+router.delete("/history/:sessionId", deleteHistoryEntryController);
 router.get("/recurring", listRoutinesController);
 router.post("/recurring", createRoutineController);
 router.patch("/recurring/:routineId", updateRoutineController);

@@ -56,6 +56,21 @@ export const BUDDY_ACTIVITY_TYPES = ["running", "walking", "any"] as const;
 export type BuddyActivityType = (typeof BUDDY_ACTIVITY_TYPES)[number];
 
 /**
+ * Indoor vs outdoor, PER PARTICIPANT.
+ *
+ * Deliberately not a session-level setting: two friends can walk "together"
+ * with one on a treadmill and one on a street, and the answer decides which
+ * instrument that phone measures with (GPS vs pedometer) — a property of where
+ * that person is standing, not of the plan they agreed on. A session-wide flag
+ * would force one of them to measure with a sensor that cannot see them.
+ *
+ * NULL on the row means "never chosen", which every client reads as outdoor —
+ * the value every buddy walk hard-coded before this existed.
+ */
+export const BUDDY_LOCATION_TYPES = ["outdoor", "indoor"] as const;
+export type BuddyLocationType = (typeof BUDDY_LOCATION_TYPES)[number];
+
+/**
  * Hard cap on participants.
  *
  * Load-bearing, not cosmetic: every active participant POSTs progress every 5s,
@@ -127,6 +142,8 @@ export interface BuddyParticipantRow {
   workout_id: string | null;
   final_distance_miles: number | null;
   place: number | null;
+  location_type: BuddyLocationType | null;
+  hidden_at: string | null;
 }
 
 /** A participant as returned to clients — row plus joined profile + derived flags. */
@@ -147,6 +164,10 @@ export interface BuddyParticipantView {
   /// The real HKWorkout, stamped by reconcileBuddySessions once it syncs. Null
   /// until then — the client uses it to link a recap post to the run.
   workout_id: string | null;
+  /// Where THIS person is walking. Null until they've said; the client treats
+  /// null as outdoor. Shown on the roster so the group can see that the person
+  /// whose pace looks different is on a treadmill.
+  location_type: BuddyLocationType | null;
 }
 
 /** The full snapshot returned by GET /state and by POST /progress. */
@@ -248,4 +269,6 @@ export type BuddyEventKind =
   | "started"
   | "goal_hit"
   | "finished"
-  | "completed";
+  | "completed"
+  /** Host called the whole thing off before anybody was moving. */
+  | "cancelled";

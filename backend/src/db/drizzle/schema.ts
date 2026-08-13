@@ -2083,6 +2083,16 @@ export const buddySessionParticipants = pgTable(
     workoutId: varchar("workout_id", { length: 255 }),
     finalDistanceMiles: doublePrecision("final_distance_miles"),
     place: integer(),
+    // Indoor vs outdoor is PER PARTICIPANT, not per session: two people can
+    // walk "together" with one on a treadmill and one on a street, and the
+    // choice decides which instrument that phone measures with (GPS vs
+    // pedometer). NULL = never chosen, which the client reads as outdoor.
+    locationType: text("location_type"),
+    // Per-VIEWER removal of a finished walk from the history screen. Only ever
+    // hides this participant's own row from their own archive — the walk
+    // happened, and the other people on it keep it. Nothing is deleted, so an
+    // accidental hide costs nothing and a shared total can't silently drift.
+    hiddenAt: timestamp("hidden_at", { withTimezone: true, mode: "string" }),
   },
   (table) => [
     index("idx_buddy_participants_user_status").using(
@@ -2112,6 +2122,10 @@ export const buddySessionParticipants = pgTable(
     check(
       "buddy_session_participants_status_check",
       sql`status = ANY (ARRAY['invited'::text, 'joined'::text, 'ready'::text, 'active'::text, 'finished'::text, 'left'::text, 'declined'::text])`,
+    ),
+    check(
+      "buddy_session_participants_location_type_check",
+      sql`location_type IS NULL OR location_type = ANY (ARRAY['outdoor'::text, 'indoor'::text])`,
     ),
   ],
 );
