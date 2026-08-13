@@ -11,6 +11,8 @@ struct BuddyRosterStrip: View {
     let session: BuddySessionState
     let currentUserId: String?
 
+    @State private var confirmLeave = false
+
     var body: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
             header
@@ -73,6 +75,46 @@ struct BuddyRosterStrip: View {
                     .monospacedDigit()
                     .foregroundStyle(session.accentColor)
             }
+
+            leaveButton
+        }
+    }
+
+    /// Step out of the GROUP without ending the walk.
+    ///
+    /// The lobby's Leave stopped being reachable the moment the tracker took
+    /// over, so once a buddy walk started the only way out of it was to finish
+    /// the whole workout — which is the wrong trade for the ordinary case of
+    /// two people who set off together and separate at the corner. Leaving here
+    /// keeps the workout, the distance and the streak exactly as they are; it
+    /// only stops the shared roster.
+    private var leaveButton: some View {
+        Button {
+            MADHaptics.tap()
+            confirmLeave = true
+        } label: {
+            Image(systemName: "person.fill.xmark")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+                .frame(width: 30, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Leave buddy walk")
+        .confirmationDialog(
+            "Leave this buddy walk?",
+            isPresented: $confirmLeave,
+            titleVisibility: .visible
+        ) {
+            Button("Leave", role: .destructive) {
+                Task { await BuddySessionService.shared.leave() }
+            }
+            Button("Stay", role: .cancel) {}
+        } message: {
+            Text(
+                "Your walk keeps going and every mile still counts — you just "
+                    + "stop sharing this one. You can rejoin while they're still out."
+            )
         }
     }
 
@@ -135,10 +177,21 @@ private struct BuddyRosterAvatar: View {
                 }
             }
 
-            Text(isMe ? "You" : participant.displayName)
-                .font(MADTheme.Typography.caption)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(isMe ? 1 : 0.75))
-                .lineLimit(1)
+            HStack(spacing: 3) {
+                // Only the exception is marked. Outdoors is the overwhelming
+                // default, so a badge on every face would carry no information
+                // — but "they're on a treadmill" is exactly what explains a
+                // pace that otherwise looks like a broken tracker.
+                if participant.resolvedLocationType == .indoor {
+                    Image(systemName: BuddyLocationType.indoor.icon)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.55))
+                }
+                Text(isMe ? "You" : participant.displayName)
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(isMe ? 1 : 0.75))
+                    .lineLimit(1)
+            }
 
             Text(participant.isStale ? "—" : String(format: "%.2f mi", participant.distanceMiles))
                 .font(MADTheme.Typography.smallBold)

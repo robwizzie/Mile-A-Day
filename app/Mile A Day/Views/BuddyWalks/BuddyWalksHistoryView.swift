@@ -61,6 +61,9 @@ struct BuddyWalksHistoryView: View {
 
     @State private var recapSessionId: String?
     @State private var photoPostId: String?
+    /// The walk a "Remove from my history" tap is waiting on confirmation for.
+    @State private var pendingRemoval: BuddyWalkRecord?
+    @State private var removalError: String?
 
     private var viewerId: String? { buddy.currentUserId }
 
@@ -133,6 +136,49 @@ struct BuddyWalksHistoryView: View {
                 if let photoPostId {
                     PostDetailLoaderView(postId: photoPostId)
                 }
+            }
+        )
+        // The `presenting:` overload, not the plain one: SwiftUI clears
+        // `isPresented` as part of handling the tap, so an action closure that
+        // read `pendingRemoval` back could find it already nil and silently do
+        // nothing. This hands the walk into the closure instead.
+        .confirmationDialog(
+            "Remove this walk?",
+            isPresented: Binding(
+                get: { pendingRemoval != nil },
+                set: { if !$0 { pendingRemoval = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingRemoval
+        ) { walk in
+            Button("Remove from my history", role: .destructive) {
+                Task { await remove(walk) }
+            }
+            Button("Keep it", role: .cancel) { pendingRemoval = nil }
+        } message: { walk in
+            // Says what it does NOT do, because the two things people fear here
+            // are losing the mile and taking the walk off a friend's history.
+            Text(
+                "\(walk.crewText(excluding: viewerId)), \(walk.dayText.lowercased()). "
+                    + "It leaves your Walks Together and nothing else changes — your "
+                    + "miles, your streak and everyone else's history stay exactly as they are."
+            )
+        }
+        // Its own invisible node, for the same reason the two sheets above are
+        // on separate ones: an alert and a confirmation dialog are both
+        // alert-family presentations, and stacking two of those on one view is
+        // how SwiftUI silently drops one.
+        .background(
+            Color.clear.alert(
+                "Couldn't remove that walk",
+                isPresented: Binding(
+                    get: { removalError != nil },
+                    set: { if !$0 { removalError = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { removalError = nil }
+            } message: {
+                Text(removalError ?? "")
             }
         )
     }
@@ -442,6 +488,21 @@ struct BuddyWalksHistoryView: View {
             )
             .strokeBorder(MADTheme.Colors.madWhite.opacity(0.10), lineWidth: 1)
         )
+        // Buddy walks get started by accident — a mis-tapped Join on a friend's
+        // card, a routine that fired on a day nobody went out, a room opened to
+        // see what the screen looked like. Those sat here forever next to the
+        // walks that meant something, dragging the one number this screen asks
+        // people to trust. In a context menu rather than a visible button
+        // because it is rare and destructive, and the whole card is already the
+        // tap target for the recap.
+        .contextMenu {
+            Button(role: .destructive) {
+                MADHaptics.tap()
+                pendingRemoval = walk
+            } label: {
+                Label("Remove from my history", systemImage: "trash")
+            }
+        }
     }
 
     /// The photo from that walk, big. Tapping it opens the post itself (where
@@ -738,6 +799,47 @@ struct BuddyWalksHistoryView: View {
         } catch {
             loadFailed = true
             print("[BuddyWalksHistoryView] load failed: \(error)")
+        }
+    }
+
+    /// Take a walk out of this viewer's archive.
+    ///
+    /// Optimistic, and the totals move with it: the headline is a server figure
+    /// over the same set of walks, so leaving it alone would leave "12 walks"
+    /// sitting above eleven cards until the next reload. Put back verbatim on
+    /// failure — a row that vanishes and then silently isn't gone is worse than
+    /// one that never moved.
+    private func remove(_ walk: BuddyWalkRecord) async {
+        pendingRemoval = nil
+        let index = walks.firstIndex(where: { $0.id == walk.id })
+        let previousTotals = totals
+        if let index { walks.remove(at: index) }
+        if let current = totals {
+            totals = BuddyHistoryTotals(
+                walks: max(0, current.walks - 1),
+                miles: max(0, current.miles - walk.myDistanceMiles),
+                // Partners can only be recomputed server-side (the person may
+                // still be on other walks), so the reload below settles it.
+                partners: current.partners,
+                firstWalkDate: current.firstWalkDate,
+                lastWalkDate: current.lastWalkDate
+            )
+        }
+
+        do {
+            try await buddy.setWalkHidden(walk.id)
+            MADHaptics.success()
+            // Re-read rather than trusting the arithmetic above: this pulls the
+            // next page's first row up into the gap and settles the partner
+            // count, both of which only the server can get right.
+            await reload()
+        } catch {
+            MADHaptics.error()
+            if let index { walks.insert(walk, at: min(index, walks.count)) }
+            totals = previousTotals
+            removalError =
+                (error as? LocalizedError)?.errorDescription
+                ?? "Check your connection and try again."
         }
     }
 

@@ -272,7 +272,14 @@ struct BuddyRecapView: View {
     /// going grey, since this is the screen's primary action.
     @ViewBuilder
     private func postSection(_ session: BuddySessionState) -> some View {
-        if freshWindow.canPostToday {
+        if alreadyPosted(session) {
+            // The walk is already on the feed. Leaving the CTA lit here was
+            // half of "it made me go through the wizard again": the button
+            // looked like the next step every time the recap was reopened, and
+            // the second attempt now runs into the server's one-post-per-walk
+            // 409 rather than quietly making a duplicate.
+            postedConfirmation(session)
+        } else if freshWindow.canPostToday {
             Button {
                 MADHaptics.action()
                 wizardSession = session
@@ -315,6 +322,67 @@ struct BuddyRecapView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, MADTheme.Spacing.md)
         }
+    }
+
+    /// Where the post CTA goes once the walk has been shared.
+    ///
+    /// A quiet confirmation rather than nothing at all: a section that simply
+    /// vanishes after you use it reads as though the post failed.
+    private func postedConfirmation(_ session: BuddySessionState) -> some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(session.accentColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Shared to the feed")
+                    .font(MADTheme.Typography.smallBold)
+                    .foregroundStyle(MADTheme.Colors.madWhite)
+                Text(
+                    crewNames(session).isEmpty
+                        ? "One post for this walk."
+                        : "One post — you and \(crewNames(session))."
+                )
+                .font(MADTheme.Typography.caption)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(MADTheme.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                .fill(MADTheme.Colors.madWhite.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                .strokeBorder(session.accentColor.opacity(0.3), lineWidth: 1)
+        )
+    }
+
+    /// "Sam and Alex" — everyone on the post except the viewer.
+    private func crewNames(_ session: BuddySessionState) -> String {
+        let names = session.participants
+            .filter { $0.status == .finished && $0.userId != buddy.currentUserId }
+            .map(\.displayName)
+        switch names.count {
+        case 0: return ""
+        case 1: return names[0]
+        case 2: return "\(names[0]) and \(names[1])"
+        default: return "\(names[0]) and \(names.count - 1) others"
+        }
+    }
+
+    /// Has this walk already been shared? Reads the same registry the photo
+    /// prompt now checks, keyed on the same locally-resolved workout id the
+    /// wizard posts with — the three have to agree or the dedup misses.
+    private func alreadyPosted(_ session: BuddySessionState) -> Bool {
+        guard let workoutId = RunPostService.buddyWorkoutId(
+            reconciled: session.me(buddy.currentUserId)?.workoutId,
+            startedAt: session.startedAtDate,
+            endedAt: session.endedAtDate
+        ) else { return false }
+        return PostedWorkoutRegistry.hasPost(for: workoutId)
     }
 
     /// "This one and 11 more" — the walk just taken, put in the context of the

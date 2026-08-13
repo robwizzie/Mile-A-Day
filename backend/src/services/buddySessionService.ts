@@ -18,6 +18,7 @@ import {
   type BuddyHistoryEntry,
   type BuddyHistoryParticipant,
   type BuddyHistoryTotals,
+  type BuddyLocationType,
   type BuddyMode,
   type BuddyOrigin,
   type BuddyParticipantView,
@@ -148,6 +149,7 @@ async function loadParticipants(
     place: number | null;
     final_distance_miles: number | null;
     workout_id: string | null;
+    location_type: BuddyLocationType | null;
   }>(
     // Staleness means "was reporting, then stopped" — NOT "hasn't reported
     // yet". A participant's first progress report is up to 5s out, so falling
@@ -155,7 +157,7 @@ async function loadParticipants(
     // out-of-range for the first moments of every walk.
     `SELECT p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
             p.status, p.distance_miles, p.duration_seconds, p.place,
-            p.final_distance_miles, p.workout_id,
+            p.final_distance_miles, p.workout_id, p.location_type,
             (p.status = 'active'
              AND COALESCE(p.last_progress_at, s.started_at, NOW())
                    < NOW() - ($2 || ' seconds')::interval
@@ -183,6 +185,7 @@ async function loadParticipants(
     final_distance_miles:
       r.final_distance_miles === null ? null : Number(r.final_distance_miles),
     workout_id: r.workout_id,
+    location_type: r.location_type,
   }));
 }
 
@@ -410,10 +413,19 @@ async function notifyInvitees(
  * h2hMatchupService uses for its once-per-day matchmaker. Checking the count
  * and inserting in separate statements without the lock is exactly the race
  * that lets a 9th person into an 8-person room.
+ *
+ * JOINING AN ALREADY-RUNNING WALK LANDS 'active', NOT 'joined'. This is the
+ * whole of the "a friend joined after we started and nobody could see them"
+ * bug, and it was three failures wearing one coat: every roster surface draws
+ * `status IN ('active','finished')`, `toState`'s pooled total counts the same
+ * set, and `recordProgress` rejects a non-active participant outright — so the
+ * late arrival was invisible, contributed nothing to a co-op goal, and had
+ * every one of their own progress reports 400'd for the rest of the walk. Only
+ * `activateSession` ever promoted anybody, and it runs once, at start.
  */
 export async function joinSession(
   userId: string,
-  opts: { sessionId?: string; code?: string },
+  opts: { sessionId?: string; code?: string; locationType?: BuddyLocationType },
 ): Promise<BuddySessionState> {
   let sessionId = opts.sessionId ?? null;
 
@@ -452,6 +464,9 @@ export async function joinSession(
   // in (a reconnect, a second tap) must stay silent.
   let previous: string | null = null;
 
+  // The walk is already underway, so there is no lobby left to wait in.
+  const arrivalStatus = session.status === "active" ? "active" : "joined";
+
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
@@ -480,13 +495,25 @@ export async function joinSession(
       }
     }
 
+    // The DO UPDATE guard also lifts a 'joined'/'ready' row to 'active' when
+    // the session is already running: that is the state an invitee sits in
+    // after tapping Accept on a walk that started without them, and leaving it
+    // alone is the same invisibility bug by a different door. 'finished' and
+    // 'active' are never rewritten — finished is terminal (re-entering would
+    // hand somebody a second mile for a walk they ended), and an active row
+    // must not have its `joined_at` or status disturbed by a stray re-join.
     await client.query(
-      `INSERT INTO buddy_session_participants (session_id, user_id, status, joined_at)
-       VALUES ($1, $2, 'joined', NOW())
+      `INSERT INTO buddy_session_participants
+         (session_id, user_id, status, joined_at, location_type)
+       VALUES ($1, $2, $3, NOW(), $4)
        ON CONFLICT (session_id, user_id) DO UPDATE
-         SET status = 'joined', joined_at = COALESCE(buddy_session_participants.joined_at, NOW())
-         WHERE buddy_session_participants.status IN ('invited', 'left', 'declined')`,
-      [sessionId, userId],
+         SET status = $3,
+             joined_at = COALESCE(buddy_session_participants.joined_at, NOW()),
+             location_type = COALESCE(
+               $4::text, buddy_session_participants.location_type)
+         WHERE buddy_session_participants.status
+                 IN ('invited', 'left', 'declined', 'joined', 'ready')`,
+      [sessionId, userId, arrivalStatus, opts.locationType ?? null],
     );
 
     await client.query(
@@ -621,6 +648,41 @@ export async function setReady(
         SET status = $3, ready_at = CASE WHEN $3 = 'ready' THEN NOW() ELSE NULL END
       WHERE session_id = $1 AND user_id = $2 AND status IN ('joined', 'ready')`,
     [sessionId, userId, ready ? "ready" : "joined"],
+  );
+  await bumpVersion(sessionId);
+
+  const session = await getSessionRow(sessionId);
+  if (!session) throw new BadRequestError("session_not_found");
+  return toState(
+    session,
+    await loadParticipants(sessionId, session.host_user_id),
+  );
+}
+
+/**
+ * Where THIS participant is walking — treadmill or street.
+ *
+ * Participant-scoped rather than host-scoped, and callable in every phase
+ * including mid-walk: it describes where one person is standing, not what the
+ * group agreed to do, and somebody who steps onto a treadmill halfway through a
+ * shared walk is making a real change to how their phone should be measuring.
+ * Deliberately does NOT bump `state_version` on its own — the UPDATE does it in
+ * the same statement, so a roster watching a friend switch sees it on the next
+ * poll without a second round trip.
+ */
+export async function setParticipantLocationType(
+  sessionId: string,
+  userId: string,
+  locationType: BuddyLocationType,
+): Promise<BuddySessionState> {
+  const membership = await participantStatus(sessionId, userId);
+  if (membership === null) throw new BadRequestError("not_a_participant");
+
+  await db.query(
+    `UPDATE buddy_session_participants
+        SET location_type = $3
+      WHERE session_id = $1 AND user_id = $2`,
+    [sessionId, userId, locationType],
   );
   await bumpVersion(sessionId);
 
@@ -831,6 +893,130 @@ async function activateSession(
   await recordEvent(sessionId, actorUserId, "started");
   void notifySessionStarted(sessionId, actorUserId);
   return true;
+}
+
+/**
+ * Host calls the whole thing off.
+ *
+ * The missing exit. A host who opened a lobby by mistake, or picked the wrong
+ * mode, or whose friend just texted "can't make it", had exactly one way out —
+ * Leave — which abandons a room that then sits `lobby` for three hours holding
+ * its join code, still listed to every invitee as a walk that is about to
+ * happen, and still promotable by the scheduled-start cron. Cancelling is what
+ * they actually meant.
+ *
+ * Two windows, both before anybody has moved:
+ *  - `lobby`, the obvious one;
+ *  - `active` while `started_at` is still in the FUTURE, i.e. during the shared
+ *    countdown. That is the exact moment "wait, no" happens, and until now the
+ *    countdown was an eight-second commitment with no brakes.
+ *
+ * Never after the walk is genuinely underway: from there the honest verb is
+ * finish (which keeps everyone's miles) or leave, and letting one person's
+ * cancel wipe a walk other people are recording would destroy their data.
+ *
+ * The window lives in the UPDATE's own WHERE, not just in a pre-check, for the
+ * same reason `updateSession`'s does: a cancel racing the countdown's elapse
+ * has to lose cleanly rather than cancel a walk that is already moving.
+ */
+export async function cancelSession(
+  sessionId: string,
+  userId: string,
+): Promise<BuddySessionState> {
+  const session = await getSessionRow(sessionId);
+  if (!session) throw new BadRequestError("session_not_found");
+  if (session.host_user_id !== userId) throw new BadRequestError("not_host");
+
+  const cancelled = await db.query<{ id: string }>(
+    `UPDATE buddy_sessions
+        SET status = 'cancelled', ended_at = NOW(),
+            state_version = state_version + 1
+      WHERE id = $1 AND host_user_id = $2
+        AND (status = 'lobby'
+             OR (status = 'active' AND started_at > NOW()))
+      RETURNING id`,
+    [sessionId, userId],
+  );
+  if (cancelled.length === 0) {
+    throw new BadRequestError("session_not_cancellable");
+  }
+
+  // Everyone still in the room is released. Deliberately NOT 'finished':
+  // finished is what the history reads, and a walk nobody took must never
+  // appear in anyone's archive.
+  await db.query(
+    `UPDATE buddy_session_participants
+        SET status = 'left'
+      WHERE session_id = $1
+        AND status IN ('invited', 'joined', 'ready', 'active')`,
+    [sessionId],
+  );
+
+  await recordEvent(sessionId, userId, "cancelled");
+  void notifySessionCancelled(sessionId, userId);
+
+  const fresh = await getSessionRow(sessionId);
+  if (!fresh) throw new BadRequestError("session_not_found");
+  return toState(fresh, await loadParticipants(sessionId, fresh.host_user_id));
+}
+
+/**
+ * "Sam called off the walk" — to everyone who had said yes.
+ *
+ * Read from `buddy_session_events` rather than the participant rows, because
+ * `cancelSession` has already rewritten every one of those to 'left' by the
+ * time this runs. Invitees who never answered are skipped: their invite simply
+ * stops existing, and telling somebody a walk they ignored is off is noise.
+ */
+async function notifySessionCancelled(
+  sessionId: string,
+  hostUserId: string,
+): Promise<void> {
+  try {
+    const rows = await db.query<{ user_id: string }>(
+      `SELECT DISTINCT e.user_id
+         FROM buddy_session_events e
+        WHERE e.session_id = $1
+          AND e.kind = 'joined'
+          AND e.user_id IS NOT NULL
+          AND e.user_id <> $2`,
+      [sessionId, hostUserId],
+    );
+    if (rows.length === 0) return;
+
+    const hostRows = await db.query<{
+      first_name: string | null;
+      username: string | null;
+    }>(`SELECT first_name, username FROM users WHERE user_id = $1`, [
+      hostUserId,
+    ]);
+    const hostName =
+      hostRows[0]?.first_name || hostRows[0]?.username || "The host";
+
+    for (const row of rows) {
+      if (!(await shouldSendNotification(row.user_id, hostUserId, "buddy"))) {
+        continue;
+      }
+      if (!(await userSupports(row.user_id, CLIENT_FEATURES.buddyWalksV1))) {
+        continue;
+      }
+      await sendPush(row.user_id, {
+        title: "Buddy Walk cancelled",
+        body: `${hostName} called off the walk`,
+        // Reuses a type every build carrying the buddy screens already routes.
+        // A new string would tap to nothing on the builds that are out.
+        type: "buddy_finished",
+        // String-valued only: shipped builds decode the inbox's `data` as
+        // [String: String], so one number breaks the whole decode.
+        data: { session_id: sessionId, cancelled: "true" },
+      });
+    }
+  } catch (err) {
+    void logError("buddy", "failed to notify session cancel", {
+      userId: hostUserId,
+      context: { sessionId, error: String(err) },
+    });
+  }
 }
 
 /**
@@ -1404,6 +1590,15 @@ export async function getInviteCandidates(userId: string): Promise<
  *
  * Sessions the caller is already in are excluded, as are full ones — an offer
  * to join something you cannot join is worse than no offer.
+ *
+ * A RUNNING walk stays joinable for as long as somebody is still in it, not for
+ * the first twenty minutes. The old bound was reasoned from racing ("arriving
+ * an hour deep means no chance of keeping up") but three of the four modes are
+ * not races, and it made the common case impossible: you see a friend is out,
+ * you put your shoes on, you walk down the road, and by the time you open the
+ * app the offer has expired. Late is not the same as too late. A lobby is still
+ * time-bounded by `created_at`, since the abandoned-lobby sweep cancels those
+ * at three hours anyway and an older one is a room nobody is standing in.
  */
 export async function getJoinableFriendSessions(userId: string): Promise<
   Array<{
@@ -1433,9 +1628,17 @@ export async function getJoinableFriendSessions(userId: string): Promise<
          ON f.user_id = $1 AND f.friend_id = s.host_user_id
         AND f.status = 'accepted'
       WHERE s.status IN ('lobby', 'active')
-        -- Only just-started walks. Offering to join a session an hour deep
-        -- means arriving with no chance of keeping up.
-        AND COALESCE(s.started_at, s.created_at) > NOW() - INTERVAL '20 minutes'
+        AND (
+          -- Running: joinable while at least one person is actually in it.
+          -- Everyone finished or left = a walk that is over in every sense the
+          -- user can see, even though the row is closed lazily on next read.
+          (s.status = 'active' AND EXISTS (
+             SELECT 1 FROM buddy_session_participants live
+              WHERE live.session_id = s.id AND live.status = 'active'
+           ))
+          -- Waiting: bounded by the same 3h the abandoned-lobby sweep uses.
+          OR (s.status = 'lobby' AND s.created_at > NOW() - INTERVAL '3 hours')
+        )
         AND NOT EXISTS (
           SELECT 1 FROM buddy_session_participants mine
            WHERE mine.session_id = s.id AND mine.user_id = $1
@@ -1641,6 +1844,7 @@ export async function getBuddyPartners(
        JOIN users u ON u.user_id = them.user_id
       WHERE me.user_id = $1
         AND me.status = 'finished'
+        AND me.hidden_at IS NULL
         AND them.status = 'finished'
         AND s.status = 'completed'
         AND EXISTS (
@@ -1751,8 +1955,9 @@ export async function getBuddyHistory(
        JOIN buddy_sessions s ON s.id = me.session_id
       WHERE me.user_id = $1
         AND me.status = 'finished'
-        AND s.status = 'completed'
+        AND me.hidden_at IS NULL
         AND ($2::timestamptz IS NULL OR ${HISTORY_SORT_KEY} < $2::timestamptz)
+        AND s.status = 'completed'
         AND ${historyHasCompanionSql("$4")}
       ORDER BY ${HISTORY_SORT_KEY} DESC
       LIMIT $3`,
@@ -1887,6 +2092,7 @@ export async function getBuddyHistoryTotals(
          JOIN buddy_sessions s ON s.id = me.session_id
         WHERE me.user_id = $1
           AND me.status = 'finished'
+          AND me.hidden_at IS NULL
           AND s.status = 'completed'
           AND ${historyHasCompanionSql("$2")}
      )
@@ -1911,4 +2117,47 @@ export async function getBuddyHistoryTotals(
     first_walk_date: row?.first_walk_date ?? null,
     last_walk_date: row?.last_walk_date ?? null,
   };
+}
+
+/**
+ * Take a walk out of the caller's own archive — or put it back.
+ *
+ * Buddy walks get started by accident: a mis-tap on a friend's Join card, a
+ * routine that fired on a day nobody went out, a room opened to check what the
+ * screen looked like. Those land in "Walks Together" forever, next to the walks
+ * that meant something, and skew the one number the whole screen asks people to
+ * trust.
+ *
+ * PER VIEWER, and a soft hide. A walk is a shared event: erasing the row would
+ * silently rewrite somebody else's history and their partner totals, which is
+ * not a thing one participant may do to another. So this stamps the CALLER's
+ * own participant row and every history read filters on it — their archive
+ * loses the walk, everyone else's is untouched, and nothing is destroyed, so
+ * un-hiding is the same call with `hidden: false`.
+ *
+ * Only a walk that is genuinely over. A live session is exited with leave or
+ * cancel, and hiding one from the archive it hasn't reached yet would read as
+ * having quit it while the roster still showed you walking.
+ */
+export async function setBuddyWalkHidden(
+  userId: string,
+  sessionId: string,
+  hidden: boolean,
+): Promise<void> {
+  const updated = await db.query<{ session_id: string }>(
+    `UPDATE buddy_session_participants p
+        SET hidden_at = CASE WHEN $3 THEN NOW() ELSE NULL END
+       FROM buddy_sessions s
+      WHERE p.session_id = $1
+        AND p.user_id = $2
+        AND s.id = p.session_id
+        AND s.status IN ('completed', 'cancelled')
+      RETURNING p.session_id`,
+    [sessionId, userId, hidden],
+  );
+  if (updated.length === 0) {
+    // Either not theirs to hide or not finished yet. One code for both: which
+    // it is would tell a caller whether a session id they guessed exists.
+    throw new BadRequestError("walk_not_hideable");
+  }
 }

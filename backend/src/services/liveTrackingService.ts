@@ -238,10 +238,20 @@ export async function friendsOutNow(userId: string): Promise<FriendOutNow[]> {
             AND theirs.user_id = f.friend_id
             AND theirs.status NOT IN ('left', 'declined')
           WHERE bs.status IN ('lobby', 'active')
-            -- Same "just started" bound getJoinableFriendSessions uses:
-            -- joining an hour-deep walk means arriving with no chance of
-            -- keeping up.
-            AND COALESCE(bs.started_at, bs.created_at) > NOW() - INTERVAL '20 minutes'
+            -- Same window getJoinableFriendSessions uses, and it must stay the
+            -- same one: this row's Join button posts to that endpoint, so a
+            -- narrower bound here just hides an offer the server would accept
+            -- and a wider one draws a button that 400s. A running walk is
+            -- joinable while anyone is still in it; a lobby until the
+            -- abandoned-lobby sweep would have cancelled it.
+            AND (
+              (bs.status = 'active' AND EXISTS (
+                 SELECT 1 FROM buddy_session_participants live
+                  WHERE live.session_id = bs.id AND live.status = 'active'
+               ))
+              OR (bs.status = 'lobby'
+                  AND bs.created_at > NOW() - INTERVAL '3 hours')
+            )
             -- Already in it? Then it isn't an offer.
             AND NOT EXISTS (
               SELECT 1 FROM buddy_session_participants mine

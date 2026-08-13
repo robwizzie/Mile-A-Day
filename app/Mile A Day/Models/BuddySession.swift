@@ -150,6 +150,62 @@ enum BuddyParticipantStatus: String, Codable {
     }
 }
 
+/// Treadmill or street — answered PER PERSON, not per session.
+///
+/// A buddy walk used to hard-code `.outdoor` at the hand-off into the tracker,
+/// which is not a small default: it picks the INSTRUMENT. Outdoor measures with
+/// GPS, and GPS indoors never gets a fix that passes the 50m accuracy gate — so
+/// a friend joining a shared walk from a treadmill watched their distance sit
+/// at 0.00 for the whole session while everyone else's climbed.
+///
+/// Per person because the group's plan doesn't decide where each of them is
+/// standing: two friends genuinely do walk "together" with one on a treadmill
+/// and one outside, and a session-wide flag forces one of them onto a sensor
+/// that cannot see them.
+enum BuddyLocationType: String, Codable, CaseIterable, Identifiable {
+    case outdoor
+    case indoor
+
+    var id: String { rawValue }
+
+    var title: String { self == .indoor ? "Indoor" : "Outdoor" }
+
+    var subtitle: String {
+        self == .indoor
+            ? "Treadmill or indoors — uses motion sensors"
+            : "Uses GPS for accurate tracking"
+    }
+
+    /// `figure.indoor.walk` is SF Symbols 6 (iOS 18) and renders as a BLANK box
+    /// on our iOS 17 floor, so the indoor glyph is resolved at runtime against
+    /// a symbol that has always existed (ios.md).
+    var icon: String {
+        guard self == .indoor else { return "location.fill" }
+        return UIImage(systemName: "figure.run.treadmill") != nil
+            ? "figure.run.treadmill" : "house.fill"
+    }
+
+    /// Unknown future values decode as `.outdoor` — the value every buddy walk
+    /// shipped with before this field existed, so an older server or a newer
+    /// one both land on the behaviour the build already knows.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = BuddyLocationType(rawValue: raw) ?? .outdoor
+    }
+
+    /// What to use for the NEXT walk, remembered across sessions. Buddy walks
+    /// are a habit with a fixed shape — the treadmill user is on the treadmill
+    /// most days — so re-asking from scratch every time is a tap that carries
+    /// no information.
+    static let storageKey = "buddyLocationTypeV1"
+
+    static var remembered: BuddyLocationType {
+        BuddyLocationType(
+            rawValue: UserDefaults.standard.string(forKey: storageKey) ?? ""
+        ) ?? .outdoor
+    }
+}
+
 // MARK: - Participant
 
 struct BuddyParticipant: Codable, Identifiable, Equatable {
@@ -171,8 +227,15 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     /// The real HKWorkout, stamped once it syncs. Nil until then — used to link
     /// a recap post to the run.
     let workoutId: String?
+    /// Where THIS person is walking. Nil until they've answered, and from an
+    /// older server build that doesn't send it — both read as outdoor.
+    let locationType: BuddyLocationType?
 
     var id: String { userId }
+
+    /// The answer to act on. Nil means "never asked", which is exactly the
+    /// behaviour every buddy walk had before the question existed.
+    var resolvedLocationType: BuddyLocationType { locationType ?? .outdoor }
 
     var displayName: String {
         if let first = firstName, !first.isEmpty { return first }
@@ -198,6 +261,7 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
         case place
         case finalDistanceMiles = "final_distance_miles"
         case workoutId = "workout_id"
+        case locationType = "location_type"
     }
 }
 

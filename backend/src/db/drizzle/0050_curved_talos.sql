@@ -1,0 +1,3 @@
+ALTER TABLE "buddy_session_participants" ADD COLUMN "location_type" text;--> statement-breakpoint
+ALTER TABLE "buddy_session_participants" ADD COLUMN "hidden_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "buddy_session_participants" ADD CONSTRAINT "buddy_session_participants_location_type_check" CHECK (location_type IS NULL OR location_type = ANY (ARRAY['outdoor'::text, 'indoor'::text]));
