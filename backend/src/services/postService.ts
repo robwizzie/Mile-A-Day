@@ -16,6 +16,7 @@ import {
   runHypeMatchSql,
   runHypedByViewerMatchSql,
 } from "./hypeService.js";
+import { stripMediaQuery } from "./mediaSigningService.js";
 
 const db = PostgresService.getInstance();
 
@@ -102,6 +103,19 @@ export interface PostCoauthor {
   last_name: string | null;
   profile_image_url: string | null;
   status: "pending" | "accepted" | "declined";
+  // THIS participant's own photo on the shared post — the slide that makes a
+  // buddy walk one post with everyone's pictures on it instead of one post per
+  // person. Null until they add one (and for every pre-existing collab).
+  // Blanked to "" by lockUnearnedPhotos alongside the author's, so the
+  // earn-to-view gate can't be walked around by reading the crew.
+  media_url?: string | null;
+  // Their GPS trace for the walk, resolved at READ time from the buddy
+  // session's participant row rather than stored — the sync reconciler stamps
+  // that workout id a minute or two after the walk ends, which is AFTER the
+  // person who posts the moment they finish has already posted. Honors their
+  // own "Share route maps" consent, so this is null for anyone who opted out
+  // and for an indoor walk with nothing to draw.
+  route?: unknown;
 }
 
 export interface PostRow {
@@ -400,6 +414,47 @@ const BLOCKED_VS_MULTI_COAUTHOR = `EXISTS (
 	WHERE pca.post_id = p.post_id AND ${MULTI_COLLAB_ACTIVE}
 )`;
 
+/**
+ * SQL: one credited participant's route polyline, or NULL.
+ *
+ * Resolved at READ time rather than stored, and that is the whole point. A
+ * participant's workout id is stamped by `reconcileBuddySessions` when THEIR
+ * HKWorkout syncs — a minute or two after the walk — while the person who
+ * posts does so the moment they finish. Baking the route (or even the workout
+ * id) at create time would therefore bake in nothing for almost every crew
+ * member, permanently. Resolving it here means a route that lands late simply
+ * appears on the card, with no backfill and no second write path.
+ *
+ * Three gates, all of them the same rules the author's own route already
+ * obeys (see the `route` projection in UNIFIED_FEED_SQL):
+ *  - `include_route`: the poster's per-post choice covers the whole card. A
+ *    walk shared without a map does not sprout four of them.
+ *  - the participant's OWN `share_route_maps` consent — never the poster's.
+ *    Being credited on someone's post is not consent to publish your trace.
+ *  - `NOT p.is_auto`: an auto card's media already IS a rendered route.
+ *
+ * Falls back to `post_coauthors.workout_id` when the post carries one (the
+ * legacy accept path stamps it), so this is not buddy-only.
+ */
+const CREW_ROUTE_SQL = `(
+	SELECT wr.route FROM workout_routes wr
+	WHERE p.include_route AND NOT p.is_auto
+		AND (
+			COALESCE(
+				(SELECT ns.share_route_maps FROM notification_settings ns
+				  WHERE ns.user_id = pca.user_id),
+				true
+			)
+			OR pca.user_id = $1
+		)
+		AND wr.workout_id = COALESCE(
+			pca.workout_id,
+			(SELECT bsp.workout_id FROM buddy_session_participants bsp
+			  WHERE bsp.session_id = pca.buddy_session_id
+				AND bsp.user_id = pca.user_id)
+		)
+)`;
+
 // Credited participants, as a JSON array for the client. NULL when the post has
 // none, which is every pre-existing post — so the payload shape is unchanged
 // for the entire legacy corpus and old clients keep reading the scalar columns.
@@ -414,7 +469,9 @@ const MULTI_COAUTHORS_JSON = `(
 		'first_name', mcu.first_name,
 		'last_name', mcu.last_name,
 		'profile_image_url', mcu.profile_image_url,
-		'status', pca.status
+		'status', pca.status,
+		'media_url', pca.media_url,
+		'route', ${CREW_ROUTE_SQL}
 	) ORDER BY pca.created_at)
 	FROM post_coauthors pca
 	JOIN users mcu ON mcu.user_id = pca.user_id
@@ -678,7 +735,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 				user_id, media_url, caption, workout_id, stats_snapshot,
 				local_date, share_to_feed, share_to_story, story_expires_at,
 				is_auto, include_route, coauthor_user_id, coauthor_status,
-				coauthor_workout_id, posted_fresh
+				coauthor_workout_id, posted_fresh, buddy_session_id
 			)
 			VALUES (
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
@@ -697,7 +754,12 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 						AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 					ORDER BY w.distance DESC LIMIT 1
 				),
-				$12
+				$12,
+				-- Recorded on the POST, not only per participant: post_coauthors
+				-- has no row for the author, so a walk whose crew all dropped out
+				-- (or a solo finisher's) had a post nothing could find by session.
+				-- The recap's "has this walk been posted yet" reads this.
+				$13
 			)
 				ON CONFLICT ${conflictTarget}
 				DO UPDATE SET
@@ -712,7 +774,13 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 					coauthor_user_id = EXCLUDED.coauthor_user_id,
 					coauthor_status = EXCLUDED.coauthor_status,
 					coauthor_workout_id = EXCLUDED.coauthor_workout_id,
-					posted_fresh = EXCLUDED.posted_fresh${flagUpdates}
+					posted_fresh = EXCLUDED.posted_fresh,
+					-- Same reasoning as the coauthor columns above: the guard only
+					-- ever overwrites an AUTO post, and an auto card is never a
+					-- buddy post, so EXCLUDED wholesale is safe. Taking it also
+					-- means the deliberate post that REPLACES the auto card
+					-- inherits the session link rather than losing it.
+					buddy_session_id = EXCLUDED.buddy_session_id${flagUpdates}
 				${updateGuard}
 			RETURNING *
 		)
@@ -733,6 +801,10 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       input.includeRoute !== false,
       coauthorId,
       !isAutoValue && input.postedLive === true,
+      // Feed-only, same as the collab it describes: a story is not "the walk's
+      // post", so linking one would make the recap report a walk as shared
+      // when nothing reached the feed.
+      !isAutoValue && input.shareToFeed ? (input.buddySessionId ?? null) : null,
     ],
   );
   if (rows[0]) {
@@ -1502,6 +1574,7 @@ export function lockUnearnedPhotos<
     media_url?: string | null;
     story_photo_url?: string | null;
     photo_locked?: boolean;
+    coauthors?: { user_id: string; media_url?: string | null }[] | null;
   },
 >(rows: T[], viewerId: string, gate: ViewerGoalGate): T[] {
   if (gate.completed || !gate.localDate) return rows;
@@ -1516,6 +1589,15 @@ export function lockUnearnedPhotos<
     // Leave auto route/stats cards visible; only real photos are locked.
     if (r.is_auto !== true && r.media_url) {
       r.media_url = "";
+      withheld = true;
+    }
+    // A buddy post carries the whole crew's photos, so gating only the
+    // author's would hand the viewer three unearned pictures on the very card
+    // the gate exists for. The viewer's OWN slide survives — same "you can
+    // always see your own" rule the author gets one branch up.
+    for (const c of r.coauthors ?? []) {
+      if (c.user_id === viewerId || !c.media_url) continue;
+      c.media_url = "";
       withheld = true;
     }
     // Only flag rows that actually LOST a photo. An auto route/stats card with
@@ -2658,6 +2740,118 @@ export async function buddySessionPhotos(
 		ORDER BY buddy_session_id, rn`,
     [viewerId, ids, Math.min(Math.max(perSession, 1), 10)],
   );
+}
+
+/**
+ * The feed post that already stands for a buddy walk, if there is one.
+ *
+ * This is what makes a buddy walk ONE post. Before it, "has this walk been
+ * shared" was answered from `PostedWorkoutRegistry` — a UserDefaults list on
+ * the poster's own phone — so the second person on the walk opened a recap
+ * whose CTA was still lit, posted the same walk again, and the feed carried
+ * the same hour twice with the crew split across both cards.
+ *
+ * Answered for ANY participant, not just the author: the whole point is that
+ * the other four people are told the walk is already up (and offered a slide
+ * on it) instead of being invited to duplicate it.
+ *
+ * Deliberately NOT visibility-gated the way a feed read is. Everyone here was
+ * on the walk, and the answer carries no content — an id, a name, and whether
+ * the caller has added their own photo. A viewer who cannot actually see the
+ * post still needs to be told not to make a second one, and `addCrewPhoto`
+ * re-authorizes on its own terms anyway.
+ */
+export interface BuddySessionPost {
+  post_id: string;
+  author_user_id: string;
+  author_name: string | null;
+  /** Has the CALLER already put their own photo on it? */
+  my_photo_added: boolean;
+  /** Is the caller credited at all (author or accepted participant)? */
+  am_i_credited: boolean;
+  created_at: string;
+}
+
+export async function buddySessionPost(
+  sessionId: string,
+  viewerId: string,
+): Promise<BuddySessionPost | null> {
+  if (!/^[0-9a-f]{1,32}$/i.test(sessionId)) return null;
+  const rows = await db.query<BuddySessionPost>(
+    // Two ways a post is "this session's": the column the wizard stamps on the
+    // post itself, and a post_coauthors row carrying the session. The second
+    // arm is what finds posts made before posts.buddy_session_id existed, so
+    // this needs no backfill to start working on the existing corpus.
+    `SELECT p.post_id, p.user_id AS author_user_id,
+					COALESCE(u.username, u.first_name) AS author_name,
+					p.created_at::text AS created_at,
+					EXISTS (
+						SELECT 1 FROM post_coauthors mine
+						WHERE mine.post_id = p.post_id AND mine.user_id = $2
+							AND mine.status = 'accepted'
+							AND mine.media_url IS NOT NULL AND mine.media_url <> ''
+					) AS my_photo_added,
+					(p.user_id = $2 OR EXISTS (
+						SELECT 1 FROM post_coauthors mine2
+						WHERE mine2.post_id = p.post_id AND mine2.user_id = $2
+							AND mine2.status = 'accepted'
+					)) AS am_i_credited
+			 FROM posts p
+			 JOIN users u ON u.user_id = p.user_id
+			WHERE p.deleted_at IS NULL AND p.share_to_feed
+				AND (
+					p.buddy_session_id = $1
+					OR EXISTS (
+						SELECT 1 FROM post_coauthors pcs
+						WHERE pcs.post_id = p.post_id AND pcs.buddy_session_id = $1
+					)
+				)
+			ORDER BY p.created_at ASC
+			LIMIT 1`,
+    [sessionId, viewerId],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Put a credited participant's own photo on a shared buddy post.
+ *
+ * The alternative — which is what shipped — was that everyone else on the walk
+ * made their own post, so a walk two people took produced two cards, each
+ * crediting the other, each with half the pictures. This is the same user
+ * action ("share my photo of this walk") landing on the card that already
+ * exists.
+ *
+ * Authorization is membership, not friendship: you may add a photo to a post
+ * you are ACCEPTED on, and to nothing else. The author's own photo is
+ * `posts.media_url` and is set at create — they are not a post_coauthors row,
+ * so they cannot reach this path and do not need to.
+ *
+ * The day/camera tiers apply exactly as they do to a first post
+ * (`photoSourceRequiresCameraWindow`): this is a photo reaching the feed, and
+ * routing it through a different door must not buy a looser rule than posting
+ * it directly would have. Callers pass the client's declared `photo_source`.
+ *
+ * Idempotent by design — re-adding REPLACES. A participant swapping their
+ * picture is editing their own slide, not opening a second one.
+ */
+export async function addCrewPhoto(
+  postId: string,
+  userId: string,
+  mediaUrl: string,
+): Promise<boolean> {
+  const rows = await db.query<{ post_id: string }>(
+    `UPDATE post_coauthors
+				SET media_url = $3, photo_added_at = NOW()
+			WHERE post_id = $1 AND user_id = $2 AND status = 'accepted'
+				AND EXISTS (
+					SELECT 1 FROM posts p
+					WHERE p.post_id = $1 AND p.deleted_at IS NULL AND p.share_to_feed
+				)
+			RETURNING post_id`,
+    [postId, userId, stripMediaQuery(mediaUrl)],
+  );
+  return rows.length > 0;
 }
 
 /** The post's PRIMARY author if the viewer may see it — see visiblePostAuthors. */

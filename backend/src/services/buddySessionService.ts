@@ -25,7 +25,11 @@ import {
   type BuddySessionRow,
   type BuddySessionState,
 } from "../types/buddy.js";
-import { buddySessionPhotos } from "./postService.js";
+import {
+  buddySessionPhotos,
+  buddySessionPost,
+  type BuddySessionPost,
+} from "./postService.js";
 
 const db = PostgresService.getInstance();
 
@@ -1698,6 +1702,20 @@ export async function getRecap(
     payload: unknown;
     at: string;
   }>;
+  /**
+   * The feed post that already stands for this walk, if someone has made one.
+   *
+   * Additive, and load-bearing: "has this walk been shared" used to be
+   * answered from a list in the poster's own UserDefaults, which by definition
+   * cannot see what a friend did on their phone. So every participant's recap
+   * lit its Post CTA, every participant posted, and one walk filled the feed
+   * with N cards that each credited the others. With this the second person is
+   * told the walk is already up and offered a slide on it instead.
+   *
+   * Null for old clients too — they simply ignore the field and keep their
+   * device-local answer, which is no worse than what they ship with today.
+   */
+  post: BuddySessionPost | null;
 }> {
   const membership = await participantStatus(sessionId, userId);
   if (membership === null) throw new BadRequestError("not_a_participant");
@@ -1724,6 +1742,7 @@ export async function getRecap(
       await loadParticipants(sessionId, session.host_user_id),
     ),
     events,
+    post: await buddySessionPost(sessionId, userId),
   };
 }
 

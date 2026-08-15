@@ -78,6 +78,12 @@ jobs:
       # as 2.55 in production.
       - name: Cross-app duplicate containment check
         run: node scripts/dedupe-containment-check.mjs
+      # A buddy walk is ONE post with everyone on it. Every way that can break
+      # breaks silently: a second card for the same walk, a crew photo that
+      # never reaches the payload, or — the one nobody would notice — a
+      # participant's GPS trace published after they turned route sharing off.
+      - name: Buddy group post check
+        run: node scripts/buddy-group-post-check.mjs
       # The buddy history archive. Everything that can go wrong with a
       # per-viewer archive goes wrong silently — a walk missing from the list,
       # an un-friended name still rendering, a photo reachable here that the
