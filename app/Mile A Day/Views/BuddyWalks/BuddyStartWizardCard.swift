@@ -80,9 +80,38 @@ struct BuddyWizardFlowModifier: ViewModifier {
     @Binding var showLobby: Bool
     /// The lobby's countdown just hit zero for this session — start moving.
     let onStarted: (BuddySessionState) -> Void
+    /// Nil once the workout has adopted a buddy session; while it's nil there
+    /// is an offer to keep fresh.
+    var activeSessionId: String? = nil
 
     func body(content: Content) -> some View {
         content
+            // Keeps `BuddyMidWalkJoinStrip`'s offer live while a workout is
+            // running and NOT in a buddy session.
+            //
+            // Hosted on this modifier rather than on the tracker's own chain
+            // for the reason this modifier exists at all: WorkoutTrackingView's
+            // body already carries a ~40-modifier chain, and each one wraps the
+            // body in another generic the solver has to unify — one more tips
+            // it into "unable to type-check this expression in reasonable
+            // time", pinned to some innocent line far from the cause.
+            //
+            // And NOT on the strip itself: that view renders nothing when
+            // there's nobody to join, and a view with an empty body gets no
+            // lifecycle at all (ios.md), so a `.task` there would only ever run
+            // once the offer it was meant to discover had already appeared.
+            //
+            // A view-level loop is right for this one and wrong for the
+            // tracker's other periodic work: that must survive backgrounding
+            // and so rides the location callbacks, whereas this exists solely
+            // to keep a button honest on a screen someone is looking at.
+            .task(id: activeSessionId) {
+                guard activeSessionId == nil else { return }
+                while !Task.isCancelled {
+                    await BuddySessionService.shared.refreshFriendsOutNow()
+                    try? await Task.sleep(for: .seconds(60))
+                }
+            }
             .background(
                 Color.clear
                     .sheet(isPresented: $showStartSheet) {
