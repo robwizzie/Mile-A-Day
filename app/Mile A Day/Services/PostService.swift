@@ -97,6 +97,16 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
 }
 
 
+/// What a buddy walk added up to, across everyone who was on it.
+///
+/// Derived server-side from the session's participants rather than stored, so
+/// it keeps moving as each person's workout reconciles — the same reason their
+/// routes resolve at read time.
+struct BuddyGroupStats: Codable, Equatable {
+    let distance_miles: Double
+    let crew_size: Int
+}
+
 /// A social post — a photo (run-stats overlay already baked in) plus optional
 /// caption and stats. Surfaces in the Feed and/or as a Story. Field names are
 /// snake_case to decode the backend JSON directly, matching FeedWorkoutItem.
@@ -157,6 +167,11 @@ struct PostItem: Codable, Identifiable {
     /// nil. Includes the participant mirrored into `coauthor_user_id`, so this
     /// is the COMPLETE list — never union it with the scalar fields.
     var coauthors: [PostCoauthorItem]?
+    /// The WALK's combined figures on a buddy post — "3.2 mi between us".
+    /// The number the recap headlines at hero size and the card never showed,
+    /// so a post about doing it together led with one person's distance. Nil
+    /// on every ordinary post and on every older server.
+    var buddy_group: BuddyGroupStats?
     /// Collab only, and only when I'M the tagged coauthor: is this post on my
     /// own profile grid? nil for everyone else (it's my curation, not theirs)
     /// and on older servers. Hiding it is grid-only — the tag, the Tagged tab
@@ -355,6 +370,10 @@ struct FeedEntry: Codable, Identifiable {
     /// every card fell back to the two-person scalar columns. A four-person
     /// walk rendered as "you & one friend".
     var coauthors: [PostCoauthorItem]?
+    /// The walk's combined figures — "3.2 mi between us". Same CodingKeys
+    /// rule as `coauthors` above: listed below, or Codable synthesis dies for
+    /// the whole struct.
+    var buddy_group: BuddyGroupStats?
 
     enum CodingKeys: String, CodingKey {
         case kind
@@ -371,7 +390,7 @@ struct FeedEntry: Codable, Identifiable {
         case coauthor_user_id, coauthor_status, coauthor_username
         case coauthor_first_name, coauthor_last_name, coauthor_profile_image_url
         case coauthor_on_profile
-        case coauthors
+        case coauthors, buddy_group
     }
 
     var id: String { "\(kind)-\(entryId)" }
@@ -419,6 +438,7 @@ struct FeedEntry: Codable, Identifiable {
             coauthor_last_name: coauthor_last_name,
             coauthor_profile_image_url: coauthor_profile_image_url,
             coauthors: coauthors,
+            buddy_group: buddy_group,
             coauthor_on_profile: coauthor_on_profile,
             segment_count: segment_count,
             segments: segments

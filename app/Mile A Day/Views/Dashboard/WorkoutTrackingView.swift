@@ -806,6 +806,17 @@ struct WorkoutTrackingView: View {
                                 currentUserId: buddyService.currentUserId
                             )
                             .padding(.horizontal, 20)
+                        } else if isTracking {
+                            // Not in a walk right now — offer the way IN, from
+                            // the one screen someone is actually looking at
+                            // mid-workout. Renders nothing when there's nobody
+                            // to join and nothing to rejoin, so an ordinary
+                            // solo run is untouched.
+                            BuddyMidWalkJoinStrip { sessionId in
+                                adoptedBuddySessionId = sessionId
+                                onBuddySessionAdopted?(sessionId)
+                            }
+                            .padding(.horizontal, 20)
                         }
 
                         distanceDisplay
@@ -1950,6 +1961,25 @@ struct WorkoutTrackingView: View {
                 }
             )
         )
+        // Keeps `BuddyMidWalkJoinStrip`'s offer live. Hosted HERE, not in the
+        // strip: that view renders nothing when there's nobody to join, and a
+        // view with an empty body gets no lifecycle at all — a `.task` on it
+        // would only ever run once the offer it was meant to discover had
+        // already appeared (ios.md).
+        //
+        // A view-level loop is right for this one and wrong for the tracker's
+        // other periodic work: those must survive backgrounding and so ride the
+        // location callbacks, whereas this exists solely to keep a button
+        // honest on a screen someone is looking at. SwiftUI cancels the task on
+        // disappear, so it stops the moment the tracker does — which is exactly
+        // when nobody can act on it anyway.
+        .task(id: effectiveBuddySessionId) {
+            guard effectiveBuddySessionId == nil else { return }
+            while !Task.isCancelled {
+                await buddyService.refreshFriendsOutNow()
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
     }
 
     /// The buddy hand-off: the lobby already ran the server-synced countdown,

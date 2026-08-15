@@ -17,6 +17,10 @@ import {
   runHypedByViewerMatchSql,
 } from "./hypeService.js";
 import { stripMediaQuery } from "./mediaSigningService.js";
+// One-way: workoutService does not import postService, so this introduces no
+// cycle. Used by the crew-photo nudge to check the recipient's local day still
+// allows a photo before inviting them to add one.
+import { getDailyGoalStatus } from "./workoutService.js";
 
 const db = PostgresService.getInstance();
 
@@ -156,6 +160,10 @@ export interface PostRow {
   // feature, so the payload shape is unchanged for the legacy corpus and old
   // clients go on reading the scalar fields above.
   coauthors?: PostCoauthor[] | null;
+  // The WALK's combined figures on a buddy post — "3.2 mi between us", the
+  // number the recap headlines and the card never showed. Null on every
+  // non-buddy post and on every older server.
+  buddy_group?: { distance_miles: number; crew_size: number } | null;
   // Resolved "is this collab on MY profile grid?" — only populated when the
   // VIEWER is the coauthor (it's their setting to read), null otherwise.
   // Drives the card's Hide/Show-on-profile action. Additive field.
@@ -455,6 +463,39 @@ const CREW_ROUTE_SQL = `(
 		)
 )`;
 
+/**
+ * SQL: the WALK's combined figures for a buddy post — "3.2 mi between us".
+ *
+ * The recap headlines this number at hero size and the post never showed it,
+ * so the card that exists to say "we did this together" led with one person's
+ * distance. Derived, never stored, for the same reason the routes are: it
+ * moves as each participant's workout reconciles, and a value frozen at post
+ * time would be whatever was known in the first ten seconds.
+ *
+ * Counts the SAME membership every other buddy surface counts — `active` and
+ * `finished`, the set the roster draws and the pooled total sums — and prefers
+ * each person's reconciled `final_distance_miles`, falling back to their live
+ * figure until it lands. NULL for every non-buddy post, which is the whole
+ * legacy corpus.
+ */
+const BUDDY_GROUP_JSON = `(
+	SELECT jsonb_build_object(
+		'distance_miles', ROUND(SUM(
+			COALESCE(bsp.final_distance_miles, bsp.distance_miles, 0)
+		)::numeric, 2)::double precision,
+		'crew_size', COUNT(*)
+	)
+	FROM buddy_session_participants bsp
+	WHERE bsp.session_id = COALESCE(
+			p.buddy_session_id,
+			(SELECT pcg.buddy_session_id FROM post_coauthors pcg
+			  WHERE pcg.post_id = p.post_id AND pcg.buddy_session_id IS NOT NULL
+			  LIMIT 1)
+		)
+		AND bsp.status IN ('active', 'finished')
+	HAVING COUNT(*) > 1
+)`;
+
 // Credited participants, as a JSON array for the client. NULL when the post has
 // none, which is every pre-existing post — so the payload shape is unchanged
 // for the entire legacy corpus and old clients keep reading the scalar columns.
@@ -530,6 +571,7 @@ const COAUTHOR_COLUMNS = `
 	(SELECT cu.last_name FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_last_name,
 	(SELECT cu.profile_image_url FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_profile_image_url,
 	${MULTI_COAUTHORS_JSON} AS coauthors,
+	${BUDDY_GROUP_JSON} AS buddy_group,
 	-- Only meaningful to the coauthor themselves (it's their grid), so it's
 	-- NULL for everyone else rather than leaking one user's curation choice
 	-- to the other. CASE guarantees the subquery only runs on collab rows the
@@ -2854,6 +2896,111 @@ export async function addCrewPhoto(
   return rows.length > 0;
 }
 
+/**
+ * "3 of you were out, 1 photo so far" — the nudge that turns a buddy post into
+ * something people come back to.
+ *
+ * ## Why this points at the CAMERA ROLL, not the camera
+ *
+ * Photo posting has two tiers (`getPostWindowStatus`): `cameraOpen`, the ten
+ * minutes after a qualifying walk, and `photoOpen`, the rest of that local day.
+ * This fires roughly an hour after the walk ends, so the camera window is
+ * long shut by construction — every one of these nudges is a LIBRARY-tier ask,
+ * and the copy has to say so. Telling someone to "grab a photo" when the
+ * shutter has been closed for fifty minutes is the same dead end the
+ * `post_window_closed` error used to be.
+ *
+ * It is also gated on `photoOpen` per recipient rather than assumed: someone
+ * whose local day has already rolled over cannot post at all, and a push
+ * inviting them to do it would tap through to a locked composer. That check is
+ * the reason this is a per-user loop rather than one bulk query.
+ *
+ * ## Once each, and never a backlog
+ *
+ * `post_coauthors.photo_nudge_sent_at` is the claim, stamped before the send.
+ * It has no DEFAULT on purpose (backend.md: a `DEFAULT now()` on an existing
+ * table stores one missing-value for every historical row, so an "older than
+ * an hour" gate stays silent for an hour and then fires on the whole archive in
+ * one tick). The window below — sessions that ended between one and six hours
+ * ago — is the second guard: a deploy after a quiet night has nothing to catch
+ * up on.
+ */
+export async function sweepCrewPhotoNudges(): Promise<number> {
+  const candidates = await db.query<{
+    post_id: string;
+    user_id: string;
+    session_id: string;
+    crew_size: string;
+    photos_so_far: string;
+  }>(
+    `SELECT pca.post_id, pca.user_id, pca.buddy_session_id AS session_id,
+            (SELECT COUNT(*) FROM buddy_session_participants bsp
+              WHERE bsp.session_id = pca.buddy_session_id
+                AND bsp.status IN ('active', 'finished'))::text AS crew_size,
+            (1 + (SELECT COUNT(*) FROM post_coauthors done
+                   WHERE done.post_id = pca.post_id
+                     AND done.status = 'accepted'
+                     AND done.media_url IS NOT NULL
+                     AND done.media_url <> ''))::text AS photos_so_far
+       FROM post_coauthors pca
+       JOIN posts p ON p.post_id = pca.post_id
+       JOIN buddy_sessions s ON s.id = pca.buddy_session_id
+      WHERE pca.status = 'accepted'
+        AND pca.photo_nudge_sent_at IS NULL
+        AND (pca.media_url IS NULL OR pca.media_url = '')
+        AND p.deleted_at IS NULL AND p.share_to_feed
+        AND s.status = 'completed'
+        AND s.ended_at BETWEEN NOW() - INTERVAL '6 hours'
+                           AND NOW() - INTERVAL '55 minutes'
+      LIMIT 200`,
+  );
+
+  let sent = 0;
+  for (const row of candidates) {
+    try {
+      // Claim FIRST. A push that fails is better lost than repeated every five
+      // minutes for six hours.
+      const claimed = await db.query<{ post_id: string }>(
+        `UPDATE post_coauthors SET photo_nudge_sent_at = NOW()
+          WHERE post_id = $1 AND user_id = $2 AND photo_nudge_sent_at IS NULL
+          RETURNING post_id`,
+        [row.post_id, row.user_id],
+      );
+      if (claimed.length === 0) continue;
+
+      if (
+        !(await userSupports(row.user_id, CLIENT_FEATURES.buddyGroupPostV1))
+      ) {
+        continue;
+      }
+      const goal = await getDailyGoalStatus(row.user_id);
+      // Their local day has rolled over (or they never qualified today) — the
+      // composer this push opens would refuse the photo, so don't send it.
+      if (!goal.completed) continue;
+      const window = await getPostWindowStatus(row.user_id, goal.localDate);
+      if (!window.photoOpen) continue;
+
+      const crew = Number(row.crew_size);
+      const photos = Number(row.photos_so_far);
+      await sendPush(row.user_id, {
+        title:
+          photos === 1
+            ? `${crew} of you were out — 1 photo so far 📸`
+            : `${crew} of you were out — ${photos} photos so far 📸`,
+        // The ask is explicitly for a photo already TAKEN. See the doc comment:
+        // the ten-minute camera window shut long before this fired.
+        body: "Add one from your camera roll to the walk's post.",
+        type: "crew_photo_nudge",
+        data: { post_id: row.post_id, buddy_session_id: row.session_id },
+      });
+      sent += 1;
+    } catch (e: any) {
+      console.error("[sweepCrewPhotoNudges] failed:", e?.message ?? e);
+    }
+  }
+  return sent;
+}
+
 /** The post's PRIMARY author if the viewer may see it — see visiblePostAuthors. */
 export async function visiblePostAuthor(
   viewerId: string,
@@ -3029,6 +3176,63 @@ export async function notifyCoauthorInvite(
     });
   } catch (e: any) {
     console.error("[notifyCoauthorInvite] failed:", e?.message ?? e);
+  }
+}
+
+/**
+ * "Sam added their photo to your walk."
+ *
+ * The moment that makes a shared card feel alive rather than static: without
+ * it, a buddy post is a thing one person made and everyone else silently
+ * appended to, and nobody ever goes back to look. Goes to the AUTHOR and to
+ * every other credited participant, because on a four-person walk the third
+ * photo landing is news to all three of the others, not just the poster.
+ *
+ * Type string is new, so it's gated on `buddyGroupPostV1` — an older build has
+ * no route for it and would show a banner that taps to nothing. Same reason
+ * the `post_id` rides in `data`: the client opens the post directly. Every
+ * value there stays a STRING (shipped builds decode the inbox as
+ * `[String: String]`, and one number breaks the whole decode).
+ *
+ * Never throws — a failed push must not fail the photo.
+ */
+export async function notifyCrewPhoto(
+  postId: string,
+  actorId: string,
+): Promise<void> {
+  try {
+    const rows = await db.query<{ user_id: string }>(
+      // Everyone on the post except whoever just added the photo. The author
+      // is unioned in explicitly: they have no post_coauthors row of their own.
+      `SELECT p.user_id FROM posts p
+        WHERE p.post_id = $1 AND p.deleted_at IS NULL AND p.user_id <> $2
+        UNION
+       SELECT pca.user_id FROM post_coauthors pca
+        WHERE pca.post_id = $1 AND pca.status = 'accepted' AND pca.user_id <> $2`,
+      [postId, actorId],
+    );
+    if (rows.length === 0) return;
+
+    const actor = await db.query<{ username: string | null }>(
+      `SELECT username FROM users WHERE user_id = $1`,
+      [actorId],
+    );
+    const name = actor[0]?.username ?? "A friend";
+
+    for (const { user_id: recipient } of rows) {
+      if (!(await shouldSendNotification(recipient, actorId, "hype"))) continue;
+      if (!(await userSupports(recipient, CLIENT_FEATURES.buddyGroupPostV1))) {
+        continue;
+      }
+      await sendPush(recipient, {
+        title: `${name} added their photo 📸`,
+        body: "It's on your walk's post — go see it.",
+        type: "crew_photo",
+        data: { user_id: actorId, post_id: postId },
+      });
+    }
+  } catch (e: any) {
+    console.error("[notifyCrewPhoto] failed:", e?.message ?? e);
   }
 }
 

@@ -208,12 +208,20 @@ struct WorkoutRouteMapView: View {
                     // start/end pins: five people on one map is ten markers,
                     // which buries the route it's meant to annotate. The
                     // legend beside the map is what says whose is whose.
-                    ForEach(companionRoutes) { companion in
+                    ForEach(Array(companionRoutes.enumerated()), id: \.element.id) {
+                        index, companion in
                         RouteOverlay(
                             coordinates: companion.coordinates,
                             project: { snapshot.point(for: $0, in: geo.size) },
                             routeColor: companion.color,
-                            trimProgress: trimProgress,
+                            // Every line draws at once, but not in lockstep.
+                            // Sharing one `trimProgress` made four routes move
+                            // as a single rigid object, which reads as one
+                            // animation rather than four people; a small
+                            // per-line lead makes them race, which is the
+                            // three seconds this card is actually for. Clamped
+                            // to 1 so nobody's line is left short.
+                            trimProgress: min(1, trimProgress * companionPace(index)),
                             showMarkers: false
                         )
                     }
@@ -257,6 +265,19 @@ struct WorkoutRouteMapView: View {
                 }
             }
         }
+    }
+
+    /// Speed multiplier for companion line `index`, so the crew's routes draw
+    /// as a pack rather than one welded shape.
+    ///
+    /// Deterministic (never random): a card re-renders constantly while
+    /// scrolling, and a pace that changed per render would make the same walk
+    /// animate differently every time it came back on screen. Bounded 0.8–1.2
+    /// so nothing lags far enough behind to look stuck, and every line still
+    /// completes well inside the 1.2s draw.
+    private func companionPace(_ index: Int) -> CGFloat {
+        let offsets: [CGFloat] = [1.18, 0.86, 1.08, 0.92, 1.14, 0.82, 1.02]
+        return offsets[index % offsets.count]
     }
 
     /// Whole-point size: sub-pixel layout jitter must not re-trigger the

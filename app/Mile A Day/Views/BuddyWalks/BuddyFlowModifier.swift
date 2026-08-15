@@ -115,7 +115,13 @@ struct BuddyFlowModifier: ViewModifier {
                 async let sessions: Void = BuddySessionService.shared.refreshMySessions()
                 async let candidates: Void = BuddySessionService.shared.loadCandidates()
                 async let routines: Void = BuddySessionService.shared.loadRoutines()
-                _ = await (sessions, candidates, routines)
+                // Who's out RIGHT NOW. Added because the dashboard pill now
+                // offers "a friend is out — join", and without this it only
+                // ever had data after a trip to the Friends tab — i.e. the
+                // offer appeared for people who had already found the feature
+                // elsewhere, which is the opposite of who it's for.
+                async let out: Void = BuddySessionService.shared.refreshFriendsOutNow()
+                _ = await (sessions, candidates, routines, out)
 
                 // The `.onReceive` pair above only fires for values published
                 // AFTER this mounts. On a cold launch the link is already

@@ -2225,6 +2225,20 @@ export const postCoauthors = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // Claim stamp for the hour-later "put your photo on it too" nudge, so the
+    // cron sends it at most once per participant per post.
+    //
+    // NOT `DEFAULT now()`: on an existing table that stores the default once as
+    // a missing-value, so every pre-existing row would read back the same
+    // DDL-time timestamp — and a cron gating on "older than an hour" would then
+    // stay silent for an hour and fire on the entire backlog in one tick
+    // (backend.md). Nullable with no default: NULL means un-nudged, and the
+    // cron's own window (sessions that ended in the last few hours) is what
+    // keeps the backlog out.
+    photoNudgeSentAt: timestamp("photo_nudge_sent_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
   (table) => [
     index("idx_post_coauthors_user").using(

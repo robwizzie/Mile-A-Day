@@ -30,6 +30,7 @@ import {
   getPostWindowStatus,
   photoSourceRequiresCameraWindow,
   addCrewPhoto,
+  notifyCrewPhoto,
   POST_WINDOW_MS,
   lockUnearnedPhotos,
   ALLOWED_STORY_REACTIONS,
@@ -921,6 +922,9 @@ export async function addCrewPhotoController(
     // existence of someone else's post is never confirmed.
     const ok = await addCrewPhoto(postId, userId, mediaUrl);
     if (!ok) return res.status(404).json({ error: "Post not found" });
+    // Fire-and-forget: everyone else on the walk hears about it, and a push
+    // that fails must never fail the photo that already landed.
+    void notifyCrewPhoto(postId, userId);
     res.json({ ok: true });
   } catch (error: any) {
     console.error("Error adding crew photo:", error.message);

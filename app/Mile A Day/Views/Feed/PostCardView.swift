@@ -79,6 +79,7 @@ struct PostCardView: View {
                 // Under the carousel rather than on the map slide: the stats
                 // band already owns the bottom of that slide, and the key is
                 // about the whole card anyway — it's the crew.
+                crewGroupLine
                 crewRouteLegend
                 if let stats = post.stats_snapshot {
                     PostStatStrip(stats: stats, feedRole: post.feed_role).padding(.horizontal, 2)
@@ -580,6 +581,32 @@ struct PostCardView: View {
                 coordinates: coords,
                 color: CrewRoutePalette.color(at: pair.offset)
             )
+        }
+    }
+
+    /// "3.2 mi between the 3 of you" — the walk, not the walker.
+    ///
+    /// A buddy post's own stat strip shows the AUTHOR's distance, which is
+    /// correct (it's their post and their photo) and also, on a card whose
+    /// whole subject is that several people went out together, the smaller and
+    /// less interesting of the two numbers. The recap has always led with the
+    /// combined figure; the card never showed it at all.
+    @ViewBuilder
+    private var crewGroupLine: some View {
+        if let group = post.buddy_group, group.crew_size > 1, group.distance_miles > 0 {
+            HStack(spacing: 6) {
+                Image(systemName: "figure.2")
+                    .font(.system(size: 12, weight: .bold))
+                Text("\(group.distance_miles.milesText) mi between the \(group.crew_size) of you")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+            }
+            .foregroundColor(ActivityCardView.color(post.workout_type))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule().fill(ActivityCardView.color(post.workout_type).opacity(0.14))
+            )
+            .padding(.horizontal, 2)
         }
     }
 

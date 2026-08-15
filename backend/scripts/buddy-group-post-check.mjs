@@ -37,7 +37,12 @@ import {
   buddySessionPost,
   getUnifiedFeed,
   lockUnearnedPhotos,
+  sweepCrewPhotoNudges,
 } from "../dist/services/postService.js";
+import {
+  joinSession,
+  leaveSession,
+} from "../dist/services/buddySessionService.js";
 
 const db = PostgresService.getInstance();
 
@@ -90,6 +95,14 @@ async function seed() {
 }
 
 async function cleanup() {
+  // FIRST, and not optional: `joinSession` notifies the host, and `sendPush`
+  // writes an in-app row even when it has no device to deliver to. Leaving
+  // those behind makes the NEXT run fail on the users FK rather than on
+  // anything it was testing — which is how a check starts looking flaky.
+  await db.query(
+    `DELETE FROM in_app_notifications WHERE user_id = ANY($1::text[])`,
+    [ALL],
+  );
   await db.query(`DELETE FROM workout_routes WHERE workout_id LIKE 'grp-w-%'`);
   await db.query(`DELETE FROM post_coauthors WHERE user_id = ANY($1::text[])`, [
     ALL,
@@ -187,6 +200,12 @@ async function seedGroupPost(sessionId, { includeRoute = true } = {}) {
     );
   }
   return postId;
+}
+
+/** The whole feed card for `postId` as `viewer` sees it. */
+async function crewCard(viewerId, postId) {
+  const feed = await getUnifiedFeed(viewerId, 20, null);
+  return feed.find((e) => e.kind === "post" && e.id === postId) ?? null;
 }
 
 /** The crew entry for `userId` on the first post of `viewer`'s unified feed. */
@@ -375,6 +394,125 @@ async function main() {
     "a viewer who ran today sees the crew's photos",
     earned[0].coauthors[0].media_url,
     "/uploads/posts/grp-pal-2.jpg",
+  );
+
+  // ── 8. The walk's combined figures ride the card ──
+  //
+  // "3.2 mi between us" is the number the recap headlines at hero size and the
+  // post never showed, so a card about doing it together led with one person's
+  // distance. Derived, so it must count the SAME membership every other buddy
+  // surface counts and must prefer a reconciled figure over a live one.
+  const grouped = await crewCard(OUT, postId);
+  check(
+    "the card carries the walk's crew size",
+    grouped?.buddy_group?.crew_size,
+    3,
+  );
+  check(
+    "...and the combined distance",
+    grouped?.buddy_group?.distance_miles,
+    4.2,
+  );
+  // A solo post has no walk behind it and must not sprout a group line.
+  const soloRows = await db.query(
+    `INSERT INTO posts (user_id, media_url, local_date, share_to_feed, is_auto)
+     VALUES ($1, '/uploads/posts/grp-author-solo.jpg', CURRENT_DATE, TRUE, FALSE)
+     RETURNING post_id`,
+    [AUTHOR],
+  );
+  check(
+    "an ordinary post has no group line",
+    (await crewCard(OUT, soloRows[0].post_id))?.buddy_group ?? null,
+    null,
+  );
+
+  // ── 9. The hour-later nudge ──
+  //
+  // Fires roughly an hour after the walk, which is LONG after the ten-minute
+  // camera window shut — so it is a camera-roll ask by construction, and the
+  // one thing that must never happen is it firing twice.
+  await db.query(
+    `UPDATE buddy_sessions SET ended_at = NOW() - INTERVAL '2 hours'
+      WHERE id = $1`,
+    [sessionId],
+  );
+  // PAL already added a photo; SHY has not. Only SHY should be nudged.
+  const firstSweep = await sweepCrewPhotoNudges();
+  const claims = await db.query(
+    `SELECT user_id FROM post_coauthors
+      WHERE post_id = $1 AND photo_nudge_sent_at IS NOT NULL
+      ORDER BY user_id`,
+    [postId],
+  );
+  check(
+    "only the participant with no photo is claimed",
+    claims.map((r) => r.user_id).join(","),
+    SHY,
+  );
+  // The push itself is suppressed (no device declares buddy_group_post_v1 in
+  // this seed), which is exactly the gating being asserted — the CLAIM is what
+  // proves the sweep selected correctly.
+  check("...and no push reaches a legacy build", firstSweep, 0);
+  // Re-running must find nothing. A cron on a 5-minute cadence that re-selects
+  // the same row would send this every five minutes for six hours.
+  await sweepCrewPhotoNudges();
+  const claimsAfter = await db.query(
+    `SELECT COUNT(*)::int AS n FROM post_coauthors
+      WHERE post_id = $1 AND photo_nudge_sent_at IS NOT NULL`,
+    [postId],
+  );
+  check("the nudge claim is once-only", claimsAfter[0].n, 1);
+
+  // ── 10. Leave and rejoin mid-walk keeps your miles ──
+  //
+  // Stepping out of the group must never cost the distance already banked: the
+  // participant row is the only record of it, and a rejoin that reset it would
+  // silently take miles off someone who walked them.
+  await db.query(
+    `UPDATE buddy_sessions SET status = 'active', ended_at = NULL,
+            started_at = NOW() - INTERVAL '30 minutes'
+      WHERE id = $1`,
+    [sessionId],
+  );
+  // BOTH still out. If PAL were the only active walker, their leaving would
+  // (correctly) finalize the whole session and there would be nothing left to
+  // rejoin — which is a different behaviour from the one under test here.
+  await db.query(
+    `UPDATE buddy_session_participants
+        SET status = 'active', distance_miles = 0.73, duration_seconds = 900
+      WHERE session_id = $1 AND user_id = ANY($2::text[])`,
+    [sessionId, [PAL, AUTHOR]],
+  );
+  await leaveSession(sessionId, PAL);
+  const afterLeave = await db.query(
+    `SELECT status, distance_miles FROM buddy_session_participants
+      WHERE session_id = $1 AND user_id = $2`,
+    [sessionId, PAL],
+  );
+  check("leaving frees the slot", afterLeave[0]?.status, "left");
+  check(
+    "...without touching the miles already walked",
+    Number(afterLeave[0]?.distance_miles),
+    0.73,
+  );
+  await joinSession(PAL, { sessionId });
+  const afterRejoin = await db.query(
+    `SELECT status, distance_miles FROM buddy_session_participants
+      WHERE session_id = $1 AND user_id = $2`,
+    [sessionId, PAL],
+  );
+  // 'active', not 'joined': a running session has no lobby left to wait in,
+  // and a 'joined' row is invisible to the roster, worth zero to the pooled
+  // total, and unable to report a metre (backend.md).
+  check(
+    "rejoining a running walk lands active",
+    afterRejoin[0]?.status,
+    "active",
+  );
+  check(
+    "...and picks up exactly where they left off",
+    Number(afterRejoin[0]?.distance_miles),
+    0.73,
   );
 
   if (!process.env.KEEP_SEED) await cleanup();

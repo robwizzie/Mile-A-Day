@@ -76,6 +76,10 @@ final class BuddySessionService: ObservableObject {
     @Published private(set) var friendsOutNow: [FriendOutNow] = []
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
+    /// The walk this user stepped out of, and when — see `rejoinableSessionId`.
+    /// Published so the tracker's offer appears and disappears on its own.
+    @Published private(set) var recentlyLeftSessionId: String?
+    @Published private(set) var recentlyLeftAt: Date?
 
     /// Set once the app has told the backend this build has the buddy UI.
     private var hasEnrolled = false
@@ -521,6 +525,9 @@ final class BuddySessionService: ObservableObject {
         )
         apply(state)
         invites.removeAll { $0.id == sessionId }
+        // Back in — whatever we were offering to rejoin is now moot, whether
+        // this is that session or a different one.
+        clearRejoinOffer()
         startPolling()
     }
 
@@ -626,6 +633,30 @@ final class BuddySessionService: ObservableObject {
         )
         stopPolling()
         session = nil
+        // Remembered so the tracker can offer a one-tap way back in. Leaving
+        // mid-walk used to be a one-way door: the roster vanished and the only
+        // route back was the Friends tab, which is not somewhere anyone goes
+        // while they're walking. The miles are still on the server (the
+        // participant row keeps `distance_miles` through a leave), so rejoining
+        // genuinely resumes rather than restarts.
+        recentlyLeftSessionId = id
+        recentlyLeftAt = Date()
+    }
+
+    /// The session this user stepped out of, while it's still worth offering
+    /// back. Nil once it goes stale — a walk you left two hours ago is not a
+    /// thing to be nudged about mid-run.
+    var rejoinableSessionId: String? {
+        guard let id = recentlyLeftSessionId, let at = recentlyLeftAt else { return nil }
+        guard Date().timeIntervalSince(at) < 2 * 60 * 60 else { return nil }
+        // Already back in something — nothing to offer.
+        guard session == nil else { return nil }
+        return id
+    }
+
+    func clearRejoinOffer() {
+        recentlyLeftSessionId = nil
+        recentlyLeftAt = nil
     }
 
     /// Host calls the whole walk off, for everyone.

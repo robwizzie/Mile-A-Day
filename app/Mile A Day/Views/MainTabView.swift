@@ -19,6 +19,10 @@ import UserNotifications
 func postTargetForPush(type: String, data: [String: String]) -> String? {
     let postTypes: Set<String> = [
         "mention", "post_comment", "coauthor_invite", "coauthor_accepted", "friend_post",
+        // Both buddy-photo pushes open the walk's post directly — that card IS
+        // the thing they're about, and landing in the inbox instead would make
+        // "go see it" a two-tap instruction.
+        "crew_photo", "crew_photo_nudge",
     ]
     guard postTypes.contains(type), data["kind"] != "story" else { return nil }
     guard let postId = data["post_id"], !postId.isEmpty else { return nil }
@@ -246,6 +250,7 @@ struct MainTabView: View {
                      // comment pushes follow the same route.
                      "friend_post", "story_reaction",
                      "coauthor_invite", "coauthor_accepted", "mention", "post_comment",
+                     "crew_photo", "crew_photo_nudge",
                      "friend_challenge_completed", "friend_personal_best":
                     selectedTab = 0
                     showNotificationInbox = true
@@ -507,7 +512,8 @@ struct MainTabView: View {
                  "lead_change", "clash_tie",
                  "friend_post", "story_reaction",
                  "buddy_finished",
-                 "coauthor_invite", "coauthor_accepted", "mention", "post_comment":
+                 "coauthor_invite", "coauthor_accepted", "mention", "post_comment",
+                 "crew_photo", "crew_photo_nudge":
                 selectedTab = 0
                 showNotificationInbox = true
                 notificationService.pendingNotificationType = nil
