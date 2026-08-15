@@ -434,7 +434,7 @@ struct PostCardView: View {
     /// them — the same order the route colours use, so slide 3 belongs to the
     /// person whose line is the third in the legend.
     private var crewPhotoSlides: [MediaSlide] {
-        post.acceptedCoauthors.compactMap { coauthor in
+        post.acceptedCoauthors.compactMap { coauthor -> MediaSlide? in
             guard let url = coauthor.mediaURL else { return nil }
             return .crewPhoto(url: url, name: coauthor.displayName)
         }
@@ -573,12 +573,12 @@ struct PostCardView: View {
     /// colours are stable between reads. Empty for an ordinary post, and for
     /// any crew member who walked indoors or shares no maps.
     private var companionRoutes: [CompanionRoute] {
-        post.acceptedCoauthors.enumerated().compactMap { index, coauthor in
-            guard let coords = coauthor.routeCoordinates else { return nil }
+        post.acceptedCoauthors.enumerated().compactMap { pair -> CompanionRoute? in
+            guard let coords = pair.element.routeCoordinates else { return nil }
             return CompanionRoute(
-                id: coauthor.user_id,
+                id: pair.element.user_id,
                 coordinates: coords,
-                color: CrewRoutePalette.color(at: index)
+                color: CrewRoutePalette.color(at: pair.offset)
             )
         }
     }
@@ -590,7 +590,7 @@ struct PostCardView: View {
     private var crewRouteLegend: some View {
         let companions = companionRoutes
         if !companions.isEmpty {
-            let byId = Dictionary(
+            let byId: [String: String] = Dictionary(
                 post.acceptedCoauthors.map { ($0.user_id, $0.displayName) },
                 uniquingKeysWith: { first, _ in first }
             )

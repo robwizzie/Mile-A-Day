@@ -886,13 +886,19 @@ struct PostComposerView: View {
                     Text("Your photo and caption won't be saved.")
                 }
             }
-            .navigationTitle("New Post")
+            // The buddy flow is a numbered wizard whose first screen lives in
+            // another view, so this screen has to say where it is in it. It
+            // used to say "New Post" — which, arriving from a screen headed
+            // "STEP 1 OF 3", read as having left the wizard rather than
+            // advanced through it.
+            .navigationTitle(vm.isCrewPhoto ? "Your photo" : editStepTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: ComposerStep.self) { _ in
                 PostShareStepView(
                     vm: vm,
                     friendService: friendService,
                     shareEnabled: vm.canPublish && termsState == .accepted,
+                    stepTitle: shareStepTitle,
                     onShare: share,
                     onEditMedia: { if !path.isEmpty { path.removeLast() } }
                 )
@@ -1004,6 +1010,24 @@ struct PostComposerView: View {
             PostTermsGateView { gateAccepted = true }
         }
     }
+
+    // MARK: - Step titles
+
+    /// A buddy walk's post is a THREE-step wizard that starts in
+    /// `BuddyPostWizardView` ("STEP 1 OF 3 · THE CREW") and finishes in this
+    /// composer, so these two screens are steps 2 and 3 of it and have to say
+    /// so. Every other entry point (the feed FAB, the post-run prompt, a
+    /// promoted story) is a plain one-off post and keeps the old titles —
+    /// numbering a flow that has no other steps would be worse than not
+    /// numbering it.
+    /// Keyed on the SESSION, not on the crew list: a walk whose buddies all
+    /// dropped out still came through the wizard's step 1, so it is still a
+    /// three-step flow and must still be numbered like one.
+    private var isBuddyWizard: Bool { vm.buddySessionId != nil }
+
+    private var editStepTitle: String { isBuddyWizard ? "Step 2 of 3 · Photo" : "New Post" }
+
+    private var shareStepTitle: String { isBuddyWizard ? "Step 3 of 3 · Share" : "Share" }
 
     // MARK: - Step actions
 

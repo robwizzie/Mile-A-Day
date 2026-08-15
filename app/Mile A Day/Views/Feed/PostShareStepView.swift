@@ -14,6 +14,11 @@ struct PostShareStepView: View {
     /// Terms accepted AND `vm.canPublish`. Resolved by the composer, which owns the
     /// terms state machine.
     let shareEnabled: Bool
+    /// "Share", or "Step 3 of 3 · Share" when this composer is the tail of the
+    /// buddy post wizard. Passed in rather than derived here: the composer owns
+    /// which flow it's in, and two views deciding that separately is how the
+    /// numbering drifts.
+    var stepTitle: String = "Share"
     /// Owned by `PostComposerView` — it holds the terms switch, `publish()`,
     /// `onFinished` and `dismiss()`.
     ///
@@ -81,7 +86,7 @@ struct PostShareStepView: View {
             }
             .scrollDismissesKeyboard(.interactively)
         }
-        .navigationTitle("Share")
+        .navigationTitle(stepTitle)
         .navigationBarTitleDisplayMode(.inline)
         // Toolbar background does not reliably inherit across a push — re-declare it
         // or this screen gets a translucent bar while the edit step has a solid one.
