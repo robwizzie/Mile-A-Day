@@ -187,6 +187,18 @@ final class PostComposerViewModel: ObservableObject {
     /// manual picker) is left alone so a normal post is unaffected.
     @Published var buddyCoauthorIds: [String] = []
     @Published var buddySessionId: String?
+    /// Non-nil turns this composer into "add MY photo to the crew's post".
+    ///
+    /// The walk already has a card — a friend made it — and everything below
+    /// (camera, canvas, sticker, the flatten) is identical; only the terminal
+    /// call differs. That's the whole point: the alternative, and what shipped,
+    /// was that the second person on a walk opened a SECOND post for the same
+    /// walk, because "add my picture to that one" had nowhere to go.
+    ///
+    /// While set there is no destination to choose — a slide on someone else's
+    /// feed card is not a story and not a post of your own — so `publish()`
+    /// treats it as feed-bound and the share step hides the picker.
+    @Published var crewPhotoPostId: String?
     /// Display names for `buddyCoauthorIds`, same order — set once by the
     /// wizard so the share step can SHOW the crew it's crediting instead of
     /// offering the manual co-poster picker beside an invisible roster.
@@ -229,8 +241,12 @@ final class PostComposerViewModel: ObservableObject {
         if initialImage != nil { self.photoSource = .library }
     }
 
+    /// Adding a slide to the crew's post — no destination to pick, so nothing
+    /// to wait for beyond the photo itself.
+    var isCrewPhoto: Bool { crewPhotoPostId != nil }
+
     var canPublish: Bool {
-        pickedImage != nil && destination != nil && !isPublishing
+        pickedImage != nil && (isCrewPhoto || destination != nil) && !isPublishing
     }
 
     /// A photo on the canvas IS the draft — the caption and sticker ride with it.
@@ -327,7 +343,11 @@ final class PostComposerViewModel: ObservableObject {
             errorMessage = "Add a photo first."
             return false
         }
-        guard let destination else {
+        // A crew photo has nowhere else to go — it's a slide on a card that
+        // already exists — so it skips the destination gate entirely.
+        let resolvedDestination: PostDestination? =
+            destination ?? (isCrewPhoto ? PostDestination.feed : nil)
+        guard let destination = resolvedDestination else {
             errorMessage = "Choose where to share — story, feed, or both."
             return false
         }
@@ -337,6 +357,27 @@ final class PostComposerViewModel: ObservableObject {
 
         do {
             let mediaUrl = try await PostService.uploadMedia(flat)
+            if let crewPhotoPostId {
+                // Everything above this line is the ordinary composer — same
+                // camera, same canvas, same flatten. Only the terminal call
+                // differs, which is exactly why this is a branch here and not
+                // a second composer: the walk's post already exists, and this
+                // photo joins it rather than opening a rival to it.
+                try await PostService.addCrewPhoto(
+                    postId: crewPhotoPostId,
+                    mediaUrl: mediaUrl,
+                    photoSource: photoSource
+                )
+                // The run's photo moment is spent either way — the picture is
+                // on the feed. Retire the prompt so it can't surface later
+                // asking for a photo of the walk it's already on, which is the
+                // exact complaint the buddy path produced before.
+                if let workoutId = stats.workoutId, !workoutId.isEmpty {
+                    PostedWorkoutRegistry.markPosted(workoutId)
+                    CelebrationManager.shared.resolvePhotoPrompt(forWorkout: workoutId)
+                }
+                return true
+            }
             _ = try await PostService.createPost(
                 mediaUrl: mediaUrl,
                 caption: caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : caption,
@@ -761,12 +802,16 @@ struct PostComposerView: View {
         buddyCoauthorIds: [String] = [],
         buddySessionId: String? = nil,
         buddyCrewNames: [String] = [],
+        // Set instead of the three above when the walk is ALREADY posted and
+        // this composer is adding your photo to it.
+        crewPhotoPostId: String? = nil,
         onFinished: @escaping (PostComposeOutcome) -> Void
     ) {
         let model = PostComposerViewModel(stats: stats, initialImage: initialImage)
         model.buddyCoauthorIds = buddyCoauthorIds
         model.buddySessionId = buddySessionId
         model.buddyCrewNames = buddyCrewNames
+        model.crewPhotoPostId = crewPhotoPostId
         _vm = StateObject(wrappedValue: model)
         self.autoOpenCamera = autoOpenCamera
         self.backNavigation = backNavigation
@@ -982,10 +1027,16 @@ struct PostComposerView: View {
         case .accepted:
             Task {
                 let ok = await vm.publish()
-                if ok, let dest = vm.destination {
-                    onFinished(.published(toFeed: dest.toFeed, toStory: dest.toStory))
-                    dismiss()
-                }
+                guard ok else { return }
+                // A crew photo has no destination to read — it goes on the
+                // walk's existing feed card, which is a feed outcome. Without
+                // this the `let dest` below failed silently and the composer
+                // simply sat there with the photo already published.
+                let resolved: PostDestination? =
+                    vm.destination ?? (vm.isCrewPhoto ? PostDestination.feed : nil)
+                guard let dest = resolved else { return }
+                onFinished(.published(toFeed: dest.toFeed, toStory: dest.toStory))
+                dismiss()
             }
         case .needsAcceptance:
             // Not allowed to post yet — the button routes to the guidelines

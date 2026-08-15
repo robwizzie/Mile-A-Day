@@ -34,9 +34,56 @@ struct RouteMapSnapshot {
     }
 }
 
+/// One more person's trace on the same map — a buddy walk drawn as the one
+/// walk it was, rather than as N separate cards each showing a third of it.
+///
+/// Colour is assigned by the caller (`CrewRoutePalette`) so the legend beside
+/// the map and the line on it can't disagree about whose is whose.
+struct CompanionRoute: Identifiable {
+    let id: String
+    let coordinates: [CLLocationCoordinate2D]
+    let color: Color
+}
+
+/// Colours for the crew's lines on a combined route map.
+///
+/// One list, consulted by BOTH the map and the legend beside it — they were
+/// always going to be derived twice otherwise, and a legend that disagrees
+/// with the map is worse than no legend at all. Indexed by position in the
+/// post's `acceptedCoauthors`, which the server orders deterministically
+/// (`ORDER BY pca.created_at`), so a card doesn't reshuffle its colours
+/// between reads.
+///
+/// Lives here rather than beside the model it describes because `Color` is
+/// SwiftUI and PostService.swift is deliberately UIKit/Foundation only.
+enum CrewRoutePalette {
+    /// Deliberately NOT the workout-type accent: that colour belongs to the
+    /// post's author, whose line keeps it. These are for everyone else.
+    static let colors: [Color] = [
+        Color(red: 0.31, green: 0.76, blue: 0.97),  // sky
+        Color(red: 0.98, green: 0.75, blue: 0.29),  // amber
+        Color(red: 0.53, green: 0.86, blue: 0.53),  // mint
+        Color(red: 0.79, green: 0.60, blue: 0.98),  // lilac
+        Color(red: 0.98, green: 0.55, blue: 0.62),  // rose
+        Color(red: 0.55, green: 0.93, blue: 0.87),  // aqua
+        Color(red: 0.95, green: 0.85, blue: 0.55),  // sand
+    ]
+
+    static func color(at index: Int) -> Color {
+        colors[index % colors.count]
+    }
+}
+
 struct WorkoutRouteMapView: View {
     let coordinates: [CLLocationCoordinate2D]
     let routeColor: Color
+    /// Everyone else who was on this walk and shared their route.
+    ///
+    /// Drawn onto the SAME snapshot, and — the part that matters — folded into
+    /// the region, so the map frames the whole group rather than framing the
+    /// author and letting the others run off the edge. Empty for every
+    /// non-buddy caller, which is all of them but the feed's crew card.
+    var companionRoutes: [CompanionRoute] = []
     /// Fired once the map snapshot lands — lets containers build a static
     /// composite (map + fully-drawn route) for the pinch-zoom floating copy.
     /// Carries the projection, not just the image: a `UIImage` alone can't say
@@ -80,7 +127,11 @@ struct WorkoutRouteMapView: View {
         return MKCoordinateRegion(center: center, span: span)
     }
 
-    private var region: MKCoordinateRegion { Self.region(for: coordinates) }
+    /// Framed over EVERY trace on the map. Framing on the author's alone left
+    /// a buddy who looped the other way half off the card.
+    private var region: MKCoordinateRegion {
+        Self.region(for: coordinates + companionRoutes.flatMap(\.coordinates))
+    }
 
     /// Static composite of the snapshot + fully-drawn route (+ an optional
     /// caller overlay, e.g. the stats band) at `size` — what the Instagram
@@ -92,6 +143,10 @@ struct WorkoutRouteMapView: View {
         snapshot: RouteMapSnapshot,
         coordinates: [CLLocationCoordinate2D],
         routeColor: Color,
+        // Zooming a combined map must show the SAME lines the card does —
+        // otherwise pinching a buddy walk's route quietly deletes everyone but
+        // the poster from it.
+        companionRoutes: [CompanionRoute] = [],
         size: CGSize,
         @ViewBuilder overlay: () -> Overlay
     ) -> UIImage? {
@@ -101,6 +156,15 @@ struct WorkoutRouteMapView: View {
                 .aspectRatio(contentMode: .fill)
                 .frame(width: size.width, height: size.height)
                 .clipped()
+            ForEach(companionRoutes) { companion in
+                RouteOverlay(
+                    coordinates: companion.coordinates,
+                    project: { snapshot.point(for: $0, in: size) },
+                    routeColor: companion.color,
+                    trimProgress: 1,
+                    showMarkers: false
+                )
+            }
             RouteOverlay(
                 coordinates: coordinates,
                 project: { snapshot.point(for: $0, in: size) },
@@ -139,6 +203,20 @@ struct WorkoutRouteMapView: View {
                         .aspectRatio(contentMode: .fill)
                         .frame(width: geo.size.width, height: geo.size.height)
                         .clipped()
+
+                    // Everyone else's lines go UNDER the author's, and without
+                    // start/end pins: five people on one map is ten markers,
+                    // which buries the route it's meant to annotate. The
+                    // legend beside the map is what says whose is whose.
+                    ForEach(companionRoutes) { companion in
+                        RouteOverlay(
+                            coordinates: companion.coordinates,
+                            project: { snapshot.point(for: $0, in: geo.size) },
+                            routeColor: companion.color,
+                            trimProgress: trimProgress,
+                            showMarkers: false
+                        )
+                    }
 
                     // Animated route overlay, projected THROUGH the snapshot.
                     RouteOverlay(

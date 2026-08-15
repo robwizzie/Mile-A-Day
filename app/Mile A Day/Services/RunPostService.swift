@@ -273,6 +273,25 @@ enum RunPostService {
     ///
     /// Nil when nothing matches, which keeps today's behaviour (an unlinked
     /// post) rather than guessing at an unrelated walk.
+    ///
+    /// Falls back to the WORKOUT INDEX when `todaysWorkouts` hasn't caught up,
+    /// and that fallback is the difference between the flow working and the
+    /// whole cascade above firing anyway. The recap opens from the tracker
+    /// cover's `onDismiss`, i.e. the instant the workout is saved — and
+    /// `todaysWorkouts` is republished by an ASYNC HealthKit query that has not
+    /// necessarily answered yet. So the window match ran against an array that
+    /// didn't contain the walk that had just ended, returned nil, and every
+    /// symptom the doc comment above describes happened in full: the post went
+    /// up unlinked, the server had no workout to hang a route on (so the card
+    /// showed the bare stats face), the photo prompt was never retired and
+    /// surfaced as the recap dismissed, and skipping THAT laid a second,
+    /// route-only auto card beside the post that was just made.
+    ///
+    /// The index is the same store `dailyMileWorkoutId`'s callers already fall
+    /// back to (DashboardView's `todayIndexWorkoutUUID`), so this also keeps
+    /// the buddy path and the photo prompt resolving through the same two
+    /// sources — when those two disagree, `resolvePhotoPrompt` misses and the
+    /// prompt fires for a walk that has already been posted.
     @MainActor
     static func buddyWorkoutId(
         reconciled: String?,
@@ -283,11 +302,27 @@ enum RunPostService {
         guard let startedAt else { return nil }
         let closedAt = (endedAt ?? Date()).addingTimeInterval(10 * 60)
 
-        return HealthKitManager.shared.todaysWorkouts
-            .filter { WorkoutFeedFloor.isSubstantive($0) }
-            .filter { $0.endDate >= startedAt && $0.startDate <= closedAt }
+        if let match = HealthKitManager.shared.todaysWorkouts
+            .filter({ WorkoutFeedFloor.isSubstantive($0) })
+            .filter({ $0.endDate >= startedAt && $0.startDate <= closedAt })
             .max(by: { $0.endDate < $1.endDate })?
-            .uuid.uuidString
+            .uuid.uuidString {
+            return match
+        }
+
+        // Same window, same substantive floor, against the index. `duration`
+        // stands in for a start date the record doesn't carry — the index
+        // stores when a workout ENDED, so the start is derived rather than
+        // read, which is exact enough for a ten-minute window.
+        return HealthKitManager.shared.workoutIndex?
+            .workouts(for: Date())
+            .filter { WorkoutFeedFloor.isSubstantive(distance: $0.distance, duration: $0.duration) }
+            .filter {
+                $0.deviceEndDate >= startedAt
+                    && $0.deviceEndDate.addingTimeInterval(-$0.duration) <= closedAt
+            }
+            .max(by: { $0.deviceEndDate < $1.deviceEndDate })?
+            .id
     }
 
     /// Render the auto image (route map or stats card), upload it, and create the

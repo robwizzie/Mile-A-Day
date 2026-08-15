@@ -76,6 +76,10 @@ struct PostCardView: View {
             // out so double-tapping a button can't hype by accident.
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 media
+                // Under the carousel rather than on the map slide: the stats
+                // band already owns the bottom of that slide, and the key is
+                // about the whole card anyway — it's the crew.
+                crewRouteLegend
                 if let stats = post.stats_snapshot {
                     PostStatStrip(stats: stats, feedRole: post.feed_role).padding(.horizontal, 2)
                 }
@@ -418,8 +422,22 @@ struct PostCardView: View {
         /// Stands in for the photo(s) the server withheld.
         case locked
         case photo(url: URL, badged: Bool)
+        /// A crew member's own photo on a buddy walk's shared post — captioned
+        /// with their name, because on a card with four pictures on it "whose
+        /// is this" is the question every slide raises.
+        case crewPhoto(url: URL, name: String)
         case route(coords: [CLLocationCoordinate2D])
         case statsCard(stats: PostStats)
+    }
+
+    /// Each credited participant's photo, in the order the server credited
+    /// them — the same order the route colours use, so slide 3 belongs to the
+    /// person whose line is the third in the legend.
+    private var crewPhotoSlides: [MediaSlide] {
+        post.acceptedCoauthors.compactMap { coauthor in
+            guard let url = coauthor.mediaURL else { return nil }
+            return .crewPhoto(url: url, name: coauthor.displayName)
+        }
     }
 
     /// The carousel's pages in swipe order: the lock (standing in for ANY
@@ -437,8 +455,19 @@ struct PostCardView: View {
             // so the swipe reads "photo → stats".
             slides.append(.photo(url: url, badged: !slides.isEmpty && post.is_auto == true))
         }
+        // The crew's photos ride BEHIND the author's and AHEAD of the map: a
+        // buddy walk reads "their shot → everyone else's shots → where we all
+        // went", which is the walk in the order it's remembered. Empty on
+        // every ordinary post.
+        slides.append(contentsOf: crewPhotoSlides)
         if let coords = routeSlideCoordinates {
             slides.append(.route(coords: coords))
+        } else if !companionRoutes.isEmpty, post.is_auto != true {
+            // The author walked indoors (or shares no maps) but their crew
+            // didn't. The walk still HAS a map — it just isn't the poster's —
+            // and dropping it would be the old bug in miniature: a group card
+            // showing bare numbers while the routes it's about exist.
+            slides.append(.route(coords: []))
         } else if let stats = workoutCardStats {
             slides.append(.statsCard(stats: stats))
         }
@@ -454,6 +483,12 @@ struct PostCardView: View {
             ZoomablePhotoSlide(
                 url: url,
                 badge: badged ? ("Stats", "chart.bar.fill") : nil,
+                onDoubleTap: isMine ? nil : doubleTapHype
+            )
+        case .crewPhoto(let url, let name):
+            ZoomablePhotoSlide(
+                url: url,
+                badge: (name, "person.fill"),
                 onDoubleTap: isMine ? nil : doubleTapHype
             )
         case .route(let coords):
@@ -534,10 +569,67 @@ struct PostCardView: View {
         )
     }
 
+    /// Everyone else's trace, in the order the server credited them so the
+    /// colours are stable between reads. Empty for an ordinary post, and for
+    /// any crew member who walked indoors or shares no maps.
+    private var companionRoutes: [CompanionRoute] {
+        post.acceptedCoauthors.enumerated().compactMap { index, coauthor in
+            guard let coords = coauthor.routeCoordinates else { return nil }
+            return CompanionRoute(
+                id: coauthor.user_id,
+                coordinates: coords,
+                color: CrewRoutePalette.color(at: index)
+            )
+        }
+    }
+
+    /// The names-to-colours key under a combined map. Without it a card with
+    /// four lines on it is just four lines — the whole point is seeing which
+    /// one is yours.
+    @ViewBuilder
+    private var crewRouteLegend: some View {
+        let companions = companionRoutes
+        if !companions.isEmpty {
+            let byId = Dictionary(
+                post.acceptedCoauthors.map { ($0.user_id, $0.displayName) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            // Wraps rather than truncates: five names on one line would clip
+            // whoever came last, which on a card about being together is the
+            // one thing it must not do.
+            FlowLayout(spacing: 10) {
+                legendChip(
+                    name: post.displayName,
+                    color: ActivityCardView.color(post.workout_type)
+                )
+                ForEach(companions) { companion in
+                    legendChip(
+                        name: byId[companion.id] ?? "a friend",
+                        color: companion.color
+                    )
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+    }
+
+    private func legendChip(name: String, color: Color) -> some View {
+        HStack(spacing: 5) {
+            Capsule()
+                .fill(color)
+                .frame(width: 14, height: 4)
+            Text(name)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.75))
+                .lineLimit(1)
+        }
+    }
+
     private func routeSlide(_ coords: [CLLocationCoordinate2D]) -> some View {
         WorkoutRouteMapView(
             coordinates: coords,
             routeColor: ActivityCardView.color(post.workout_type),
+            companionRoutes: companionRoutes,
             onSnapshot: { routeSnapshot = $0 }
         )
         .frame(maxWidth: .infinity)
@@ -582,6 +674,7 @@ struct PostCardView: View {
             snapshot: snapshot,
             coordinates: coords,
             routeColor: ActivityCardView.color(post.workout_type),
+            companionRoutes: companionRoutes,
             size: CGSize(width: 720, height: 900)
         ) {
             if let stats {

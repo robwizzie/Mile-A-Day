@@ -63,6 +63,16 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     let profile_image_url: String?
     /// "pending" | "accepted" | "declined"
     let status: String
+    /// THIS person's own photo on the shared post — the slide that makes a
+    /// buddy walk one card with everyone's pictures rather than one card per
+    /// person. Optional: absent from every older server's response, and nil
+    /// for anyone who hasn't added one. Blanked to "" when the earn-to-view
+    /// gate withheld it, exactly like the author's `media_url`.
+    let media_url: String?
+    /// Their GPS trace for the walk, so the card can draw the whole group on
+    /// one map. Nil for an indoor walk, for anyone who turned "Share route
+    /// maps" off, and on older servers.
+    let route: [[Double]]?
 
     var id: String { user_id }
 
@@ -71,7 +81,21 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
         if let first_name, !first_name.isEmpty { return first_name }
         return "a friend"
     }
+
+    /// Their photo's URL, or nil when there isn't one / it was withheld.
+    var mediaURL: URL? {
+        guard let media_url, !media_url.isEmpty else { return nil }
+        return ProfileImageService.fullImageURL(for: media_url)
+    }
+
+    /// Set only when the server withheld a photo this person HAD added — an
+    /// empty string, as opposed to nil for "never added one". The card draws
+    /// the lock once for the whole post, so this only has to be distinguishable.
+    var hasWithheldPhoto: Bool { media_url == "" }
+
+    var routeCoordinates: [CLLocationCoordinate2D]? { decodeRouteCoordinates(route) }
 }
+
 
 /// A social post — a photo (run-stats overlay already baked in) plus optional
 /// caption and stats. Surfaces in the Feed and/or as a Story. Field names are
@@ -321,6 +345,16 @@ struct FeedEntry: Codable, Identifiable {
     var coauthor_profile_image_url: String?
     /// Only populated when the viewer IS the coauthor — see PostItem.
     var coauthor_on_profile: Bool?
+    /// Everyone credited on a multi-person collab (a Buddy Walk), each with
+    /// their own photo and route.
+    ///
+    /// This was MISSING, and the omission is why a buddy walk never looked
+    /// like a group post in the feed: the server has sent the array since
+    /// multi-collabs shipped, `PostItem` has always had somewhere to put it,
+    /// and the unified feed — which is the feed — simply never decoded it, so
+    /// every card fell back to the two-person scalar columns. A four-person
+    /// walk rendered as "you & one friend".
+    var coauthors: [PostCoauthorItem]?
 
     enum CodingKeys: String, CodingKey {
         case kind
@@ -337,6 +371,7 @@ struct FeedEntry: Codable, Identifiable {
         case coauthor_user_id, coauthor_status, coauthor_username
         case coauthor_first_name, coauthor_last_name, coauthor_profile_image_url
         case coauthor_on_profile
+        case coauthors
     }
 
     var id: String { "\(kind)-\(entryId)" }
@@ -383,6 +418,7 @@ struct FeedEntry: Codable, Identifiable {
             coauthor_first_name: coauthor_first_name,
             coauthor_last_name: coauthor_last_name,
             coauthor_profile_image_url: coauthor_profile_image_url,
+            coauthors: coauthors,
             coauthor_on_profile: coauthor_on_profile,
             segment_count: segment_count,
             segments: segments
@@ -649,6 +685,36 @@ enum PostService {
             method: .POST,
             body: bodyData,
             responseType: PostItem.self
+        )
+    }
+
+    /// Put YOUR photo on a buddy walk's shared post.
+    ///
+    /// The other half of "one walk, one post". Everyone on the walk wants to
+    /// share their picture of it; before this the only way to do that was to
+    /// open a second post for the same walk, so a walk two people took filled
+    /// the feed twice with the crew split across both cards. This lands the
+    /// same photo on the card that already exists, as another slide.
+    ///
+    /// Idempotent — re-sending REPLACES your slide. Swapping your picture is
+    /// editing your own contribution, not adding a second one.
+    static func addCrewPhoto(
+        postId: String,
+        mediaUrl: String,
+        photoSource: PostPhotoSource?
+    ) async throws {
+        struct Body: Encodable {
+            let media_url: String
+            let photo_source: String?
+        }
+        let bodyData = try JSONEncoder().encode(
+            Body(media_url: mediaUrl, photo_source: photoSource?.rawValue)
+        )
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/\(postId)/crew-photo",
+            method: .PUT,
+            body: bodyData,
+            responseType: OKResponse.self
         )
     }
 
