@@ -14,6 +14,11 @@ struct PostShareStepView: View {
     /// Terms accepted AND `vm.canPublish`. Resolved by the composer, which owns the
     /// terms state machine.
     let shareEnabled: Bool
+    /// "Share", or "Step 3 of 3 · Share" when this composer is the tail of the
+    /// buddy post wizard. Passed in rather than derived here: the composer owns
+    /// which flow it's in, and two views deciding that separately is how the
+    /// numbering drifts.
+    var stepTitle: String = "Share"
     /// Owned by `PostComposerView` — it holds the terms switch, `publish()`,
     /// `onFinished` and `dismiss()`.
     ///
@@ -42,24 +47,33 @@ struct PostShareStepView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-                    captionRow
-                    if !captionMentionCandidates.isEmpty { mentionRail }
+                    // Adding your slide to the crew's post: there is no caption
+                    // to write (the post has one, and it isn't yours), nowhere
+                    // else to send it, and no route toggle — the card's map
+                    // already draws everyone who shared one. All that's left is
+                    // saying where the photo is going.
+                    if vm.isCrewPhoto {
+                        crewPhotoDestinationNote
+                    } else {
+                        captionRow
+                        if !captionMentionCandidates.isEmpty { mentionRail }
 
-                    Divider().overlay(Color.white.opacity(0.08))
+                        Divider().overlay(Color.white.opacity(0.08))
 
-                    destinationSection
-                    // Collabs are a feed concept — only offered once the chosen
-                    // destination actually includes the feed. A buddy-walk post
-                    // arrives with its crew already settled by the wizard, so it
-                    // gets the read-only crew row, never the manual picker.
-                    if vm.destination?.toFeed == true {
-                        if vm.buddyCoauthorIds.isEmpty {
-                            coauthorRow
-                        } else {
-                            buddyCrewRow
+                        destinationSection
+                        // Collabs are a feed concept — only offered once the chosen
+                        // destination actually includes the feed. A buddy-walk post
+                        // arrives with its crew already settled by the wizard, so it
+                        // gets the read-only crew row, never the manual picker.
+                        if vm.destination?.toFeed == true {
+                            if vm.buddyCoauthorIds.isEmpty {
+                                coauthorRow
+                            } else {
+                                buddyCrewRow
+                            }
                         }
+                        if vm.hasRoute { routeToggle }
                     }
-                    if vm.hasRoute { routeToggle }
 
                     if let error = vm.errorMessage {
                         Text(error)
@@ -72,7 +86,7 @@ struct PostShareStepView: View {
             }
             .scrollDismissesKeyboard(.interactively)
         }
-        .navigationTitle("Share")
+        .navigationTitle(stepTitle)
         .navigationBarTitleDisplayMode(.inline)
         // Toolbar background does not reliably inherit across a push — re-declare it
         // or this screen gets a translucent bar while the edit step has a solid one.
@@ -336,6 +350,40 @@ struct PostShareStepView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .fill(Color.white.opacity(0.06))
+        )
+    }
+
+    /// The whole share step when this photo is joining a walk that's already
+    /// on the feed. It replaces the caption/destination/route stack rather than
+    /// greying it out: none of those are choices here, and a screen of disabled
+    /// controls reads as something being broken.
+    private var crewPhotoDestinationNote: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            HStack(spacing: 10) {
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(MADTheme.Colors.madRed)
+                Text("Adding to the walk's post")
+                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                Spacer(minLength: 0)
+            }
+            Text(
+                vm.buddyCrewNames.first.map {
+                    "Your photo joins \($0)'s post from this walk — one card, "
+                        + "everyone's pictures on it."
+                } ?? "Your photo joins this walk's post — one card, everyone's "
+                    + "pictures on it."
+            )
+            .font(.system(size: 13, weight: .medium, design: .rounded))
+            .foregroundColor(.white.opacity(0.6))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(MADTheme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)

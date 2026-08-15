@@ -432,6 +432,41 @@ struct BuddyRecapEvent: Codable, Identifiable {
 struct BuddyRecapResponse: Codable {
     let session: BuddySessionState
     let events: [BuddyRecapEvent]
+    /// The feed post that already stands for this walk, if anyone has made one.
+    ///
+    /// The whole reason a buddy walk stopped producing one post per person.
+    /// "Has this been shared?" used to be answered from `PostedWorkoutRegistry`
+    /// — a list in this device's own UserDefaults, which cannot possibly know
+    /// what a friend did on their phone. So every participant's recap lit its
+    /// Post CTA, everyone posted, and one walk filled the feed with N cards
+    /// that each credited the others and each carried a fraction of the photos.
+    ///
+    /// Optional because an older server omits it entirely; nil falls back to
+    /// the device-local answer, which is exactly what shipped before.
+    let post: BuddySessionPostRef?
+}
+
+/// The post standing for a buddy walk — enough to decide what the recap should
+/// offer, and nothing more.
+struct BuddySessionPostRef: Codable {
+    let postId: String
+    let authorUserId: String
+    let authorName: String?
+    /// Has THIS user's own photo been added to it yet? Drives the difference
+    /// between "add your photo" and "your photo's on it".
+    let myPhotoAdded: Bool
+    /// Is this user credited at all? A walk someone else posted without
+    /// crediting you (they finished before you joined, say) is still that
+    /// walk's post — you just have no slide to add to.
+    let amICredited: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case postId = "post_id"
+        case authorUserId = "author_user_id"
+        case authorName = "author_name"
+        case myPhotoAdded = "my_photo_added"
+        case amICredited = "am_i_credited"
+    }
 }
 
 struct BuddyOKResponse: Codable {

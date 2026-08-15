@@ -16,6 +16,11 @@ import {
   runHypeMatchSql,
   runHypedByViewerMatchSql,
 } from "./hypeService.js";
+import { stripMediaQuery } from "./mediaSigningService.js";
+// One-way: workoutService does not import postService, so this introduces no
+// cycle. Used by the crew-photo nudge to check the recipient's local day still
+// allows a photo before inviting them to add one.
+import { getDailyGoalStatus } from "./workoutService.js";
 
 const db = PostgresService.getInstance();
 
@@ -102,6 +107,19 @@ export interface PostCoauthor {
   last_name: string | null;
   profile_image_url: string | null;
   status: "pending" | "accepted" | "declined";
+  // THIS participant's own photo on the shared post — the slide that makes a
+  // buddy walk one post with everyone's pictures on it instead of one post per
+  // person. Null until they add one (and for every pre-existing collab).
+  // Blanked to "" by lockUnearnedPhotos alongside the author's, so the
+  // earn-to-view gate can't be walked around by reading the crew.
+  media_url?: string | null;
+  // Their GPS trace for the walk, resolved at READ time from the buddy
+  // session's participant row rather than stored — the sync reconciler stamps
+  // that workout id a minute or two after the walk ends, which is AFTER the
+  // person who posts the moment they finish has already posted. Honors their
+  // own "Share route maps" consent, so this is null for anyone who opted out
+  // and for an indoor walk with nothing to draw.
+  route?: unknown;
 }
 
 export interface PostRow {
@@ -142,6 +160,10 @@ export interface PostRow {
   // feature, so the payload shape is unchanged for the legacy corpus and old
   // clients go on reading the scalar fields above.
   coauthors?: PostCoauthor[] | null;
+  // The WALK's combined figures on a buddy post — "3.2 mi between us", the
+  // number the recap headlines and the card never showed. Null on every
+  // non-buddy post and on every older server.
+  buddy_group?: { distance_miles: number; crew_size: number } | null;
   // Resolved "is this collab on MY profile grid?" — only populated when the
   // VIEWER is the coauthor (it's their setting to read), null otherwise.
   // Drives the card's Hide/Show-on-profile action. Additive field.
@@ -400,6 +422,80 @@ const BLOCKED_VS_MULTI_COAUTHOR = `EXISTS (
 	WHERE pca.post_id = p.post_id AND ${MULTI_COLLAB_ACTIVE}
 )`;
 
+/**
+ * SQL: one credited participant's route polyline, or NULL.
+ *
+ * Resolved at READ time rather than stored, and that is the whole point. A
+ * participant's workout id is stamped by `reconcileBuddySessions` when THEIR
+ * HKWorkout syncs — a minute or two after the walk — while the person who
+ * posts does so the moment they finish. Baking the route (or even the workout
+ * id) at create time would therefore bake in nothing for almost every crew
+ * member, permanently. Resolving it here means a route that lands late simply
+ * appears on the card, with no backfill and no second write path.
+ *
+ * Three gates, all of them the same rules the author's own route already
+ * obeys (see the `route` projection in UNIFIED_FEED_SQL):
+ *  - `include_route`: the poster's per-post choice covers the whole card. A
+ *    walk shared without a map does not sprout four of them.
+ *  - the participant's OWN `share_route_maps` consent — never the poster's.
+ *    Being credited on someone's post is not consent to publish your trace.
+ *  - `NOT p.is_auto`: an auto card's media already IS a rendered route.
+ *
+ * Falls back to `post_coauthors.workout_id` when the post carries one (the
+ * legacy accept path stamps it), so this is not buddy-only.
+ */
+const CREW_ROUTE_SQL = `(
+	SELECT wr.route FROM workout_routes wr
+	WHERE p.include_route AND NOT p.is_auto
+		AND (
+			COALESCE(
+				(SELECT ns.share_route_maps FROM notification_settings ns
+				  WHERE ns.user_id = pca.user_id),
+				true
+			)
+			OR pca.user_id = $1
+		)
+		AND wr.workout_id = COALESCE(
+			pca.workout_id,
+			(SELECT bsp.workout_id FROM buddy_session_participants bsp
+			  WHERE bsp.session_id = pca.buddy_session_id
+				AND bsp.user_id = pca.user_id)
+		)
+)`;
+
+/**
+ * SQL: the WALK's combined figures for a buddy post — "3.2 mi between us".
+ *
+ * The recap headlines this number at hero size and the post never showed it,
+ * so the card that exists to say "we did this together" led with one person's
+ * distance. Derived, never stored, for the same reason the routes are: it
+ * moves as each participant's workout reconciles, and a value frozen at post
+ * time would be whatever was known in the first ten seconds.
+ *
+ * Counts the SAME membership every other buddy surface counts — `active` and
+ * `finished`, the set the roster draws and the pooled total sums — and prefers
+ * each person's reconciled `final_distance_miles`, falling back to their live
+ * figure until it lands. NULL for every non-buddy post, which is the whole
+ * legacy corpus.
+ */
+const BUDDY_GROUP_JSON = `(
+	SELECT jsonb_build_object(
+		'distance_miles', ROUND(SUM(
+			COALESCE(bsp.final_distance_miles, bsp.distance_miles, 0)
+		)::numeric, 2)::double precision,
+		'crew_size', COUNT(*)
+	)
+	FROM buddy_session_participants bsp
+	WHERE bsp.session_id = COALESCE(
+			p.buddy_session_id,
+			(SELECT pcg.buddy_session_id FROM post_coauthors pcg
+			  WHERE pcg.post_id = p.post_id AND pcg.buddy_session_id IS NOT NULL
+			  LIMIT 1)
+		)
+		AND bsp.status IN ('active', 'finished')
+	HAVING COUNT(*) > 1
+)`;
+
 // Credited participants, as a JSON array for the client. NULL when the post has
 // none, which is every pre-existing post — so the payload shape is unchanged
 // for the entire legacy corpus and old clients keep reading the scalar columns.
@@ -414,7 +510,9 @@ const MULTI_COAUTHORS_JSON = `(
 		'first_name', mcu.first_name,
 		'last_name', mcu.last_name,
 		'profile_image_url', mcu.profile_image_url,
-		'status', pca.status
+		'status', pca.status,
+		'media_url', pca.media_url,
+		'route', ${CREW_ROUTE_SQL}
 	) ORDER BY pca.created_at)
 	FROM post_coauthors pca
 	JOIN users mcu ON mcu.user_id = pca.user_id
@@ -473,6 +571,7 @@ const COAUTHOR_COLUMNS = `
 	(SELECT cu.last_name FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_last_name,
 	(SELECT cu.profile_image_url FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_profile_image_url,
 	${MULTI_COAUTHORS_JSON} AS coauthors,
+	${BUDDY_GROUP_JSON} AS buddy_group,
 	-- Only meaningful to the coauthor themselves (it's their grid), so it's
 	-- NULL for everyone else rather than leaking one user's curation choice
 	-- to the other. CASE guarantees the subquery only runs on collab rows the
@@ -678,7 +777,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 				user_id, media_url, caption, workout_id, stats_snapshot,
 				local_date, share_to_feed, share_to_story, story_expires_at,
 				is_auto, include_route, coauthor_user_id, coauthor_status,
-				coauthor_workout_id, posted_fresh
+				coauthor_workout_id, posted_fresh, buddy_session_id
 			)
 			VALUES (
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
@@ -697,7 +796,12 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 						AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 					ORDER BY w.distance DESC LIMIT 1
 				),
-				$12
+				$12,
+				-- Recorded on the POST, not only per participant: post_coauthors
+				-- has no row for the author, so a walk whose crew all dropped out
+				-- (or a solo finisher's) had a post nothing could find by session.
+				-- The recap's "has this walk been posted yet" reads this.
+				$13
 			)
 				ON CONFLICT ${conflictTarget}
 				DO UPDATE SET
@@ -712,7 +816,13 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 					coauthor_user_id = EXCLUDED.coauthor_user_id,
 					coauthor_status = EXCLUDED.coauthor_status,
 					coauthor_workout_id = EXCLUDED.coauthor_workout_id,
-					posted_fresh = EXCLUDED.posted_fresh${flagUpdates}
+					posted_fresh = EXCLUDED.posted_fresh,
+					-- Same reasoning as the coauthor columns above: the guard only
+					-- ever overwrites an AUTO post, and an auto card is never a
+					-- buddy post, so EXCLUDED wholesale is safe. Taking it also
+					-- means the deliberate post that REPLACES the auto card
+					-- inherits the session link rather than losing it.
+					buddy_session_id = EXCLUDED.buddy_session_id${flagUpdates}
 				${updateGuard}
 			RETURNING *
 		)
@@ -733,6 +843,10 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       input.includeRoute !== false,
       coauthorId,
       !isAutoValue && input.postedLive === true,
+      // Feed-only, same as the collab it describes: a story is not "the walk's
+      // post", so linking one would make the recap report a walk as shared
+      // when nothing reached the feed.
+      !isAutoValue && input.shareToFeed ? (input.buddySessionId ?? null) : null,
     ],
   );
   if (rows[0]) {
@@ -1502,6 +1616,7 @@ export function lockUnearnedPhotos<
     media_url?: string | null;
     story_photo_url?: string | null;
     photo_locked?: boolean;
+    coauthors?: { user_id: string; media_url?: string | null }[] | null;
   },
 >(rows: T[], viewerId: string, gate: ViewerGoalGate): T[] {
   if (gate.completed || !gate.localDate) return rows;
@@ -1516,6 +1631,15 @@ export function lockUnearnedPhotos<
     // Leave auto route/stats cards visible; only real photos are locked.
     if (r.is_auto !== true && r.media_url) {
       r.media_url = "";
+      withheld = true;
+    }
+    // A buddy post carries the whole crew's photos, so gating only the
+    // author's would hand the viewer three unearned pictures on the very card
+    // the gate exists for. The viewer's OWN slide survives — same "you can
+    // always see your own" rule the author gets one branch up.
+    for (const c of r.coauthors ?? []) {
+      if (c.user_id === viewerId || !c.media_url) continue;
+      c.media_url = "";
       withheld = true;
     }
     // Only flag rows that actually LOST a photo. An auto route/stats card with
@@ -2660,6 +2784,223 @@ export async function buddySessionPhotos(
   );
 }
 
+/**
+ * The feed post that already stands for a buddy walk, if there is one.
+ *
+ * This is what makes a buddy walk ONE post. Before it, "has this walk been
+ * shared" was answered from `PostedWorkoutRegistry` — a UserDefaults list on
+ * the poster's own phone — so the second person on the walk opened a recap
+ * whose CTA was still lit, posted the same walk again, and the feed carried
+ * the same hour twice with the crew split across both cards.
+ *
+ * Answered for ANY participant, not just the author: the whole point is that
+ * the other four people are told the walk is already up (and offered a slide
+ * on it) instead of being invited to duplicate it.
+ *
+ * Deliberately NOT visibility-gated the way a feed read is. Everyone here was
+ * on the walk, and the answer carries no content — an id, a name, and whether
+ * the caller has added their own photo. A viewer who cannot actually see the
+ * post still needs to be told not to make a second one, and `addCrewPhoto`
+ * re-authorizes on its own terms anyway.
+ */
+export interface BuddySessionPost {
+  post_id: string;
+  author_user_id: string;
+  author_name: string | null;
+  /** Has the CALLER already put their own photo on it? */
+  my_photo_added: boolean;
+  /** Is the caller credited at all (author or accepted participant)? */
+  am_i_credited: boolean;
+  created_at: string;
+}
+
+export async function buddySessionPost(
+  sessionId: string,
+  viewerId: string,
+): Promise<BuddySessionPost | null> {
+  if (!/^[0-9a-f]{1,32}$/i.test(sessionId)) return null;
+  const rows = await db.query<BuddySessionPost>(
+    // Two ways a post is "this session's": the column the wizard stamps on the
+    // post itself, and a post_coauthors row carrying the session. The second
+    // arm is what finds posts made before posts.buddy_session_id existed, so
+    // this needs no backfill to start working on the existing corpus.
+    `SELECT p.post_id, p.user_id AS author_user_id,
+					COALESCE(u.username, u.first_name) AS author_name,
+					p.created_at::text AS created_at,
+					EXISTS (
+						SELECT 1 FROM post_coauthors mine
+						WHERE mine.post_id = p.post_id AND mine.user_id = $2
+							AND mine.status = 'accepted'
+							AND mine.media_url IS NOT NULL AND mine.media_url <> ''
+					) AS my_photo_added,
+					(p.user_id = $2 OR EXISTS (
+						SELECT 1 FROM post_coauthors mine2
+						WHERE mine2.post_id = p.post_id AND mine2.user_id = $2
+							AND mine2.status = 'accepted'
+					)) AS am_i_credited
+			 FROM posts p
+			 JOIN users u ON u.user_id = p.user_id
+			WHERE p.deleted_at IS NULL AND p.share_to_feed
+				AND (
+					p.buddy_session_id = $1
+					OR EXISTS (
+						SELECT 1 FROM post_coauthors pcs
+						WHERE pcs.post_id = p.post_id AND pcs.buddy_session_id = $1
+					)
+				)
+			ORDER BY p.created_at ASC
+			LIMIT 1`,
+    [sessionId, viewerId],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Put a credited participant's own photo on a shared buddy post.
+ *
+ * The alternative — which is what shipped — was that everyone else on the walk
+ * made their own post, so a walk two people took produced two cards, each
+ * crediting the other, each with half the pictures. This is the same user
+ * action ("share my photo of this walk") landing on the card that already
+ * exists.
+ *
+ * Authorization is membership, not friendship: you may add a photo to a post
+ * you are ACCEPTED on, and to nothing else. The author's own photo is
+ * `posts.media_url` and is set at create — they are not a post_coauthors row,
+ * so they cannot reach this path and do not need to.
+ *
+ * The day/camera tiers apply exactly as they do to a first post
+ * (`photoSourceRequiresCameraWindow`): this is a photo reaching the feed, and
+ * routing it through a different door must not buy a looser rule than posting
+ * it directly would have. Callers pass the client's declared `photo_source`.
+ *
+ * Idempotent by design — re-adding REPLACES. A participant swapping their
+ * picture is editing their own slide, not opening a second one.
+ */
+export async function addCrewPhoto(
+  postId: string,
+  userId: string,
+  mediaUrl: string,
+): Promise<boolean> {
+  const rows = await db.query<{ post_id: string }>(
+    `UPDATE post_coauthors
+				SET media_url = $3, photo_added_at = NOW()
+			WHERE post_id = $1 AND user_id = $2 AND status = 'accepted'
+				AND EXISTS (
+					SELECT 1 FROM posts p
+					WHERE p.post_id = $1 AND p.deleted_at IS NULL AND p.share_to_feed
+				)
+			RETURNING post_id`,
+    [postId, userId, stripMediaQuery(mediaUrl)],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * "3 of you were out, 1 photo so far" — the nudge that turns a buddy post into
+ * something people come back to.
+ *
+ * ## Why this points at the CAMERA ROLL, not the camera
+ *
+ * Photo posting has two tiers (`getPostWindowStatus`): `cameraOpen`, the ten
+ * minutes after a qualifying walk, and `photoOpen`, the rest of that local day.
+ * This fires roughly an hour after the walk ends, so the camera window is
+ * long shut by construction — every one of these nudges is a LIBRARY-tier ask,
+ * and the copy has to say so. Telling someone to "grab a photo" when the
+ * shutter has been closed for fifty minutes is the same dead end the
+ * `post_window_closed` error used to be.
+ *
+ * It is also gated on `photoOpen` per recipient rather than assumed: someone
+ * whose local day has already rolled over cannot post at all, and a push
+ * inviting them to do it would tap through to a locked composer. That check is
+ * the reason this is a per-user loop rather than one bulk query.
+ *
+ * ## Once each, and never a backlog
+ *
+ * `post_coauthors.photo_nudge_sent_at` is the claim, stamped before the send.
+ * It has no DEFAULT on purpose (backend.md: a `DEFAULT now()` on an existing
+ * table stores one missing-value for every historical row, so an "older than
+ * an hour" gate stays silent for an hour and then fires on the whole archive in
+ * one tick). The window below — sessions that ended between one and six hours
+ * ago — is the second guard: a deploy after a quiet night has nothing to catch
+ * up on.
+ */
+export async function sweepCrewPhotoNudges(): Promise<number> {
+  const candidates = await db.query<{
+    post_id: string;
+    user_id: string;
+    session_id: string;
+    crew_size: string;
+    photos_so_far: string;
+  }>(
+    `SELECT pca.post_id, pca.user_id, pca.buddy_session_id AS session_id,
+            (SELECT COUNT(*) FROM buddy_session_participants bsp
+              WHERE bsp.session_id = pca.buddy_session_id
+                AND bsp.status IN ('active', 'finished'))::text AS crew_size,
+            (1 + (SELECT COUNT(*) FROM post_coauthors done
+                   WHERE done.post_id = pca.post_id
+                     AND done.status = 'accepted'
+                     AND done.media_url IS NOT NULL
+                     AND done.media_url <> ''))::text AS photos_so_far
+       FROM post_coauthors pca
+       JOIN posts p ON p.post_id = pca.post_id
+       JOIN buddy_sessions s ON s.id = pca.buddy_session_id
+      WHERE pca.status = 'accepted'
+        AND pca.photo_nudge_sent_at IS NULL
+        AND (pca.media_url IS NULL OR pca.media_url = '')
+        AND p.deleted_at IS NULL AND p.share_to_feed
+        AND s.status = 'completed'
+        AND s.ended_at BETWEEN NOW() - INTERVAL '6 hours'
+                           AND NOW() - INTERVAL '55 minutes'
+      LIMIT 200`,
+  );
+
+  let sent = 0;
+  for (const row of candidates) {
+    try {
+      // Claim FIRST. A push that fails is better lost than repeated every five
+      // minutes for six hours.
+      const claimed = await db.query<{ post_id: string }>(
+        `UPDATE post_coauthors SET photo_nudge_sent_at = NOW()
+          WHERE post_id = $1 AND user_id = $2 AND photo_nudge_sent_at IS NULL
+          RETURNING post_id`,
+        [row.post_id, row.user_id],
+      );
+      if (claimed.length === 0) continue;
+
+      if (
+        !(await userSupports(row.user_id, CLIENT_FEATURES.buddyGroupPostV1))
+      ) {
+        continue;
+      }
+      const goal = await getDailyGoalStatus(row.user_id);
+      // Their local day has rolled over (or they never qualified today) — the
+      // composer this push opens would refuse the photo, so don't send it.
+      if (!goal.completed) continue;
+      const window = await getPostWindowStatus(row.user_id, goal.localDate);
+      if (!window.photoOpen) continue;
+
+      const crew = Number(row.crew_size);
+      const photos = Number(row.photos_so_far);
+      await sendPush(row.user_id, {
+        title:
+          photos === 1
+            ? `${crew} of you were out — 1 photo so far 📸`
+            : `${crew} of you were out — ${photos} photos so far 📸`,
+        // The ask is explicitly for a photo already TAKEN. See the doc comment:
+        // the ten-minute camera window shut long before this fired.
+        body: "Add one from your camera roll to the walk's post.",
+        type: "crew_photo_nudge",
+        data: { post_id: row.post_id, buddy_session_id: row.session_id },
+      });
+      sent += 1;
+    } catch (e: any) {
+      console.error("[sweepCrewPhotoNudges] failed:", e?.message ?? e);
+    }
+  }
+  return sent;
+}
+
 /** The post's PRIMARY author if the viewer may see it — see visiblePostAuthors. */
 export async function visiblePostAuthor(
   viewerId: string,
@@ -2835,6 +3176,63 @@ export async function notifyCoauthorInvite(
     });
   } catch (e: any) {
     console.error("[notifyCoauthorInvite] failed:", e?.message ?? e);
+  }
+}
+
+/**
+ * "Sam added their photo to your walk."
+ *
+ * The moment that makes a shared card feel alive rather than static: without
+ * it, a buddy post is a thing one person made and everyone else silently
+ * appended to, and nobody ever goes back to look. Goes to the AUTHOR and to
+ * every other credited participant, because on a four-person walk the third
+ * photo landing is news to all three of the others, not just the poster.
+ *
+ * Type string is new, so it's gated on `buddyGroupPostV1` — an older build has
+ * no route for it and would show a banner that taps to nothing. Same reason
+ * the `post_id` rides in `data`: the client opens the post directly. Every
+ * value there stays a STRING (shipped builds decode the inbox as
+ * `[String: String]`, and one number breaks the whole decode).
+ *
+ * Never throws — a failed push must not fail the photo.
+ */
+export async function notifyCrewPhoto(
+  postId: string,
+  actorId: string,
+): Promise<void> {
+  try {
+    const rows = await db.query<{ user_id: string }>(
+      // Everyone on the post except whoever just added the photo. The author
+      // is unioned in explicitly: they have no post_coauthors row of their own.
+      `SELECT p.user_id FROM posts p
+        WHERE p.post_id = $1 AND p.deleted_at IS NULL AND p.user_id <> $2
+        UNION
+       SELECT pca.user_id FROM post_coauthors pca
+        WHERE pca.post_id = $1 AND pca.status = 'accepted' AND pca.user_id <> $2`,
+      [postId, actorId],
+    );
+    if (rows.length === 0) return;
+
+    const actor = await db.query<{ username: string | null }>(
+      `SELECT username FROM users WHERE user_id = $1`,
+      [actorId],
+    );
+    const name = actor[0]?.username ?? "A friend";
+
+    for (const { user_id: recipient } of rows) {
+      if (!(await shouldSendNotification(recipient, actorId, "hype"))) continue;
+      if (!(await userSupports(recipient, CLIENT_FEATURES.buddyGroupPostV1))) {
+        continue;
+      }
+      await sendPush(recipient, {
+        title: `${name} added their photo 📸`,
+        body: "It's on your walk's post — go see it.",
+        type: "crew_photo",
+        data: { user_id: actorId, post_id: postId },
+      });
+    }
+  } catch (e: any) {
+    console.error("[notifyCrewPhoto] failed:", e?.message ?? e);
   }
 }
 

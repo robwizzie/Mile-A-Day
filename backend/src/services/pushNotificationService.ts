@@ -169,6 +169,15 @@ export type NotificationType =
   | "mention"
   | "coauthor_invite"
   | "coauthor_accepted"
+  // Someone put THEIR photo on a buddy walk's shared post. New string, so it's
+  // gated on `buddyGroupPostV1` at the send site — an older build has no route
+  // for it and would show a banner that taps to nothing.
+  | "crew_photo"
+  // "3 of you were out, 1 photo so far" — the hour-later nudge to put your own
+  // picture on the walk's card. Deliberately points at the CAMERA ROLL, not the
+  // camera: by the time this fires the ten-minute capture window is long shut,
+  // and the honest ask is for a photo already taken on the walk.
+  | "crew_photo_nudge"
   | "daily_reminder"
   // The runner's OWN "mile complete" — sent from the same atomic once-per-day
   // claim that triggers friend_activity, so it fires no matter which device

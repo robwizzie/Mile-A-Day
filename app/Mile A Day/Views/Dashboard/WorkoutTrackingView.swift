@@ -806,6 +806,17 @@ struct WorkoutTrackingView: View {
                                 currentUserId: buddyService.currentUserId
                             )
                             .padding(.horizontal, 20)
+                        } else if isTracking {
+                            // Not in a walk right now — offer the way IN, from
+                            // the one screen someone is actually looking at
+                            // mid-workout. Renders nothing when there's nobody
+                            // to join and nothing to rejoin, so an ordinary
+                            // solo run is untouched.
+                            BuddyMidWalkJoinStrip { sessionId in
+                                adoptedBuddySessionId = sessionId
+                                onBuddySessionAdopted?(sessionId)
+                            }
+                            .padding(.horizontal, 20)
                         }
 
                         distanceDisplay
@@ -1947,7 +1958,10 @@ struct WorkoutTrackingView: View {
                     adoptedBuddySessionId = session.id
                     onBuddySessionAdopted?(session.id)
                     startBuddyWorkoutIfReady()
-                }
+                },
+                // Lets the modifier keep the mid-walk join offer fresh without
+                // adding another node to this already type-check-fragile chain.
+                activeSessionId: effectiveBuddySessionId
             )
         )
     }

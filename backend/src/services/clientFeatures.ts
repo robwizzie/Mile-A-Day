@@ -100,6 +100,28 @@ export const CLIENT_FEATURES = {
    * build would show the banner and do nothing when tapped.
    */
   weeklyChallengeV1: "weekly_challenge_v1",
+
+  /**
+   * The build renders a buddy walk as ONE group post: it draws every credited
+   * participant's route on a single combined map, shows each of their photos
+   * as its own slide, and — the half that matters — offers "add your photo to
+   * the crew's post" instead of a second Post CTA when someone else has
+   * already shared the walk.
+   *
+   * Gated on the POSTER, not the viewer, and only for the write half. The
+   * additive `coauthors[].media_url` / `.route` fields ship to everyone: an
+   * older build decodes the coauthors array with `CodingKeys` it already has
+   * and ignores fields it doesn't know, so it keeps rendering exactly the
+   * two-person collab it renders today.
+   *
+   * What must NOT reach an older build is the assumption that one walk has one
+   * post. Those builds answer "already posted?" from a device-local registry
+   * and have no way to add a photo to someone else's card, so if a newer build
+   * posts the walk first they would still offer a second post — and the server
+   * should let them, because the alternative is a dead CTA that 409s. They get
+   * today's behaviour until they update.
+   */
+  buddyGroupPostV1: "buddy_group_post_v1",
 } as const;
 
 export type ClientFeature =

@@ -29,6 +29,8 @@ import {
   getOwnedWorkoutRollupDistance,
   getPostWindowStatus,
   photoSourceRequiresCameraWindow,
+  addCrewPhoto,
+  notifyCrewPhoto,
   POST_WINDOW_MS,
   lockUnearnedPhotos,
   ALLOWED_STORY_REACTIONS,
@@ -837,6 +839,96 @@ export async function updatePostController(
   } catch (error: any) {
     console.error("Error updating post:", error.message);
     res.status(500).json({ error: "Error updating post" });
+  }
+}
+
+/**
+ * PUT /posts/:postId/crew-photo — a credited participant's own photo on a
+ * shared buddy post.
+ *
+ * The door that stops a buddy walk becoming N posts. Everyone on the walk
+ * wants to share their picture of it; before this, the only way to do that was
+ * to open a second post for the same walk, so a walk two people took filled
+ * the feed twice with the crew split across both cards. Here it becomes
+ * another slide on the card that already exists.
+ *
+ * Gated exactly like creating a post, deliberately: the media-ownership check,
+ * the on-disk check, and the day/camera tiers. A photo reaching the feed
+ * through a side door must not buy a looser rule than the front one.
+ */
+export async function addCrewPhotoController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  const userId = req.userId!;
+  const postId = req.params.postId;
+  const { media_url, photo_source } = req.body ?? {};
+  try {
+    if (!isUuid(postId)) {
+      return res.status(404).json({ error: "Post not found" });
+    }
+    // Same three media checks createPost runs, in the same order. The
+    // ownership one is not optional: media urls are visible to the whole
+    // circle, so without it anyone credited on a post could pin a friend's
+    // photo to it as their own.
+    const mediaUrl =
+      typeof media_url === "string" ? stripMediaQuery(media_url) : media_url;
+    if (
+      typeof mediaUrl !== "string" ||
+      !mediaUrl.startsWith(POSTS_MEDIA_PREFIX) ||
+      mediaUrl.includes("..")
+    ) {
+      return res
+        .status(400)
+        .json({ error: "A valid uploaded media_url is required" });
+    }
+    if (!fs.existsSync(path.join(process.cwd(), mediaUrl.replace(/^\//, "")))) {
+      return res
+        .status(400)
+        .json({ error: "media_url does not reference an uploaded file" });
+    }
+    if (!path.basename(mediaUrl).startsWith(`${userId}-`)) {
+      return res
+        .status(403)
+        .json({ error: "media_url must reference your own upload" });
+    }
+
+    // Adding your slide is posting a photo, so it answers to the same window.
+    // Which tier applies is the client's declared source, same split as
+    // createPost: a live capture is on the ten-minute clock, a camera-roll
+    // pick is bounded by when it was SHOT and only needs a qualifying walk
+    // today.
+    if (await userSupports(userId, CLIENT_FEATURES.postWindowV1)) {
+      const goal = await getDailyGoalStatus(userId);
+      const postWindow = goal.completed
+        ? await getPostWindowStatus(userId, goal.localDate)
+        : null;
+      const needsCamera = photoSourceRequiresCameraWindow(photo_source);
+      const allowed = needsCamera
+        ? postWindow?.cameraOpen
+        : postWindow?.photoOpen;
+      if (!allowed) {
+        return res.status(403).json({
+          error: "post_window_closed",
+          reason: needsCamera ? "camera_window_closed" : "no_workout_today",
+          photo_open: postWindow?.photoOpen === true,
+          window_seconds: Math.round(POST_WINDOW_MS / 1000),
+        });
+      }
+    }
+
+    // Membership IS the authorization — you may add a photo to a post you are
+    // accepted on and to nothing else. A miss is 404 rather than 403 so the
+    // existence of someone else's post is never confirmed.
+    const ok = await addCrewPhoto(postId, userId, mediaUrl);
+    if (!ok) return res.status(404).json({ error: "Post not found" });
+    // Fire-and-forget: everyone else on the walk hears about it, and a push
+    // that fails must never fail the photo that already landed.
+    void notifyCrewPhoto(postId, userId);
+    res.json({ ok: true });
+  } catch (error: any) {
+    console.error("Error adding crew photo:", error.message);
+    res.status(500).json({ error: "Error adding crew photo" });
   }
 }
 

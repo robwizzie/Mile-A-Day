@@ -18,6 +18,7 @@ import {
   deletePostController,
   updatePostController,
   reportPostController,
+  addCrewPhotoController,
   getTermsStatusController,
   acceptTermsController,
   getPostWindowController,
@@ -98,6 +99,11 @@ router.post(
 );
 router.post("/:postId/coauthor", respondToCoauthorController);
 router.post("/:postId/report", reportPostController);
+// A buddy walk is one walk, so it gets one post — and everyone on it puts
+// their own photo on THAT post here, rather than opening a second card for the
+// same hour. PUT because re-sending replaces your slide; it is not a second
+// one.
+router.put("/:postId/crew-photo", addCrewPhotoController);
 router.patch("/:postId", updatePostController);
 router.delete("/:postId", deletePostController);
 // One post, shaped like its feed entry — opening a post directly.

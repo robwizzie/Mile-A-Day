@@ -1,0 +1,1 @@
+ALTER TABLE "post_coauthors" ADD COLUMN "photo_nudge_sent_at" timestamp with time zone;

@@ -365,6 +365,20 @@
       "when": 1786588012440,
       "tag": "0051_lively_zzzax",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1786765308293,
+      "tag": "0052_lucky_stone_men",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1786768874010,
+      "tag": "0053_wild_frightful_four",
+      "breakpoints": true
     }
   ]
 }

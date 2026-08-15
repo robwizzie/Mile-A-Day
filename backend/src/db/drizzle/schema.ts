@@ -1555,8 +1555,27 @@ export const posts = pgTable(
     // legacy builds that don't send it get a server-side derivation in the
     // feed query. Cosmetic only: drives the FRESH chip every viewer sees.
     postedFresh: boolean("posted_fresh").default(false).notNull(),
+    // The buddy walk this post stands for, when it came from a recap.
+    //
+    // Already recorded per participant on post_coauthors, but that row does not
+    // exist for the AUTHOR — so a walk whose crew all dropped out had a post
+    // nothing could find by session. The recap asks "has this walk been posted
+    // yet" on every open, for every participant, and that question is what
+    // stops two people opening two posts for one walk.
+    buddySessionId: varchar("buddy_session_id", { length: 32 }),
   },
   (table) => [
+    // "Has this session been posted?" — asked on every recap open. Partial
+    // because buddy posts are a small slice of the table and the lookup always
+    // states `IS NOT NULL` (a partial index is only usable when the planner can
+    // prove the query implies its predicate).
+    index("idx_posts_buddy_session")
+      .using(
+        "btree",
+        table.buddySessionId.asc().nullsLast(),
+        table.createdAt.desc().nullsFirst(),
+      )
+      .where(sql`(buddy_session_id IS NOT NULL AND deleted_at IS NULL)`),
     index("idx_posts_user_created").using(
       "btree",
       table.userId.asc().nullsLast(),
@@ -2183,10 +2202,40 @@ export const postCoauthors = pgTable(
     status: text().default("pending").notNull(),
     workoutId: varchar("workout_id", { length: 255 }),
     buddySessionId: varchar("buddy_session_id", { length: 32 }),
+    // THIS participant's own photo on the shared post.
+    //
+    // A buddy walk is one walk, so it gets one post — but everyone on it was
+    // there, and everyone took a picture. Rather than have the second person
+    // open a second post for the same walk (which is what they did, because
+    // "already posted" was answered from a device-local registry that cannot
+    // see a friend's phone), they add their photo here and it becomes another
+    // slide on the card that already exists.
+    //
+    // Null on every pre-existing row and on every participant who hasn't added
+    // one, which are the same thing as far as any reader is concerned.
+    mediaUrl: text("media_url"),
+    photoAddedAt: timestamp("photo_added_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
     respondedAt: timestamp("responded_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    // Claim stamp for the hour-later "put your photo on it too" nudge, so the
+    // cron sends it at most once per participant per post.
+    //
+    // NOT `DEFAULT now()`: on an existing table that stores the default once as
+    // a missing-value, so every pre-existing row would read back the same
+    // DDL-time timestamp — and a cron gating on "older than an hour" would then
+    // stay silent for an hour and fire on the entire backlog in one tick
+    // (backend.md). Nullable with no default: NULL means un-nudged, and the
+    // cron's own window (sessions that ended in the last few hours) is what
+    // keeps the backlog out.
+    photoNudgeSentAt: timestamp("photo_nudge_sent_at", {
       withTimezone: true,
       mode: "string",
     }),

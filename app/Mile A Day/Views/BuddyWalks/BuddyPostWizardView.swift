@@ -17,6 +17,11 @@ import CoreLocation
 /// than erroring when the owner doesn't share).
 struct BuddyPostWizardView: View {
     let session: BuddySessionState
+    /// Fired once the post is live, so the recap can re-read and swap its CTA
+    /// for the confirmation + "See the post" link. Without it the screen the
+    /// user lands back on looks exactly as it did before they posted, which is
+    /// most of why the flow read as "did that work?".
+    var onPosted: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var buddy = BuddySessionService.shared
@@ -45,6 +50,7 @@ struct BuddyPostWizardView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
                         header
+                        combinedRouteCard
                         crewSection
                         if !stillOut.isEmpty { stillOutNote }
                         continueButton
@@ -77,6 +83,10 @@ struct BuddyPostWizardView: View {
                         // wizard asking to be filled in a second time.
                         guard case .published = outcome else { return }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            // Tell the recap BEFORE dismissing: it re-reads and
+                            // has its confirmation ready by the time it's the
+                            // screen on top.
+                            onPosted()
                             dismiss()
                         }
                     }
@@ -106,10 +116,63 @@ struct BuddyPostWizardView: View {
             Text("One post, everyone on it")
                 .font(MADTheme.Typography.title2)
                 .foregroundStyle(MADTheme.Colors.madWhite)
-            Text("Everyone below is credited on the post — friends see all of you on one card, with each route your buddies chose to share.")
-                .font(MADTheme.Typography.subheadline)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.65))
-                .fixedSize(horizontal: false, vertical: true)
+            Text(
+                "Everyone below is credited on one card — your routes drawn "
+                    + "together, and each of them can add their own photo to it."
+            )
+            .font(MADTheme.Typography.subheadline)
+            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.65))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The routes, on ONE map, coloured and keyed exactly as the published
+    /// card will draw them.
+    ///
+    /// This screen used to stack a separate 150pt map per person and then
+    /// publish a post carrying only the poster's — so the wizard's own preview
+    /// was the clearest possible statement of a promise the post didn't keep.
+    /// Showing the real thing here is half the fix; the other half is that the
+    /// post now actually renders it.
+    @ViewBuilder
+    private var combinedRouteCard: some View {
+        let drawn = drawnRoutes
+        if !drawn.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                WorkoutRouteMapView(
+                    coordinates: drawn.first?.coordinates ?? [],
+                    routeColor: drawn.first?.color ?? session.accentColor,
+                    companionRoutes: Array(drawn.dropFirst())
+                )
+                .frame(height: 220)
+                .clipShape(RoundedRectangle(
+                    cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+                .overlay(
+                    RoundedRectangle(
+                        cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                        .strokeBorder(MADTheme.Colors.madWhite.opacity(0.1), lineWidth: 1)
+                )
+
+                FlowLayout(spacing: 10) {
+                    ForEach(drawn) { route in
+                        HStack(spacing: 5) {
+                            Capsule().fill(route.color).frame(width: 14, height: 4)
+                            Text(routeNames[route.id] ?? "a friend")
+                                .font(MADTheme.Typography.caption)
+                                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.75))
+                                .lineLimit(1)
+                        }
+                    }
+                }
+
+                if drawn.count < crew.count {
+                    // Said once, for the group, without naming anyone: an
+                    // indoor walk and a privacy choice must read the same.
+                    Text("Routes appear for everyone who has one to share.")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.45))
+                }
+            }
         }
     }
 
@@ -166,33 +229,35 @@ struct BuddyPostWizardView: View {
                 )
             }
 
-            routeView(for: participant)
+            // The per-person 150pt map that used to live here is gone: the
+            // card above draws every route on ONE map, which is what the post
+            // does. A stack of separate maps described a post that has never
+            // existed. What's left per row is the state of THEIR route, in a
+            // line — still honest about what's missing, without repeating the
+            // picture.
+            routeFootnoteRow(for: participant)
         }
         .padding(MADTheme.Spacing.md)
         .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.large)
     }
 
+    /// One line about this person's trace: the colour it's drawn in, or why
+    /// there isn't one.
     @ViewBuilder
-    private func routeView(for participant: BuddyParticipant) -> some View {
+    private func routeFootnoteRow(for participant: BuddyParticipant) -> some View {
         switch routes[participant.userId] ?? .pending {
-        case .loaded(let coordinates):
-            WorkoutRouteMapView(
-                coordinates: coordinates,
-                routeColor: session.accentColor
-            )
-            .frame(height: 150)
-            .clipShape(RoundedRectangle(
-                cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-            .overlay(
-                RoundedRectangle(
-                    cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
-                    .strokeBorder(MADTheme.Colors.madWhite.opacity(0.1), lineWidth: 1)
-            )
+        case .loaded:
+            if let color = drawnRoutes.first(where: { $0.id == participant.userId })?.color {
+                HStack(spacing: 6) {
+                    Capsule().fill(color).frame(width: 14, height: 4)
+                    Text("Route on the map")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.55))
+                }
+                .padding(.vertical, MADTheme.Spacing.xs)
+            }
         case .loading:
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
-                .fill(MADTheme.Colors.madWhite.opacity(0.06))
-                .frame(height: 150)
-                .overlay(ProgressView().tint(MADTheme.Colors.madWhite.opacity(0.4)))
+            routeFootnote(icon: "arrow.triangle.2.circlepath", text: "Loading their route…")
         case .pending:
             routeFootnote(
                 icon: "arrow.triangle.2.circlepath",
@@ -200,7 +265,7 @@ struct BuddyPostWizardView: View {
             )
         case .unavailable:
             // Indoor walk, or maps not shared — one quiet message for both,
-            // so the card never outs a privacy setting.
+            // so the row never outs a privacy setting.
             routeFootnote(icon: "map", text: "No route map for this one.")
         }
     }
@@ -265,6 +330,49 @@ struct BuddyPostWizardView: View {
 
     // MARK: - Crew
 
+    /// Every crew route that actually loaded, poster FIRST.
+    ///
+    /// Order and colour mirror the published card exactly: the author's line
+    /// takes the activity accent, everyone else takes `CrewRoutePalette` in
+    /// the order the server credits them — which is `coauthorIds()`, which is
+    /// `crew` minus the poster. Deriving it any other way here would let the
+    /// preview and the post disagree about whose line is whose, which is worse
+    /// than showing no key at all.
+    private var drawnRoutes: [CompanionRoute] {
+        var out: [CompanionRoute] = []
+        if let mine = buddy.currentUserId,
+           case .loaded(let coords)? = routes[mine] {
+            out.append(CompanionRoute(
+                id: mine, coordinates: coords, color: session.accentColor))
+        }
+        for (index, participant) in crewExcludingMe.enumerated() {
+            guard case .loaded(let coords)? = routes[participant.userId] else { continue }
+            out.append(CompanionRoute(
+                id: participant.userId,
+                coordinates: coords,
+                color: CrewRoutePalette.color(at: index)
+            ))
+        }
+        return out
+    }
+
+    /// user id → the name to print beside their line.
+    private var routeNames: [String: String] {
+        var out: [String: String] = [:]
+        for participant in crew {
+            out[participant.userId] =
+                participant.userId == buddy.currentUserId ? "You" : participant.displayName
+        }
+        return out
+    }
+
+    /// The crew in the exact order `coauthorIds()` sends them, which is the
+    /// order the server writes `post_coauthors` rows and therefore the order
+    /// the card assigns colours in.
+    private var crewExcludingMe: [BuddyParticipant] {
+        crew.filter { $0.userId != buddy.currentUserId }
+    }
+
     /// Everyone credited on the post, best distance first — the same people
     /// `coauthorIds()` sends (plus the poster), so what the wizard shows is
     /// exactly what the server is asked to write.
@@ -306,13 +414,13 @@ struct BuddyPostWizardView: View {
     /// Everyone who finished except the poster. Mirrors what the crew list
     /// shows; the server validates every id and drops any that fail.
     private func coauthorIds() -> [String] {
-        crew.filter { $0.userId != buddy.currentUserId }.map(\.userId)
+        crewExcludingMe.map(\.userId)
     }
 
     /// Display names for `coauthorIds()`, same order — the share step's crew
     /// row says who's riding along without re-fetching anything.
     private func coauthorNames() -> [String] {
-        crew.filter { $0.userId != buddy.currentUserId }.map(\.displayName)
+        crewExcludingMe.map(\.displayName)
     }
 
     /// The workout this buddy walk was, for THIS user.
@@ -376,6 +484,7 @@ struct BuddyPostWizardView: View {
     /// @MainActor FriendService.
     @MainActor
     private func loadRoutes() async {
+        await loadMyRoute()
         for participant in crew {
             guard routes[participant.userId] == nil else { continue }
             guard let workoutId = participant.workoutId else {
@@ -388,5 +497,27 @@ struct BuddyPostWizardView: View {
             routes[participant.userId] =
                 decodeRouteCoordinates(raw).map(RouteState.loaded) ?? .unavailable
         }
+    }
+
+    /// The POSTER's own trace, read from HealthKit rather than fetched back
+    /// from the server.
+    ///
+    /// The server route only exists once this walk has synced AND been given a
+    /// `workout_routes` row, which is a minute or two out — so on the screen
+    /// that opens seconds after finishing, asking the API for your own map
+    /// reliably answered "nothing", and the preview showed everyone's line but
+    /// yours. The device has the samples already.
+    @MainActor
+    private func loadMyRoute() async {
+        guard let me = buddy.currentUserId, routes[me] == nil else { return }
+        guard let workoutId = myWorkoutId,
+              let workout = HealthKitManager.shared.todaysWorkouts
+                  .first(where: { $0.uuid.uuidString == workoutId })
+        else { return }  // Leave it unset so the server pass below can try.
+        routes[me] = .loading
+        let coords = await HealthKitManager.shared
+            .fetchAllRouteLocations(for: workout)
+            .map(\.coordinate)
+        routes[me] = coords.count >= 2 ? .loaded(coords) : .unavailable
     }
 }

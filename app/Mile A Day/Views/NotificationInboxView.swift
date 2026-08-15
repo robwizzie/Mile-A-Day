@@ -602,7 +602,8 @@ struct NotificationInboxView: View {
             )
             switchTab(2)
             NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
-        case "coauthor_invite", "coauthor_accepted", "mention", "post_comment":
+        case "coauthor_invite", "coauthor_accepted", "mention", "post_comment",
+             "crew_photo", "crew_photo_nudge":
             // Collab invites/accepts, @mentions, and comment activity all live
             // on one specific feed item. A post opens DIRECTLY — scrolling the
             // feed to it only ever worked while the post was still on the
@@ -1014,6 +1015,9 @@ struct NotificationInboxView: View {
         case "lead_change": return ("arrow.up.right", .green)
         case "clash_tie": return ("equal.circle.fill", .purple)
         case "challenge_won": return ("flag.2.crossed.fill", .yellow)
+        // Someone put their photo on a walk you were on, and the nudge to put
+        // yours on it. Same glyph for both: they're the same card.
+        case "crew_photo", "crew_photo_nudge": return ("photo.stack.fill", .orange)
         default: return ("bell.fill", .white.opacity(0.5))
         }
     }

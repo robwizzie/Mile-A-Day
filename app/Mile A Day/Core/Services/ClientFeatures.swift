@@ -67,10 +67,24 @@ enum ClientFeatures {
     /// this gate an older install would get a banner that does nothing.
     static let weeklyChallengeV1 = "weekly_challenge_v1"
 
+    /// This build treats a buddy walk as ONE post: it draws the crew's routes
+    /// on a single combined map, shows each participant's photo as its own
+    /// slide, and — the half that matters — asks the SERVER whether the walk
+    /// has already been posted, offering "add your photo" instead of a second
+    /// Post CTA when it has.
+    ///
+    /// Gated because the one-post rule is a RESTRICTION on what a shipped build
+    /// already does. Those builds answer "already posted?" from a device-local
+    /// registry that cannot see a friend's phone, and have no way to put a
+    /// photo on someone else's card — so if a newer build posts the walk first,
+    /// the older one must still be allowed its own post rather than be left
+    /// with a CTA that 409s. They keep today's behaviour until they update.
+    static let buddyGroupPostV1 = "buddy_group_post_v1"
+
     /// Declared on registration. Add a string here only in the same build that
     /// actually implements the behavior.
     static let supported: [String] = [
         friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
-        weeklyChallengeV1,
+        weeklyChallengeV1, buddyGroupPostV1,
     ]
 }

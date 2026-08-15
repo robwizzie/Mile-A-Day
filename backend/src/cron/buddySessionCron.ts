@@ -5,6 +5,7 @@ import {
   sweepAbandonedSessions,
 } from "../services/buddySessionService.js";
 import { spawnDueRecurringWalks } from "../services/buddyRecurringService.js";
+import { sweepCrewPhotoNudges } from "../services/postService.js";
 
 /**
  * Buddy session backstop sweep.
@@ -66,6 +67,18 @@ export function startBuddySessionCron(): void {
         "[CRON] Error sweeping abandoned buddy sessions:",
         error.message,
       );
+    }
+    try {
+      // "3 of you were out, 1 photo so far" — an hour after the walk, for
+      // participants who haven't put their own picture on its post yet. The
+      // 5-minute cadence is why the window can be a tight one-to-six hours:
+      // nothing waits long for its tick.
+      const nudged = await sweepCrewPhotoNudges();
+      if (nudged > 0) {
+        console.log(`[CRON] Sent ${nudged} crew-photo nudge(s).`);
+      }
+    } catch (error: any) {
+      console.error("[CRON] Error sending crew-photo nudges:", error.message);
     }
   });
 
