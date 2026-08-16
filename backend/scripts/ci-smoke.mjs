@@ -1477,6 +1477,26 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     "Weekend Warrior is retired (it named specific weekdays, which Sunday-start weeks broke)",
   );
 
+  // The same handover, twice over: Early Birds and Night Owls measured schedule
+  // rather than effort, so they gave slots 5 and 6 to challenges that ask for
+  // something.
+  for (const [key, slot, retired] of [
+    ["no_junk_miles", 5, "early_birds"],
+    ["personal_best", 6, "night_owls"],
+  ]) {
+    const row = catalog.find((c) => c.challenge_key === key);
+    assert.ok(row, `${key} is in the active rotation`);
+    assert.equal(
+      row.rotation_index,
+      slot,
+      `${key} holds slot ${slot}, so no other week's challenge moved`,
+    );
+    assert.ok(
+      !catalog.some((c) => c.challenge_key === retired),
+      `${retired} is retired`,
+    );
+  }
+
   const win = await weekWindowForUser(WENDY);
   const day = (offset) => {
     const d = new Date(`${win.weekStart}T00:00:00Z`);
@@ -1682,6 +1702,95 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     "a blocked friend is off the board",
   );
   await db.query(`DELETE FROM user_blocks WHERE blocker_id LIKE 'ci-%'`);
+
+  // --- The two challenges that replaced Early Birds / Night Owls ------------
+  // Last, so they can add workouts without moving any number asserted above.
+
+  // No Junk Miles counts WORKOUTS that were a real mile. Wendy's counted set is
+  // now 2.0, 1.5, 2.0, 2.0, 8.0, 0.96 — six — plus a sub-floor 0.5 and the
+  // excluded 5.0 duplicate, which must both stay out.
+  await addWorkout(WENDY, "ci-wk-njm-low", day(6), 0.5);
+  assert.equal(
+    await measure(WENDY, "full_mile_workouts", win.weekStart, win.weekEnd),
+    6,
+    "full_mile_workouts counts workouts >= the 0.95 tolerance (a raw >= 1.0 reads 5 and drops the 0.96; no floor reads 7)",
+  );
+
+  // Personal Best: mile splits that beat the user's best from the PRIOR four
+  // weeks. Three in-window splits — one faster than the reference, one slower,
+  // and one EXACTLY equal to it. The tie is the whole point of the third: it is
+  // the only seed that tells `<` apart from `<=`, and tying your best is not
+  // beating it.
+  const addSplit = async (workoutId, pace) => {
+    await db.query(
+      `INSERT INTO workout_splits (workout_id, split_number, split_duration, split_distance, split_pace)
+       VALUES ($1, 1, $2, 1.0, $2)`,
+      [workoutId, pace],
+    );
+  };
+  await addSplit("ci-wk-1", 590);
+  await addSplit("ci-wk-2", 610);
+  await addSplit("ci-wk-3", 600);
+
+  // With no prior split at all, every complete mile is a personal best — that
+  // is what keeps a brand-new user off an unwinnable week.
+  assert.equal(
+    await measure(WENDY, "pb_mile_splits", win.weekStart, win.weekEnd),
+    3,
+    "with no prior best, every complete in-window mile counts",
+  );
+
+  // Now give her a 10:00 mile a fortnight ago. Only the 9:50 beats it — the
+  // 10:00 ties and the 10:10 is slower.
+  await addWorkout(WENDY, "ci-wk-prior", day(-14), 1.0);
+  await addSplit("ci-wk-prior", 600);
+  assert.equal(
+    await measure(WENDY, "pb_mile_splits", win.weekStart, win.weekEnd),
+    1,
+    "only splits FASTER than the 4-week best count — a tie is not a PB (a <= comparison reads 2)",
+  );
+
+  // The reference window ROLLS. A blistering 8:20 from six weeks ago has aged
+  // out and must not set the bar — that is the difference between this and the
+  // daily beat_your_pace, whose all-time reference mileTime.ts records as able
+  // to "raise the bar permanently and make that challenge unwinnable". An
+  // all-time lookback reads 0 here.
+  await addWorkout(WENDY, "ci-wk-ancient", day(-40), 1.0);
+  await addSplit("ci-wk-ancient", 500);
+  assert.equal(
+    await measure(WENDY, "pb_mile_splits", win.weekStart, win.weekEnd),
+    1,
+    "a best older than 4 weeks has aged out of the reference (an all-time lookback reads 0)",
+  );
+
+  // A vehicle_speed drive in the reference window must not set the bar. Without
+  // countedWorkoutSql on the prior arm the reference becomes 5:00 and nothing
+  // beats it, so this reads 0 — the same class of bug mileTime.ts records
+  // against the daily beat_your_pace.
+  await addWorkout(WENDY, "ci-wk-prior-x", day(-10), 1.0, "vehicle_speed");
+  await addSplit("ci-wk-prior-x", 300);
+  assert.equal(
+    await measure(WENDY, "pb_mile_splits", win.weekStart, win.weekEnd),
+    1,
+    "an excluded workout never sets the personal-best bar",
+  );
+
+  // Both new metrics feed the friends leaderboard through measureBatch. If it
+  // drifts from measure(), a user's board row disagrees with their own card.
+  for (const [metric, expected] of [
+    ["full_mile_workouts", 6],
+    ["pb_mile_splits", 1],
+  ]) {
+    assert.equal(
+      (await measureBatch([WENDY], metric, win.weekStart, win.weekEnd)).get(
+        WENDY,
+      ) ?? 0,
+      expected,
+      `measureBatch agrees with measure on ${metric}`,
+    );
+  }
+
+  await db.query(`DELETE FROM workout_splits WHERE workout_id LIKE 'ci-wk-%'`);
 
   await db.query(
     `DELETE FROM user_weekly_challenge_completions WHERE user_id LIKE 'ci-%'`,
