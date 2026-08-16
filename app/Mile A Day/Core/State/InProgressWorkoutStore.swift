@@ -37,6 +37,16 @@ struct InProgressWorkoutState: Codable {
     /// return to the tracker, so a walk past the goal buzzed again on each
     /// re-entry even though the on-screen celebration correctly stayed quiet.
     var alertedGoalComplete: Bool?
+    /// Every manual pause this workout has taken, open interval last. This —
+    /// not `pausedTime` — is the source of truth: it survives a relaunch, it
+    /// re-derives `pausedTime` for free, and it is what the HealthKit
+    /// pause/resume events are built from at Finish (a builder created on
+    /// recovery starts empty, so events held only in memory would be lost and
+    /// the saved duration would silently include the pause). Optional for the
+    /// usual persisted-Codable reason: synthesized Decodable ignores property
+    /// defaults, so a non-optional addition would throw on the blob an older
+    /// build persisted mid-workout.
+    var pauseIntervals: [WorkoutPauseInterval]?
 
     init(
         isActive: Bool = false,
@@ -57,7 +67,8 @@ struct InProgressWorkoutState: Codable {
         liveActivityID: String? = nil,
         celebratedCatchUp: Bool? = nil,
         celebratedCompletion: Bool? = nil,
-        alertedGoalComplete: Bool? = nil
+        alertedGoalComplete: Bool? = nil,
+        pauseIntervals: [WorkoutPauseInterval]? = nil
     ) {
         self.isActive = isActive
         self.isPaused = isPaused
@@ -78,6 +89,27 @@ struct InProgressWorkoutState: Codable {
         self.celebratedCatchUp = celebratedCatchUp
         self.celebratedCompletion = celebratedCompletion
         self.alertedGoalComplete = alertedGoalComplete
+        self.pauseIntervals = pauseIntervals
+    }
+}
+
+/// One manual pause. `end` is nil while the pause is still open — which is
+/// also how a relaunch knows to come back PAUSED rather than silently
+/// resuming and counting ground the user never asked for.
+struct WorkoutPauseInterval: Codable {
+    let start: Date
+    var end: Date?
+
+    /// Seconds this pause has consumed, measured to `now` while still open.
+    func seconds(asOf now: Date = Date()) -> TimeInterval {
+        max(0, (end ?? now).timeIntervalSince(start))
+    }
+}
+
+extension Array where Element == WorkoutPauseInterval {
+    /// Total paused seconds, including an open pause in flight.
+    func totalPausedSeconds(asOf now: Date = Date()) -> TimeInterval {
+        reduce(0) { $0 + $1.seconds(asOf: now) }
     }
 }
 
@@ -320,19 +352,19 @@ enum InProgressWorkoutStore {
         save(state)
     }
 
-    /// Mark workout as paused
-    static func pause(pausedTime: TimeInterval) {
+    /// Write through the manual-pause state the instant it changes.
+    ///
+    /// Not left to the tracker's 1 Hz tick: that timer dies with the cover
+    /// (`onDisappear` invalidates it), so a user who pauses and then backs out
+    /// to the dashboard would have an unpersisted pause — and a termination
+    /// there would resume the workout on relaunch with the whole pause counted
+    /// as active time. `WorkoutLocationManager` is the singleton that outlives
+    /// the view, so it owns the live intervals and calls this on every edge.
+    static func savePauseState(isPaused: Bool, intervals: [WorkoutPauseInterval]) {
         guard var state = load() else { return }
-        state.isPaused = true
-        state.pausedTime = pausedTime
-        save(state)
-    }
-
-    /// Mark workout as resumed
-    static func resume(pausedTime: TimeInterval) {
-        guard var state = load() else { return }
-        state.isPaused = false
-        state.pausedTime = pausedTime
+        state.isPaused = isPaused
+        state.pausedTime = intervals.totalPausedSeconds()
+        state.pauseIntervals = intervals
         save(state)
     }
 }

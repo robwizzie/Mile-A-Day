@@ -42,6 +42,12 @@ struct WorkoutActivityAttributes: ActivityAttributes {
         /// same decode-safety reason as above.
         var hypeCount: Int? = nil
         var latestHypeName: String? = nil
+        /// The user manually paused. Distinct from `isAutoPaused`, which is a
+        /// movement GUESS — this one is an instruction, and it freezes the
+        /// clock as well as the distance. Optional for the same decode-safety
+        /// reason as the fields above: an activity already in flight from the
+        /// shipped build must still decode.
+        var isPaused: Bool? = nil
     }
 
     var startTime: Date
@@ -69,7 +75,11 @@ private extension WorkoutActivityAttributes.ContentState {
         return divisor / distance
     }
 
-    var showsAutoPaused: Bool { isAutoPaused == true }
+    var showsManualPause: Bool { isPaused == true }
+
+    /// The movement guess only gets to speak when the user hasn't already
+    /// settled the question by pausing.
+    var showsAutoPaused: Bool { isAutoPaused == true && !showsManualPause }
 
     var paceText: String? {
         guard let pace = paceSecondsPerMile, pace.isFinite, pace < 3600 else { return nil }
@@ -106,7 +116,12 @@ private struct LiveTimerText: View {
 
     var body: some View {
         Group {
-            if let start = state.timerStartDate {
+            // A manual pause drops the anchor, so this falls through to the
+            // frozen pushed value. It has to: `Text(timerInterval:)` is
+            // rendered by the system and keeps counting with no updates from
+            // the app — the very property that makes it right for a live
+            // workout makes it a lie about a paused one.
+            if let start = state.timerStartDate, !state.showsManualPause {
                 Text(timerInterval: start...Date.distantFuture, countsDown: false)
             } else {
                 Text(staticTime)
@@ -180,10 +195,16 @@ struct WorkoutLiveActivity: Widget {
                             .foregroundColor(.white)
                             .frame(maxWidth: 70, alignment: .trailing)
 
-                            if context.state.showsAutoPaused {
+                            if context.state.showsManualPause {
                                 Text("PAUSED")
                                     .font(.system(size: 10, weight: .heavy, design: .rounded))
                                     .foregroundColor(.orange)
+                            } else if context.state.showsAutoPaused {
+                                Text("AUTO-PAUSED")
+                                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                    .foregroundColor(.orange)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
                             } else if let pace = context.state.paceText {
                                 Text(pace)
                                     .font(.system(size: 11, weight: .medium, design: .rounded))
@@ -408,7 +429,15 @@ struct WorkoutLiveActivityView: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: 90, alignment: .trailing)
 
-                    if context.state.showsAutoPaused {
+                    if context.state.showsManualPause {
+                        HStack(spacing: 4) {
+                            Image(systemName: "pause.fill")
+                                .font(.system(size: 8, weight: .bold))
+                            Text("PAUSED")
+                                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        }
+                        .foregroundColor(.orange)
+                    } else if context.state.showsAutoPaused {
                         HStack(spacing: 4) {
                             Image(systemName: "pause.fill")
                                 .font(.system(size: 8, weight: .bold))

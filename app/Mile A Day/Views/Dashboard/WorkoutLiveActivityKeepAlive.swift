@@ -52,11 +52,16 @@ enum WorkoutLiveActivityKeepAlive {
         var state = activity.content.state
         state.distance = manager.liveDistance
         state.totalDailyDistance = saved.startingDistance + manager.liveDistance
-        let elapsed = max(0, now.timeIntervalSince(saved.startTime))
+        // Pause-excluded, and the anchor is DROPPED while paused. This beat
+        // rides the manager's heartbeat, which keeps running through a pause —
+        // re-stamping a live anchor here would restart the system-rendered
+        // clock on the lock screen a minute after the user froze the workout.
+        let elapsed = max(0, now.timeIntervalSince(saved.startTime) - manager.pausedSeconds)
         state.elapsedTime = elapsed
-        state.timerStartDate = now.addingTimeInterval(-elapsed)
+        state.timerStartDate = manager.isPaused ? nil : now.addingTimeInterval(-elapsed)
         state.movingSeconds = manager.movingSeconds
         state.isAutoPaused = manager.isAutoPaused
+        state.isPaused = manager.isPaused
 
         let content = ActivityContent(
             state: state, staleDate: now.addingTimeInterval(staleMargin))
