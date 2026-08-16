@@ -30,13 +30,18 @@ export type WeeklyMetric =
   | "active_days"
   | "longest_single_workout"
   | "total_steps"
+  // The three below belong to RETIRED catalog rows. They stay because the
+  // boot-time CHECK constraint is generated from these metrics: dropping one a
+  // surviving row still carries would fail `ADD CONSTRAINT`. `weekend_distance`
+  // went when weeks became Sunday-start (its two days stopped being
+  // contiguous); the early/late pair went because they measured SCHEDULE rather
+  // than effort — a quarter-mile walk before 8 AM counted as a run.
   | "early_workouts"
   | "late_workouts"
-  // Retired from the rotation when weeks became Sunday-start (its two days
-  // stopped being contiguous), but kept: the retired catalog row still carries
-  // it, and the boot-time CHECK constraint is generated from these metrics.
   | "weekend_distance"
   | "best_day_distance"
+  | "full_mile_workouts"
+  | "pb_mile_splits"
   | "total_minutes"
   | "fast_mile_splits"
   | "workout_count"
@@ -453,6 +458,59 @@ export async function measure(
       );
     }
 
+    // A real mile per WORKOUT, which nothing else in the catalog asks for:
+    // `workout_count` has no floor at all, and `mile_days` is per-DAY with the
+    // tolerance, so two half-mile walks make a mile day but no full-mile
+    // workout. The floor is the tolerance, not a raw 1.0 — a GPS-measured 0.99
+    // must not read as a failure (see DAILY_GOAL_TOLERANCE).
+    case "full_mile_workouts":
+      return scalar(
+        `SELECT COUNT(*) AS v
+			FROM workouts w
+			WHERE w.user_id = $1 AND w.local_date BETWEEN $2::date AND $3::date
+				AND w.distance >= ${DAILY_GOAL_TOLERANCE}
+				AND ${countedWorkoutSql("w")}`,
+        params,
+      );
+
+    // Mile splits inside the window that beat the user's best from the 4 weeks
+    // BEFORE it.
+    //
+    // The reference window ROLLS — it is deliberately not all-time. mileTime.ts
+    // records that the daily `beat_your_pace` compares against the all-time
+    // prior best and can therefore "raise the bar permanently and make that
+    // challenge unwinnable"; a 4-week reference decays as an old best rolls out
+    // of it. Deriving it from the measure window's own start (rather than from
+    // today) is also what lets `computeBaseline` work unchanged: each historical
+    // week is scored against its own prior four weeks.
+    //
+    // No prior split at all ⇒ every complete mile counts, since anyone's first
+    // real mile is a personal best. That keeps a new user off an unwinnable
+    // week without needing an off-rotation substitute row.
+    case "pb_mile_splits":
+      return scalar(
+        `WITH prior AS (
+				SELECT MIN(ws.split_pace) AS p
+				FROM workout_splits ws
+				JOIN workouts w ON w.workout_id = ws.workout_id
+				WHERE w.user_id = $1
+					AND w.local_date BETWEEN ($2::date - 28) AND ($2::date - 1)
+					AND ${countedWorkoutSql("w")}
+					AND ${realMileSplitSql("ws.split_pace")}
+					AND ws.split_distance >= ${DAILY_GOAL_TOLERANCE}
+			)
+			SELECT COUNT(*) AS v
+			FROM workout_splits ws
+			JOIN workouts w ON w.workout_id = ws.workout_id
+			CROSS JOIN prior
+			WHERE w.user_id = $1 AND w.local_date BETWEEN $2::date AND $3::date
+				AND ${countedWorkoutSql("w")}
+				AND ${realMileSplitSql("ws.split_pace")}
+				AND ws.split_distance >= ${DAILY_GOAL_TOLERANCE}
+				AND (prior.p IS NULL OR ws.split_pace < prior.p)`,
+        params,
+      );
+
     case "fast_mile_splits":
       return scalar(
         `SELECT COUNT(*) AS v
@@ -859,6 +917,41 @@ export async function measureBatch(
 				GROUP BY w.user_id`;
       break;
     }
+
+    case "full_mile_workouts":
+      sql = `SELECT w.user_id, COUNT(*) AS v
+				FROM workouts w
+				WHERE ${range} AND ${counted}
+					AND w.distance >= ${DAILY_GOAL_TOLERANCE}
+				GROUP BY w.user_id`;
+      break;
+
+    // Per-user rolling reference: each user's own best from the 4 weeks before
+    // the window. Must stay in lockstep with the `measure` arm — this one feeds
+    // the friends leaderboard and that one feeds the user's own card, so a
+    // drift makes someone's board row disagree with their own screen.
+    case "pb_mile_splits":
+      sql = `WITH prior AS (
+					SELECT w.user_id, MIN(ws.split_pace) AS p
+					FROM workout_splits ws
+					JOIN workouts w ON w.workout_id = ws.workout_id
+					WHERE w.user_id = ANY($1::text[])
+						AND w.local_date BETWEEN ($2::date - 28) AND ($2::date - 1)
+						AND ${counted}
+						AND ${realMileSplitSql("ws.split_pace")}
+						AND ws.split_distance >= ${DAILY_GOAL_TOLERANCE}
+					GROUP BY w.user_id
+				)
+				SELECT w.user_id, COUNT(*) AS v
+				FROM workout_splits ws
+				JOIN workouts w ON w.workout_id = ws.workout_id
+				LEFT JOIN prior ON prior.user_id = w.user_id
+				WHERE ${range} AND ${counted}
+					AND ${realMileSplitSql("ws.split_pace")}
+					AND ws.split_distance >= ${DAILY_GOAL_TOLERANCE}
+					AND (prior.p IS NULL OR ws.split_pace < prior.p)
+				GROUP BY w.user_id`;
+      break;
 
     case "fast_mile_splits":
       sql = `SELECT w.user_id, COUNT(*) AS v
@@ -1306,32 +1399,36 @@ const WEEKLY_CATALOG: Array<
     rotation_index: 4,
   },
   {
-    challenge_key: "early_birds",
-    title: "Early Birds",
-    description_template: "Finish {target} workouts before 8 AM.",
-    icon: "sunrise.fill",
-    gradient_start: "FF6B6B",
-    gradient_end: "FF8E53",
-    metric: "early_workouts",
+    challenge_key: "no_junk_miles",
+    title: "No Junk Miles",
+    description_template: "Log {target} workouts of a mile or more.",
+    icon: "ruler.fill",
+    gradient_start: "56AB2F",
+    gradient_end: "A8E063",
+    metric: "full_mile_workouts",
     unit: "runs",
-    base_target: 2,
-    scale_multiplier: 1.2,
-    target_ceiling: 10,
+    base_target: 4,
+    scale_multiplier: 1.1,
+    target_ceiling: 25,
     target_step: 1,
     rotation_index: 5,
   },
   {
-    challenge_key: "night_owls",
-    title: "Night Owls",
-    description_template: "Finish {target} workouts after 8 PM.",
-    icon: "moon.stars.fill",
-    gradient_start: "2C3E50",
-    gradient_end: "4CA1AF",
-    metric: "late_workouts",
-    unit: "runs",
-    base_target: 2,
-    scale_multiplier: 1.2,
-    target_ceiling: 10,
+    challenge_key: "personal_best",
+    title: "Personal Best",
+    description_template:
+      "Log {target} miles faster than your best from the last 4 weeks.",
+    icon: "stopwatch.fill",
+    gradient_start: "EE0979",
+    gradient_end: "FF6A00",
+    metric: "pb_mile_splits",
+    unit: "miles",
+    // 1 is the honest answer for almost everyone — the metric is a count, so a
+    // target of 1 is the boolean "did you beat it?" expressed as a scalar. The
+    // ceiling is low for the same reason: five PBs in a week is already a lot.
+    base_target: 1,
+    scale_multiplier: 1.1,
+    target_ceiling: 5,
     target_step: 1,
     rotation_index: 6,
   },
@@ -1452,6 +1549,45 @@ const WEEKLY_CATALOG: Array<
     target_ceiling: 30,
     target_step: 0.5,
     rotation_index: 107,
+    active: false,
+  },
+  // RETIRED, same reasoning as above. These two measured SCHEDULE rather than
+  // effort: past a 0.25-mile floor nothing about distance, pace or duration
+  // counted, so a five-minute walk before 8 AM was a "run" and the base target
+  // of 2 asked for two of them in a week. Their scaling was also bimodal —
+  // never run early and the target sat at 2 forever; always run early and the
+  // baseline pushed it past 7, which needs double-days. `no_junk_miles` and
+  // `personal_best` took slots 5 and 6.
+  {
+    challenge_key: "early_birds",
+    title: "Early Birds",
+    description_template: "Finish {target} workouts before 8 AM.",
+    icon: "sunrise.fill",
+    gradient_start: "FF6B6B",
+    gradient_end: "FF8E53",
+    metric: "early_workouts",
+    unit: "runs",
+    base_target: 2,
+    scale_multiplier: 1.2,
+    target_ceiling: 10,
+    target_step: 1,
+    rotation_index: 105,
+    active: false,
+  },
+  {
+    challenge_key: "night_owls",
+    title: "Night Owls",
+    description_template: "Finish {target} workouts after 8 PM.",
+    icon: "moon.stars.fill",
+    gradient_start: "2C3E50",
+    gradient_end: "4CA1AF",
+    metric: "late_workouts",
+    unit: "runs",
+    base_target: 2,
+    scale_multiplier: 1.2,
+    target_ceiling: 10,
+    target_step: 1,
+    rotation_index: 106,
     active: false,
   },
 ];
