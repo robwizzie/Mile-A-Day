@@ -76,6 +76,11 @@ struct WorkoutTrackingView: View {
     /// Quarter splits vs the ghost, snapshotted before tracking tears down.
     @State private var recapRaceSplits: [BestEffortStore.RaceSplit] = []
     @State private var recapGhostName: String = "your ghost"
+    /// Pause-excluded elapsed time frozen at Finish. `endLiveActivity()` runs
+    /// from `finishCleanup`, i.e. AFTER `stopTracking()` has cleared the pause
+    /// timeline — recomputing there would hand the ended Live Activity a
+    /// wall-clock duration the recap and Health both disagree with.
+    @State private var finalActiveElapsed: TimeInterval?
     @State private var showStopConfirmation = false // Confirmation before ending workout
     @State private var isStopping = false // Prevents double-stop and shows "Ending..." UI
     /// Whether the Live Activity goal-completed alert was already sent (or the
@@ -295,6 +300,22 @@ struct WorkoutTrackingView: View {
         let minutes = Int(elapsedTime) / 60
         let seconds = Int(elapsedTime) % 60
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    /// Wall time since the workout started, minus every manual pause.
+    ///
+    /// THE duration figure: the on-screen clock, the Live Activity, the buddy
+    /// heartbeat and the recap all read it, and HealthKit independently
+    /// derives the same number from the pause/resume events written at finish
+    /// — so the card, the lock screen and Apple Health agree.
+    ///
+    /// Derived from `workoutStartDate` rather than accumulated on the tick, so
+    /// it stays correct across a backgrounded (suspended) timer and across a
+    /// relaunch, where `pausedSeconds` is rehydrated from the persisted
+    /// pause intervals.
+    private var activeElapsedTime: TimeInterval {
+        guard let start = workoutStartDate else { return elapsedTime }
+        return max(0, Date().timeIntervalSince(start) - locationManager.pausedSeconds)
     }
 
     // MARK: - Pre-start wizard chrome
@@ -842,7 +863,7 @@ struct WorkoutTrackingView: View {
                     }
                 )
 
-                stopButton
+                workoutControls
             }
         }
         .opacity(showCompletion || showPreviousProgress ? 0 : 1)
@@ -1264,6 +1285,12 @@ struct WorkoutTrackingView: View {
     /// each of these states used to be completely silent.
     private var trackingIssue: (icon: String, title: String, detail: String, showsSettings: Bool)? {
         guard isTracking, !locationManager.isUsingPedometer else { return nil }
+        // Nothing here is actionable during a deliberate pause, and one of
+        // them is actively wrong: pausing to step inside is exactly when fixes
+        // dry up, so "No GPS signal — head for open sky" would shout at
+        // someone who paused BECAUSE they went indoors. It all returns on
+        // resume, when it matters again.
+        guard !locationManager.isPaused else { return nil }
         let auth = locationManager.authorizationStatus
         if auth == .denied || auth == .restricted {
             return (
@@ -1359,13 +1386,31 @@ struct WorkoutTrackingView: View {
 
             Text(formattedTime)
                 .font(.system(size: 48, weight: .semibold, design: .rounded))
-                .foregroundColor(.white)
+                .foregroundColor(locationManager.isPaused ? .orange : .white)
                 .monospacedDigit()
+
+            // Manual pause outranks the movement guess — showing both at once
+            // would be nonsense, and this one is a fact rather than an
+            // inference, so it gets the definite word.
+            if locationManager.isPaused {
+                HStack(spacing: 5) {
+                    Image(systemName: "pause.fill")
+                        .font(.system(size: 9, weight: .bold))
+                    Text("PAUSED")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .tracking(1.0)
+                }
+                .foregroundColor(.orange)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(Color.orange.opacity(0.15)))
+                .transition(.opacity.combined(with: .scale))
+            }
 
             // The movement gate freezing distance is CORRECT behavior — this
             // chip is what keeps it from reading as "tracking broke" while
             // the user stands at a light or sits down mid-walk.
-            if locationManager.isAutoPaused {
+            if locationManager.isAutoPaused, !locationManager.isPaused {
                 HStack(spacing: 5) {
                     Image(systemName: "pause.fill")
                         .font(.system(size: 9, weight: .bold))
@@ -1400,6 +1445,7 @@ struct WorkoutTrackingView: View {
             }
         }
         .animation(.spring(response: 0.3), value: locationManager.isAutoPaused)
+        .animation(.spring(response: 0.3), value: locationManager.isPaused)
         .animation(.spring(response: 0.3), value: raceFinalDelta != nil)
         .animation(.easeInOut(duration: 0.25), value: coach.lastLine)
     }
@@ -1450,6 +1496,43 @@ struct WorkoutTrackingView: View {
         .background(Capsule().fill((ahead ? Color.green : Color.orange).opacity(0.15)))
     }
 
+    /// Pause/resume beside Stop, mirroring the Watch's control row
+    /// (`WorkoutView`), which has paired them since day one — the phone was
+    /// the odd one out. Pinned outside the scroll area with Stop, so neither
+    /// control can ever be scrolled off screen.
+    private var workoutControls: some View {
+        HStack(spacing: 14) {
+            if !isStopping {
+                pauseResumeButton
+            }
+            stopButton
+        }
+        .padding(.horizontal, 32)
+        .padding(.bottom, 40)
+        .animation(.spring(response: 0.3), value: locationManager.isPaused)
+    }
+
+    private var pauseResumeButton: some View {
+        let paused = locationManager.isPaused
+        return Button {
+            if paused { resumeWorkout() } else { pauseWorkout() }
+        } label: {
+            Image(systemName: paused ? "play.fill" : "pause.fill")
+                .font(.title2)
+                .foregroundColor(.white)
+                .frame(width: 64, height: 64)
+                .background(
+                    Circle()
+                        .fill((paused ? Color.green : Color.orange).opacity(0.3))
+                        .overlay(
+                            Circle().stroke(paused ? Color.green : Color.orange, lineWidth: 2)
+                        )
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .accessibilityLabel(paused ? "Resume workout" : "Pause workout")
+    }
+
     private var stopButton: some View {
         Button(action: { showStopConfirmation = true }) {
             HStack(spacing: 12) {
@@ -1462,9 +1545,17 @@ struct WorkoutTrackingView: View {
                 } else {
                     Image(systemName: "stop.fill")
                         .font(.title2)
+                    // Shrinks rather than truncates: the pause button now
+                    // takes 64pt + spacing out of this row, and "Stop
+                    // Workout" at large Dynamic Type on a small screen would
+                    // otherwise clip to "Stop Work…". Never `.fixedSize` here
+                    // — that publishes a minimum width no ancestor can shrink
+                    // and pushes the overflow out to the screen gutter.
                     Text("Stop Workout")
                         .font(.title3)
                         .fontWeight(.semibold)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
             }
             .foregroundColor(.white)
@@ -1480,9 +1571,28 @@ struct WorkoutTrackingView: View {
             )
         }
         .disabled(isStopping)
-        .padding(.horizontal, 32)
-        .padding(.bottom, 40)
         .buttonStyle(PlainButtonStyle())
+    }
+
+    /// Freeze the workout. The manager owns every consequence (accrual, route,
+    /// pedometer span, moving clock, watchdog, GPS power tier) and writes the
+    /// pause through to disk itself — all this has to do is tell the Live
+    /// Activity immediately rather than letting it sit on a stale ticking
+    /// clock until the 30s cadence comes round.
+    private func pauseWorkout() {
+        guard isTracking, !isStopping else { return }
+        locationManager.pause()
+        MADHaptics.action()
+        lastActivityPushDate = .distantPast
+        updateLiveActivity()
+    }
+
+    private func resumeWorkout() {
+        guard isTracking, !isStopping else { return }
+        locationManager.resume()
+        MADHaptics.action()
+        lastActivityPushDate = .distantPast
+        updateLiveActivity()
     }
 
     @ViewBuilder
@@ -1870,9 +1980,10 @@ struct WorkoutTrackingView: View {
 
             guard let saved = InProgressWorkoutStore.load(), saved.isActive else { return }
 
-            // Restore core state
+            // Restore core state. The clock is settled AFTER tracking restarts
+            // below, once `pausedSeconds` has been rehydrated — computing it
+            // here would count every past pause as active time.
             workoutStartDate = saved.startTime
-            elapsedTime = max(0, Date().timeIntervalSince(saved.startTime))
 
             // Restore activity + location type
             if saved.activityType == "Running" {
@@ -1929,7 +2040,19 @@ struct WorkoutTrackingView: View {
             // Resume tracking with the saved distance as the starting point.
             // For pedometer: new pedometer readings will ADD to saved.currentDistance.
             // For GPS: new GPS deltas will add to saved.currentDistance.
-            locationManager.startTracking(locationType: selectedLocationType, initialDistance: saved.currentDistance)
+            //
+            // The pause timeline rides along: an interval left OPEN means the
+            // workout was paused when the app died, so it comes back paused.
+            // Resuming it silently would start counting ground the user never
+            // asked for, on a screen they haven't looked at yet.
+            locationManager.startTracking(
+                locationType: selectedLocationType,
+                initialDistance: saved.currentDistance,
+                pauseIntervals: saved.pauseIntervals ?? []
+            )
+
+            // Now that `pausedSeconds` is rehydrated, settle the clock.
+            elapsedTime = activeElapsedTime
 
             // Restart HKWorkoutBuilder (non-blocking, best-effort)
             healthManager.requestAuthorization { authorized in
@@ -2247,6 +2370,9 @@ struct WorkoutTrackingView: View {
         raceFinalDelta = nil
         recapWorkoutId = nil
         recapWasIndoor = false
+        // This view instance survives across sessions — a stale frozen clock
+        // would be handed to the next workout's ended Live Activity.
+        finalActiveElapsed = nil
         if raceArmed, let ghost = resolvedGhost {
             raceGhost = ghost.effort
             raceGhostName = ghost.shortName
@@ -2336,10 +2462,12 @@ struct WorkoutTrackingView: View {
     private func startWorkoutTimer() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [self] _ in
-            guard let startDate = workoutStartDate else { return }
+            guard workoutStartDate != nil else { return }
             // Don't persist state while we're in the middle of stopping
             guard !isStopping else { return }
-            elapsedTime = Date().timeIntervalSince(startDate)
+            // Freezes on its own while manually paused — `pausedSeconds` grows
+            // at exactly the rate wall time does for the length of the pause.
+            elapsedTime = activeElapsedTime
             updateLiveActivity()
 
             // Ghost coach rides this tick rather than owning a timer. It reads
@@ -2387,6 +2515,14 @@ struct WorkoutTrackingView: View {
         // is the number the user watched, so it saves verbatim.
         let finalDistance = locationManager.liveDistance
 
+        // Capture the pause timeline BEFORE `stopTracking()` below clears it.
+        // Ending while still paused is legitimate (pause, decide you're done,
+        // tap End), and leaves the last interval open — it gets closed at
+        // `endDate` when the HealthKit events are built, so that final stretch
+        // is excluded rather than silently counted.
+        let pauseIntervals = locationManager.pauseIntervals
+        let pausedSeconds = locationManager.pausedSeconds
+
         // Ghost race bookkeeping — runs for EVERY session (an unraced mile
         // still quietly becomes the baseline/best, keeping future ghosts
         // honest); racing only changes what gets celebrated. The curve already
@@ -2418,7 +2554,13 @@ struct WorkoutTrackingView: View {
 
         // Freeze the recap stats now, before anything refreshes underneath us
         recapDistance = finalDistance
-        recapDuration = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
+        // Pause-excluded, matching what HealthKit will compute from the events
+        // written below and therefore what the backend stores as
+        // `total_duration`. The recap must not be the one surface quoting a
+        // wall-clock number nothing else agrees with.
+        recapDuration = workoutStartDate
+            .map { max(0, Date().timeIntervalSince($0) - pausedSeconds) } ?? elapsedTime
+        finalActiveElapsed = recapDuration
         recapStartingDistance = startingDistance
         recapGoalDistance = goalDistance
         recapWasIndoor = selectedLocationType == .indoor
@@ -2615,11 +2757,62 @@ struct WorkoutTrackingView: View {
                 metadata[WorkoutLocationManager.ghostFriendMetadataKey] = friendId
             }
         }
-        if metadata.isEmpty {
-            beginSave()
-        } else {
-            builder.addMetadata(metadata) { _, _ in
+        let addMetadataThenSave = {
+            if metadata.isEmpty {
                 beginSave()
+            } else {
+                builder.addMetadata(metadata) { _, _ in
+                    beginSave()
+                }
+            }
+        }
+
+        // Manual pauses become HealthKit pause/resume events, which is what
+        // makes `HKWorkout.duration` come back pause-excluded — and that
+        // property is the whole reason no backend change is needed: the sync
+        // uploads `workout.duration` as `totalDuration` and the server stores
+        // it unchanged. It also puts an in-app walk in line with the Watch and
+        // with every third-party workout arriving through HealthKit, all of
+        // which already carry pause-excluded durations.
+        //
+        // Built from the persisted intervals rather than events accumulated in
+        // memory, so a workout paused before its builder finished authorizing
+        // — or one that survived a relaunch — still records its pauses.
+        var pauseEvents: [HKWorkoutEvent] = []
+        for interval in pauseIntervals {
+            // Clamp into the workout's own window; a pause outside it would be
+            // rejected and take the whole batch with it.
+            let pauseStart = min(max(interval.start, startDate), endDate)
+            // An open interval means the user ended while paused — close it at
+            // the workout end so the stretch is excluded, not left ambiguous.
+            let pauseEnd = min(max(interval.end ?? endDate, pauseStart), endDate)
+            guard pauseEnd > pauseStart else { continue }
+            pauseEvents.append(
+                HKWorkoutEvent(
+                    type: .pause,
+                    dateInterval: DateInterval(start: pauseStart, duration: 0),
+                    metadata: nil
+                )
+            )
+            pauseEvents.append(
+                HKWorkoutEvent(
+                    type: .resume,
+                    dateInterval: DateInterval(start: pauseEnd, duration: 0),
+                    metadata: nil
+                )
+            )
+        }
+
+        if pauseEvents.isEmpty {
+            addMetadataThenSave()
+        } else {
+            // Sequenced rather than fired alongside: these must land before
+            // `endCollection`, and concurrent builder mutations aren't ordered.
+            builder.addWorkoutEvents(pauseEvents) { added, error in
+                if !added {
+                    print("[WorkoutTracking] ⚠️ Pause events rejected: \(String(describing: error)) — duration will read as elapsed")
+                }
+                addMetadataThenSave()
             }
         }
     }
@@ -2748,13 +2941,12 @@ struct WorkoutTrackingView: View {
             goalDistance: goalDistance
         )
 
-        // Compute real-time elapsed time from start date
-        let realTimeElapsed: TimeInterval
-        if let startDate = workoutStartDate {
-            realTimeElapsed = Date().timeIntervalSince(startDate)
-        } else {
-            realTimeElapsed = 0
-        }
+        // Pause-excluded, like every other clock in the app. This path also
+        // runs on recovery, where the workout may come back PAUSED — an
+        // activity created with a live anchor there would tick away on the
+        // lock screen over a frozen workout.
+        let realTimeElapsed = activeElapsedTime
+        let paused = locationManager.isPaused
 
         let initialState = WorkoutActivityAttributes.ContentState(
             distance: currentDistance,
@@ -2762,13 +2954,14 @@ struct WorkoutTrackingView: View {
             elapsedTime: realTimeElapsed,
             goalDistance: goalDistance,
             activityType: selectedActivityType == .running ? "Running" : "Walking",
-            timerStartDate: Date().addingTimeInterval(-realTimeElapsed),
+            timerStartDate: paused ? nil : Date().addingTimeInterval(-realTimeElapsed),
             streak: userManager.currentUser.streak,
             movingSeconds: locationManager.movingSeconds,
             isAutoPaused: locationManager.isAutoPaused,
             ghostDeltaSeconds: raceDeltaSeconds,
             hypeCount: livePresence.sessionHypes.isEmpty ? nil : livePresence.sessionHypes.count,
-            latestHypeName: livePresence.sessionHypes.last?.senderName
+            latestHypeName: livePresence.sessionHypes.last?.senderName,
+            isPaused: paused
         )
 
         // If the goal was already met before this workout (post-goal extra
@@ -2815,7 +3008,8 @@ struct WorkoutTrackingView: View {
         // screen / Dynamic Island never outruns what will persist.
         let freshDistance = locationManager.liveDistance
         let freshTotalDaily = startingDistance + freshDistance
-        let realTimeElapsed = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
+        let realTimeElapsed = activeElapsedTime
+        let paused = locationManager.isPaused
 
         // Update Live Activity (if we have one)
         if workoutActivity == nil {
@@ -2857,13 +3051,20 @@ struct WorkoutTrackingView: View {
                     elapsedTime: realTimeElapsed,
                     goalDistance: goalDistance,
                     activityType: selectedActivityType == .running ? "Running" : "Walking",
-                    timerStartDate: Date().addingTimeInterval(-realTimeElapsed),
+                    // No anchor while paused: `Text(timerInterval:)` is
+                    // rendered by the SYSTEM and keeps ticking with no updates
+                    // from us, which is exactly wrong on a frozen workout.
+                    // Dropping the anchor falls the view back to the static
+                    // pushed value — the same mechanism the ended activity
+                    // already uses to show a final time.
+                    timerStartDate: paused ? nil : Date().addingTimeInterval(-realTimeElapsed),
                     streak: userManager.currentUser.streak,
                     movingSeconds: locationManager.movingSeconds,
                     isAutoPaused: locationManager.isAutoPaused,
                     ghostDeltaSeconds: raceDeltaSeconds,
                     hypeCount: livePresence.sessionHypes.isEmpty ? nil : livePresence.sessionHypes.count,
-                    latestHypeName: livePresence.sessionHypes.last?.senderName
+                    latestHypeName: livePresence.sessionHypes.last?.senderName,
+                    isPaused: paused
                 )
                 // staleDate lets the system dim the activity if the app dies and
                 // stops sending updates, instead of showing confident stale data.
@@ -2907,7 +3108,9 @@ struct WorkoutTrackingView: View {
         // Use FRESH data for the final state (identical to what Finish saves)
         let freshDistance = locationManager.liveDistance
         let freshTotalDaily = startingDistance + freshDistance
-        let realTimeElapsed = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
+        // Frozen at Finish — see `finalActiveElapsed`. By the time this runs,
+        // `stopTracking()` has already cleared the pause timeline.
+        let realTimeElapsed = finalActiveElapsed ?? activeElapsedTime
 
         // Final state: no timerStartDate, so the ended activity shows the
         // frozen final time instead of a clock that keeps ticking.
@@ -2920,7 +3123,8 @@ struct WorkoutTrackingView: View {
             timerStartDate: nil,
             streak: userManager.currentUser.streak,
             movingSeconds: locationManager.movingSeconds,
-            isAutoPaused: false
+            isAutoPaused: false,
+            isPaused: false
         )
 
         // Capture the ID before clearing the reference so the orphan cleanup can exclude it

@@ -188,6 +188,64 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// Someone stepping, displacing, or carrying doppler speed is never
     /// "paused"; fresh evidence clears the chip immediately.
     @Published private(set) var isAutoPaused = false
+
+    // MARK: - Manual pause
+    //
+    // Deliberately NOT the same concept as `isAutoPaused`. Auto-pause is a
+    // GUESS about movement, rendered as a chip, biased toward not-paused, and
+    // it gates nothing. This is the user's explicit instruction and it gates
+    // everything: accrual, the route, the pedometer span, the moving clock and
+    // the saved duration. They never show at once — manual pause wins the
+    // display and suppresses the auto chip (see `pause()`).
+    //
+    // There is no auto-RESUME on detected movement, on purpose. The movement
+    // gate is lenient by design, and a false "you're moving" resume would
+    // restart accrual from a stale anchor and quietly cost the walker distance.
+    // Manual pause, manual resume.
+
+    /// True while the user has explicitly paused. Published so the tracker,
+    /// the banner and the Live Activity all read one flag.
+    @Published private(set) var isPaused = false
+    /// Every pause this session has taken, open interval last. Mirrored to
+    /// `InProgressWorkoutStore` on each edge so a relaunch resumes PAUSED and
+    /// the finish can build HealthKit pause/resume events from real timestamps.
+    private(set) var pauseIntervals: [WorkoutPauseInterval] = []
+    /// When tracking last resumed — the movement gate's grace window. Without
+    /// it, every witness is stale the moment a long pause ends, so the first
+    /// fresh fix (which clears `blind`) would flash AUTO-PAUSED at a walker
+    /// who has just started moving again.
+    private var lastResumeAt: Date?
+
+    /// Total paused seconds, including a pause still in flight. Feeds the
+    /// tracker's frozen clock, the recap duration and the indoor race clock.
+    var pausedSeconds: TimeInterval { pauseIntervals.totalPausedSeconds() }
+
+    /// Raw pedometer span since this session's pedometer start (miles),
+    /// clamped monotonic. Held apart from the EXPOSED span because CMPedometer
+    /// is an odometer: it keeps counting steps through a pause whether or not
+    /// we are listening, so merely ignoring readings while paused would credit
+    /// the whole pause on the first reading after resume. The exposed span is
+    /// `raw - excludedPedometerMiles`.
+    private var rawPedometerMiles: Double = 0
+    /// Pedometer ground banked during pauses that have already ended.
+    private var committedPausedPedometerMiles: Double = 0
+    /// `rawPedometerMiles` at the moment the current pause began; nil while
+    /// running. Makes the in-flight pause's exclusion live, so the exposed
+    /// span is frozen during the pause rather than corrected after it.
+    private var pauseAnchorPedometerMiles: Double?
+
+    /// Pedometer distance that must never reach `liveDistance` — completed
+    /// pauses plus the one currently open.
+    private var excludedPedometerMiles: Double {
+        committedPausedPedometerMiles
+            + max(0, rawPedometerMiles - (pauseAnchorPedometerMiles ?? rawPedometerMiles))
+    }
+
+    /// The pedometer span this session is allowed to count.
+    private var countablePedometerMiles: Double {
+        max(0, rawPedometerMiles - excludedPedometerMiles)
+    }
+
     /// Distance carried into this session by a recovery (miles). The pedometer
     /// starts at resume time, so the estimator only compares the span BOTH
     /// instruments actually measured this session.
@@ -207,7 +265,12 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     var raceClockSeconds: TimeInterval {
         if isUsingPedometer {
             guard let start = trackingStartedAt else { return 0 }
-            return Date().timeIntervalSince(start)
+            // Manual pause must come out of the indoor clock explicitly.
+            // Outdoors `movingSeconds` only advances inside `accrueDistance`,
+            // which a pause blocks, so it freezes for free — but the treadmill
+            // clock is wall time, and without this subtraction a racer could
+            // beat their ghost by standing on the side rails.
+            return max(0, Date().timeIntervalSince(start) - pausedSeconds)
         }
         return movingSeconds
     }
@@ -341,7 +404,15 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     ///   - initialDistance: Distance already accumulated in a prior session (0 for new workouts).
     ///     For GPS mode, this becomes the starting value that incremental updates add to.
     ///     For pedometer mode, this becomes the offset added to the pedometer's readings.
-    func startTracking(locationType: HKWorkoutSessionLocationType = .outdoor, initialDistance: Double = 0.0) {
+    ///   - pauseIntervals: Pauses carried in by a recovery. An open interval
+    ///     (nil `end`) means the workout was paused when the app died, so it
+    ///     comes back paused — resuming it silently would count ground the user
+    ///     never asked for.
+    func startTracking(
+        locationType: HKWorkoutSessionLocationType = .outdoor,
+        initialDistance: Double = 0.0,
+        pauseIntervals: [WorkoutPauseInterval] = []
+    ) {
         // Prevent double-start
         guard !isTracking else { return }
         isTracking = true
@@ -372,7 +443,24 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         lastFixAt = nil
         isUsingPedometer = (locationType == .indoor)
         pedometerOffset = initialDistance
-        armTrackingWatchdog(force: true)
+
+        // Manual-pause state. A recovered session restarts the pedometer from
+        // scratch, so the mileage exclusions reset with it — only the pause
+        // TIMELINE carries over (it's what the recap duration and the
+        // HealthKit events are built from).
+        self.pauseIntervals = pauseIntervals
+        // Written out rather than `last?.end == nil`: that chains to `Date??`,
+        // where an OPEN pause is `.some(nil)` and compares UNEQUAL to nil — it
+        // would report paused only when there were no pauses at all.
+        isPaused = pauseIntervals.last.map { $0.end == nil } ?? false
+        lastResumeAt = nil
+        rawPedometerMiles = 0
+        committedPausedPedometerMiles = 0
+        // Recovering INTO a pause: anchor at zero so anything walked before
+        // the user taps resume is excluded, exactly as a live pause would.
+        pauseAnchorPedometerMiles = isPaused ? 0 : nil
+
+        armTrackingWatchdog(force: !isPaused)
 
         if locationType == .indoor {
             if CMPedometer.isDistanceAvailable() {
@@ -409,6 +497,86 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         }
 
         startPauseHeartbeat()
+        applyLocationPowerProfile()
+    }
+
+    // MARK: - Manual pause / resume
+
+    /// Freeze the workout at the user's request.
+    ///
+    /// Everything that could credit ground stops here — accrual, the route
+    /// trace, the pedometer span, the moving clock — but the location stream
+    /// itself deliberately keeps running. The `location` background mode is
+    /// the ONLY reason this process survives a locked screen; calling
+    /// `stopUpdatingLocation()` for the duration of a pause invites iOS to
+    /// suspend and then terminate the app, and the user comes back to a dead
+    /// workout instead of a paused one. So the fixes keep arriving and get
+    /// thrown away, at the coarse accuracy indoor mode already uses as its
+    /// keep-alive — a long pause costs about what indoor tracking costs.
+    func pause() {
+        guard isTracking, !isPaused else { return }
+        isPaused = true
+        pauseIntervals.append(WorkoutPauseInterval(start: Date(), end: nil))
+        // Freeze the pedometer odometer where it stands. It keeps counting
+        // through the pause regardless; this anchor is what keeps that ground
+        // out of `liveDistance` (see `excludedPedometerMiles`).
+        pauseAnchorPedometerMiles = rawPedometerMiles
+        // Manual pause outranks the guess — two pause chips at once is
+        // nonsense, and the auto one would flap underneath this anyway.
+        isAutoPaused = false
+        // The dead-man switch slides forward off location/pedometer callbacks.
+        // A paused workout stops feeding it, so 5 minutes in it would ask "is
+        // your workout still tracking?" about a workout the user just paused.
+        cancelTrackingWatchdog()
+        applyLocationPowerProfile()
+        persistPauseState()
+    }
+
+    /// Resume from a manual pause.
+    ///
+    /// Every anchor is dropped on the way out. This is the load-bearing half:
+    /// the accrual gate only rejects a segment implying more than 12 m/s, so a
+    /// 10-minute pause spent walking 300 m to the car resolves to an implied
+    /// 0.5 m/s — it clears every gate and silently lands in the mile. Same
+    /// story for the route (a stale anchor draws a chord across the pause) and
+    /// the fix-to-fix movement witness.
+    func resume() {
+        guard isTracking, isPaused else { return }
+        isPaused = false
+        if !pauseIntervals.isEmpty, pauseIntervals[pauseIntervals.count - 1].end == nil {
+            pauseIntervals[pauseIntervals.count - 1].end = Date()
+        }
+        if let anchor = pauseAnchorPedometerMiles {
+            committedPausedPedometerMiles += max(0, rawPedometerMiles - anchor)
+            pauseAnchorPedometerMiles = nil
+        }
+        lastLocation = nil
+        lastRoutePoint = nil
+        evidenceAnchor = nil
+        // Grace window for the movement gate: after a long pause every witness
+        // is stale, so the first fresh fix would clear `blind` and flash
+        // AUTO-PAUSED at someone who has just started walking again.
+        lastResumeAt = Date()
+        armTrackingWatchdog(force: true)
+        applyLocationPowerProfile()
+        persistPauseState()
+    }
+
+    /// GPS precision follows the pause state: full accuracy while the workout
+    /// is live, the coarse keep-alive tier while paused (and always coarse in
+    /// pedometer mode, where fixes are only ever a keep-alive).
+    private func applyLocationPowerProfile() {
+        locationManager.desiredAccuracy = (isPaused || isUsingPedometer)
+            ? kCLLocationAccuracyHundredMeters
+            : kCLLocationAccuracyBest
+    }
+
+    /// Mirror the pause timeline to disk on every edge. The tracker's 1 Hz
+    /// tick can't be trusted with this — it dies with the cover — and a pause
+    /// that never reached disk would come back RUNNING after a termination,
+    /// with the whole pause counted as active time.
+    private func persistPauseState() {
+        InProgressWorkoutStore.savePauseState(isPaused: isPaused, intervals: pauseIntervals)
     }
 
     /// Keeps the movement witnesses fresh and the chip honest without
@@ -551,7 +719,12 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// `currentDistance` with a smaller value.
     private func ingestIndoorPedometerDistance(_ miles: Double) {
         lastPedometerSampleAt = Date()
-        currentDistance = max(currentDistance, pedometerOffset + miles)
+        // Keep ingesting through a pause rather than dropping readings: the
+        // odometer counts regardless, so the only way to keep paused ground
+        // out is to keep MEASURING it and subtract it. `countablePedometerMiles`
+        // is frozen for the whole pause and steps forward again on resume.
+        rawPedometerMiles = max(rawPedometerMiles, miles)
+        currentDistance = max(currentDistance, pedometerOffset + countablePedometerMiles)
         refreshLiveDistance()
         persistDistanceThrottled()
         // Liveness rides the data callbacks, not a view timer: a delivered
@@ -581,9 +754,15 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             lastPedometerProgressMiles = miles
             lastPedometerProgressAt = Date()
         }
+        // Same rebase as indoors: the raw odometer keeps running through a
+        // pause, so paused ground is measured and then subtracted rather than
+        // ignored — ignoring it would credit the entire pause on the first
+        // reading after resume, since each reading is a span from session
+        // start, not a delta.
+        rawPedometerMiles = max(rawPedometerMiles, miles)
         // Clamped monotonic: this span is displayed AND saved, so a
         // revised-down batch must never tick the workout backwards.
-        outdoorPedometerMiles = max(outdoorPedometerMiles ?? 0, miles)
+        outdoorPedometerMiles = max(outdoorPedometerMiles ?? 0, countablePedometerMiles)
         refreshLiveDistance()
         // The poll now advances the odometer in the background, where the
         // foreground timer is suspended — persist so a termination mid-walk
@@ -627,6 +806,12 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// so the fire date keeps sliding forward while the app is alive.
     private func armTrackingWatchdog(force: Bool = false) {
         guard isTracking || force else { return }
+        // A paused workout isn't a stalled one. Callbacks keep arriving (the
+        // location stream stays up as the process keep-alive), so without this
+        // the watchdog would keep re-arming and eventually fire only if the
+        // app died — but `pause()` cancels it outright, and letting any
+        // callback re-arm it would undo that.
+        guard !isPaused else { return }
         let now = Date()
         guard force || now.timeIntervalSince(lastWatchdogArm) >= 60 else { return }
         lastWatchdogArm = now
@@ -671,6 +856,15 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         isAutoPaused = false
         automotiveVerdict = false
         automotiveVerdictAt = nil
+        // Manual-pause state is session-scoped. Callers that need the pause
+        // timeline at finish (HealthKit events, the recap duration) capture it
+        // BEFORE stopping — see `stopWorkout`.
+        isPaused = false
+        pauseIntervals = []
+        lastResumeAt = nil
+        rawPedometerMiles = 0
+        committedPausedPedometerMiles = 0
+        pauseAnchorPedometerMiles = nil
     }
 
     /// Re-derive `liveDistance` after either instrument moved (main thread
@@ -723,6 +917,12 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // In pedometer mode location is only a background keep-alive —
         // distance comes from CMPedometer and there's no meaningful route.
         guard !isUsingPedometer else { return }
+
+        // Manually paused: the stream stays up purely to keep this process
+        // alive, so every fix is discarded. Nothing is anchored either —
+        // `resume()` re-anchors from the first fix after the pause, which is
+        // what stops the pause gap being counted as one long walked segment.
+        guard !isPaused else { return }
 
         // Process EVERY delivered fix in order — background delivery batches
         // several fixes per callback, and taking only the last one flattened
@@ -804,11 +1004,15 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// consulted alone: held-anchor stalls (turnarounds) aren't stillness.
     private func refreshAutoPauseState() {
         guard isTracking, !isUsingPedometer else { return }
+        // Manual pause owns the display while it's on. `pause()` already
+        // cleared the chip; this keeps the heartbeat from re-raising it.
+        guard !isPaused else { return }
         let evidence = [
             lastAccrualAt,
             lastMovingDopplerAt,
             lastFixMovementAt,
             lastPedometerProgressAt,
+            lastResumeAt,
             trackingStartedAt
         ]
         .compactMap { $0 }
@@ -960,13 +1164,20 @@ struct InProgressWorkoutBanner: View {
     @State private var latestState: InProgressWorkoutState?
     @State private var tickTimer: Timer?
 
-    // Compute real-time elapsed time based on start time
+    /// The state this banner is actually rendering — the reloaded copy once
+    /// the tick timer has one, else what it was handed.
+    private var current: InProgressWorkoutState { latestState ?? state }
+
+    /// Elapsed time, pause-excluded, matching the tracker's clock. Read from
+    /// the persisted intervals rather than the manager so the banner needs no
+    /// dependency on it; the manager writes them through on every pause edge.
     private var realTimeElapsedSeconds: TimeInterval {
-        if let latest = latestState {
-            return currentTime.timeIntervalSince(latest.startTime)
-        }
-        return currentTime.timeIntervalSince(state.startTime)
+        let paused = current.pauseIntervals?.totalPausedSeconds(asOf: currentTime)
+            ?? current.pausedTime
+        return max(0, currentTime.timeIntervalSince(current.startTime) - paused)
     }
+
+    private var isPaused: Bool { current.isPaused }
 
     private var formattedTime: String {
         let minutes = Int(realTimeElapsedSeconds) / 60
@@ -975,7 +1186,7 @@ struct InProgressWorkoutBanner: View {
     }
 
     private var currentDistance: Double {
-        latestState?.currentDistance ?? state.currentDistance
+        current.currentDistance
     }
 
     var body: some View {
@@ -995,13 +1206,15 @@ struct InProgressWorkoutBanner: View {
                         )
                         .frame(width: 40, height: 40)
 
-                    Image(systemName: "play.fill")
+                    // A paused workout must not wear a play glyph on a banner
+                    // whose whole job is to say what's happening right now.
+                    Image(systemName: isPaused ? "pause.fill" : "play.fill")
                         .foregroundColor(.white)
                         .font(.system(size: 18, weight: .bold))
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Workout in progress")
+                    Text(isPaused ? "Workout paused" : "Workout in progress")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundColor(.white)
