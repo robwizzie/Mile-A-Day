@@ -225,6 +225,26 @@ export async function selectChallengeForWeek(
  */
 export const STEPS_SUBSTITUTE_KEY = "move_more";
 
+/**
+ * Challenges pulled from the rotation, whose catalog rows survive only so that
+ * history entries still render and the `challenge_key` foreign key still
+ * resolves. A week already stamped with one of these self-heals — see
+ * `serveWeek`.
+ *
+ * Deliberately an EXPLICIT list rather than `active = FALSE`, because
+ * `STEPS_SUBSTITUTE_KEY` is inactive BY DESIGN: it sits outside the rotation so
+ * it can never be picked on its own, and it is stamped legitimately for anyone
+ * with no step data. Deriving "retired" from the `active` flag would re-roll
+ * those users' challenge on every single read.
+ *
+ * Add a key here in the same change that sets its catalog entry inactive.
+ */
+export const RETIRED_WEEKLY_KEYS = new Set([
+  "weekend_warrior",
+  "early_birds",
+  "night_owls",
+]);
+
 // MARK: - Target scaling
 
 function roundToStep(value: number, step: number): number {
@@ -575,6 +595,69 @@ export interface ServedWeek {
  * `ON CONFLICT DO NOTHING` plus a re-read means concurrent callers converge on
  * whichever landed first rather than one overwriting the other.
  */
+/**
+ * Re-stamp a week whose challenge has since been retired. Returns true when the
+ * row was rewritten, so the caller knows to re-read.
+ *
+ * Two guards, and both matter:
+ *
+ *   - **The current week only.** A past week is a record of what someone
+ *     actually played. Re-stamping it would rewrite that history and contradict
+ *     `getWeeklyChallengeHistory`, which joins retired catalog rows precisely so
+ *     old entries still render their real title and icon.
+ *   - **Nothing already completed.** An earned week is never taken away, even
+ *     for a challenge that no longer exists.
+ *
+ * The target is RECOMPUTED rather than carried over: the replacement measures a
+ * different metric, so the stamped target and baseline mean nothing to it.
+ */
+async function rerollRetiredWeek(
+  userId: string,
+  weekStart: string,
+): Promise<boolean> {
+  const window = await weekWindowForUser(userId);
+  if (window.weekStart !== weekStart) return false;
+
+  const done = await db.query<{ ok: boolean }>(
+    `SELECT EXISTS (
+			SELECT 1 FROM user_weekly_challenge_completions
+			WHERE user_id = $1 AND week_start = $2::date
+		) AS ok`,
+    [userId, weekStart],
+  );
+  if (done[0]?.ok) return false;
+
+  // Picks from getCatalog(), which is active-only, so the replacement can never
+  // itself be retired and the caller's re-read cannot loop. The one inactive key
+  // this can return is STEPS_SUBSTITUTE_KEY, which is deliberately not in
+  // RETIRED_WEEKLY_KEYS.
+  const challenge = await selectChallengeForWeek(userId, weekStart);
+  if (!challenge || RETIRED_WEEKLY_KEYS.has(challenge.challenge_key)) {
+    return false;
+  }
+
+  const baseline = await computeBaseline(userId, challenge.metric, weekStart);
+  const resolved = resolveTarget(challenge, baseline);
+
+  const updated = await db.query<{ user_id: string }>(
+    `UPDATE user_weekly_challenges
+		SET challenge_key = $3, target = $4, baseline = $5
+		WHERE user_id = $1 AND week_start = $2::date
+			AND challenge_key = ANY($6::text[])
+		RETURNING user_id`,
+    [
+      userId,
+      weekStart,
+      challenge.challenge_key,
+      resolved.target,
+      resolved.baseline,
+      [...RETIRED_WEEKLY_KEYS],
+    ],
+  );
+
+  return updated.length > 0;
+}
+
 export async function serveWeek(
   userId: string,
   weekStart: string,
@@ -595,6 +678,20 @@ export async function serveWeek(
     // The catalog row was deactivated or renamed after being served. Nothing
     // sane to render, and re-picking would contradict the stamp.
     if (!challenge) return null;
+
+    // A challenge retired between the stamp and now. The freeze is what would
+    // otherwise pin a user to it for the rest of the week: the Sunday announce
+    // cron SERVES as well as announces, so everyone gets stamped at their local
+    // 9 AM, and a retirement deployed later that day would be invisible until
+    // the following Sunday. Heal it instead of serving a challenge that no
+    // longer exists in the rotation.
+    if (
+      RETIRED_WEEKLY_KEYS.has(existing[0].challenge_key) &&
+      (await rerollRetiredWeek(userId, weekStart))
+    ) {
+      return serveWeek(userId, weekStart);
+    }
+
     return {
       challenge,
       target: existing[0].target,
