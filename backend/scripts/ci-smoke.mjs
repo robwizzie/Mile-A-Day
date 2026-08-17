@@ -30,6 +30,8 @@ const { signMediaUrl, verifyPostsMediaAccess, stripMediaQuery } =
 const { getNotificationPreferences, updateNotificationPreferences } =
   await import("../dist/services/notificationSettingsService.js");
 const { getFriendGhosts } = await import("../dist/services/ghostService.js");
+const { paceReference, paceTargetSeconds } =
+  await import("../dist/services/dailyChallengeService.js");
 const {
   seedWeeklyChallenges,
   weekWindowForUser,
@@ -1901,6 +1903,97 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     WENDY,
   ]);
   await db.query(`DELETE FROM users WHERE user_id = $1`, [WENDY]);
+}
+
+// --- Daily beat_your_pace: the reference window --------------------------
+//
+// The bar used to be the ALL-TIME best split, which mileTime.ts records as able
+// to "raise the bar permanently and make that challenge unwinnable" — one great
+// mile and the challenge is dead for that user forever. It is now a rolling
+// 4-week window, and three separate sites (live progress, completion, and the
+// card's description) share one definition. Every assertion here is on that
+// shared helper, so it covers all three.
+{
+  const PACER = "ci-pacer";
+  const TODAY = "2026-06-15";
+  const dayBefore = (n) => {
+    const d = new Date(`${TODAY}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - n);
+    return d.toISOString().slice(0, 10);
+  };
+
+  await db.query(
+    `INSERT INTO users (user_id, email, apple_sub, username, first_name)
+     VALUES ($1, 'pacer@ci.local', 'ci-sub-pacer', 'ci_pacer', 'pacer')
+     ON CONFLICT (user_id) DO NOTHING`,
+    [PACER],
+  );
+
+  const pace = async (id, daysAgo, seconds, exclusion = null) => {
+    const date = dayBefore(daysAgo);
+    await db.query(
+      `INSERT INTO workouts (workout_id, user_id, distance, local_date, date,
+         timezone_offset, workout_type, device_end_date, calories,
+         total_duration, exclusion_reason)
+       VALUES ($1,$2,1.0,$3::date,$3::date,0,'running',($3 || 'T12:00:00Z')::timestamptz,100,$4,$5)
+       ON CONFLICT (workout_id) DO NOTHING`,
+      [id, PACER, date, seconds, exclusion],
+    );
+    await db.query(
+      `INSERT INTO workout_splits (workout_id, split_number, split_duration, split_distance, split_pace)
+       VALUES ($1, 1, $2, 1.0, $2)`,
+      [id, seconds],
+    );
+  };
+
+  // A 10:00 mile ten days ago is inside the window and sets the bar.
+  await pace("ci-pace-recent", 10, 600);
+  assert.equal(
+    (await paceReference(PACER, TODAY)).prior,
+    600,
+    "a best inside the 4-week window sets the bar",
+  );
+
+  // An 8:20 from FORTY days ago has aged out. This is the whole fix: under the
+  // old all-time reference the bar would drop to 500 and stay there forever.
+  await pace("ci-pace-ancient", 40, 500);
+  assert.equal(
+    (await paceReference(PACER, TODAY)).prior,
+    600,
+    "a best older than 4 weeks has aged out (an all-time reference reads 500 and never recovers)",
+  );
+
+  // A vehicle_speed drive inside the window must not set an unbeatable bar —
+  // the exact failure mileTime.ts describes.
+  await pace("ci-pace-drive", 5, 300, "vehicle_speed");
+  assert.equal(
+    (await paceReference(PACER, TODAY)).prior,
+    600,
+    "an excluded workout never sets the bar (countedWorkoutSql)",
+  );
+
+  // Today's own split belongs to `today`, never to `prior`. The description
+  // query had no date bound at all, so a fast mile run today tightened the
+  // target printed on the card below the bar being scored against.
+  await pace("ci-pace-today", 0, 540);
+  const ref = await paceReference(PACER, TODAY);
+  assert.equal(
+    ref.prior,
+    600,
+    "today's split does NOT leak into the reference",
+  );
+  assert.equal(ref.today, 540, "and is reported as today's best");
+  assert.equal(
+    paceTargetSeconds(ref.prior),
+    630,
+    "the target is the reference plus 30s of slack",
+  );
+
+  await db.query(
+    `DELETE FROM workout_splits WHERE workout_id LIKE 'ci-pace-%'`,
+  );
+  await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-pace-%'`);
+  await db.query(`DELETE FROM users WHERE user_id = $1`, [PACER]);
 }
 
 console.log("ci-smoke: all assertions passed");
