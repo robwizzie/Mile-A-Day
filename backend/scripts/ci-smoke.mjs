@@ -1792,6 +1792,100 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
 
   await db.query(`DELETE FROM workout_splits WHERE workout_id LIKE 'ci-wk-%'`);
 
+  // --- Healing a week stamped before its challenge retired -------------------
+  //
+  // serveWeek freezes the pick, and the Sunday announce cron SERVES as well as
+  // announces — so everyone is stamped at their local 9 AM and a retirement
+  // deployed later that day would otherwise be invisible until the following
+  // Sunday. This is the code path that noticed Early Birds still showing after
+  // it had been retired.
+  const stamp = async (weekStart, key, target = 99) => {
+    await db.query(
+      `INSERT INTO user_weekly_challenges (user_id, week_start, challenge_key, target, baseline)
+       VALUES ($1, $2::date, $3, $4, NULL)
+       ON CONFLICT (user_id, week_start) DO UPDATE
+         SET challenge_key = EXCLUDED.challenge_key, target = EXCLUDED.target`,
+      [WENDY, weekStart, key, target],
+    );
+  };
+  const stampedKey = async (weekStart) =>
+    (
+      await db.query(
+        `SELECT challenge_key FROM user_weekly_challenges
+         WHERE user_id = $1 AND week_start = $2::date`,
+        [WENDY, weekStart],
+      )
+    )[0]?.challenge_key ?? null;
+
+  // Wendy earned a completion in the evaluator assertions above, and the heal
+  // deliberately refuses to touch a completed week — so clear both to get a
+  // clean starting state. (The completion guard gets its own assertion below.)
+  await db.query(`DELETE FROM user_weekly_challenges WHERE user_id = $1`, [
+    WENDY,
+  ]);
+  await db.query(
+    `DELETE FROM user_weekly_challenge_completions WHERE user_id = $1`,
+    [WENDY],
+  );
+
+  await stamp(win.weekStart, "early_birds");
+  const healed = await serveWeek(WENDY, win.weekStart);
+  assert.ok(healed, "a retired stamp still serves something");
+  assert.ok(
+    !["early_birds", "night_owls", "weekend_warrior"].includes(
+      healed.challenge.challenge_key,
+    ),
+    "a week stamped with a retired challenge re-rolls to a live one",
+  );
+  assert.notEqual(
+    healed.target,
+    99,
+    "and the target is RECOMPUTED — the replacement measures a different metric, so the stamped target means nothing to it",
+  );
+
+  // A past week is a record of what someone actually played. Re-stamping it
+  // would rewrite history and contradict the history read, which joins retired
+  // catalog rows precisely so old entries still render.
+  const oldWeek = day(-28);
+  await stamp(oldWeek, "early_birds");
+  await serveWeek(WENDY, oldWeek);
+  assert.equal(
+    await stampedKey(oldWeek),
+    "early_birds",
+    "a PAST week keeps its retired challenge — history is not rewritten",
+  );
+
+  // An earned week is never taken away, even for a challenge that no longer
+  // exists in the rotation.
+  await stamp(win.weekStart, "early_birds");
+  await db.query(
+    `INSERT INTO user_weekly_challenge_completions (user_id, week_start, challenge_key, target, final_value)
+     VALUES ($1, $2::date, 'early_birds', 2, 2)`,
+    [WENDY, win.weekStart],
+  );
+  await serveWeek(WENDY, win.weekStart);
+  assert.equal(
+    await stampedKey(win.weekStart),
+    "early_birds",
+    "a COMPLETED week keeps its retired challenge — an earned week is never taken away",
+  );
+  await db.query(
+    `DELETE FROM user_weekly_challenge_completions WHERE user_id = $1`,
+    [WENDY],
+  );
+
+  // The trap: move_more is `active: false` BY DESIGN — it is the off-rotation
+  // substitute for users with no step data, and it is stamped legitimately.
+  // Deriving "retired" from the active flag instead of the explicit key set
+  // would re-roll those users' challenge on every single read.
+  await stamp(win.weekStart, "move_more", 4);
+  await serveWeek(WENDY, win.weekStart);
+  assert.equal(
+    await stampedKey(win.weekStart),
+    "move_more",
+    "the steps substitute is inactive by design and must NEVER be treated as retired",
+  );
+
   await db.query(
     `DELETE FROM user_weekly_challenge_completions WHERE user_id LIKE 'ci-%'`,
   );
