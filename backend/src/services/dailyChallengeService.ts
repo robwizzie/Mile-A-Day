@@ -243,8 +243,7 @@ async function missedDaysInWindow(
   const missed: ChallengeMissedDayItem[] = [];
   for (const localDate of openDays) {
     let row: ChallengeRow | null =
-      servedByDate.get(localDate) ??
-      (duelDays.has(localDate) ? h2hRow : null);
+      servedByDate.get(localDate) ?? (duelDays.has(localDate) ? h2hRow : null);
     if (!row) {
       let friendlessOnH2hDay = false;
       const picked = await walkRotation(
@@ -621,33 +620,13 @@ async function computeProgress(
       return Math.min(dayTotal / Math.max(goalMiles, 0.01), 0.5);
     }
     case "beat_your_pace": {
-      const rows = await db.query<{
-        prior_min: string | null;
-        today_min: string | null;
-      }>(
-        `WITH prior AS (
-					SELECT MIN(s.split_pace) AS p
-					FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					WHERE w.user_id = $1 AND w.local_date < $2 AND ${countedWorkoutSql("w")}
-						AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
-				), today AS (
-					SELECT MIN(s.split_pace) AS p
-					FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					WHERE w.user_id = $1 AND w.local_date = $2 AND ${countedWorkoutSql("w")}
-						AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
-				)
-				SELECT prior.p::text AS prior_min, today.p::text AS today_min FROM prior, today`,
-        [userId, localDate],
-      );
-      const prior = rows[0]?.prior_min ? parseFloat(rows[0].prior_min) : 0;
-      const today = rows[0]?.today_min ? parseFloat(rows[0].today_min) : 0;
-      if (today <= 0) return 0;
-      if (prior <= 0) {
+      const { prior, today } = await paceReference(userId, localDate);
+      if (today === null) return 0;
+      if (prior === null) {
         const d = await dayTotalDistance(userId, localDate);
         return d >= goalMiles * 0.95 ? 1.0 : 0;
       }
-      // Target pace = prior + 30s (0.5 min/mi). Check against that target.
-      const targetSec = prior + 30;
+      const targetSec = paceTargetSeconds(prior);
       if (today <= targetSec) return 1.0;
       return Math.min(targetSec / today, 0.99);
     }
@@ -793,31 +772,12 @@ async function evaluatePredicate(
     }
 
     case "beat_your_pace": {
-      const rows = await db.query<{
-        prior_min: string | null;
-        today_min: string | null;
-      }>(
-        `WITH prior AS (
-					SELECT MIN(s.split_pace) AS p
-					FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					WHERE w.user_id = $1 AND w.local_date < $2 AND ${countedWorkoutSql("w")}
-						AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
-				), today AS (
-					SELECT MIN(s.split_pace) AS p
-					FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-					WHERE w.user_id = $1 AND w.local_date = $2 AND ${countedWorkoutSql("w")}
-						AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95
-				)
-				SELECT prior.p::text AS prior_min, today.p::text AS today_min FROM prior, today`,
-        [userId, localDate],
-      );
-      const prior = rows[0]?.prior_min ? parseFloat(rows[0].prior_min) : null;
-      const today = rows[0]?.today_min ? parseFloat(rows[0].today_min) : null;
+      const { prior, today } = await paceReference(userId, localDate);
       if (prior === null) {
         return (await dayTotalDistance(userId, localDate)) >= goalMiles * 0.95;
       }
       if (today === null) return false;
-      return today <= prior + 30;
+      return today <= paceTargetSeconds(prior);
     }
 
     case "five_k_day":
@@ -858,6 +818,75 @@ async function evaluatePredicate(
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
+
+/**
+ * How far back `beat_your_pace` looks for the time you have to beat.
+ *
+ * Matches the weekly `personal_best` challenge's reference window, and for the
+ * same reason: an all-time best makes the challenge PERMANENTLY unwinnable.
+ * Set one great mile — or have one bad split slip through the plausibility
+ * floor — and the bar never comes down again, so the challenge is dead for that
+ * user forever. Rolling the window means an old best simply ages out.
+ *
+ * mileTime.ts already documented this as a live problem; this is the fix.
+ */
+const PACE_REFERENCE_DAYS = 28;
+
+/**
+ * The pace to beat and the pace achieved, in seconds per mile — the only place
+ * `beat_your_pace`'s reference window is defined.
+ *
+ * All three sites that need it (live progress, completion, and the card's
+ * rendered description) go through here. They previously carried three separate
+ * copies of this SQL and had already drifted: the description's had NO date
+ * bound at all, so a fast mile run TODAY tightened the target shown on the card
+ * below the bar the user was actually being judged against.
+ *
+ * `countedWorkoutSql` is what keeps a `vehicle_speed` drive or a Strava
+ * duplicate from setting the bar.
+ */
+export async function paceReference(
+  userId: string,
+  localDate: string,
+): Promise<{ prior: number | null; today: number | null }> {
+  const splitFilter = `${countedWorkoutSql("w")}
+			AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}
+			AND s.split_distance >= 0.95`;
+
+  const rows = await db.query<{
+    prior_min: string | null;
+    today_min: string | null;
+  }>(
+    `WITH prior AS (
+			SELECT MIN(s.split_pace) AS p
+			FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
+			WHERE w.user_id = $1
+				AND w.local_date BETWEEN ($2::date - ${PACE_REFERENCE_DAYS}) AND ($2::date - 1)
+				AND ${splitFilter}
+		), today AS (
+			SELECT MIN(s.split_pace) AS p
+			FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
+			WHERE w.user_id = $1 AND w.local_date = $2::date
+				AND ${splitFilter}
+		)
+		SELECT prior.p::text AS prior_min, today.p::text AS today_min FROM prior, today`,
+    [userId, localDate],
+  );
+
+  const num = (v: string | null | undefined) => {
+    const n = v ? parseFloat(v) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+  return {
+    prior: num(rows[0]?.prior_min),
+    today: num(rows[0]?.today_min),
+  };
+}
+
+/** Seconds per mile you have to hit today: the reference plus 30s of slack. */
+export function paceTargetSeconds(prior: number): number {
+  return prior + 30;
+}
 
 async function dayTotalDistance(
   userId: string,
@@ -1406,19 +1435,17 @@ async function renderDescription(
     return challenge.description_template;
   }
   // Personalize for beat_your_pace (and any future pace challenges).
-  const rows = await db.query<{ min_pace: string | null }>(
-    `SELECT MIN(s.split_pace)::text AS min_pace
-		FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-		WHERE w.user_id = $1 AND ${countedWorkoutSql("w")}
-			AND s.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS} AND s.split_distance >= 0.95`,
-    [userId],
-  );
-  const secPerMile = rows[0]?.min_pace ? parseFloat(rows[0].min_pace) : 0;
-  if (secPerMile <= 0) return "Set a new personal best pace today";
-  const targetMinPerMi = secPerMile / 60.0 + 0.5;
+  //
+  // Must be the SAME reference the scorer uses. This query used to have no date
+  // bound at all, so it included TODAY's splits: run a fast mile and the target
+  // printed on the card tightened below the bar you were actually judged
+  // against, which reads as the challenge moving while you do it.
+  const localDate = await resolveUserLocalDate(userId);
+  const { prior } = await paceReference(userId, localDate);
+  if (prior === null) return "Set a new personal best pace today";
   return challenge.description_template.replace(
     "{avg_pace}",
-    formatPace(targetMinPerMi),
+    formatPace(paceTargetSeconds(prior) / 60.0),
   );
 }
 
