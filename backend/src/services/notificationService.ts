@@ -17,6 +17,7 @@ import {
   getTodayMiles,
   getTodayStats,
   getUserLocalDate,
+  DAILY_GOAL_TOLERANCE,
 } from "./workoutService.js";
 import {
   resolveAudience,
@@ -51,6 +52,90 @@ function formatPace(secondsPerMile: number): string {
   const m = Math.floor(s / 60);
   const sec = s % 60;
   return `${m}:${sec.toString().padStart(2, "0")}/mi`;
+}
+
+// ─── Stat-line body builders ───────────────────────────────────────
+
+/**
+ * The workout pushes are BUILT when the workout syncs and DELIVERED ~10
+ * minutes later (see the deferred queue below), so their bodies have to be
+ * re-derivable from the DB at any point in between — a recap distance edit
+ * lands squarely inside that window. Both the queue-time senders and
+ * refreshWorkoutEditNotifications go through these, so a corrected number
+ * re-states the same sentence instead of a hand-rolled second version of it.
+ */
+
+const MILE_COMPLETION_FALLBACK_BODY =
+  "Your friend just completed their daily mile. Time to lace up!";
+
+/** Friend-facing "got their mile in" stat line, from the whole day's total. */
+async function buildMileCompletionBody(userId: string): Promise<string> {
+  // If stats fail or are degenerate, fall back to the generic body so the
+  // notification still goes out.
+  try {
+    const stats = await getTodayStats(userId);
+    if (stats.miles > 0) {
+      const parts = [
+        formatMiles(stats.miles),
+        formatDuration(stats.durationSeconds),
+      ];
+      if (stats.bestSplitPaceSecMi != null && stats.bestSplitPaceSecMi > 0) {
+        parts.push(`best pace ${formatPace(stats.bestSplitPaceSecMi)}`);
+      }
+      return parts.join(" · ");
+    }
+  } catch (err: any) {
+    console.error(
+      "[Notifications] Error building mile completion stats body, using fallback:",
+      err.message,
+    );
+  }
+  return MILE_COMPLETION_FALLBACK_BODY;
+}
+
+/** The runner's OWN "Mile complete!" body, from the whole day's total. */
+async function buildGoalReachedSelfBody(userId: string): Promise<string> {
+  try {
+    const stats = await getTodayStats(userId);
+    if (stats.miles > 0) {
+      return `${formatMiles(stats.miles)} · ${formatDuration(stats.durationSeconds)} — your streak is safe for today.`;
+    }
+  } catch {
+    // Stats are garnish; the celebration still goes out.
+  }
+  return "Your daily goal is done — streak safe for today.";
+}
+
+/**
+ * Per-workout ('workout' / 'extra_workout') stat line: THIS workout's numbers
+ * plus the day's running total. Best pace is the workout's own full-mile
+ * split, falling back to its average when the workout is itself ~a mile.
+ */
+async function buildWorkoutEventBody(
+  userId: string,
+  workoutId: string,
+  distance: number,
+  duration: number,
+): Promise<string> {
+  let bestPace: number | null = null;
+  const [paceRow] = await db.query<{ pace: number | string | null }>(
+    `SELECT MIN(split_pace) AS pace
+			FROM workout_splits
+			WHERE workout_id = $1 AND split_distance >= 0.95 AND split_pace > 0`,
+    [workoutId],
+  );
+  if (paceRow?.pace != null) bestPace = Number(paceRow.pace);
+  if (bestPace == null && distance >= 0.95 && duration > 0) {
+    bestPace = duration / distance;
+  }
+
+  const todayMiles = await getTodayMiles(userId);
+
+  const parts = [formatMiles(distance), formatDuration(duration)];
+  if (bestPace != null && bestPace > 0)
+    parts.push(`best pace ${formatPace(bestPace)}`);
+  if (todayMiles > 0) parts.push(`${formatMiles(Number(todayMiles))} today`);
+  return parts.join(" · ");
 }
 
 // ─── Shared Recipient Pool Helper ──────────────────────────────────
@@ -167,18 +252,9 @@ export async function notifyFriendsOfMileCompletion(
     // BEFORE the outgoing-audience branch: telling friends is optional,
     // telling the runner is not.
     try {
-      let selfBody = "Your daily goal is done — streak safe for today.";
-      try {
-        const selfStats = await getTodayStats(userId);
-        if (selfStats.miles > 0) {
-          selfBody = `${formatMiles(selfStats.miles)} · ${formatDuration(selfStats.durationSeconds)} — your streak is safe for today.`;
-        }
-      } catch {
-        // Stats are garnish; the celebration still goes out.
-      }
       await sendPush(userId, {
         title: "Mile complete! 🔥",
-        body: selfBody,
+        body: await buildGoalReachedSelfBody(userId),
         type: "goal_reached",
         data: { local_date: localDate },
       });
@@ -218,29 +294,7 @@ export async function notifyFriendsOfMileCompletion(
 
     const title = `${user.username} got their mile in!`;
 
-    // Build a stat-line body. If stats fail or are degenerate, fall back to
-    // the generic body so the notification still goes out.
-    const FALLBACK_BODY =
-      "Your friend just completed their daily mile. Time to lace up!";
-    let body = FALLBACK_BODY;
-    try {
-      const stats = await getTodayStats(userId);
-      if (stats.miles > 0) {
-        const parts = [
-          formatMiles(stats.miles),
-          formatDuration(stats.durationSeconds),
-        ];
-        if (stats.bestSplitPaceSecMi != null && stats.bestSplitPaceSecMi > 0) {
-          parts.push(`best pace ${formatPace(stats.bestSplitPaceSecMi)}`);
-        }
-        body = parts.join(" · ");
-      }
-    } catch (err: any) {
-      console.error(
-        "[Notifications] Error building mile completion stats body, using fallback:",
-        err.message,
-      );
-    }
+    const body = await buildMileCompletionBody(userId);
 
     const payload = {
       title,
@@ -389,28 +443,13 @@ async function notifyFriendsOfWorkoutEvent(
     );
     if (!user) return;
 
-    // Best pace for THIS workout: min split pace where split is ~full mile,
-    // else workout average if the workout itself is ~full mile.
-    let bestPace: number | null = null;
-    const [paceRow] = await db.query<{ pace: number | string | null }>(
-      `SELECT MIN(split_pace) AS pace
-			FROM workout_splits
-			WHERE workout_id = $1 AND split_distance >= 0.95 AND split_pace > 0`,
-      [workoutId],
-    );
-    if (paceRow?.pace != null) bestPace = Number(paceRow.pace);
-    if (bestPace == null && distance >= 0.95 && duration > 0) {
-      bestPace = duration / distance;
-    }
-
-    const todayMiles = await getTodayMiles(userId);
-
     const title = `${user.username} completed a ${activity}`;
-    const parts = [formatMiles(distance), formatDuration(duration)];
-    if (bestPace != null && bestPace > 0)
-      parts.push(`best pace ${formatPace(bestPace)}`);
-    if (todayMiles > 0) parts.push(`${formatMiles(Number(todayMiles))} today`);
-    const body = parts.join(" · ");
+    const body = await buildWorkoutEventBody(
+      userId,
+      workoutId,
+      distance,
+      duration,
+    );
 
     // Runner's local date (fetched above for the today-only guard) — hype
     // dedupe key for clients (see mile-completion note).
@@ -465,6 +504,136 @@ async function notifyFriendsOfWorkoutEvent(
     console.error(
       `[Notifications] Error notifying friends of ${eventType}:`,
       err.message,
+    );
+  }
+}
+
+/**
+ * Re-state a workout's notifications after the user EDITED it.
+ *
+ * Both friend workout pushes are built at sync time and delivered ~10 minutes
+ * later (`send_after_at`, the photo-merge window), and an audience-'ask'
+ * confirm card sits in the sender's own inbox until they tap send. A recap
+ * distance correction — the treadmill card exists for exactly this — lands
+ * inside that window, so the row that eventually sends was written from the
+ * number the user just replaced: friends were told "0.62 mi" for a mile its
+ * owner had already corrected to 1.05. Rebuild every still-pending body from
+ * the DB's current numbers.
+ *
+ * Two crossings change WHICH notification is right, not just its text:
+ *  - edited UP over the goal: the mile was never announced (the sync-time
+ *    check saw a short workout), so announce it now. The per-day claim inside
+ *    notifyFriendsOfMileCompletion keeps a re-edit from re-firing it.
+ *  - edited DOWN under the goal: a queued "got their mile in!" now describes
+ *    a mile the day doesn't have — expire it before the cron sends it.
+ *
+ * The runner's own "Mile complete! 🔥" has already been delivered by then and
+ * APNs can't take it back, but its in-app inbox row is the copy they keep
+ * re-reading, so that gets the corrected stat line too.
+ *
+ * Today-only: editing a historical workout must never push anything (same
+ * guard as the sync-time senders). Never throws — an edit must not fail
+ * because a notification couldn't be restated.
+ */
+export async function refreshWorkoutEditNotifications(
+  userId: string,
+  workoutId: string,
+): Promise<void> {
+  try {
+    const [workout] = await db.query<{
+      workout_type: string;
+      distance: number | string;
+      total_duration: number | string;
+      local_date: string;
+    }>(
+      `SELECT workout_type, distance, total_duration, local_date::text AS local_date
+			FROM workouts
+			WHERE user_id = $1 AND workout_id = $2 AND deleted_at IS NULL AND exclusion_reason IS NULL`,
+      [userId, workoutId],
+    );
+    if (!workout) return;
+
+    const type = workout.workout_type;
+    if (type !== "running" && type !== "walking") return;
+
+    const localDate = await getUserLocalDate(userId);
+    if (workout.local_date !== localDate) return;
+
+    // Per-workout rows ('workout' pre-goal, 'extra_workout' post-goal) carry
+    // this workout's own numbers.
+    const eventBody = await buildWorkoutEventBody(
+      userId,
+      workoutId,
+      Number(workout.distance),
+      Number(workout.total_duration),
+    );
+    await db.query(
+      `UPDATE pending_friend_notifications
+			 SET payload = jsonb_set(payload, '{body}', to_jsonb($3::text))
+			 WHERE user_id = $1 AND workout_id = $2 AND status = 'pending'
+				 AND event_type IN ('workout', 'extra_workout')`,
+      [userId, workoutId, eventBody],
+    );
+
+    // Same tolerance the sync path completes the day on.
+    const todayMiles = Number(await getTodayMiles(userId));
+    const dayComplete = todayMiles >= DAILY_GOAL_TOLERANCE;
+
+    if (!dayComplete) {
+      await db.query(
+        `UPDATE pending_friend_notifications SET status = 'expired'
+				 WHERE user_id = $1 AND event_type = 'mile_completed'
+					 AND status = 'pending' AND local_date = $2::date`,
+        [userId, localDate],
+      );
+      return;
+    }
+
+    // Announce the mile when THIS edit is what crossed the line — the
+    // sync-time check saw a workout that fell short, so nothing fired at all.
+    //
+    // Gated on the runner's own goal_reached inbox row rather than on
+    // notifyFriendsOfMileCompletion's return value: its claim key is the UTC
+    // date, so an evening run whose sync and edit straddle UTC midnight would
+    // claim twice and push the day's mile twice. The inbox row is written on
+    // every sendPush path (quiet hours, prefs off, no devices), keyed by the
+    // runner's LOCAL date, which is the question being asked.
+    const [announced] = await db.query(
+      `SELECT 1 FROM in_app_notifications
+				 WHERE user_id = $1 AND type = 'goal_reached'
+					 AND data->>'local_date' = $2
+				 LIMIT 1`,
+      [userId, localDate],
+    );
+    if (!announced) await notifyFriendsOfMileCompletion(userId);
+
+    // Restate a mile-completion row queued BEFORE the edit — unless a photo
+    // has since been merged into it (notifyFriendsOfPost rewrites the body to
+    // the caption and stamps data.post_id); that body is no longer a stat
+    // line and must survive.
+    const mileBody = await buildMileCompletionBody(userId);
+    await db.query(
+      `UPDATE pending_friend_notifications
+			 SET payload = jsonb_set(payload, '{body}', to_jsonb($3::text))
+			 WHERE user_id = $1 AND event_type = 'mile_completed'
+				 AND status = 'pending' AND local_date = $2::date
+				 AND payload->'data'->>'post_id' IS NULL`,
+      [userId, localDate, mileBody],
+    );
+
+    const selfBody = await buildGoalReachedSelfBody(userId);
+    await db.query(
+      `UPDATE in_app_notifications
+			 SET body = $3
+			 WHERE user_id = $1 AND type = 'goal_reached'
+				 AND data->>'local_date' = $2
+				 AND body <> $3`,
+      [userId, localDate, selfBody],
+    );
+  } catch (err: any) {
+    console.error(
+      "[Notifications] Error refreshing notifications after workout edit:",
+      err?.message ?? err,
     );
   }
 }

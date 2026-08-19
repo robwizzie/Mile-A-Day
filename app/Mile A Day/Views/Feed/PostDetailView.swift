@@ -210,6 +210,18 @@ struct PostDetailView: View {
                 : nil,
             onSetCollabOnProfile: (post.hasAcceptedCoauthor && post.coauthor_user_id == currentUserId)
                 ? { onProfile in Task { await setCollabOnProfile(post, onProfile: onProfile) } }
+                : nil,
+            onSetCollabOnFeed: (post.hasAcceptedCoauthor && post.coauthor_user_id == currentUserId)
+                ? { onFeed in Task { await setCollabOnFeed(post, onFeed: onFeed) } }
+                : nil,
+            // Offered to any credited participant, not just the mirrored
+            // coauthor: on a buddy walk everyone's trace is on the card, and
+            // everyone's trace is theirs.
+            onSetMyCollabRoute: post.acceptedCoauthors.contains { $0.user_id == currentUserId }
+                ? { include in Task { await setMyCollabRoute(post, include: include) } }
+                : nil,
+            onSetIncludeRoute: post.is_self
+                ? { include in Task { await setIncludeRoute(post, include: include) } }
                 : nil
         )
     }
@@ -220,6 +232,49 @@ struct PostDetailView: View {
     private func leaveCollab(_ post: PostItem) async {
         try? await PostService.respondToCoauthor(postId: post.post_id, accept: false)
         await MainActor.run { posts.removeAll { $0.post_id == post.post_id } }
+    }
+
+    /// Accepted coauthor keeps the tag but stops the post reaching THEIR
+    /// friends' feeds. Nothing else moves — the author's circle keeps it, the
+    /// tag stays visible, and it stays on the coauthor's own grid.
+    private func setCollabOnFeed(_ post: PostItem, onFeed: Bool) async {
+        await MainActor.run {
+            MADHaptics.tap()
+            updatePost(post.post_id) { $0.coauthor_on_feed = onFeed }
+        }
+        do {
+            try await PostService.setCoauthorOnFeed(postId: post.post_id, onFeed: onFeed)
+        } catch {
+            await MainActor.run { updatePost(post.post_id) { $0.coauthor_on_feed = !onFeed } }
+        }
+    }
+
+    /// A credited participant's own route consent for THIS post, above their
+    /// global "Share route maps" setting.
+    private func setMyCollabRoute(_ post: PostItem, include: Bool) async {
+        await MainActor.run {
+            MADHaptics.tap()
+            updatePost(post.post_id) { item in
+                guard let idx = item.coauthors?.firstIndex(where: { $0.user_id == currentUserId })
+                else { return }
+                item.coauthors?[idx].include_route = include
+            }
+        }
+        try? await PostService.setCoauthorRoute(postId: post.post_id, includeRoute: include)
+    }
+
+    /// The author adds or withdraws the route slide after posting. The trace
+    /// itself is untouched, so this is reversible either way.
+    private func setIncludeRoute(_ post: PostItem, include: Bool) async {
+        await MainActor.run {
+            MADHaptics.tap()
+            updatePost(post.post_id) { $0.include_route = include }
+        }
+        do {
+            try await PostService.setPostIncludeRoute(postId: post.post_id, includeRoute: include)
+        } catch {
+            await MainActor.run { updatePost(post.post_id) { $0.include_route = !include } }
+        }
     }
 
     /// Accepted coauthor pins this collab on/off their own profile grid. The

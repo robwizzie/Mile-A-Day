@@ -407,50 +407,93 @@ struct PostShareStepView: View {
         }
     }
 
-    /// "Ran it together?" — pick ONE friend to co-post with. They're invited
-    /// on share and the post goes dual-author once they accept.
+    /// "Ran it together?" — credit everyone who was on the walk. They're
+    /// tagged on share, the post reaches all their friends, and it lands on
+    /// all their profiles.
+    ///
+    /// Names, not one name: the walk this composer usually opens from had more
+    /// than two people on it, and crediting only the first meant the rest
+    /// either went uncredited or posted the same walk again themselves. Each
+    /// chip removes itself; the row as a whole reopens the picker.
     private var coauthorRow: some View {
-        Button { showCoauthorPicker = true } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "person.2.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(MADTheme.Colors.madRed)
-                if let coauthor = vm.coauthor {
-                    AvatarView(name: coauthor.username ?? "?",
-                               imageURL: coauthor.profile_image_url, size: 26)
-                    Text("Co-posting with @\(coauthor.username ?? "")")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                    Spacer()
-                    Button {
-                        vm.coauthor = nil
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(.white.opacity(0.4))
-                    }
-                } else {
-                    Text("Ran it together? Add a co-poster")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.7))
+        VStack(alignment: .leading, spacing: 8) {
+            Button { showCoauthorPicker = true } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "person.2.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(MADTheme.Colors.madRed)
+                    Text(coauthorPrompt)
+                        .font(.system(size: 14, weight: vm.coauthors.isEmpty ? .semibold : .bold,
+                                      design: .rounded))
+                        .foregroundColor(vm.coauthors.isEmpty ? .white.opacity(0.7) : .white)
                     Spacer()
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.white.opacity(0.4))
                 }
+                .contentShape(Rectangle())
             }
-            .padding(MADTheme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                    .fill(Color.white.opacity(0.06))
-            )
+            .buttonStyle(.plain)
+
+            if !vm.coauthors.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(vm.coauthors, id: \.user_id) { person in
+                            coauthorChip(person)
+                        }
+                    }
+                    .padding(.vertical, 1)
+                }
+            }
         }
-        .buttonStyle(.plain)
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .fill(Color.white.opacity(0.06))
+        )
         .sheet(isPresented: $showCoauthorPicker) {
-            CoauthorPickerSheet(friends: friendService.friends) { picked in
-                vm.coauthor = picked
+            CoauthorPickerSheet(
+                friends: friendService.friends,
+                initialSelection: vm.coauthors,
+                maxSelection: PostComposerViewModel.maxCoauthors
+            ) { picked in
+                vm.coauthors = picked
             }
         }
+    }
+
+    private var coauthorPrompt: String {
+        switch vm.coauthors.count {
+        case 0: return "Ran it together? Add co-posters"
+        case 1: return "Co-posting with @\(vm.coauthors[0].username ?? "")"
+        default: return "Co-posting with \(vm.coauthors.count) friends"
+        }
+    }
+
+    private func coauthorChip(_ person: BackendUser) -> some View {
+        HStack(spacing: 6) {
+            AvatarView(name: person.username ?? "?",
+                       imageURL: person.profile_image_url, size: 22)
+            Text("@\(person.username ?? "")")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+            Button {
+                MADHaptics.tap()
+                vm.coauthors.removeAll { $0.user_id == person.user_id }
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.45))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.leading, 4)
+        .padding(.trailing, 8)
+        .padding(.vertical, 4)
+        // .fixedSize, deliberately: a username is DATA, and a chip row that
+        // can publish an unshrinkable minimum width is what pushed a card past
+        // the screen once already. The row scrolls instead.
+        .background(Capsule().fill(Color.white.opacity(0.08)))
     }
 
     // MARK: - Route
@@ -466,7 +509,7 @@ struct PostShareStepView: View {
                     .foregroundColor(.white)
             }
             .tint(MADTheme.Colors.madRed)
-            Text("Friends can swipe to see your mile's path next to the photo.")
+            Text(routeToggleCaption)
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.5))
                 .fixedSize(horizontal: false, vertical: true)
@@ -480,6 +523,18 @@ struct PostShareStepView: View {
         // The coordinates are only fetched here, on the screen that draws
         // them — the edit step just needs to know a route EXISTS.
         .task { await vm.loadRoutePreview() }
+    }
+
+    /// The toggle explains itself, and — when the user has set a standing
+    /// preference — says so, because otherwise "why is this always off?" has
+    /// no answer anywhere on this screen.
+    private var routeToggleCaption: String {
+        let base = "Friends can swipe to see your mile's path next to the photo."
+        switch RouteSharingDefault.current {
+        case .ask: return base
+        case .always: return base + " You've set new posts to always include it."
+        case .never: return base + " You've set new posts to leave it off."
+        }
     }
 
     /// The route slide as friends will actually get it: the same 4:5 frame,

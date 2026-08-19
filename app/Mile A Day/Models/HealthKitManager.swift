@@ -43,11 +43,10 @@ struct WorkoutRecord: Codable, Identifiable {
         self.deviceEndDate = workout.endDate
         self.localDate = timezoneCorrectedDate
         
-        if timezoneOffset != 0 {
-            self.localEndTime = Calendar.current.date(byAdding: .hour, value: timezoneOffset, to: workout.endDate) ?? workout.endDate
-        } else {
-            self.localEndTime = workout.endDate
-        }
+        // The workout's real end instant, unshifted. Local formatters render it
+        // in the device's timezone already; adding `timezoneOffset` hours on top
+        // moved the displayed clock time by that offset a SECOND time.
+        self.localEndTime = workout.endDate
         
         self.timezoneOffset = timezoneOffset
         self.distance = workout.madDistanceMiles
@@ -263,33 +262,13 @@ final class WorkoutProcessor {
         return Set(milesByDate.filter { $0.value >= 0.95 }.keys)
     }
     
+    /// The local calendar day a workout belongs to: the device calendar day of
+    /// its START. Mirrors the iOS `WorkoutProcessor` (and the server's
+    /// `local_date`) exactly — see that copy for why the old "unusual hour"
+    /// offset search had to go. Second value stays for the persisted
+    /// `timezoneOffset` field and is always 0.
     private func determineLocalDateWithOffset(for workout: HKWorkout) -> (Date, Int) {
-        let deviceDate = workout.endDate
-        let deviceStartOfDay = calendar.startOfDay(for: deviceDate)
-        let hour = calendar.component(.hour, from: deviceDate)
-        
-        if hour >= 6 && hour <= 22 {
-            return (deviceStartOfDay, 0)
-        }
-        
-        let possibleOffsets = [-6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6]
-        
-        for offset in possibleOffsets {
-            guard let correctedDate = calendar.date(byAdding: .hour, value: offset, to: deviceDate) else {
-                continue
-            }
-            
-            let correctedHour = calendar.component(.hour, from: correctedDate)
-            
-            if correctedHour >= 6 && correctedHour <= 22 {
-                let correctedDay = calendar.startOfDay(for: correctedDate)
-                if correctedDay != deviceStartOfDay {
-                    return (correctedDay, offset)
-                }
-            }
-        }
-        
-        return (deviceStartOfDay, 0)
+        (calendar.startOfDay(for: workout.startDate), 0)
     }
 }
 
@@ -657,7 +636,7 @@ class HealthKitManager: ObservableObject {
     
     /// The types we read from HealthKit. Shared by the authorization request and
     /// the non-prompting status check so the two can never drift apart.
-    private var healthKitReadTypes: Set<HKObjectType> {
+    var healthKitReadTypes: Set<HKObjectType> {
         [
             HKObjectType.workoutType(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
@@ -670,7 +649,11 @@ class HealthKitManager: ObservableObject {
     /// The types we write (for workout tracking). workoutRoute share access lets
     /// in-app GPS workouts save their route, which is what the feed's route maps
     /// are built from at sync time.
-    private var healthKitWriteTypes: Set<HKSampleType> {
+    // Not private: the Health Access screen reports on exactly these two sets,
+    // and a screen that listed its own hand-written copy would drift the first
+    // time a type is added here — telling the user everything is fine about a
+    // permission the app is actually blocked on.
+    var healthKitWriteTypes: Set<HKSampleType> {
         [
             HKObjectType.workoutType(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
@@ -756,6 +739,19 @@ class HealthKitManager: ObservableObject {
     func isWorkoutSharingDenied() -> Bool {
         guard HKHealthStore.isHealthDataAvailable() else { return false }
         return healthStore.authorizationStatus(for: HKObjectType.workoutType()) == .sharingDenied
+    }
+
+    /// Whether *route* write access is off, independently of Workouts.
+    ///
+    /// These are two separate switches in Settings > Health > Data Access, and a
+    /// walk saves perfectly well with Workouts allowed and Route denied — it just
+    /// arrives with no map, in Apple Fitness and in our own feed alike, with no
+    /// error anywhere (`finishRoute` reports failure but nothing else can tell
+    /// that apart from "this walk had no GPS"). Share status is reliable, unlike
+    /// read status, so this is worth asking before blaming the trace.
+    func isRouteSharingDenied() -> Bool {
+        guard HKHealthStore.isHealthDataAvailable() else { return false }
+        return healthStore.authorizationStatus(for: HKSeriesType.workoutRoute()) == .sharingDenied
     }
 
     // Enable background delivery for HealthKit data
@@ -1210,8 +1206,7 @@ class HealthKitManager: ObservableObject {
         let today = calendar.startOfDay(for: Date())
         
         let todaysWorkouts = workouts.filter { workout in
-            let workoutDate = calendar.startOfDay(for: workout.endDate)
-            return workoutDate == today
+            localDay(for: workout) == today
         }
         
         completion(todaysWorkouts)
@@ -1224,8 +1219,7 @@ class HealthKitManager: ObservableObject {
         let targetDateStart = calendar.startOfDay(for: targetDate)
         
         let targetDateWorkouts = workouts.filter { workout in
-            let workoutDate = calendar.startOfDay(for: workout.endDate)
-            return workoutDate == targetDateStart
+            localDay(for: workout) == targetDateStart
         }
         
         completion(targetDateWorkouts)
@@ -1475,18 +1469,19 @@ class HealthKitManager: ObservableObject {
     
     // MARK: - Workout Index Management (moved to HealthKitManager+WorkoutIndex.swift)
     
-    /// Get the timezone-corrected local end time for a workout
-    /// Returns the corrected time if workout is in index, otherwise returns workout's device time
-    func getCorrectedLocalTime(for workout: HKWorkout) -> Date {
-        #if !os(watchOS)
-        if let record = workoutRecord(forUUID: workout.uuid.uuidString) {
-            return record.localEndTime
-        }
-        return workout.endDate
-        #else
-        return workout.endDate
-        #endif
+    /// The local calendar day a workout belongs to — the ONE rule every surface
+    /// that buckets workouts into days must use.
+    ///
+    /// It is the device calendar day of the workout's START, which is exactly how
+    /// the server derives `local_date` (WorkoutSyncService formats
+    /// `workout.startDate` with `TimeZone.current`). Bucketing by END instead
+    /// silently disagrees with the server for any walk that crosses midnight —
+    /// the app draws an empty day while the server counts the mile and keeps the
+    /// streak alive, which is indistinguishable from data loss to the user.
+    func localDay(for workout: HKWorkout) -> Date {
+        Calendar.current.startOfDay(for: workout.startDate)
     }
+
 
     #if os(watchOS)
     // MARK: - Watch Summary Refresh
@@ -1798,9 +1793,11 @@ extension MADWatchBridge: WCSessionDelegate {
 /// pipelines all behaving: what the tracker showed is the floor for what every
 /// screen — and the server — is allowed to show afterwards.
 ///
-/// Deliberately only ever RAISES, and only for workouts this app measured
+/// The receipt only ever RAISES, and only for workouts this app measured
 /// itself. A third-party recording is untouched, and a HealthKit value that is
-/// somehow larger (an edit, a correction) still wins.
+/// somehow larger still wins. The single exception is the user typing a
+/// distance on the edit screen: that is an answer rather than a floor, so it
+/// wins in both directions and for any workout (`userOverride`).
 ///
 /// Lives here rather than in its own file because `WorkoutDedup` below consults
 /// it and both are compiled into the Watch target — see the note above
@@ -1817,6 +1814,17 @@ final class TrackedWorkoutLedger {
     private struct Entry: Codable {
         let miles: Double
         let recordedAt: Date
+        /// Whether the tracker itself measured this workout. Optional because
+        /// it is decoded from blobs written before an edit could mint an
+        /// entry — every one of those came from the tracker, so nil is true.
+        let tracked: Bool?
+        /// The user typed this number on the edit screen. Authoritative in
+        /// BOTH directions (see `resolvedMiles`); a tracker receipt is only
+        /// ever a floor. Optional for the same decode reason.
+        let userChosen: Bool?
+
+        var isTrackerMeasured: Bool { tracked != false }
+        var isUserChosen: Bool { userChosen == true }
     }
 
     private let defaults = UserDefaults.standard
@@ -1845,11 +1853,33 @@ final class TrackedWorkoutLedger {
         guard miles > 0 else { return }
         lock.lock()
         defer { lock.unlock() }
-        if let existing = entries[workoutId], existing.miles >= miles { return }
-        entries[workoutId] = Entry(miles: miles, recordedAt: Date())
+        // A number the user typed outranks the tracker's own, so a late
+        // receipt must not raise it back to what was measured.
+        if let existing = entries[workoutId] {
+            guard !existing.isUserChosen, existing.miles < miles else { return }
+        }
+        entries[workoutId] = Entry(
+            miles: miles, recordedAt: Date(), tracked: true, userChosen: nil)
         let cutoff = Date().addingTimeInterval(-Self.retention)
         entries = entries.filter { $0.value.recordedAt >= cutoff }
         persistLocked()
+    }
+
+    /// The number this workout is worth, given what HealthKit stores for it.
+    ///
+    /// A tracker receipt is a FLOOR — HealthKit winning when it is larger is
+    /// the point (see the type's note). A number the USER typed is not a
+    /// floor, it is the answer: it wins outright, including when it is
+    /// smaller. Without that, correcting a treadmill walk downwards changed
+    /// nothing — `max` handed back the recorded distance on every screen, and
+    /// the next full sync re-uploaded it over the edit the server had
+    /// accepted, so the mile stayed whatever it was before the edit.
+    func resolvedMiles(forWorkoutId workoutId: String, healthKitMiles: Double) -> Double {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = entries[workoutId] else { return healthKitMiles }
+        if entry.isUserChosen { return entry.miles }
+        return max(healthKitMiles, entry.miles)
     }
 
     /// What the tracker showed for this workout, if this app measured it.
@@ -1862,24 +1892,46 @@ final class TrackedWorkoutLedger {
     /// Whether this app's own tracker measured this workout. The counting rules
     /// use it to make sure a walk the user watched being recorded can never be
     /// voted out of their own total by another app's copy of it.
+    ///
+    /// An edit-minted entry answers FALSE: editing someone else's recording
+    /// supplies a number, not a measurement, and must not buy that recording
+    /// the protection our own walks get from duplicate detection.
     func isTracked(_ workoutId: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries[workoutId]?.isTrackerMeasured == true
+    }
+
+    /// Whether this app holds a distance for the workout at all — tracked or
+    /// typed. "Is there a number to show", where `isTracked` is "did we
+    /// measure it".
+    func hasDistance(_ workoutId: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         return entries[workoutId] != nil
     }
 
-    /// Replace the receipt with a number the USER chose — the one caller that
-    /// may lower it. The monotonic rule exists to stop the PIPELINE talking
-    /// the number down; a deliberate edit on the edit screen is the user
-    /// talking it down, and the receipt fighting them (flooring the display
-    /// back to the tracked value forever) would turn the safety net into a
-    /// bug. No-op for workouts the tracker never measured: an edit must not
-    /// mint a receipt.
+    /// Record a number the USER chose — the one caller that may lower it. The
+    /// monotonic rule exists to stop the PIPELINE talking the number down; a
+    /// deliberate edit on the edit screen is the user talking it down, and the
+    /// receipt fighting them (flooring the display back to the tracked value
+    /// forever) would turn the safety net into a bug.
+    ///
+    /// Kept for workouts the tracker never measured too — the edit screen is
+    /// reachable from any workout's detail, and a Watch treadmill run edited
+    /// there has exactly the same claim to the user's number. `tracked` stays
+    /// false for those, so an edit still never mints a measurement.
     func userOverride(workoutId: String, miles: Double) {
+        guard miles > 0 else { return }
         lock.lock()
         defer { lock.unlock() }
-        guard entries[workoutId] != nil, miles > 0 else { return }
-        entries[workoutId] = Entry(miles: miles, recordedAt: Date())
+        entries[workoutId] = Entry(
+            miles: miles,
+            recordedAt: Date(),
+            tracked: entries[workoutId]?.isTrackerMeasured ?? false,
+            userChosen: true)
+        let cutoff = Date().addingTimeInterval(-Self.retention)
+        entries = entries.filter { $0.value.recordedAt >= cutoff }
         persistLocked()
     }
 
@@ -1898,12 +1950,12 @@ extension HKWorkout {
     /// Every surface that shows or sums a workout's distance goes through this
     /// rather than reading `totalDistance` itself. For anything this app didn't
     /// record it IS `totalDistance`; for a walk our own tracker measured it can
-    /// never be less than the number the tracker showed while measuring it.
+    /// never be less than the number the tracker showed while measuring it;
+    /// and for one the user edited it is exactly what they typed.
     var madDistanceMiles: Double {
         let stored = totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
-        guard let tracked = TrackedWorkoutLedger.shared.miles(forWorkoutId: uuid.uuidString)
-        else { return stored }
-        return max(stored, tracked)
+        return TrackedWorkoutLedger.shared.resolvedMiles(
+            forWorkoutId: uuid.uuidString, healthKitMiles: stored)
     }
 }
 

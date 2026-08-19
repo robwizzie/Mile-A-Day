@@ -51,6 +51,18 @@ struct PostCardView: View {
     /// only my grid changes. Wired alongside it; the menu still gates on the
     /// server having sent `coauthor_on_profile`.
     var onSetCollabOnProfile: ((Bool) -> Void)? = nil
+    /// Accepted coauthor: does this collab reach MY friends' feeds? Deliberately
+    /// a third switch rather than folded into the grid one — "keep it off my
+    /// grid" and "don't put it in my friends' feeds" are different asks, and a
+    /// user who only wants the second shouldn't have to give up the tag.
+    /// Gated on the server having sent `coauthor_on_feed`.
+    var onSetCollabOnFeed: ((Bool) -> Void)? = nil
+    /// Credited participant: is MY route drawn on this post? Overrides my
+    /// global "Share route maps" for this one card. Gated on my own row
+    /// actually being in `coauthors`.
+    var onSetMyCollabRoute: ((Bool) -> Void)? = nil
+    /// Author: add or withdraw the route map slide after posting.
+    var onSetIncludeRoute: ((Bool) -> Void)? = nil
 
     @State private var hypeBurst = 0
     /// Collapses the same physical double-tap arriving from two recognizers
@@ -64,6 +76,15 @@ struct PostCardView: View {
     /// True if the current user is the post author.
     private var isMine: Bool {
         post.is_self
+    }
+
+    /// My own row among the credited participants, if I'm one of them. The
+    /// server only fills a participant's private switches (`on_feed`,
+    /// `include_route`) on their OWN row, so this is the only row worth
+    /// reading them from.
+    private var myCoauthorRow: PostCoauthorItem? {
+        guard let me = UserDefaults.standard.string(forKey: "backendUserId") else { return nil }
+        return post.acceptedCoauthors.first { $0.user_id == me }
     }
 
     var body: some View {
@@ -293,6 +314,19 @@ struct PostCardView: View {
                             Label("Edit caption", systemImage: "pencil")
                         }
                     }
+                    // The route was the one thing about a post you could only
+                    // decide before sharing, and it's the thing people most
+                    // often want back. Withdrawing the slide doesn't touch the
+                    // trace, so turning it on again restores the same map.
+                    if let onSetIncludeRoute, post.is_auto != true,
+                       let showing = post.include_route {
+                        Button {
+                            onSetIncludeRoute(!showing)
+                        } label: {
+                            Label(showing ? "Hide the route map" : "Show the route map",
+                                  systemImage: showing ? "map.slash" : "map")
+                        }
+                    }
                     Button(role: .destructive, action: onDelete) {
                         Label(post.share_to_feed == false ? "Delete story" : "Delete post",
                               systemImage: "trash")
@@ -312,6 +346,30 @@ struct PostCardView: View {
                         } label: {
                             Label(onProfile ? "Remove from my grid" : "Add to my grid",
                                   systemImage: onProfile ? "minus.square" : "square.grid.3x3")
+                        }
+                    }
+                    if let onSetCollabOnFeed, let onFeed = post.coauthor_on_feed {
+                        Button {
+                            onSetCollabOnFeed(!onFeed)
+                        } label: {
+                            Label(onFeed ? "Hide from my friends' feeds"
+                                         : "Show in my friends' feeds",
+                                  systemImage: onFeed ? "eye.slash" : "eye")
+                        }
+                    }
+                    // Being credited on someone's post is not consent to
+                    // publish your own GPS trace, and the answer can differ
+                    // per walk — hence a per-post override above the global
+                    // setting rather than only the global one.
+                    if let onSetMyCollabRoute, let mine = myCoauthorRow,
+                       mine.include_route != nil || mine.route != nil {
+                        let showing = mine.include_route ?? true
+                        Button {
+                            onSetMyCollabRoute(!showing)
+                        } label: {
+                            Label(showing ? "Hide my route on this post"
+                                          : "Show my route on this post",
+                                  systemImage: showing ? "map.slash" : "map")
                         }
                     }
                     Button(role: .destructive, action: onLeaveCollab) {

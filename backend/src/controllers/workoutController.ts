@@ -35,6 +35,7 @@ import {
   notifyFriendsOfMileCompletion,
   notifyFriendsOfExtraWorkout,
   notifyFriendsOfWorkout,
+  refreshWorkoutEditNotifications,
   checkCompetitionMilestones,
   checkLeadChanges,
 } from "../services/notificationService.js";
@@ -826,6 +827,14 @@ export async function updateWorkout(req: Request, res: Response) {
     } catch (raceError: any) {
       console.error("Error checking race completions:", raceError.message);
     }
+
+    // A recap correction (the treadmill card) lands inside the 10-minute
+    // window the friend pushes are deferred into, so the queued bodies still
+    // describe the pre-edit distance. Restate them with what the user just
+    // submitted — and announce the mile if this edit is what completed it.
+    // Not awaited: it can fan out a push, and nothing in this response
+    // depends on it. Never throws.
+    void refreshWorkoutEditNotifications(userId, workoutId);
 
     res.status(200).json(updated);
   } catch (error: any) {

@@ -60,14 +60,17 @@ struct WorkoutDetailView: View {
         return .none
     }
 
-    // Timezone-corrected times from index
+    // The workout's own instants. Rendered by local formatters, so they read in
+    // the device's timezone with no adjustment of our own.
     private var correctedEndTime: Date {
-        healthManager.getCorrectedLocalTime(for: workout)
+        workout.endDate
     }
 
+    /// `workout.startDate`, never `end - duration`: `HKWorkout.duration` is
+    /// pause-EXCLUDED (the tracker writes .pause/.resume events), so subtracting
+    /// it from the end skips a paused walk's start forward by the pause.
     private var correctedStartTime: Date {
-        let endTime = correctedEndTime
-        return endTime.addingTimeInterval(-workout.duration)
+        workout.startDate
     }
 
     private var workoutTypeString: String {
@@ -373,11 +376,11 @@ struct WorkoutDetailView: View {
 
     private var dayWorkoutsForCounting: [HKWorkout] {
         let calendar = Calendar.current
-        let day = calendar.startOfDay(for: correctedEndTime)
+        let day = healthManager.localDay(for: workout)
         return healthManager.cachedWorkouts
             .filter {
                 calendar.isDate(
-                    healthManager.getCorrectedLocalTime(for: $0), inSameDayAs: day)
+                    healthManager.localDay(for: $0), inSameDayAs: day)
             }
             .sorted { $0.endDate < $1.endDate }
     }

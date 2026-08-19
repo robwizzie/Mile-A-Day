@@ -30,75 +30,43 @@ class WorkoutProcessor {
     func processWorkouts(_ workouts: [HKWorkout]) -> [WorkoutRecord] {
         print("[WorkoutProcessor] Processing \(workouts.count) workouts...")
         var records: [WorkoutRecord] = []
-        var correctionCount = 0
-        
+
         for workout in workouts {
             // Skip workouts the user deleted in-app — Health still has them, but
             // they must not count toward streaks, totals, or the calendar.
             if DeletedWorkoutRegistry.contains(workout.uuid.uuidString) { continue }
 
             let (localDate, offset) = determineLocalDateWithOffset(for: workout)
-
-            if offset != 0 {
-                correctionCount += 1
-            }
-
             records.append(WorkoutRecord(from: workout, timezoneCorrectedDate: localDate, timezoneOffset: offset))
         }
-        
-        if correctionCount > 0 {
-            print("[WorkoutProcessor] 🌍 Applied \(correctionCount) timezone corrections")
-        }
-        
+
         return records
     }
     
-    // MARK: - Timezone Correction Logic
-    
-    /// Determine the local date where workout was performed WITH timezone offset
-    /// Returns (correctedDate, timezoneOffsetInHours)
-    /// Uses intelligent timezone detection for workouts at unusual hours
+    // MARK: - Local Day
+
+    /// The local calendar day a workout belongs to.
+    ///
+    /// This is `Calendar.current.startOfDay(for: workout.startDate)` and nothing
+    /// else. `HKWorkout.startDate` is an absolute instant and `Calendar.current`
+    /// already renders it in the device's real timezone, so there is nothing to
+    /// "correct" — and it is the SAME rule the server files `local_date` under
+    /// (start date, user timezone; see WorkoutSyncService's `localDate`). Client
+    /// and server disagreeing about which day a walk happened on is what makes a
+    /// day read empty while the streak that depends on it stays alive.
+    ///
+    /// What used to be here was a heuristic that assumed nobody works out
+    /// between 10 PM and 6 AM, and "corrected" any workout at those hours by
+    /// brute-forcing offsets from -6 to +6 until one landed in "reasonable"
+    /// hours AND changed the calendar day. It tried -6 first, so a genuine
+    /// 2:01 AM walk became 8:01 PM *the previous day* — every late-night mile
+    /// silently filed itself under yesterday, blanking the day it was actually
+    /// walked. It was never timezone logic: no travel, no `HKMetadataKeyTimeZone`
+    /// and no location was ever consulted, and a real timezone change is already
+    /// reflected in `Calendar.current`. The second return value stays for the
+    /// persisted `WorkoutRecord.timezoneOffset` field and is always 0.
     private func determineLocalDateWithOffset(for workout: HKWorkout) -> (Date, Int) {
-        let deviceDate = workout.startDate
-        let deviceStartOfDay = calendar.startOfDay(for: deviceDate)
-        let hour = calendar.component(.hour, from: deviceDate)
-        
-        // Most workouts are done in reasonable hours (6 AM - 10 PM)
-        // These don't need timezone correction
-        if hour >= 6 && hour <= 22 {
-            return (deviceStartOfDay, 0)
-        }
-        
-        // Workout at unusual hour (10 PM - 6 AM) - might be timezone shifted
-        print("[WorkoutProcessor] 🌍 Workout at unusual hour \(hour):00, checking timezones...")
-        
-        // Try timezone offsets from -6 to +6 hours
-        let possibleOffsets = [-6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6]
-        
-        for offset in possibleOffsets {
-            guard let correctedDate = calendar.date(byAdding: .hour, value: offset, to: deviceDate) else {
-                continue
-            }
-            
-            let correctedHour = calendar.component(.hour, from: correctedDate)
-            
-            // If this results in a reasonable workout time (6 AM - 10 PM local)
-            if correctedHour >= 6 && correctedHour <= 22 {
-                let correctedDay = calendar.startOfDay(for: correctedDate)
-                
-                // Only apply if it changes the day
-                if correctedDay != deviceStartOfDay {
-                    let formatter = DateFormatter()
-                    formatter.dateFormat = "M/d"
-                    print("[WorkoutProcessor] ✅ Timezone correction: \(formatter.string(from: deviceStartOfDay)) → \(formatter.string(from: correctedDay)) (offset: \(offset)h, \(correctedHour):00 local)")
-                    
-                    return (correctedDay, offset)
-                }
-            }
-        }
-        
-        // No reasonable correction found, use device date
-        return (deviceStartOfDay, 0)
+        (calendar.startOfDay(for: workout.startDate), 0)
     }
     
     // MARK: - Streak Calculation

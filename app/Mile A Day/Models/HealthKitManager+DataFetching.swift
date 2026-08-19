@@ -542,7 +542,7 @@ extension HealthKitManager {
             #endif
             guard !seen.contains(id) else { continue }
             let belongs = indexedIds.contains(id)
-                || calendar.isDate(getCorrectedLocalTime(for: workout), inSameDayAs: target)
+                || calendar.isDate(localDay(for: workout), inSameDayAs: target)
             guard belongs else { continue }
             seen.insert(id)
             out.append(workout)

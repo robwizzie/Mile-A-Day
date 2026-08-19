@@ -25,7 +25,9 @@ struct DashboardView: View {
     @StateObject private var syncService = WorkoutSyncService.shared
 
     @State private var showConfetti = false
-    @State private var showGoalSheet = false
+    // The goal sheet moved to the settings page along with everything else
+    // the gear used to open. Nothing on the Dashboard itself sets the goal, so
+    // a sheet here would be one nothing could present.
     @State private var showDashboardSettings = false
     /// "See All" on the Recent Workouts card. Lives here, not on the card, so
     /// the destination is registered on the stack's root — a
@@ -546,6 +548,18 @@ struct DashboardView: View {
                         healthKitDisabledBanner
                             .padding(.horizontal, MADTheme.Spacing.md)
                             .padding(.top, MADTheme.Spacing.md)
+                    } else {
+                        // ...and the harder case, which had no message at all:
+                        // access granted, but not for everything. HealthKit
+                        // doesn't error on a type that's switched off, it
+                        // returns nothing — indistinguishable from a day with
+                        // no walks — so a PARTIALLY granted install reads as a
+                        // broken app, with a streak that won't move and no
+                        // explanation anywhere. This is that explanation, and
+                        // it draws itself away the moment it's fixed.
+                        HealthAccessBanner { showDashboardSettings = true }
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                            .padding(.top, MADTheme.Spacing.md)
                     }
 
                     // ONE "needs your attention" slot — active workout,
@@ -595,10 +609,13 @@ struct DashboardView: View {
             }
         }
         .navigationDestination(isPresented: $showDashboardSettings) {
-            DashboardSettingsView(
+            // The SAME page the Profile gear opens. There used to be two, and
+            // half the app's settings were only reachable from a tab you might
+            // never have opened.
+            MADSettingsView(
                 userManager: userManager,
-                currentGoal: userManager.currentUser.goalMiles,
-                onSetGoal: { showGoalSheet = true }
+                healthManager: healthManager,
+                friendService: friendService
             )
         }
         .navigationDestination(isPresented: $showWorkouts) {
@@ -840,16 +857,6 @@ struct DashboardView: View {
                     .zIndex(50)
                 }
             }
-            .sheet(isPresented: $showGoalSheet) {
-                GoalSettingSheet(
-                    currentGoal: userManager.currentUser.goalMiles,
-                    onSave: { newGoal in
-                        userManager.setDailyGoal(miles: newGoal)
-                        syncWidgetData()
-                    }
-                )
-                .presentationDetents([.height(300)])
-                    }
             .sheet(isPresented: $showPendingSheet) {
                 PendingNotificationsSheet()
             }
@@ -1106,37 +1113,19 @@ struct DashboardView: View {
         showPendingSheet = true
     }
 
-    /// Fetch fastest mile pace from backend database (authoritative source)
+    /// Refresh the viewer's own backend stats (fastest pace, streak, tokens),
+    /// plus the two follow-ups only the Dashboard owns.
+    ///
+    /// The applies themselves live in `SelfStatsRefresher` so the Friends tab
+    /// can move the same numbers from its own refresh — see that type.
     private func fetchFastestPaceFromBackend() {
-        guard let userId = UserDefaults.standard.string(forKey: "backendUserId") else { return }
-        Task {
-            do {
-                let stats = try await workoutService.getUserStats(userId: userId)
-                print("[Dashboard] 📡 Backend best_split_time = \(stats.bestSplitTimeSeconds?.description ?? "nil") sec/mi, streak = \(stats.streak)")
-                await MainActor.run {
-                    // Rescue the streak on first login / before HealthKit indexes locally.
-                    // updateStreakFromBackend only raises the value, so it can't clobber a
-                    // higher HealthKit-computed streak from a later refresh.
-                    userManager.updateStreakFromBackend(stats.streak)
-                    // Sync the streak-token state (meters + covered days) from the
-                    // gated payload — this is OUR stats call, never a friend's.
-                    StreakFeatureService.applyStatsPayload(stats.streakFeatures)
-                    repairWorkoutIndexIfStale(backendStreak: stats.streak)
-                    if let bestSplitSeconds = stats.bestSplitTimeSeconds, bestSplitSeconds > 0 {
-                        let paceMinutesPerMile = bestSplitSeconds / 60.0
-                        print("[Dashboard] ✅ Updating fastest pace from backend → \(paceMinutesPerMile) min/mi")
-                        userManager.updateFastestPaceFromBackend(paceMinutesPerMile)
-                    }
-                    if let longest = stats.longestStreak {
-                        userManager.updateLongestStreakFromBackend(longest)
-                    }
-                }
-                // Warm the era history (hall of streaks, hero ghost target,
-                // comeback/record moments). Tolerant of failure; never blocks.
-                await StreakErasStore.shared.refreshIfStale()
-            } catch {
-                print("[Dashboard] ⚠️ Failed to fetch stats from backend: \(error)")
-            }
+        Task { @MainActor in
+            guard let stats = await SelfStatsRefresher.refreshBackendStats(userManager: userManager)
+            else { return }
+            repairWorkoutIndexIfStale(backendStreak: stats.streak)
+            // Warm the era history (hall of streaks, hero ghost target,
+            // comeback/record moments). Tolerant of failure; never blocks.
+            await StreakErasStore.shared.refreshIfStale()
         }
     }
 
@@ -1166,15 +1155,7 @@ struct DashboardView: View {
     /// no worse than before.
     @MainActor
     private func refreshStreakFromBackendForCelebration() async {
-        guard let userId = UserDefaults.standard.string(forKey: "backendUserId") else { return }
-        do {
-            let stats = try await workoutService.getUserStats(userId: userId)
-            print("[Dashboard] 🔄 Fresh streak for celebration = \(stats.streak)")
-            userManager.updateStreakFromBackend(stats.streak)
-            StreakFeatureService.applyStatsPayload(stats.streakFeatures)
-        } catch {
-            print("[Dashboard] ⚠️ Fresh streak fetch for celebration failed: \(error)")
-        }
+        await SelfStatsRefresher.refreshBackendStats(userManager: userManager)
     }
 
     /// One-shot decision, made the first time real HealthKit data is ready:

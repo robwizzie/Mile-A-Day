@@ -2062,7 +2062,12 @@ struct WorkoutTrackingView: View {
                 configuration.activityType = self.selectedActivityType ?? .walking
                 configuration.locationType = self.selectedLocationType
 
-                let healthStore = HKHealthStore()
+                // The app's ONE long-lived store (HealthKitManager holds it for the
+                // process). A freshly-made `HKHealthStore()` here is owned by nothing
+                // but this scope, and HealthKit requires the store to outlive every
+                // operation started on it — see the route builder in `endWorkout`,
+                // where the same shape costs the walk its map, silently.
+                let healthStore = self.healthManager.healthStore
                 let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
                 self.workoutBuilder = builder
 
@@ -2450,7 +2455,12 @@ struct WorkoutTrackingView: View {
             configuration.activityType = self.selectedActivityType ?? .walking
             configuration.locationType = self.selectedLocationType
 
-            let healthStore = HKHealthStore()
+            // The app's ONE long-lived store (HealthKitManager holds it for the
+            // process). A freshly-made `HKHealthStore()` here is owned by nothing
+            // but this scope, and HealthKit requires the store to outlive every
+            // operation started on it — see the route builder in `endWorkout`,
+            // where the same shape costs the walk its map, silently.
+            let healthStore = self.healthManager.healthStore
             let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
             self.workoutBuilder = builder
 
@@ -2694,21 +2704,39 @@ struct WorkoutTrackingView: View {
                     // best-effort: a failed route write still finalizes the
                     // workout itself.
                     guard let workout, saved, routeLocations.count >= 2 else {
+                        // An outdoor walk that reaches here has a workout but no
+                        // trace to attach, which is a different fault from a
+                        // failed write and needs saying so: the fixes live at
+                        // opposite ends (accrual gates in WorkoutLocationManager
+                        // vs. the HealthKit write below).
+                        if saved, self.selectedLocationType == .outdoor {
+                            print("[WorkoutTracking] ⚠️ Outdoor walk saved with no route to attach (\(routeLocations.count) usable pts) — nothing was captured during the walk")
+                        }
                         finalize()
                         return
                     }
+                    // Same long-lived store as the workout builder. A temporary
+                    // `HKHealthStore()` passed inline has no owner once this
+                    // statement returns, and HealthKit reports nothing when a
+                    // deallocated store drops the work — the route simply never
+                    // lands, so Apple Fitness (and our own maps) show the walk
+                    // with no map and nothing anywhere says why.
                     let routeBuilder = HKWorkoutRouteBuilder(
-                        healthStore: HKHealthStore(), device: .local()
+                        healthStore: self.healthManager.healthStore, device: .local()
                     )
+                    // A denied Route switch is the one failure that looks
+                    // identical to "this walk had no GPS", so name it in both
+                    // logs rather than leaving a bare error to be guessed at.
+                    let routeDenied = self.healthManager.isRouteSharingDenied()
                     routeBuilder.insertRouteData(routeLocations) { inserted, insertError in
                         guard inserted else {
-                            print("[WorkoutTracking] ⚠️ Route insert failed: \(String(describing: insertError))")
+                            print("[WorkoutTracking] ⚠️ Route insert failed (\(routeLocations.count) pts, route sharing denied: \(routeDenied)): \(String(describing: insertError))")
                             finalize()
                             return
                         }
                         routeBuilder.finishRoute(with: workout, metadata: nil) { route, finishError in
                             if route == nil {
-                                print("[WorkoutTracking] ⚠️ Route finish failed: \(String(describing: finishError))")
+                                print("[WorkoutTracking] ⚠️ Route finish failed (\(routeLocations.count) pts, route sharing denied: \(routeDenied)): \(String(describing: finishError))")
                             } else {
                                 let workoutId = workout.uuid
                                 Task { await WorkoutSyncService.shared.uploadWorkout(withId: workoutId) }

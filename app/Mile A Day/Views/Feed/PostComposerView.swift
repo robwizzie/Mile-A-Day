@@ -162,7 +162,13 @@ final class PostComposerViewModel: ObservableObject {
     /// Whether the linked workout has a GPS route to offer alongside the photo.
     @Published var hasRoute = false
     /// User choice: show the route map with this post (carousel slide 2).
-    @Published var includeRoute = true
+    ///
+    /// Seeded from the standing preference rather than hardcoded to true. The
+    /// toggle is unchanged and still wins for this post — this only decides
+    /// where it opens, so someone whose walks all start at their front door
+    /// stops re-making the same decision every day and only has to remember
+    /// once. `.ask` (the default) is exactly the old behaviour.
+    @Published var includeRoute = RouteSharingDefault.current.initialIncludeRoute
     /// The run's actual GPS trace, so the share step can show the map that's
     /// about to be posted rather than asking people to take the toggle on
     /// faith. Read from HealthKit — the same samples the sync ships to the
@@ -176,9 +182,20 @@ final class PostComposerViewModel: ObservableObject {
     /// Workout type behind the route ("running"/"walking"/…), so the preview
     /// uses the same accent colour the feed card will.
     @Published var routeWorkoutType = "running"
-    /// Collab post: the friend this mile was run with. They get an invite and,
-    /// once accepted, the post shows both names and lands on both profiles.
-    @Published var coauthor: BackendUser?
+    /// Collab post: the friends this mile was run with, in pick order.
+    ///
+    /// A list, not one person: a walk with three people on it is the ordinary
+    /// case here, and the one-slot picker meant two of them went uncredited
+    /// (or, worse, opened their own posts for the same walk). The server has
+    /// carried multiple credited people since Buddy Walks — `post_coauthors`
+    /// plus a legacy scalar mirroring the first, so a shipped client still
+    /// renders a coherent two-person collab — this is the manual path finally
+    /// using it. Capped at `maxCoauthors`, matching the server's cap.
+    @Published var coauthors: [BackendUser] = []
+
+    /// The server's MAX_POST_COAUTHORS. Enforced there; mirrored here only so
+    /// the picker can stop offering rather than have picks silently dropped.
+    static let maxCoauthors = 8
     /// Buddy Walk context, set when the composer is opened from the recap's
     /// post wizard. Everyone who finished the walk is credited automatically —
     /// the point of a buddy recap is that you didn't do it alone, so making
@@ -337,6 +354,16 @@ final class PostComposerViewModel: ObservableObject {
         return renderer.uiImage
     }
 
+    /// Who this post credits: the buddy walk's crew if it came from a recap,
+    /// otherwise whoever was picked by hand. Nil rather than an empty array so
+    /// an ordinary solo post sends no collab field at all.
+    private var resolvedCoauthorIds: [String]? {
+        let ids = buddyCoauthorIds.isEmpty
+            ? coauthors.map(\.user_id)
+            : buddyCoauthorIds
+        return ids.isEmpty ? nil : ids
+    }
+
     func publish() async -> Bool {
         guard !isPublishing else { return false }
         guard let flat = flatten() else {
@@ -388,9 +415,15 @@ final class PostComposerViewModel: ObservableObject {
                 isAuto: false,
                 includeRoute: includeRoute,
                 // Feed posts only — the server ignores it otherwise anyway.
-                coauthorUserId: destination.toFeed ? coauthor?.user_id : nil,
-                coauthorUserIds: destination.toFeed && !buddyCoauthorIds.isEmpty
-                    ? buddyCoauthorIds : nil,
+                //
+                // Everyone goes through `coauthorUserIds`, including a single
+                // manual pick: the server mirrors the FIRST of them into the
+                // legacy scalar column itself, so sending both would just be
+                // two ways of saying the same thing that can disagree. A buddy
+                // recap's crew stays authoritative when it's set — the wizard
+                // already settled who was on that walk.
+                coauthorUserId: nil,
+                coauthorUserIds: destination.toFeed ? resolvedCoauthorIds : nil,
                 buddySessionId: destination.toFeed ? buddySessionId : nil,
                 photoSource: photoSource
             )
@@ -1475,13 +1508,26 @@ struct PostComposerView: View {
 
 }
 
-/// Pick one accepted friend as the post's co-author (Instagram collab style).
+/// Pick the friends who were on this walk (Instagram collab style, plural).
+///
+/// Multi-select with a Done button rather than pick-one-and-dismiss: a walk
+/// with three people on it is the ordinary case, and the single-slot picker
+/// meant the other two either went uncredited or opened their own posts for
+/// the same walk. Selection order is kept — the server mirrors the FIRST pick
+/// into the legacy scalar coauthor column, which is the name a shipped client
+/// that knows nothing about multi-person collabs will show.
 struct CoauthorPickerSheet: View {
     let friends: [BackendUser]
-    let onPick: (BackendUser) -> Void
+    /// Already-picked, so re-opening the sheet shows the current crew rather
+    /// than starting from nothing.
+    let initialSelection: [BackendUser]
+    let maxSelection: Int
+    let onDone: ([BackendUser]) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
+    @State private var picked: [BackendUser] = []
+    @State private var seeded = false
 
     private var filtered: [BackendUser] {
         guard !search.isEmpty else { return friends }
@@ -1491,6 +1537,8 @@ struct CoauthorPickerSheet: View {
                 || ($0.first_name?.lowercased().contains(q) ?? false)
         }
     }
+
+    private var isFull: Bool { picked.count >= maxSelection }
 
     var body: some View {
         NavigationStack {
@@ -1509,30 +1557,7 @@ struct CoauthorPickerSheet: View {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(filtered, id: \.user_id) { friend in
-                                Button {
-                                    onPick(friend)
-                                    dismiss()
-                                } label: {
-                                    HStack(spacing: 12) {
-                                        AvatarView(name: friend.username ?? "?",
-                                                   imageURL: friend.profile_image_url, size: 42)
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(friend.username ?? friend.first_name ?? "Friend")
-                                                .font(.system(size: 15, weight: .bold, design: .rounded))
-                                                .foregroundColor(.white)
-                                            if let first = friend.first_name, !first.isEmpty {
-                                                Text(first)
-                                                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                                                    .foregroundColor(.white.opacity(0.5))
-                                            }
-                                        }
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, MADTheme.Spacing.md)
-                                    .padding(.vertical, 8)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
+                                friendRow(friend)
                             }
                         }
                         .padding(.vertical, MADTheme.Spacing.sm)
@@ -1540,7 +1565,7 @@ struct CoauthorPickerSheet: View {
                     .scrollIndicators(.hidden)
                 }
             }
-            .navigationTitle("Co-post with")
+            .navigationTitle(picked.isEmpty ? "Co-post with" : "Co-posting with \(picked.count)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .searchable(text: $search, prompt: "Search friends")
@@ -1549,8 +1574,82 @@ struct CoauthorPickerSheet: View {
                     Button("Cancel") { dismiss() }
                         .foregroundColor(.white.opacity(0.7))
                 }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        onDone(picked)
+                        dismiss()
+                    }
+                    .fontWeight(.bold)
+                    .foregroundColor(MADTheme.Colors.madRed)
+                }
             }
         }
         .presentationDetents([.medium, .large])
+        // Seeded once, in onAppear rather than init: a `@State` initial value
+        // is captured the first time the view is built and would go stale if
+        // the sheet is re-presented after the crew changed.
+        .onAppear {
+            guard !seeded else { return }
+            picked = initialSelection
+            seeded = true
+        }
+    }
+
+    private func friendRow(_ friend: BackendUser) -> some View {
+        let position = picked.firstIndex { $0.user_id == friend.user_id }
+        // A full crew greys out the people who aren't in it rather than
+        // dropping them from the list — vanishing rows read as a broken search.
+        let disabled = position == nil && isFull
+        return Button {
+            MADHaptics.tap()
+            toggle(friend)
+        } label: {
+            HStack(spacing: 12) {
+                AvatarView(name: friend.username ?? "?",
+                           imageURL: friend.profile_image_url, size: 42)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(friend.username ?? friend.first_name ?? "Friend")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    if let first = friend.first_name, !first.isEmpty {
+                        Text(first)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                }
+                Spacer()
+                ZStack {
+                    Circle()
+                        .strokeBorder(
+                            position != nil ? Color.clear : Color.white.opacity(0.25),
+                            lineWidth: 1.5
+                        )
+                        .background(
+                            Circle().fill(position != nil
+                                          ? MADTheme.Colors.madRed : Color.clear)
+                        )
+                        .frame(width: 24, height: 24)
+                    if let position {
+                        Text("\(position + 1)")
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                    }
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+            .opacity(disabled ? 0.35 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
+
+    private func toggle(_ friend: BackendUser) {
+        if let index = picked.firstIndex(where: { $0.user_id == friend.user_id }) {
+            picked.remove(at: index)
+        } else if picked.count < maxSelection {
+            picked.append(friend)
+        }
     }
 }

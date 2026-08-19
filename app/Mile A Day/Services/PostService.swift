@@ -73,6 +73,15 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     /// one map. Nil for an indoor walk, for anyone who turned "Share route
     /// maps" off, and on older servers.
     let route: [[Double]]?
+    /// MY two switches on this shared post, and non-nil ONLY on my own row —
+    /// one person's curation isn't the crew's to read, so the server nulls
+    /// them for everyone else (and every older server omits them entirely).
+    ///
+    /// `on_feed`: does this post reach MY friends' feeds. `include_route`:
+    /// is MY trace drawn on it, where nil means "follow my global Share route
+    /// maps setting" rather than "off".
+    var on_feed: Bool?
+    var include_route: Bool?
 
     var id: String { user_id }
 
@@ -131,6 +140,10 @@ struct PostItem: Codable, Identifiable {
     let created_at: String
     /// System-generated route/stats card (vs a deliberate user post).
     var is_auto: Bool?
+    /// Does this post carry the run's route map as a slide? The author's
+    /// per-post choice, changeable after posting (`setPostIncludeRoute`).
+    /// Optional because older servers omit it on some projections.
+    var include_route: Bool?
     /// The linked workout's type ("running"/"walking") for the type icon.
     var workout_type: String?
     /// Simplified GPS trace [[lat, lng], ...] when synced + shared.
@@ -177,6 +190,14 @@ struct PostItem: Codable, Identifiable {
     /// and on older servers. Hiding it is grid-only — the tag, the Tagged tab
     /// and both circles' feeds are untouched.
     var coauthor_on_profile: Bool? = nil
+    /// Same rule as `coauthor_on_profile` and the same nil-for-everyone-else:
+    /// as the tagged coauthor, does this collab reach MY friends' feeds?
+    /// Turning it off removes nothing else — the tag, the author's feed and
+    /// my own view of it are untouched.
+    var coauthor_on_feed: Bool? = nil
+    /// Non-nil when the AUTHOR pinned this to the top of their grid. Everyone
+    /// sees the pins; only the author can set them. nil on older servers.
+    var pinned_at: String? = nil
     /// Set when this post is attached to the workout that completed a mile made
     /// of several walks/runs — its stats are the day's combined figures and this
     /// is the per-leg breakdown behind them. nil/1 = an ordinary single run.
@@ -207,6 +228,18 @@ struct PostItem: Codable, Identifiable {
     /// the existing `hasAcceptedCoauthor` rendering stays in charge, so nothing
     /// about a normal collab changes.
     var isMultiCollab: Bool { acceptedCoauthors.count >= 2 }
+
+    /// More than one slide on this card, because somebody else on the walk put
+    /// their own photo on it. Drives the grid tile's "there's more in here"
+    /// glyph — the same signal a carousel corner gives.
+    ///
+    /// Crew photos only, deliberately: the route slide would qualify too, but
+    /// `route` is not part of the profile-grid projection (routes are jsonb and
+    /// the grid never draws one), so claiming it from `include_route` alone
+    /// would put the glyph on every indoor walk that has no trace at all.
+    var hasExtraSlides: Bool {
+        acceptedCoauthors.contains { ($0.media_url?.isEmpty == false) }
+    }
 
     /// "Rob, Alex & Sam" up to three people, "Rob, Alex & 2 others" beyond —
     /// a byline that grows to eight names would push the timestamp off screen.
@@ -286,6 +319,11 @@ struct StoryGroup: Codable, Identifiable {
 struct FeedResponse: Decodable {
     let items: [PostItem]
     let next_before: String?
+    /// The author's pinned posts, present only when the caller asked for them
+    /// to be split out of `items` (see `fetchUserPosts(pinsSplit:)`) and only
+    /// on the first page. Absent on every older server, hence the default.
+    var pinned: [PostItem]? = nil
+    var pin_limit: Int? = nil
 }
 
 /// One row of the unified feed: either a photo `post` or a raw `workout`
@@ -309,6 +347,11 @@ struct FeedEntry: Codable, Identifiable {
     let story_photo_url: String?
     /// post-only: system-generated route/stats card (vs a deliberate post).
     let is_auto: Bool?
+    /// post-only: is the route map on this card? The author's per-post choice,
+    /// changeable after posting from the card's ⋯ menu — hence `var`, so the
+    /// feed can reflect the change without a reload. Optional: older servers
+    /// don't send it, and the menu item simply isn't offered then.
+    var include_route: Bool?
     /// The entry's workout: the linked workout for posts (nil when unlinked
     /// or from an older backend), the workout itself for workout entries.
     let workout_id: String?
@@ -360,6 +403,9 @@ struct FeedEntry: Codable, Identifiable {
     var coauthor_profile_image_url: String?
     /// Only populated when the viewer IS the coauthor — see PostItem.
     var coauthor_on_profile: Bool?
+    /// Sibling of the above, same rule: as the tagged coauthor, does this
+    /// collab reach MY friends' feeds?
+    var coauthor_on_feed: Bool?
     /// Everyone credited on a multi-person collab (a Buddy Walk), each with
     /// their own photo and route.
     ///
@@ -380,6 +426,7 @@ struct FeedEntry: Codable, Identifiable {
         case entryId = "id"
         case sort_ts, user_id, username, first_name, last_name, profile_image_url
         case media_url, caption, stats_snapshot, story_photo_url, is_auto
+        case include_route
         // With an explicit CodingKeys enum, EVERY stored property must be
         // listed (or defaulted) — a new field left out kills Codable
         // synthesis for the whole struct (Xcode Cloud build 413).
@@ -389,7 +436,7 @@ struct FeedEntry: Codable, Identifiable {
         case is_self, is_hyped, hype_count, comment_count, photo_locked, is_fresh
         case coauthor_user_id, coauthor_status, coauthor_username
         case coauthor_first_name, coauthor_last_name, coauthor_profile_image_url
-        case coauthor_on_profile
+        case coauthor_on_profile, coauthor_on_feed
         case coauthors, buddy_group
     }
 
@@ -426,7 +473,8 @@ struct FeedEntry: Codable, Identifiable {
             workout_id: workout_id, feed_role: feed_role,
             stats_snapshot: stats_snapshot, local_date: nil,
             share_to_feed: true, share_to_story: nil, story_expires_at: nil,
-            created_at: sort_ts, is_auto: is_auto, workout_type: workout_type,
+            created_at: sort_ts, is_auto: is_auto, include_route: include_route,
+            workout_type: workout_type,
             route: route, story_photo_url: story_photo_url,
             is_self: is_self, is_hyped: is_hyped,
             hype_count: hype_count, comment_count: comment_count,
@@ -440,6 +488,7 @@ struct FeedEntry: Codable, Identifiable {
             coauthors: coauthors,
             buddy_group: buddy_group,
             coauthor_on_profile: coauthor_on_profile,
+            coauthor_on_feed: coauthor_on_feed,
             segment_count: segment_count,
             segments: segments
         )
@@ -824,11 +873,33 @@ enum PostService {
     static func fetchUserPosts(
         userId: String,
         before: String? = nil,
-        includeStories: Bool = false
+        includeStories: Bool = false,
+        sort: PostGridSort = .newest,
+        filter: PostGridFilter = .all,
+        // Pins come back inline unless this is set, which is what keeps a
+        // pinned post visible to any caller that doesn't know about pins.
+        pinsSplit: Bool = false
     ) async throws -> FeedResponse {
         var endpoint = "/posts/user/\(userId)?limit=24" + beforeSuffix(before)
         if includeStories { endpoint += "&include_stories=true" }
+        if sort != .newest { endpoint += "&sort=\(sort.rawValue)" }
+        if filter != .all { endpoint += "&filter=\(filter.rawValue)" }
+        if pinsSplit { endpoint += "&pins=split" }
         return try await APIClient.fancyFetch(endpoint: endpoint, responseType: FeedResponse.self)
+    }
+
+    /// Pin / unpin one of YOUR OWN posts to the top of your grid.
+    /// Throws `APIError.conflict` once `PostGridPreferences.pinLimit` are set —
+    /// the cap is a choice to make, not a pin to silently evict.
+    static func setPostPinned(postId: String, pinned: Bool) async throws {
+        struct Body: Encodable { let pinned: Bool }
+        let bodyData = try JSONEncoder().encode(Body(pinned: pinned))
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/\(postId)/pin",
+            method: .POST,
+            body: bodyData,
+            responseType: OKResponse.self
+        )
     }
 
     /// Posts a user is TAGGED in — visible collabs + caption @mentions —
@@ -864,6 +935,133 @@ enum PostService {
             endpoint: "/posts/\(postId)/coauthor/profile",
             method: .POST,
             body: bodyData,
+            responseType: OKResponse.self
+        )
+    }
+
+    /// As the tagged coauthor: does this collab reach MY friends' feeds?
+    ///
+    /// Deliberately separate from `setCoauthorOnProfile` — "keep it off my
+    /// grid" and "don't put it in my friends' feeds" are different asks, and
+    /// bundling them would make quieting the broadcast cost you the credit.
+    /// Turning it off removes nothing else: the tag stays, the author's own
+    /// circle keeps the post, and I still see it myself.
+    static func setCoauthorOnFeed(postId: String, onFeed: Bool) async throws {
+        struct Body: Encodable { let on_feed: Bool }
+        let bodyData = try JSONEncoder().encode(Body(on_feed: onFeed))
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/\(postId)/coauthor/feed",
+            method: .POST,
+            body: bodyData,
+            responseType: OKResponse.self
+        )
+    }
+
+    /// As a credited participant: is MY route drawn on this post?
+    /// `nil` restores "follow my global Share route maps setting", which is
+    /// what every crew photo starts as.
+    static func setCoauthorRoute(postId: String, includeRoute: Bool?) async throws {
+        struct Body: Encodable { let include_route: Bool? }
+        let bodyData = try JSONEncoder().encode(Body(include_route: includeRoute))
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/\(postId)/coauthor/route",
+            method: .POST,
+            body: bodyData,
+            responseType: OKResponse.self
+        )
+    }
+
+    /// Add or withdraw the route map on one of your own posts, after posting.
+    ///
+    /// The route is otherwise the only part of a post you can only decide
+    /// BEFORE sharing, and it's the part people most often want back. The
+    /// trace itself is untouched — this withdraws the slide, and turning it
+    /// back on restores it.
+    static func setPostIncludeRoute(postId: String, includeRoute: Bool) async throws {
+        struct Body: Encodable { let include_route: Bool }
+        let bodyData = try JSONEncoder().encode(Body(include_route: includeRoute))
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/\(postId)",
+            method: .PATCH,
+            body: bodyData,
+            responseType: OKResponse.self
+        )
+    }
+
+    // MARK: - Story Highlights
+
+    /// Someone's highlight rail (the circles above their grid).
+    static func fetchHighlights(userId: String) async throws -> [PostHighlight] {
+        struct Response: Decodable { let items: [PostHighlight] }
+        return try await APIClient.fancyFetch(
+            endpoint: "/posts/highlights/\(userId)",
+            responseType: Response.self
+        ).items
+    }
+
+    /// One highlight, opened. Members come back in the owner's chosen order,
+    /// already filtered to what this viewer may see.
+    static func fetchHighlight(highlightId: String) async throws -> PostHighlightDetail {
+        try await APIClient.fancyFetch(
+            endpoint: "/posts/highlights/detail/\(highlightId)",
+            responseType: PostHighlightDetail.self
+        )
+    }
+
+    /// Create a highlight from posts you own. `postIds` order IS the order.
+    @discardableResult
+    static func createHighlight(
+        title: String,
+        postIds: [String],
+        coverPostId: String? = nil
+    ) async throws -> String {
+        struct Body: Encodable {
+            let title: String
+            let post_ids: [String]
+            let cover_post_id: String?
+        }
+        struct Response: Decodable { let highlight_id: String }
+        let bodyData = try JSONEncoder().encode(
+            Body(title: title, post_ids: postIds, cover_post_id: coverPostId)
+        )
+        return try await APIClient.fancyFetch(
+            endpoint: "/posts/highlights",
+            method: .POST,
+            body: bodyData,
+            responseType: Response.self
+        ).highlight_id
+    }
+
+    /// Rename, re-cover or re-order. `postIds` is the list you want to END UP
+    /// with — adding, removing and reordering are all the same call, because a
+    /// drag-to-reorder UI can't honestly produce anything else.
+    static func updateHighlight(
+        highlightId: String,
+        title: String? = nil,
+        postIds: [String]? = nil,
+        coverPostId: String? = nil
+    ) async throws {
+        struct Body: Encodable {
+            let title: String?
+            let post_ids: [String]?
+            let cover_post_id: String?
+        }
+        let bodyData = try JSONEncoder().encode(
+            Body(title: title, post_ids: postIds, cover_post_id: coverPostId)
+        )
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/highlights/\(highlightId)",
+            method: .PATCH,
+            body: bodyData,
+            responseType: OKResponse.self
+        )
+    }
+
+    /// Delete the grouping. The posts inside are untouched.
+    static func deleteHighlight(highlightId: String) async throws {
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/highlights/\(highlightId)",
+            method: .DELETE,
             responseType: OKResponse.self
         )
     }

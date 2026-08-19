@@ -295,7 +295,7 @@ private struct RoadLocalDayIndex {
             #endif
             guard seenIds.insert(id).inserted else { continue }
 
-            let localDay = calendar.startOfDay(for: healthManager.getCorrectedLocalTime(for: workout))
+            let localDay = healthManager.localDay(for: workout)
             grouped[localDay, default: []].append(workout)
         }
 

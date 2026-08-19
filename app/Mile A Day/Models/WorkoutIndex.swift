@@ -151,7 +151,7 @@ struct WorkoutIndex: Codable {
         self.lastUpdated = Date.distantPast
         self.latestWorkoutDate = nil
         self.latestWorkoutUUID = nil
-        self.version = 2
+        self.version = 3
         self.totalWorkouts = 0
         self.totalLifetimeMiles = 0.0
         self.countedMilesByDate = [:]
@@ -331,8 +331,13 @@ struct WorkoutIndex: Codable {
 
         do {
             let index = try decoder.decode(WorkoutIndex.self, from: data)
-            guard index.version >= 2, index.countedMilesByDate != nil else {
-                workoutIndexLog("[WorkoutIndex] Cached v1 index has raw daily totals; rebuilding")
+            // v3 is the first version whose `localDate`/`localEndTime` are free
+            // of the fabricated "unusual hour" timezone offset. Those values are
+            // PERSISTED, so fixing the code that writes them does nothing for an
+            // install already holding a cache full of days shifted by up to 6
+            // hours — the whole index has to be rebuilt from HealthKit once.
+            guard index.version >= 3, index.countedMilesByDate != nil else {
+                workoutIndexLog("[WorkoutIndex] Cached index predates v3 (shifted local days); rebuilding")
                 UserDefaults.standard.removeObject(forKey: indexKey)
                 return nil
             }
@@ -359,13 +364,18 @@ struct WorkoutRecord: Codable, Identifiable {
     /// Original end date from HealthKit (device timezone)
     let deviceEndDate: Date
 
-    /// Local date where workout was performed (timezone-corrected, start of day)
+    /// The local calendar day this workout belongs to (start of day), derived
+    /// from `workout.startDate` in the device timezone — the same rule the
+    /// server files `local_date` under.
     let localDate: Date
 
-    /// Corrected end time in local timezone (for display)
+    /// The workout's end instant (for display). No offset is applied: formatters
+    /// already render a `Date` in the device's timezone.
     let localEndTime: Date
 
-    /// Timezone offset applied (in hours) - 0 if no correction
+    /// Always 0. Retained because it is a persisted Codable field; the offset
+    /// search that used to populate it invented timezone shifts (see
+    /// `WorkoutProcessor.determineLocalDateWithOffset`).
     let timezoneOffset: Int
 
     /// Distance in miles
@@ -409,12 +419,13 @@ struct WorkoutRecord: Codable, Identifiable {
         self.deviceEndDate = workout.endDate
         self.localDate = timezoneCorrectedDate
 
-        // Calculate local end time by applying the same offset
-        if timezoneOffset != 0 {
-            self.localEndTime = Calendar.current.date(byAdding: .hour, value: timezoneOffset, to: workout.endDate) ?? workout.endDate
-        } else {
-            self.localEndTime = workout.endDate
-        }
+        // The workout's real end instant, unshifted. `Date` is absolute and every
+        // formatter/Calendar that reads this is already on `TimeZone.current`, so
+        // adding `timezoneOffset` hours here applied the device's offset a SECOND
+        // time — a 2:01 AM walk rendered as 8:01 PM. `timezoneOffset` is always 0
+        // now (see WorkoutProcessor); the branch is gone rather than dormant so a
+        // stale non-zero value decoded from an old cache can't resurrect it.
+        self.localEndTime = workout.endDate
 
         self.timezoneOffset = timezoneOffset
         self.distance = workout.madDistanceMiles

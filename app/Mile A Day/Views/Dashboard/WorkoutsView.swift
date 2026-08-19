@@ -423,14 +423,14 @@ struct WorkoutsView: View {
     ///
     /// Deliberately not `workouts(on:)` per cell: that re-filters the entire
     /// cache for each of the 42 cells, and for a day with no indexed workouts it
-    /// takes the expensive corrected-time fallback — 40k+ calendar comparisons
+    /// takes the expensive per-workout day fallback — 40k+ calendar comparisons
     /// per body evaluation on a long history, on every day tap. Bucketing by
-    /// `getCorrectedLocalTime` groups by the same local day that function does.
+    /// `localDay(for:)` groups by the same local day that function does.
     private var monthInfo: [Date: DayInfo] {
         guard let interval = calendar.dateInterval(of: .month, for: month) else { return [:] }
         var out: [Date: DayInfo] = [:]
         for workout in healthManager.cachedWorkouts {
-            let day = calendar.startOfDay(for: healthManager.getCorrectedLocalTime(for: workout))
+            let day = healthManager.localDay(for: workout)
             guard day >= interval.start, day < interval.end else { continue }
             var info = out[day] ?? DayInfo()
             let key = workout.workoutActivityType.madTypeKey
@@ -512,7 +512,7 @@ struct WorkoutsView: View {
         guard !didPickDefaultDay else { return }
         didPickDefaultDay = true
         if let recent = healthManager.recentWorkouts.first {
-            let day = calendar.startOfDay(for: healthManager.getCorrectedLocalTime(for: recent))
+            let day = healthManager.localDay(for: recent)
             selectedDay = day
             month = startOfMonth(for: day)
         } else {

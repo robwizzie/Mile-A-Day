@@ -113,7 +113,23 @@ extension Array where Element == WorkoutPauseInterval {
     }
 }
 
-/// Represents a single location point in a workout route
+/// Represents a single location point in a workout route.
+///
+/// Carries the MEASURED motion of the fix (`speed`/`course` and their
+/// accuracies), not just where it was. A `CLLocation` rebuilt without them
+/// reports `-1` on all four, which is CoreLocation's "invalid" — so a route
+/// written from such points is a bare list of coordinates. Our own maps only
+/// read `.coordinate` and drew fine, which is exactly why this stayed invisible;
+/// Apple Fitness plots a route by its speed, and a series where every sample
+/// says "speed unknown" gives it nothing to draw. The values are always
+/// available at capture: `isRoutePointWorthKeeping` gates on `location.speed`,
+/// so every point that reaches here had valid doppler in hand.
+///
+/// The four are Optional because this struct is persisted inside
+/// `InProgressWorkoutState`: synthesized `Decodable` ignores property defaults,
+/// so a non-optional addition would throw on the blob an in-flight workout saved
+/// under the previous build and take the whole walk with it (ios.md Codable
+/// trap). Absent ⇒ `-1` ⇒ byte-identical to the old behaviour.
 struct WorkoutRoutePoint: Codable {
     let latitude: Double
     let longitude: Double
@@ -121,6 +137,10 @@ struct WorkoutRoutePoint: Codable {
     let altitude: Double
     let horizontalAccuracy: Double
     let verticalAccuracy: Double
+    let course: Double?
+    let courseAccuracy: Double?
+    let speed: Double?
+    let speedAccuracy: Double?
 
     init(from location: CLLocation) {
         self.latitude = location.coordinate.latitude
@@ -129,15 +149,27 @@ struct WorkoutRoutePoint: Codable {
         self.altitude = location.altitude
         self.horizontalAccuracy = location.horizontalAccuracy
         self.verticalAccuracy = location.verticalAccuracy
+        self.course = location.course
+        self.courseAccuracy = location.courseAccuracy
+        self.speed = location.speed
+        self.speedAccuracy = location.speedAccuracy
     }
 
-    /// Convert back to CLLocation for processing
+    /// Convert back to CLLocation for processing.
+    ///
+    /// Uses the full initializer so course/speed survive the round trip. A point
+    /// persisted before those fields existed decodes them as nil and gets `-1`,
+    /// which is what CoreLocation itself means by "not measured".
     func toCLLocation() -> CLLocation {
         return CLLocation(
             coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
             altitude: altitude,
             horizontalAccuracy: horizontalAccuracy,
             verticalAccuracy: verticalAccuracy,
+            course: course ?? -1,
+            courseAccuracy: courseAccuracy ?? -1,
+            speed: speed ?? -1,
+            speedAccuracy: speedAccuracy ?? -1,
             timestamp: timestamp
         )
     }

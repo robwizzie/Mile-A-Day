@@ -237,10 +237,9 @@ struct FastestPaceDetailView: View {
         if !healthManager.fastestMileWorkouts.isEmpty {
             let workouts = healthManager.fastestMileWorkouts
             // Get all workouts from the same day(s) as the fastest mile workouts
-            let fastestDays = Set(workouts.map { Calendar.current.startOfDay(for: $0.endDate) })
+            let fastestDays = Set(workouts.map { healthManager.localDay(for: $0) })
             let allDayWorkouts = healthManager.cachedWorkouts.filter { workout in
-                let day = Calendar.current.startOfDay(for: workout.endDate)
-                return fastestDays.contains(day)
+                fastestDays.contains(healthManager.localDay(for: workout))
             }.sorted { $0.endDate < $1.endDate }
 
             await MainActor.run {
@@ -255,10 +254,9 @@ struct FastestPaceDetailView: View {
 
         if !healthManager.fastestMileWorkouts.isEmpty {
             let workouts = healthManager.fastestMileWorkouts
-            let fastestDays = Set(workouts.map { Calendar.current.startOfDay(for: $0.endDate) })
+            let fastestDays = Set(workouts.map { healthManager.localDay(for: $0) })
             let allDayWorkouts = healthManager.cachedWorkouts.filter { workout in
-                let day = Calendar.current.startOfDay(for: workout.endDate)
-                return fastestDays.contains(day)
+                fastestDays.contains(healthManager.localDay(for: workout))
             }.sorted { $0.endDate < $1.endDate }
 
             await MainActor.run {

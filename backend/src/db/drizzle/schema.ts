@@ -1549,6 +1549,27 @@ export const posts = pgTable(
     // later setting changes. Grid ONLY — the Tagged tab, the author's own
     // profile and both circles' feeds are deliberately untouched.
     coauthorOnProfile: boolean("coauthor_on_profile"),
+    // Does this collab reach the COAUTHOR's own friend circle?
+    //
+    // Sibling of coauthor_on_profile and deliberately a SEPARATE switch: being
+    // credited on a walk and broadcasting it to your friends are two different
+    // consents. "Keep it off my grid" is curation; "keep it out of my friends'
+    // feeds" is reach, and a user who wants the second almost never wants to
+    // give up the tag itself.
+    //
+    // Tri-state for the same reason as coauthor_on_profile, except the middle
+    // state is a constant rather than a preference: NULL = TRUE, which is what
+    // every pre-existing collab already does. Only an explicit FALSE withholds
+    // reach, and it withholds NOTHING else — the post stays on the author's
+    // feed, the tag stays visible, and the coauthor still sees it themselves.
+    coauthorOnFeed: boolean("coauthor_on_feed"),
+    // Pinned to the top of the author's own profile grid (Instagram's 3-pin
+    // model). Timestamp rather than a boolean so the pins have a stable order
+    // of their own — most recently pinned first — independent of post date.
+    // The cap (POST_PIN_LIMIT) is enforced in the service, not the schema: it
+    // is a product number, and a CHECK constraint over a windowed count is not
+    // expressible anyway.
+    pinnedAt: timestamp("pinned_at", { withTimezone: true, mode: "string" }),
     // "Posted live": the author shared this inside the 10-minute fresh window
     // after finishing the run. Client-claimed at create time (the client owns
     // the window — it's anchored to when the app SAW the finished workout);
@@ -1581,6 +1602,16 @@ export const posts = pgTable(
       table.userId.asc().nullsLast(),
       table.createdAt.desc().nullsFirst(),
     ),
+    // The grid asks for "this author's pins" as its own small query before the
+    // paged body. Partial because pinned posts are a handful of rows across the
+    // whole table and the query always states `pinned_at IS NOT NULL`.
+    index("idx_posts_user_pinned")
+      .using(
+        "btree",
+        table.userId.asc().nullsLast(),
+        table.pinnedAt.desc().nullsFirst(),
+      )
+      .where(sql`(pinned_at IS NOT NULL AND deleted_at IS NULL)`),
     index("idx_posts_feed")
       .using("btree", table.createdAt.desc().nullsFirst())
       .where(sql`(deleted_at IS NULL AND share_to_feed)`),
@@ -2218,6 +2249,20 @@ export const postCoauthors = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // THIS participant's reach consent, the multi-person mirror of
+    // posts.coauthor_on_feed. NULL = TRUE (every pre-existing row), so the
+    // column can only ever withhold reach that was previously granted, never
+    // grant new reach.
+    onFeed: boolean("on_feed"),
+    // THIS participant's per-post route consent, overriding their global
+    // `share_route_maps` for this one card. Tri-state on purpose and in this
+    // order: NULL = "follow my setting", which is what every existing crew
+    // photo does — so the global switch keeps covering posts made before the
+    // override existed. An explicit value pins one walk either way, which is
+    // the actual ask ("share the park loop, never the one that starts at my
+    // front door"). Read through crewRouteConsentSql; the poster's own
+    // include_route still covers the whole card above it.
+    includeRoute: boolean("include_route"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
@@ -2531,6 +2576,106 @@ export const weeklyChallengePushLog = pgTable(
     primaryKey({
       columns: [table.userId, table.weekStart, table.kind],
       name: "weekly_challenge_push_log_pkey",
+    }),
+  ],
+);
+
+/**
+ * A named, permanent collection of the owner's own posts — Instagram's Story
+ * Highlights, applied to the thing this app actually accumulates: walks.
+ *
+ * The point is that a story is the only content here with an expiry, and the
+ * expiry is the reason people don't bother making one. `story_expires_at`
+ * retires a story from the RAIL; it never deletes the row, and a story-only
+ * post already survives on its author's profile in the "not on your feed"
+ * strip. A highlight is therefore nothing more than a name and an ordered list
+ * of post ids the owner already has — no copies, no second media path, and no
+ * new privacy surface: every read re-resolves the member posts through the
+ * ordinary post-visibility rules, so a post that later goes private or gets
+ * deleted simply leaves the highlight for everyone but its owner.
+ *
+ * Owner-only content by construction: a highlight can only ever contain posts
+ * whose author is the highlight's owner (enforced at write time), so there is
+ * no path here for one user to publish another's photo.
+ */
+export const postHighlights = pgTable(
+  "post_highlights",
+  {
+    highlightId: uuid("highlight_id").defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    title: text().notNull(),
+    // Which member post's photo is the circle on the profile rail. Nullable and
+    // SET NULL on delete: a cover whose post is gone falls back to the first
+    // member at read time rather than leaving a broken tile.
+    coverPostId: uuid("cover_post_id"),
+    // Owner-chosen order of the rail itself. Ties break on created_at so a
+    // batch created with the same index still has a stable order.
+    sortIndex: integer("sort_index").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_post_highlights_user").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.sortIndex.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+    ),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "post_highlights_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.coverPostId],
+      foreignColumns: [posts.postId],
+      name: "post_highlights_cover_post_id_fkey",
+    }).onDelete("set null"),
+    check("post_highlights_title_check", sql`char_length(title) BETWEEN 1 AND 30`),
+  ],
+);
+
+/** Ordered membership of a highlight. Cascades from both sides. */
+export const postHighlightItems = pgTable(
+  "post_highlight_items",
+  {
+    highlightId: uuid("highlight_id").notNull(),
+    postId: uuid("post_id").notNull(),
+    sortIndex: integer("sort_index").default(0).notNull(),
+    addedAt: timestamp("added_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_post_highlight_items_order").using(
+      "btree",
+      table.highlightId.asc().nullsLast(),
+      table.sortIndex.asc().nullsLast(),
+      table.addedAt.asc().nullsLast(),
+    ),
+    // "Which highlights is this post in?" — asked when a post is deleted from
+    // the grid and when the composer offers "add to a highlight".
+    index("idx_post_highlight_items_post").using(
+      "btree",
+      table.postId.asc().nullsLast(),
+    ),
+    foreignKey({
+      columns: [table.highlightId],
+      foreignColumns: [postHighlights.highlightId],
+      name: "post_highlight_items_highlight_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.postId],
+      foreignColumns: [posts.postId],
+      name: "post_highlight_items_post_id_fkey",
+    }).onDelete("cascade"),
+    primaryKey({
+      columns: [table.highlightId, table.postId],
+      name: "post_highlight_items_pkey",
     }),
   ],
 );

@@ -119,24 +119,14 @@ struct ProfileView: View {
             ShareProfileView()
         }
         .navigationDestination(isPresented: $showingSettings) {
-            // Confirmations for these rows are presented BY the settings page —
-            // a modal attached here never appears while that page is pushed on
-            // top, which made Sign Out look like a no-op until you hit Back.
-            ProfileSettingsView(
+            // ONE settings page, shared with the Dashboard's gear. It owns its
+            // own confirmations and account actions: a modal attached to THIS
+            // view can't present while that page is pushed on top, which is how
+            // Sign Out came to look like a no-op until you hit Back.
+            MADSettingsView(
                 userManager: userManager,
-                friendService: friendService,
-                showingLogoutConfirmation: $showingLogoutConfirmation,
-                showingDeleteAccountConfirmation: $showingDeleteAccountConfirmation,
-                deleteAccountErrorMessage: $deleteAccountErrorMessage,
-                recalibrateResultMessage: $recalibrateResultMessage,
-                onConfirmLogout: {
-                    userManager.signOut()
-                    appStateManager.signOut()
-                },
-                onConfirmDeleteAccount: { Task { await performDeleteAccount() } },
-                onRecalibrateStreak: { Task { await recalibrateStreak() } },
-                isRecalibratingStreak: isRecalibratingStreak,
-                isDeletingAccount: isDeletingAccount
+                healthManager: healthManager,
+                friendService: friendService
             )
         }
         .sheet(item: $activeSheet) { sheet in
@@ -460,7 +450,7 @@ struct ProfileView: View {
             #endif
             guard seenIds.insert(id).inserted else { continue }
 
-            let localDay = calendar.startOfDay(for: healthManager.getCorrectedLocalTime(for: workout))
+            let localDay = healthManager.localDay(for: workout)
             guard daysToInclude.contains(localDay) else { continue }
             grouped[localDay, default: []].append(workout)
         }

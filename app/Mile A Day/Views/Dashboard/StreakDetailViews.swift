@@ -238,10 +238,9 @@ struct CurrentStreakFastestPaceDetailView: View {
 
         var dayWorkouts: [HKWorkout] = []
         if !fastestMileWorkouts.isEmpty {
-            let fastestDays = Set(fastestMileWorkouts.map { Calendar.current.startOfDay(for: $0.endDate) })
+            let fastestDays = Set(fastestMileWorkouts.map { healthManager.localDay(for: $0) })
             dayWorkouts = allStreakWorkouts.filter { workout in
-                let workoutDay = Calendar.current.startOfDay(for: workout.endDate)
-                return fastestDays.contains(workoutDay)
+                fastestDays.contains(healthManager.localDay(for: workout))
             }
         }
 
@@ -423,7 +422,7 @@ struct CurrentStreakMostMilesDetailView: View {
         isLoading = true
         let allStreakWorkouts = healthManager.getWorkoutsForCurrentStreak(streakDays: currentStreakStats.streakDays)
         let workoutsByDay = Dictionary(grouping: allStreakWorkouts) { workout in
-            Calendar.current.startOfDay(for: workout.endDate)
+            healthManager.localDay(for: workout)
         }
 
         var mostMilesDay: Date?

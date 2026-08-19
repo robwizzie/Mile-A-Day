@@ -130,11 +130,9 @@ struct RecentWorkoutsView: View {
     /// exclusion, and the row would say "not counted" with nothing to point at.
     private var countState: CountState {
         var state = CountState()
-        let calendar = Calendar.current
         var byDay: [Date: [HKWorkout]] = [:]
         for workout in workouts {
-            let day = calendar.startOfDay(
-                for: healthManager.getCorrectedLocalTime(for: workout))
+            let day = healthManager.localDay(for: workout)
             byDay[day, default: []].append(workout)
         }
         for (_, dayWorkouts) in byDay {

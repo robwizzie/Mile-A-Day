@@ -277,14 +277,16 @@ struct WorkoutRow: View {
     /// True once we confirm the workout carries a GPS trace (cheap limit-1 probe).
     @State private var hasRoute: Bool = false
 
+    /// The workout's own start instant. Not `end - duration`:
+    /// `HKWorkout.duration` is pause-excluded, so that subtraction lands after
+    /// the real start on any walk that was paused.
     private var correctedStartTime: Date {
-        let correctedEndTime = healthManager.getCorrectedLocalTime(for: workout)
-        return correctedEndTime.addingTimeInterval(-workout.duration)
+        workout.startDate
     }
 
     private var workoutDistance: String {
         guard workout.totalDistance != nil
-            || TrackedWorkoutLedger.shared.isTracked(workout.uuid.uuidString)
+            || TrackedWorkoutLedger.shared.hasDistance(workout.uuid.uuidString)
         else { return "Unknown" }
         return workout.madDistanceMiles.milesFormatted
     }

@@ -12,6 +12,18 @@ import {
   getFeed,
   getUnifiedFeed,
   getUserPosts,
+  getUserPinnedPosts,
+  setPostPinned,
+  parseUserPostsSort,
+  parseUserPostsFilter,
+  POST_PIN_LIMIT,
+  listUserHighlights,
+  getHighlight,
+  createHighlight,
+  updateHighlight,
+  deleteHighlight,
+  MAX_HIGHLIGHT_TITLE,
+  MAX_HIGHLIGHTS_PER_USER,
   getFeedEntryForPost,
   getUserTaggedPosts,
   notifyFriendsOfPost,
@@ -50,7 +62,10 @@ import {
   respondToCoauthorInvite,
   respondToMultiCoauthorInvite,
   postAuthorId,
+  acceptedCoauthorIds,
   setCoauthorProfileVisibility,
+  setCoauthorFeedVisibility,
+  setCoauthorRoutePreference,
 } from "../services/postService.js";
 import {
   getActiveStreak,
@@ -357,6 +372,26 @@ export async function createPostController(
       notifyCoauthorInvite(userId, post.coauthor_user_id, post.post_id).catch(
         () => {},
       );
+    }
+    // ...and everyone ELSE credited on a multi-person collab. Only the legacy
+    // scalar coauthor (the first of them) was told, so on a four-person walk
+    // three people were tagged in a post they never heard about — the tag is
+    // the whole feature, and a silent one may as well not exist. Read back
+    // from post_coauthors rather than from the request: createPost drops
+    // candidates that failed validation, and notifying a name it refused
+    // would announce a credit that isn't on the card.
+    if (post.coauthor_status === "accepted" || post.coauthor_user_id == null) {
+      acceptedCoauthorIds(post.post_id)
+        .then((ids) =>
+          Promise.all(
+            ids
+              .filter((id) => id !== post.coauthor_user_id && id !== userId)
+              .map((id) =>
+                notifyCoauthorInvite(userId, id, post.post_id).catch(() => {}),
+              ),
+          ),
+        )
+        .catch(() => {});
     }
 
     // Fire-and-forget: tell friends about a new DELIBERATE post — the photo
@@ -673,23 +708,82 @@ export async function getUserPostsController(
     // see them, no matter what the query string claims.
     const includeStoryOnly =
       req.query.include_stories === "true" && req.params.userId === req.userId;
+    // Grid controls. Every one of these defaults to what shipped, so a client
+    // that sends none of them gets byte-identical behaviour — which is the
+    // whole installed base until the build that adds the picker.
+    const sort = parseUserPostsSort(req.query.sort);
+    const filter = parseUserPostsFilter(req.query.filter);
+    // Pins come back inline unless asked for separately; see UserPostsQuery.
+    const splitPins = req.query.pins === "split";
+
     const items = await getUserPosts(
       req.userId!,
       req.params.userId,
       limit,
       before,
       includeStoryOnly,
+      { sort, filter, splitPins },
     );
-    lockUnearnedPhotos(items, req.userId!, await viewerPhotoGate(req.userId!));
+    // Only on the first page: pins are a header, not a page, and re-sending
+    // them under every cursor would draw them again halfway down the grid.
+    const pinned =
+      splitPins && !before
+        ? await getUserPinnedPosts(req.userId!, req.params.userId)
+        : [];
+
+    const gate = await viewerPhotoGate(req.userId!);
+    lockUnearnedPhotos(items, req.userId!, gate);
+    if (pinned.length > 0) lockUnearnedPhotos(pinned, req.userId!, gate);
+
     const last = items[items.length - 1];
     const nextBefore =
       items.length === limit ? (last.cursor ?? last.created_at) : null;
-    res
-      .status(200)
-      .json({ items: signMediaUrlsDeep(items), next_before: nextBefore });
+    res.status(200).json({
+      items: signMediaUrlsDeep(items),
+      next_before: nextBefore,
+      // Additive: absent-as-empty for callers that didn't ask to split.
+      pinned: signMediaUrlsDeep(pinned),
+      pin_limit: POST_PIN_LIMIT,
+    });
   } catch (error: any) {
     console.error("Error fetching user posts:", error.message);
     res.status(500).json({ error: "Error fetching posts" });
+  }
+}
+
+/**
+ * POST /posts/:postId/pin — pin or unpin one of your own posts to the top of
+ * your profile grid. Author only; see setPostPinned for why a tagged coauthor
+ * doesn't get this.
+ */
+export async function setPostPinnedController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    if (!isUuid(req.params.postId)) {
+      return res.status(404).json({ error: "post_not_found" });
+    }
+    if (typeof req.body?.pinned !== "boolean") {
+      return res.status(400).json({ error: "pinned must be a boolean" });
+    }
+    const result = await setPostPinned(
+      req.userId!,
+      req.params.postId,
+      req.body.pinned,
+    );
+    if (result === "not_found") {
+      return res.status(404).json({ error: "post_not_found" });
+    }
+    if (result === "limit") {
+      return res
+        .status(409)
+        .json({ error: "pin_limit_reached", pin_limit: POST_PIN_LIMIT });
+    }
+    res.json({ ok: true, pinned: req.body.pinned, pin_limit: POST_PIN_LIMIT });
+  } catch (error: any) {
+    console.error("Error pinning post:", error.message);
+    res.status(500).json({ error: "Error pinning post" });
   }
 }
 
@@ -766,7 +860,7 @@ export async function updatePostController(
 ) {
   const userId = req.userId!;
   const postId = req.params.postId;
-  const { caption, add_to_feed } = req.body ?? {};
+  const { caption, add_to_feed, include_route } = req.body ?? {};
   try {
     if (!isUuid(postId)) {
       return res.status(404).json({ error: "Post not found" });
@@ -783,7 +877,16 @@ export async function updatePostController(
       });
     }
     const addToFeed = add_to_feed === true;
-    if (!hasCaption && !addToFeed) {
+    // The route slide, changeable after the fact. Ungated for the same reason
+    // caption edits are: withdrawing a map you already published is the safe
+    // direction, and re-adding one only restores a trace the post's own
+    // workout already had. It is NOT a photo reaching the feed, which is what
+    // the post window exists to bound.
+    const hasIncludeRoute = typeof include_route === "boolean";
+    if (include_route !== undefined && !hasIncludeRoute) {
+      return res.status(400).json({ error: "include_route must be a boolean" });
+    }
+    if (!hasCaption && !addToFeed && !hasIncludeRoute) {
       return res.status(400).json({ error: "Nothing to update" });
     }
 
@@ -828,6 +931,7 @@ export async function updatePostController(
           }
         : {}),
       ...(addToFeed ? { addToFeed: true } : {}),
+      ...(hasIncludeRoute ? { includeRoute: include_route as boolean } : {}),
     });
     if (result === "not_found") {
       return res.status(404).json({ error: "Post not found" });
@@ -1065,6 +1169,200 @@ export async function setCoauthorProfileVisibilityController(
   } catch (error: any) {
     console.error("Error setting collab profile visibility:", error.message);
     res.status(500).json({ error: "Error setting collab profile visibility" });
+  }
+}
+
+/**
+ * POST /posts/:postId/coauthor/feed — the credited coauthor's reach switch.
+ *
+ * Sibling of /coauthor/profile and deliberately its own endpoint: "keep it off
+ * my grid" and "keep it out of my friends' feeds" are different asks, and a
+ * user who only wants the second should not have to give up the tag to get it.
+ * Turning it off removes nothing else — the post stays on the author's feed
+ * and grid, the tag stays visible, and the coauthor keeps seeing it themselves.
+ */
+export async function setCoauthorFeedVisibilityController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    if (!isUuid(req.params.postId)) {
+      return res.status(404).json({ error: "post_not_found" });
+    }
+    if (typeof req.body?.on_feed !== "boolean") {
+      return res.status(400).json({ error: "on_feed must be a boolean" });
+    }
+    const result = await setCoauthorFeedVisibility(
+      req.userId!,
+      req.params.postId,
+      req.body.on_feed,
+    );
+    if (!result) {
+      return res.status(404).json({ error: "collab_not_found" });
+    }
+    res.json({ ok: true, on_feed: req.body.on_feed });
+  } catch (error: any) {
+    console.error("Error setting collab feed visibility:", error.message);
+    res.status(500).json({ error: "Error updating collab" });
+  }
+}
+
+/**
+ * POST /posts/:postId/coauthor/route — the credited participant's route
+ * consent for THIS post.
+ *
+ * `include_route: null` restores "follow my Share route maps setting", which
+ * is what every crew photo starts as. The poster's own per-post include_route
+ * still covers the whole card above this, and nobody's trace is ever drawn
+ * from someone else's consent.
+ */
+export async function setCoauthorRouteController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    if (!isUuid(req.params.postId)) {
+      return res.status(404).json({ error: "post_not_found" });
+    }
+    const raw = req.body?.include_route;
+    if (raw !== null && typeof raw !== "boolean") {
+      return res
+        .status(400)
+        .json({ error: "include_route must be a boolean or null" });
+    }
+    const result = await setCoauthorRoutePreference(
+      req.userId!,
+      req.params.postId,
+      raw as boolean | null,
+    );
+    if (!result) {
+      return res.status(404).json({ error: "collab_not_found" });
+    }
+    res.json({ ok: true, include_route: raw ?? null });
+  } catch (error: any) {
+    console.error("Error setting collab route consent:", error.message);
+    res.status(500).json({ error: "Error updating collab" });
+  }
+}
+
+// ─── Story Highlights ────────────────────────────────────────────────────
+
+/** GET /posts/highlights/:userId — the profile rail. */
+export async function listHighlightsController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const items = await listUserHighlights(req.userId!, req.params.userId);
+    // A highlight whose members have all become invisible to this viewer would
+    // draw a circle that opens onto nothing. Drop it here rather than in SQL so
+    // the owner still sees their own empty one and can fix or delete it.
+    const visible =
+      req.params.userId === req.userId
+        ? items
+        : items.filter((h) => h.item_count > 0);
+    res.json({ items: signMediaUrlsDeep(visible), limit: MAX_HIGHLIGHTS_PER_USER });
+  } catch (error: any) {
+    console.error("Error listing highlights:", error.message);
+    res.status(500).json({ error: "Error loading highlights" });
+  }
+}
+
+/** GET /posts/highlights/detail/:highlightId — one highlight, opened. */
+export async function getHighlightController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    if (!isUuid(req.params.highlightId)) {
+      return res.status(404).json({ error: "highlight_not_found" });
+    }
+    const detail = await getHighlight(req.userId!, req.params.highlightId);
+    if (!detail) {
+      return res.status(404).json({ error: "highlight_not_found" });
+    }
+    lockUnearnedPhotos(
+      detail.items,
+      req.userId!,
+      await viewerPhotoGate(req.userId!),
+    );
+    res.json(signMediaUrlsDeep(detail));
+  } catch (error: any) {
+    console.error("Error loading highlight:", error.message);
+    res.status(500).json({ error: "Error loading highlight" });
+  }
+}
+
+function highlightWriteError(res: Response, error: string) {
+  if (error === "not_found") {
+    return res.status(404).json({ error: "highlight_not_found" });
+  }
+  if (error === "limit") {
+    return res
+      .status(409)
+      .json({ error: "highlight_limit_reached", limit: MAX_HIGHLIGHTS_PER_USER });
+  }
+  if (error === "invalid_title") {
+    return res.status(400).json({
+      error: "invalid_title",
+      max_length: MAX_HIGHLIGHT_TITLE,
+    });
+  }
+  return res.status(400).json({ error: "no_posts" });
+}
+
+/** POST /posts/highlights — create one from posts you own. */
+export async function createHighlightController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const result = await createHighlight(req.userId!, req.body ?? {});
+    if (!result.ok) return highlightWriteError(res, result.error);
+    res.status(201).json({ ok: true, highlight_id: result.highlight_id });
+  } catch (error: any) {
+    console.error("Error creating highlight:", error.message);
+    res.status(500).json({ error: "Error creating highlight" });
+  }
+}
+
+/** PATCH /posts/highlights/:highlightId — rename, re-cover, or re-order. */
+export async function updateHighlightController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    if (!isUuid(req.params.highlightId)) {
+      return res.status(404).json({ error: "highlight_not_found" });
+    }
+    const result = await updateHighlight(
+      req.userId!,
+      req.params.highlightId,
+      req.body ?? {},
+    );
+    if (!result.ok) return highlightWriteError(res, result.error);
+    res.json({ ok: true, highlight_id: result.highlight_id });
+  } catch (error: any) {
+    console.error("Error updating highlight:", error.message);
+    res.status(500).json({ error: "Error updating highlight" });
+  }
+}
+
+/** DELETE /posts/highlights/:highlightId — the grouping only; posts survive. */
+export async function deleteHighlightController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    if (!isUuid(req.params.highlightId)) {
+      return res.status(404).json({ error: "highlight_not_found" });
+    }
+    const ok = await deleteHighlight(req.userId!, req.params.highlightId);
+    if (!ok) return res.status(404).json({ error: "highlight_not_found" });
+    res.json({ ok: true });
+  } catch (error: any) {
+    console.error("Error deleting highlight:", error.message);
+    res.status(500).json({ error: "Error deleting highlight" });
   }
 }
 

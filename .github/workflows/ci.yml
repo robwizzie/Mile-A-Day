@@ -97,6 +97,16 @@ jobs:
       # would wipe other people's miles) and the per-viewer history hide.
       - name: Buddy live join/leave/cancel/hide check
         run: node scripts/buddy-live-check.mjs
+      # Profile-grid controls, the collab reach/route switches and Story
+      # Highlights. The reach switch lives inside collabReachSql — the fragment
+      # getFeed, the unified feed and direct post access all ask — so too
+      # strict silently deletes a coauthor's own post and too loose makes a
+      # "don't broadcast this" switch do nothing. Highlights publish story-only
+      # posts permanently, which is a NEW reach and needs its privacy and block
+      # rules tested rather than inherited. The grid's default shape is pinned
+      # here too: every shipped client sends no parameters.
+      - name: Grid controls + collab switches + highlights check
+        run: node scripts/grid-controls-check.mjs
       # Two prod-only push failures, neither reproducible without a shell there.
       # APNS_KEY is pasted into a dashboard in four different shapes and one of
       # them silently produced an unsignable PEM; device-token pruning is the

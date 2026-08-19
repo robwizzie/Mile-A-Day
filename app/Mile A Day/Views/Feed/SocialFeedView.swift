@@ -710,6 +710,20 @@ struct SocialFeedView: View {
                     : nil,
                 onSetCollabOnProfile: isMyAcceptedCollab
                     ? { onProfile in Task { await setCollabOnProfile(entry, onProfile: onProfile) } }
+                    : nil,
+                onSetCollabOnFeed: isMyAcceptedCollab
+                    ? { onFeed in Task { await setCollabOnFeed(entry, onFeed: onFeed) } }
+                    : nil,
+                // Any credited participant, not just the mirrored coauthor: on
+                // a buddy walk everyone's trace is on the card, and everyone's
+                // trace is their own to withhold.
+                onSetMyCollabRoute: (entry.coauthors ?? []).contains {
+                    $0.user_id == currentUserId && $0.status == "accepted"
+                }
+                    ? { include in Task { await setMyCollabRoute(entry, include: include) } }
+                    : nil,
+                onSetIncludeRoute: entry.is_self
+                    ? { include in Task { await setIncludeRoute(entry, include: include) } }
                     : nil
             )
         } else {
@@ -1216,6 +1230,49 @@ struct SocialFeedView: View {
             await MainActor.run {
                 updateEntry(entry.id) { $0.coauthor_on_profile = !onProfile }
             }
+        }
+    }
+
+    /// Accepted coauthor keeps the tag but stops the post reaching THEIR
+    /// friends' feeds. It stays on the author's feed, on both grids, and here.
+    private func setCollabOnFeed(_ entry: FeedEntry, onFeed: Bool) async {
+        await MainActor.run {
+            MADHaptics.tap()
+            updateEntry(entry.id) { $0.coauthor_on_feed = onFeed }
+        }
+        do {
+            try await PostService.setCoauthorOnFeed(postId: entry.entryId, onFeed: onFeed)
+        } catch {
+            await MainActor.run { updateEntry(entry.id) { $0.coauthor_on_feed = !onFeed } }
+        }
+    }
+
+    /// A credited participant's own route consent for THIS post, above their
+    /// global "Share route maps" setting. The map redraws on the next load —
+    /// the trace itself is resolved server-side, so there's nothing local to
+    /// swap in beyond the menu's own state.
+    private func setMyCollabRoute(_ entry: FeedEntry, include: Bool) async {
+        await MainActor.run {
+            MADHaptics.tap()
+            updateEntry(entry.id) { item in
+                guard let idx = item.coauthors?.firstIndex(where: { $0.user_id == currentUserId })
+                else { return }
+                item.coauthors?[idx].include_route = include
+            }
+        }
+        try? await PostService.setCoauthorRoute(postId: entry.entryId, includeRoute: include)
+    }
+
+    /// The author withdraws or restores the route slide after posting.
+    private func setIncludeRoute(_ entry: FeedEntry, include: Bool) async {
+        await MainActor.run {
+            MADHaptics.tap()
+            updateEntry(entry.id) { $0.include_route = include }
+        }
+        do {
+            try await PostService.setPostIncludeRoute(postId: entry.entryId, includeRoute: include)
+        } catch {
+            await MainActor.run { updateEntry(entry.id) { $0.include_route = !include } }
         }
     }
 

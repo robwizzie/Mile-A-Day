@@ -24,6 +24,14 @@ import {
   getPostWindowController,
   respondToCoauthorController,
   setCoauthorProfileVisibilityController,
+  setCoauthorFeedVisibilityController,
+  setCoauthorRouteController,
+  setPostPinnedController,
+  listHighlightsController,
+  getHighlightController,
+  createHighlightController,
+  updateHighlightController,
+  deleteHighlightController,
 } from "../controllers/postsController.js";
 import {
   listCommentsController,
@@ -72,6 +80,17 @@ router.post("/stories/:postId/react", reactToStoryController);
 // "On this day" — the caller's own past post photos.
 router.get("/memories", getPostMemoriesController);
 
+// Story Highlights — named, permanent collections of your own posts, shown as
+// a rail above the profile grid. Registered above the /:postId block for the
+// usual reason: "highlights" would otherwise be parsed as a post id. The
+// /detail/ segment keeps a highlight id from colliding with a user id on
+// /highlights/:userId, which is the read every profile does.
+router.get("/highlights/detail/:highlightId", getHighlightController);
+router.get("/highlights/:userId", listHighlightsController);
+router.post("/highlights", createHighlightController);
+router.patch("/highlights/:highlightId", updateHighlightController);
+router.delete("/highlights/:highlightId", deleteHighlightController);
+
 // Persistent feed (photo-only) + unified feed (posts + workout activity).
 router.get("/feed", getFeedController);
 router.get("/feed/unified", getUnifiedFeedController);
@@ -97,7 +116,14 @@ router.post(
   "/:postId/coauthor/profile",
   setCoauthorProfileVisibilityController,
 );
+// The coauthor's other two switches on a shared post: reach (does it go to MY
+// friends' feeds) and route (is MY trace drawn on it). Separate from /profile
+// because they are separate consents — see the controllers.
+router.post("/:postId/coauthor/feed", setCoauthorFeedVisibilityController);
+router.post("/:postId/coauthor/route", setCoauthorRouteController);
 router.post("/:postId/coauthor", respondToCoauthorController);
+// Pin/unpin one of your own posts to the top of your grid (author only).
+router.post("/:postId/pin", setPostPinnedController);
 router.post("/:postId/report", reportPostController);
 // A buddy walk is one walk, so it gets one post — and everyone on it puts
 // their own photo on THAT post here, rather than opening a second card for the

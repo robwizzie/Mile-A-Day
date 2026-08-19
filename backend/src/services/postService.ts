@@ -120,6 +120,15 @@ export interface PostCoauthor {
   // own "Share route maps" consent, so this is null for anyone who opted out
   // and for an indoor walk with nothing to draw.
   route?: unknown;
+  // THIS participant's own two switches on the shared post, and null for
+  // everybody except the participant themselves — one person's curation is not
+  // another's to read. `on_feed` = does the post reach MY friends' feeds
+  // (nothing else moves when it's off: the tag stays, the author's circle
+  // keeps it, and I still see it). `include_route` = is MY trace drawn on it,
+  // overriding my global "Share route maps" for this one walk; null there
+  // means "follow my setting", which is what every pre-existing row does.
+  on_feed?: boolean | null;
+  include_route?: boolean | null;
 }
 
 export interface PostRow {
@@ -168,6 +177,13 @@ export interface PostRow {
   // VIEWER is the coauthor (it's their setting to read), null otherwise.
   // Drives the card's Hide/Show-on-profile action. Additive field.
   coauthor_on_profile?: boolean | null;
+  // Sibling of coauthor_on_profile, same rule: only populated when the VIEWER
+  // is the coauthor. "Does this collab reach my own friends' feeds?" Additive.
+  coauthor_on_feed?: boolean | null;
+  // Non-null when the AUTHOR has pinned this post to the top of their grid.
+  // Everyone sees the pins (that's the point of a pin) — only the author can
+  // set them. Additive field; null on every post that isn't pinned.
+  pinned_at?: string | null;
   is_viewed?: boolean;
   // The viewer's own emoji reaction to this story (getUserActiveStories only),
   // so re-opening a story they already reacted to shows the reaction. null/absent
@@ -288,6 +304,7 @@ const POST_COLUMNS = `
 	p.created_at,
 	p.is_auto,
 	p.include_route,
+	p.pinned_at,
 	(SELECT w.workout_type FROM workouts w WHERE w.workout_id = p.workout_id) AS workout_type`;
 
 /**
@@ -327,12 +344,24 @@ const COAUTHOR_VISIBLE = coauthorVisibleSql("p");
 
 /**
  * SQL: may the collab on `a` extend the post's reach to the COAUTHOR's circle?
- * Same rule as the tag above — a live collab with a non-private coauthor.
+ * Same rule as the tag above — a live collab with a non-private coauthor — plus
+ * that coauthor's own `coauthor_on_feed` switch, which is the difference
+ * between "don't put my name on it" (privacy) and "credit me, just don't
+ * broadcast it to my friends" (reach). NULL there means TRUE, so this can only
+ * ever withhold reach a user explicitly gave up.
+ *
+ * The `= $1` arm stays OUTSIDE both gates on purpose: turning your own reach
+ * off must not delete the post from your OWN feed. It also can't hide the post
+ * from the AUTHOR's friends — that post is theirs, and this switch was never
+ * offered as a veto over someone else's audience.
+ *
  * Written as its own fragment because the reach checks sit in circle semi-joins
  * while the tag check sits in the SELECT list.
  */
 const collabReachSql = (a: string) => `(${collabActiveSql(a)} AND (
-	${a}.coauthor_user_id = $1 OR ${OWNER_NOT_PRIVATE_SQL(`${a}.coauthor_user_id`)}
+	${a}.coauthor_user_id = $1
+	OR (${OWNER_NOT_PRIVATE_SQL(`${a}.coauthor_user_id`)}
+		AND COALESCE(${a}.coauthor_on_feed, TRUE))
 ))`;
 const COLLAB_REACH_SQL = collabReachSql("p");
 const COLLAB_ACTIVE = collabActiveSql("p");
@@ -407,7 +436,8 @@ const FRIEND_OF_MULTI_COAUTHOR = `EXISTS (
 	JOIN friendships f ON f.friend_id = pca.user_id
 	WHERE pca.post_id = p.post_id AND ${MULTI_COLLAB_ACTIVE}
 		AND f.user_id = $1 AND f.status = 'accepted'
-		AND (pca.user_id = $1 OR ${OWNER_NOT_PRIVATE_SQL("pca.user_id")})
+		AND (pca.user_id = $1
+			OR (${OWNER_NOT_PRIVATE_SQL("pca.user_id")} AND COALESCE(pca.on_feed, TRUE)))
 )`;
 
 // Blocks are checked against every LIVE participant, in both directions — the
@@ -437,8 +467,13 @@ const BLOCKED_VS_MULTI_COAUTHOR = `EXISTS (
  * obeys (see the `route` projection in UNIFIED_FEED_SQL):
  *  - `include_route`: the poster's per-post choice covers the whole card. A
  *    walk shared without a map does not sprout four of them.
- *  - the participant's OWN `share_route_maps` consent — never the poster's.
- *    Being credited on someone's post is not consent to publish your trace.
+ *  - the participant's OWN route consent — never the poster's. Being credited
+ *    on someone's post is not consent to publish your trace. Resolved in the
+ *    same tri-state order the grid switch uses: this post's
+ *    `post_coauthors.include_route` override first, then their global
+ *    `share_route_maps`, then TRUE. NULL override = "follow my setting", which
+ *    is every row that predates the override, so the global switch keeps
+ *    covering them.
  *  - `NOT p.is_auto`: an auto card's media already IS a rendered route.
  *
  * Falls back to `post_coauthors.workout_id` when the post carries one (the
@@ -449,6 +484,7 @@ const CREW_ROUTE_SQL = `(
 	WHERE p.include_route AND NOT p.is_auto
 		AND (
 			COALESCE(
+				pca.include_route,
 				(SELECT ns.share_route_maps FROM notification_settings ns
 				  WHERE ns.user_id = pca.user_id),
 				true
@@ -512,7 +548,15 @@ const MULTI_COAUTHORS_JSON = `(
 		'profile_image_url', mcu.profile_image_url,
 		'status', pca.status,
 		'media_url', pca.media_url,
-		'route', ${CREW_ROUTE_SQL}
+		'route', ${CREW_ROUTE_SQL},
+		-- A participant's own curation, readable only BY that participant.
+		-- Returning it to the whole crew would publish "bob kept this out of
+		-- his friends' feeds" to bob's friends, which is the opposite of what
+		-- he asked for.
+		'on_feed', CASE WHEN pca.user_id = $1
+			THEN COALESCE(pca.on_feed, TRUE) END,
+		'include_route', CASE WHEN pca.user_id = $1
+			THEN pca.include_route END
 	) ORDER BY pca.created_at)
 	FROM post_coauthors pca
 	JOIN users mcu ON mcu.user_id = pca.user_id
@@ -577,7 +621,10 @@ const COAUTHOR_COLUMNS = `
 	-- to the other. CASE guarantees the subquery only runs on collab rows the
 	-- viewer is actually part of.
 	CASE WHEN p.coauthor_user_id = $1
-		THEN ${coauthorOnProfileSql("p", "$1")} END AS coauthor_on_profile`;
+		THEN ${coauthorOnProfileSql("p", "$1")} END AS coauthor_on_profile,
+	-- Same rule, same reason: the coauthor's reach switch is theirs to read.
+	CASE WHEN p.coauthor_user_id = $1
+		THEN COALESCE(p.coauthor_on_feed, TRUE) END AS coauthor_on_feed`;
 
 // SELECT list shared by feed + story-detail reads so both shapes match PostRow.
 // `$1` must be the viewer id (drives is_self / is_hyped).
@@ -1820,6 +1867,9 @@ const FEED_ENTRY_PROJECTION = `
 				LIMIT 1
 			) AS story_photo_url,
 			p.is_auto,
+			-- The author's route-slide choice, so the card's ⋯ menu can offer to
+			-- withdraw or restore it without a second round trip. Additive.
+			p.include_route,
 			page.workout_id,
 			-- Populated for posts (via their linked workout) and workouts alike.
 			wt.workout_type,
@@ -2305,53 +2355,105 @@ export async function getPublicPostPreview(
  * whose run is already on the feed stay excluded — they already surface as
  * that feed post's story_photo_url slide.
  */
-export async function getUserPosts(
-  viewerId: string,
-  authorId: string,
-  limit: number,
-  before?: string | null,
-  includeStoryOnly = false,
-): Promise<PostRow[]> {
-  // No CIRCLE_CTE here: a profile read is exactly where `workout_visibility`
-  // decides who gets in, and a hardcoded circle join would have made 'public'
-  // impossible. The feed still uses the circle — that one IS friends-by-nature.
-  const rows = await db.query<PostRow>(
-    `
-		SELECT ${POST_SELECT},
-			${URL_SAFE_CURSOR("p.created_at")} AS cursor,
-			-- The run's story photo, so the profile grid + detail cards lead
-			-- with the real picture (workout card second), matching the feed.
-			-- Owner's decision: story expiry does NOT remove the photo from
-			-- feed/profile surfaces — only deleting the story does.
-			(
-				SELECT p3.media_url FROM posts p3
-				WHERE p.workout_id IS NOT NULL
-					AND p3.workout_id = p.workout_id
-					AND p3.user_id = p.user_id
-					AND p3.post_id <> p.post_id
-					AND p3.deleted_at IS NULL
-					AND p3.share_to_story AND NOT p3.share_to_feed
-				ORDER BY p3.created_at DESC
-				LIMIT 1
-			) AS story_photo_url
-		FROM posts p
-		JOIN users u ON u.user_id = p.user_id
-		WHERE (p.user_id = $2
+/**
+ * How the profile grid may be ordered. Every value is keyset-paginated on
+ * `created_at`, which is the only column the grid has an index on and the only
+ * one a cursor can express without changing the cursor's shape — so adding a
+ * sort here is free, and adding one that isn't a `created_at` walk is not.
+ */
+export type UserPostsSort = "newest" | "oldest";
+
+/**
+ * What the grid is filtered to. `all` is the shipped behaviour and the default
+ * for any client that doesn't ask, which is every build that predates this.
+ *
+ *  - `photos`   — deliberate posts. A picture someone chose to take.
+ *  - `auto`     — the generated route/stats cards published when the photo
+ *                 prompt was skipped. Together with `photos` this partitions
+ *                 the grid exactly, which is why it's `is_auto` and not a
+ *                 has-a-route test: a photo post can carry a route too.
+ *  - `collabs`  — posts with at least one live credited coauthor, in either
+ *                 representation (the legacy scalar or post_coauthors).
+ */
+export type UserPostsFilter = "all" | "photos" | "auto" | "collabs";
+
+export interface UserPostsQuery {
+  sort?: UserPostsSort;
+  filter?: UserPostsFilter;
+  /**
+   * Return pinned posts through `getUserPinnedPosts` INSTEAD of inline in the
+   * paged body.
+   *
+   * Off by default and that is load-bearing: a shipped client knows nothing
+   * about pins, so excluding them from `items` would make a pinned post vanish
+   * from its grid entirely. Old clients keep seeing every post in date order
+   * (with an additive `pinned_at` they ignore); new clients ask for the split
+   * and render the pins as their own row on top.
+   */
+  splitPins?: boolean;
+}
+
+/** Instagram's number, and for the same reason: three fit one grid row. */
+export const POST_PIN_LIMIT = 3;
+
+/**
+ * SQL: the filter clause for `filter`, or TRUE. `p` is the posts alias.
+ *
+ * Kept as a lookup rather than interpolation so the value can never reach SQL
+ * — the caller's string is validated into the union by `parseUserPostsFilter`,
+ * and anything unrecognised falls back to `all`.
+ */
+const USER_POSTS_FILTER_SQL: Record<UserPostsFilter, string> = {
+  all: "TRUE",
+  photos: "NOT p.is_auto",
+  auto: "p.is_auto",
+  collabs: `(${COLLAB_ACTIVE} OR EXISTS (
+			SELECT 1 FROM post_coauthors pca
+			WHERE pca.post_id = p.post_id AND ${MULTI_COLLAB_ACTIVE}
+		))`,
+};
+
+export function parseUserPostsSort(raw: unknown): UserPostsSort {
+  return raw === "oldest" ? "oldest" : "newest";
+}
+
+export function parseUserPostsFilter(raw: unknown): UserPostsFilter {
+  return raw === "photos" || raw === "auto" || raw === "collabs" ? raw : "all";
+}
+
+/**
+ * Everything a post must satisfy to appear on `$2`'s profile grid as read by
+ * viewer `$1`, minus the cursor bound and the ordering.
+ *
+ * Extracted because the pinned row and the paged body are the same grid asked
+ * two different ways, and a visibility rule that lived in only one of them
+ * would be a leak in the other — the pins are the surface someone is most
+ * likely to add a shortcut to later.
+ *
+ * Parameterised by placeholder rather than fixed to $1/$2/$5: the two callers
+ * bind different numbers of values, and Postgres rejects a statement that
+ * skips a $n (it can't infer the type of a parameter nothing references).
+ */
+const userGridWhere = (
+  viewer: string,
+  author: string,
+  storyOnly: string,
+) => `(p.user_id = ${author}
 				-- Tags are the Tagged tab's job, not the grid's: a collab only
 				-- joins the coauthor's Posts grid while they haven't opted out
 				-- (per-post override, else their tagged_posts_on_profile).
 				-- Hiding it here removes it from NOWHERE else — it stays in
 				-- their Tagged tab, on the author's grid, and in both circles'
 				-- feeds.
-				OR (p.coauthor_user_id = $2 AND ${COLLAB_ACTIVE}
-					AND ${coauthorOnProfileSql("p", "$2")}))
+				OR (p.coauthor_user_id = ${author} AND ${COLLAB_ACTIVE}
+					AND ${coauthorOnProfileSql("p", author)}))
 			AND p.deleted_at IS NULL
 			AND (
 				p.share_to_feed
 				OR (
-					$5::boolean
-					AND p.user_id = $2
-					AND p.user_id = $1
+					${storyOnly}::boolean
+					AND p.user_id = ${author}
+					AND p.user_id = ${viewer}
 					AND p.share_to_story AND NOT p.share_to_feed
 					AND NOT EXISTS (
 						SELECT 1 FROM posts pf
@@ -2363,27 +2465,177 @@ export async function getUserPosts(
 					)
 				)
 			)
-			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$2", "$1")}
+			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL(author, viewer)}
 			-- Collab rows surface the PRIMARY author's content on the coauthor's
 			-- profile. Reach mirrors the unified feed: a collab deliberately
 			-- shares BOTH audiences, so the viewer needn't be the author's
 			-- friend — but a private or blocked author still disappears. The
 			-- privacy arm alone exempts the coauthor (they co-own the post and
 			-- must keep seeing it); a block still wins, in either direction.
-			AND (p.user_id = $2 OR p.coauthor_user_id = $1
+			AND (p.user_id = ${author} OR p.coauthor_user_id = ${viewer}
 				OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")})
-			AND (p.user_id = $2 OR NOT EXISTS (
+			AND (p.user_id = ${author} OR NOT EXISTS (
 				SELECT 1 FROM user_blocks b
-				WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
-					OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
-			))
-			AND ($3::timestamptz IS NULL OR p.created_at < $3::timestamptz)
-		ORDER BY p.created_at DESC
+				WHERE (b.blocker_id = ${viewer} AND b.blocked_id = p.user_id)
+					OR (b.blocker_id = p.user_id AND b.blocked_id = ${viewer})
+			))`;
+
+/**
+ * The run's active story photo, so profile surfaces lead with the real picture
+ * (workout card second), matching the feed. Owner's decision: story EXPIRY does
+ * not remove the photo from feed/profile surfaces — only deleting the story
+ * does.
+ */
+const GRID_STORY_PHOTO_SQL = `(
+				SELECT p3.media_url FROM posts p3
+				WHERE p.workout_id IS NOT NULL
+					AND p3.workout_id = p.workout_id
+					AND p3.user_id = p.user_id
+					AND p3.post_id <> p.post_id
+					AND p3.deleted_at IS NULL
+					AND p3.share_to_story AND NOT p3.share_to_feed
+				ORDER BY p3.created_at DESC
+				LIMIT 1
+			)`;
+
+export async function getUserPosts(
+  viewerId: string,
+  authorId: string,
+  limit: number,
+  before?: string | null,
+  includeStoryOnly = false,
+  query: UserPostsQuery = {},
+): Promise<PostRow[]> {
+  const sort = query.sort ?? "newest";
+  const filter = query.filter ?? "all";
+  // "Oldest first" walks the same index the other way, so the cursor bound has
+  // to invert with it — the client keeps sending back the last row it saw and
+  // never has to know which direction that means.
+  const cursorBound =
+    sort === "oldest"
+      ? `($3::timestamptz IS NULL OR p.created_at > $3::timestamptz)`
+      : `($3::timestamptz IS NULL OR p.created_at < $3::timestamptz)`;
+  const orderBy =
+    sort === "oldest" ? "p.created_at ASC" : "p.created_at DESC";
+
+  // No CIRCLE_CTE here: a profile read is exactly where `workout_visibility`
+  // decides who gets in, and a hardcoded circle join would have made 'public'
+  // impossible. The feed still uses the circle — that one IS friends-by-nature.
+  const rows = await db.query<PostRow>(
+    `
+		SELECT ${POST_SELECT},
+			${URL_SAFE_CURSOR("p.created_at")} AS cursor,
+			${GRID_STORY_PHOTO_SQL} AS story_photo_url
+		FROM posts p
+		JOIN users u ON u.user_id = p.user_id
+		WHERE ${userGridWhere("$1", "$2", "$5")}
+			AND ${USER_POSTS_FILTER_SQL[filter]}
+			-- Pins ride in the paged body unless the caller asked for them
+			-- separately; $6 is that request, never a filter of its own.
+			AND (NOT $6::boolean OR p.pinned_at IS NULL)
+			AND ${cursorBound}
+		ORDER BY ${orderBy}
 		LIMIT $4
 		`,
-    [viewerId, authorId, before ?? null, limit, includeStoryOnly],
+    [
+      viewerId,
+      authorId,
+      before ?? null,
+      limit,
+      includeStoryOnly,
+      query.splitPins === true,
+    ],
   );
   return rows;
+}
+
+/**
+ * The author's pinned posts, newest pin first — the row that sits above the
+ * grid.
+ *
+ * Its own query rather than a branch in the paged one because pins are not a
+ * page: there are at most POST_PIN_LIMIT of them, they ignore the sort and the
+ * filter (a pin is the author saying "this one, first", and a filter that hid
+ * it would make the pin look broken), and they must not consume the cursor.
+ * Same visibility fragment as the body, so nothing can be pinned into view
+ * that couldn't be scrolled to.
+ */
+export async function getUserPinnedPosts(
+  viewerId: string,
+  authorId: string,
+): Promise<PostRow[]> {
+  return db.query<PostRow>(
+    `
+		SELECT ${POST_SELECT},
+			${URL_SAFE_CURSOR("p.created_at")} AS cursor,
+			${GRID_STORY_PHOTO_SQL} AS story_photo_url
+		FROM posts p
+		JOIN users u ON u.user_id = p.user_id
+		WHERE ${userGridWhere("$1", "$2", "$3")}
+			AND p.pinned_at IS NOT NULL
+			-- A pin only ever belongs to the person whose grid this is: pinning
+			-- is the AUTHOR's curation of their own profile, so a collab pinned
+			-- by its author must not jump to the top of the coauthor's grid too.
+			AND p.user_id = $2
+		ORDER BY p.pinned_at DESC
+		LIMIT $4
+		`,
+    [viewerId, authorId, false, POST_PIN_LIMIT],
+  );
+}
+
+/**
+ * Pin / unpin one of your OWN posts to the top of your grid.
+ *
+ * Returns "limit" rather than silently dropping the oldest pin: three is a
+ * small enough number that a user who hits it meant to choose, and an
+ * unpin-something-else prompt is a better answer than a pin that quietly
+ * evicted one they still wanted.
+ *
+ * Deliberately author-only and not offered to a tagged coauthor — a pin is
+ * curation of a grid, and the collab is on the coauthor's grid at the author's
+ * invitation, which `coauthor_on_profile` already lets them refuse wholesale.
+ */
+export async function setPostPinned(
+  authorId: string,
+  postId: string,
+  pinned: boolean,
+): Promise<"ok" | "not_found" | "limit"> {
+  if (!pinned) {
+    const cleared = await db.query<{ post_id: string }>(
+      `UPDATE posts SET pinned_at = NULL
+			 WHERE post_id = $1 AND user_id = $2 AND deleted_at IS NULL
+			 RETURNING post_id`,
+      [postId, authorId],
+    );
+    return cleared.length > 0 ? "ok" : "not_found";
+  }
+
+  // One statement so two taps can't race past the cap: the count is taken
+  // inside the same UPDATE that would exceed it, and a post that is ALREADY
+  // pinned re-stamps freely (it consumes no new slot, it just moves to front).
+  const rows = await db.query<{ post_id: string }>(
+    `UPDATE posts SET pinned_at = NOW()
+		 WHERE post_id = $1 AND user_id = $2 AND deleted_at IS NULL
+			 AND (
+				pinned_at IS NOT NULL
+				OR (SELECT COUNT(*) FROM posts pp
+					WHERE pp.user_id = $2 AND pp.pinned_at IS NOT NULL
+						AND pp.deleted_at IS NULL) < $3
+			 )
+		 RETURNING post_id`,
+    [postId, authorId, POST_PIN_LIMIT],
+  );
+  if (rows.length > 0) return "ok";
+
+  // Nothing updated: either the post isn't theirs, or the cap is full. Tell
+  // those apart — "you already have 3 pinned" is actionable, "not found" is not.
+  const exists = await db.query<{ post_id: string }>(
+    `SELECT post_id FROM posts
+		 WHERE post_id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+    [postId, authorId],
+  );
+  return exists.length > 0 ? "limit" : "not_found";
 }
 
 /**
@@ -3122,6 +3374,64 @@ export async function setCoauthorProfileVisibility(
 }
 
 /**
+ * The coauthor's REACH switch: does this collab go to my friends' feeds?
+ *
+ * Separate call from the profile one because they are separate decisions and
+ * bundling them would force a user to give up the tag to quiet the broadcast.
+ * Writes the legacy scalar AND the multi-person row in one go where both
+ * exist, for the same reason respondToCoauthorController does: a buddy post
+ * carries the same person in both representations, and a switch that only
+ * moved one of them would read as not working from whichever surface asked
+ * the other.
+ */
+export async function setCoauthorFeedVisibility(
+  userId: string,
+  postId: string,
+  onFeed: boolean,
+): Promise<{ author_id: string } | null> {
+  const scalar = await db.query<{ author_id: string }>(
+    `UPDATE posts SET coauthor_on_feed = $3
+		 WHERE post_id = $2 AND coauthor_user_id = $1 AND deleted_at IS NULL
+		 RETURNING user_id AS author_id`,
+    [userId, postId, onFeed],
+  );
+  const multi = await db.query<{ author_id: string }>(
+    `UPDATE post_coauthors pca SET on_feed = $3
+		 FROM posts p
+		 WHERE pca.post_id = $2 AND pca.user_id = $1
+			 AND p.post_id = pca.post_id AND p.deleted_at IS NULL
+		 RETURNING p.user_id AS author_id`,
+    [userId, postId, onFeed],
+  );
+  return scalar[0] ?? multi[0] ?? null;
+}
+
+/**
+ * The coauthor's ROUTE switch for one post: is MY trace drawn on this card?
+ *
+ * Only meaningful on the multi-person representation — `post_coauthors` is
+ * where a participant's route is resolved from (CREW_ROUTE_SQL), and the
+ * legacy scalar coauthor has never had a route on the card at all. Passing
+ * null restores "follow my global Share route maps setting", which is what
+ * every row starts as.
+ */
+export async function setCoauthorRoutePreference(
+  userId: string,
+  postId: string,
+  includeRoute: boolean | null,
+): Promise<{ author_id: string } | null> {
+  const rows = await db.query<{ author_id: string }>(
+    `UPDATE post_coauthors pca SET include_route = $3
+		 FROM posts p
+		 WHERE pca.post_id = $2 AND pca.user_id = $1
+			 AND p.post_id = pca.post_id AND p.deleted_at IS NULL
+		 RETURNING p.user_id AS author_id`,
+    [userId, postId, includeRoute],
+  );
+  return rows[0] ?? null;
+}
+
+/**
  * Would a NEW tag on `coauthorId` land on their profile grid? Reads the
  * setting alone — a brand-new tag has no per-post override yet. Only used to
  * word the tag push truthfully; the grid query resolves this itself.
@@ -3300,8 +3610,29 @@ export type UpdatePostResult = "ok" | "not_found" | "feed_conflict";
 export async function updateOwnPost(
   authorId: string,
   postId: string,
-  updates: { caption?: string | null; addToFeed?: boolean },
+  updates: {
+    caption?: string | null;
+    addToFeed?: boolean;
+    includeRoute?: boolean;
+  },
 ): Promise<UpdatePostResult> {
+  // The route is the one part of a post the author can only decide BEFORE
+  // sharing, and it is the part they most often want back: a walk that started
+  // at their front door reads differently once it's on the feed. Toggling it
+  // here changes nothing else — the map is resolved at read time from
+  // workout_routes, so turning it off withdraws the slide rather than deleting
+  // the trace, and turning it back on restores it. Each crew member's own
+  // trace still answers to their own consent underneath this.
+  if (updates.includeRoute !== undefined) {
+    const rows = await db.query<{ post_id: string }>(
+      `UPDATE posts SET include_route = $3
+			 WHERE post_id = $1 AND user_id = $2 AND deleted_at IS NULL
+			 RETURNING post_id`,
+      [postId, authorId, updates.includeRoute],
+    );
+    if (rows.length === 0) return "not_found";
+  }
+
   if (updates.caption !== undefined) {
     const rows = await db.query<{ post_id: string }>(
       `UPDATE posts SET caption = $3
@@ -3395,4 +3726,329 @@ export async function acceptTerms(userId: string): Promise<string> {
     [userId],
   );
   return rows[0]?.terms_accepted_at;
+}
+
+// ─── Story Highlights ────────────────────────────────────────────────────
+//
+// A highlight is a named, ordered list of the OWNER's own posts, pinned to
+// their profile above the grid. It stores no media and copies nothing: every
+// read re-resolves the member posts, so a post that is later deleted or made
+// private simply leaves the highlight, with no orphaned copy to clean up.
+//
+// The reason the feature exists is the expiry. A story is the only content in
+// this app with one, and `story_expires_at` retiring it from the rail is
+// exactly why nobody bothers making one. Adding a story to a highlight is
+// therefore a PUBLICATION decision — it takes a photo that was going to
+// disappear and makes it permanent for whoever can already see the profile —
+// which is why `highlightMemberWhere` deliberately drops the `share_to_feed`
+// requirement the grid enforces while keeping every other rule (the owner's
+// workout_visibility, blocks in either direction, and the caller's
+// lockUnearnedPhotos gate on the way out) exactly as it is.
+
+// Same shape check the controllers apply before a ::uuid cast, restated here
+// rather than imported: a service reaching into a controller inverts the
+// dependency, and this list arrives as a client-supplied array that never
+// passes through a route param.
+const HIGHLIGHT_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (value: string): boolean => HIGHLIGHT_UUID_RE.test(value);
+
+/** Enough for a profile rail; past this the row stops being scannable. */
+export const MAX_HIGHLIGHTS_PER_USER = 20;
+/** Per highlight. A highlight is a story, not an archive. */
+export const MAX_HIGHLIGHT_ITEMS = 100;
+export const MAX_HIGHLIGHT_TITLE = 30;
+
+export interface PostHighlight {
+  highlight_id: string;
+  user_id: string;
+  title: string;
+  cover_post_id: string | null;
+  /** Resolved cover photo — the chosen cover, else the first member. */
+  cover_media_url: string | null;
+  item_count: number;
+  sort_index: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * SQL: may viewer `viewer` see owner `owner`'s post `p` AS A HIGHLIGHT MEMBER?
+ *
+ * The grid's rules minus `share_to_feed` (membership is the publish decision,
+ * see above) and minus the collab arm (a highlight only ever holds the owner's
+ * own posts, enforced at write time). Everything that protects another person
+ * — visibility, blocks — is unchanged and stated here rather than assumed.
+ */
+const highlightMemberWhere = (viewer: string, owner: string) => `(
+			p.user_id = ${owner}
+			AND p.deleted_at IS NULL
+			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL(owner, viewer)}
+			AND (p.user_id = ${viewer} OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")})
+			AND (p.user_id = ${viewer} OR NOT EXISTS (
+				SELECT 1 FROM user_blocks b
+				WHERE (b.blocker_id = ${viewer} AND b.blocked_id = p.user_id)
+					OR (b.blocker_id = p.user_id AND b.blocked_id = ${viewer})
+			))
+		)`;
+
+/**
+ * The owner's highlight rail. Counts and covers are resolved against the same
+ * visibility rule the members are, so a highlight whose every post has become
+ * invisible to this viewer reports 0 rather than a count they can't reach —
+ * and the caller drops those, instead of drawing a circle that opens empty.
+ */
+export async function listUserHighlights(
+  viewerId: string,
+  ownerId: string,
+): Promise<PostHighlight[]> {
+  return db.query<PostHighlight>(
+    `
+		SELECT h.highlight_id,
+			h.user_id,
+			h.title,
+			h.cover_post_id,
+			(
+				SELECT p.media_url FROM post_highlight_items i
+				JOIN posts p ON p.post_id = i.post_id
+				WHERE i.highlight_id = h.highlight_id
+					AND ${highlightMemberWhere("$1", "h.user_id")}
+				-- The chosen cover wins; otherwise the first member does, so a
+				-- highlight always has a face even after its cover is deleted.
+				ORDER BY (p.post_id = h.cover_post_id) DESC, i.sort_index, i.added_at
+				LIMIT 1
+			) AS cover_media_url,
+			(
+				SELECT COUNT(*)::int FROM post_highlight_items i
+				JOIN posts p ON p.post_id = i.post_id
+				WHERE i.highlight_id = h.highlight_id
+					AND ${highlightMemberWhere("$1", "h.user_id")}
+			) AS item_count,
+			h.sort_index,
+			h.created_at,
+			h.updated_at
+		FROM post_highlights h
+		WHERE h.user_id = $2
+		ORDER BY h.sort_index ASC, h.created_at ASC
+		LIMIT $3
+		`,
+    [viewerId, ownerId, MAX_HIGHLIGHTS_PER_USER],
+  );
+}
+
+export interface HighlightDetail {
+  highlight_id: string;
+  user_id: string;
+  title: string;
+  items: PostRow[];
+}
+
+/** One highlight, opened. Members in the owner's chosen order. */
+export async function getHighlight(
+  viewerId: string,
+  highlightId: string,
+): Promise<HighlightDetail | null> {
+  const head = await db.query<{
+    highlight_id: string;
+    user_id: string;
+    title: string;
+  }>(
+    `SELECT highlight_id, user_id, title FROM post_highlights WHERE highlight_id = $1`,
+    [highlightId],
+  );
+  if (head.length === 0) return null;
+
+  const items = await db.query<PostRow>(
+    `
+		SELECT ${POST_SELECT},
+			${URL_SAFE_CURSOR("p.created_at")} AS cursor
+		FROM post_highlight_items i
+		JOIN posts p ON p.post_id = i.post_id
+		JOIN users u ON u.user_id = p.user_id
+		WHERE i.highlight_id = $2
+			AND ${highlightMemberWhere("$1", "$3")}
+		ORDER BY i.sort_index ASC, i.added_at ASC
+		LIMIT $4
+		`,
+    [viewerId, highlightId, head[0].user_id, MAX_HIGHLIGHT_ITEMS],
+  );
+
+  return {
+    highlight_id: head[0].highlight_id,
+    user_id: head[0].user_id,
+    title: head[0].title,
+    items,
+  };
+}
+
+export type HighlightWriteResult =
+  | { ok: true; highlight_id: string }
+  | { ok: false; error: "not_found" | "limit" | "invalid_title" | "no_posts" };
+
+function normalizeHighlightTitle(raw: unknown): string | null {
+  const title = typeof raw === "string" ? raw.trim() : "";
+  if (!title || title.length > MAX_HIGHLIGHT_TITLE) return null;
+  return title;
+}
+
+/**
+ * Which of `postIds` are genuinely the caller's own live posts, in the order
+ * they were given. Everything else is DROPPED rather than rejected: the client
+ * builds this list from a grid it may have loaded minutes ago, and a post
+ * deleted in the meantime should not fail the whole save.
+ */
+async function ownedPostIds(
+  userId: string,
+  postIds: string[],
+): Promise<string[]> {
+  const wanted = Array.from(new Set(postIds.filter(isUuid))).slice(
+    0,
+    MAX_HIGHLIGHT_ITEMS,
+  );
+  if (wanted.length === 0) return [];
+  const rows = await db.query<{ post_id: string }>(
+    `SELECT post_id FROM posts
+		 WHERE post_id = ANY($1::uuid[]) AND user_id = $2 AND deleted_at IS NULL`,
+    [wanted, userId],
+  );
+  const live = new Set(rows.map((r) => r.post_id));
+  return wanted.filter((id) => live.has(id));
+}
+
+export async function createHighlight(
+  userId: string,
+  input: { title: unknown; post_ids?: unknown; cover_post_id?: unknown },
+): Promise<HighlightWriteResult> {
+  const title = normalizeHighlightTitle(input.title);
+  if (!title) return { ok: false, error: "invalid_title" };
+
+  const count = await db.query<{ n: string }>(
+    `SELECT COUNT(*) AS n FROM post_highlights WHERE user_id = $1`,
+    [userId],
+  );
+  if (Number(count[0]?.n ?? 0) >= MAX_HIGHLIGHTS_PER_USER) {
+    return { ok: false, error: "limit" };
+  }
+
+  const postIds = await ownedPostIds(
+    userId,
+    Array.isArray(input.post_ids) ? input.post_ids.map(String) : [],
+  );
+  if (postIds.length === 0) return { ok: false, error: "no_posts" };
+  const cover =
+    typeof input.cover_post_id === "string" &&
+    postIds.includes(input.cover_post_id)
+      ? input.cover_post_id
+      : postIds[0];
+
+  const created = await db.query<{ highlight_id: string }>(
+    `INSERT INTO post_highlights (user_id, title, cover_post_id, sort_index)
+		 VALUES ($1, $2, $3,
+			COALESCE((SELECT MAX(sort_index) + 1 FROM post_highlights WHERE user_id = $1), 0))
+		 RETURNING highlight_id`,
+    [userId, title, cover],
+  );
+  const highlightId = created[0].highlight_id;
+  await replaceHighlightItems(highlightId, postIds);
+  return { ok: true, highlight_id: highlightId };
+}
+
+/**
+ * Membership rewrite as one statement pair: delete what's no longer a member,
+ * then upsert the given order. `sort_index` comes from the array position, so
+ * reordering is the same call as adding — the client always sends the list it
+ * wants to end up with, which is the only shape a drag-to-reorder UI can
+ * honestly produce.
+ */
+async function replaceHighlightItems(
+  highlightId: string,
+  postIds: string[],
+): Promise<void> {
+  await db.query(
+    `DELETE FROM post_highlight_items
+		 WHERE highlight_id = $1 AND NOT (post_id = ANY($2::uuid[]))`,
+    [highlightId, postIds],
+  );
+  if (postIds.length === 0) return;
+  await db.query(
+    `INSERT INTO post_highlight_items (highlight_id, post_id, sort_index)
+		 SELECT $1, v.post_id, v.ord
+		 FROM UNNEST($2::uuid[]) WITH ORDINALITY AS v(post_id, ord)
+		 ON CONFLICT (highlight_id, post_id) DO UPDATE SET sort_index = EXCLUDED.sort_index`,
+    [highlightId, postIds],
+  );
+}
+
+export async function updateHighlight(
+  userId: string,
+  highlightId: string,
+  input: {
+    title?: unknown;
+    post_ids?: unknown;
+    cover_post_id?: unknown;
+    sort_index?: unknown;
+  },
+): Promise<HighlightWriteResult> {
+  const owned = await db.query<{ highlight_id: string }>(
+    `SELECT highlight_id FROM post_highlights WHERE highlight_id = $1 AND user_id = $2`,
+    [highlightId, userId],
+  );
+  if (owned.length === 0) return { ok: false, error: "not_found" };
+
+  let title: string | null = null;
+  if (input.title !== undefined) {
+    title = normalizeHighlightTitle(input.title);
+    if (!title) return { ok: false, error: "invalid_title" };
+  }
+
+  let postIds: string[] | null = null;
+  if (input.post_ids !== undefined) {
+    postIds = await ownedPostIds(
+      userId,
+      Array.isArray(input.post_ids) ? input.post_ids.map(String) : [],
+    );
+    // An empty highlight is a circle that opens onto nothing, so emptying one
+    // is a delete in disguise — say so instead of leaving the shell behind.
+    if (postIds.length === 0) return { ok: false, error: "no_posts" };
+    await replaceHighlightItems(highlightId, postIds);
+  }
+
+  const cover =
+    typeof input.cover_post_id === "string" && isUuid(input.cover_post_id)
+      ? input.cover_post_id
+      : null;
+  const sortIndex =
+    typeof input.sort_index === "number" && Number.isFinite(input.sort_index)
+      ? Math.max(0, Math.trunc(input.sort_index))
+      : null;
+
+  await db.query(
+    `UPDATE post_highlights SET
+			title = COALESCE($3, title),
+			-- Only ever a member post: a cover pointing at something that isn't
+			-- in the highlight would render a photo the highlight doesn't hold.
+			cover_post_id = CASE
+				WHEN $4::uuid IS NULL THEN cover_post_id
+				WHEN EXISTS (SELECT 1 FROM post_highlight_items i
+					WHERE i.highlight_id = $1 AND i.post_id = $4::uuid) THEN $4::uuid
+				ELSE cover_post_id END,
+			sort_index = COALESCE($5, sort_index),
+			updated_at = NOW()
+		 WHERE highlight_id = $1 AND user_id = $2`,
+    [highlightId, userId, title, cover, sortIndex],
+  );
+  return { ok: true, highlight_id: highlightId };
+}
+
+/** Hard delete — the posts themselves are untouched, only the grouping goes. */
+export async function deleteHighlight(
+  userId: string,
+  highlightId: string,
+): Promise<boolean> {
+  const rows = await db.query<{ highlight_id: string }>(
+    `DELETE FROM post_highlights WHERE highlight_id = $1 AND user_id = $2
+		 RETURNING highlight_id`,
+    [highlightId, userId],
+  );
+  return rows.length > 0;
 }

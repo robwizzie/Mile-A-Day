@@ -143,13 +143,9 @@ struct FriendsListView: View {
             }
         }
         .task {
-            // Presence is the one thing on this screen that is only true for
-            // the next few minutes, so it is always re-pulled on open rather
-            // than trusted from whenever the dashboard last looked.
-            await buddy.refreshFriendsOutNow()
-            if friendService.friends.isEmpty && friendService.friendRequests.isEmpty && friendService.sentRequests.isEmpty {
-                await friendService.refreshAllData()
-            }
+            // Parked intents first: they're synchronous state reads, so there
+            // is no reason to make a deep-linked sheet wait behind the network
+            // work below.
             if MADNotificationService.shared.pendingNotificationType == "friend_request" {
                 showingRequestsSheet = true
                 MADNotificationService.shared.pendingNotificationType = nil
@@ -166,12 +162,7 @@ struct FriendsListView: View {
             if let pending = DeepLinkRouter.shared.pendingProfileUsername {
                 openProfileFromDeepLink(username: pending)
             }
-            await loadNudgeStatuses()
-            await loadMyRank()
-            await loadFeed()
-            // Rescuable friends + meters (no-op {active:false} until the
-            // server enables streak features for this user).
-            await tokensState.refreshStatus()
+            await refreshAll(force: false)
         }
         .onReceive(DeepLinkRouter.shared.$pendingProfileUsername) { username in
             guard let username else { return }
@@ -184,11 +175,7 @@ struct FriendsListView: View {
             DeepLinkRouter.shared.pendingOpenFriendRequests = false
         }
         .refreshable {
-            // refreshAllData re-fetches nudge statuses internally.
-            await friendService.refreshAllData()
-            await buddy.refreshFriendsOutNow()
-            await loadMyRank()
-            await loadFeed(force: true)
+            await refreshAll(force: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
             guard let type = notification.userInfo?["type"] as? String else { return }
@@ -206,6 +193,52 @@ struct FriendsListView: View {
         } message: {
             Text("You will no longer be friends with this person.")
         }
+    }
+
+    // MARK: - Refresh
+
+    /// Everything this tab renders, in one place.
+    ///
+    /// `.task` and `.refreshable` had drifted into two different subsets: the
+    /// pull re-fetched the friend graph and nothing else, so the hero card's own
+    /// miles/streak and every Streak Assist CTA stayed frozen until the user
+    /// happened to visit the Dashboard (whose onAppear refreshes HealthKit and
+    /// the backend stats) and come back — which is why a tab round-trip looked
+    /// like a better refresh than the refresh gesture. One function, both
+    /// callers; add new page data here and both paths get it.
+    ///
+    /// `force` is the pull: it re-fetches the friend graph and the activity feed
+    /// unconditionally, where opening the tab keeps the existing "only if we
+    /// have nothing yet" guards so a tab switch doesn't re-run what the
+    /// Dashboard just loaded.
+    private func refreshAll(force: Bool) async {
+        // The hero card is the top of this page and shows the VIEWER's own
+        // numbers — today's miles straight off HealthKit, the streak off the
+        // backend. Nothing else on this tab fetches either.
+        healthManager.fetchTodaysDistance()
+
+        // Presence is the one thing on this screen that is only true for the
+        // next few minutes, so it is always re-pulled rather than trusted from
+        // whenever the dashboard last looked.
+        await buddy.refreshFriendsOutNow()
+
+        if force || (friendService.friends.isEmpty && friendService.friendRequests.isEmpty && friendService.sentRequests.isEmpty) {
+            // refreshAllData re-fetches nudge statuses internally.
+            await friendService.refreshAllData()
+        } else {
+            // Friend rows still need fresh today-miles/completion even when the
+            // list itself is already loaded.
+            await loadNudgeStatuses()
+        }
+
+        // Streak (raise-only) + fastest pace + the gated tokens payload.
+        await SelfStatsRefresher.refreshBackendStats(userManager: userManager)
+        // Rescuable friends + meters (no-op {active:false} until the server
+        // enables streak features for this user). Runs after the stats call so
+        // the fuller of the two payloads is the one that lands last.
+        await tokensState.refreshStatus()
+        await loadMyRank()
+        await loadFeed(force: force)
     }
 
     // MARK: - Streak Assist (in-row rescue)

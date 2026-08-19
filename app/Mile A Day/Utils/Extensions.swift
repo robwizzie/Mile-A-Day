@@ -163,7 +163,7 @@ struct IdentifiableWorkout: Identifiable {
 // HKWorkout extension for easier data access
 extension HKWorkout {
     var formattedDistance: String {
-        guard totalDistance != nil || TrackedWorkoutLedger.shared.isTracked(uuid.uuidString)
+        guard totalDistance != nil || TrackedWorkoutLedger.shared.hasDistance(uuid.uuidString)
         else { return "Unknown" }
         return madDistanceMiles.milesFormatted
     }

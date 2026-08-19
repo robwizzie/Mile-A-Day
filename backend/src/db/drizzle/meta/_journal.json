@@ -379,6 +379,13 @@
       "when": 1786768874010,
       "tag": "0053_wild_frightful_four",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1787096488558,
+      "tag": "0054_lethal_daimon_hellstrom",
+      "breakpoints": true
     }
   ]
 }

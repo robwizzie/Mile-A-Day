@@ -13,13 +13,47 @@ import CoreLocation
 ///      fraction of the points (smaller HealthKit route and sync payload;
 ///      the server caps uploads at 300 points anyway).
 /// Timestamps/order are preserved throughout — HKWorkoutRoute requires
-/// monotonic samples.
+/// STRICTLY ascending samples, which `strictlyAscending` establishes up front
+/// (the persisted route comes back with second-resolution timestamps) and every
+/// later step only ever drops points, never reorders them.
 enum WorkoutRouteCleanup {
     static func cleaned(_ points: [CLLocation]) -> [CLLocation] {
-        guard points.count >= 3 else { return points }
-        let despiked = droppingSpikes(points)
+        let ordered = strictlyAscending(points)
+        guard ordered.count >= 3 else { return ordered }
+        let despiked = droppingSpikes(ordered)
         let smoothed = smoothing(despiked)
         return simplified(smoothed, toleranceMeters: 5)
+    }
+
+    /// Enforce `HKWorkoutRouteBuilder.insertRouteData`'s hard precondition:
+    /// timestamps strictly ascending. It rejects the WHOLE batch otherwise, and
+    /// the only trace is a completion flag nobody sees — the walk just saves
+    /// without a map.
+    ///
+    /// Fixes are delivered in order, so this is not about GPS: the route is
+    /// persisted through `JSONEncoder`'s `.iso8601` strategy, which writes whole
+    /// seconds and drops the fractional part. Two points kept inside the same
+    /// second — routine at running pace, where the 4 m displacement floor clears
+    /// in well under a second — come back from disk with EQUAL timestamps, which
+    /// is not ascending. Nudging the duplicate forward by a millisecond keeps the
+    /// batch insertable and moves the drawn line by nothing.
+    static func strictlyAscending(_ points: [CLLocation]) -> [CLLocation] {
+        guard points.count >= 2 else { return points }
+        let sorted = points.sorted { $0.timestamp < $1.timestamp }
+        var out: [CLLocation] = []
+        out.reserveCapacity(sorted.count)
+        for point in sorted {
+            guard let previous = out.last else {
+                out.append(point)
+                continue
+            }
+            if point.timestamp > previous.timestamp {
+                out.append(point)
+                continue
+            }
+            out.append(point.withTimestamp(previous.timestamp.addingTimeInterval(0.001)))
+        }
+        return out
     }
 
     private static let maxOnFootSpeed: Double = 12
@@ -59,15 +93,7 @@ enum WorkoutRouteCleanup {
                 latitude: before.latitude * 0.25 + point.coordinate.latitude * 0.5 + after.latitude * 0.25,
                 longitude: before.longitude * 0.25 + point.coordinate.longitude * 0.5 + after.longitude * 0.25
             )
-            out.append(CLLocation(
-                coordinate: coordinate,
-                altitude: point.altitude,
-                horizontalAccuracy: point.horizontalAccuracy,
-                verticalAccuracy: point.verticalAccuracy,
-                course: point.course,
-                speed: point.speed,
-                timestamp: point.timestamp
-            ))
+            out.append(point.withCoordinate(coordinate))
         }
         out.append(points[points.count - 1])
         return out
@@ -142,5 +168,35 @@ enum WorkoutRouteCleanup {
         }
 
         return points.indices.compactMap { keep[$0] ? points[$0] : nil }
+    }
+}
+
+/// Rebuilding a `CLLocation` to change ONE field has to carry the other eight,
+/// and the two accuracy fields are the easy ones to lose: the
+/// `course:speed:timestamp:` initializer silently sets `courseAccuracy` and
+/// `speedAccuracy` to -1, and CoreLocation treats a negative accuracy as "this
+/// measurement is invalid" — so dropping them un-measures the very speed you
+/// were preserving. These copy everything and vary one thing.
+private extension CLLocation {
+    func withCoordinate(_ coordinate: CLLocationCoordinate2D) -> CLLocation {
+        copying(coordinate: coordinate, timestamp: timestamp)
+    }
+
+    func withTimestamp(_ timestamp: Date) -> CLLocation {
+        copying(coordinate: coordinate, timestamp: timestamp)
+    }
+
+    private func copying(coordinate: CLLocationCoordinate2D, timestamp: Date) -> CLLocation {
+        CLLocation(
+            coordinate: coordinate,
+            altitude: altitude,
+            horizontalAccuracy: horizontalAccuracy,
+            verticalAccuracy: verticalAccuracy,
+            course: course,
+            courseAccuracy: courseAccuracy,
+            speed: speed,
+            speedAccuracy: speedAccuracy,
+            timestamp: timestamp
+        )
     }
 }
