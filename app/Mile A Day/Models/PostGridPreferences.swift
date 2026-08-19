@@ -29,14 +29,19 @@ enum PostGridSort: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-/// What the grid is narrowed to. `photos` and `auto` partition it exactly —
-/// `auto` is the generated route/stats card published when the photo prompt
-/// was skipped, so the split is "pictures I took" against "cards the app made",
-/// not "has a map" (a photo post can carry a map too).
+/// What the grid is narrowed to.
+///
+/// There used to be a photos/route-cards split here as well. It was a filter
+/// nobody asked a grid of their own runs: both are just your posts, the tile
+/// already looks like what it is, and splitting them mostly answered "which
+/// days did I skip the photo prompt" — which is a question about the prompt,
+/// not about the walk. The server still honours `photos` and `auto` for the
+/// builds that shipped with them; this is only what we offer now.
+///
+/// A preference persisted as one of the retired values decodes to nil and
+/// falls back to `.all`, so a grid that was left filtered comes back whole.
 enum PostGridFilter: String, CaseIterable, Identifiable, Codable {
     case all
-    case photos
-    case auto
     case collabs
 
     var id: String { rawValue }
@@ -44,8 +49,6 @@ enum PostGridFilter: String, CaseIterable, Identifiable, Codable {
     var title: String {
         switch self {
         case .all: return "Everything"
-        case .photos: return "Photos"
-        case .auto: return "Route cards"
         case .collabs: return "With friends"
         }
     }
@@ -53,8 +56,6 @@ enum PostGridFilter: String, CaseIterable, Identifiable, Codable {
     var icon: String {
         switch self {
         case .all: return "square.grid.3x3"
-        case .photos: return "photo"
-        case .auto: return "map"
         case .collabs: return "person.2"
         }
     }
@@ -182,8 +183,14 @@ struct PostHighlight: Codable, Identifiable, Equatable {
     let user_id: String
     var title: String
     var cover_post_id: String?
-    /// The resolved cover photo — the chosen cover, else the first member, so
-    /// a highlight always has a face even after its cover is deleted.
+    /// A cover picked from the camera roll rather than from the posts inside.
+    /// Optional because an older server doesn't send it at all — nil there
+    /// means "this server has no custom covers", not "no custom cover set",
+    /// and either way `cover_media_url` is what gets drawn.
+    var cover_image_url: String?
+    /// The resolved cover photo — the uploaded cover if there is one, else the
+    /// chosen member post, else the first member, so a highlight always has a
+    /// face even after its cover is deleted.
     var cover_media_url: String?
     var item_count: Int
     var sort_index: Int?
@@ -194,6 +201,9 @@ struct PostHighlight: Codable, Identifiable, Equatable {
         guard let cover_media_url, !cover_media_url.isEmpty else { return nil }
         return ProfileImageService.fullImageURL(for: cover_media_url)
     }
+
+    /// Is the circle a photo the owner chose, rather than one of the posts?
+    var hasCustomCover: Bool { cover_image_url?.isEmpty == false }
 }
 
 /// A highlight, opened — its members in the owner's chosen order.

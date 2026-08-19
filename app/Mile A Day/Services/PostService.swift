@@ -1009,20 +1009,30 @@ enum PostService {
     }
 
     /// Create a highlight from posts you own. `postIds` order IS the order.
+    ///
+    /// `coverImageUrl` is a media_url from `uploadMedia` — a cover picked from
+    /// the camera roll, which outranks `coverPostId` server-side.
     @discardableResult
     static func createHighlight(
         title: String,
         postIds: [String],
-        coverPostId: String? = nil
+        coverPostId: String? = nil,
+        coverImageUrl: String? = nil
     ) async throws -> String {
         struct Body: Encodable {
             let title: String
             let post_ids: [String]
             let cover_post_id: String?
+            let cover_image_url: String?
         }
         struct Response: Decodable { let highlight_id: String }
         let bodyData = try JSONEncoder().encode(
-            Body(title: title, post_ids: postIds, cover_post_id: coverPostId)
+            Body(
+                title: title,
+                post_ids: postIds,
+                cover_post_id: coverPostId,
+                cover_image_url: coverImageUrl
+            )
         )
         return try await APIClient.fancyFetch(
             endpoint: "/posts/highlights",
@@ -1035,19 +1045,31 @@ enum PostService {
     /// Rename, re-cover or re-order. `postIds` is the list you want to END UP
     /// with — adding, removing and reordering are all the same call, because a
     /// drag-to-reorder UI can't honestly produce anything else.
+    ///
+    /// `coverImageUrl` has three states and the encoder is why they're spelled
+    /// this way: nil is omitted from the body (leave the uploaded cover as it
+    /// is), a media_url replaces it, and the EMPTY STRING clears it so the
+    /// cover falls back to a post inside the highlight.
     static func updateHighlight(
         highlightId: String,
         title: String? = nil,
         postIds: [String]? = nil,
-        coverPostId: String? = nil
+        coverPostId: String? = nil,
+        coverImageUrl: String? = nil
     ) async throws {
         struct Body: Encodable {
             let title: String?
             let post_ids: [String]?
             let cover_post_id: String?
+            let cover_image_url: String?
         }
         let bodyData = try JSONEncoder().encode(
-            Body(title: title, post_ids: postIds, cover_post_id: coverPostId)
+            Body(
+                title: title,
+                post_ids: postIds,
+                cover_post_id: coverPostId,
+                cover_image_url: coverImageUrl
+            )
         )
         _ = try await APIClient.fancyFetch(
             endpoint: "/posts/highlights/\(highlightId)",

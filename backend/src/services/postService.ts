@@ -3764,7 +3764,18 @@ export interface PostHighlight {
   user_id: string;
   title: string;
   cover_post_id: string | null;
-  /** Resolved cover photo — the chosen cover, else the first member. */
+  /**
+   * An uploaded cover image, or null when the cover comes from a member post.
+   * Additive: `cover_media_url` already resolves it, so a client that ignores
+   * this field still draws the right circle — it exists so the editor can say
+   * "custom cover set" and offer to drop back to a member's photo.
+   */
+  cover_image_url: string | null;
+  /**
+   * Resolved cover photo — the uploaded cover if there is one, else the
+   * chosen member post, else the first member. Every client reads this one
+   * field, which is why a custom cover needs no client change to appear.
+   */
   cover_media_url: string | null;
   item_count: number;
   sort_index: number;
@@ -3808,7 +3819,8 @@ export async function listUserHighlights(
 			h.user_id,
 			h.title,
 			h.cover_post_id,
-			(
+			h.cover_image_url,
+			COALESCE(h.cover_image_url, (
 				SELECT p.media_url FROM post_highlight_items i
 				JOIN posts p ON p.post_id = i.post_id
 				WHERE i.highlight_id = h.highlight_id
@@ -3817,7 +3829,7 @@ export async function listUserHighlights(
 				-- highlight always has a face even after its cover is deleted.
 				ORDER BY (p.post_id = h.cover_post_id) DESC, i.sort_index, i.added_at
 				LIMIT 1
-			) AS cover_media_url,
+			)) AS cover_media_url,
 			(
 				SELECT COUNT(*)::int FROM post_highlight_items i
 				JOIN posts p ON p.post_id = i.post_id
@@ -3915,9 +3927,29 @@ async function ownedPostIds(
   return wanted.filter((id) => live.has(id));
 }
 
+/**
+ * The uploaded cover image for a write, or `undefined` for "leave it alone".
+ *
+ * `cover_image_url` is validated by the CONTROLLER (same ownership + on-disk
+ * checks a post's media gets) and reaches here already stripped of its
+ * signature, so a service that can't do filesystem checks never has to guess.
+ * An empty string means "drop the custom cover and go back to a member's
+ * photo" — the client can't express a JSON null through an encoder that omits
+ * nil, so the empty string is the clear.
+ */
+function normalizeCoverImage(raw: unknown): string | null | undefined {
+  if (typeof raw !== "string") return undefined;
+  return raw.trim() === "" ? null : raw;
+}
+
 export async function createHighlight(
   userId: string,
-  input: { title: unknown; post_ids?: unknown; cover_post_id?: unknown },
+  input: {
+    title: unknown;
+    post_ids?: unknown;
+    cover_post_id?: unknown;
+    cover_image_url?: unknown;
+  },
 ): Promise<HighlightWriteResult> {
   const title = normalizeHighlightTitle(input.title);
   if (!title) return { ok: false, error: "invalid_title" };
@@ -3942,11 +3974,11 @@ export async function createHighlight(
       : postIds[0];
 
   const created = await db.query<{ highlight_id: string }>(
-    `INSERT INTO post_highlights (user_id, title, cover_post_id, sort_index)
-		 VALUES ($1, $2, $3,
+    `INSERT INTO post_highlights (user_id, title, cover_post_id, cover_image_url, sort_index)
+		 VALUES ($1, $2, $3, $4,
 			COALESCE((SELECT MAX(sort_index) + 1 FROM post_highlights WHERE user_id = $1), 0))
 		 RETURNING highlight_id`,
-    [userId, title, cover],
+    [userId, title, cover, normalizeCoverImage(input.cover_image_url) ?? null],
   );
   const highlightId = created[0].highlight_id;
   await replaceHighlightItems(highlightId, postIds);
@@ -3986,6 +4018,7 @@ export async function updateHighlight(
     title?: unknown;
     post_ids?: unknown;
     cover_post_id?: unknown;
+    cover_image_url?: unknown;
     sort_index?: unknown;
   },
 ): Promise<HighlightWriteResult> {
@@ -4022,6 +4055,10 @@ export async function updateHighlight(
       ? Math.max(0, Math.trunc(input.sort_index))
       : null;
 
+  // Three states, not two: absent leaves the uploaded cover alone, a path
+  // replaces it, and the empty string drops it so the member photo shows again.
+  const coverImage = normalizeCoverImage(input.cover_image_url);
+
   await db.query(
     `UPDATE post_highlights SET
 			title = COALESCE($3, title),
@@ -4032,10 +4069,19 @@ export async function updateHighlight(
 				WHEN EXISTS (SELECT 1 FROM post_highlight_items i
 					WHERE i.highlight_id = $1 AND i.post_id = $4::uuid) THEN $4::uuid
 				ELSE cover_post_id END,
+			cover_image_url = CASE WHEN $6::boolean THEN $7::text ELSE cover_image_url END,
 			sort_index = COALESCE($5, sort_index),
 			updated_at = NOW()
 		 WHERE highlight_id = $1 AND user_id = $2`,
-    [highlightId, userId, title, cover, sortIndex],
+    [
+      highlightId,
+      userId,
+      title,
+      cover,
+      sortIndex,
+      coverImage !== undefined,
+      coverImage ?? null,
+    ],
   );
   return { ok: true, highlight_id: highlightId };
 }

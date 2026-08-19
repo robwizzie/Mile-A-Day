@@ -1,0 +1,1 @@
+ALTER TABLE "post_highlights" ADD COLUMN "cover_image_url" text;

@@ -1311,13 +1311,51 @@ function highlightWriteError(res: Response, error: string) {
   return res.status(400).json({ error: "no_posts" });
 }
 
+/**
+ * Normalize a highlight's uploaded cover image into what the service expects:
+ * `undefined` (untouched), `""` (drop it, go back to a member's photo), or a
+ * bare `/uploads/posts/...` path this caller genuinely owns.
+ *
+ * The same three checks a post's `media_url` gets, for the same reason: media
+ * urls are visible to the whole circle, so without the filename ownership test
+ * anyone could point their rail at a friend's photo — including a story-only
+ * one that never reached a grid. Returns `false` when the value is present but
+ * not usable, so the caller can 400 rather than silently ignore it.
+ */
+function normalizeHighlightCoverImage(
+  userId: string,
+  raw: unknown,
+): string | undefined | false {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "string") return false;
+  if (raw.trim() === "") return "";
+  const bare = stripMediaQuery(raw);
+  if (!bare.startsWith(POSTS_MEDIA_PREFIX) || bare.includes("..")) return false;
+  if (!path.basename(bare).startsWith(`${userId}-`)) return false;
+  if (!fs.existsSync(path.join(process.cwd(), bare.replace(/^\//, "")))) {
+    return false;
+  }
+  return bare;
+}
+
 /** POST /posts/highlights — create one from posts you own. */
 export async function createHighlightController(
   req: AuthenticatedRequest,
   res: Response,
 ) {
   try {
-    const result = await createHighlight(req.userId!, req.body ?? {});
+    const body = req.body ?? {};
+    const coverImage = normalizeHighlightCoverImage(
+      req.userId!,
+      body.cover_image_url,
+    );
+    if (coverImage === false) {
+      return res.status(400).json({ error: "invalid_cover_image" });
+    }
+    const result = await createHighlight(req.userId!, {
+      ...body,
+      cover_image_url: coverImage,
+    });
     if (!result.ok) return highlightWriteError(res, result.error);
     res.status(201).json({ ok: true, highlight_id: result.highlight_id });
   } catch (error: any) {
@@ -1335,11 +1373,18 @@ export async function updateHighlightController(
     if (!isUuid(req.params.highlightId)) {
       return res.status(404).json({ error: "highlight_not_found" });
     }
-    const result = await updateHighlight(
+    const body = req.body ?? {};
+    const coverImage = normalizeHighlightCoverImage(
       req.userId!,
-      req.params.highlightId,
-      req.body ?? {},
+      body.cover_image_url,
     );
+    if (coverImage === false) {
+      return res.status(400).json({ error: "invalid_cover_image" });
+    }
+    const result = await updateHighlight(req.userId!, req.params.highlightId, {
+      ...body,
+      cover_image_url: coverImage,
+    });
     if (!result.ok) return highlightWriteError(res, result.error);
     res.json({ ok: true, highlight_id: result.highlight_id });
   } catch (error: any) {
