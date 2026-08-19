@@ -2608,6 +2608,11 @@ export const postHighlights = pgTable(
     // SET NULL on delete: a cover whose post is gone falls back to the first
     // member at read time rather than leaving a broken tile.
     coverPostId: uuid("cover_post_id"),
+    // An uploaded cover image (/uploads/posts/...), chosen from the camera
+    // roll instead of from the member posts. Wins over cover_post_id at read
+    // time; NULL means "use a member's photo", which is the shipped behaviour
+    // and what every highlight created before this column has.
+    coverImageUrl: text("cover_image_url"),
     // Owner-chosen order of the rail itself. Ties break on created_at so a
     // batch created with the same index still has a stable order.
     sortIndex: integer("sort_index").default(0).notNull(),

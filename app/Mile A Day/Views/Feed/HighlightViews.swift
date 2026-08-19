@@ -324,7 +324,25 @@ struct HighlightEditorView: View {
     /// Ordered — position in this array becomes the highlight's play order.
     @State private var selected: [String] = []
     @State private var coverPostId: String?
+    /// A cover picked from the camera roll this session, not uploaded yet —
+    /// uploading on Save means a cancelled edit costs nothing and a bad
+    /// connection fails once, where the user is already being told about it.
+    @State private var pickedCover: UIImage?
+    /// The uploaded cover already on the highlight, if it has one.
+    @State private var coverImageUrl: String?
+    /// The user chose a post's photo over the uploaded cover, so Save has to
+    /// say so out loud — an omitted field means "leave it alone", which would
+    /// keep drawing the cover they just replaced.
+    @State private var coverCleared = false
+    @State private var showingCoverPicker = false
+    @State private var showingCoverCropper = false
+    @State private var pickedFromLibrary: UIImage?
     @State private var library: [PostItem] = []
+    /// The members this highlight already holds, from its own detail read.
+    /// The library is paginated, so an older member — including the one that
+    /// is the cover — often isn't on the first page, and looking a thumbnail
+    /// up in the library alone drew the strip and the cover circle blank.
+    @State private var memberPosts: [String: PostItem] = [:]
     @State private var nextBefore: String?
     @State private var isLoading = true
     @State private var isSaving = false
@@ -345,6 +363,7 @@ struct HighlightEditorView: View {
                 MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
+                        coverField
                         nameField
                         if !selected.isEmpty { selectionStrip }
                         libraryGrid
@@ -377,8 +396,140 @@ struct HighlightEditorView: View {
             } message: {
                 Text(errorMessage ?? "")
             }
+            .sheet(isPresented: $showingCoverPicker) {
+                ImagePicker(selectedImage: $pickedFromLibrary)
+            }
+            // The rail draws covers in a circle, so the crop is the same one
+            // the profile photo gets — what you frame here is what shows.
+            .fullScreenCover(isPresented: $showingCoverCropper) {
+                if let image = pickedFromLibrary {
+                    ProfileImageCropper(
+                        image: image,
+                        onCrop: { cropped in
+                            pickedCover = cropped
+                            coverCleared = false
+                            showingCoverCropper = false
+                            pickedFromLibrary = nil
+                            MADHaptics.tap()
+                        },
+                        onCancel: {
+                            showingCoverCropper = false
+                            pickedFromLibrary = nil
+                        }
+                    )
+                }
+            }
+            .onChange(of: pickedFromLibrary) { _, newImage in
+                if newImage != nil { showingCoverCropper = true }
+            }
         }
         .task { await load() }
+    }
+
+    // MARK: - Cover
+
+    /// Is the circle currently a photo from the camera roll rather than one of
+    /// the posts inside?
+    private var usesCustomCover: Bool {
+        pickedCover != nil || (!coverCleared && coverImageUrl?.isEmpty == false)
+    }
+
+    /// A picked post by id, from whichever of the two sources has it.
+    private func pickedPost(_ postId: String) -> PostItem? {
+        library.first { $0.post_id == postId } ?? memberPosts[postId]
+    }
+
+    /// The post whose photo would be the cover if there were no uploaded one.
+    private var coverPost: PostItem? {
+        guard let id = coverPostId ?? selected.first else { return nil }
+        return pickedPost(id)
+    }
+
+    private var coverField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("COVER")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .tracking(1.2)
+                .foregroundColor(.white.opacity(0.45))
+            HStack(spacing: MADTheme.Spacing.md) {
+                coverPreview
+                VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        MADHaptics.tap()
+                        showingCoverPicker = true
+                    } label: {
+                        Label(
+                            usesCustomCover ? "Change cover photo" : "Choose a cover photo",
+                            systemImage: "photo.on.rectangle"
+                        )
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, MADTheme.Spacing.md)
+                        .padding(.vertical, 9)
+                        .background(
+                            Capsule().fill(Color.white.opacity(0.08))
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    if usesCustomCover {
+                        Button {
+                            MADHaptics.tap()
+                            pickedCover = nil
+                            coverCleared = true
+                        } label: {
+                            Text("Use a photo from inside instead")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundColor(.white.opacity(0.55))
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text("Or tap a photo below to use it as the cover.")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.45))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private var coverPreview: some View {
+        Group {
+            if let pickedCover {
+                Image(uiImage: pickedCover).resizable().scaledToFill()
+            } else if !coverCleared,
+                      let coverImageUrl,
+                      !coverImageUrl.isEmpty,
+                      let url = ProfileImageService.fullImageURL(for: coverImageUrl) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image): image.resizable().scaledToFill()
+                    default: Color.white.opacity(0.06)
+                    }
+                }
+            } else if let post = coverPost {
+                AsyncImage(url: post.storyPhotoURL ?? post.mediaURL) { phase in
+                    switch phase {
+                    case .success(let image): image.resizable().scaledToFill()
+                    default: Color.white.opacity(0.06)
+                    }
+                }
+            } else {
+                ZStack {
+                    Color.white.opacity(0.06)
+                    Image(systemName: "photo")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.35))
+                }
+            }
+        }
+        .frame(width: 72, height: 72)
+        .clipShape(Circle())
+        .overlay(
+            Circle().strokeBorder(MADTheme.Colors.madRed.opacity(0.8), lineWidth: 2)
+        )
     }
 
     private var nameField: some View {
@@ -408,7 +559,9 @@ struct HighlightEditorView: View {
     /// makes it the cover; the ✕ removes it.
     private var selectionStrip: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("IN THIS HIGHLIGHT · TAP TO SET THE COVER")
+            Text(usesCustomCover
+                 ? "IN THIS HIGHLIGHT · TAP ONE TO USE IT AS THE COVER"
+                 : "IN THIS HIGHLIGHT · TAP TO SET THE COVER")
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
                 .tracking(1.0)
                 .foregroundColor(.white.opacity(0.45))
@@ -424,11 +577,15 @@ struct HighlightEditorView: View {
     }
 
     private func selectionTile(postId: String, position: Int) -> some View {
-        let post = library.first { $0.post_id == postId }
-        let isCover = coverPostId == postId
+        let post = pickedPost(postId)
+        // A highlight has ONE cover: picking a post's photo has to retire the
+        // uploaded one, or the tap does nothing visible and reads as broken.
+        let isCover = coverPostId == postId && !usesCustomCover
         return Button {
             MADHaptics.tap()
             coverPostId = postId
+            pickedCover = nil
+            if coverImageUrl?.isEmpty == false { coverCleared = true }
         } label: {
             AsyncImage(url: post?.storyPhotoURL ?? post?.mediaURL) { phase in
                 switch phase {
@@ -586,11 +743,17 @@ struct HighlightEditorView: View {
             await MainActor.run {
                 title = existing.title
                 coverPostId = existing.cover_post_id
+                coverImageUrl = existing.cover_image_url
             }
             if let detail = try? await PostService.fetchHighlight(
                 highlightId: existing.highlight_id
             ) {
-                await MainActor.run { selected = detail.items.map(\.post_id) }
+                var byId: [String: PostItem] = [:]
+                for item in detail.items { byId[item.post_id] = item }
+                await MainActor.run {
+                    selected = detail.items.map(\.post_id)
+                    memberPosts = byId
+                }
             }
         } else if let seed = target.seedPostId {
             await MainActor.run {
@@ -633,24 +796,43 @@ struct HighlightEditorView: View {
         defer { Task { @MainActor in isSaving = false } }
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
+            // A picked cover is uploaded here, not when it was chosen: an edit
+            // that gets cancelled should leave nothing behind on the server.
+            // The empty string is how "drop the uploaded cover" is spelled —
+            // an omitted field means "leave it alone" (see updateHighlight).
+            var coverImage: String? = nil
+            if let pickedCover {
+                coverImage = try await PostService.uploadMedia(pickedCover)
+            } else if coverCleared {
+                coverImage = ""
+            }
             if let existing = target.existing {
                 try await PostService.updateHighlight(
                     highlightId: existing.highlight_id,
                     title: name,
                     postIds: selected,
-                    coverPostId: coverPostId
+                    coverPostId: coverPostId,
+                    coverImageUrl: coverImage
                 )
             } else {
                 try await PostService.createHighlight(
                     title: name,
                     postIds: selected,
-                    coverPostId: coverPostId
+                    coverPostId: coverPostId,
+                    // Nothing to clear on a highlight that doesn't exist yet.
+                    coverImageUrl: coverImage?.isEmpty == false ? coverImage : nil
                 )
             }
             await MainActor.run {
                 MADHaptics.success()
                 onSaved()
                 dismiss()
+            }
+        // Only the cover upload throws a PostError here; every other leg of
+        // this save is an APIError, so the message can name the real failure.
+        } catch is PostError {
+            await MainActor.run {
+                errorMessage = "Couldn't upload that cover photo. Check your connection and try again."
             }
         } catch let APIError.apiError(message) where message == "highlight_limit_reached" {
             await MainActor.run {

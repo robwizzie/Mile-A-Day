@@ -31,6 +31,9 @@
  *   7. highlights: owner-only membership, a story-only member IS visible to a
  *      friend, and is NOT visible to a blocked user or through a private
  *      owner; delete removes the grouping and keeps the posts
+ *   8. an uploaded highlight cover outranks the member photo on the rail, a
+ *      write that doesn't mention it leaves it alone, and "" puts the member
+ *      photo back
  *
  * Usage (same env as ci-smoke):
  *   DATABASE_URL=... node scripts/grid-controls-check.mjs
@@ -609,6 +612,34 @@ async function main() {
       )[0].cover_post_id === story.post_id,
     true,
   );
+  // An uploaded cover: it must win over the member photo on the read every
+  // profile does, and the empty string must put the member photo back. Both
+  // are COALESCE precedence in a subquery — reading it proves nothing.
+  await updateHighlight(AUTHOR, hid, {
+    cover_image_url: "/uploads/posts/grid-cover.jpg",
+  });
+  const covered = (await listUserHighlights(AUTHOR, AUTHOR))[0];
+  check(
+    "an uploaded cover wins over the member photo",
+    covered.cover_media_url,
+    "/uploads/posts/grid-cover.jpg",
+  );
+  check("...and is reported separately", covered.cover_image_url, "/uploads/posts/grid-cover.jpg");
+  await updateHighlight(AUTHOR, hid, { title: "Sunday loops" });
+  check(
+    "a write that doesn't mention the cover leaves it alone",
+    (await listUserHighlights(AUTHOR, AUTHOR))[0].cover_image_url,
+    "/uploads/posts/grid-cover.jpg",
+  );
+  await updateHighlight(AUTHOR, hid, { cover_image_url: "" });
+  const uncovered = (await listUserHighlights(AUTHOR, AUTHOR))[0];
+  check("clearing it restores the member photo", uncovered.cover_image_url, null);
+  check(
+    "...which is the chosen member's",
+    uncovered.cover_media_url,
+    "/uploads/posts/grid-story.jpg",
+  );
+
   check(
     "emptying a highlight is refused (it would open onto nothing)",
     (await updateHighlight(AUTHOR, hid, { post_ids: [] })).error,
