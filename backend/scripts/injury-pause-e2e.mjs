@@ -550,6 +550,65 @@ await refreshCurrentStreak("u-covered");
 const covSt = await ips.getInjuryPauseStatus("u-covered");
 check("RG11 token-covered day keeps the CTA eligible", covSt.eligible, true);
 
+// RG12: people walk during recovery (PT laps, an easy mile). Those days earn
+// nothing while paused — and must STILL earn nothing once the pause expires at
+// the cap, or they spring back as ordinary qualifying days and carry the streak
+// straight through the ceiling that was supposed to end it.
+await mkUser("u-walked");
+await seedDays("u-walked", 400, 200);
+await db.query(
+  `INSERT INTO streak_pauses (user_id, started_on, frozen_streak)
+   VALUES ('u-walked',$1::date,201)`,
+  [d(199)],
+);
+await seedDays("u-walked", 198, 0); // walked nearly every day of the pause
+await refreshCurrentStreak("u-walked");
+check(
+  "RG12 mid-pause walks do not grow the streak",
+  await streakOf("u-walked"),
+  201,
+);
+await ips.expirePausesPastCap();
+const walkedExpired = await db.query(
+  `SELECT expired_at IS NOT NULL AS expired FROM streak_pauses WHERE user_id='u-walked'`,
+);
+check("RG12 cap expires the pause", walkedExpired[0].expired, true);
+// The pause covered exactly its 180 days, so the 20 days AFTER the cap are
+// ordinary again — they walked them, so they now hold a fresh 20-day streak.
+// What must not happen is the 201-day run surviving through the ceiling.
+check(
+  "RG12 expired pause suppresses its days — old streak cannot carry through",
+  await streakOf("u-walked"),
+  20,
+);
+const walkedRow = await db.query(
+  `SELECT longest_streak FROM users WHERE user_id='u-walked'`,
+);
+check(
+  "RG12 longest_streak keeps the frozen value",
+  walkedRow[0].longest_streak,
+  201,
+);
+
+// RG13: a short walk logged AFTER the injury date must not hide the CTA — a
+// backdated start reaching past it would still freeze the real streak.
+await mkUser("u-strayw");
+await seedDays("u-strayw", 400, 5); // 396-day run ending 5 days ago
+await seedDays("u-strayw", 2, 2); // one stray qualifying walk 2 days ago
+await refreshCurrentStreak("u-strayw");
+const strayS = await ips.getInjuryPauseStatus("u-strayw");
+check(
+  "RG13 stray post-injury walk does not hide eligibility",
+  [strayS.eligible, strayS.reason],
+  [true, null],
+);
+const strayStart = await ips.startInjuryPause("u-strayw", d(4));
+check(
+  "RG13 backdated start freezes the real streak",
+  strayStart.active.frozen_streak,
+  396,
+);
+
 // ---------------------------------------------------------------- legacy parity
 await mkUser("u-legacy", { enrolled: false });
 await seedDays("u-legacy", 30, 1);

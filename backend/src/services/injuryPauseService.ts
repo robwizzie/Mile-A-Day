@@ -192,46 +192,33 @@ async function reearnProgress(
 }
 
 /**
- * The streak this user could actually freeze right now — i.e. exactly what
- * startInjuryPause would compute for the best start date available to them.
+ * The best streak this user could freeze right now, over EVERY legal start date.
  *
- * The run that matters is the one ending on their LAST qualifying day, and it's
- * only reachable if a pause starting the day after it still falls inside
- * the backdate window.
+ * `eligible` has to mean exactly "some started_on exists that POST would
+ * accept", so this asks the same question POST does — streakEndingAt(start - 1)
+ * — once per candidate start in the backdate window, and takes the best.
+ *
+ * A single-candidate shortcut (the day after their last qualifying day) was
+ * wrong in both directions. It advertised a pause on the day a streak first
+ * reaches exactly 90, when starting today would freeze the 89-day run ending
+ * yesterday; and it hid one from an injured user who logged a short walk after
+ * the day they actually got hurt, even though backdating past that walk would
+ * have frozen the real pre-injury streak. Eight indexed reads on a status
+ * endpoint is a fair price for the two answers never disagreeing.
  */
 async function bestStartableStreak(
   userId: string,
   today: string,
 ): Promise<number> {
-  // Unions streak_coverage the same way streakEndingAt does. A day carried by a
-  // Streak Save / Double Down / Assist is a streak day with no workout row, so
-  // scanning workouts alone would call a token-covered user's last day older
-  // than it is and hide the CTA that POST would have honoured.
-  const rows = await db.query<{ last_day: string | null }>(
-    `SELECT to_char(MAX(local_date), 'YYYY-MM-DD') AS last_day FROM (
-       SELECT local_date FROM workouts
-        WHERE user_id = $1 AND local_date <= $2::date
-          AND deleted_at IS NULL AND exclusion_reason IS NULL
-        GROUP BY local_date HAVING SUM(distance) >= 0.95
-       UNION
-       SELECT local_date FROM streak_coverage
-        WHERE user_id = $1 AND local_date <= $2::date
-     ) d`,
-    [userId, today],
-  );
-  const lastDay = rows[0]?.last_day;
-  if (!lastDay) return 0;
-
-  // The best legal start is the day after their last qualifying day, clamped to
-  // today because a pause cannot begin in the future. Deriving the answer from
-  // that start — rather than from users.current_streak — is what keeps GET and
-  // POST agreeing: on the day a user's streak first reaches 90, a pause started
-  // today would freeze the run ending YESTERDAY (89), so `eligible` must say no
-  // rather than advertise a button that 400s.
-  const bestStart = lastDay >= today ? today : dateStrPlus(lastDay, 1);
-  if (daysBetweenInclusive(bestStart, today) - 1 > MAX_BACKDATE_DAYS) return 0;
-
-  return streakEndingAt(userId, dateStrMinus(bestStart, 1));
+  let best = 0;
+  for (let back = 0; back <= MAX_BACKDATE_DAYS; back++) {
+    const start = dateStrMinus(today, back);
+    const frozen = await streakEndingAt(userId, dateStrMinus(start, 1));
+    if (frozen > best) best = frozen;
+    // Nothing further back can change the verdict once we've cleared the bar.
+    if (best >= MIN_STREAK_TO_PAUSE) break;
+  }
+  return best;
 }
 
 export async function getInjuryPauseStatus(
@@ -271,23 +258,20 @@ export async function getInjuryPauseStatus(
   const today = await getLocalToday(userId);
   const streak = Number(row?.current_streak ?? 0);
   const progress = await reearnProgress(userId, streak, today);
-  // Must mirror what startInjuryPause would actually accept, not just today's
-  // number. An injury has usually already cost a day or two by the time the
-  // user opens the app, so current_streak may read 0 while a backdated start
-  // would still succeed — reporting `streak_too_short` there would hide the
-  // button from precisely the person the feature exists for.
-  const startable = await bestStartableStreak(userId, today);
 
   // "rebuilding" is checked FIRST because it's the more specific answer and the
   // two overlap constantly: someone who just came back from a pause also has a
   // short freezable run, and telling them their streak is too short invites
   // them to go and fix a thing that isn't the blocker. Users who have never
   // paused can't hit this branch at all — reearnProgress returns the full
-  // target for them.
+  // target for them. Ordering it first also keeps the backdate scan off the
+  // path for everyone it can't help.
   let reason: InjuryPauseStatus["reason"] = null;
   if (!enrolled) reason = "not_enrolled";
   else if (progress < REEARN_DAYS) reason = "rebuilding";
-  else if (startable < MIN_STREAK_TO_PAUSE) reason = "streak_too_short";
+  else if ((await bestStartableStreak(userId, today)) < MIN_STREAK_TO_PAUSE) {
+    reason = "streak_too_short";
+  }
 
   return {
     active: null,
@@ -489,5 +473,7 @@ export async function pausedUserIds(userIds: string[]): Promise<Set<string>> {
  */
 export async function isPaused(userId: string): Promise<boolean> {
   const intervals = await fetchPauseIntervals(userId);
-  return intervals.some((p) => p.resumed_on === null);
+  // fetchPauseIntervals now returns expired rows too (they still suppress days
+  // in the walk), so "open" has to exclude them explicitly.
+  return intervals.some((p) => p.resumed_on === null && !p.expired);
 }
