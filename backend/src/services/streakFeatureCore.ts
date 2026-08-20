@@ -67,6 +67,23 @@ export async function coverageActiveFor(userId: string): Promise<boolean> {
   return rows[0]?.enrolled === true;
 }
 
+/**
+ * Must this user's streak skip the LEGACY walk? True when token coverage is
+ * live for them, and — independently — whenever they have any pause on record.
+ *
+ * The pause half is not an optimization, it's a safety interlock. The legacy
+ * loop knows nothing about streak_pauses, so if STREAK_FEATURES_DISABLED were
+ * flipped during an incident, every injured user would fall into it and
+ * refreshCurrentStreak (the ONLY writer of users.current_streak, also driven by
+ * a 6-hourly cron) would persist their frozen streak as BROKEN. That write is
+ * not recoverable, and it would come from the switch whose entire purpose is to
+ * be safe to flip. Killing the tokens must never un-bridge a pause.
+ */
+export async function needsFeatureWalk(userId: string): Promise<boolean> {
+  if (await coverageActiveFor(userId)) return true;
+  return (await fetchPauseIntervals(userId)).length > 0;
+}
+
 /** All covered local dates for a user, newest first (tiny — days are rare). */
 export async function fetchCoverageDates(userId: string): Promise<string[]> {
   const rows = await db.query<{ d: string }>(
@@ -125,6 +142,82 @@ export async function fetchCoveredDays(
     params,
   );
 }
+
+/**
+ * One injury pause, as a HALF-OPEN local-date interval: paused = [started_on,
+ * resumed_on), so the day a user resumes is immediately a running day again.
+ * An ACTIVE pause has resumed_on === null and extends to today.
+ */
+export interface PauseInterval {
+  started_on: string;
+  resumed_on: string | null;
+}
+
+/**
+ * The pauses that BRIDGE a streak, newest first.
+ *
+ * Deliberately excludes expired ones (`expired_at IS NOT NULL`, written when a
+ * pause runs past the 180-day cap). An expired pause must read as a plain gap
+ * — its days go back to being ordinary misses and the streak ends — which is
+ * exactly "converts to longest_streak" given longest_streak already ratcheted
+ * to the frozen value while the pause was live.
+ */
+export async function fetchPauseIntervals(
+  userId: string,
+): Promise<PauseInterval[]> {
+  const rows = await db.query<PauseInterval>(
+    `SELECT to_char(started_on, 'YYYY-MM-DD') AS started_on,
+            to_char(resumed_on, 'YYYY-MM-DD') AS resumed_on
+       FROM streak_pauses
+      WHERE user_id = $1 AND expired_at IS NULL
+      ORDER BY started_on DESC`,
+    [userId],
+  );
+  return rows;
+}
+
+/**
+ * "Is this local date inside a pause?" over a (tiny) interval list.
+ *
+ * A pause ELIDES days rather than covering them, and that distinction is the
+ * whole feature. A streak_coverage row COUNTS as a day in the walk, so
+ * covering a 90-day injury would hand the user 90 free streak days — the exact
+ * opposite of the rule that a paused streak must not grow. Eliding instead
+ * removes the days from the calendar: the run either side joins up and the
+ * number is frozen, not inflated.
+ */
+export function makePausePredicate(
+  intervals: PauseInterval[],
+): (d: string) => boolean {
+  if (intervals.length === 0) return () => false;
+  return (d: string) =>
+    intervals.some(
+      (p) => d >= p.started_on && (p.resumed_on === null || d < p.resumed_on),
+    );
+}
+
+/**
+ * Walk `d` backwards past any paused days to the first day that actually
+ * counts. This is what makes the two ends of a pause adjacent: with a pause
+ * over [Jan 1, Mar 1), the day "before" Mar 1 is Dec 31.
+ *
+ * Bounded by a hard step budget so a corrupt interval (e.g. a pause with a
+ * started_on far in the past that never resumed) can never spin forever inside
+ * a streak read.
+ */
+export function elidePaused(
+  d: string,
+  isPaused: (day: string) => boolean,
+): string {
+  let cur = d;
+  for (let i = 0; i < MAX_PAUSE_ELIDE_DAYS && isPaused(cur); i++) {
+    cur = dateStrMinus(cur, 1);
+  }
+  return cur;
+}
+
+/** Generous ceiling: the product cap is 180 days, so this is only a backstop. */
+const MAX_PAUSE_ELIDE_DAYS = 400;
 
 /** Shared YYYY-MM-DD date arithmetic (UTC-safe, mirrors the legacy walks'). */
 export function dateStrMinus(dateStr: string, days: number): string {
@@ -220,8 +313,20 @@ export async function computeCoveredStreak(
   userId: string,
   userToday: string,
 ): Promise<{ streak: number; start: string | undefined }> {
-  const coverage = await fetchCoverageDates(userId); // DESC
-  const yesterday = dateStrMinus(userToday, 1);
+  // Coverage is gated INSIDE rather than assumed by the caller, because this
+  // walk is now also the path for a paused user whose token coverage is switched
+  // off — see needsFeatureWalk. Pauses are always applied; tokens only when live.
+  const coverage = (await coverageActiveFor(userId))
+    ? await fetchCoverageDates(userId) // DESC
+    : [];
+  const isPaused = makePausePredicate(await fetchPauseIntervals(userId));
+  // The anchor elides too, and it has to: a user who resumes today after a
+  // 90-day pause has no qualifying day anywhere near today, so anchoring on the
+  // literal today/yesterday would read their 400-day streak as 0 the instant
+  // they came back. Anchoring on the last day that COUNTS makes the pause
+  // invisible to the walk from both ends.
+  const anchorToday = elidePaused(userToday, isPaused);
+  const anchorYesterday = elidePaused(dateStrMinus(anchorToday, 1), isPaused);
   const { next } = mergedQualifyingDayStream(userId, coverage);
 
   let streak = 0;
@@ -231,18 +336,23 @@ export async function computeCoveredStreak(
   while (true) {
     const date = await next();
     if (date === undefined) break;
+    // A run logged DURING a pause earns nothing — the streak is frozen, not
+    // merely protected. Skipping here (rather than filtering the query) keeps
+    // the day in every other total: miles, competitions and the feed all still
+    // count it, because only the streak is paused.
+    if (isPaused(date)) continue;
 
     if (expectedDate === undefined) {
-      if (date !== userToday && date !== yesterday) {
+      if (date !== anchorToday && date !== anchorYesterday) {
         return { streak: 0, start: undefined };
       }
       streak = 1;
       streakStartDay = date;
-      expectedDate = dateStrMinus(date, 1);
+      expectedDate = elidePaused(dateStrMinus(date, 1), isPaused);
     } else if (date === expectedDate) {
       streak++;
       streakStartDay = date;
-      expectedDate = dateStrMinus(date, 1);
+      expectedDate = elidePaused(dateStrMinus(date, 1), isPaused);
     } else {
       return { streak, start: streakStartDay };
     }
@@ -271,11 +381,19 @@ export async function computeStreakEras(
   userId: string,
   userToday: string,
 ): Promise<{ eras: StreakEra[]; longest: number }> {
-  const coverage = (await coverageActiveFor(userId))
-    ? await fetchCoverageDates(userId)
-    : [];
+  const active = await coverageActiveFor(userId);
+  const coverage = active ? await fetchCoverageDates(userId) : [];
+  // Pauses are fetched unconditionally, NOT behind `active`. With the kill
+  // switch on, the live walks still bridge open pauses (needsFeatureWalk), so
+  // gating this on coverage would make /streak-eras call the current era broken
+  // while the streak endpoint calls it intact — the same user, two answers.
+  const isPaused = makePausePredicate(await fetchPauseIntervals(userId));
   const { next } = mergedQualifyingDayStream(userId, coverage);
-  const yesterday = dateStrMinus(userToday, 1);
+  // Same elided anchor as computeCoveredStreak, so the current era's length
+  // keeps agreeing with getActiveStreak across a pause (house rule: the walks
+  // must never disagree about the live number).
+  const anchorToday = elidePaused(userToday, isPaused);
+  const anchorYesterday = elidePaused(dateStrMinus(anchorToday, 1), isPaused);
 
   const eras: StreakEra[] = [];
   let open: StreakEra | null = null;
@@ -284,6 +402,7 @@ export async function computeStreakEras(
   while (true) {
     const date = await next();
     if (date === undefined) break;
+    if (isPaused(date)) continue;
     if (open !== null && date === expected) {
       open.start_date = date;
       open.length++;
@@ -293,10 +412,10 @@ export async function computeStreakEras(
         start_date: date,
         end_date: date,
         length: 1,
-        is_current: date === userToday || date === yesterday,
+        is_current: date === anchorToday || date === anchorYesterday,
       };
     }
-    expected = dateStrMinus(date, 1);
+    expected = elidePaused(dateStrMinus(date, 1), isPaused);
   }
   if (open !== null) eras.push(open);
 
@@ -321,10 +440,52 @@ export async function computeStreakEras(
  * and `recordBreak`'s `prior >= MIN_NOTIFY_PRIOR_STREAK` gate never opened, so
  * the "their streak just broke, you can save it" push never fired at all.
  */
+/**
+ * streakEndingAt for the rare user who has an injury pause in their history.
+ *
+ * The SQL below is a gaps-and-islands over raw dates, and elision doesn't
+ * express cleanly there — you'd need a per-row count of paused days to compress
+ * the date axis before islanding. Rather than complicate a query every break
+ * stamp runs, users WITHOUT pauses keep the untouched SQL (byte-identical, no
+ * new risk for effectively everyone) and only paused users pay for this walk.
+ */
+async function streakEndingAtElided(
+  userId: string,
+  endDate: string,
+  isPaused: (d: string) => boolean,
+): Promise<number> {
+  const coverage = await fetchCoverageDates(userId);
+  const { next } = mergedQualifyingDayStream(userId, coverage);
+
+  let streak = 0;
+  let expected: string | undefined;
+  while (true) {
+    const date = await next();
+    if (date === undefined) break;
+    if (date > endDate) continue; // stream starts at the newest day
+    if (isPaused(date)) continue;
+    if (expected === undefined) {
+      if (date !== endDate) return 0; // endDate itself must qualify
+      streak = 1;
+    } else if (date !== expected) {
+      break;
+    } else {
+      streak++;
+    }
+    expected = elidePaused(dateStrMinus(date, 1), isPaused);
+  }
+  return streak;
+}
+
 export async function streakEndingAt(
   userId: string,
   endDate: string,
 ): Promise<number> {
+  const pauses = await fetchPauseIntervals(userId);
+  if (pauses.length > 0) {
+    return streakEndingAtElided(userId, endDate, makePausePredicate(pauses));
+  }
+
   const rows = await db.query<{ len: number; max_d: string }>(
     `WITH days AS (
        SELECT local_date FROM workouts

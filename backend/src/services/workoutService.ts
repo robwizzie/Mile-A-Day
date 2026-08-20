@@ -10,6 +10,7 @@ import {
   computeCoveredStreak,
   computeStreakEras,
   type StreakEra,
+  needsFeatureWalk,
 } from "./streakFeatureCore.js";
 
 const db = PostgresService.getInstance();
@@ -980,7 +981,9 @@ export async function getActiveStreak(userId: string) {
   // coverage-aware path so token-covered days count. Everyone else falls
   // through to the UNTOUCHED legacy walk below — their output is byte-
   // identical to before this feature existed.
-  if (await coverageActiveFor(userId)) {
+  // needsFeatureWalk covers the paused case too — the legacy walk below has no
+  // knowledge of streak_pauses and would report an injured user as broken.
+  if (await needsFeatureWalk(userId)) {
     return computeCoveredStreak(userId, userToday);
   }
 

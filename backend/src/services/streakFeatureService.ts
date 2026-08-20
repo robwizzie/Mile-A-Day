@@ -5,8 +5,14 @@ import {
   dateStrMinus,
   dateStrPlus,
   streakEndingAt,
+  fetchPauseIntervals,
   StreakFeatureUserRow,
 } from "./streakFeatureCore.js";
+import {
+  getInjuryPauseStatus,
+  isPaused,
+  InjuryPauseStatus,
+} from "./injuryPauseService.js";
 import { getUserLocalToday, getMilesOnLocalDate } from "./workoutService.js";
 import { refreshCurrentStreak } from "./leaderboardService.js";
 import { sendPush } from "./pushNotificationService.js";
@@ -362,6 +368,14 @@ async function sweepOneUser(
 ): Promise<"none" | "waiting" | "saved" | "break"> {
   const row = await getStreakFeatureRow(userId);
   if (!row?.streak_features_at) return "none";
+
+  // A paused streak is FROZEN and cannot break, and this is the one place that
+  // would never notice: every morning of an injury looks exactly like the
+  // unsalvageable 2-day gap below, so the sweep would stamp a `break` event AND
+  // fan out "their streak needs a hand" pushes to every assist-holding friend —
+  // once a day, for the entire injury. The pause elides its days in the streak
+  // WALK; the sweep reads raw workout facts, so it has to be told here.
+  if (await isPaused(userId)) return "none";
 
   const d1 = dateStrMinus(userToday, 1);
   const d2 = dateStrMinus(userToday, 2);
@@ -1067,6 +1081,13 @@ export interface StreakFeaturesPayload {
     kind: SavableTarget["kind"];
     restored_streak: number;
   } | null;
+  /**
+   * Recovery Mode: the open pause (if any) plus the eligibility reason and
+   * every limit, so the client renders "62 / 90 until you can pause again"
+   * without hardcoding numbers that are still being tuned. Additive to the
+   * object; shipped clients ignore the extra key.
+   */
+  injury_pause: InjuryPauseStatus;
 }
 
 /**
@@ -1105,10 +1126,25 @@ export async function getStreakFeaturesPayload(
     [userId, dateStrMinus(userToday, METER_WINDOW_DAYS)],
   );
 
+  // A pause ELIDES its days rather than covering them, so nothing lands in
+  // streak_coverage and the check below is blind to it on its own — a 90-day
+  // injury would otherwise hand back a "pure flame" 400-day streak with three
+  // months missing out of the middle of it. `resumed_on` is the EXCLUSIVE end
+  // (same convention as makePausePredicate), so a closed pause only touches the
+  // run if it ended after the streak started; an open one always does.
+  const pauseIntervals = await fetchPauseIntervals(userId);
+  const pausedInSpan = (start: string) =>
+    pauseIntervals.some(
+      (p) =>
+        p.started_on <= userToday &&
+        (p.resumed_on === null || p.resumed_on > start),
+    );
+
   const natural =
     streak === 0 ||
     !streakStart ||
-    !coverage.some((c) => c.local_date >= streakStart);
+    (!coverage.some((c) => c.local_date >= streakStart) &&
+      !pausedInSpan(streakStart));
 
   // At risk = yesterday missed, older streak intact, and a held Double Down
   // could still bring it back with a 2× run today.
@@ -1138,6 +1174,7 @@ export async function getStreakFeaturesPayload(
     streak_at_risk: atRisk,
     // Only worth reporting when they're holding the token that would pay for
     // it — an ask they can't complete is worse than no ask.
+    injury_pause: await getInjuryPauseStatus(userId),
     my_savable_day: meters.streak_assist.held
       ? await getSavableTarget(userId, userToday, row).then((t) =>
           t
@@ -1255,6 +1292,15 @@ export async function getAssistableFriends(
        -- inlining a meter subquery per friend.
        AND (u.streak_assist_last_used IS NULL
             OR u.streak_assist_last_used <= t.today - ${STREAK_ASSIST_TARGET_DAYS})
+       -- A paused friend's streak is frozen, so none of their missed days is
+       -- worth an Assist: the token and the donated mile would buy a day that
+       -- was never going to break. Filtered in the query rather than after it,
+       -- because every survivor otherwise costs a streakEndingAt walk.
+       AND NOT EXISTS (
+         SELECT 1 FROM streak_pauses sp
+         WHERE sp.user_id = u.user_id
+           AND sp.resumed_on IS NULL AND sp.expired_at IS NULL
+       )
        AND NOT EXISTS (
          SELECT 1 FROM user_blocks b
          WHERE (b.blocker_id = $1 AND b.blocked_id = u.user_id)
@@ -1562,6 +1608,13 @@ async function getSavableTarget(
   userToday: string,
   row: StreakFeatureUserRow,
 ): Promise<SavableTarget | null> {
+  // Nothing to save while a pause is open: the missed days are elided, not
+  // lost. Checked at this chokepoint rather than at each caller because every
+  // single-user path runs through here — the owner's `my_savable_day`, a
+  // friend's rescue status, and both ends of the exchange (offer + accept) —
+  // and a miss caught by only some of them advertises a give the POST rejects.
+  if (await isPaused(userId)) return null;
+
   const facts = await recentDayFacts(userId, dateStrMinus(userToday, 4));
   const ok = (d: string) => facts.qualified.has(d) || facts.covered.has(d);
 

@@ -24,6 +24,7 @@ import liveTrackingRoutes from "./routes/liveTrackingRoutes.js";
 import ghostRoutes from "./routes/ghostRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
 import buddyRoutes from "./routes/buddyRoutes.js";
+import injuryPauseRoutes from "./routes/injuryPauseRoutes.js";
 import {
   authenticateToken,
   requireAdmin,
@@ -328,6 +329,7 @@ app.use("/posts", postsRoutes);
 app.use("/blocks", blocksRoutes);
 app.use("/leaderboard", leaderboardRoutes);
 app.use("/buddy", buddyRoutes);
+app.use("/streak", injuryPauseRoutes);
 app.use("/live", liveTrackingRoutes);
 app.use("/ghosts", ghostRoutes);
 

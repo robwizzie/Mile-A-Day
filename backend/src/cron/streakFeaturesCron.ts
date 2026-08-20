@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import { runStreakFeaturesSweep } from "../services/streakFeatureService.js";
 import { streakFeaturesGloballyEnabled } from "../services/streakFeatureCore.js";
+import { expirePausesPastCap } from "../services/injuryPauseService.js";
 
 /**
  * Hourly streak-token sweep. Each run settles YESTERDAY for enrolled users
@@ -15,6 +16,19 @@ import { streakFeaturesGloballyEnabled } from "../services/streakFeatureCore.js"
 export function startStreakFeaturesCron(): void {
   cron.schedule("10 * * * *", async () => {
     if (!streakFeaturesGloballyEnabled()) return;
+
+    // Retire injury pauses past the 180-day cap first, so the sweep below
+    // settles those users as unpaused. Isolated: a failure here must not cost
+    // everyone else their sweep.
+    try {
+      const expired = await expirePausesPastCap();
+      if (expired > 0) {
+        console.log(`[CRON] Injury pauses past cap expired: ${expired}.`);
+      }
+    } catch (error: any) {
+      console.error("[CRON] Injury-pause cap sweep failed:", error.message);
+    }
+
     try {
       const { processed, saved, breaks } = await runStreakFeaturesSweep();
       if (processed > 0) {

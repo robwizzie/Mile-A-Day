@@ -3,6 +3,7 @@ import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
 import {
   coverageActiveFor,
   computeCoveredStreak,
+  needsFeatureWalk,
 } from "./streakFeatureCore.js";
 
 const db = PostgresService.getInstance();
@@ -105,6 +106,22 @@ async function rankingUserIds(userId: string): Promise<string[]> {
 }
 
 /**
+ * Users with an OPEN injury pause are excluded from the streak ranking: their
+ * streak is frozen, so it would otherwise hold the top spot for months without
+ * the user running a step — the one way this feature could feel unfair to
+ * everyone else. Their number still shows on their profile; they just don't
+ * rank. STREAK ONLY — an injured user's real miles/pace still count everywhere
+ * else. Inlined rather than asking injuryPauseService, which imports this file
+ * for refreshCurrentStreak (cycle).
+ */
+const notStreakPausedSql = (alias: string) => `NOT EXISTS (
+			SELECT 1 FROM streak_pauses sp
+			WHERE sp.user_id = ${alias}.user_id
+			  AND sp.resumed_on IS NULL AND sp.expired_at IS NULL
+		)`;
+const NOT_STREAK_PAUSED_SQL = notStreakPausedSql("u");
+
+/**
  * Streak leaderboard reads precomputed users.current_streak (maintained by
  * workoutController after each upload). Zero-streak users excluded.
  */
@@ -119,6 +136,7 @@ async function getStreakLeaderboard(
 		FROM users u
 		WHERE u.current_streak > 0
 		  AND u.user_id = ANY($1::text[])
+		  AND ${NOT_STREAK_PAUSED_SQL}
 	`;
   const totalRow = await db.query(countQuery, [ids]);
   const total_count: number = totalRow[0]?.total ?? 0;
@@ -151,6 +169,7 @@ async function getStreakLeaderboard(
 		FROM users u
 		WHERE u.current_streak > 0
 		  AND u.user_id = ANY($1::text[])
+		  AND ${NOT_STREAK_PAUSED_SQL}
 		ORDER BY u.current_streak DESC, u.user_id ASC
 		LIMIT $2 OFFSET $3
 	`;
@@ -184,6 +203,12 @@ async function getStreakLeaderboard(
   };
 }
 
+/**
+ * The viewer's own out-of-page entry. Returns null while THEY are paused: the
+ * page and total_count already exclude paused users, so handing the caller a
+ * ranked entry for themselves would have the same leaderboard assert both that
+ * they don't rank and that they're 4th.
+ */
 async function getCurrentUserStreakEntry(
   userId: string,
   ids: string[],
@@ -219,9 +244,11 @@ async function getCurrentUserStreakEntry(
 				SELECT COUNT(*)::int FROM users u2
 				WHERE u2.current_streak > u.current_streak
 				  AND u2.user_id = ANY($2::text[])
+				  AND ${notStreakPausedSql("u2")}
 			) + 1 AS rank
 		FROM users u
 		WHERE u.user_id = $1
+		  AND ${NOT_STREAK_PAUSED_SQL}
 		`,
     [userId, ids],
   );
@@ -695,7 +722,10 @@ export async function refreshCurrentStreak(userId: string): Promise<number> {
   // silently erase every token-saved streak within hours. Enrolled users (new
   // build + env switch on) get the coverage-aware walk; everyone else runs
   // the untouched legacy loop below, byte-identical to before.
-  if (await coverageActiveFor(userId)) {
+  // needsFeatureWalk, not coverageActiveFor: a user with an open injury pause
+  // must never fall into the legacy loop, which would persist their frozen
+  // streak as broken. See streakFeatureCore.needsFeatureWalk.
+  if (await needsFeatureWalk(userId)) {
     const covered = await computeCoveredStreak(userId, userToday);
     await db.query(
       `UPDATE users SET current_streak = $1,

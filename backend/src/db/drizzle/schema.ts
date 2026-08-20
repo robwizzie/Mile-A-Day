@@ -1377,6 +1377,47 @@ export const streakAssistOffers = pgTable(
   ],
 );
 
+// One row per injury pause. A pause ELIDES local dates from the streak walk
+// rather than covering them (see streakFeatureCore.makePausePredicate): the run
+// either side joins up, so the streak is frozen at its pre-injury length and
+// cannot grow while paused, even on days the user does log a walk.
+//
+// The interval is HALF-OPEN — paused = [started_on, resumed_on) — so the day a
+// user resumes counts for them immediately. An active pause has resumed_on
+// NULL and runs to today. `frozen_streak` is the snapshot at started_on - 1,
+// kept for display and audit; the walk re-derives the number rather than
+// trusting it.
+export const streakPauses = pgTable(
+  "streak_pauses",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    startedOn: date("started_on").notNull(),
+    resumedOn: date("resumed_on"),
+    frozenStreak: integer("frozen_streak").default(0).notNull(),
+    // Set when the pause ran past the 180-day cap. An expired pause stops
+    // bridging, so its days revert to ordinary misses and the streak ends —
+    // longest_streak has already ratcheted to the frozen value by then.
+    expiredAt: timestamp("expired_at", { withTimezone: true, mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "streak_pauses_user_id_fkey",
+    }).onDelete("cascade"),
+    // One active pause per user, enforced by the DB so two racing devices
+    // can't open two.
+    uniqueIndex("streak_pauses_one_active_key")
+      .on(table.userId)
+      .where(sql`(resumed_on IS NULL)`),
+    index("streak_pauses_user_idx").on(table.userId, table.startedOn),
+  ],
+);
+
 export const notificationAudienceSettings = pgTable(
   "notification_audience_settings",
   {
