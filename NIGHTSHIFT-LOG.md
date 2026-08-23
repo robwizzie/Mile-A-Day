@@ -32,7 +32,10 @@ Cleveland Clinic, MGH/OSU rehab protocols.
 - [x] `GET/POST/DELETE /streak/pause`
 - [x] 66-assertion e2e + 13 HTTP tests + ci-smoke + migrate-twice
 - [x] 4 rounds of `codex review` — final pass clean
-- [ ] **iOS not started** (deliberate — see Decisions)
+- [x] iOS: injured flame figure, both paused heroes, Recovery Mode screen,
+      injury chip component, TEMPORARY preview toggle (`InjuryPausePreview`)
+- [ ] Friend-facing injury chip — component built, but NO endpoint serves a
+      paused flag for friends yet (see Next)
 
 ## The one idea worth keeping in your head
 
@@ -90,9 +93,16 @@ a role is over-privileged — i.e. exactly the misconfiguration it's meant to
 detect, and the docs say to run it against prod. Worth wrapping those probes in
 a rolled-back transaction before it's ever pointed at prod.
 
-## Next (iOS)
+## Next
 
-Backend is deployable alone. When you pick up the client:
+**Friend-facing badge needs a backend field.** `InjuryStatusChip` /
+`InjuryNameRow` exist and are layout-safe, but nothing serves "is this friend
+paused" — `pausedUserIds()` was written and never wired into a response. The
+feed/friends payloads need an additive `injury_paused` bool before the chip can
+appear next to anyone but yourself. Recovery Mode copy deliberately promises
+nothing about friend visibility until that lands.
+
+Original client notes, still true:
 - crutches flame as a 4th `StreakFlamePhase` — NOT `.coal` (coal means the
   streak actually died; `ReignitingFlameView` would tell a returning 400-day
   user their flame went out). Lives in `FlameBuddyFigure` + both widget copies.
