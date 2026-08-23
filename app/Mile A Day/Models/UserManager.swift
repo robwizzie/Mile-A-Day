@@ -214,6 +214,9 @@ class UserManager: ObservableObject {
             }
         }
 
+        // Pause state belongs to the account we're leaving.
+        Task { @MainActor in InjuryPauseState.shared.reset() }
+
         currentUser.appleId = nil
         currentUser.email = nil
         currentUser.authProvider = .guest

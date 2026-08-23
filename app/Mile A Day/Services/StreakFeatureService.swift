@@ -64,6 +64,46 @@ struct StreakFeaturesPayload: Codable {
     /// "ask a friend"; nothing else on the payload can tell whether one
     /// covered day would actually reconnect the streak.
     let my_savable_day: SavableDay?
+    /// Recovery Mode. Optional because it rides a later backend than the rest
+    /// of this payload — an older server omits it and the feature simply isn't
+    /// offered, instead of failing the whole stats decode.
+    let injury_pause: InjuryPauseStatus?
+}
+
+/// Mirrors the backend's `InjuryPauseStatus`. Every field the server sends is
+/// optional-tolerant where an older backend could omit it, so a deploy skew
+/// degrades to "feature not offered" instead of failing the whole decode.
+struct InjuryPauseStatus: Codable, Equatable {
+    struct Active: Codable, Equatable {
+        let id: String
+        let started_on: String
+        let frozen_streak: Int
+        /// Days elapsed including today — what the UI prints as "Paused N days".
+        let paused_days: Int
+        /// True once the minimum has elapsed and the user may resume.
+        let can_end: Bool
+        let expires_on: String
+    }
+
+    let active: Active?
+    let eligible: Bool
+    /// nil | "not_enrolled" | "already_paused" | "streak_too_short" | "rebuilding"
+    let reason: String?
+    let reearn_progress: Int
+    let reearn_target: Int
+    let min_streak: Int
+    let min_days: Int
+    let max_days: Int
+    let max_backdate_days: Int
+
+    var isPaused: Bool { active != nil }
+
+    /// Days still owed before the minimum is served. Clamped at zero so a
+    /// pause that has run long never prints a negative countdown.
+    var daysUntilCanEnd: Int {
+        guard let active else { return 0 }
+        return max(0, min_days - active.paused_days)
+    }
 }
 
 /// A day an Assist could cover, and where the streak lands if it does.
@@ -343,7 +383,15 @@ enum StreakFeatureService {
     /// store the three client streak walks union in, and the observable UI
     /// state. Pass nil when the response had no payload (feature off) so stale
     /// coverage can't linger. NEVER call this with a FRIEND's stats response.
-    static func applyStatsPayload(_ payload: StreakFeaturesPayload?) {
+    /// `carriesInjuryPause` is false for payloads SYNTHESIZED from the token
+    /// status endpoint, which has no injury_pause field. Without the flag those
+    /// refreshes would hand `apply` a nil pause and clear a live one — the
+    /// dashboard would drop out of the paused hero every time the token meters
+    /// refreshed, then snap back on the next real stats read.
+    static func applyStatsPayload(
+        _ payload: StreakFeaturesPayload?,
+        carriesInjuryPause: Bool = true
+    ) {
         if let payload {
             StreakCoverageStore.update(
                 coveredDates: payload.frozen_dates.map { $0.local_date }
@@ -353,6 +401,9 @@ enum StreakFeatureService {
         }
         Task { @MainActor in
             StreakTokensState.shared.apply(payload)
+            if carriesInjuryPause {
+                InjuryPauseState.shared.apply(payload)
+            }
         }
     }
 }

@@ -200,7 +200,11 @@ final class StreakTokensState: ObservableObject {
                 assistableFriends = []
                 donationBudget = nil
                 pendingOffers = []
-                StreakFeatureService.applyStatsPayload(nil)
+                // Also not authoritative about the pause: the token
+                // kill switch turning this endpoint off says nothing about
+                // whether an injury pause is open, and clearing it here would
+                // drop a paused user back to a normal hero.
+                StreakFeatureService.applyStatsPayload(nil, carriesInjuryPause: false)
                 return
             }
             let fresh = StreakFeaturesPayload(
@@ -210,7 +214,10 @@ final class StreakTokensState: ObservableObject {
                 frozen_dates: status.frozen_dates ?? [],
                 natural_streak: status.natural_streak ?? true,
                 streak_at_risk: status.streak_at_risk ?? false,
-                my_savable_day: status.my_savable_day
+                my_savable_day: status.my_savable_day,
+                // This status endpoint doesn't carry the pause; the stats
+                // payload does, and InjuryPauseState is fed from there.
+                injury_pause: nil
             )
             assistableFriends = status.assistable_friends ?? []
             donationBudget = status.donation_budget
@@ -219,7 +226,7 @@ final class StreakTokensState: ObservableObject {
             // Route through applyStatsPayload → apply() so the payload is
             // published, held flags are diffed, gain chips fire, and the
             // coverage store stays in sync — one path for every payload.
-            StreakFeatureService.applyStatsPayload(fresh)
+            StreakFeatureService.applyStatsPayload(fresh, carriesInjuryPause: false)
         } catch {
             // Keep last known state on transient failures.
             print("[StreakTokens] status refresh failed: \(error.localizedDescription)")
@@ -249,7 +256,8 @@ final class StreakTokensState: ObservableObject {
             streak_at_risk: true,
             my_savable_day: SavableDay(
                 local_date: "2026-07-21", kind: "missed", restored_streak: 18
-            )
+            ),
+            injury_pause: nil
         )
         assistableFriends = [
             AssistableFriend(

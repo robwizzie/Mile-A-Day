@@ -19,6 +19,7 @@ struct MADSettingsView: View {
     @ObservedObject var userManager: UserManager
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var friendService: FriendService
+    @ObservedObject private var injuryPause = InjuryPauseState.shared
     @Environment(\.appStateManager) var appStateManager
     @Environment(\.dismiss) private var dismiss
 
@@ -190,6 +191,44 @@ struct MADSettingsView: View {
                     subtitle: "Head-to-Head matchup preferences",
                     iconColor: .purple
                 )
+            }
+
+            divider
+
+            NavigationLink(destination: RecoveryModeView()) {
+                MADSettingsRow(
+                    icon: "cross.case.fill",
+                    title: "Recovery Mode",
+                    subtitle: injuryPause.isPaused
+                        ? "Streak paused for injury"
+                        : "Pause your streak while injured",
+                    iconColor: MADTheme.Colors.warning
+                )
+            }
+
+            // ⚠️ TEMPORARY — see InjuryPausePreview. Lets the paused UI be
+            // inspected without actually pausing a streak. Dev builds only: a
+            // visible "preview" switch in a shipped build is both confusing and
+            // exactly the test-flavoured copy App Review flags (2.3).
+            if AppEnvironment.isDevelopment {
+                divider
+
+                Toggle(isOn: Binding(
+                    get: { injuryPause.previewEnabled },
+                    set: {
+                        injuryPause.previewEnabled = $0
+                        InjuryPausePreview.isOn = $0
+                        MADHaptics.tap()
+                    }
+                )) {
+                    MADSettingsRow(
+                        icon: "eye.fill",
+                        title: "Preview injured flame",
+                        subtitle: "Fakes a 23-day pause. Nothing is sent to the server.",
+                        iconColor: .teal
+                    )
+                }
+                .padding(.bottom, MADTheme.Spacing.xs)
             }
         }
     }

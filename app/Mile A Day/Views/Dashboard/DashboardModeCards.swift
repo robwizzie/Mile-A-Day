@@ -306,6 +306,17 @@ struct FunDashboardBody: View {
 }
 
 private struct ModernHeroCard: View {
+    @ObservedObject private var injuryPause = InjuryPauseState.shared
+
+    /// The number to print on the hero. A pause FREEZES a specific value, and
+    /// `currentUser.streak` is not it: the local copy is quarantined and
+    /// raise-only, so a pause started after a couple of missed days (the normal
+    /// case — you back-date it once you're out of the hospital) leaves it at 0
+    /// while the server has correctly frozen 412.
+    private var heroStreakValue: Int {
+        injuryPause.effective?.active?.frozen_streak ?? userManager.currentUser.streak
+    }
+
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     let currentDistance: Double
@@ -341,6 +352,9 @@ private struct ModernHeroCard: View {
     }
 
     private var statusColor: Color {
+        // Nothing about a paused streak is urgent: it can't break today, so the
+        // at-risk red (and the amber "running out of day") would be lying.
+        if injuryPause.isPaused { return MADTheme.Colors.warning }
         if trustedDone { return .green }
         if userManager.currentUser.isStreakAtRisk { return MADTheme.Colors.madRed }
         return .orange
@@ -350,30 +364,44 @@ private struct ModernHeroCard: View {
         VStack(spacing: 16) {
             HStack(alignment: .center, spacing: 18) {
                 ZStack {
-                    ProfessionalFlameView(
-                        phase: flamePhase,
-                        health: flameHealth,
-                        size: 166,
-                        ringProgress: timeLeftRingProgress,
-                        dayEnd: StreakFlameClock.nextLocalMidnight(),
-                        coalWarmth: min(progress, 1)
-                    )
+                    // While paused there is no countdown to draw — the ring
+                    // measures time left in the day, and a frozen streak isn't
+                    // losing any. Same injured buddy as the Fun hero so the two
+                    // styles agree about what a pause looks like.
+                    if injuryPause.isPaused {
+                        // Smaller and lifted: this hero overlays the streak
+                        // number on the figure, and at ring size the number
+                        // lands squarely on the buddy's face.
+                        InjuredFlameBuddyView(size: 112)
+                            .offset(y: -30)
+                    } else {
+                        ProfessionalFlameView(
+                            phase: flamePhase,
+                            health: flameHealth,
+                            size: 166,
+                            ringProgress: timeLeftRingProgress,
+                            dayEnd: StreakFlameClock.nextLocalMidnight(),
+                            coalWarmth: min(progress, 1)
+                        )
+                    }
 
                     VStack(spacing: 0) {
-                        Text("\(userManager.currentUser.streak)")
+                        Text("\(heroStreakValue)")
                             .font(.system(size: 34, weight: .black, design: .rounded))
                             .monospacedDigit()
                             .foregroundColor(.white)
                             .shadow(color: .black.opacity(0.72), radius: 5, x: 0, y: 2)
                             .lineLimit(1)
                             .minimumScaleFactor(0.60)
-                        Text("DAYS")
+                        Text(injuryPause.isPaused ? "DAYS · PAUSED" : "DAYS")
                             .font(.system(size: 8, weight: .black, design: .rounded))
                             .tracking(1.1)
-                            .foregroundColor(.white.opacity(0.88))
+                            .foregroundColor(injuryPause.isPaused
+                                             ? MADTheme.Colors.warning
+                                             : .white.opacity(0.88))
                             .shadow(color: .black.opacity(0.72), radius: 4, x: 0, y: 2)
                     }
-                    .offset(y: 39)
+                    .offset(y: injuryPause.isPaused ? 54 : 39)
                 }
                 .frame(width: 172, height: 176)
                 .layoutPriority(1)
@@ -463,6 +491,7 @@ private struct ModernHeroCard: View {
     }
 
     private var statusText: String {
+        if injuryPause.isPaused { return "Paused for injury" }
         if trustedDone { return "Done today" }
         if !distanceIsFresh { return "Syncing today" }
         if userManager.currentUser.isStreakAtRisk { return "Streak at risk" }
@@ -470,6 +499,7 @@ private struct ModernHeroCard: View {
     }
 
     private var formattedTimeOnly: String {
+        if injuryPause.isPaused { return "—" }
         let remaining = secondsUntilLocalMidnight
         let hours = Int(remaining) / 3600
         let minutes = Int(remaining) % 3600 / 60
@@ -1157,6 +1187,17 @@ private struct ModernChallengeRow: View {
 }
 
 private struct FlameBuddyHeroCard: View {
+    @ObservedObject private var injuryPause = InjuryPauseState.shared
+
+    /// The number to print on the hero. A pause FREEZES a specific value, and
+    /// `currentUser.streak` is not it: the local copy is quarantined and
+    /// raise-only, so a pause started after a couple of missed days (the normal
+    /// case — you back-date it once you're out of the hospital) leaves it at 0
+    /// while the server has correctly frozen 412.
+    private var heroStreakValue: Int {
+        injuryPause.effective?.active?.frozen_streak ?? userManager.currentUser.streak
+    }
+
     /// Distance from the hero's top edge to the ground the buddy stands on.
     /// Held constant so the art keeps its footing when the card's height moves.
     private static let groundBaseline: CGFloat = 196
@@ -1197,6 +1238,9 @@ private struct FlameBuddyHeroCard: View {
     }
 
     private var statusColor: Color {
+        // Nothing about a paused streak is urgent: it can't break today, so the
+        // at-risk red (and the amber "running out of day") would be lying.
+        if injuryPause.isPaused { return MADTheme.Colors.warning }
         if trustedDone { return .green }
         if userManager.currentUser.isStreakAtRisk { return MADTheme.Colors.madRed }
         return .orange
@@ -1211,15 +1255,25 @@ private struct FlameBuddyHeroCard: View {
 
                 HStack(alignment: .top, spacing: 12) {
                     ZStack(alignment: .top) {
-                        FlameBuddyView(
-                            health: health,
-                            size: buddySize,
-                            phase: flamePhase,
-                            dayEnd: StreakFlameClock.nextLocalMidnight(),
-                            coalWarmth: min(progress, 1)
-                        )
-                        .frame(width: buddySize * 1.50, height: buddySize * 1.34)
-                        .offset(y: -28)
+                        // A paused streak is not a point on the flame's daily
+                        // lifecycle, so it gets no phase — it replaces the
+                        // figure outright. Nothing is burning down, so nothing
+                        // should shrink with the clock.
+                        if injuryPause.isPaused {
+                            InjuredFlameBuddyView(size: buddySize)
+                                .frame(width: buddySize * 1.50, height: buddySize * 1.34)
+                                .offset(y: -28)
+                        } else {
+                            FlameBuddyView(
+                                health: health,
+                                size: buddySize,
+                                phase: flamePhase,
+                                dayEnd: StreakFlameClock.nextLocalMidnight(),
+                                coalWarmth: min(progress, 1)
+                            )
+                            .frame(width: buddySize * 1.50, height: buddySize * 1.34)
+                            .offset(y: -28)
+                        }
 
                         FunHeroGround()
                             .frame(width: buddySize * 1.26, height: 28)
@@ -1311,7 +1365,7 @@ private struct FlameBuddyHeroCard: View {
         let accent = atAllTimeBest ? gold : statusColor
 
         return HStack(alignment: .center, spacing: 8) {
-            Text("\(userManager.currentUser.streak)")
+            Text("\(heroStreakValue)")
                 .font(.system(size: 35, weight: .black, design: .rounded))
                 .monospacedDigit()
                 .foregroundColor(.white)
@@ -1436,7 +1490,22 @@ private struct FlameBuddyHeroCard: View {
     private var funStatRows: some View {
         VStack(alignment: .leading, spacing: 0) {
             streakHeadline
+                .padding(.bottom, injuryPause.isPaused ? 4 : 8)
+
+            // Says the quiet part out loud: the number is frozen, not stalled.
+            // Without this the hero looks identical to a day you simply haven't
+            // run yet, which is the reading that panics people.
+            if let active = injuryPause.effective?.active {
+                HStack(spacing: 4) {
+                    InjuryStatusChip(compact: true)
+                    Text("Paused \(active.paused_days) \(active.paused_days == 1 ? "day" : "days")")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundColor(MADTheme.Colors.warning)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
                 .padding(.bottom, 8)
+            }
 
             HeroStatColumn(
                 currentDistance: currentDistance,
@@ -1490,6 +1559,7 @@ private struct FlameBuddyHeroCard: View {
     }
 
     private var statusText: String {
+        if injuryPause.isPaused { return "Paused for injury" }
         if trustedDone { return "Streak safe" }
         if !distanceIsFresh { return "Syncing" }
         if userManager.currentUser.isStreakAtRisk { return "Streak at risk" }
@@ -1500,6 +1570,7 @@ private struct FlameBuddyHeroCard: View {
     /// mile is done, which left the two dashboards showing different values in
     /// the same "Left today" row.
     private var formattedTimeOnly: String {
+        if injuryPause.isPaused { return "—" }
         _ = timeRemainingText
         let remaining = secondsUntilLocalMidnight
         let hours = Int(remaining) / 3600
