@@ -215,7 +215,16 @@ class UserManager: ObservableObject {
         }
 
         // Pause state belongs to the account we're leaving.
+        //
+        // Guarded because this file is a member of the WATCH target too, and
+        // InjuryPauseState is iPhone-only: a new main-app file joins the phone
+        // target alone, so an unguarded reference from a dual-membership file
+        // builds fine on iPhone and fails the Watch with "Cannot find
+        // 'InjuryPauseState' in scope". The watch has no Recovery Mode UI and
+        // no pause state of its own, so there is nothing to clear there.
+        #if !os(watchOS)
         Task { @MainActor in InjuryPauseState.shared.reset() }
+        #endif
 
         currentUser.appleId = nil
         currentUser.email = nil
