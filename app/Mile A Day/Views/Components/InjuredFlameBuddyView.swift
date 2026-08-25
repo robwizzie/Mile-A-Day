@@ -19,6 +19,13 @@ import SwiftUI
 ///                      give. `outerColors` prefers vigor whenever health
 ///                      isn't `.critical`, so the two compose: warm from
 ///                      vigor, frown from health.
+///
+/// GEOMETRY. Everything here is expressed in a 130 × 116 design space, which is
+/// this view's own frame in units where `size` = 100. That is not decorative:
+/// the props have to be placed against where `FlameBuddyFigure` actually puts
+/// its body, which is `figureSize * 0.82` wide by `figureSize` tall, CENTRED —
+/// not the full frame. Guessing that cost a round: the first pass put the
+/// bandage near the flame's tip and buried both crutches behind the body.
 struct InjuredFlameBuddyView: View {
     var size: CGFloat = 170
     var grounded: Bool = true
@@ -30,6 +37,12 @@ struct InjuredFlameBuddyView: View {
     /// palette picked in mockup review — lit, just turned down.
     private let pausedVigor: CGFloat = 0.78
 
+    /// The body renders slightly smaller than the live buddy, which is what
+    /// clears room for the crutch ends to show either side. Without it the
+    /// silhouette covers the shafts almost end to end and the crossbones read
+    /// as two little floating T-shapes.
+    private var figureSize: CGFloat { size * 0.86 }
+
     var body: some View {
         ZStack {
             if showsProps {
@@ -38,17 +51,18 @@ struct InjuredFlameBuddyView: View {
 
             FlameBuddyFigure(
                 health: .low,
-                size: size,
+                size: figureSize,
                 showsFace: true,
                 vigor: pausedVigor,
                 grounded: grounded
             )
 
             if showsProps {
+                // Centred on the container, which lands it across the brow:
+                // the eyes sit at figureSize * 0.18 BELOW centre, so this
+                // clears them. A band any lower crosses the eyes and reads
+                // unmistakably as a surgical mask — wrong injury entirely.
                 HeadBandage(size: size)
-                    // Sits on the brow. A band any lower crosses the eyes and
-                    // reads unmistakably as a surgical mask — wrong injury.
-                    .offset(y: -size * 0.13)
             }
         }
         .frame(width: size * 1.30, height: size * 1.16)
@@ -58,62 +72,71 @@ struct InjuredFlameBuddyView: View {
 }
 
 /// Two crutches crossed BEHIND the body, crossbones-style: the shafts meet
-/// under the flame so only the four ends show. Drawn from a fixed 210×132
-/// design space so the proportions survive any `size`.
+/// under the flame, with both ends splayed clear of the silhouette so they
+/// actually read as crutches.
 private struct CrossedCrutches: View {
     let size: CGFloat
 
-    private var w: CGFloat { size * 1.30 }
-    private var h: CGFloat { size * 1.16 }
+    /// (top, tip) of each shaft in the shared 130 × 116 design space.
+    private static let shafts: [(CGPoint, CGPoint)] = [
+        (CGPoint(x: 32.2, y: 22.9), CGPoint(x: 104.0, y: 103.7)),
+        (CGPoint(x: 97.8, y: 22.9), CGPoint(x: 26.0, y: 103.7)),
+    ]
+
+    /// Design-space widths, converted to points against `size`.
+    private func w(_ units: CGFloat) -> CGFloat { max(1, units * size / 100) }
 
     var body: some View {
         ZStack {
-            // shafts
-            CrutchLines(lines: [
-                [CGPoint(x: 70, y: 38), CGPoint(x: 142, y: 118)],
-                [CGPoint(x: 140, y: 38), CGPoint(x: 68, y: 118)],
-            ])
-            .stroke(Color(red: 0.78, green: 0.80, blue: 0.83),
-                    style: StrokeStyle(lineWidth: max(2, size * 0.026), lineCap: .round))
+            CrutchLines(lines: Self.shafts.map { [$0.0, $0.1] })
+                .stroke(Self.shaft, style: .init(lineWidth: w(3.4), lineCap: .round))
 
-            // armpit cuffs
-            CrutchLines(lines: [
-                [CGPoint(x: 65, y: 42), CGPoint(x: 75, y: 33)],
-                [CGPoint(x: 135, y: 33), CGPoint(x: 145, y: 42)],
-            ])
-            .stroke(Color(red: 0.60, green: 0.64, blue: 0.68),
-                    style: StrokeStyle(lineWidth: max(3, size * 0.037), lineCap: .round))
+            CrutchLines(lines: Self.bars(at: 0, half: 4.6))
+                .stroke(Self.cuff, style: .init(lineWidth: w(4.6), lineCap: .round))
 
-            // hand grips
-            CrutchLines(lines: [
-                [CGPoint(x: 74, y: 51), CGPoint(x: 83, y: 43)],
-                [CGPoint(x: 127, y: 43), CGPoint(x: 136, y: 51)],
-            ])
-            .stroke(Color(red: 0.78, green: 0.80, blue: 0.83),
-                    style: StrokeStyle(lineWidth: max(2, size * 0.024), lineCap: .round))
+            CrutchLines(lines: Self.bars(at: 0.18, half: 3.9))
+                .stroke(Self.shaft, style: .init(lineWidth: w(3.2), lineCap: .round))
 
-            // rubber tips
-            CrutchLines(lines: [
-                [CGPoint(x: 138, y: 122), CGPoint(x: 147, y: 114)],
-                [CGPoint(x: 63, y: 114), CGPoint(x: 72, y: 122)],
-            ])
-            .stroke(Color(red: 0.25, green: 0.27, blue: 0.31),
-                    style: StrokeStyle(lineWidth: max(3, size * 0.033), lineCap: .round))
+            CrutchLines(lines: Self.bars(at: 1, half: 3.4))
+                .stroke(Self.tip, style: .init(lineWidth: w(4.4), lineCap: .round))
         }
-        .frame(width: w, height: h)
+        .frame(width: size * 1.30, height: size * 1.16)
+    }
+
+    private static let shaft = Color(red: 0.78, green: 0.80, blue: 0.83)
+    private static let cuff = Color(red: 0.60, green: 0.64, blue: 0.68)
+    private static let tip = Color(red: 0.25, green: 0.27, blue: 0.31)
+
+    /// The armpit cuff, hand grip and rubber tip are all just bars ACROSS the
+    /// shaft, so they're derived from it rather than hand-placed — hand-placed
+    /// endpoints drift out of square the moment the shaft angle is retuned.
+    private static func bars(at t: CGFloat, half: CGFloat) -> [[CGPoint]] {
+        shafts.map { p, q in
+            let cx = p.x + (q.x - p.x) * t
+            let cy = p.y + (q.y - p.y) * t
+            let dx = q.x - p.x
+            let dy = q.y - p.y
+            let len = max(0.0001, sqrt(dx * dx + dy * dy))
+            let nx = -dy / len
+            let ny = dx / len
+            return [
+                CGPoint(x: cx - nx * half, y: cy - ny * half),
+                CGPoint(x: cx + nx * half, y: cy + ny * half),
+            ]
+        }
     }
 }
 
-/// Straight segments in a 210×132 design space, scaled into whatever rect the
-/// view gets. One shape for all of a crutch's same-coloured parts keeps this to
-/// four strokes instead of sixteen rotated capsules.
+/// Polylines in the 130 × 116 design space, scaled into whatever rect the view
+/// gets. One shape per colour keeps this to four strokes instead of sixteen
+/// separately positioned capsules.
 private struct CrutchLines: Shape {
     let lines: [[CGPoint]]
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        let sx = rect.width / 210
-        let sy = rect.height / 132
+        let sx = rect.width / 130
+        let sy = rect.height / 116
         for line in lines {
             guard let first = line.first else { continue }
             path.move(to: CGPoint(x: rect.minX + first.x * sx, y: rect.minY + first.y * sy))
@@ -131,8 +154,8 @@ private struct CrutchLines: Shape {
 private struct HeadBandage: View {
     let size: CGFloat
 
-    private var bandWidth: CGFloat { size * 0.60 }
-    private var bandHeight: CGFloat { size * 0.115 }
+    private var bandWidth: CGFloat { size * 0.42 }
+    private var bandHeight: CGFloat { size * 0.095 }
 
     var body: some View {
         ZStack {
@@ -140,32 +163,32 @@ private struct HeadBandage: View {
                 .fill(Color(red: 0.96, green: 0.95, blue: 0.92))
                 .frame(width: bandWidth, height: bandHeight)
                 .overlay {
-                    // seam + two wrap folds
                     ZStack {
                         Capsule()
                             .fill(Color(red: 0.86, green: 0.84, blue: 0.78))
-                            .frame(width: bandWidth * 0.84, height: max(0.8, size * 0.006))
-                        HStack(spacing: bandWidth * 0.17) {
+                            .frame(width: bandWidth * 0.84, height: max(0.8, size * 0.005))
+                        HStack(spacing: bandWidth * 0.20) {
                             fold
                             fold
                         }
                     }
                 }
 
+            // Knot, sitting just past the band's right end.
             RoundedRectangle(cornerRadius: bandHeight * 0.30, style: .continuous)
                 .fill(Color(red: 0.96, green: 0.95, blue: 0.92))
-                .frame(width: bandHeight * 0.95, height: bandHeight * 1.10)
-                .offset(x: bandWidth * 0.50)
+                .frame(width: bandHeight * 0.95, height: bandHeight * 1.20)
+                .offset(x: bandWidth * 0.55)
         }
-        .rotationEffect(.degrees(-11))
-        .shadow(color: .black.opacity(0.18), radius: size * 0.012, y: size * 0.006)
+        .rotationEffect(.degrees(-8))
+        .shadow(color: .black.opacity(0.18), radius: size * 0.010, y: size * 0.005)
     }
 
     private var fold: some View {
         Capsule()
             .fill(Color(red: 0.89, green: 0.87, blue: 0.82))
-            .frame(width: max(0.8, size * 0.007), height: bandHeight * 0.86)
-            .rotationEffect(.degrees(12))
+            .frame(width: max(0.8, size * 0.006), height: bandHeight * 0.88)
+            .rotationEffect(.degrees(10))
     }
 }
 
