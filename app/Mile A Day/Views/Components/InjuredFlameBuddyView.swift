@@ -18,16 +18,14 @@ import SwiftUI
 ///                      give. `outerColors` prefers vigor whenever health
 ///                      isn't `.critical`, so the two compose.
 ///
-/// GEOMETRY. Every prop constant below is expressed in one 130 × 116 design
-/// space, which is this view's own frame in units where `size` = 100. That is
-/// not decorative: the props have to be placed against where `FlameBuddyFigure`
-/// actually puts its body — `figureSize * 0.82` wide by `figureSize` tall,
-/// CENTRED, not the full frame. Guessing that cost a round, with the bandage up
-/// by the flame's tip and both crutches buried behind the silhouette.
+/// GEOMETRY. Prop constants live in one 130 × 116 design space, which is this
+/// view's own frame in units where `size` = 100. Two facts about where the body
+/// actually lands have each cost a round of rework, so they're spelled out in
+/// `bodyRect`: the body frame is `figureSize * 0.82` wide (not the full frame),
+/// and it is then SCALED by vigor about its bottom edge.
 ///
-/// These numbers were dialled in against a preview that draws the real
-/// `FlameBuddyOuterShape` bezier with the same layout math — mockup sandbox,
-/// `/m/injury-pause`, every constant on a slider. Retune there, not by eye.
+/// Retune in the mockup sandbox (`/m/injury-pause`), which draws the real
+/// bezier with this same math and puts every constant on a slider — not by eye.
 struct InjuredFlameBuddyView: View {
     var size: CGFloat = 170
     var grounded: Bool = true
@@ -40,10 +38,12 @@ struct InjuredFlameBuddyView: View {
     private let pausedVigor: CGFloat = 0.78
 
     /// The body renders slightly smaller than the live buddy, which is what
-    /// clears room for the crutch ends to show either side. Without it the
-    /// silhouette covers the shafts almost end to end and the crossbones read
-    /// as two little floating T-shapes.
+    /// clears room for the crutch ends to show either side.
     private var figureSize: CGFloat { size * 0.86 }
+
+    private var containerSize: CGSize {
+        CGSize(width: size * 1.30, height: size * 1.16)
+    }
 
     var body: some View {
         ZStack {
@@ -61,11 +61,54 @@ struct InjuredFlameBuddyView: View {
 
             if showsProps {
                 HeadWrap(size: size)
+                    .frame(width: containerSize.width, height: containerSize.height)
+                    // The wrap follows the flame's OUTLINE rather than hanging
+                    // off it — bands are drawn oversized on purpose and the
+                    // silhouette decides where they stop.
+                    .clipShape(FlameSilhouette(bodyRect: bodyRect, wobble: bodyWobble))
             }
         }
-        .frame(width: size * 1.30, height: size * 1.16)
+        .frame(width: containerSize.width, height: containerSize.height)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Flame buddy on crutches. Streak paused for injury.")
+    }
+
+    /// Where `FlameBuddyFigure` actually draws its silhouette, in this view's
+    /// coordinate space.
+    ///
+    /// Two corrections live here, both of which produced visibly wrong props
+    /// when assumed away:
+    ///  1. the body frame is `figureSize * 0.82` WIDE, not the full frame;
+    ///  2. it is then `.scaleEffect`-ed by `flameScale(vigor:)` — 0.816 at our
+    ///     vigor, not 1 — anchored to the frame's BOTTOM when grounded, so the
+    ///     top edge moves down while the bottom stays put.
+    private var bodyRect: CGRect {
+        let scale = StreakFlameClock.flameScale(vigor: Double(pausedVigor))
+        let w = figureSize * 0.82 * scale
+        let h = figureSize * scale
+        let x = containerSize.width / 2 - w / 2
+        // scaleEffect(anchor: .bottom) pins the UNSCALED frame's bottom edge.
+        let unscaledBottom = containerSize.height / 2 + figureSize / 2
+        let y = grounded ? unscaledBottom - h : containerSize.height / 2 - h / 2
+        return CGRect(x: x, y: y, width: w, height: h)
+    }
+
+    /// The silhouette's wobble, taken from the figure's own formula rather than
+    /// assumed to be zero — `flickerPhase: 0` is NOT wobble 0, and a clip built
+    /// on zero leaves slivers of bandage hanging past the body edge.
+    private var bodyWobble: CGFloat {
+        FlameBuddyFigure.wobble(health: .low, vigor: pausedVigor, flickerPhase: 0)
+    }
+}
+
+/// The flame's outline, positioned in the parent's coordinate space so the
+/// bandages can be masked to exactly what the body covers.
+private struct FlameSilhouette: Shape {
+    let bodyRect: CGRect
+    let wobble: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        FlameBuddyOuterShape(wobble: wobble).path(in: bodyRect)
     }
 }
 
@@ -79,18 +122,18 @@ private struct CrossedCrutches: View {
     let size: CGFloat
 
     // All in the shared 130 × 116 design space.
-    private static let topInset: CGFloat = 32.2
-    private static let topY: CGFloat = 22.9
-    private static let tipInset: CGFloat = 26.0
-    private static let tipY: CGFloat = 103.7
-    private static let padWidth: CGFloat = 15
-    private static let railSpread: CGFloat = 5.6
+    private static let topInset: CGFloat = 28.5
+    private static let topY: CGFloat = 40.5
+    private static let tipInset: CGFloat = 35
+    private static let tipY: CGFloat = 103
+    private static let padWidth: CGFloat = 20
+    private static let railSpread: CGFloat = 7.8
     /// Where the hand grip sits, as a fraction of the shaft's length.
-    private static let gripT: CGFloat = 0.34
+    private static let gripT: CGFloat = 0.16
     /// Where the two rails meet the single lower shaft.
-    private static let convergeT: CGFloat = 0.54
-    private static let tipWidth: CGFloat = 9
-    private static let thickness: CGFloat = 2.9
+    private static let convergeT: CGFloat = 0.35
+    private static let tipWidth: CGFloat = 3
+    private static let thickness: CGFloat = 5
 
     private static let shafts: [(CGPoint, CGPoint)] = [
         (CGPoint(x: topInset, y: topY), CGPoint(x: 130 - tipInset, y: tipY)),
@@ -106,17 +149,26 @@ private struct CrossedCrutches: View {
 
     var body: some View {
         ZStack {
-            CrutchLines(lines: Self.part { p, q in [Self.P(p, q, 1, 0), Self.P(p, q, Self.convergeT, 0)] })
-                .stroke(Self.shaftColor, style: .init(lineWidth: w(Self.thickness), lineCap: .round))
+            CrutchLines(lines: Self.part { p, q in
+                [Self.P(p, q, 1, 0), Self.P(p, q, Self.convergeT, 0)]
+            })
+            .stroke(Self.shaftColor, style: .init(lineWidth: w(Self.thickness), lineCap: .round))
 
             CrutchLines(lines: Self.rails)
                 .stroke(
                     Self.shaftColor,
-                    style: .init(lineWidth: w(Self.thickness * 0.85), lineCap: .round, lineJoin: .round)
+                    style: .init(
+                        lineWidth: w(Self.thickness * 0.85),
+                        lineCap: .round,
+                        lineJoin: .round
+                    )
                 )
 
             CrutchLines(lines: Self.part { p, q in
-                [Self.P(p, q, Self.gripT, -Self.railSpread), Self.P(p, q, Self.gripT, Self.railSpread)]
+                [
+                    Self.P(p, q, Self.gripT, -Self.railSpread),
+                    Self.P(p, q, Self.gripT, Self.railSpread),
+                ]
             })
             .stroke(Self.cuffColor, style: .init(lineWidth: w(Self.thickness * 1.15), lineCap: .round))
 
@@ -157,8 +209,8 @@ private struct CrossedCrutches: View {
     /// The forked upper section: one rail either side, each running from under
     /// the pad, past the grip, in to where they meet the shaft.
     private static var rails: [[CGPoint]] {
-        // Explicit .0/.1 rather than `{ p, q in }` — a closure over an array
-        // of TUPLES takes one argument, not two, and destructuring it in the
+        // Explicit .0/.1 rather than `{ p, q in }` — a closure over an array of
+        // TUPLES takes one argument, not two, and destructuring it in the
         // parameter list stopped being legal Swift years ago.
         shafts.flatMap { shaft -> [[CGPoint]] in
             let p = shaft.0
@@ -197,25 +249,20 @@ private struct CrutchLines: Shape {
 
 // MARK: - Head wrap
 
-/// The 🤕 wrap: a flat band across the brow plus a second band crossing it at
-/// an angle, with the knot tied at one end of the flat one.
+/// The 🤕 wrap: a flat band across the head plus a second crossing it at an
+/// angle. Plain gauze — no seam lines, no knot.
 ///
-/// The angled band is drawn UNDER the flat one so the flat band reads as the
-/// outer layer, and the knot sits on top of both. Both are centred on the
-/// container rather than offset up: the eyes sit `figureSize * 0.18` BELOW the
-/// centre, so this lands on the brow and clears them. A band any lower crosses
-/// the eyes and reads unmistakably as a surgical mask — wrong injury entirely.
+/// Both bands are deliberately drawn WIDER than the head. They're clipped to
+/// the silhouette by the caller, so their width only has to be enough to reach
+/// the edges and the outline does the shaping. That's also why there's no drop
+/// shadow here: it would be clipped away with everything else outside the body.
 private struct HeadWrap: View {
     let size: CGFloat
 
-    /// Flat band across the brow.
-    private static let flat = BandSpec(width: 0.42, height: 0.095, x: 0, y: 0, angle: -4)
-    /// Second band, angled over the skull.
-    private static let angled = BandSpec(width: 0.36, height: 0.085, x: 0, y: -0.03, angle: -35)
-    /// Knot position as a fraction of the flat band's own width/height.
-    private static let knotX: CGFloat = 0.55
-    private static let knotY: CGFloat = 0
-    private static let knotScale: CGFloat = 1.0
+    /// Flat band.
+    private static let flat = BandSpec(width: 0.59, height: 0.10, x: -0.005, y: 0.01, angle: -2)
+    /// Second band, angled across it.
+    private static let angled = BandSpec(width: 0.62, height: 0.095, x: -0.02, y: 0.005, angle: -19)
 
     struct BandSpec {
         let width: CGFloat
@@ -229,49 +276,15 @@ private struct HeadWrap: View {
         ZStack {
             band(Self.angled)
             band(Self.flat)
-            knot
         }
-        .shadow(color: .black.opacity(0.18), radius: size * 0.010, y: size * 0.005)
     }
 
     private func band(_ spec: BandSpec) -> some View {
-        let w = size * spec.width
-        let h = size * spec.height
-        return RoundedRectangle(cornerRadius: h * 0.42, style: .continuous)
+        RoundedRectangle(cornerRadius: size * spec.height * 0.42, style: .continuous)
             .fill(Color(red: 0.96, green: 0.95, blue: 0.92))
-            .frame(width: w, height: h)
-            .overlay {
-                ZStack {
-                    Capsule()
-                        .fill(Color(red: 0.86, green: 0.84, blue: 0.78))
-                        .frame(width: w * 0.84, height: max(0.8, size * 0.005))
-                    HStack(spacing: w * 0.20) {
-                        fold(h)
-                        fold(h)
-                    }
-                }
-            }
+            .frame(width: size * spec.width, height: size * spec.height)
             .rotationEffect(.degrees(spec.angle))
             .offset(x: size * spec.x, y: size * spec.y)
-    }
-
-    private var knot: some View {
-        let flat = Self.flat
-        let w = size * flat.width
-        let h = size * flat.height
-        return RoundedRectangle(cornerRadius: h * 0.30 * Self.knotScale, style: .continuous)
-            .fill(Color(red: 0.96, green: 0.95, blue: 0.92))
-            .frame(width: h * 0.95 * Self.knotScale, height: h * 1.20 * Self.knotScale)
-            .offset(x: w * Self.knotX, y: h * Self.knotY)
-            .rotationEffect(.degrees(flat.angle))
-            .offset(x: size * flat.x, y: size * flat.y)
-    }
-
-    private func fold(_ h: CGFloat) -> some View {
-        Capsule()
-            .fill(Color(red: 0.89, green: 0.87, blue: 0.82))
-            .frame(width: max(0.8, size * 0.006), height: h * 0.88)
-            .rotationEffect(.degrees(10))
     }
 }
 

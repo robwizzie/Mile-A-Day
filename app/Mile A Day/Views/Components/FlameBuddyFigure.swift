@@ -134,9 +134,19 @@ struct FlameBuddyFigure: View {
     }
 
     private var wobble: CGFloat {
+        Self.wobble(health: health, vigor: vigorValue, flickerPhase: flickerPhase)
+    }
+
+    /// The silhouette's wobble, which is deterministic given health, vigor and
+    /// phase. Exposed because anything that has to CLIP to this exact outline
+    /// (the injured buddy masks its bandages to it) must build the identical
+    /// shape — and `flickerPhase: 0` is NOT wobble 0: the second term carries a
+    /// 1.7 phase offset, so a still flame still sits ~0.027 off-centre. A clip
+    /// built on zero leaves slivers of bandage hanging past the body edge.
+    static func wobble(health: FlameHealth, vigor: CGFloat?, flickerPhase: CGFloat) -> CGFloat {
         guard health != .dead else { return 0 }
         let base: CGFloat = health == .critical ? 0.07 : 0.045
-        guard let v = vigorValue else { return sin(flickerPhase) * base }
+        guard let v = vigor else { return sin(flickerPhase) * base }
         // A starving flame gutters: bigger, more erratic flicker as the day drains.
         let gutter = min(1 + (1 - v) * 1.5, 2.2)
         let organic = sin(flickerPhase) + 0.45 * sin(flickerPhase * 2.3 + 1.7)
