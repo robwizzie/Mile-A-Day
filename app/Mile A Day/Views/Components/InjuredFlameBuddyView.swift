@@ -250,7 +250,7 @@ private struct CrutchLines: Shape {
 // MARK: - Head wrap
 
 /// The 🤕 wrap: a flat band across the head plus a second crossing it at an
-/// angle. Plain gauze — no seam lines, no knot.
+/// angle. Plain gauze with an edge on each strip — no seam lines, no knot.
 ///
 /// Both bands are deliberately drawn WIDER than the head. They're clipped to
 /// the silhouette by the caller, so their width only has to be enough to reach
@@ -280,12 +280,24 @@ private struct HeadWrap: View {
     }
 
     private func band(_ spec: BandSpec) -> some View {
-        RoundedRectangle(cornerRadius: size * spec.height * 0.42, style: .continuous)
-            .fill(Color(red: 0.96, green: 0.95, blue: 0.92))
+        let radius = size * spec.height * 0.42
+        return RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(Self.gauze)
+            .overlay(
+                // The edge is what separates the two strips where they cross.
+                // Without it the overlap fills as one flat blob and the wrap
+                // stops reading as bandaging. `strokeBorder` (not `stroke`)
+                // draws INSIDE the bounds, so the band keeps its exact size.
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Self.gauzeEdge, lineWidth: max(0.6, size * 0.005))
+            )
             .frame(width: size * spec.width, height: size * spec.height)
             .rotationEffect(.degrees(spec.angle))
             .offset(x: size * spec.x, y: size * spec.y)
     }
+
+    private static let gauze = Color(red: 0.96, green: 0.95, blue: 0.92)
+    private static let gauzeEdge = Color(red: 0.855, green: 0.827, blue: 0.769)
 }
 
 #Preview {
