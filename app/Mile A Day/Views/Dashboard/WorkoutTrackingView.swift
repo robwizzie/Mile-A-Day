@@ -704,7 +704,8 @@ struct WorkoutTrackingView: View {
                         activityKey: raceActivityKey,
                         newRecordSeconds: recordSeconds,
                         friendUserId: raceTarget.friendUserId,
-                        workoutId: nil
+                        workoutId: nil,
+                        distanceMiles: ghost.distanceMiles
                     )
                 )
             )

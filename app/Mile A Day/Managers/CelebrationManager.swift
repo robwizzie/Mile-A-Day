@@ -276,9 +276,11 @@ struct GhostRaceWin: Equatable {
     /// Seconds the user finished AHEAD by. Always positive; a loss stays
     /// silent (the frozen chip already told that story).
     let marginSeconds: Double
-    /// The user's mile time, interpolated at the exact crossing.
+    /// The user's time over the RACED distance, interpolated at the exact
+    /// crossing. Named for the mile because that is what every ghost was when
+    /// this shipped; `distanceMiles` is what says whether it still is.
     let mileSeconds: Double
-    /// The ghost's mile time.
+    /// The ghost's time over the raced distance.
     let ghostSeconds: Double
     /// How the ghost was named in copy ("your best", "your PR", "your target").
     let ghostName: String
@@ -291,6 +293,11 @@ struct GhostRaceWin: Equatable {
     let friendUserId: String?
     /// Workout it belongs to, so the win can be attached to the post.
     let workoutId: String?
+    /// How far the race actually was. Defaulted so every existing construction
+    /// site (and the preview) keeps meaning the mile — this struct is plain
+    /// Equatable, never Codable, so a default is safe here in a way it would
+    /// not be on a persisted model.
+    var distanceMiles: Double = 1.0
 }
 
 /// Types of celebrations that can be shown

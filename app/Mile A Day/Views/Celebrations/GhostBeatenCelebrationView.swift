@@ -163,12 +163,30 @@ struct GhostBeatenCelebrationView: View {
             )
             .shadow(color: accent.opacity(0.55), radius: 22)
 
-            Text("ahead of \(win.ghostName) over the mile")
+            Text("ahead of \(win.ghostName) over \(racedDistanceLabel)")
                 .font(.system(size: 16, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.75))
                 .multilineTextAlignment(.center)
         }
         .padding(.horizontal, MADTheme.Spacing.lg)
+    }
+
+    /// "the mile" / "the 5K" / "3 miles". A race longer than a mile used to
+    /// render here as a mile — so a 24:48 5K was announced as a 24:48 mile,
+    /// with the ghost's total in the column beside it.
+    /// Spelled out rather than reusing `BestEffortStore.distanceLabel`, which
+    /// is built for a CHIP: it already carries its own unit ("3 mi"), so
+    /// wrapping it here produced "over 3 mi miles".
+    private var racedDistanceLabel: String {
+        let miles = win.distanceMiles
+        if abs(miles - 1.0) < 0.005 { return "the mile" }
+        if abs(miles - 3.1) < 0.005 { return "the 5K" }
+        if abs(miles - 6.2) < 0.005 { return "the 10K" }
+        if abs(miles - 13.1) < 0.005 { return "the half" }
+        if abs(miles - miles.rounded()) < 0.005 {
+            return "\(Int(miles.rounded())) miles"
+        }
+        return String(format: "%.1f miles", miles)
     }
 
     // MARK: - Times
