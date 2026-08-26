@@ -62,14 +62,19 @@ to be set in Xcode.
   `finish()` ends only the race and mile 2, 3, 4 keep getting called against the same goal pace.
 - **Pace-state hysteresis**: `on` inside ±6 s/mi, must reach ±10 s/mi to claim ahead/behind.
   A single dead band made a runner hovering on the boundary get narrated every few strides.
-- **Halfway with no ghost uses the day's goal distance** as the intended run length. It is
-  measured over THIS workout's distance (not the day's total), which is what an out-and-back
-  turnaround actually wants.
-- **Interval default 0.5 mi**, choices Off / 0.1 / ¼ / ½ / 1. Stored via `object(forKey:)`
-  not `double(forKey:)` so that 0 can mean OFF rather than "never set" — otherwise a fresh
-  install comes up with the feature disabled.
-- **Mile splits are `force: true`** (bypass the speech floor) — they carry two numbers that
-  can't be reconstructed later. Everything else respects the floor.
+- **Halfway** is half of the target, measured over THIS workout's distance (not the day's
+  total). ~~With no ghost it uses the day's goal.~~ **Superseded by review finding 5:** the
+  turnaround cue now requires a distance the runner actually CHOSE, because half of a 1-mile
+  daily goal is not the halfway point of a six-mile run. With no explicit distance it says
+  "Half way to your goal." instead.
+- **Interval default 0.5 mi**, choices Off / 0.1 / ¼ / ½ ~~/ 1~~ (1 mi removed — review
+  finding 8: the per-mile split re-anchors the marker, so it was identical to Off). Stored via
+  `object(forKey:)` not `double(forKey:)` so that 0 can mean OFF rather than "never set" —
+  otherwise a fresh install comes up with the feature disabled.
+- ~~**Mile splits are `force: true`**~~ **Superseded by review findings 1 and 2:** forcing put
+  two lines in one breath when a race finished on the same tick, and flooring dropped the split
+  outright. They are now HELD — re-offered until the floor clears, which is safe because a
+  split is still true a few seconds later.
 - Mile-split crossing re-anchors the interval marker, so "Mile 2" and an interval call can't
   fire a stride apart.
 
