@@ -2568,9 +2568,14 @@ struct WorkoutTrackingView: View {
         // written below and therefore what the backend stores as
         // `total_duration`. The recap must not be the one surface quoting a
         // wall-clock number nothing else agrees with.
-        recapDuration = workoutStartDate
+        // Held as a local as well, like every other value the async save chain
+        // reads (finalDistance, pauseIntervals, routeLocations): the energy
+        // sample is built inside an escaping closure, and @State read back
+        // through a captured `self` is not a promise of the value just written.
+        let activeSeconds = workoutStartDate
             .map { max(0, Date().timeIntervalSince($0) - pausedSeconds) } ?? elapsedTime
-        finalActiveElapsed = recapDuration
+        recapDuration = activeSeconds
+        finalActiveElapsed = activeSeconds
         recapStartingDistance = startingDistance
         recapGoalDistance = goalDistance
         recapWasIndoor = selectedLocationType == .indoor
@@ -2648,7 +2653,7 @@ struct WorkoutTrackingView: View {
             // silently, with the tracked number gone forever. It isn't gone
             // now: the ledger below is what every screen reads.
             if !added {
-                print("[WorkoutTracking] ⚠️ Distance sample rejected: \(String(describing: addError)) — the tracked \(String(format: "%.2f", finalDistance)) mi stands via the ledger")
+                print("[WorkoutTracking] ⚠️ Sample batch rejected (distance + estimated energy): \(String(describing: addError)) — the tracked \(String(format: "%.2f", finalDistance)) mi stands via the ledger")
             }
             builder.endCollection(withEnd: endDate) { _, endError in
                 if let endError {
@@ -2749,18 +2754,49 @@ struct WorkoutTrackingView: View {
         }
 
         let beginSave = {
+            let distanceMeters = finalDistance / 0.000621371
+            var samples: [HKQuantitySample] = []
+
             if finalDistance > 0 {
-                let distanceMeters = finalDistance / 0.000621371
                 let distanceQuantity = HKQuantity(unit: HKUnit.meter(), doubleValue: distanceMeters)
-                let sample = HKQuantitySample(
+                samples.append(HKQuantitySample(
                     type: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!,
                     quantity: distanceQuantity,
                     start: startDate,
                     end: endDate
-                )
-                builder.add([sample], completion: addCompletion)
-            } else {
+                ))
+            }
+
+            // Active energy, estimated — HealthKit computes none for a workout
+            // this app builds (only the Watch's live data source measures it),
+            // so without this the walk lands in Apple Fitness with no calories
+            // beside every Watch workout that shows them.
+            //
+            // Rides the SAME `add` call as distance rather than taking a second
+            // one: every extra call is another completion the finish chain can
+            // never come back from, and the workout is already staked on this
+            // one. That makes the denied-permission case the thing to handle
+            // up front — `add` accepts or rejects a batch as a UNIT, and
+            // "Active Energy" is a separate switch from Workouts in Settings,
+            // so an unasked sample for a denied type would take the distance
+            // down with it. Share status is reliable, so it is asked, not
+            // guessed; the estimate itself is finite and positive by
+            // construction.
+            if !self.healthManager.isActiveEnergySharingDenied(),
+               let energySample = WorkoutEnergyEstimate.sample(
+                   meters: distanceMeters,
+                   activeSeconds: activeSeconds,
+                   bodyMassKilograms: self.healthManager.bodyMassKilograms,
+                   start: startDate,
+                   end: endDate
+               ) {
+                samples.append(energySample)
+            }
+
+            if samples.isEmpty {
                 addCompletion(true, nil)
+            } else {
+                builder.add(samples, completion: addCompletion)
             }
         }
 

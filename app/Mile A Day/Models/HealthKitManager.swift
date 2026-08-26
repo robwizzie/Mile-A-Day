@@ -315,6 +315,11 @@ class HealthKitManager: ObservableObject {
     }
     @Published var mostMilesWorkouts: [HKWorkout] = []
     @Published var todaysSteps: Int = 0
+    /// Most recent body mass from Health, in kilograms — nil until a read
+    /// answers, and nil forever for the many people who have never entered a
+    /// weight (it is part of no required setup). Only `WorkoutEnergyEstimate`
+    /// reads it, and it substitutes a typical adult mass when this is nil.
+    @Published private(set) var bodyMassKilograms: Double?
     @Published var dailyStepsData: [Date: Int] = [:]
     @Published var dailyMileGoals: [Date: Bool] = [:]
     /// Streak tokens currently held (0–3), mirrored from the iPhone via
@@ -642,6 +647,13 @@ class HealthKitManager: ObservableObject {
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
             HKObjectType.quantityType(forIdentifier: .stepCount)!,
+            // Scales the active-energy estimate written for in-app workouts
+            // (WorkoutEnergyEstimate). Read-only, and used for nothing else —
+            // calories are the entire reason it is asked for. Adding a type
+            // here flips `getRequestStatusForAuthorization` back to
+            // `.shouldRequest` for existing installs, which is exactly the
+            // mechanism that re-prompts them once after updating.
+            HKObjectType.quantityType(forIdentifier: .bodyMass)!,
             HKSeriesType.workoutRoute()
         ]
     }
@@ -722,11 +734,40 @@ class HealthKitManager: ObservableObject {
                 // Enable background delivery for workouts when authorized
                 if success {
                     self.enableBackgroundDelivery()
+                    // Refreshed here rather than at the point of use: the
+                    // energy sample is written inside `finishWorkout`'s
+                    // completion chain, which has nowhere to await a query.
+                    // Every workout start runs through this call, so the
+                    // cached value is at most one session stale.
+                    self.refreshBodyMass()
                 }
 
                 completion(success)
             }
         }
+    }
+
+    /// Cache the newest body-mass sample for the workout energy estimate.
+    ///
+    /// A denied read and an empty Health profile are indistinguishable here
+    /// (Apple reports neither), and both mean the same thing to the caller —
+    /// no weight — so this never clears a value it already has: a locked
+    /// device answering nothing must not downgrade the estimate mid-session.
+    func refreshBodyMass() {
+        guard HKHealthStore.isHealthDataAvailable(),
+              let bodyMassType = HKObjectType.quantityType(forIdentifier: .bodyMass) else { return }
+        let newestFirst = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+        let query = HKSampleQuery(
+            sampleType: bodyMassType,
+            predicate: nil,
+            limit: 1,
+            sortDescriptors: [newestFirst]
+        ) { [weak self] _, samples, _ in
+            guard let kilograms = (samples?.first as? HKQuantitySample)?
+                .quantity.doubleValue(for: .gramUnit(with: .kilo)), kilograms > 0 else { return }
+            DispatchQueue.main.async { self?.bodyMassKilograms = kilograms }
+        }
+        healthStore.execute(query)
     }
 
     /// Whether the user has explicitly turned OFF *write* access to Workouts for
@@ -739,6 +780,20 @@ class HealthKitManager: ObservableObject {
     func isWorkoutSharingDenied() -> Bool {
         guard HKHealthStore.isHealthDataAvailable() else { return false }
         return healthStore.authorizationStatus(for: HKObjectType.workoutType()) == .sharingDenied
+    }
+
+    /// Whether *active energy* write access is off, independently of Workouts.
+    ///
+    /// Checked before the estimated energy sample joins the workout's sample
+    /// batch: `HKWorkoutBuilder.add` accepts or rejects a batch as a UNIT, so a
+    /// sample for a denied type would take the distance sample down with it and
+    /// save a workout with no distance at all — the exact silent failure the
+    /// distance-rejection logging exists to catch. Share status is reliable
+    /// (unlike reads), so this is answerable rather than guessed at.
+    func isActiveEnergySharingDenied() -> Bool {
+        guard HKHealthStore.isHealthDataAvailable(),
+              let energyType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned) else { return false }
+        return healthStore.authorizationStatus(for: energyType) == .sharingDenied
     }
 
     /// Whether *route* write access is off, independently of Workouts.
