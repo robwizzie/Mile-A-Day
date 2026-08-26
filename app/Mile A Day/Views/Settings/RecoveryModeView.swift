@@ -17,7 +17,7 @@ struct RecoveryModeView: View {
     @State private var working = false
     @State private var errorMessage: String?
 
-    private var status: InjuryPauseStatus? { state.effective }
+    private var status: InjuryPauseStatus? { state.status }
 
     var body: some View {
         ScrollView {

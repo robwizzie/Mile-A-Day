@@ -205,31 +205,6 @@ struct MADSettingsView: View {
                     iconColor: MADTheme.Colors.warning
                 )
             }
-
-            // ⚠️ TEMPORARY — see InjuryPausePreview. Lets the paused UI be
-            // inspected without actually pausing a streak. Dev builds only: a
-            // visible "preview" switch in a shipped build is both confusing and
-            // exactly the test-flavoured copy App Review flags (2.3).
-            if AppEnvironment.isDevelopment {
-                divider
-
-                Toggle(isOn: Binding(
-                    get: { injuryPause.previewEnabled },
-                    set: {
-                        injuryPause.previewEnabled = $0
-                        InjuryPausePreview.isOn = $0
-                        MADHaptics.tap()
-                    }
-                )) {
-                    MADSettingsRow(
-                        icon: "eye.fill",
-                        title: "Preview injured flame",
-                        subtitle: "Fakes a 23-day pause. Nothing is sent to the server.",
-                        iconColor: .teal
-                    )
-                }
-                .padding(.bottom, MADTheme.Spacing.xs)
-            }
         }
     }
 

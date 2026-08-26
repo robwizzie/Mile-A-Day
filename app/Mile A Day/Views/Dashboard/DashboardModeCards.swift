@@ -314,7 +314,7 @@ private struct ModernHeroCard: View {
     /// case — you back-date it once you're out of the hospital) leaves it at 0
     /// while the server has correctly frozen 412.
     private var heroStreakValue: Int {
-        injuryPause.effective?.active?.frozen_streak ?? userManager.currentUser.streak
+        injuryPause.status?.active?.frozen_streak ?? userManager.currentUser.streak
     }
 
     @ObservedObject var healthManager: HealthKitManager
@@ -1195,7 +1195,7 @@ private struct FlameBuddyHeroCard: View {
     /// case — you back-date it once you're out of the hospital) leaves it at 0
     /// while the server has correctly frozen 412.
     private var heroStreakValue: Int {
-        injuryPause.effective?.active?.frozen_streak ?? userManager.currentUser.streak
+        injuryPause.status?.active?.frozen_streak ?? userManager.currentUser.streak
     }
 
     /// Distance from the hero's top edge to the ground the buddy stands on.
@@ -1495,7 +1495,7 @@ private struct FlameBuddyHeroCard: View {
             // Says the quiet part out loud: the number is frozen, not stalled.
             // Without this the hero looks identical to a day you simply haven't
             // run yet, which is the reading that panics people.
-            if let active = injuryPause.effective?.active {
+            if let active = injuryPause.status?.active {
                 HStack(spacing: 4) {
                     InjuryStatusChip(compact: true)
                     Text("Paused \(active.paused_days) \(active.paused_days == 1 ? "day" : "days")")

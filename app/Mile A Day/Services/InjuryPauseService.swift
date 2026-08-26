@@ -56,10 +56,6 @@ final class InjuryPauseState: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var lastError: String?
 
-    /// DEBUG PREVIEW — see `InjuryPausePreview`. Published so flipping the
-    /// toggle repaints the dashboard immediately.
-    @Published var previewEnabled = InjuryPausePreview.isOn
-
     private init() {}
 
     /// Fed from the user's OWN gated stats payload, which already carries
@@ -81,19 +77,7 @@ final class InjuryPauseState: ObservableObject {
         lastError = nil
     }
 
-    /// What every surface should read. Returns the fake status while preview is
-    /// on so the paused UI can be inspected without actually pausing a streak.
-    ///
-    /// The `isDevelopment` half is load-bearing, not belt-and-braces: the flag
-    /// lives in UserDefaults, which SURVIVES a Debug → TestFlight upgrade of
-    /// the same install. Without it, anyone who left the toggle on would get a
-    /// production dashboard insisting their streak was frozen at 412 days, with
-    /// the switch to turn it off now hidden.
-    var effective: InjuryPauseStatus? {
-        (previewEnabled && AppEnvironment.isDevelopment) ? InjuryPausePreview.sample : status
-    }
-
-    var isPaused: Bool { effective?.isPaused ?? false }
+    var isPaused: Bool { status?.isPaused ?? false }
 
     @MainActor
     func refresh() async {
@@ -163,43 +147,4 @@ final class InjuryPauseState: ObservableObject {
         if raw.contains("injury_pause_disabled") { return "Recovery Mode is temporarily unavailable." }
         return error.localizedDescription
     }
-}
-
-// MARK: - Preview harness (TEMPORARY)
-
-/// ⚠️ DELETE ME — a way to look at the paused UI without actually pausing a
-/// streak. Toggle lives at the bottom of Settings.
-///
-/// Everything for this lives in this one enum plus `InjuryPauseState.effective`
-/// and one Settings row, so removing it is: delete this enum, delete the
-/// `previewEnabled`/`effective` members above, point the surfaces back at
-/// `status`, delete the Settings row. Search `InjuryPausePreview`.
-enum InjuryPausePreview {
-    static let key = "injuryPausePreviewV1_DELETE_ME"
-
-    static var isOn: Bool {
-        get { UserDefaults.standard.bool(forKey: key) }
-        set { UserDefaults.standard.set(newValue, forKey: key) }
-    }
-
-    /// A plausible mid-recovery pause: 23 days into a 412-day streak, one week
-    /// short of being allowed to end it.
-    static let sample = InjuryPauseStatus(
-        active: .init(
-            id: "preview",
-            started_on: "2026-07-31",
-            frozen_streak: 412,
-            paused_days: 23,
-            can_end: false,
-            expires_on: "2027-01-26"
-        ),
-        eligible: false,
-        reason: "already_paused",
-        reearn_progress: 0,
-        reearn_target: 90,
-        min_streak: 90,
-        min_days: 30,
-        max_days: 180,
-        max_backdate_days: 7
-    )
 }
