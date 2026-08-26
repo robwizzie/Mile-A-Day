@@ -48,7 +48,11 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     /// reads an unset key as 0, which is a real setting here (off), so an
     /// untouched install would come up with the feature disabled.
     static let intervalKey = "coachIntervalMilesV1"
-    static let intervalChoices: [Double] = [0, 0.1, 0.25, 0.5, 1.0]
+    /// No 1.0 option: the per-mile split already fires on every whole mile and
+    /// re-anchors this marker, so "every 1 mile" would be indistinguishable
+    /// from "off" — a setting that visibly does nothing is worse than one that
+    /// isn't offered.
+    static let intervalChoices: [Double] = [0, 0.1, 0.25, 0.5]
     static var intervalMiles: Double {
         UserDefaults.standard.object(forKey: intervalKey) as? Double ?? 0.5
     }
@@ -122,6 +126,13 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     private var lastMileClock: TimeInterval = 0
     private var lastIntervalMark: Double = 0
     private var paceState: PaceState?
+    /// A line the floor refused, waiting for its turn. See `hold(_:urgency:)`.
+    private var pendingLine: (text: String, urgency: Urgency, expires: Date)?
+    /// True when the runner actually CHOSE the distance (an armed ghost),
+    /// false when it's just the day's goal standing in. Only an explicit
+    /// choice earns the turnaround cue — half of a 1-mile daily goal is not
+    /// the halfway point of a 6-mile run.
+    private var targetIsExplicit = false
 
     private override init() {
         super.init()
@@ -154,6 +165,8 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         lastMileClock = 0
         lastIntervalMark = 0
         paceState = nil
+        pendingLine = nil
+        targetIsExplicit = ghostSeconds != nil
         goalPace = ghostSeconds.map { $0 / self.targetDistance }
 
         guard let ghostSeconds else { return }
@@ -161,8 +174,10 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         // pace is a number you can actually check yourself against, and over
         // anything longer than a mile it's the only one that travels.
         if self.targetDistance > 1.01, let goalPace {
+            // `formatClock`, not `formatSeconds`: the latter is mm:ss and
+            // renders a half marathon target as "117:59".
             say(
-                "Racing \(ghostName). \(BestEffortStore.formatSeconds(ghostSeconds)) "
+                "Racing \(ghostName). \(BestEffortStore.formatClock(ghostSeconds)) "
                     + "for \(milesSpoken(self.targetDistance)) — \(paceWords(goalPace)).",
                 force: true
             )
@@ -231,8 +246,15 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         /// Average pace for everything run so far. The honest fallback when
         /// there's no recent-pace derivative to quote.
         var averagePace: Double? {
-            guard distance > 0.05, raceClock > 0 else { return nil }
-            return raceClock / distance
+            guard distance > 0.05, raceClock > 30 else { return nil }
+            let pace = raceClock / distance
+            // A workout ADOPTED mid-run (relaunch recovery) restarts the
+            // moving clock at zero while `liveDistance` carries the miles
+            // already run, so the first samples imply an impossible pace.
+            // Bounded rather than trusted: "0 minute pace" is not a thing to
+            // say out loud, and it would resolve as wildly ahead of goal.
+            guard pace > 180, pace < 3600 else { return nil }
+            return pace
         }
     }
 
@@ -242,9 +264,33 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     /// speaks RETURNS: two lines in one breath is how a coach gets muted.
     func update(_ sample: Sample) {
         guard Self.isEnabled, isActive else { return }
-        targetDistance = max(sample.targetDistance, 0.1)
-        if goalPace == nil, let ghostSeconds = sample.ghostSeconds {
-            goalPace = ghostSeconds / targetDistance
+
+        // The target is LATCHED at `start()` and never re-read from the tick.
+        // The tracker is a fullScreenCover whose @State dies every time the
+        // user peeks at the dashboard, taking `raceGhost` with it — so the
+        // sample's target silently falls back to the day's goal mid-race.
+        // Re-scaling here moved every milestone with it: "Three quarters." at
+        // 0.75 mi of a 5K, a quarter of the way in.
+        //
+        // Losing the ghost that way also means the finish can never be
+        // detected (the tracker bails on a nil ghost), so a race that loses
+        // its ghost is over as far as the coach is concerned — otherwise
+        // `isRacing` stays true forever and `standing()`/`chaseLine()` return
+        // empty strings that get spoken as a line of pure whitespace.
+        if isRacing, sample.ghostSeconds == nil {
+            isRacing = false
+            wasAhead = nil
+        }
+
+        // A held line beats a new one: it was worth saying, the floor is the
+        // only reason it wasn't, and everything held here is still true.
+        if let pending = pendingLine {
+            if Date() >= pending.expires {
+                pendingLine = nil
+            } else if say(pending.text, urgency: pending.urgency) {
+                pendingLine = nil
+                return
+            }
         }
 
         // Adopt wherever the run already is, silently. Only the FIRST sample
@@ -283,33 +329,38 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         // allowed past the floor: it carries two numbers you can't reconstruct
         // later (that mile's split, and the average it moved).
         if let mileLine = mileSplitLine(sample) {
-            // Forced past the floor, but only if the coach isn't already
-            // mid-thought. Winning a one-mile race speaks the verdict on the
-            // very tick that crosses the mile, and an unconditional force
-            // queued the split straight behind it — two lines in one breath,
-            // which is the one thing this state machine exists to prevent.
-            let quiet = Date().timeIntervalSince(lastSpokeAt) >= 4
-            say(mileLine, urgency: .high, force: quiet)
+            // HELD rather than forced. Winning a one-mile race speaks the
+            // verdict on the very tick that crosses the mile, so forcing put
+            // two lines in one breath and flooring it dropped the split
+            // entirely — on exactly the run the runner most wants it. A split
+            // is still true fifteen seconds later, so it waits its turn.
+            hold(mileLine, urgency: .high)
             return
         }
 
         // Fractions of the TARGET, not of a mile — over a 5K the useful
         // halfway is 1.55 miles, and it's the one a there-and-back turns on.
         if let milestoneLine = milestoneLine(sample) {
-            say(milestoneLine, urgency: .high)
+            hold(milestoneLine, urgency: .high)
             return
         }
 
         // Crossing between ahead / on / behind the goal pace. Hysteresis in
         // `resolvedPaceState` is what keeps this from narrating every stride.
         if let stateLine = paceStateLine(sample) {
-            say(stateLine, urgency: .high)
+            hold(stateLine, urgency: .high)
             return
         }
 
         // The metronome: where you are and how fast, every N miles.
+        //
+        // `.high` because the CADENCE IS THE USER'S CHOICE — at 0.1 mi and a
+        // 6:00 pace a callout is due every 36 seconds, and the 40-second
+        // normal floor would have silently eaten every other one. Not held:
+        // "you're at 1.25 miles" stops being true almost immediately, and the
+        // next one is never far away.
         if let intervalLine = intervalLine(sample) {
-            say(intervalLine, urgency: .normal)
+            say(intervalLine, urgency: .high)
             return
         }
 
@@ -330,13 +381,19 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     private func mileSplitLine(_ sample: Sample) -> String? {
         let mile = Int(sample.distance)
         guard mile > lastMileCompleted, mile >= 1 else { return nil }
+        // More than one boundary since the last look means the ticks that
+        // should have called mile 2 never ran (a backgrounded run, a long
+        // dashboard peek). The elapsed time then covers BOTH miles, so
+        // reporting it as this mile's split would be a made-up number —
+        // re-anchor silently instead.
+        let skippedAMile = mile - lastMileCompleted > 1
         let split = sample.raceClock - lastMileClock
         lastMileCompleted = mile
         lastMileClock = sample.raceClock
         lastIntervalMark = Double(mile)
         // A split needs a clock that actually ran. A workout adopted mid-run,
         // or a mile crossed while the clock was frozen, has nothing to report.
-        guard split > 1, let average = sample.averagePace else { return nil }
+        guard !skippedAMile, split > 1, let average = sample.averagePace else { return nil }
         return "Mile \(mile). \(clockWords(split)). Average \(paceWords(average))."
     }
 
@@ -352,7 +409,11 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
             firedMilestones.insert(milestone.id)
             if milestone.id == "half" {
                 // The turnaround cue is the whole reason this one is spoken on
-                // a plain run: an out-and-back has to know when to turn.
+                // a plain run — but it is only honest when the runner SAID how
+                // far they were going. Against a bare 1-mile daily goal it
+                // would tell someone half a mile into a six-mile run to turn
+                // around, so that case gets the goal framing instead.
+                guard targetIsExplicit else { return "Half way to your goal." }
                 let head = "Half way. \(milesSpoken(sample.distance)). Turn around if you're heading back."
                 return isRacing ? "\(head) \(standing(sample.delta))" : head
             }
@@ -367,7 +428,14 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         guard let goalPace, let average = sample.averagePace else { return nil }
         guard sample.distance >= 0.25 else { return nil }
         let resolved = resolvedPaceState(average: average, goal: goalPace)
-        guard resolved != paceState else { return nil }
+        // The FIRST resolution is a reading, not a transition — "you're now
+        // behind pace" as the opening line describes a change that never
+        // happened. Seed it silently and announce only real crossings.
+        guard let previous = paceState else {
+            paceState = resolved
+            return nil
+        }
+        guard resolved != previous else { return nil }
         paceState = resolved
         return resolved.spoken
     }
@@ -380,7 +448,12 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         if drift <= -10 { return .ahead }
         if drift >= 10 { return .behind }
         if abs(drift) <= 6 { return .on }
-        return paceState ?? .on
+        // The 6–10 band is the hysteresis gap: hold whatever we already were.
+        // With NO prior state it must name the side it is actually on —
+        // defaulting to `.on` told a runner sitting eight seconds a mile down
+        // that they were on pace.
+        if let paceState { return paceState }
+        return drift < 0 ? .ahead : .behind
     }
 
     /// "You're at 1.25 miles, running at 8 12 pace."
@@ -458,6 +531,8 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         lastMileClock = 0
         lastIntervalMark = 0
         paceState = nil
+        pendingLine = nil
+        targetIsExplicit = false
         goalPace = nil
         synthesizer.stopSpeaking(at: .immediate)
         DispatchQueue.main.async { self.lastLine = nil }
@@ -514,7 +589,12 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
             let whole = Int(rounded)
             return "\(whole) mile\(whole == 1 ? "" : "s")"
         }
-        return String(format: "%.2f miles", rounded)
+        // Trailing zero stripped: the DEFAULT interval is half a mile, so
+        // every other callout lands on x.5 and "1.50 miles" is spoken
+        // "one point five zero".
+        var text = String(format: "%.2f", rounded)
+        if text.hasSuffix("0") { text = String(text.dropLast()) }
+        return "\(text) miles"
     }
 
     private func seconds(_ value: TimeInterval) -> String {
@@ -524,10 +604,25 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
 
     // MARK: - Speech
 
-    private func say(_ line: String, urgency: Urgency = .normal, force: Bool = false) {
-        guard Self.isEnabled else { return }
+    /// Hold a line that the floor refused, and re-offer it on later ticks.
+    ///
+    /// Every producer commits its own "already said that" state BEFORE the
+    /// floor gets a vote — `firedMilestones`, `lastMileCompleted`, `paceState`
+    /// are all advanced by the function that builds the string. Without this,
+    /// a line the floor suppressed was gone permanently: a pace transition
+    /// three seconds after a milestone was recorded as announced and never
+    /// spoken, which is precisely the "tell me every time it changes" the
+    /// feature promises. Only lines that stay TRUE while they wait are held.
+    private func hold(_ line: String, urgency: Urgency, holdFor: TimeInterval = 90) {
+        if say(line, urgency: urgency) { return }
+        pendingLine = (line, urgency, Date().addingTimeInterval(holdFor))
+    }
+
+    @discardableResult
+    private func say(_ line: String, urgency: Urgency = .normal, force: Bool = false) -> Bool {
+        guard Self.isEnabled else { return false }
         if !force, Date().timeIntervalSince(lastSpokeAt) < urgency.floor {
-            return
+            return false
         }
         lastSpokeAt = Date()
         DispatchQueue.main.async { self.lastLine = line }
@@ -539,6 +634,7 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         utterance.voice = AVSpeechSynthesisVoice(language: Locale.current.identifier)
             ?? AVSpeechSynthesisVoice(language: "en-US")
         synthesizer.speak(utterance)
+        return true
     }
 
     /// Activated only around an utterance. `.duckOthers` lowers music instead

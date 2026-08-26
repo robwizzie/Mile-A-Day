@@ -2111,6 +2111,21 @@ struct WorkoutTrackingView: View {
             // Restart timer and Live Activity
             startWorkoutTimer()
             startLiveActivity()
+
+            // And the coach. `GhostCoach` is a singleton whose `isActive` is a
+            // process-lifetime flag, so a relaunch mid-workout came back with
+            // it false and `update()` returned on every tick for the rest of
+            // the run — no splits, no interval, no halfway, and a permanently
+            // blank on-screen echo. Ghostless by necessity: the armed race
+            // isn't part of the persisted workout state, so there is nothing
+            // to resume it from, and claiming a race we can't score would be
+            // worse than coaching the run we can still see.
+            GhostCoach.shared.start(
+                ghostName: "your best mile",
+                isRun: selectedActivityType == .running,
+                ghostSeconds: nil,
+                targetDistance: max(goalDistance, 0.1)
+            )
         }
         .modifier(
             BuddyWizardFlowModifier(
