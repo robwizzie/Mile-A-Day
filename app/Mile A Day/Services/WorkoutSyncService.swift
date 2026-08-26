@@ -1009,6 +1009,18 @@ class WorkoutSyncService: ObservableObject {
     /// Manual workouts (source = "manual") are never auto-deleted — the user
     /// entered them explicitly and they may not have a matching HK entry.
     private func removeOrphanedBackendWorkouts(since: Date, hkUUIDs: Set<String>, userId: String) async {
+        // An EMPTY HealthKit set is never evidence that the user deleted
+        // everything. Apple never reports read authorization, so a denied
+        // Workouts switch returns an empty array with NO error — indistinguishable
+        // from a genuinely empty window — and taking it at face value would delete
+        // the whole backend history of anyone who taps Recalibrate with reads off.
+        // A real "I deleted them all" self-heals on the next recalibrate after one
+        // new workout lands.
+        guard !hkUUIDs.isEmpty else {
+            print("[WorkoutSyncService] ⚠️ Orphan check skipped: HealthKit returned no workouts (denied read, or a genuinely empty window)")
+            return
+        }
+
         struct BackendWorkout: Decodable {
             let workoutId: String
             let deviceEndDate: String
