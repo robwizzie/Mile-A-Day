@@ -667,7 +667,20 @@ struct WorkoutTrackingView: View {
         // ever show you your victories: no history, no "two seconds away", no
         // reason to come back. The stamp is separate from the celebration for
         // exactly that reason — one records, the other congratulates.
-        if let ghost = raceGhost, let delta = raceFinalDelta {
+        //
+        // MILE races only. The stamp travels to the server as
+        // `ghostTargetSeconds`, which `ghostRaceParams` (workoutService)
+        // validates against MIN/MAX_PLAUSIBLE_MILE_SECONDS — a 10K target
+        // total blows past the ceiling and the server nulls the margin, the
+        // target AND the friend id together. Sending a number that gets
+        // silently discarded is worse than sending none, and re-pointing the
+        // field at a per-mile pace would change what a shipped server thinks
+        // it is holding. Carrying longer races needs a distance on the wire
+        // and a backend deploy ahead of the app; until then a 5K ghost is a
+        // local result.
+        if let ghost = raceGhost, let delta = raceFinalDelta,
+            abs(ghost.distanceMiles - 1.0) < 0.005
+        {
             pendingRaceStamp = RaceStamp(
                 marginSeconds: delta,
                 ghostSeconds: ghost.seconds,
@@ -1449,7 +1462,11 @@ struct WorkoutTrackingView: View {
             // Every coach line as text too. This is what makes the feature work
             // with the volume down, with the coach switched off, or before the
             // `audio` background mode lets it speak through a locked screen.
-            if raceGhost != nil, let line = coach.lastLine {
+            // NOT gated on a ghost: the coach now speaks on every workout
+            // (splits, interval, halfway), and this echo is the whole
+            // accessibility story for it — volume down, speech unavailable, or
+            // a locked screen before the `audio` background mode kicks in.
+            if let line = coach.lastLine {
                 Text(line)
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.75))

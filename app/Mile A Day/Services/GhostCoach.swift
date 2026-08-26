@@ -283,7 +283,13 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         // allowed past the floor: it carries two numbers you can't reconstruct
         // later (that mile's split, and the average it moved).
         if let mileLine = mileSplitLine(sample) {
-            say(mileLine, urgency: .high, force: true)
+            // Forced past the floor, but only if the coach isn't already
+            // mid-thought. Winning a one-mile race speaks the verdict on the
+            // very tick that crosses the mile, and an unconditional force
+            // queued the split straight behind it — two lines in one breath,
+            // which is the one thing this state machine exists to prevent.
+            let quiet = Date().timeIntervalSince(lastSpokeAt) >= 4
+            say(mileLine, urgency: .high, force: quiet)
             return
         }
 
