@@ -17,13 +17,32 @@ enum BestEffortStore {
         var d: Double  // cumulative miles
     }
 
-    /// A recorded (or synthesized) best mile. `curve` is cumulative,
-    /// monotonic, and ends exactly at (seconds, 1.0).
+    /// A recorded (or synthesized) best effort. `curve` is cumulative,
+    /// monotonic, and ends exactly at (seconds, `distanceMiles`).
     struct BestMileEffort: Codable, Equatable {
         var dateISO: String
         var seconds: Double
         var curve: [CurvePoint]
         var workoutId: String? = nil
+
+        /// How far this effort covers, in miles — OPTIONAL on purpose.
+        ///
+        /// This struct is persisted to UserDefaults as a Codable blob, and
+        /// synthesized `Decodable` ignores property defaults: a non-optional
+        /// stored property added here would throw on every already-saved
+        /// effort, i.e. everyone's recorded best would silently vanish. An
+        /// Optional decodes to nil when the key is absent, which is exactly
+        /// what every blob written before this existed needs to mean.
+        ///
+        /// Read `distanceMiles`, never this.
+        var distanceMilesRaw: Double? = nil
+
+        /// The effort's distance. Every legacy value — and everything the
+        /// recorder writes — is one mile.
+        var distanceMiles: Double {
+            guard let raw = distanceMilesRaw, raw.isFinite, raw > 0 else { return 1.0 }
+            return raw
+        }
     }
 
     private static func key(_ activityKey: String) -> String {
@@ -51,8 +70,17 @@ enum BestEffortStore {
         case recordedBest
         /// The backend fastest-mile PR, flattened to a constant pace.
         case personalRecord
-        /// A time the user typed in. Constant pace, same as the PR ghost.
-        case custom(seconds: Double)
+        /// A time the user typed in, over a distance they chose. Constant
+        /// pace, same as the PR ghost.
+        ///
+        /// `seconds` is the TOTAL for `distanceMiles`, not a per-mile pace —
+        /// it stays the "how long is this ghost's whole race" figure every
+        /// other case already carries, so nothing downstream has to know
+        /// which unit it is holding. This is the ONLY case that is ever
+        /// anything other than a mile: `.recordedBest`, `.personalRecord` and
+        /// `.friend` are all measured mile efforts, and stretching one of
+        /// them over a 5K would invent a time nobody ran.
+        case custom(seconds: Double, distanceMiles: Double)
         /// A FRIEND's fastest mile, from `GET /ghosts/friends`.
         ///
         /// The seconds and the name ride in the case rather than being looked
@@ -68,7 +96,18 @@ enum BestEffortStore {
             switch self {
             case .recordedBest: return "best"
             case .personalRecord: return "pr"
-            case .custom(let seconds): return "custom:\(Int(seconds.rounded()))"
+            case .custom(let seconds, let distanceMiles):
+                // A ONE-MILE custom target keeps the byte-identical shipped
+                // encoding, and the distance is appended only when there is
+                // one — so the overwhelmingly common value still round-trips
+                // through any build, and a stored `custom:540` still decodes
+                // (as a mile) here. Hundredths of a mile as an Int, matching
+                // how seconds are already stored: no float formatting, no
+                // locale to get wrong, and every offered distance is exact.
+                let total = Int(seconds.rounded())
+                let hundredths = Int((distanceMiles * 100).rounded())
+                if hundredths == 100 { return "custom:\(total)" }
+                return "custom:\(total):\(hundredths)"
             case .friend(let id, let seconds, let name):
                 // Name goes LAST so it may contain colons — the decoder splits
                 // with maxSplits and takes the remainder verbatim.
@@ -101,12 +140,34 @@ enum BestEffortStore {
                     )
                     return
                 }
-                guard storage.hasPrefix("custom:"),
-                    let seconds = Double(storage.dropFirst("custom:".count)),
-                    Self.isPlausible(seconds)
+                guard storage.hasPrefix("custom:") else { return nil }
+                // Two accepted forms, and the short one is what the entire
+                // installed base has stored:
+                //   "custom:540"      -> 9:00 for ONE mile  (shipped form)
+                //   "custom:1488:310" -> 24:48 for 3.10 mi  (additive form)
+                let customParts = storage.dropFirst("custom:".count)
+                    .split(separator: ":", maxSplits: 1,
+                           omittingEmptySubsequences: false)
+                guard let head = customParts.first, let seconds = Double(head)
                 else { return nil }
-                self = .custom(seconds: seconds)
+                var miles: Double = 1.0
+                if customParts.count > 1 {
+                    guard let hundredths = Double(customParts[1]), hundredths > 0
+                    else { return nil }
+                    miles = hundredths / 100
+                }
+                guard Self.isPlausible(seconds, over: miles) else { return nil }
+                self = .custom(seconds: seconds, distanceMiles: miles)
             }
+        }
+
+        /// How far this target races. Only `.custom` is ever anything but a
+        /// mile — see the case's own note.
+        var distanceMiles: Double {
+            if case .custom(_, let miles) = self, miles.isFinite, miles > 0 {
+                return miles
+            }
+            return 1.0
         }
 
         /// The friend whose mile this races, when it races one.
@@ -125,13 +186,46 @@ enum BestEffortStore {
         /// would simply never appear. The ceiling keeps a fat-fingered target
         /// from being unbeatable-by-standing-still.
         static func isPlausible(_ seconds: Double) -> Bool {
-            seconds.isFinite && seconds >= minPlausibleSeconds
-                && seconds <= maxPlausibleSeconds
+            isPlausible(seconds, over: 1.0)
+        }
+
+        /// The same band, applied to the PACE the target implies rather than
+        /// its total — a 24:48 5K is a 8:00 mile, which is exactly as
+        /// plausible as an 8:00 mile target and has to be accepted as one.
+        /// Identical to the mile check when `distanceMiles` is 1.
+        static func isPlausible(_ seconds: Double, over distanceMiles: Double) -> Bool {
+            guard seconds.isFinite, distanceMiles.isFinite,
+                distanceMiles >= minTargetMiles, distanceMiles <= maxTargetMiles
+            else { return false }
+            let perMile = seconds / distanceMiles
+            return perMile >= minPlausibleSeconds && perMile <= maxPlausibleSeconds
         }
 
         /// 4:01 — mirrors `backend/src/services/mileTime.ts`.
         static let minPlausibleSeconds: Double = 241
         static let maxPlausibleSeconds: Double = 2400
+
+        /// A custom target never races LESS than a mile — the mile is the
+        /// app's unit and every other target is one — and never more than a
+        /// marathon.
+        static let minTargetMiles: Double = 1.0
+        static let maxTargetMiles: Double = 26.2
+    }
+
+    /// The distances a custom target may be raced over. The mile first,
+    /// because it is still what almost everyone picks.
+    static let targetDistanceChoices: [Double] = [1, 1.5, 2, 3, 3.1, 5, 6.2, 10, 13.1]
+
+    /// Short label for a race distance — "5K" and "10K" are what people call
+    /// those, and nobody says "3.1 miles".
+    static func distanceLabel(_ miles: Double) -> String {
+        if abs(miles - 3.1) < 0.005 { return "5K" }
+        if abs(miles - 6.2) < 0.005 { return "10K" }
+        if abs(miles - 13.1) < 0.005 { return "Half" }
+        if abs(miles - miles.rounded()) < 0.005 {
+            return "\(Int(miles.rounded())) mi"
+        }
+        return String(format: "%.1f mi", miles)
     }
 
     /// One quarter of a raced mile: your split beside the ghost's.
@@ -165,15 +259,19 @@ enum BestEffortStore {
     ) -> [RaceSplit] {
         let scale = distanceScale.isFinite && distanceScale > 0 ? distanceScale : 1.0
         let curve = rawCurve.map { CurvePoint(t: $0.t, d: $0.d * scale) }
+        // Quarters of the RACE, which is the mile for every ghost but a
+        // custom long-distance target — so this is byte-identical to the
+        // mile-only version whenever the ghost is a mile.
+        let raceDistance = ghost.distanceMiles
         guard let first = curve.first, let last = curve.last,
-            first.d <= 0.05, last.d >= 1.0
+            raceDistance > 0, first.d <= 0.05, last.d >= raceDistance
         else { return [] }
 
         let mine = BestMileEffort(dateISO: "", seconds: last.t, curve: curve)
         var splits: [RaceSplit] = []
         for quarter in 0..<4 {
-            let from = Double(quarter) * 0.25
-            let to = from + 0.25
+            let from = Double(quarter) * 0.25 * raceDistance
+            let to = from + 0.25 * raceDistance
             splits.append(
                 RaceSplit(
                     index: quarter,
@@ -205,8 +303,18 @@ enum BestEffortStore {
         if seededPace(activityKey: activityKey, pace: seedPaceSecondsPerMile) != nil {
             targets.append(.personalRecord)
         }
-        targets.append(.custom(seconds: customSeconds(for: activityKey)))
+        targets.append(storedCustomTarget(for: activityKey))
         return targets
+    }
+
+    /// The custom target as the user last left it: their per-mile pace held
+    /// over their last chosen distance.
+    static func storedCustomTarget(for activityKey: String) -> GhostTarget {
+        let miles = customDistanceMiles(for: activityKey)
+        return .custom(
+            seconds: customSeconds(for: activityKey) * miles,
+            distanceMiles: miles
+        )
     }
 
     /// Resolve a target into something raceable, or nil if it no longer exists
@@ -225,10 +333,13 @@ enum BestEffortStore {
             else { return nil }
             return ResolvedGhost(
                 target: target, effort: constantPace(pace), shortName: "your PR")
-        case .custom(let seconds):
-            guard GhostTarget.isPlausible(seconds) else { return nil }
+        case .custom(let seconds, let distanceMiles):
+            guard GhostTarget.isPlausible(seconds, over: distanceMiles) else { return nil }
             return ResolvedGhost(
-                target: target, effort: constantPace(seconds), shortName: "your target")
+                target: target,
+                effort: constantPace(seconds, distanceMiles: distanceMiles),
+                shortName: "your target"
+            )
         case .friend(_, let seconds, let name):
             guard GhostTarget.isPlausible(seconds) else { return nil }
             // A flat pace, like the PR and custom ghosts: the server only has
@@ -251,7 +362,7 @@ enum BestEffortStore {
         seedPaceSecondsPerMile: Double?
     ) -> GhostTarget {
         availableTargets(for: activityKey, seedPaceSecondsPerMile: seedPaceSecondsPerMile)
-            .first ?? .custom(seconds: customSeconds(for: activityKey))
+            .first ?? storedCustomTarget(for: activityKey)
     }
 
     /// Walks never inherit a RUN PR — a run PR is not a walk target, and
@@ -263,12 +374,19 @@ enum BestEffortStore {
         return pace
     }
 
-    /// A ghost that holds one exact pace for the whole mile.
-    private static func constantPace(_ seconds: Double) -> BestMileEffort {
-        BestMileEffort(
+    /// A ghost that holds one exact pace for the whole race. Defaults to the
+    /// mile, so the PR and friend ghosts — which are measured MILE efforts —
+    /// keep calling it unchanged and stay miles.
+    private static func constantPace(
+        _ seconds: Double, distanceMiles: Double = 1.0
+    ) -> BestMileEffort {
+        let miles = (distanceMiles.isFinite && distanceMiles > 0) ? distanceMiles : 1.0
+        return BestMileEffort(
             dateISO: "",
             seconds: seconds,
-            curve: [CurvePoint(t: 0, d: 0), CurvePoint(t: seconds, d: 1.0)]
+            curve: [CurvePoint(t: 0, d: 0), CurvePoint(t: seconds, d: miles)],
+            workoutId: nil,
+            distanceMilesRaw: miles
         )
     }
 
@@ -293,6 +411,42 @@ enum BestEffortStore {
     static func saveCustomSeconds(_ seconds: Double, for activityKey: String) {
         guard GhostTarget.isPlausible(seconds) else { return }
         UserDefaults.standard.set(seconds.rounded(), forKey: customKey(activityKey))
+    }
+
+    private static func customDistanceKey(_ activityKey: String) -> String {
+        "ghostCustomDistanceV1.\(activityKey)"
+    }
+
+    /// The distance the user last raced a custom target over. A missing key
+    /// reads 0 from UserDefaults and therefore falls through to the mile,
+    /// which is what every install had before this existed.
+    static func customDistanceMiles(for activityKey: String) -> Double {
+        let stored = UserDefaults.standard.double(forKey: customDistanceKey(activityKey))
+        guard stored.isFinite, stored >= GhostTarget.minTargetMiles,
+            stored <= GhostTarget.maxTargetMiles
+        else { return 1.0 }
+        return stored
+    }
+
+    static func saveCustomDistanceMiles(_ miles: Double, for activityKey: String) {
+        guard miles.isFinite, miles >= GhostTarget.minTargetMiles,
+            miles <= GhostTarget.maxTargetMiles
+        else { return }
+        UserDefaults.standard.set(miles, forKey: customDistanceKey(activityKey))
+    }
+
+    /// Persist a whole custom target, given its TOTAL time.
+    ///
+    /// The seconds key keeps holding a PER-MILE pace, exactly as it always
+    /// has: it is seeded from a mile time, compared against the mile band,
+    /// and read by `customSeconds` — so storing a 5K total in it would make
+    /// every one of those mean something different overnight.
+    static func saveCustomTarget(
+        seconds: Double, distanceMiles: Double, for activityKey: String
+    ) {
+        let miles = (distanceMiles.isFinite && distanceMiles > 0) ? distanceMiles : 1.0
+        saveCustomDistanceMiles(miles, for: activityKey)
+        saveCustomSeconds(seconds / miles, for: activityKey)
     }
 
     /// The ghost's race-clock time at cumulative distance `d` (miles), by
@@ -393,6 +547,16 @@ enum BestEffortStore {
     /// "8:42" formatting for card and celebration copy.
     static func formatSeconds(_ seconds: Double) -> String {
         let s = max(0, Int(seconds.rounded()))
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
+    /// Same, but rolls over into hours — a half marathon target is two hours
+    /// of running, and "127:18" is not a time anyone reads.
+    static func formatClock(_ seconds: Double) -> String {
+        let s = max(0, Int(seconds.rounded()))
+        if s >= 3600 {
+            return String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
+        }
         return String(format: "%d:%02d", s / 60, s % 60)
     }
 }

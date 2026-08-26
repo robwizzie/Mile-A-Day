@@ -37,16 +37,32 @@ struct GhostRaceOptionsContent: View {
     /// Don't race this session.
     let onDecline: () -> Void
 
+    /// Which number the wheels are holding. The two are the same thing over a
+    /// mile, and only diverge once a longer distance is chosen — so the toggle
+    /// only ever needs to exist for the custom target.
+    private enum CustomEntryMode: Hashable {
+        /// Wheels hold the time for the WHOLE distance ("24:48 for a 5K").
+        case total
+        /// Wheels hold seconds per mile ("8:00/mi").
+        case perMile
+    }
+
     @State private var selection: BestEffortStore.GhostTarget = .recordedBest
     /// Custom target, held split so the wheels are independent.
     @State private var customMinutes: Int = 9
     @State private var customSeconds: Int = 0
+    /// How far the custom target races. Every other target is a measured mile.
+    @State private var customDistance: Double = 1.0
+    @State private var entryMode: CustomEntryMode = .perMile
     /// `onAppear` fires again when a host re-presents this view; priming twice
     /// would throw away wheel edits mid-decision.
     @State private var hasPrimed = false
 
     @ObservedObject private var friendGhosts = FriendGhostService.shared
     @AppStorage(GhostCoach.enabledKey) private var coachEnabled = true
+    /// Mirrors `GhostCoach.intervalMiles`' own default, which reads the key
+    /// with `object(forKey:)` so that 0 can mean OFF rather than "never set".
+    @AppStorage(GhostCoach.intervalKey) private var coachInterval: Double = 0.5
 
     private var isRun: Bool { activityKey == "running" }
 
@@ -98,8 +114,26 @@ struct GhostRaceOptionsContent: View {
         return base
     }
 
-    private var customTotalSeconds: Double {
+    /// Whatever the wheels literally read, in the ACTIVE mode's unit.
+    private var wheelSeconds: Double {
         Double(customMinutes * 60 + customSeconds)
+    }
+
+    /// Miles the custom target covers, never zero — everything below divides
+    /// by it.
+    private var customMiles: Double {
+        customDistance.isFinite && customDistance > 0 ? customDistance : 1.0
+    }
+
+    /// Time for the WHOLE custom distance. This is what a `.custom` target
+    /// carries, whichever way the user typed it in.
+    private var customTotalSeconds: Double {
+        entryMode == .total ? wheelSeconds : wheelSeconds * customMiles
+    }
+
+    /// Seconds per mile the custom target implies.
+    private var customPerMileSeconds: Double {
+        entryMode == .total ? wheelSeconds / customMiles : wheelSeconds
     }
 
     private var isCustomSelected: Bool {
@@ -109,11 +143,58 @@ struct GhostRaceOptionsContent: View {
 
     /// The selection as it would be armed — custom picks up the live wheels.
     private var armedTarget: BestEffortStore.GhostTarget {
-        isCustomSelected ? .custom(seconds: customTotalSeconds) : selection
+        isCustomSelected
+            ? .custom(seconds: customTotalSeconds, distanceMiles: customMiles)
+            : selection
+    }
+
+    /// The distance actually being raced. Only a custom target is ever
+    /// anything but a mile.
+    private var armedDistanceMiles: Double {
+        armedTarget.distanceMiles
     }
 
     private var armedIsValid: Bool {
-        !isCustomSelected || BestEffortStore.GhostTarget.isPlausible(customTotalSeconds)
+        !isCustomSelected
+            || BestEffortStore.GhostTarget.isPlausible(
+                customTotalSeconds, over: customMiles)
+    }
+
+    private var minutesRange: ClosedRange<Int> {
+        wheelMinutesRange(for: entryMode, miles: customMiles)
+    }
+
+    /// Minutes the wheel may show. In total-time mode it has to stretch to
+    /// cover the whole distance — a half marathon is two hours, not forty
+    /// minutes. Identical to the shipped 4...40 for a mile.
+    ///
+    /// Takes the mode and distance rather than reading state, so a mode or
+    /// distance change can compute the NEW range and re-seat the wheels in the
+    /// same pass that changes them.
+    private func wheelMinutesRange(
+        for mode: CustomEntryMode, miles: Double
+    ) -> ClosedRange<Int> {
+        guard mode == .total, miles > 1.001 else { return 4...40 }
+        let low = max(
+            1, Int((BestEffortStore.GhostTarget.minPlausibleSeconds * miles) / 60))
+        let raw = Int((BestEffortStore.GhostTarget.maxPlausibleSeconds * miles) / 60)
+        let high = max(low + 1, min(600, raw))
+        return low...high
+    }
+
+    /// Put `seconds` on the wheels, clamped into the range the given mode
+    /// allows — a Picker whose selection isn't among its own rows shows as no
+    /// selection at all, so the clamp is not cosmetic.
+    private func setWheelSeconds(
+        _ seconds: Double, mode: CustomEntryMode, miles: Double
+    ) {
+        let range = wheelMinutesRange(for: mode, miles: miles)
+        let low = Double(range.lowerBound * 60)
+        let high = Double(range.upperBound * 60 + 59)
+        let rounded = seconds.isFinite ? seconds.rounded() : low
+        let clamped = Int(min(max(rounded, low), high))
+        customMinutes = min(max(clamped / 60, range.lowerBound), range.upperBound)
+        customSeconds = min(max(clamped % 60, 0), 59)
     }
 
     // MARK: - Body
@@ -126,6 +207,7 @@ struct GhostRaceOptionsContent: View {
                     targetList
                     if isCustomSelected { customPicker }
                     coachToggle
+                    coachIntervalChooser
                     howItWorks
                     // Reserves scroll room under the pinned footer.
                     Color.clear.frame(height: 180)
@@ -153,20 +235,27 @@ struct GhostRaceOptionsContent: View {
     /// One-shot: seed the wheels and the selected row from what's already
     /// armed, falling back to the best available target.
     private func primeSelection() {
-        let seconds = BestEffortStore.customSeconds(for: activityKey)
-        customMinutes = Int(seconds) / 60
-        customSeconds = Int(seconds) % 60
+        // The stored custom target is held as a per-mile PACE plus a distance,
+        // so priming always starts from the pace and the wheels always open in
+        // per-mile mode — the one reading that means the same thing at every
+        // distance, and the one the seeding ("a shade under your best") is in.
+        var perMile = BestEffortStore.customSeconds(for: activityKey)
+        var miles = BestEffortStore.customDistanceMiles(for: activityKey)
 
         if let current, targetsContain(current) {
             selection = current
-            if case .custom(let s) = current {
-                customMinutes = Int(s) / 60
-                customSeconds = Int(s) % 60
+            if case .custom(let total, let distanceMiles) = current {
+                miles = distanceMiles.isFinite && distanceMiles > 0 ? distanceMiles : 1.0
+                perMile = total / miles
             }
         } else {
             selection = BestEffortStore.defaultTarget(
                 for: activityKey, seedPaceSecondsPerMile: seedPaceSeconds)
         }
+
+        entryMode = .perMile
+        customDistance = miles
+        setWheelSeconds(perMile, mode: .perMile, miles: miles)
     }
 
     /// Custom matches on KIND, not on seconds — the wheels own the value.
@@ -198,7 +287,7 @@ struct GhostRaceOptionsContent: View {
                 Circle().fill(accent.opacity(0.22)).frame(width: 64, height: 64)
                 GhostSprite(size: 34, color: accent, glancesBack: true)
             }
-            Text("Race a ghost for one mile")
+            Text(headerTitle)
                 .font(.system(size: 24, weight: .bold, design: .rounded))
                 .foregroundStyle(MADTheme.Colors.madWhite)
                 .multilineTextAlignment(.center)
@@ -211,6 +300,12 @@ struct GhostRaceOptionsContent: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, MADTheme.Spacing.sm)
+    }
+
+    private var headerTitle: String {
+        armedDistanceMiles > 1.001
+            ? "Race a ghost over \(BestEffortStore.distanceLabel(armedDistanceMiles))"
+            : "Race a ghost for one mile"
     }
 
     // MARK: - Targets
@@ -351,13 +446,19 @@ struct GhostRaceOptionsContent: View {
                 BestEffortStore.formatSeconds(seconds)
             )
         case .custom:
+            let detail: String
+            if customMiles > 1.001 {
+                detail = "Any distance and pace you like — a 5K goal, a long-run pace."
+            } else if isRun {
+                detail = "Any distance and pace you like — a goal pace, or a friend's time."
+            } else {
+                detail = "Any distance and pace you like. Works from your very first walk."
+            }
             return (
                 "slider.horizontal.3",
                 "A time you set",
-                isRun
-                    ? "Any target you like — a goal pace, or a friend's time."
-                    : "Any target you like. Works from your very first walk.",
-                BestEffortStore.formatSeconds(customTotalSeconds)
+                detail,
+                BestEffortStore.formatClock(customTotalSeconds)
             )
         }
     }
@@ -379,13 +480,17 @@ struct GhostRaceOptionsContent: View {
     // MARK: - Custom picker
 
     private var customPicker: some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
+        VStack(spacing: MADTheme.Spacing.md) {
+            distanceChooser
+            entryModeToggle
+
             HStack(spacing: 0) {
-                // Starts at 4, not 2: everything below 4:01 is rejected as a
-                // drive, so offering those minutes was offering a dead end.
-                // 4:00 exactly stays selectable and simply disables the button,
-                // the same way the 40:01 corner already does.
-                wheel(value: $customMinutes, range: 4...40, unit: "min")
+                // In per-mile mode this starts at 4, not 2: everything below
+                // 4:01 a mile is rejected as a drive, so offering those minutes
+                // was offering a dead end. 4:00 exactly stays selectable and
+                // simply disables the button, the same way the 40:01 corner
+                // already does.
+                wheel(value: $customMinutes, range: minutesRange, unit: "min")
                 Text(":")
                     .font(.system(size: 26, weight: .bold, design: .rounded))
                     .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
@@ -393,14 +498,139 @@ struct GhostRaceOptionsContent: View {
             }
             .frame(height: 130)
 
-            Text(paceHint)
-                .font(MADTheme.Typography.caption)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
-                .multilineTextAlignment(.center)
+            VStack(spacing: 4) {
+                // The number they did NOT type. Both readings are the target,
+                // and which one is useful depends entirely on whether they're
+                // pacing the race or checking they can hold it.
+                Text(derivedCaption)
+                    .font(MADTheme.Typography.smallBold)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.85))
+                Text(paceHint)
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+            }
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(MADTheme.Spacing.md)
         .frame(maxWidth: .infinity)
         .ghostRaceSurface(selected: false, accent: accent)
+    }
+
+    // MARK: Distance
+
+    private var distanceChooser: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            Text("How far?")
+                .font(MADTheme.Typography.caption)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    ForEach(BestEffortStore.targetDistanceChoices, id: \.self) { miles in
+                        distanceChip(miles)
+                    }
+                }
+                // Room for the selected chip's 2pt stroke, which would
+                // otherwise be shaved off at either end of the scroll.
+                .padding(.horizontal, 2)
+                .padding(.vertical, 2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func distanceChip(_ miles: Double) -> some View {
+        let isOn = abs(miles - customDistance) < 0.005
+        return Button {
+            guard !isOn else { return }
+            MADHaptics.tap()
+            // Changing the DISTANCE holds the PACE, so 8:00/mi over a mile
+            // becomes 8:00/mi over a 5K rather than an 8:00 5K. In per-mile
+            // mode the wheels already say that and must not move.
+            let raw = Double(customMinutes * 60 + customSeconds)
+            let previousMiles = customMiles
+            withAnimation(MADTheme.Animation.quick) { customDistance = miles }
+            if entryMode == .total, previousMiles > 0 {
+                setWheelSeconds(
+                    raw / previousMiles * miles, mode: .total, miles: miles)
+            }
+        } label: {
+            Text(BestEffortStore.distanceLabel(miles))
+                .font(MADTheme.Typography.smallBold)
+                .foregroundStyle(
+                    isOn ? MADTheme.Colors.madWhite : MADTheme.Colors.madWhite.opacity(0.7)
+                )
+                .padding(.horizontal, MADTheme.Spacing.md)
+                .padding(.vertical, MADTheme.Spacing.sm)
+                .background(
+                    Capsule().fill(isOn ? accent.opacity(0.28) : Color.white.opacity(0.10))
+                )
+                .overlay(
+                    Capsule().strokeBorder(
+                        isOn ? accent : Color.white.opacity(0.18),
+                        lineWidth: isOn ? 2 : 1
+                    )
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Total vs per-mile
+
+    /// Built from the same capsule vocabulary as the distance chips rather
+    /// than `.pickerStyle(.segmented)` — a UIKit segmented control renders
+    /// light-on-light over both gradients this screen is hosted on.
+    private var entryModeToggle: some View {
+        HStack(spacing: 4) {
+            entryModeSegment(.total, title: "Total time")
+            entryModeSegment(.perMile, title: "Per mile")
+        }
+        .padding(4)
+        .background(Capsule().fill(Color.white.opacity(0.10)))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+    }
+
+    private func entryModeSegment(_ mode: CustomEntryMode, title: String) -> some View {
+        let isOn = entryMode == mode
+        return Button {
+            guard !isOn else { return }
+            MADHaptics.tap()
+            // Switching how the target is STATED must carry the value over,
+            // not clear it: someone who has dialled in 8:00/mi and then wants
+            // to see it as a total is asking about the number they already
+            // set, and handing them back a default would answer a different
+            // question.
+            let raw = Double(customMinutes * 60 + customSeconds)
+            let carried = mode == .total ? raw * customMiles : raw / customMiles
+            let miles = customMiles
+            withAnimation(MADTheme.Animation.quick) { entryMode = mode }
+            setWheelSeconds(carried, mode: mode, miles: miles)
+        } label: {
+            Text(title)
+                .font(MADTheme.Typography.smallBold)
+                .foregroundStyle(
+                    isOn ? MADTheme.Colors.madWhite : MADTheme.Colors.madWhite.opacity(0.6)
+                )
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, MADTheme.Spacing.sm)
+                .background(Capsule().fill(isOn ? accent.opacity(0.28) : Color.clear))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The other reading of the same target: type a pace, see the total; type
+    /// a total, see the pace.
+    private var derivedCaption: String {
+        if customMiles <= 1.001 {
+            return "\(BestEffortStore.formatSeconds(customPerMileSeconds)) for the mile."
+        }
+        let label = BestEffortStore.distanceLabel(customMiles)
+        if entryMode == .total {
+            return "\(BestEffortStore.formatSeconds(customPerMileSeconds))/mi over \(label)."
+        }
+        return "\(BestEffortStore.formatClock(customTotalSeconds)) total for \(label)."
     }
 
     private func wheel(value: Binding<Int>, range: ClosedRange<Int>, unit: String) -> some View {
@@ -425,14 +655,19 @@ struct GhostRaceOptionsContent: View {
     /// Grounds the abstract number in something the user recognises. A target
     /// they can't picture is a target they can't pick well.
     private var paceHint: String {
+        // Compared PER MILE, always: a 5K total is a bigger number than a mile
+        // best by construction, and holding the two side by side would call
+        // every long target "easier" when it is nothing of the kind.
+        let perMile = customPerMileSeconds
         guard let reference = referenceSeconds else {
-            return "That's a \(BestEffortStore.formatSeconds(customTotalSeconds)) mile pace."
+            return "That's a \(BestEffortStore.formatSeconds(perMile)) mile pace."
         }
-        let delta = Int((reference - customTotalSeconds).rounded())
+        let unit = customMiles > 1.001 ? "s/mi" : "s"
+        let delta = Int((reference - perMile).rounded())
         if abs(delta) < 3 { return "Just about dead even with your best mile." }
         return delta > 0
-            ? "\(delta)s faster than your best mile — a real push."
-            : "\(-delta)s easier than your best mile — a comfortable target."
+            ? "\(delta)\(unit) faster than your best mile — a real push."
+            : "\(-delta)\(unit) easier than your best mile — a comfortable target."
     }
 
     private var referenceSeconds: Double? {
@@ -457,7 +692,7 @@ struct GhostRaceOptionsContent: View {
                     Text("Coach")
                         .font(MADTheme.Typography.bodyBold)
                         .foregroundStyle(MADTheme.Colors.madWhite)
-                    Text("Calls out where you stand at each quarter mile, and whenever the lead changes.")
+                    Text("Calls out your pace and splits as you run, the halfway turnaround, and — when you're racing — every lead change.")
                         .font(MADTheme.Typography.caption)
                         .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
                         .fixedSize(horizontal: false, vertical: true)
@@ -475,6 +710,75 @@ struct GhostRaceOptionsContent: View {
         .onChange(of: coachEnabled) { _, _ in MADHaptics.tap() }
     }
 
+    /// How often the coach calls distance + pace. Hidden while the coach is
+    /// off — a cadence for something silent is a setting that can only
+    /// confuse. "Off" is a real choice here and keeps the splits, the
+    /// milestones and the race lines, which are event-driven rather than
+    /// metronomic.
+    @ViewBuilder
+    private var coachIntervalChooser: some View {
+        if coachEnabled {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                Text("Call out my pace every")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: MADTheme.Spacing.sm) {
+                        ForEach(GhostCoach.intervalChoices, id: \.self) { miles in
+                            coachIntervalChip(miles)
+                        }
+                    }
+                    // Room for the selected chip's stroke, same as the
+                    // distance row above.
+                    .padding(.horizontal, 2)
+                    .padding(.vertical, 2)
+                }
+
+                Text(
+                    coachInterval > 0
+                        ? "Every mile you'll also hear that mile's split and your overall average."
+                        : "You'll still hear every mile split and your overall average."
+                )
+                .font(MADTheme.Typography.caption)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(MADTheme.Spacing.md)
+            .ghostRaceSurface(selected: false, accent: accent)
+        }
+    }
+
+    private func coachIntervalChip(_ miles: Double) -> some View {
+        let isOn = abs(miles - coachInterval) < 0.005
+        return Button {
+            guard !isOn else { return }
+            MADHaptics.tap()
+            withAnimation(MADTheme.Animation.quick) { coachInterval = miles }
+        } label: {
+            Text(Self.intervalLabel(miles))
+                .font(MADTheme.Typography.smallBold)
+                .foregroundStyle(
+                    isOn ? MADTheme.Colors.madWhite : MADTheme.Colors.madWhite.opacity(0.7)
+                )
+                .padding(.horizontal, MADTheme.Spacing.md)
+                .padding(.vertical, MADTheme.Spacing.sm)
+                .background(
+                    Capsule().fill(isOn ? accent.opacity(0.28) : Color.white.opacity(0.10))
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private static func intervalLabel(_ miles: Double) -> String {
+        if miles <= 0 { return "Off" }
+        if abs(miles - 0.25) < 0.005 { return "¼ mi" }
+        if abs(miles - 0.5) < 0.005 { return "½ mi" }
+        if abs(miles - 1.0) < 0.005 { return "1 mi" }
+        return String(format: "%.1f mi", miles)
+    }
+
     // MARK: - Explainer
 
     private var howItWorks: some View {
@@ -487,12 +791,7 @@ struct GhostRaceOptionsContent: View {
                 "gauge.with.needle",
                 "A live chip under your clock shows +/- seconds against the ghost."
             )
-            explainerRow(
-                "flag.checkered",
-                isRun
-                    ? "It locks in the moment you hit 1.00 mi — the rest of the run is yours."
-                    : "It locks in the moment you hit 1.00 mi — the rest of the walk is yours."
-            )
+            explainerRow("flag.checkered", lockInLine)
             explainerRow(
                 "stopwatch",
                 isRun
@@ -507,6 +806,20 @@ struct GhostRaceOptionsContent: View {
         .padding(MADTheme.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
         .ghostRaceSurface(selected: false, accent: accent)
+    }
+
+    /// Where the race ends — the mile unless a custom target moved it.
+    private var finishLineText: String {
+        armedDistanceMiles > 1.001
+            ? BestEffortStore.distanceLabel(armedDistanceMiles)
+            : "1.00 mi"
+    }
+
+    private var lockInLine: String {
+        let line = finishLineText
+        return isRun
+            ? "It locks in the moment you hit \(line) — the rest of the run is yours."
+            : "It locks in the moment you hit \(line) — the rest of the walk is yours."
     }
 
     private func explainerRow(_ icon: String, _ text: String) -> some View {
@@ -532,7 +845,7 @@ struct GhostRaceOptionsContent: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "flag.checkered")
-                    Text("Race \(BestEffortStore.formatSeconds(armedSeconds))")
+                    Text(armedButtonTitle)
                 }
                 .font(MADTheme.Typography.bodyBold)
                 .frame(maxWidth: .infinity)
@@ -577,15 +890,27 @@ struct GhostRaceOptionsContent: View {
         switch armedTarget {
         case .recordedBest: return BestEffortStore.best(for: activityKey)?.seconds ?? 0
         case .personalRecord: return seedPaceSeconds ?? 0
-        case .custom(let seconds): return seconds
+        case .custom(let seconds, _): return seconds
         case .friend(_, let seconds, _): return seconds
         }
     }
 
+    /// "Race 8:42" for a mile; a longer target has to name the distance, or
+    /// "Race 24:48" is a time with nothing attached to it.
+    private var armedButtonTitle: String {
+        guard armedDistanceMiles > 1.001 else {
+            return "Race \(BestEffortStore.formatSeconds(armedSeconds))"
+        }
+        let label = BestEffortStore.distanceLabel(armedDistanceMiles)
+        let clock = BestEffortStore.formatClock(armedSeconds)
+        return "Race \(label) in \(clock)"
+    }
+
     private func commit() {
         guard armedIsValid else { return }
-        if case .custom(let seconds) = armedTarget {
-            BestEffortStore.saveCustomSeconds(seconds, for: activityKey)
+        if case .custom(let seconds, let distanceMiles) = armedTarget {
+            BestEffortStore.saveCustomTarget(
+                seconds: seconds, distanceMiles: distanceMiles, for: activityKey)
         }
         onRace(armedTarget)
     }

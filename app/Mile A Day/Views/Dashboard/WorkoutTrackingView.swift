@@ -240,13 +240,28 @@ struct WorkoutTrackingView: View {
     /// Live ahead(+)/behind(−) seconds vs the ghost at the current distance,
     /// or the frozen verdict once the mile completes. Nil while not racing or
     /// in the first steps (no meaningful delta yet).
+    /// The finish line, in miles. A mile for every ghost that IS a mile effort
+    /// (recorded best, PR, a friend's); whatever the user set for a custom
+    /// pace target. Never read a literal 1.0 against a ghost again — a 5K
+    /// target would freeze its verdict a third of the way in.
+    private var raceTargetDistance: Double {
+        max(raceGhost?.distanceMiles ?? 1.0, 0.1)
+    }
+
+    /// What the COACH measures against when no ghost is armed: the day's goal.
+    /// It only drives the halfway turnaround cue in that case, which still
+    /// wants a distance to be half OF.
+    private var coachTargetDistance: Double {
+        raceGhost != nil ? raceTargetDistance : max(goalDistance, 0.1)
+    }
+
     private var raceDeltaSeconds: TimeInterval? {
         guard let ghost = raceGhost else { return nil }
         if let frozen = raceFinalDelta { return frozen }
         // Raced against the DISPLAYED distance (`liveDistance`), the same
         // figure the effort curve samples and Finish saves — reading raw GPS
         // accrual here would put the chip and the ring on different miles.
-        let d = min(locationManager.liveDistance, 1.0)
+        let d = min(locationManager.liveDistance, raceTargetDistance)
         guard d > 0.02 else { return nil }
         return BestEffortStore.timeAtDistance(d, in: ghost) - locationManager.raceClockSeconds
     }
@@ -255,18 +270,19 @@ struct WorkoutTrackingView: View {
     /// interpolated crossing time from the effort curve — accurate no matter
     /// when the tick that notices runs.
     private func updateRaceFreezeIfNeeded() {
+        let finishLine = raceTargetDistance
         guard let ghost = raceGhost, raceFinalDelta == nil,
-            locationManager.liveDistance >= 1.0
+            locationManager.liveDistance >= finishLine
         else { return }
         let curve = locationManager.effortCurve
-        guard let crossing = curve.firstIndex(where: { $0.d >= 1.0 }) else { return }
+        guard let crossing = curve.firstIndex(where: { $0.d >= finishLine }) else { return }
         let b = curve[crossing]
         var myMileSeconds = b.t
         if crossing > 0 {
             let a = curve[crossing - 1]
             let span = b.d - a.d
             if span > 0 {
-                myMileSeconds = a.t + (b.t - a.t) * ((1.0 - a.d) / span)
+                myMileSeconds = a.t + (b.t - a.t) * ((finishLine - a.d) / span)
             }
         }
         let finalDelta = ghost.seconds - myMileSeconds
@@ -2384,11 +2400,22 @@ struct WorkoutTrackingView: View {
             GhostCoach.shared.start(
                 ghostName: ghost.shortName,
                 isRun: selectedActivityType == .running,
-                ghostSeconds: ghost.effort.seconds
+                ghostSeconds: ghost.effort.seconds,
+                targetDistance: ghost.effort.distanceMiles
             )
         } else {
             raceGhost = nil
             raceGhostName = "your best mile"
+            // The coach is not the race. With no ghost armed it still calls
+            // splits, the interval line and the halfway turnaround — those are
+            // properties of the RUN, and gating them on having armed a ghost
+            // is what made coaching an opt-in of an opt-in.
+            GhostCoach.shared.start(
+                ghostName: "your best mile",
+                isRun: selectedActivityType == .running,
+                ghostSeconds: nil,
+                targetDistance: max(goalDistance, 0.1)
+            )
         }
 
         // Live presence session (fire-and-forget; the share pref only gates
@@ -2483,17 +2510,22 @@ struct WorkoutTrackingView: View {
             // Ghost coach rides this tick rather than owning a timer. It reads
             // the SAME delta the chip renders, so the voice can never say
             // something the screen contradicts.
-            if let ghost = raceGhost, let delta = raceDeltaSeconds {
-                GhostCoach.shared.update(
-                    GhostCoach.Sample(
-                        distance: locationManager.liveDistance,
-                        raceClock: locationManager.raceClockSeconds,
-                        delta: delta,
-                        ghostSeconds: ghost.seconds,
-                        recentPace: locationManager.recentPaceSecondsPerMile
-                    )
+            //
+            // Fired on EVERY tick, ghost or not: the coach's own `isActive`
+            // gate decides whether there's anything to say. Gating the call
+            // itself on `raceGhost` is what used to make the whole feature
+            // vanish for anyone who hadn't armed one — and made it fall silent
+            // at the finish line for everyone who had.
+            GhostCoach.shared.update(
+                GhostCoach.Sample(
+                    distance: locationManager.liveDistance,
+                    raceClock: locationManager.raceClockSeconds,
+                    delta: raceDeltaSeconds,
+                    ghostSeconds: raceGhost?.seconds,
+                    recentPace: locationManager.recentPaceSecondsPerMile,
+                    targetDistance: coachTargetDistance
                 )
-            }
+            )
             // Foreground heartbeat driver (self-throttled to ~45s). The
             // background driver is the location/pedometer callback path.
             livePresence.tick()
