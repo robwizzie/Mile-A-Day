@@ -122,16 +122,16 @@ private struct CrossedCrutches: View {
     let size: CGFloat
 
     // All in the shared 130 × 116 design space.
-    private static let topInset: CGFloat = 28.5
-    private static let topY: CGFloat = 40.5
-    private static let tipInset: CGFloat = 35
-    private static let tipY: CGFloat = 103
+    private static let topInset: CGFloat = 31.5
+    private static let topY: CGFloat = 50
+    private static let tipInset: CGFloat = 42
+    private static let tipY: CGFloat = 103.5
     private static let padWidth: CGFloat = 20
     private static let railSpread: CGFloat = 7.8
     /// Where the hand grip sits, as a fraction of the shaft's length.
     private static let gripT: CGFloat = 0.16
     /// Where the two rails meet the single lower shaft.
-    private static let convergeT: CGFloat = 0.35
+    private static let convergeT: CGFloat = 0.8
     private static let tipWidth: CGFloat = 3
     private static let thickness: CGFloat = 5
 
@@ -260,9 +260,9 @@ private struct HeadWrap: View {
     let size: CGFloat
 
     /// Flat band.
-    private static let flat = BandSpec(width: 0.59, height: 0.10, x: -0.005, y: 0.01, angle: -2)
+    private static let flat = BandSpec(width: 0.49, height: 0.10, x: -0.005, y: 0.09, angle: -2)
     /// Second band, angled across it.
-    private static let angled = BandSpec(width: 0.62, height: 0.095, x: -0.02, y: 0.005, angle: -19)
+    private static let angled = BandSpec(width: 0.62, height: 0.10, x: -0.02, y: 0.075, angle: -20)
 
     struct BandSpec {
         let width: CGFloat
