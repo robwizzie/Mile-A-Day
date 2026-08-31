@@ -30,3 +30,9 @@ Use `npm` for all operations.
 - Primary color: `#c72554` (burgundy red).
 - Dark theme throughout (`bg-[#0a0a0a]`).
 - Scroll reveal animations via `ScrollReveal` component (Intersection Observer).
+
+## Admin dashboard (`app/admin/`)
+- Tabs render from the `TABS` array in `dashboard.tsx`; each tab is one file in `_components/`. Data goes through `getData("<path>")` → the same-origin proxy → backend `/admin/<path>`, so a new panel needs a backend route and nothing else.
+- Multi-series charts use `SERIES` from `lib.tsx` (validated for this dark surface: CVD separation, contrast, one lightness band). Assign in order, never cycle it, and never add a 4th concurrent series — split the chart instead. `PALETTE` is for one-series-per-card breakdowns only.
+- A `HeatGrid` needs FIXED px columns and `justify-content: start`. A label placed in the flow widens its own track (the axis then drifts off the cells), and an `auto` first track in a stretched grid absorbs all slack and floats the plot to the right edge.
+- Photos ≠ posts: `is_auto` route cards are published FOR a user who skips the prompt, so any "is the social feature working" number reads `photo_count`, never `post_count`.

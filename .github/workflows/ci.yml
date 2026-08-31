@@ -82,6 +82,14 @@ jobs:
       # breaks silently: a second card for the same walk, a crew photo that
       # never reaches the payload, or — the one nobody would notice — a
       # participant's GPS trace published after they turned route sharing off.
+      # The admin dashboard's feature panels. A wrong aggregate here does not
+      # 500 — it reports a plausible number nobody can tell is wrong, and
+      # those numbers decide what gets built next. Asserts each panel against
+      # a seeded world, plus the empty-table shapes (an average over no rows,
+      # a zero-length axis) that only break on a quiet day.
+      - name: Admin analytics panel check
+        run: node scripts/admin-analytics-check.mjs
+
       - name: Buddy group post check
         run: node scripts/buddy-group-post-check.mjs
       # The buddy history archive. Everything that can go wrong with a

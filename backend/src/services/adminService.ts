@@ -289,7 +289,7 @@ export async function getUsers(opts: {
   search: string | null;
   limit: number;
   offset: number;
-  sort?: "recent" | "streak" | "miles" | "active";
+  sort?: "recent" | "streak" | "miles" | "active" | "photos";
 }) {
   const like = opts.search ? `%${opts.search}%` : null;
   const where = `WHERE ($1::text IS NULL
@@ -309,7 +309,9 @@ export async function getUsers(opts: {
         ? "total_miles DESC NULLS LAST, u.created_at DESC"
         : opts.sort === "active"
           ? "last_active DESC NULLS LAST, u.created_at DESC"
-          : "u.created_at DESC";
+          : opts.sort === "photos"
+            ? "photo_count DESC NULLS LAST, last_photo_at DESC NULLS LAST, u.created_at DESC"
+            : "u.created_at DESC";
 
   const users = await db.query(
     `SELECT u.user_id, u.username, u.first_name, u.last_name, u.email,
@@ -317,7 +319,9 @@ export async function getUsers(opts: {
             u.created_at, u.terms_accepted_at,
             COALESCE(w.total_miles, 0)::float AS total_miles,
             w.last_active,
-            COALESCE(p.post_count, 0)::int AS post_count
+            COALESCE(p.post_count, 0)::int AS post_count,
+            COALESCE(p.photo_count, 0)::int AS photo_count,
+            p.last_photo_at
      FROM users u
      LEFT JOIN LATERAL (
        SELECT SUM(distance) AS total_miles, MAX(local_date)::text AS last_active
@@ -325,7 +329,13 @@ export async function getUsers(opts: {
        WHERE user_id = u.user_id AND deleted_at IS NULL AND exclusion_reason IS NULL
      ) w ON TRUE
      LEFT JOIN LATERAL (
-       SELECT COUNT(*) AS post_count
+       SELECT COUNT(*) AS post_count,
+              -- A PHOTO is a deliberate user post. The is_auto route cards are
+              -- published for the user when they skip the photo prompt, so
+              -- counting them would say the social feature is working when
+              -- nobody has actually taken a picture.
+              COUNT(*) FILTER (WHERE NOT is_auto) AS photo_count,
+              MAX(created_at) FILTER (WHERE NOT is_auto) AS last_photo_at
        FROM posts
        WHERE user_id = u.user_id AND deleted_at IS NULL
      ) p ON TRUE

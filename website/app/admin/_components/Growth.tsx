@@ -1,7 +1,55 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BarList, Card, fmt, getData, Loading, StatCard } from "./lib";
+import {
+  BarList,
+  Card,
+  Chip,
+  fmt,
+  fmtDate,
+  getData,
+  HEAT_HUE,
+  Loading,
+  pct,
+  relativeDay,
+  StatCard,
+} from "./lib";
+import { HeatGrid } from "./charts";
+
+type ReferralGraph = {
+  summary: {
+    total_users: number;
+    friend_referred: number;
+    matched: number;
+    unmatched: number;
+    referrers: number;
+  };
+  referrers: {
+    referrer_id: string | null;
+    referrer_username: string | null;
+    typed_as: string;
+    count: number;
+    active: number;
+    referred: {
+      user_id: string;
+      username: string | null;
+      name: string | null;
+      created_at: string;
+      last_active: string | null;
+      total_miles: number;
+      current_streak: number;
+    }[];
+  }[];
+};
+
+type Retention = {
+  max_week: number;
+  cohorts: {
+    cohort: string;
+    size: number;
+    weeks: { week: number; users: number; pct: number }[];
+  }[];
+};
 
 type Referrals = {
   by_source: { source: string; count: number }[];
@@ -28,6 +76,181 @@ const SOURCE_LABELS: Record<string, string> = {
 const pretty = (s: string) =>
   SOURCE_LABELS[s] ??
   s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+/**
+ * Who brought whom in.
+ *
+ * There is no referral code — attribution is a name a new user TYPES at
+ * onboarding, so this shows the resolved and unresolved halves separately
+ * rather than pretending every typed name is an account. The number that
+ * matters is `active`: a referrer who brought in ten people who all stopped
+ * running brought in nobody.
+ */
+function ReferralGraphPanel() {
+  const [g, setG] = useState<ReferralGraph | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    getData<ReferralGraph>("referral-graph")
+      .then(setG)
+      .catch((e) => {
+        if (e?.message !== "unauthorized")
+          setErr("Failed to load the referral graph.");
+      });
+  }, []);
+
+  if (err) return <Card title="Who referred whom">{err}</Card>;
+  if (!g)
+    return (
+      <Card title="Who referred whom">
+        <Loading />
+      </Card>
+    );
+
+  const { summary } = g;
+
+  return (
+    <Card
+      title="Who referred whom"
+      hint={`${fmt(summary.friend_referred)} people said a friend sent them. ${fmt(summary.matched)} named an account we could find; ${fmt(summary.unmatched)} typed something that matches no username.`}
+    >
+      {g.referrers.length === 0 ? (
+        <p className="text-sm text-white/40">
+          Nobody has named a friend yet — this fills in as new users pick
+          “Friend” at onboarding.
+        </p>
+      ) : (
+        <ul className="divide-y divide-white/5">
+          {g.referrers.map((r) => {
+            const key = r.referrer_id ?? `typed:${r.typed_as}`;
+            const open = openId === key;
+            return (
+              <li key={key} className="py-2.5">
+                <button
+                  onClick={() => setOpenId(open ? null : key)}
+                  className="flex w-full items-center justify-between gap-3 text-left"
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="w-3 shrink-0 text-xs text-white/30">
+                      {open ? "▾" : "▸"}
+                    </span>
+                    <span className="truncate text-sm text-white/90">
+                      {r.referrer_username ? `@${r.referrer_username}` : r.typed_as}
+                    </span>
+                    {!r.referrer_id && <Chip text="no such user" tone="bad" />}
+                  </span>
+                  <span className="shrink-0 text-sm tabular-nums text-white/50">
+                    <span className="text-white/90">{r.count}</span> brought in
+                    {" · "}
+                    <span
+                      className={
+                        r.active > 0 ? "text-emerald-300" : "text-white/40"
+                      }
+                    >
+                      {r.active} still running
+                    </span>
+                  </span>
+                </button>
+                {open && (
+                  <ul className="mt-2 ml-5 space-y-1.5 border-l border-white/10 pl-4">
+                    {r.referred.map((u) => (
+                      <li
+                        key={u.user_id}
+                        className="flex items-baseline justify-between gap-3 text-xs"
+                      >
+                        <span className="truncate text-white/70">
+                          {u.username ? `@${u.username}` : u.name || u.user_id.slice(0, 8)}
+                        </span>
+                        <span className="shrink-0 tabular-nums text-white/40">
+                          joined {fmtDate(u.created_at)} · last run{" "}
+                          {relativeDay(u.last_active)} ·{" "}
+                          {Math.round(u.total_miles)} mi
+                          {u.current_streak > 0 && ` · ${u.current_streak}🔥`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/**
+ * Weekly signup cohorts × how many of that cohort were still logging a mile
+ * N weeks later. The triangle narrows on its own — a cohort three weeks old
+ * has no week-4 cell to fill, which is why those read as blank rather than 0.
+ */
+function RetentionPanel() {
+  const [r, setR] = useState<Retention | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    getData<Retention>("retention")
+      .then(setR)
+      .catch((e) => {
+        if (e?.message !== "unauthorized") setErr("Failed to load retention.");
+      });
+  }, []);
+
+  if (err) return <Card title="Retention">{err}</Card>;
+  if (!r)
+    return (
+      <Card title="Retention">
+        <Loading />
+      </Card>
+    );
+  if (r.cohorts.length === 0)
+    return (
+      <Card title="Retention">
+        <p className="text-sm text-white/40">Not enough signup history yet.</p>
+      </Card>
+    );
+
+  const today = new Date();
+  const weeksSince = (cohort: string) =>
+    Math.floor(
+      (today.getTime() - new Date(`${cohort}T00:00:00`).getTime()) /
+        (7 * 86_400_000),
+    );
+
+  return (
+    <Card
+      title="Retention by signup week"
+      hint="Share of each week's signups still logging a mile N weeks later. Week 0 is the week they joined."
+    >
+      <HeatGrid
+        hue={HEAT_HUE}
+        rows={r.cohorts.map((c) => ({
+          key: c.cohort,
+          label: `${c.cohort.slice(5)} · ${c.size}`,
+        }))}
+        cols={Array.from({ length: r.max_week + 1 }, (_, w) => ({
+          key: String(w),
+          label: `W${w}`,
+        }))}
+        value={(cohortKey, weekKey) => {
+          const c = r.cohorts.find((x) => x.cohort === cohortKey);
+          const w = Number(weekKey);
+          // A cohort that has not lived this long yet has no cell, which is
+          // different from a cohort that lost everybody.
+          if (!c || w > weeksSince(cohortKey)) return null;
+          return c.weeks.find((x) => x.week === w)?.pct ?? 0;
+        }}
+        title={(cohort, week, v) => `${cohort} · ${week}: ${v}% still running`}
+        formatValue={(v) => `${Math.round(v)}%`}
+        legend="Each row is a signup week; the label shows its size."
+      />
+    </Card>
+  );
+}
 
 export function GrowthTab() {
   const [r, setR] = useState<Referrals | null>(null);
@@ -98,21 +321,6 @@ export function GrowthTab() {
         </Card>
 
         <Card
-          title="Top friend referrers"
-          hint="Named when “Friend” is picked."
-        >
-          <BarList
-            items={r.friend_referrers.map((f) => ({
-              label: f.detail,
-              value: f.count,
-            }))}
-            color="#34d399"
-            emptyLabel="No named friend referrers yet."
-            formatValue={(v) => `${v} signup${v === 1 ? "" : "s"}`}
-          />
-        </Card>
-
-        <Card
           title="Signup goals"
           hint="What users say they want out of the app."
         >
@@ -135,6 +343,9 @@ export function GrowthTab() {
           />
         </Card>
       </div>
+
+      <ReferralGraphPanel />
+      <RetentionPanel />
     </div>
   );
 }

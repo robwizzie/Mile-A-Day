@@ -89,8 +89,24 @@ export function relativeDay(dateStr?: string | null): string {
   return `${Math.floor(days / 365)}y ago`;
 }
 
-// A small categorical palette used across breakdown charts. Burgundy leads to
-// stay on-brand; the rest are distinct in both hue and lightness.
+/**
+ * The categorical set for charts that draw SEVERAL series at once, validated
+ * against this dashboard's dark surface: every adjacent pair clears the
+ * colour-vision separation floor, the normal-vision floor and 3:1 contrast,
+ * and all three sit inside one lightness band so no series shouts louder than
+ * the others. Burgundy leads to stay on brand.
+ *
+ * Assign these IN ORDER and never cycle them. A fourth concurrent series does
+ * not get a made-up fourth hue — it becomes its own chart, because the next
+ * step that still separates cleanly for a protanope does not exist here.
+ */
+export const SERIES = ["#c72554", "#0284c7", "#d97706"] as const;
+
+// The single hue every heat grid ramps through, as "r, g, b" for rgba().
+export const HEAT_HUE = "199, 37, 84";
+
+// A wider palette for one-series-per-card breakdowns, where nothing has to be
+// told apart from a neighbour at a glance. Not for stacked or grouped charts.
 export const PALETTE = [
   "#c72554",
   "#38bdf8",
@@ -228,6 +244,71 @@ export function BarList({
         </li>
       ))}
     </ul>
+  );
+}
+
+/** "42%" from a part and a whole, with a zero whole reading as 0 rather than NaN. */
+export const pct = (part: number, whole: number) =>
+  whole > 0 ? Math.round((part / whole) * 100) : 0;
+
+/**
+ * A labelled proportion bar: the share of the user base that has ever touched
+ * something, with the recent share drawn INSIDE it. Two nested bars rather
+ * than two colours — "of the people who ever did this, these still do" is a
+ * containment, and a grouped pair would invite reading them as rivals.
+ */
+export function AdoptionBar({
+  label,
+  everCount,
+  recentCount,
+  total,
+  events,
+}: {
+  label: string;
+  everCount: number;
+  recentCount: number;
+  total: number;
+  events?: number;
+}) {
+  return (
+    <li>
+      {/* Label on its own line: these names are sentences ("Raced a friend's
+          ghost"), and sharing a row with three numbers truncated every one of
+          them to an ellipsis in a three-column layout. */}
+      <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
+        <span className="min-w-0 text-white/80">{label}</span>
+        <span className="shrink-0 tabular-nums text-white/90">
+          {fmt(everCount)}
+        </span>
+      </div>
+      <div
+        className="h-2.5 overflow-hidden rounded-full bg-white/[0.06]"
+        role="img"
+        aria-label={`${label}: ${everCount} of ${total} users ever, ${recentCount} in the last 30 days`}
+      >
+        <div
+          className="relative h-full rounded-full"
+          style={{
+            width: `${pct(everCount, total)}%`,
+            background: "rgba(199, 37, 84, 0.35)",
+          }}
+        >
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: `${everCount > 0 ? pct(recentCount, everCount) : 0}%`,
+              background: "#c72554",
+            }}
+          />
+        </div>
+      </div>
+      <div className="mt-1 text-[11px] tabular-nums text-white/40">
+        {pct(everCount, total)}% of users ·{" "}
+        <span className="text-white/60">{fmt(recentCount)}</span> in the last
+        30 days
+        {events != null && <span> · {fmt(events)} times</span>}
+      </div>
+    </li>
   );
 }
 
