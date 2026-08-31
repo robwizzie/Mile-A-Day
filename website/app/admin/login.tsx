@@ -80,7 +80,7 @@ export function AdminLogin() {
           >
             {busy ? "Signing in…" : "Sign in with Apple"}
           </button>
-          {error && <p className="mt-4 text-sm text-[#c72554]">{error}</p>}
+          {error && <p className="mt-4 text-sm text-[#d94059]">{error}</p>}
         </div>
       </main>
     </>

@@ -34,6 +34,8 @@ import {
   getActivityRhythms,
   getPulse,
   resetAnalyticsCaches,
+  getDrilldown,
+  DRILLDOWN_KINDS,
 } from "../dist/services/adminAnalyticsService.js";
 import { getUsers } from "../dist/services/adminService.js";
 
@@ -515,6 +517,77 @@ async function main() {
   check("pulse: live competitions", d("pulse.competitions_live"), 2);
   check("pulse: buddy sessions today", d("pulse.buddy_sessions_today"), 1);
   check("pulse: photos today", d("pulse.photos_today"), 3);
+
+  // ── Drill-downs ────────────────────────────────────────────────────
+  // Every panel number is clickable, and the list behind it must agree with
+  // the number that opened it — a drawer that says "3 people" under a bar
+  // reading 5 is worse than no drawer.
+  console.log("\n--- drill-downs ---");
+
+  const dd = (kind, id) => getDrilldown(kind, id ?? null);
+
+  const photoRows = await dd("feature", "photo_post");
+  truthy(
+    "the photo drill-down lists the two photographers",
+    [ALICE, BOB].every((u) => photoRows.rows.some((r) => r.user_id === u)),
+  );
+  truthy(
+    "and not the one whose only photo was deleted",
+    !photoRows.rows.some((r) => r.user_id === CAROL),
+  );
+  check(
+    "its per-user count matches the adoption events",
+    photoRows.rows.find((r) => r.user_id === ALICE)?.stat,
+    "2×",
+  );
+
+  const compRows = await dd("competition", COMPS[0]);
+  check("competition drill-down names it", compRows.title, "Live Clash");
+  check("and lists every invite, accepted or not", compRows.rows.length, 3);
+
+  const tokenRows = await dd("token", "streak_assist");
+  check("assist drill-down finds the rescue", tokenRows.rows.length, 1);
+  check(
+    "and credits the donor by name",
+    tokenRows.rows[0]?.subtitle,
+    `saved by @${ALICE}`,
+  );
+
+  const bucketRows = await dd("streak_bucket", "30–99");
+  truthy(
+    "the 30–99 streak band contains the 40-day streaker",
+    bucketRows.rows.some((r) => r.user_id === DAVE),
+  );
+  truthy(
+    "and not the 12-day one",
+    !bucketRows.rows.some((r) => r.user_id === ALICE),
+  );
+
+  const buddyRows = await dd("buddy_origin", "invite");
+  check("buddy origin drill-down finds the session", buddyRows.rows.length, 1);
+  check("with its crew size", buddyRows.rows[0]?.subtitle, "2 walked · active");
+
+  const typeRows = await dd("workout_type", "running");
+  truthy(
+    "workout-type drill-down excludes the deleted and excluded workouts",
+    typeRows.rows.find((r) => r.user_id === ALICE)?.subtitle === "10 workouts",
+  );
+
+  check("an unknown feature key resolves to nothing", await dd("feature", "nope"), null);
+  check("an unknown streak band resolves to nothing", await dd("streak_bucket", "7"), null);
+  check("an unknown badge resolves to nothing", await dd("badge", "nope"), null);
+
+  // Every declared kind must answer without throwing, including on ids that
+  // match nothing — the drawer opens before it knows there are rows.
+  for (const kind of DRILLDOWN_KINDS) {
+    try {
+      await dd(kind, "definitely-not-a-real-id");
+      console.log(`ok    ${kind} survives an unknown id`);
+    } catch (err) {
+      failures++;
+      console.log(`FAIL  ${kind} threw on an unknown id: ${err.message}`);
+    }
+  }
 
   if (!process.env.KEEP_SEED) await cleanup();
 

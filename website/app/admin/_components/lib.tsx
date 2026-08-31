@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { CARD, CARD_INTERACTIVE, MAD_RED } from "./theme";
 
 // ─── Data fetching (via the same-origin admin proxy) ────────────────
 
@@ -89,35 +90,21 @@ export function relativeDay(dateStr?: string | null): string {
   return `${Math.floor(days / 365)}y ago`;
 }
 
-/**
- * The categorical set for charts that draw SEVERAL series at once, validated
- * against this dashboard's dark surface: every adjacent pair clears the
- * colour-vision separation floor, the normal-vision floor and 3:1 contrast,
- * and all three sit inside one lightness band so no series shouts louder than
- * the others. Burgundy leads to stay on brand.
- *
- * Assign these IN ORDER and never cycle them. A fourth concurrent series does
- * not get a made-up fourth hue — it becomes its own chart, because the next
- * step that still separates cleanly for a protanope does not exist here.
- */
-export const SERIES = ["#c72554", "#0284c7", "#d97706"] as const;
-
-// The single hue every heat grid ramps through, as "r, g, b" for rgba().
-export const HEAT_HUE = "199, 37, 84";
-
-// A wider palette for one-series-per-card breakdowns, where nothing has to be
-// told apart from a neighbour at a glance. Not for stacked or grouped charts.
-export const PALETTE = [
-  "#c72554",
-  "#38bdf8",
-  "#fbbf24",
-  "#34d399",
-  "#a78bfa",
-  "#f472b6",
-  "#fb923c",
-  "#60a5fa",
-  "#9ca3af",
-];
+// The palette and card tokens now come from the app's own design system —
+// see theme.ts, which is a direct port of MADTheme.swift. Re-exported here so
+// every panel keeps importing them from one place.
+export {
+  SERIES,
+  HEAT_HUE,
+  PALETTE,
+  MAD_RED,
+  WALK_BLUE,
+  MAD_SUCCESS,
+  MAD_WARNING,
+  CARD,
+  CARD_INTERACTIVE,
+  workoutColor,
+} from "./theme";
 
 // ─── UI primitives ──────────────────────────────────────────────────
 
@@ -126,26 +113,48 @@ export function StatCard({
   value,
   sub,
   accent,
+  onClick,
 }: {
   label: string;
   value: string;
   sub?: ReactNode;
   accent?: boolean;
+  /** Present = this number opens the rows behind it. */
+  onClick?: () => void;
 }) {
-  return (
-    <div
-      className={`rounded-xl border p-5 ${
-        accent
-          ? "border-[#c72554]/40 bg-[#c72554]/10"
-          : "border-white/10 bg-white/[0.03]"
-      }`}
-    >
-      <div className="text-xs font-medium uppercase tracking-wide text-white/40">
+  // Value and label mirror the app's stat cell (ProfileStatsRow): a heavy
+  // rounded number over an 11px semibold tracked caption at 55% white.
+  const body = (
+    <>
+      <div className="text-[11px] font-semibold tracking-[0.4px] text-white/55 uppercase">
         {label}
       </div>
-      <div className="mt-1.5 text-3xl font-semibold text-white">{value}</div>
-      {sub != null && <div className="mt-1 text-sm text-white/50">{sub}</div>}
-    </div>
+      <div className="mad-num mt-1.5 text-[32px] leading-none font-extrabold text-white">
+        {value}
+      </div>
+      {sub != null && (
+        <div className="mt-1.5 text-[13px] text-white/45">{sub}</div>
+      )}
+    </>
+  );
+
+  const shell = accent
+    ? "rounded-2xl border border-[#d94059]/40 bg-[#d94059]/[0.12]"
+    : CARD;
+
+  if (!onClick) {
+    return <div className={`${shell} p-5`}>{body}</div>;
+  }
+  return (
+    <button
+      onClick={onClick}
+      className={`${accent ? shell + " transition hover:border-[#d94059]/70 hover:bg-[#d94059]/20" : CARD_INTERACTIVE} group p-5 text-left`}
+    >
+      {body}
+      <div className="mt-2 text-[11px] font-semibold text-white/25 transition group-hover:text-[#d94059]">
+        View →
+      </div>
+    </button>
   );
 }
 
@@ -163,16 +172,18 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div
-      className={`rounded-xl border border-white/10 bg-white/[0.03] p-5 ${className}`}
-    >
+    <div className={`${CARD} p-5 ${className}`}>
       {(title || actions) && (
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             {title && (
-              <h2 className="text-sm font-medium text-white/70">{title}</h2>
+              <h2 className="text-[15px] font-bold text-white/90">{title}</h2>
             )}
-            {hint && <p className="mt-1 text-xs text-white/40">{hint}</p>}
+            {hint && (
+              <p className="mt-1 text-xs leading-relaxed text-white/40">
+                {hint}
+              </p>
+            )}
           </div>
           {actions && <div className="shrink-0">{actions}</div>}
         </div>
@@ -189,31 +200,47 @@ export function Chip({
   text: string;
   tone?: "ok" | "bad" | "muted" | "info";
 }) {
+  // Capsule, tinted fill — the app's chip (WorkoutAttributionView draws its
+  // pills as Capsule().fill(tint.opacity(0.18))), not a square badge.
   const cls =
     tone === "ok"
-      ? "bg-emerald-500/15 text-emerald-300"
+      ? "bg-[#33b34d]/20 text-[#7fe39a]"
       : tone === "bad"
-        ? "bg-[#c72554]/20 text-[#ffb3c6]"
+        ? "bg-[#d94059]/20 text-[#ffb3c6]"
         : tone === "info"
-          ? "bg-sky-500/15 text-sky-300"
-          : "bg-white/10 text-white/60";
+          ? "bg-[#4099f2]/20 text-[#9ecbff]"
+          : "bg-white/[0.14] text-white/60";
   return (
     <span
-      className={`rounded px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ${cls}`}
+      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ${cls}`}
     >
       {text}
     </span>
   );
 }
 
-/** Horizontal proportional-bar list for categorical breakdowns. */
+/**
+ * Horizontal proportional-bar list for categorical breakdowns.
+ *
+ * An item carrying `onClick` becomes a row you can open — the bar itself is
+ * the hit target, not a separate chevron, since the whole row is the thing
+ * the reader is pointing at.
+ */
 export function BarList({
   items,
-  color = "#c72554",
+  color = MAD_RED,
   emptyLabel = "No data yet.",
   formatValue = (v: number) => fmt(v),
 }: {
-  items: { label: string; value: number; sub?: string }[];
+  items: {
+    label: string;
+    value: number;
+    sub?: string;
+    /** Per-item colour, for lists whose rows carry their own identity
+     *  (workout types, token kinds). Falls back to the list colour. */
+    color?: string;
+    onClick?: () => void;
+  }[];
   color?: string;
   emptyLabel?: string;
   formatValue?: (v: number) => string;
@@ -223,26 +250,44 @@ export function BarList({
   const max = Math.max(...items.map((i) => i.value), 1);
   return (
     <ul className="space-y-2.5">
-      {items.map((it) => (
-        <li key={it.label}>
-          <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
-            <span className="truncate text-white/80">{it.label}</span>
-            <span className="shrink-0 text-white/50">
-              {it.sub ? `${it.sub} · ` : ""}
-              <span className="text-white/90">{formatValue(it.value)}</span>
-            </span>
-          </div>
-          <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${(it.value / max) * 100}%`,
-                background: color,
-              }}
-            />
-          </div>
-        </li>
-      ))}
+      {items.map((it) => {
+        const row = (
+          <>
+            <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
+              <span className="truncate text-white/85">{it.label}</span>
+              <span className="shrink-0 tabular-nums text-white/45">
+                {it.sub ? `${it.sub} · ` : ""}
+                <span className="font-semibold text-white/95">
+                  {formatValue(it.value)}
+                </span>
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-white/[0.06]">
+              <div
+                className="h-full rounded-full transition-[width] duration-300"
+                style={{
+                  width: `${(it.value / max) * 100}%`,
+                  background: it.color ?? color,
+                }}
+              />
+            </div>
+          </>
+        );
+        return (
+          <li key={it.label}>
+            {it.onClick ? (
+              <button
+                onClick={it.onClick}
+                className="-mx-2 block w-[calc(100%+1rem)] rounded-lg px-2 py-1 text-left transition hover:bg-white/[0.05]"
+              >
+                {row}
+              </button>
+            ) : (
+              row
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -263,15 +308,18 @@ export function AdoptionBar({
   recentCount,
   total,
   events,
+  onClick,
 }: {
   label: string;
   everCount: number;
   recentCount: number;
   total: number;
   events?: number;
+  /** Present = this row opens the people behind it. */
+  onClick?: () => void;
 }) {
-  return (
-    <li>
+  const body = (
+    <>
       {/* Label on its own line: these names are sentences ("Raced a friend's
           ghost"), and sharing a row with three numbers truncated every one of
           them to an ellipsis in a three-column layout. */}
@@ -297,7 +345,7 @@ export function AdoptionBar({
             className="h-full rounded-full"
             style={{
               width: `${everCount > 0 ? pct(recentCount, everCount) : 0}%`,
-              background: "#c72554",
+              background: "#d94059",
             }}
           />
         </div>
@@ -308,6 +356,21 @@ export function AdoptionBar({
         30 days
         {events != null && <span> · {fmt(events)} times</span>}
       </div>
+    </>
+  );
+
+  return (
+    <li>
+      {onClick ? (
+        <button
+          onClick={onClick}
+          className="-mx-2 block w-[calc(100%+1rem)] rounded-lg px-2 py-1 text-left transition hover:bg-white/[0.05]"
+        >
+          {body}
+        </button>
+      ) : (
+        body
+      )}
     </li>
   );
 }
@@ -332,11 +395,20 @@ export function SegmentedControl<T extends string>({
         <button
           key={o.value}
           onClick={() => onChange(o.value)}
-          className={`rounded-full px-2.5 py-0.5 text-xs transition ${
+          className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
             value === o.value
-              ? "bg-[#c72554] text-white"
-              : "border border-white/10 text-white/60 hover:text-white"
+              ? "text-white shadow-[0_2px_8px_rgba(0,0,0,0.25)]"
+              : "border border-white/[0.12] text-white/55 hover:text-white"
           }`}
+          style={
+            value === o.value
+              ? {
+                  // MADTheme.Colors.redGradient, the app's filled-pill fill.
+                  background:
+                    "linear-gradient(135deg, #e64d66 0%, #b3334d 100%)",
+                }
+              : undefined
+          }
         >
           {o.label}
         </button>

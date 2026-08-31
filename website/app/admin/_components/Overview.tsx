@@ -8,11 +8,16 @@ import {
   getData,
   HEAT_HUE,
   Loading,
-  PALETTE,
+  MAD_RED,
+  MAD_SUCCESS,
+  MAD_WARNING,
   pct,
+  WALK_BLUE,
   StatCard,
+  workoutColor,
 } from "./lib";
 import { HeatGrid, TimeSeriesBars } from "./charts";
+import { useDrilldown, useOpenUser } from "./Drilldown";
 
 type Overview = {
   total_users: number;
@@ -83,6 +88,8 @@ const nameOf = (u: { username: string | null; user_id: string }) =>
   u.username ? `@${u.username}` : u.user_id.slice(0, 8);
 
 export function OverviewTab() {
+  const open = useDrilldown();
+  const openUser = useOpenUser();
   const [overview, setOverview] = useState<Overview | null>(null);
   const [engagement, setEngagement] = useState<Engagement | null>(null);
   const [miles, setMiles] = useState<DayMiles[]>([]);
@@ -119,7 +126,7 @@ export function OverviewTab() {
       });
   }, []);
 
-  if (err) return <p className="text-sm text-[#c72554]">{err}</p>;
+  if (err) return <p className="text-sm text-[#d94059]">{err}</p>;
   if (!overview || !engagement) return <Loading />;
 
   return (
@@ -176,28 +183,70 @@ export function OverviewTab() {
           hint="Since midnight ET, the same boundary every daily counter in the app uses."
         >
           <div className="grid grid-cols-3 gap-x-6 gap-y-4 sm:grid-cols-5 lg:grid-cols-9">
-            {[
-              ["Out running now", pulse.tracking_now, true],
-              ["Photos posted", pulse.photos_today],
-              ["Comments", pulse.comments_today],
-              ["Competitions live", pulse.competitions_live],
-              ["Buddy walks started", pulse.buddy_sessions_today],
-              ["Streak tokens spent", pulse.tokens_spent_today],
-              ["Challenges completed", pulse.challenges_completed_today],
-              ["Badges earned", pulse.badges_today],
-              ["New friendships", pulse.friends_today],
-            ].map(([label, value, accent]) => (
-              <div key={label as string}>
-                <div
-                  className={`text-2xl font-semibold tabular-nums ${
-                    accent ? "text-[#ffb3c6]" : "text-white"
-                  }`}
+            {(
+              [
+                {
+                  label: "Out running now",
+                  value: pulse.tracking_now,
+                  accent: true,
+                  kind: "live_tracking",
+                },
+                { label: "Photos posted", value: pulse.photos_today },
+                { label: "Comments", value: pulse.comments_today },
+                {
+                  label: "Competitions live",
+                  value: pulse.competitions_live,
+                },
+                {
+                  label: "Buddy walks started",
+                  value: pulse.buddy_sessions_today,
+                },
+                {
+                  label: "Streak tokens spent",
+                  value: pulse.tokens_spent_today,
+                },
+                {
+                  label: "Challenges completed",
+                  value: pulse.challenges_completed_today,
+                },
+                { label: "Badges earned", value: pulse.badges_today },
+                { label: "New friendships", value: pulse.friends_today },
+              ] as {
+                label: string;
+                value: number;
+                accent?: boolean;
+                kind?: string;
+              }[]
+            ).map((it) => {
+              const body = (
+                <>
+                  <div
+                    className={`mad-num text-2xl font-extrabold ${
+                      it.accent ? "text-[#ff8fa3]" : "text-white"
+                    }`}
+                  >
+                    {fmt(it.value)}
+                  </div>
+                  <div className="mt-0.5 text-[11px] leading-tight text-white/40">
+                    {it.label}
+                  </div>
+                </>
+              );
+              // Only the counters with rows behind them are pressable —
+              // making the whole strip look clickable when most of it isn't
+              // is worse than a strip that plainly isn't.
+              return it.kind ? (
+                <button
+                  key={it.label}
+                  onClick={() => open({ kind: it.kind! })}
+                  className="-mx-2 rounded-lg px-2 py-1 text-left transition hover:bg-white/[0.05]"
                 >
-                  {fmt(value as number)}
-                </div>
-                <div className="text-xs text-white/40">{label as string}</div>
-              </div>
-            ))}
+                  {body}
+                </button>
+              ) : (
+                <div key={it.label}>{body}</div>
+              );
+            })}
           </div>
         </Card>
       )}
@@ -215,8 +264,8 @@ export function OverviewTab() {
           <TimeSeriesBars
             data={signups.map((d) => ({ date: d.date, value: d.count }))}
             label="New signups per day — last 30 days"
-            color="#38bdf8"
-            hoverColor="#7dd3fc"
+            color={WALK_BLUE}
+            hoverColor="#8fc4ff"
             formatValue={(v) => v.toFixed(0)}
           />
         </Card>
@@ -229,8 +278,9 @@ export function OverviewTab() {
             items={(boards?.top_streaks ?? []).map((u) => ({
               label: nameOf(u),
               value: u.current_streak,
+              onClick: () => openUser(u.user_id),
             }))}
-            color="#fb923c"
+            color={MAD_WARNING}
             formatValue={(v) => `${v} days`}
           />
         </Card>
@@ -239,19 +289,27 @@ export function OverviewTab() {
             items={(boards?.top_milers ?? []).map((u) => ({
               label: nameOf(u),
               value: Math.round(u.total_miles),
+              onClick: () => openUser(u.user_id),
             }))}
-            color="#34d399"
+            color={MAD_SUCCESS}
             formatValue={(v) => `${fmt(v)} mi`}
           />
         </Card>
-        <Card title="Workout mix" hint="Counting workouts only">
+        <Card
+          title="Workout mix"
+          hint="Counting workouts only. Colours are the app's own: runs red, walks blue."
+        >
           <BarList
             items={types.map((t) => ({
               label: t.type,
               value: t.count,
               sub: `${fmt(Math.round(t.miles))} mi`,
+              // MADTheme.workoutColor — the same red/blue the feed, dashboard
+              // and route heatmap use, so a walk never changes colour between
+              // the app and here.
+              color: workoutColor(t.type),
+              onClick: () => open({ kind: "workout_type", id: t.type }),
             }))}
-            color={PALETTE[2]}
             formatValue={(v) => `${fmt(v)}`}
           />
         </Card>
@@ -296,8 +354,12 @@ export function OverviewTab() {
                 label: b.label === "0" ? "No streak" : `${b.label} days`,
                 value: b.users,
                 sub: `${pct(b.users, rhythms.streak_buckets.reduce((a, x) => a + x.users, 0))}%`,
+                onClick:
+                  b.users > 0
+                    ? () => open({ kind: "streak_bucket", id: b.label })
+                    : undefined,
               }))}
-              color={PALETTE[6]}
+              color={MAD_RED}
               formatValue={(v) => `${fmt(v)}`}
             />
           </Card>

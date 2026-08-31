@@ -76,11 +76,13 @@ type UserDetail = {
 
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wide text-white/40">
+    <div className="rounded-2xl border border-white/[0.08] bg-white/[0.05] px-3 py-2.5">
+      <div className="text-[10px] font-semibold tracking-[0.4px] text-white/55 uppercase">
         {label}
       </div>
-      <div className="mt-0.5 text-lg font-semibold text-white">{value}</div>
+      <div className="mad-num mt-0.5 text-xl font-extrabold text-white">
+        {value}
+      </div>
     </div>
   );
 }
@@ -133,11 +135,15 @@ export function UserModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl rounded-2xl border border-white/10 bg-[#111] shadow-2xl"
+        className="w-full max-w-2xl rounded-2xl border border-white/[0.08] shadow-2xl"
+        style={{
+          background:
+            "linear-gradient(180deg, #241318 0%, #1a0d12 55%, #12080c 100%)",
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center gap-4 border-b border-white/10 p-5">
+        <div className="flex items-center gap-4 border-b border-white/[0.08] p-5">
           {p?.profile_image_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -166,13 +172,13 @@ export function UserModal({
           </div>
           <button
             onClick={onClose}
-            className="shrink-0 rounded-md border border-white/10 px-2.5 py-1 text-sm text-white/60 hover:text-white"
+            className="shrink-0 rounded-full border border-white/[0.12] px-3 py-1 text-sm text-white/60 transition hover:text-white"
           >
             Close
           </button>
         </div>
 
-        {err && <p className="p-5 text-sm text-[#c72554]">{err}</p>}
+        {err && <p className="p-5 text-sm text-[#d94059]">{err}</p>}
         {!detail && !err && (
           <div className="p-5">
             <Loading />
@@ -223,7 +229,7 @@ export function UserModal({
             {/* Two-column detail */}
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
-                <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-white/40">
+                <h3 className="mb-2 text-[11px] font-semibold tracking-[0.4px] text-white/45 uppercase">
                   Account
                 </h3>
                 <Field
@@ -262,7 +268,7 @@ export function UserModal({
                 />
               </div>
               <div>
-                <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-white/40">
+                <h3 className="mb-2 text-[11px] font-semibold tracking-[0.4px] text-white/45 uppercase">
                   Acquisition & social
                 </h3>
                 <Field
@@ -296,7 +302,7 @@ export function UserModal({
 
             {/* Devices */}
             <div>
-              <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-white/40">
+              <h3 className="mb-2 text-[11px] font-semibold tracking-[0.4px] text-white/45 uppercase">
                 Push devices ({detail.devices.length})
               </h3>
               {detail.devices.length === 0 ? (
@@ -306,7 +312,7 @@ export function UserModal({
                   {detail.devices.map((d, i) => (
                     <span
                       key={i}
-                      className="rounded-md border border-white/10 bg-white/[0.02] px-2.5 py-1 text-xs text-white/60"
+                      className="rounded-full border border-white/[0.12] bg-white/[0.05] px-2.5 py-1 text-xs text-white/60"
                     >
                       <Chip
                         text={d.environment}
@@ -324,7 +330,7 @@ export function UserModal({
             {/* Recent posts */}
             {detail.recent_posts.length > 0 && (
               <div>
-                <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-white/40">
+                <h3 className="mb-2 text-[11px] font-semibold tracking-[0.4px] text-white/45 uppercase">
                   Recent posts
                 </h3>
                 <div className="flex gap-2 overflow-x-auto pb-1">
@@ -342,7 +348,7 @@ export function UserModal({
                         }}
                       />
                       {post.deleted_at && (
-                        <span className="absolute left-1 top-1 rounded bg-[#c72554]/80 px-1 text-[9px] font-medium text-white">
+                        <span className="absolute left-1 top-1 rounded bg-[#d94059]/80 px-1 text-[9px] font-medium text-white">
                           DEL
                         </span>
                       )}
@@ -359,7 +365,7 @@ export function UserModal({
 
             {/* Recent workouts */}
             <div>
-              <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-white/40">
+              <h3 className="mb-2 text-[11px] font-semibold tracking-[0.4px] text-white/45 uppercase">
                 Recent workouts
               </h3>
               {detail.recent_workouts.length === 0 ? (

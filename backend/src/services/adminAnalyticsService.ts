@@ -1218,3 +1218,515 @@ export async function getPulse(): Promise<PulseStats> {
   `);
   return row;
 }
+
+// ─── Drill-downs ────────────────────────────────────────────────────
+
+/**
+ * One row of a drill-down list. Deliberately ONE shape for every kind: the
+ * panels differ in what they count, not in what a reader wants when they tap
+ * a number — who, when, how much. A row carrying a `user_id` is clickable
+ * through to the existing user modal, which is why that field is separate
+ * from the display title rather than baked into it.
+ */
+export interface DrilldownRow {
+  user_id: string | null;
+  username: string | null;
+  title: string;
+  subtitle: string | null;
+  stat: string | null;
+  meta: string | null;
+}
+
+export interface Drilldown {
+  kind: string;
+  id: string | null;
+  title: string;
+  subtitle: string | null;
+  /** Rows available; `rows` is capped at DRILLDOWN_LIMIT. */
+  total: number;
+  rows: DrilldownRow[];
+}
+
+/** Every drill-down is a peek, not an export — the UI shows a list, not a page. */
+const DRILLDOWN_LIMIT = 100;
+
+export const DRILLDOWN_KINDS = [
+  "feature",
+  "competition",
+  "competition_invites",
+  "token",
+  "challenge",
+  "badge",
+  "buddy_mode",
+  "buddy_origin",
+  "cohort",
+  "streak_bucket",
+  "live_tracking",
+  "workout_type",
+] as const;
+
+export type DrilldownKind = (typeof DRILLDOWN_KINDS)[number];
+
+const dateText = (v: string | Date | null): string | null => {
+  if (!v) return null;
+  return v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
+};
+
+/**
+ * Resolve one panel number into the rows behind it.
+ *
+ * `kind` is whitelisted by the controller and `id` is always bound as a query
+ * PARAMETER — with one deliberate exception: the `feature` kind looks `id` up
+ * in ADOPTION_SOURCES and uses that entry's own code-controlled SQL fragments,
+ * so an unknown key resolves to nothing rather than reaching the database.
+ * That reuse is the point: the drill-down counts the same rows the adoption
+ * matrix counted, so the list can never disagree with the number that opened
+ * it.
+ */
+export async function getDrilldown(
+  kind: DrilldownKind,
+  id: string | null,
+): Promise<Drilldown | null> {
+  switch (kind) {
+    case "feature": {
+      const source = ADOPTION_SOURCES.find((s) => s.key === id);
+      if (!source) return null;
+      const rows = await db.query<{
+        user_id: string;
+        username: string | null;
+        n: number;
+        last_at: string | Date | null;
+      }>(
+        `SELECT ${source.actor} AS user_id, u.username,
+                COUNT(*)::int AS n, MAX(${source.at}) AS last_at
+         FROM ${source.from}
+         LEFT JOIN users u ON u.user_id = ${source.actor}
+         ${source.where ? `WHERE ${source.where}` : ""}
+         GROUP BY 1, 2
+         ORDER BY last_at DESC NULLS LAST
+         LIMIT ${DRILLDOWN_LIMIT}`,
+      );
+      return {
+        kind,
+        id,
+        title: source.label,
+        subtitle: `Everyone who has done this, most recent first`,
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle: null,
+          stat: `${r.n}×`,
+          meta: dateText(r.last_at),
+        })),
+      };
+    }
+
+    case "competition": {
+      const [comp] = await db.query<{
+        competition_name: string | null;
+        type: string;
+        start_date: string | null;
+        end_date: string | null;
+        ended: boolean | null;
+      }>(
+        `SELECT competition_name, type, start_date::text AS start_date,
+                end_date::text AS end_date, ended
+         FROM competitions WHERE id = $1`,
+        [id],
+      );
+      if (!comp) return null;
+      const rows = await db.query<{
+        user_id: string;
+        username: string | null;
+        invite_status: string | null;
+        team_id: string | null;
+        placement: number | null;
+      }>(
+        `SELECT cu.user_id, u.username, cu.invite_status, cu.team_id, cu.placement
+         FROM competition_users cu
+         LEFT JOIN users u ON u.user_id = cu.user_id
+         WHERE cu.competition_id = $1
+         ORDER BY (cu.invite_status = 'accepted') DESC, cu.placement ASC NULLS LAST,
+                  u.username ASC
+         LIMIT ${DRILLDOWN_LIMIT}`,
+        [id],
+      );
+      return {
+        kind,
+        id,
+        title: comp.competition_name || "Untitled competition",
+        subtitle: [
+          comp.type,
+          comp.start_date ? `from ${comp.start_date}` : null,
+          comp.end_date ? `to ${comp.end_date}` : "open-ended",
+          comp.ended ? "resolved" : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle: r.team_id ? `team ${r.team_id}` : null,
+          stat: r.invite_status,
+          meta: r.placement != null ? `placed #${r.placement}` : null,
+        })),
+      };
+    }
+
+    case "competition_invites": {
+      const status = id ?? "pending";
+      const rows = await db.query<{
+        user_id: string;
+        username: string | null;
+        competition_name: string | null;
+        type: string;
+        created_at: string | Date;
+      }>(
+        `SELECT cu.user_id, u.username, c.competition_name, c.type, c.created_at
+         FROM competition_users cu
+         JOIN competitions c ON c.id = cu.competition_id
+         LEFT JOIN users u ON u.user_id = cu.user_id
+         WHERE cu.invite_status = $1
+         ORDER BY c.created_at DESC
+         LIMIT ${DRILLDOWN_LIMIT}`,
+        [status],
+      );
+      return {
+        kind,
+        id,
+        title: `Invites — ${status}`,
+        subtitle: "Newest competition first",
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle: r.competition_name || "Untitled competition",
+          stat: r.type,
+          meta: dateText(r.created_at),
+        })),
+      };
+    }
+
+    case "token": {
+      // The donor is resolved here rather than shown as a raw id: "who gave
+      // you the mile" is the whole point of an Assist row.
+      const rows = await db.query<{
+        user_id: string;
+        username: string | null;
+        local_date: string;
+        source_user: string | null;
+        source_username: string | null;
+      }>(
+        `SELECT sc.user_id, u.username, sc.local_date::text AS local_date,
+                sc.source_user, su.username AS source_username
+         FROM streak_coverage sc
+         LEFT JOIN users u ON u.user_id = sc.user_id
+         LEFT JOIN users su ON su.user_id = sc.source_user
+         WHERE sc.kind = $1
+         ORDER BY sc.local_date DESC
+         LIMIT ${DRILLDOWN_LIMIT}`,
+        [id],
+      );
+      return {
+        kind,
+        id,
+        title: `${id} — days rescued`,
+        subtitle: "The day each token covered, most recent first",
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle: r.source_user
+            ? `saved by ${r.source_username ? `@${r.source_username}` : r.source_user.slice(0, 8)}`
+            : null,
+          stat: r.local_date,
+          meta: null,
+        })),
+      };
+    }
+
+    case "challenge": {
+      const [meta] = await db.query<{ title: string | null }>(
+        `SELECT title FROM daily_challenges WHERE challenge_key = $1`,
+        [id],
+      );
+      const [counts] = await db.query<{ served: number; completed: number }>(
+        `SELECT
+           (SELECT COUNT(*) FROM user_daily_challenges WHERE challenge_key = $1)::int AS served,
+           (SELECT COUNT(*) FROM user_challenge_completions WHERE challenge_key = $1)::int AS completed`,
+        [id],
+      );
+      const rows = await db.query<{
+        user_id: string;
+        username: string | null;
+        local_date: string;
+      }>(
+        `SELECT ucc.user_id, u.username, ucc.local_date::text AS local_date
+         FROM user_challenge_completions ucc
+         LEFT JOIN users u ON u.user_id = ucc.user_id
+         WHERE ucc.challenge_key = $1
+         ORDER BY ucc.local_date DESC
+         LIMIT ${DRILLDOWN_LIMIT}`,
+        [id],
+      );
+      return {
+        kind,
+        id,
+        title: meta?.title || String(id),
+        subtitle: `${counts.completed} completed of ${counts.served} served`,
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle: null,
+          stat: r.local_date,
+          meta: null,
+        })),
+      };
+    }
+
+    case "badge": {
+      const [meta] = await db.query<{
+        name: string;
+        description: string;
+        rarity: string;
+      }>(`SELECT name, description, rarity FROM badges WHERE badge_id = $1`, [
+        id,
+      ]);
+      if (!meta) return null;
+      const rows = await db.query<{
+        user_id: string;
+        username: string | null;
+        earned_at: string | Date;
+      }>(
+        `SELECT ub.user_id, u.username, ub.earned_at
+         FROM user_badges ub
+         LEFT JOIN users u ON u.user_id = ub.user_id
+         WHERE ub.badge_id = $1
+         ORDER BY ub.earned_at DESC
+         LIMIT ${DRILLDOWN_LIMIT}`,
+        [id],
+      );
+      return {
+        kind,
+        id,
+        title: meta.name,
+        subtitle: `${meta.rarity} · ${meta.description}`,
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle: null,
+          stat: dateText(r.earned_at),
+          meta: null,
+        })),
+      };
+    }
+
+    case "buddy_mode":
+    case "buddy_origin": {
+      const column = kind === "buddy_mode" ? "mode" : "origin";
+      const rows = await db.query<{
+        id: string;
+        host_user_id: string | null;
+        username: string | null;
+        status: string;
+        local_date: string;
+        crew: number;
+      }>(
+        `SELECT b.id, b.host_user_id, u.username, b.status,
+                b.local_date::text AS local_date,
+                (SELECT COUNT(*) FROM buddy_session_participants p
+                   WHERE p.session_id = b.id AND p.status IN ('active','finished'))::int AS crew
+         FROM buddy_sessions b
+         LEFT JOIN users u ON u.user_id = b.host_user_id
+         WHERE b.${column} = $1
+         ORDER BY b.created_at DESC
+         LIMIT ${DRILLDOWN_LIMIT}`,
+        [id],
+      );
+      return {
+        kind,
+        id,
+        title: `Buddy walks — ${id}`,
+        subtitle: "Newest first; the host is the linked account",
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.host_user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : "unknown host",
+          subtitle: `${r.crew} walked · ${r.status}`,
+          stat: r.local_date,
+          meta: null,
+        })),
+      };
+    }
+
+    case "cohort": {
+      // `id` is the Monday a signup week starts, which the retention grid
+      // already keys its rows by. It is the ONE kind whose id reaches a
+      // ::date cast, so it is shape-checked here rather than letting a
+      // non-date 500 the drawer — every other kind binds its id as text.
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(id ?? "")) return null;
+      const rows = await db.query<{
+        user_id: string;
+        username: string | null;
+        created_at: string | Date;
+        last_active: string | null;
+        total_miles: number;
+        current_streak: number;
+      }>(
+        `SELECT u.user_id, u.username, u.created_at, u.current_streak,
+                w.last_active, COALESCE(w.total_miles, 0)::float AS total_miles
+         FROM users u
+         LEFT JOIN LATERAL (
+           SELECT MAX(w.local_date)::text AS last_active, SUM(w.distance) AS total_miles
+           FROM workouts w WHERE w.user_id = u.user_id AND ${COUNTING_WORKOUT}
+         ) w ON TRUE
+         WHERE date_trunc('week', (u.created_at AT TIME ZONE 'America/New_York'))::date = $1::date
+         ORDER BY w.last_active DESC NULLS LAST
+         LIMIT ${DRILLDOWN_LIMIT}`,
+        [id],
+      );
+      return {
+        kind,
+        id,
+        title: `Signed up the week of ${id}`,
+        subtitle: "Still-active members first",
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle: r.last_active ? `last ran ${r.last_active}` : "never ran",
+          stat: `${Math.round(r.total_miles)} mi`,
+          meta: r.current_streak > 0 ? `${r.current_streak} day streak` : null,
+        })),
+      };
+    }
+
+    case "streak_bucket": {
+      // The bands are code-controlled (they match loadActivityRhythms'
+      // CASE arms exactly) so the label maps to a range rather than reaching
+      // the query as text.
+      const BANDS: Record<string, [number, number | null]> = {
+        "0": [0, 0],
+        "1–6": [1, 6],
+        "7–29": [7, 29],
+        "30–99": [30, 99],
+        "100+": [100, null],
+      };
+      const band = BANDS[id ?? ""];
+      if (!band) return null;
+      const [lo, hi] = band;
+      const rows = await db.query<{
+        user_id: string;
+        username: string | null;
+        current_streak: number;
+        last_active: string | null;
+      }>(
+        `SELECT u.user_id, u.username, u.current_streak, w.last_active
+         FROM users u
+         LEFT JOIN LATERAL (
+           SELECT MAX(w.local_date)::text AS last_active
+           FROM workouts w WHERE w.user_id = u.user_id AND ${COUNTING_WORKOUT}
+         ) w ON TRUE
+         WHERE u.current_streak >= $1 AND ($2::int IS NULL OR u.current_streak <= $2)
+         ORDER BY u.current_streak DESC, w.last_active DESC NULLS LAST
+         LIMIT ${DRILLDOWN_LIMIT}`,
+        [lo, hi],
+      );
+      return {
+        kind,
+        id,
+        title: id === "0" ? "No active streak" : `Streak of ${id} days`,
+        total: rows.length,
+        subtitle: "Longest streak first",
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle: r.last_active ? `last ran ${r.last_active}` : "never ran",
+          stat: `${r.current_streak}`,
+          meta: null,
+        })),
+      };
+    }
+
+    case "live_tracking": {
+      const rows = await db.query<{
+        user_id: string;
+        username: string | null;
+        workout_type: string;
+        distance_miles: number;
+        started_at: string | Date;
+      }>(
+        `SELECT l.user_id, u.username, l.workout_type, l.distance_miles, l.started_at
+         FROM live_tracking_sessions l
+         LEFT JOIN users u ON u.user_id = l.user_id
+         WHERE l.last_seen_at >= NOW() - INTERVAL '5 minutes'
+         ORDER BY l.started_at ASC
+         LIMIT ${DRILLDOWN_LIMIT}`,
+      );
+      return {
+        kind,
+        id,
+        title: "Out there right now",
+        subtitle: "Seen in the last 5 minutes",
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle: r.workout_type,
+          stat: `${r.distance_miles.toFixed(2)} mi`,
+          meta: null,
+        })),
+      };
+    }
+
+    case "workout_type": {
+      const rows = await db.query<{
+        user_id: string;
+        username: string | null;
+        n: number;
+        miles: number;
+        last_at: string | null;
+      }>(
+        `SELECT w.user_id, u.username, COUNT(*)::int AS n,
+                COALESCE(SUM(w.distance), 0)::float AS miles,
+                MAX(w.local_date)::text AS last_at
+         FROM workouts w
+         LEFT JOIN users u ON u.user_id = w.user_id
+         WHERE ${COUNTING_WORKOUT} AND COALESCE(w.workout_type, 'unknown') = $1
+         GROUP BY 1, 2
+         ORDER BY miles DESC
+         LIMIT ${DRILLDOWN_LIMIT}`,
+        [id],
+      );
+      return {
+        kind,
+        id,
+        title: `${id} — who does it`,
+        subtitle: "Most miles first",
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle: `${r.n} workouts`,
+          stat: `${Math.round(r.miles)} mi`,
+          meta: r.last_at,
+        })),
+      };
+    }
+  }
+}

@@ -9,14 +9,17 @@ import {
   fmt,
   getData,
   Loading,
-  PALETTE,
+  MAD_SUCCESS,
+  MAD_WARNING,
   pct,
   relativeDay,
   SERIES,
   SegmentedControl,
+  WALK_BLUE,
   StatCard,
 } from "./lib";
 import { StackedDayBars } from "./charts";
+import { useDrilldown, useOpenUser } from "./Drilldown";
 
 // ─── Types (mirror backend/src/services/adminAnalyticsService.ts) ────
 
@@ -203,6 +206,8 @@ const pretty = (map: Record<string, string>, key: string) =>
 // ─── Competitions ───────────────────────────────────────────────────
 
 function Competitions({ d }: { d: CompetitionStats }) {
+  const open = useDrilldown();
+  const openUser = useOpenUser();
   const s = d.summary;
   const maxWeek = Math.max(...d.by_week.map((w) => w.created), 1);
 
@@ -228,6 +233,7 @@ function Competitions({ d }: { d: CompetitionStats }) {
           label="People who compete"
           value={fmt(s.players)}
           sub={`${pct(s.players, s.total_users)}% of all users`}
+          onClick={() => open({ kind: "feature", id: "competition" })}
         />
         <StatCard
           label="Average roster"
@@ -283,6 +289,7 @@ function Competitions({ d }: { d: CompetitionStats }) {
               items={d.by_type.map((t) => ({
                 label: pretty(TYPE_LABELS, t.type),
                 value: t.total,
+                onClick: () => open({ kind: "competition_invites", id: "accepted" }),
                 sub:
                   t.live > 0
                     ? `${t.live} live · ${t.avg_roster.toFixed(1)} per game`
@@ -298,24 +305,30 @@ function Competitions({ d }: { d: CompetitionStats }) {
           >
             <div className="grid grid-cols-3 gap-3 text-center">
               {[
-                ["Accepted", s.invites_accepted, "ok"],
-                ["Pending", s.invites_pending, "muted"],
-                ["Declined", s.invites_declined, "bad"],
-              ].map(([label, value, tone]) => (
-                <div
+                ["Accepted", s.invites_accepted, "ok", "accepted"],
+                ["Pending", s.invites_pending, "muted", "pending"],
+                ["Declined", s.invites_declined, "bad", "declined"],
+              ].map(([label, value, tone, status]) => (
+                <button
                   key={label as string}
-                  className="rounded-lg border border-white/10 bg-white/[0.02] p-3"
+                  onClick={() =>
+                    open({
+                      kind: "competition_invites",
+                      id: status as string,
+                    })
+                  }
+                  className="rounded-2xl border border-white/[0.08] bg-white/[0.05] p-3 transition hover:border-white/20 hover:bg-white/[0.08]"
                 >
-                  <div className="text-2xl font-semibold text-white">
+                  <div className="mad-num text-2xl font-extrabold text-white">
                     {fmt(value as number)}
                   </div>
-                  <div className="mt-1">
+                  <div className="mt-1.5">
                     <Chip
                       text={label as string}
                       tone={tone as "ok" | "bad" | "muted"}
                     />
                   </div>
-                </div>
+                </button>
               ))}
             </div>
             <p className="mt-3 text-xs text-white/40">
@@ -353,7 +366,11 @@ function Competitions({ d }: { d: CompetitionStats }) {
                     !c.start_date ||
                     c.start_date <= new Date().toISOString().slice(0, 10);
                   return (
-                    <tr key={c.id}>
+                    <tr
+                      key={c.id}
+                      onClick={() => open({ kind: "competition", id: c.id })}
+                      className="cursor-pointer transition hover:bg-white/[0.04]"
+                    >
                       <td className="p-2">
                         <span className="text-white/90">
                           {c.competition_name || "Untitled"}
@@ -403,8 +420,9 @@ function Competitions({ d }: { d: CompetitionStats }) {
             items={d.top_organizers.map((o) => ({
               label: nameOf(o),
               value: o.created,
+              onClick: () => openUser(o.user_id),
             }))}
-            color={PALETTE[4]}
+            color={MAD_WARNING}
             emptyLabel="No competitions created yet."
             formatValue={(v) => `${v} started`}
           />
@@ -414,8 +432,9 @@ function Competitions({ d }: { d: CompetitionStats }) {
             items={d.top_winners.map((o) => ({
               label: nameOf(o),
               value: o.wins,
+              onClick: () => openUser(o.user_id),
             }))}
-            color={PALETTE[3]}
+            color={MAD_SUCCESS}
             emptyLabel="None have been resolved yet."
             formatValue={(v) => `${v} won`}
           />
@@ -434,6 +453,8 @@ const TOKEN_SERIES = [
 ];
 
 function StreakTokens({ d }: { d: TokenStats }) {
+  const open = useDrilldown();
+  const openUser = useOpenUser();
   const spent = (kind: string) =>
     d.spend_by_kind.find((k) => k.kind === kind) ?? {
       total: 0,
@@ -459,6 +480,7 @@ function StreakTokens({ d }: { d: TokenStats }) {
           value={fmt(totalSpent)}
           sub={`${fmt(save.last_30d + dd.last_30d + assist.last_30d)} in the last 30 days`}
           accent
+          onClick={() => open({ kind: "feature", id: "streak_token" })}
         />
         <StatCard
           label="Enrolled"
@@ -474,6 +496,7 @@ function StreakTokens({ d }: { d: TokenStats }) {
           label="Injury pauses"
           value={fmt(d.pauses.active)}
           sub={`open now · ${fmt(d.pauses.total)} ever`}
+          onClick={() => open({ kind: "feature", id: "injury_pause" })}
         />
       </div>
 
@@ -493,10 +516,10 @@ function StreakTokens({ d }: { d: TokenStats }) {
         >
           <ul className="space-y-3">
             {[
-              ["Streak Save", save, TOKEN_SERIES[0].color],
-              ["Double Down", dd, TOKEN_SERIES[1].color],
-              ["Streak Assist", assist, TOKEN_SERIES[2].color],
-            ].map(([label, v, color]) => {
+              ["Streak Save", save, TOKEN_SERIES[0].color, "streak_save"],
+              ["Double Down", dd, TOKEN_SERIES[1].color, "double_down_recover"],
+              ["Streak Assist", assist, TOKEN_SERIES[2].color, "streak_assist"],
+            ].map(([label, v, color, kind]) => {
               const stat = v as {
                 total: number;
                 last_30d: number;
@@ -504,20 +527,25 @@ function StreakTokens({ d }: { d: TokenStats }) {
               };
               return (
                 <li key={label as string}>
-                  <div className="flex items-baseline justify-between gap-2 text-sm">
-                    <span className="flex items-center gap-1.5 text-white/80">
+                  <button
+                    onClick={() => open({ kind: "token", id: kind as string })}
+                    className="-mx-2 flex w-[calc(100%+1rem)] items-baseline justify-between gap-2 rounded-lg px-2 py-1 text-sm transition hover:bg-white/[0.05]"
+                  >
+                    <span className="flex items-center gap-2 text-white/85">
                       <span
-                        className="h-2 w-2 rounded-sm"
+                        className="h-2.5 w-2.5 rounded-full"
                         style={{ background: color as string }}
                         aria-hidden
                       />
                       {label as string}
                     </span>
-                    <span className="tabular-nums text-white/50">
-                      <span className="text-white/90">{fmt(stat.total)}</span> ·{" "}
-                      {fmt(stat.users)} people
+                    <span className="tabular-nums text-white/45">
+                      <span className="font-semibold text-white/95">
+                        {fmt(stat.total)}
+                      </span>{" "}
+                      · {fmt(stat.users)} people
                     </span>
-                  </div>
+                  </button>
                 </li>
               );
             })}
@@ -615,6 +643,7 @@ function StreakTokens({ d }: { d: TokenStats }) {
                 items={d.top_donors.map((x) => ({
                   label: nameOf(x),
                   value: x.assists,
+                  onClick: () => openUser(x.user_id),
                 }))}
                 color={SERIES[2]}
                 formatValue={(v) => `${v}`}
@@ -630,6 +659,7 @@ function StreakTokens({ d }: { d: TokenStats }) {
 // ─── Adoption + community ───────────────────────────────────────────
 
 function Adoption({ d }: { d: Adoption }) {
+  const open = useDrilldown();
   const groups = [...new Set(d.features.map((f) => f.group))];
   return (
     <section className="space-y-6">
@@ -655,6 +685,11 @@ function Adoption({ d }: { d: Adoption }) {
                     recentCount={f.users_30d}
                     total={d.total_users}
                     events={f.events_ever}
+                    onClick={
+                      f.users_ever > 0
+                        ? () => open({ kind: "feature", id: f.key })
+                        : undefined
+                    }
                   />
                 ))}
             </ul>
@@ -670,6 +705,8 @@ function Adoption({ d }: { d: Adoption }) {
 }
 
 function CommunityPanels({ d }: { d: Community }) {
+  const open = useDrilldown();
+  const openUser = useOpenUser();
   const ch = d.challenges;
   return (
     <section className="space-y-6">
@@ -682,6 +719,7 @@ function CommunityPanels({ d }: { d: Community }) {
           label="Friendships"
           value={fmt(d.friends.pairs)}
           sub={`${d.friends.avg_friends.toFixed(1)} friends each`}
+          onClick={() => open({ kind: "feature", id: "friend" })}
         />
         <StatCard
           label="Nobody added yet"
@@ -692,12 +730,14 @@ function CommunityPanels({ d }: { d: Community }) {
           label="Buddy walks"
           value={fmt(d.buddy.sessions)}
           sub={`${fmt(d.buddy.sessions_30d)} in the last 30 days`}
+          onClick={() => open({ kind: "feature", id: "buddy" })}
         />
         <StatCard
           label="Out there now"
           value={fmt(d.live_now.tracking)}
           sub={`${fmt(d.live_now.buddy_sessions)} buddy walks live`}
           accent
+          onClick={() => open({ kind: "live_tracking" })}
         />
       </div>
 
@@ -710,6 +750,7 @@ function CommunityPanels({ d }: { d: Community }) {
             items={d.buddy.by_origin.map((o) => ({
               label: pretty(ORIGIN_LABELS, o.origin),
               value: o.count,
+              onClick: () => open({ kind: "buddy_origin", id: o.origin }),
             }))}
             color={SERIES[1]}
             emptyLabel="No buddy walks yet."
@@ -720,8 +761,9 @@ function CommunityPanels({ d }: { d: Community }) {
               items={d.buddy.by_mode.map((m) => ({
                 label: pretty(MODE_LABELS, m.mode),
                 value: m.count,
+                onClick: () => open({ kind: "buddy_mode", id: m.mode }),
               }))}
-              color={PALETTE[4]}
+              color={WALK_BLUE}
               emptyLabel="No buddy walks yet."
             />
           </div>
@@ -754,6 +796,12 @@ function CommunityPanels({ d }: { d: Community }) {
             <ul className="space-y-2.5">
               {ch.by_challenge.map((c) => (
                 <li key={c.challenge_key}>
+                  <button
+                    onClick={() =>
+                      open({ kind: "challenge", id: c.challenge_key })
+                    }
+                    className="-mx-2 block w-[calc(100%+1rem)] rounded-lg px-2 py-1 text-left transition hover:bg-white/[0.05]"
+                  >
                   <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
                     <span className="truncate text-white/80">
                       {c.title || c.challenge_key}
@@ -774,6 +822,7 @@ function CommunityPanels({ d }: { d: Community }) {
                       }}
                     />
                   </div>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -782,6 +831,14 @@ function CommunityPanels({ d }: { d: Community }) {
 
         <Card
           title="Who is posting photos"
+          actions={
+            <button
+              onClick={() => open({ kind: "feature", id: "photo_post" })}
+              className="rounded-full border border-white/[0.12] px-3 py-1 text-xs text-white/55 transition hover:text-white"
+            >
+              See all
+            </button>
+          }
           hint="Real photos only — the auto route cards published on a skipped prompt are not people using the camera."
         >
           {d.top_photographers.length === 0 ? (
@@ -789,15 +846,17 @@ function CommunityPanels({ d }: { d: Community }) {
           ) : (
             <ul className="space-y-2">
               {d.top_photographers.map((p) => (
-                <li
-                  key={p.user_id}
-                  className="flex items-baseline justify-between gap-3 text-sm"
-                >
+                <li key={p.user_id}>
+                  <button
+                    onClick={() => openUser(p.user_id)}
+                    className="-mx-2 flex w-[calc(100%+1rem)] items-baseline justify-between gap-3 rounded-lg px-2 py-1 text-left text-sm transition hover:bg-white/[0.05]"
+                  >
                   <span className="truncate text-white/80">{nameOf(p)}</span>
                   <span className="shrink-0 tabular-nums text-white/50">
                     <span className="text-white/90">{fmt(p.photos)}</span>{" "}
                     photos · {relativeDay(p.last_photo_at)}
                   </span>
+                  </button>
                 </li>
               ))}
             </ul>
@@ -813,8 +872,9 @@ function CommunityPanels({ d }: { d: Community }) {
               label: b.name,
               value: b.earned,
               sub: b.rarity,
+              onClick: () => open({ kind: "badge", id: b.badge_id }),
             }))}
-            color={PALETTE[2]}
+            color={MAD_WARNING}
             emptyLabel="No badges earned yet."
           />
         </Card>
@@ -854,7 +914,7 @@ export function FeaturesTab() {
       });
   }, []);
 
-  if (err) return <p className="text-sm text-[#c72554]">{err}</p>;
+  if (err) return <p className="text-sm text-[#d94059]">{err}</p>;
   if (!comps || !tokens || !adoption || !community) return <Loading />;
 
   const show = (v: View) => view === "all" || view === v;

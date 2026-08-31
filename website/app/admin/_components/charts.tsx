@@ -12,7 +12,7 @@ export type DayPoint = { date: string; value: number };
 export function TimeSeriesBars({
   data,
   label,
-  color = "#c72554",
+  color = "#d94059",
   hoverColor = "#ffb3c6",
   unit = "",
   formatValue = (v: number) =>
@@ -245,6 +245,7 @@ export function HeatGrid({
   colLabel,
   legend,
   cell = 20,
+  onRowClick,
 }: {
   rows: { key: string; label: string }[];
   cols: { key: string; label: string }[];
@@ -257,6 +258,8 @@ export function HeatGrid({
   legend?: string;
   /** Column width in px. FIXED, never 1fr — see the header note below. */
   cell?: number;
+  /** Present = a row label opens the rows behind that row. */
+  onRowClick?: (rowKey: string) => void;
 }) {
   let max = 0;
   for (const r of rows)
@@ -291,12 +294,22 @@ export function HeatGrid({
           ))}
           {rows.map((r) => (
             <Fragment key={r.key}>
-              <div
-                className="pr-2 text-right text-[11px] whitespace-nowrap text-white/40"
-                style={{ lineHeight: `${cell}px` }}
-              >
-                {r.label}
-              </div>
+              {onRowClick ? (
+                <button
+                  onClick={() => onRowClick(r.key)}
+                  className="pr-2 text-right text-[11px] whitespace-nowrap text-white/40 transition hover:text-white"
+                  style={{ lineHeight: `${cell}px` }}
+                >
+                  {r.label}
+                </button>
+              ) : (
+                <div
+                  className="pr-2 text-right text-[11px] whitespace-nowrap text-white/40"
+                  style={{ lineHeight: `${cell}px` }}
+                >
+                  {r.label}
+                </div>
+              )}
               {cols.map((c) => {
                 const v = value(r.key, c.key);
                 if (v == null)

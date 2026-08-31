@@ -7,6 +7,8 @@ import { ContentTab } from "./_components/Content";
 import { FeaturesTab } from "./_components/Features";
 import { GrowthTab } from "./_components/Growth";
 import { ErrorsTab } from "./_components/Errors";
+import { DrilldownProvider } from "./_components/Drilldown";
+import { APP_BACKGROUND, ROUNDED_STACK } from "./_components/theme";
 
 const TABS = [
   { id: "overview", label: "Overview", render: () => <OverviewTab /> },
@@ -42,42 +44,65 @@ export function AdminDashboard() {
   const active = TABS.find((t) => t.id === tab) ?? TABS[0];
 
   return (
-    <main className="min-h-screen bg-[#0a0a0a] text-white">
-      {/* Sticky header with title + tab nav */}
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0a0a0a]/90 backdrop-blur">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <div className="flex items-center justify-between py-4">
-            <h1 className="text-lg font-semibold sm:text-xl">
-              Mile A Day <span className="text-white/40">— Admin</span>
-            </h1>
-            <button
-              onClick={logout}
-              className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-white/60 hover:text-white"
-            >
-              Sign out
-            </button>
-          </div>
-          <nav className="-mb-px flex gap-1 overflow-x-auto">
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => select(t.id)}
-                className={`whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition ${
-                  tab === t.id
-                    ? "border-[#c72554] text-white"
-                    : "border-transparent text-white/50 hover:text-white/80"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </nav>
-        </div>
-      </header>
+    <DrilldownProvider>
+      {/* The app's own background gradient and rounded type, so the dashboard
+          and the product read as one thing. `ui-rounded` resolves to real SF
+          Rounded on Apple platforms; Nunito stands in elsewhere. */}
+      <main
+        className="min-h-screen text-white"
+        style={{ background: APP_BACKGROUND, fontFamily: ROUNDED_STACK }}
+      >
+        <style>{`.mad-num { font-feature-settings: "tnum"; letter-spacing: -0.01em; }`}</style>
 
-      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-        {active.render()}
-      </div>
-    </main>
+        <header className="sticky top-0 z-40 border-b border-white/[0.08] backdrop-blur-xl">
+          {/* Its own translucent wash rather than the page gradient, which
+              would band against the content scrolling under it. */}
+          <div className="absolute inset-0 -z-10 bg-[#1a0d12]/85" />
+          <div className="mx-auto max-w-6xl px-5 sm:px-6">
+            <div className="flex items-center justify-between py-4">
+              {/* MADTabHeader: 26pt heavy rounded title. */}
+              <h1 className="text-[26px] leading-none font-extrabold tracking-tight">
+                Mile A Day{" "}
+                <span className="text-white/35">Admin</span>
+              </h1>
+              <button
+                onClick={logout}
+                className="rounded-full border border-white/[0.12] px-3.5 py-1.5 text-sm text-white/55 transition hover:border-white/25 hover:text-white"
+              >
+                Sign out
+              </button>
+            </div>
+            <nav className="-mb-px flex gap-1 overflow-x-auto">
+              {TABS.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => select(t.id)}
+                  className={`relative whitespace-nowrap px-3 py-2.5 text-sm font-semibold transition ${
+                    tab === t.id
+                      ? "text-white"
+                      : "text-white/45 hover:text-white/80"
+                  }`}
+                >
+                  {t.label}
+                  {tab === t.id && (
+                    <span
+                      className="absolute inset-x-2 -bottom-px h-[2.5px] rounded-full"
+                      style={{
+                        background:
+                          "linear-gradient(90deg, #e64d66 0%, #b3334d 100%)",
+                      }}
+                    />
+                  )}
+                </button>
+              ))}
+            </nav>
+          </div>
+        </header>
+
+        <div className="mx-auto max-w-6xl px-5 py-8 sm:px-6">
+          {active.render()}
+        </div>
+      </main>
+    </DrilldownProvider>
   );
 }

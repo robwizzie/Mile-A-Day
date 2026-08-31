@@ -13,6 +13,7 @@ import {
   postData,
   SegmentedControl,
   StatCard,
+  WALK_BLUE,
 } from "./lib";
 import { TimeSeriesBars } from "./charts";
 
@@ -127,14 +128,14 @@ function StoragePanel() {
           </div>
           <div className="flex h-3 overflow-hidden rounded-full bg-white/[0.06]">
             <div
-              className="h-full bg-[#c72554]"
+              className="h-full bg-[#d94059]"
               style={{ width: `${Math.min(s.disk.used_pct, 100)}%` }}
               title={`Used ${fmtBytes(s.disk.used)}`}
             />
           </div>
           <div className="mt-1.5 flex items-center gap-3 text-[11px] text-white/40">
             <span>
-              <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-[#c72554]" />
+              <span className="mr-1 inline-block h-2 w-2 rounded-sm bg-[#d94059]" />
               uploads {fmtBytes(s.uploads.total_bytes)} (
               {(
                 (s.uploads.total_bytes / Math.max(s.disk.used, 1)) *
@@ -201,7 +202,7 @@ function StoragePanel() {
         <div
           className={`rounded-lg border p-3 ${
             s.integrity.missing_files > 0
-              ? "border-[#c72554]/40 bg-[#c72554]/[0.08]"
+              ? "border-[#d94059]/40 bg-[#d94059]/[0.08]"
               : "border-white/10 bg-white/[0.02]"
           }`}
         >
@@ -267,8 +268,8 @@ function PostStats() {
         <TimeSeriesBars
           data={byDay.map((d) => ({ date: d.date, value: d.count }))}
           label="Posts per day — last 30 days"
-          color="#a78bfa"
-          hoverColor="#c4b5fd"
+          color={WALK_BLUE}
+          hoverColor="#8fc4ff"
           formatValue={(v) => v.toFixed(0)}
         />
       </Card>
@@ -364,7 +365,7 @@ function PostsBrowser() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search caption or @user…"
-          className="w-full max-w-[240px] rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-sm text-white placeholder:text-white/30 focus:border-[#c72554]/60 focus:outline-none"
+          className="w-full max-w-[240px] rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-sm text-white placeholder:text-white/30 focus:border-[#d94059]/60 focus:outline-none"
         />
       </div>
 
@@ -417,7 +418,7 @@ function PostsBrowser() {
                   <button
                     onClick={() => restore(p.post_id)}
                     disabled={busyId === p.post_id}
-                    className="mt-1.5 w-full rounded border border-emerald-400/40 py-1 text-[11px] font-medium text-emerald-300 disabled:opacity-40"
+                    className="mt-1.5 w-full rounded border border-[#33b34d]/40 py-1 text-[11px] font-medium text-[#7fe39a] disabled:opacity-40"
                   >
                     {busyId === p.post_id ? "…" : "Restore"}
                   </button>
@@ -547,7 +548,7 @@ function PhotoForensics() {
         <button
           onClick={load}
           disabled={busy}
-          className="rounded-lg bg-[#c72554] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          className="rounded-lg bg-[#d94059] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
           {busy ? "Working…" : "Load posts"}
         </button>
@@ -613,7 +614,7 @@ function PhotoForensics() {
                   <button
                     onClick={() => restore(p.post_id)}
                     disabled={busy}
-                    className="mt-2 rounded-md border border-emerald-400/40 px-3 py-1 text-xs font-medium text-emerald-300 disabled:opacity-50"
+                    className="mt-2 rounded-md border border-[#33b34d]/40 px-3 py-1 text-xs font-medium text-[#7fe39a] disabled:opacity-50"
                   >
                     Restore this post
                   </button>
