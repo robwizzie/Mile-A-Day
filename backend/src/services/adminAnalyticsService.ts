@@ -76,6 +76,7 @@ const cacheResets: (() => void)[] = [];
  */
 export function resetAnalyticsCaches(): void {
   for (const reset of cacheResets) reset();
+  trendCache.clear();
 }
 
 function cached<T>(ttlMs: number, load: () => Promise<T>): () => Promise<T> {
@@ -894,8 +895,11 @@ export interface ReferralGraph {
   referrers: {
     referrer_id: string | null;
     referrer_username: string | null;
-    /** The name as typed, when it doesn't resolve to a real account. */
+    /** The name as typed. Always present — it is what the user actually
+     *  wrote, and stays visible even once the name has been linked. */
     typed_as: string;
+    /** True when only an admin's manual link resolved this, not a username. */
+    linked_by_hand: boolean;
     count: number;
     active: number;
     referred: {
@@ -932,6 +936,7 @@ async function loadReferralGraph(): Promise<ReferralGraph> {
     handle: string;
     referrer_id: string | null;
     referrer_username: string | null;
+    linked_by_hand: boolean;
     last_active: string | null;
     total_miles: number;
     current_streak: number;
@@ -946,10 +951,16 @@ async function loadReferralGraph(): Promise<ReferralGraph> {
         AND COALESCE(btrim(u.referral_detail), '') <> ''
     )
     SELECT r.user_id, r.username, r.name, r.created_at, r.handle, r.current_streak,
-           ru.user_id AS referrer_id, ru.username AS referrer_username,
+           COALESCE(ru.user_id, au.user_id) AS referrer_id,
+           COALESCE(ru.username, au.username) AS referrer_username,
+           (ru.user_id IS NULL AND au.user_id IS NOT NULL) AS linked_by_hand,
            w.last_active, COALESCE(w.total_miles, 0)::float AS total_miles
     FROM referred r
     LEFT JOIN users ru ON lower(ru.username) = r.handle
+    -- A name that matches no username can still be resolved by hand; the
+    -- alias never overrides a real username match, it only fills a gap.
+    LEFT JOIN referral_aliases ra ON ra.alias = r.handle
+    LEFT JOIN users au ON au.user_id = ra.user_id
     LEFT JOIN LATERAL (
       SELECT MAX(w.local_date)::text AS last_active, SUM(w.distance) AS total_miles
       FROM workouts w
@@ -978,6 +989,7 @@ async function loadReferralGraph(): Promise<ReferralGraph> {
         referrer_id: r.referrer_id,
         referrer_username: r.referrer_username,
         typed_as: r.handle,
+        linked_by_hand: Boolean(r.linked_by_hand),
         count: 0,
         active: 0,
         referred: [],
@@ -1269,6 +1281,12 @@ export const DRILLDOWN_KINDS = [
   "workout_type",
   "activation_step",
   "at_risk",
+  "today",
+  "referral_source",
+  "signup_goal",
+  "experience_level",
+  "trend_day",
+  "link_candidates",
 ] as const;
 
 export type DrilldownKind = (typeof DRILLDOWN_KINDS)[number];
@@ -1759,6 +1777,308 @@ export async function getDrilldown(
       };
     }
 
+    case "today": {
+      // Every counter in the "Right now" strip, resolvable to the people
+      // behind it. Each arm is code-controlled SQL chosen by a whitelisted
+      // key — `id` never reaches the query.
+      const TODAY_KINDS: Record<
+        string,
+        { title: string; sql: string }
+      > = {
+        photos: {
+          title: "Photos posted today",
+          sql: `SELECT p.user_id, u.username, p.created_at AS at,
+                       COALESCE(p.caption, '') AS detail
+                FROM posts p LEFT JOIN users u ON u.user_id = p.user_id
+                WHERE p.created_at >= ${START_OF_TODAY_ET_SQL}
+                  AND p.deleted_at IS NULL AND NOT p.is_auto`,
+        },
+        comments: {
+          title: "Comments today",
+          sql: `SELECT pc.user_id, u.username, pc.created_at AS at,
+                       pc.content AS detail
+                FROM post_comments pc LEFT JOIN users u ON u.user_id = pc.user_id
+                WHERE pc.created_at >= ${START_OF_TODAY_ET_SQL}
+                  AND pc.deleted_at IS NULL`,
+        },
+        buddy: {
+          title: "Buddy walks started today",
+          sql: `SELECT b.host_user_id AS user_id, u.username, b.created_at AS at,
+                       b.mode || ' · ' || b.status AS detail
+                FROM buddy_sessions b LEFT JOIN users u ON u.user_id = b.host_user_id
+                WHERE b.created_at >= ${START_OF_TODAY_ET_SQL}`,
+        },
+        tokens: {
+          title: "Streak tokens spent today",
+          sql: `SELECT sc.user_id, u.username, sc.created_at AS at,
+                       sc.kind || ' · saved ' || sc.local_date::text AS detail
+                FROM streak_coverage sc LEFT JOIN users u ON u.user_id = sc.user_id
+                WHERE sc.created_at >= ${START_OF_TODAY_ET_SQL}`,
+        },
+        challenges: {
+          title: "Daily challenges completed today",
+          sql: `SELECT ucc.user_id, u.username, ucc.completed_at AS at,
+                       COALESCE(dc.title, ucc.challenge_key) AS detail
+                FROM user_challenge_completions ucc
+                LEFT JOIN users u ON u.user_id = ucc.user_id
+                LEFT JOIN daily_challenges dc ON dc.challenge_key = ucc.challenge_key
+                WHERE ucc.completed_at >= ${START_OF_TODAY_ET_SQL}`,
+        },
+        badges: {
+          title: "Badges earned today",
+          sql: `SELECT ub.user_id, u.username, ub.earned_at AS at,
+                       b.name AS detail
+                FROM user_badges ub
+                LEFT JOIN users u ON u.user_id = ub.user_id
+                LEFT JOIN badges b ON b.badge_id = ub.badge_id
+                WHERE ub.earned_at >= ${START_OF_TODAY_ET_SQL}`,
+        },
+        friends: {
+          title: "Friendships made today",
+          sql: `SELECT f.user_id, u.username, f.created_at AS at,
+                       'now friends with ' || COALESCE(fu.username, f.friend_id) AS detail
+                FROM friendships f
+                LEFT JOIN users u ON u.user_id = f.user_id
+                LEFT JOIN users fu ON fu.user_id = f.friend_id
+                WHERE f.status = 'accepted'
+                  AND f.created_at >= ${START_OF_TODAY_ET_SQL}`,
+        },
+        hypes: {
+          title: "Hypes sent today",
+          sql: `SELECT h.sender_id AS user_id, u.username, h.created_at AS at,
+                       'hyped ' || COALESCE(tu.username, h.target_id) AS detail
+                FROM hype_log h
+                LEFT JOIN users u ON u.user_id = h.sender_id
+                LEFT JOIN users tu ON tu.user_id = h.target_id
+                WHERE h.created_at >= ${START_OF_TODAY_ET_SQL}`,
+        },
+        competitions: {
+          title: "Competitions running now",
+          sql: `SELECT c.owner AS user_id, u.username, c.created_at AS at,
+                       COALESCE(c.competition_name, 'Untitled') || ' · ' || c.type AS detail
+                FROM competitions c LEFT JOIN users u ON u.user_id = c.owner
+                WHERE ${COMPETITION_LIVE}`,
+        },
+      };
+      const spec = TODAY_KINDS[id ?? ""];
+      if (!spec) return null;
+      const rows = await db.query<{
+        user_id: string | null;
+        username: string | null;
+        at: string | Date;
+        detail: string | null;
+      }>(`${spec.sql} ORDER BY at DESC LIMIT ${DRILLDOWN_LIMIT}`);
+      return {
+        kind,
+        id,
+        title: spec.title,
+        subtitle: "Since midnight ET, most recent first",
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username
+            ? `@${r.username}`
+            : (r.user_id ?? "unknown").slice(0, 8),
+          subtitle: r.detail ? r.detail.slice(0, 90) : null,
+          stat: null,
+          meta:
+            r.at instanceof Date
+              ? r.at.toISOString().slice(11, 16)
+              : String(r.at).slice(11, 16),
+        })),
+      };
+    }
+
+    case "referral_source":
+    case "signup_goal":
+    case "experience_level": {
+      // The onboarding answers, each openable to the people who gave it.
+      // The COLUMN is chosen by the kind (code-controlled); the VALUE is
+      // bound, and the "unknown" bucket means the column is null.
+      const column =
+        kind === "referral_source"
+          ? "referral_source"
+          : kind === "signup_goal"
+            ? "signup_goal"
+            : "experience_level";
+      const unknown = id === "unknown" || id === null;
+      const rows = await db.query<{
+        user_id: string;
+        username: string | null;
+        created_at: string | Date;
+        referral_detail: string | null;
+        last_active: string | null;
+      }>(
+        `SELECT u.user_id, u.username, u.created_at, u.referral_detail,
+                w.last_active
+         FROM users u
+         LEFT JOIN LATERAL (
+           SELECT MAX(w.local_date)::text AS last_active
+           FROM workouts w WHERE w.user_id = u.user_id AND ${COUNTING_WORKOUT}
+         ) w ON TRUE
+         WHERE ${unknown ? `u.${column} IS NULL` : `u.${column} = $1`}
+         ORDER BY u.created_at DESC
+         LIMIT ${DRILLDOWN_LIMIT}`,
+        unknown ? [] : [id],
+      );
+      const LABEL: Record<string, string> = {
+        referral_source: "Heard about us via",
+        signup_goal: "Signed up wanting",
+        experience_level: "Describe themselves as",
+      };
+      return {
+        kind,
+        id,
+        title: `${LABEL[kind]} ${unknown ? "— not asked" : id}`,
+        subtitle: "Newest first",
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle:
+            kind === "referral_source" && r.referral_detail
+              ? `said: ${r.referral_detail}`
+              : r.last_active
+                ? `last ran ${r.last_active}`
+                : "never ran",
+          stat: dateText(r.created_at),
+          meta: null,
+        })),
+      };
+    }
+
+    case "trend_day": {
+      // id is "<metric>|<YYYY-MM-DD>" — one bar of the trends chart.
+      const [metric, day] = (id ?? "").split("|");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day ?? "")) return null;
+      const DAY_KINDS: Record<string, { title: string; sql: string }> = {
+        new_users: {
+          title: "Signed up",
+          sql: `SELECT u.user_id, u.username, u.created_at AS at,
+                       COALESCE(u.referral_source, 'no source given') AS detail
+                FROM users u
+                WHERE (u.created_at AT TIME ZONE 'America/New_York')::date = $1::date`,
+        },
+        active_users: {
+          title: "Logged a workout",
+          sql: `SELECT w.user_id, u.username, MAX(w.device_end_date) AS at,
+                       ROUND(SUM(w.distance)::numeric, 2)::text || ' mi' AS detail
+                FROM workouts w LEFT JOIN users u ON u.user_id = w.user_id
+                WHERE ${COUNTING_WORKOUT} AND w.local_date = $1::date
+                GROUP BY w.user_id, u.username`,
+        },
+        miles: {
+          title: "Miles logged",
+          sql: `SELECT w.user_id, u.username, MAX(w.device_end_date) AS at,
+                       ROUND(SUM(w.distance)::numeric, 2)::text || ' mi' AS detail
+                FROM workouts w LEFT JOIN users u ON u.user_id = w.user_id
+                WHERE ${COUNTING_WORKOUT} AND w.local_date = $1::date
+                GROUP BY w.user_id, u.username`,
+        },
+        photos: {
+          title: "Photos posted",
+          sql: `SELECT p.user_id, u.username, p.created_at AS at,
+                       COALESCE(p.caption, '') AS detail
+                FROM posts p LEFT JOIN users u ON u.user_id = p.user_id
+                WHERE p.local_date = $1::date
+                  AND NOT p.is_auto AND p.deleted_at IS NULL`,
+        },
+        posters: {
+          title: "People who posted",
+          sql: `SELECT p.user_id, u.username, MAX(p.created_at) AS at,
+                       COUNT(*)::text || ' photos' AS detail
+                FROM posts p LEFT JOIN users u ON u.user_id = p.user_id
+                WHERE p.local_date = $1::date
+                  AND NOT p.is_auto AND p.deleted_at IS NULL
+                GROUP BY p.user_id, u.username`,
+        },
+        competitions: {
+          title: "Competitions started",
+          sql: `SELECT c.owner AS user_id, u.username, c.created_at AS at,
+                       COALESCE(c.competition_name, 'Untitled') || ' · ' || c.type AS detail
+                FROM competitions c LEFT JOIN users u ON u.user_id = c.owner
+                WHERE (c.created_at AT TIME ZONE 'America/New_York')::date = $1::date`,
+        },
+        tokens: {
+          title: "Streak tokens spent",
+          sql: `SELECT sc.user_id, u.username, sc.created_at AS at,
+                       sc.kind || ' · saved ' || sc.local_date::text AS detail
+                FROM streak_coverage sc LEFT JOIN users u ON u.user_id = sc.user_id
+                WHERE (sc.created_at AT TIME ZONE 'America/New_York')::date = $1::date`,
+        },
+      };
+      const spec = DAY_KINDS[metric ?? ""];
+      if (!spec) return null;
+      const rows = await db.query<{
+        user_id: string | null;
+        username: string | null;
+        at: string | Date | null;
+        detail: string | null;
+      }>(`${spec.sql} ORDER BY at DESC NULLS LAST LIMIT ${DRILLDOWN_LIMIT}`, [
+        day,
+      ]);
+      return {
+        kind,
+        id,
+        title: `${spec.title} · ${day}`,
+        subtitle: "That day only",
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username
+            ? `@${r.username}`
+            : (r.user_id ?? "unknown").slice(0, 8),
+          subtitle: r.detail ? r.detail.slice(0, 90) : null,
+          stat: null,
+          meta: null,
+        })),
+      };
+    }
+
+    case "link_candidates": {
+      // Accounts to link an unresolved referral name to. Ranked by how close
+      // the typed text is to a username or real name, so the likely answer
+      // is at the top rather than buried in an alphabetical list.
+      const needle = (id ?? "").trim().toLowerCase();
+      if (!needle) return null;
+      const rows = await db.query<{
+        user_id: string;
+        username: string | null;
+        name: string | null;
+        created_at: string | Date;
+      }>(
+        `SELECT u.user_id, u.username, u.created_at,
+                NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name
+         FROM users u
+         ORDER BY GREATEST(
+                    similarity(COALESCE(lower(u.username), ''), $1),
+                    similarity(lower(COALESCE(u.first_name, '') || ' ' ||
+                                     COALESCE(u.last_name, '')), $1)
+                  ) DESC,
+                  u.created_at DESC
+         LIMIT 25`,
+        [needle],
+      );
+      return {
+        kind,
+        id,
+        title: `Who is "${id}"?`,
+        subtitle: "Closest matches first — picking one links the referral",
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle: r.name,
+          stat: null,
+          meta: dateText(r.created_at),
+        })),
+      };
+    }
+
     case "workout_type": {
       const rows = await db.query<{
         user_id: string;
@@ -1802,118 +2122,180 @@ export async function getDrilldown(
 export interface TrendMetric {
   key: string;
   label: string;
-  /** Total over the last 30 days. */
+  /** The window total. For a `distinct` metric this is a real
+   *  COUNT(DISTINCT user), NOT the sum of the daily values. */
   current: number;
-  /** Total over the 30 days before that. */
+  /** The same measure over the window immediately before this one. */
   previous: number;
   /** null when there is no prior period to compare against. */
   change_pct: number | null;
-  /** 30 daily values, oldest first, aligned to TrendsResponse.days. */
+  /** One value per day of the window, oldest first, aligned to `days`. */
   spark: number[];
-  /** True when this metric counts DISTINCT people, so the period total is
-   *  not the sum of its daily values and the spark is only a shape. */
+  /** True when this counts PEOPLE, so the daily values are per-day distinct
+   *  counts and deliberately do not sum to `current`. */
   distinct: boolean;
 }
 
-/**
- * A number with no direction is half a number: "412 miles" reads the same on
- * the way up and on the way down. Every metric here carries its previous
- * period and its daily shape so the dashboard can say which way it is going.
- *
- * Windows are ET calendar days, like every other daily counter in the app.
- */
 export interface TrendsResponse {
-  /** The 30 ET dates the sparklines are aligned to, oldest first. */
+  window_days: number;
+  /** The ET dates the sparklines are aligned to, oldest first. */
   days: string[];
   metrics: TrendMetric[];
 }
 
-async function loadTrends(): Promise<TrendsResponse> {
-  // Each entry is 60 days of one daily value; the halves become
-  // current/previous and the last 30 become the sparkline. Written as one
-  // series-per-metric rather than one wide query so a metric can key on its
-  // own date column (local_date for workouts, created_at for signups).
-  const SERIES_SQL: { key: string; label: string; distinct: boolean; sql: string }[] =
-    [
-      {
-        key: "new_users",
-        label: "New signups",
-        distinct: false,
-        sql: `SELECT d::date AS day, COUNT(u.user_id)::int AS v
-              FROM days d
-              LEFT JOIN users u
-                ON (u.created_at AT TIME ZONE 'America/New_York')::date = d::date
-              GROUP BY d`,
-      },
-      {
-        key: "active_users",
-        label: "Active people",
-        distinct: true,
-        sql: `SELECT d::date AS day, COUNT(DISTINCT w.user_id)::int AS v
-              FROM days d
-              LEFT JOIN workouts w
-                ON w.local_date = d::date AND ${COUNTING_WORKOUT}
-              GROUP BY d`,
-      },
-      {
-        key: "miles",
-        label: "Miles logged",
-        distinct: false,
-        sql: `SELECT d::date AS day, COALESCE(SUM(w.distance), 0)::float AS v
-              FROM days d
-              LEFT JOIN workouts w
-                ON w.local_date = d::date AND ${COUNTING_WORKOUT}
-              GROUP BY d`,
-      },
-      {
-        key: "photos",
-        label: "Photos posted",
-        distinct: false,
-        sql: `SELECT d::date AS day, COUNT(p.post_id)::int AS v
-              FROM days d
-              LEFT JOIN posts p
-                ON p.local_date = d::date AND NOT p.is_auto AND p.deleted_at IS NULL
-              GROUP BY d`,
-      },
-      {
-        key: "competitions",
-        label: "Competitions started",
-        distinct: false,
-        sql: `SELECT d::date AS day, COUNT(c.id)::int AS v
-              FROM days d
-              LEFT JOIN competitions c
-                ON (c.created_at AT TIME ZONE 'America/New_York')::date = d::date
-              GROUP BY d`,
-      },
-      {
-        key: "tokens",
-        label: "Streak tokens spent",
-        distinct: false,
-        sql: `SELECT d::date AS day, COUNT(sc.user_id)::int AS v
-              FROM days d
-              LEFT JOIN streak_coverage sc
-                ON (sc.created_at AT TIME ZONE 'America/New_York')::date = d::date
-              GROUP BY d`,
-      },
-    ];
+/** Windows the dashboard offers. Anything else is rejected by the controller. */
+export const TREND_WINDOWS = [7, 30, 90] as const;
+export type TrendWindow = (typeof TREND_WINDOWS)[number];
 
-  // Every series walks the same generate_series, so one metric's dates
-  // describe them all — the client needs an axis, not six copies of it.
+/**
+ * One metric's SQL. `daily` is the per-day series; `windowTotal` is how the
+ * whole window is counted when that is NOT the sum of the days.
+ *
+ * That distinction is the whole point of this type. "Active people" summed
+ * over its daily values counted somebody active on twenty days as twenty
+ * people — a number larger than the entire user base, printed in the biggest
+ * font on the page. A metric that counts PEOPLE has to be counted DISTINCT
+ * over the window, and its daily values remain a shape, not addends.
+ */
+interface TrendSpec {
+  key: string;
+  label: string;
+  distinct: boolean;
+  daily: string;
+  /** Scalar SQL over $1 (from) .. $2 (to). Omit when summing days is right. */
+  windowTotal?: string;
+}
+
+const TREND_SPECS: TrendSpec[] = [
+  {
+    key: "new_users",
+    label: "New signups",
+    distinct: false,
+    daily: `SELECT d::date AS day, COUNT(u.user_id)::int AS v
+            FROM days d
+            LEFT JOIN users u
+              ON (u.created_at AT TIME ZONE 'America/New_York')::date = d::date
+            GROUP BY d`,
+  },
+  {
+    key: "active_users",
+    label: "Active people",
+    distinct: true,
+    daily: `SELECT d::date AS day, COUNT(DISTINCT w.user_id)::int AS v
+            FROM days d
+            LEFT JOIN workouts w
+              ON w.local_date = d::date AND ${COUNTING_WORKOUT}
+            GROUP BY d`,
+    windowTotal: `SELECT COUNT(DISTINCT w.user_id)::int AS v
+                  FROM workouts w
+                  WHERE ${COUNTING_WORKOUT}
+                    AND w.local_date BETWEEN $1::date AND $2::date`,
+  },
+  {
+    key: "miles",
+    label: "Miles logged",
+    distinct: false,
+    daily: `SELECT d::date AS day, COALESCE(SUM(w.distance), 0)::float AS v
+            FROM days d
+            LEFT JOIN workouts w
+              ON w.local_date = d::date AND ${COUNTING_WORKOUT}
+            GROUP BY d`,
+  },
+  {
+    key: "photos",
+    label: "Photos posted",
+    distinct: false,
+    daily: `SELECT d::date AS day, COUNT(p.post_id)::int AS v
+            FROM days d
+            LEFT JOIN posts p
+              ON p.local_date = d::date AND NOT p.is_auto AND p.deleted_at IS NULL
+            GROUP BY d`,
+  },
+  {
+    key: "posters",
+    label: "People posting",
+    distinct: true,
+    daily: `SELECT d::date AS day, COUNT(DISTINCT p.user_id)::int AS v
+            FROM days d
+            LEFT JOIN posts p
+              ON p.local_date = d::date AND NOT p.is_auto AND p.deleted_at IS NULL
+            GROUP BY d`,
+    windowTotal: `SELECT COUNT(DISTINCT p.user_id)::int AS v
+                  FROM posts p
+                  WHERE NOT p.is_auto AND p.deleted_at IS NULL
+                    AND p.local_date BETWEEN $1::date AND $2::date`,
+  },
+  {
+    key: "competitions",
+    label: "Competitions started",
+    distinct: false,
+    daily: `SELECT d::date AS day, COUNT(c.id)::int AS v
+            FROM days d
+            LEFT JOIN competitions c
+              ON (c.created_at AT TIME ZONE 'America/New_York')::date = d::date
+            GROUP BY d`,
+  },
+  {
+    key: "tokens",
+    label: "Streak tokens spent",
+    distinct: false,
+    daily: `SELECT d::date AS day, COUNT(sc.user_id)::int AS v
+            FROM days d
+            LEFT JOIN streak_coverage sc
+              ON (sc.created_at AT TIME ZONE 'America/New_York')::date = d::date
+            GROUP BY d`,
+  },
+];
+
+/**
+ * Every headline number, with a direction and a shape.
+ *
+ * `windowDays` covers both halves: the series runs over 2 x window days, the
+ * later half is the current window and the earlier half is what it is
+ * compared against.
+ */
+async function loadTrends(windowDays: number): Promise<TrendsResponse> {
+  const span = windowDays * 2;
   let days: string[] = [];
-  const results = await Promise.all(
-    SERIES_SQL.map(async (m) => {
+
+  const metrics = await Promise.all(
+    TREND_SPECS.map(async (m) => {
       const rows = await db.query<{ day: string | Date; v: number }>(
         `WITH days AS (
-           SELECT generate_series(${TODAY_ET_DATE_SQL} - 59, ${TODAY_ET_DATE_SQL}, INTERVAL '1 day') AS d
+           SELECT generate_series(
+             ${TODAY_ET_DATE_SQL} - ${span - 1},
+             ${TODAY_ET_DATE_SQL},
+             INTERVAL '1 day') AS d
          )
-         ${m.sql}
+         ${m.daily}
          ORDER BY day`,
       );
       const values = rows.map((r) => Number(r.v) || 0);
-      days = rows.slice(30).map((r) => dateText(r.day) ?? "");
-      // 60 rows: [0..29] previous window, [30..59] current window.
-      const previous = values.slice(0, 30).reduce((a, b) => a + b, 0);
-      const current = values.slice(30).reduce((a, b) => a + b, 0);
+      const dates = rows.map((r) => dateText(r.day) ?? "");
+      days = dates.slice(windowDays);
+
+      let current: number;
+      let previous: number;
+      if (m.windowTotal) {
+        // Counted over the window itself. Summing the daily distinct counts
+        // would multiply anyone who showed up on more than one day.
+        const [[cur], [prev]] = await Promise.all([
+          db.query<{ v: number }>(m.windowTotal, [
+            dates[windowDays],
+            dates[dates.length - 1],
+          ]),
+          db.query<{ v: number }>(m.windowTotal, [
+            dates[0],
+            dates[windowDays - 1],
+          ]),
+        ]);
+        current = Number(cur?.v ?? 0);
+        previous = Number(prev?.v ?? 0);
+      } else {
+        previous = values.slice(0, windowDays).reduce((a, b) => a + b, 0);
+        current = values.slice(windowDays).reduce((a, b) => a + b, 0);
+      }
+
       return {
         key: m.key,
         label: m.label,
@@ -1926,14 +2308,27 @@ async function loadTrends(): Promise<TrendsResponse> {
           previous > 0
             ? Math.round(((current - previous) / previous) * 1000) / 10
             : null,
-        spark: values.slice(30),
+        spark: values.slice(windowDays),
       };
     }),
   );
-  return { days, metrics: results };
+
+  return { window_days: windowDays, days, metrics };
 }
 
-export const getTrends = cached(60_000, loadTrends);
+// One cache slot per window — they are different queries, not one answer.
+const trendCache = new Map<number, { at: number; data: TrendsResponse }>();
+const TRENDS_TTL_MS = 60_000;
+
+export async function getTrends(
+  windowDays: TrendWindow = 30,
+): Promise<TrendsResponse> {
+  const hit = trendCache.get(windowDays);
+  if (hit && Date.now() - hit.at < TRENDS_TTL_MS) return hit.data;
+  const data = await loadTrends(windowDays);
+  trendCache.set(windowDays, { at: Date.now(), data });
+  return data;
+}
 
 // ─── Activation milestones ──────────────────────────────────────────
 
@@ -2111,4 +2506,58 @@ export async function getAtRisk(): Promise<AtRiskUser[]> {
      LIMIT 50`,
     [AT_RISK_MIN_STREAK],
   );
+}
+
+
+// ─── Referral aliases (the one write on this dashboard) ─────────────
+
+/**
+ * Link a typed referral name to a real account, or clear that link.
+ *
+ * Deliberately a separate table rather than an UPDATE on
+ * `users.referral_detail`: what a user typed is their answer, and an
+ * admin's best guess about who they meant is a different fact. Keeping them
+ * apart means the link is reversible and the original is still auditable
+ * when somebody later asks where a number came from.
+ *
+ * `alias` is normalised the same way the graph normalises what it reads —
+ * trimmed, case-folded, a leading "@" stripped — or the link would resolve
+ * for one spelling and not the one actually stored.
+ */
+export function normalizeReferralAlias(raw: string): string {
+  return raw.trim().replace(/^@/, "").toLowerCase();
+}
+
+export async function setReferralAlias(
+  aliasRaw: string,
+  userId: string,
+  createdBy: string | null,
+): Promise<{ ok: boolean; reason?: string }> {
+  const alias = normalizeReferralAlias(aliasRaw);
+  if (!alias) return { ok: false, reason: "empty_alias" };
+
+  const [user] = await db.query<{ user_id: string }>(
+    `SELECT user_id FROM users WHERE user_id = $1`,
+    [userId],
+  );
+  if (!user) return { ok: false, reason: "unknown_user" };
+
+  await db.query(
+    `INSERT INTO referral_aliases (alias, user_id, created_by)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (alias) DO UPDATE
+       SET user_id = EXCLUDED.user_id,
+           created_by = EXCLUDED.created_by,
+           created_at = NOW()`,
+    [alias, userId, createdBy],
+  );
+  resetAnalyticsCaches();
+  return { ok: true };
+}
+
+export async function clearReferralAlias(aliasRaw: string): Promise<void> {
+  await db.query(`DELETE FROM referral_aliases WHERE alias = $1`, [
+    normalizeReferralAlias(aliasRaw),
+  ]);
+  resetAnalyticsCaches();
 }

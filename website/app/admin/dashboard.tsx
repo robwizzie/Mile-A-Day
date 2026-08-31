@@ -52,7 +52,13 @@ export function AdminDashboard() {
         className="min-h-screen text-white"
         style={{ background: APP_BACKGROUND, fontFamily: ROUNDED_STACK }}
       >
-        <style>{`.mad-num { font-feature-settings: "tnum"; letter-spacing: -0.01em; }`}</style>
+        <style>{`
+          .mad-num { font-feature-settings: "tnum"; letter-spacing: -0.01em; }
+          /* The tab row still scrolls on a narrow window; it just does not
+             draw a bar across the header to say so. */
+          .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+          .no-scrollbar::-webkit-scrollbar { display: none; }
+        `}</style>
 
         <header className="sticky top-0 z-40 border-b border-white/[0.08] backdrop-blur-xl">
           {/* Its own translucent wash rather than the page gradient, which
@@ -72,7 +78,7 @@ export function AdminDashboard() {
                 Sign out
               </button>
             </div>
-            <nav className="-mb-px flex gap-1 overflow-x-auto">
+            <nav className="no-scrollbar -mb-px flex gap-1 overflow-x-auto">
               {TABS.map((t) => (
                 <button
                   key={t.id}

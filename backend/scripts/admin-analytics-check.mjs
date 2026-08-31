@@ -39,6 +39,8 @@ import {
   getTrends,
   getActivation,
   getAtRisk,
+  setReferralAlias,
+  clearReferralAlias,
 } from "../dist/services/adminAnalyticsService.js";
 import { getUsers } from "../dist/services/adminService.js";
 
@@ -345,6 +347,7 @@ async function main() {
   );
   truthy("adoption lists every feature", before.adoption.features.length >= 15);
   check("trends carry a 30-day axis", before.trends.days.length, 30);
+  check("and say which window they are", before.trends.window_days, 30);
   truthy(
     "every trend has a 30-point sparkline aligned to it",
     before.trends.metrics.every((t) => t.spark.length === 30),
@@ -537,6 +540,51 @@ async function main() {
   check("pulse: buddy sessions today", d("pulse.buddy_sessions_today"), 1);
   check("pulse: photos today", d("pulse.photos_today"), 3);
 
+  console.log("\n--- counting people vs counting events ---");
+  // The bug this exists to catch: "active people" summed its DAILY distinct
+  // counts, so somebody active on ten days counted as ten people and the
+  // headline read larger than the entire user base. Inside the 30-day window
+  // ALICE ran 10 separate days, DAVE 3 and BOB 1 — 14 person-days, but only
+  // 3 PEOPLE, and 3 is what the card must say. (CAROL's one workout is 40
+  // days back, outside the window entirely.)
+  const activeTrend = after.trends.metrics.find((t) => t.key === "active_users");
+  const activeBefore = before.trends.metrics.find(
+    (t) => t.key === "active_users",
+  );
+  const dailySum = activeTrend.spark.reduce((a, b) => a + b, 0);
+  const dailySumBefore = activeBefore.spark.reduce((a, b) => a + b, 0);
+  check(
+    "the daily series still sums to every person-day",
+    dailySum - dailySumBefore,
+    14,
+  );
+  check(
+    "but the window total counts each person once",
+    activeTrend.current - activeBefore.current,
+    3,
+  );
+  truthy(
+    "a people metric is flagged so the UI can say the bars do not add up",
+    activeTrend.distinct === true,
+  );
+  const milesMetric = after.trends.metrics.find((t) => t.key === "miles");
+  truthy(
+    "an event metric still totals its days",
+    Math.abs(
+      milesMetric.spark.reduce((a, b) => a + b, 0) - milesMetric.current,
+    ) < 0.01,
+  );
+
+  // A shorter window is a different question, not a slice of the same answer.
+  const week = await getTrends(7);
+  check("a 7-day window returns 7 days", week.days.length, 7);
+  check("and says so", week.window_days, 7);
+  const weekActive = week.metrics.find((t) => t.key === "active_users");
+  truthy(
+    "its distinct total never exceeds the 30-day one",
+    weekActive.current <= activeTrend.current,
+  );
+
   console.log("\n--- activation, trends, at-risk ---");
   const step = (k) => after.activation.steps.find((x) => x.key === k)?.users;
   const stepBefore = (k) =>
@@ -646,6 +694,69 @@ async function main() {
   check("an unknown feature key resolves to nothing", await dd("feature", "nope"), null);
   check("an unknown streak band resolves to nothing", await dd("streak_bucket", "7"), null);
   check("an unknown badge resolves to nothing", await dd("badge", "nope"), null);
+
+  const todayPhotos = await dd("today", "photos");
+  check("today's photos list the two posters", todayPhotos.rows.length, 3);
+  truthy(
+    "and an unknown today-key resolves to nothing",
+    (await dd("today", "nope")) === null,
+  );
+
+  const bySource = await dd("referral_source", "friend");
+  check("the friend-referred are listable", bySource.rows.length, 4);
+  truthy(
+    "and each row shows what they actually typed",
+    bySource.rows.every((r) => (r.subtitle ?? "").startsWith("said:")),
+  );
+
+  const trendDay = await dd("trend_day", `miles|${dayOffset(0)}`);
+  truthy(
+    "a trend bar opens the people behind that day",
+    trendDay.rows.some((r) => r.user_id === ALICE),
+  );
+  check(
+    "a malformed trend-day id resolves to nothing",
+    await dd("trend_day", "miles|not-a-date"),
+    null,
+  );
+  check(
+    "an unknown trend metric resolves to nothing",
+    await dd("trend_day", `nope|${dayOffset(0)}`),
+    null,
+  );
+
+  console.log("\n--- linking a referral nobody matched ---");
+  const ghostBefore = after.referrals.referrers.find(
+    (r) => r.typed_as === "adm-ghost",
+  );
+  check("starts unresolved", ghostBefore?.referrer_id ?? null, null);
+  check(
+    "linking to a non-existent account is refused",
+    (await setReferralAlias("adm-ghost", "nobody-at-all", null)).ok,
+    false,
+  );
+  await setReferralAlias("  @ADM-Ghost ", BOB, ALICE);
+  resetAnalyticsCaches();
+  const linked = await getReferralGraph();
+  const ghostAfter = linked.referrers.find((r) => r.referrer_id === BOB);
+  truthy(
+    "a typed name links to a real account, whatever its spelling",
+    Boolean(ghostAfter),
+  );
+  truthy("and is marked as resolved by hand", ghostAfter?.linked_by_hand);
+  check(
+    "the link moves the matched/unmatched split",
+    linked.summary.unmatched,
+    0,
+  );
+  await clearReferralAlias("adm-ghost");
+  resetAnalyticsCaches();
+  const unlinked = await getReferralGraph();
+  check(
+    "and unlinking puts it back",
+    unlinked.referrers.some((r) => r.typed_as === "adm-ghost"),
+    true,
+  );
 
   // Every declared kind must answer without throwing, including on ids that
   // match nothing — the drawer opens before it knows there are rows.

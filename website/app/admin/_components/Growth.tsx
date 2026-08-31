@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   BarList,
   Card,
@@ -9,6 +9,7 @@ import {
   fmtDate,
   getData,
   HEAT_HUE,
+  postData,
   Loading,
   MAD_SUCCESS,
   MAD_WARNING,
@@ -34,6 +35,7 @@ type ReferralGraph = {
     referrer_id: string | null;
     referrer_username: string | null;
     typed_as: string;
+    linked_by_hand?: boolean;
     count: number;
     active: number;
     referred: {
@@ -94,11 +96,13 @@ const pretty = (s: string) =>
  */
 function ReferralGraphPanel() {
   const openUser = useOpenUser();
+  const openDrill = useDrilldown();
   const [g, setG] = useState<ReferralGraph | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     getData<ReferralGraph>("referral-graph")
       .then(setG)
       .catch((e) => {
@@ -106,6 +110,27 @@ function ReferralGraphPanel() {
           setErr("Failed to load the referral graph.");
       });
   }, []);
+
+  useEffect(load, [load]);
+
+  /**
+   * Record (or clear) who a typed name meant. This writes an alias, never
+   * the user's own answer — `referral_detail` stays exactly as entered, so
+   * the link is reversible and the original is still auditable.
+   */
+  async function link(alias: string, userId: string | null) {
+    setBusy(alias);
+    try {
+      const params = new URLSearchParams({ alias });
+      if (userId) params.set("userId", userId);
+      await postData(`referral-alias?${params.toString()}`);
+      load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not link that name.");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   if (err) return <Card title="Who referred whom">{err}</Card>;
   if (!g)
@@ -145,6 +170,9 @@ function ReferralGraphPanel() {
                       {r.referrer_username ? `@${r.referrer_username}` : r.typed_as}
                     </span>
                     {!r.referrer_id && <Chip text="no such user" tone="bad" />}
+                    {r.linked_by_hand && (
+                      <Chip text="linked by hand" tone="info" />
+                    )}
                   </span>
                   <span className="shrink-0 text-sm tabular-nums text-white/50">
                     <span className="text-white/90">{r.count}</span> brought in
@@ -157,6 +185,37 @@ function ReferralGraphPanel() {
                     </span>
                   </span>
                 </button>
+
+                {/* A name that resolved to nobody is not a dead end: an admin
+                    who knows who was meant can say so. */}
+                {(!r.referrer_id || r.linked_by_hand) && (
+                  <div className="mt-1 ml-5 flex items-center gap-2 pl-4">
+                    <button
+                      disabled={busy === r.typed_as}
+                      onClick={() =>
+                        openDrill({
+                          kind: "link_candidates",
+                          id: r.typed_as,
+                          pickHint: "tap whoever they meant",
+                          onPick: (userId) => link(r.typed_as, userId),
+                        })
+                      }
+                      className="rounded-full border border-white/[0.12] px-2.5 py-0.5 text-[11px] text-white/55 transition hover:text-white disabled:opacity-40"
+                    >
+                      {r.linked_by_hand ? "Link to someone else" : "Link to a user"}
+                    </button>
+                    {r.linked_by_hand && (
+                      <button
+                        disabled={busy === r.typed_as}
+                        onClick={() => link(r.typed_as, null)}
+                        className="rounded-full border border-white/[0.12] px-2.5 py-0.5 text-[11px] text-white/40 transition hover:text-white disabled:opacity-40"
+                      >
+                        Unlink
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {open && (
                   <ul className="mt-2 ml-5 space-y-1.5 border-l border-white/10 pl-4">
                     {r.referred.map((u) => (
@@ -261,6 +320,7 @@ function RetentionPanel() {
 }
 
 export function GrowthTab() {
+  const open = useDrilldown();
   const [r, setR] = useState<Referrals | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -326,6 +386,7 @@ export function GrowthTab() {
               sub: funnel.gave_source
                 ? `${Math.round((s.count / funnel.gave_source) * 100)}%`
                 : undefined,
+              onClick: () => open({ kind: "referral_source", id: s.source }),
             }))}
             color={WALK_BLUE}
             emptyLabel="No attributed signups yet — data appears as new users pick a source at onboarding."
@@ -339,7 +400,11 @@ export function GrowthTab() {
           <BarList
             items={r.by_goal
               .filter((g) => g.goal !== "unknown")
-              .map((g) => ({ label: pretty(g.goal), value: g.count }))}
+              .map((g) => ({
+                label: pretty(g.goal),
+                value: g.count,
+                onClick: () => open({ kind: "signup_goal", id: g.goal }),
+              }))}
             color={MAD_WARNING}
             emptyLabel="No signup goals recorded yet."
           />
@@ -349,7 +414,11 @@ export function GrowthTab() {
           <BarList
             items={r.by_experience
               .filter((e) => e.level !== "unknown")
-              .map((e) => ({ label: pretty(e.level), value: e.count }))}
+              .map((e) => ({
+                label: pretty(e.level),
+                value: e.count,
+                onClick: () => open({ kind: "experience_level", id: e.level }),
+              }))}
             color={MAD_SUCCESS}
             emptyLabel="No experience levels recorded yet."
           />

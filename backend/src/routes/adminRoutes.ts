@@ -32,6 +32,7 @@ import {
   trends,
   activation,
   atRisk,
+  referralAlias,
 } from "../controllers/adminController.js";
 
 // Public: Sign in with Apple (web) exchange -> admin access token.
@@ -76,6 +77,8 @@ adminRouter.get("/pulse", pulse);
 adminRouter.get("/trends", trends);
 adminRouter.get("/activation", activation);
 adminRouter.get("/at-risk", atRisk);
+// The one write here: resolve a typed referral name to a real account.
+adminRouter.post("/referral-alias", referralAlias);
 // The rows behind any one number on the dashboard — see DRILLDOWN_KINDS.
 adminRouter.get("/drilldown", drilldown);
 
