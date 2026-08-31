@@ -36,6 +36,9 @@ import {
   resetAnalyticsCaches,
   getDrilldown,
   DRILLDOWN_KINDS,
+  getTrends,
+  getActivation,
+  getAtRisk,
 } from "../dist/services/adminAnalyticsService.js";
 import { getUsers } from "../dist/services/adminService.js";
 
@@ -77,6 +80,9 @@ async function snapshot() {
     retention: await getRetentionCohorts(),
     rhythms: await getActivityRhythms(),
     pulse: await getPulse(),
+    trends: await getTrends(),
+    activation: await getActivation(),
+    atRisk: await getAtRisk(),
   };
 }
 
@@ -338,6 +344,19 @@ async function main() {
     Number.isFinite(before.community.friends.avg_friends),
   );
   truthy("adoption lists every feature", before.adoption.features.length >= 15);
+  check("trends carry a 30-day axis", before.trends.days.length, 30);
+  truthy(
+    "every trend has a 30-point sparkline aligned to it",
+    before.trends.metrics.every((t) => t.spark.length === 30),
+  );
+  truthy(
+    "a trend with no prior period reports no percentage rather than +100%",
+    before.trends.metrics.every((t) => t.previous > 0 || t.change_pct === null),
+  );
+  truthy(
+    "activation lists every milestone",
+    before.activation.steps.length >= 8,
+  );
   truthy(
     "every retention cell is a real percentage",
     before.retention.cohorts.every((c) =>
@@ -517,6 +536,57 @@ async function main() {
   check("pulse: live competitions", d("pulse.competitions_live"), 2);
   check("pulse: buddy sessions today", d("pulse.buddy_sessions_today"), 1);
   check("pulse: photos today", d("pulse.photos_today"), 3);
+
+  console.log("\n--- activation, trends, at-risk ---");
+  const step = (k) => after.activation.steps.find((x) => x.key === k)?.users;
+  const stepBefore = (k) =>
+    before.activation.steps.find((x) => x.key === k)?.users ?? 0;
+  check("signed up", step("signed_up") - stepBefore("signed_up"), 6);
+  // ALICE (10 days), DAVE (3), CAROL (one hand-entered mile) and BOB, whose
+  // ghost run counts — only his OTHER workout is vehicle-speed excluded.
+  // ERIN and FRANK never ran at all.
+  check(
+    "logged a first mile",
+    step("first_mile") - stepBefore("first_mile"),
+    4,
+  );
+  check(
+    "came back three days",
+    step("three_days") - stepBefore("three_days"),
+    2,
+  );
+  check("added a friend", step("friend") - stepBefore("friend"), 3);
+  check("posted a photo", step("photo") - stepBefore("photo"), 2);
+
+  const milesTrend = after.trends.metrics.find((t) => t.key === "miles");
+  truthy("miles trend has a current window", milesTrend.current > 0);
+  check("its sparkline is 30 days", milesTrend.spark.length, 30);
+  truthy(
+    "and the window total matches the sparkline it draws",
+    Math.abs(
+      milesTrend.spark.reduce((a, b) => a + b, 0) - milesTrend.current,
+    ) < 0.01,
+  );
+
+  // ALICE ran today, so she is not at risk; DAVE ran today too. Nobody
+  // seeded has a streak >= 3 AND a missing day, except ERIN (streak 8, never
+  // ran) — who is on an open injury pause and must therefore be excluded.
+  const atRiskIds = after.atRisk.map((r) => r.user_id);
+  truthy(
+    "an injury-paused user is never called at risk",
+    !atRiskIds.includes(ERIN),
+  );
+  truthy(
+    "somebody who already ran today is not at risk",
+    !atRiskIds.includes(ALICE),
+  );
+
+  const activationDrill = await getDrilldown("activation_step", "photo");
+  truthy(
+    "the activation drill-down lists who has NOT reached the milestone",
+    activationDrill.rows.some((r) => r.user_id === DAVE) &&
+      !activationDrill.rows.some((r) => r.user_id === ALICE),
+  );
 
   // ── Drill-downs ────────────────────────────────────────────────────
   // Every panel number is clickable, and the list behind it must agree with

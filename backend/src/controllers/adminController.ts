@@ -35,6 +35,9 @@ import {
   getActivityRhythms,
   getPulse,
   getDrilldown,
+  getTrends,
+  getActivation,
+  getAtRisk,
   DRILLDOWN_KINDS,
   type DrilldownKind,
 } from "../services/adminAnalyticsService.js";
@@ -336,6 +339,18 @@ export async function activityRhythms(_req: Request, res: Response) {
 
 export async function pulse(_req: Request, res: Response) {
   res.json(await getPulse());
+}
+
+export async function trends(_req: Request, res: Response) {
+  res.json(await getTrends());
+}
+
+export async function activation(_req: Request, res: Response) {
+  res.json(await getActivation());
+}
+
+export async function atRisk(_req: Request, res: Response) {
+  res.json(await getAtRisk());
 }
 
 const DRILLDOWN_KIND_SET = new Set<string>(DRILLDOWN_KINDS);

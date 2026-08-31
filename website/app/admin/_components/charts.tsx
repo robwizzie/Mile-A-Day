@@ -17,6 +17,7 @@ export function TimeSeriesBars({
   unit = "",
   formatValue = (v: number) =>
     v.toLocaleString(undefined, { maximumFractionDigits: 1 }),
+  period = "day",
 }: {
   data: DayPoint[];
   label: string;
@@ -24,6 +25,9 @@ export function TimeSeriesBars({
   hoverColor?: string;
   unit?: string;
   formatValue?: (v: number) => string;
+  /** What one bar covers. The axis says "peak N/<period>", so a weekly
+   *  series left on the default claimed a daily peak it never measured. */
+  period?: string;
 }) {
   const [hover, setHover] = useState<DayPoint | null>(null);
   if (!data.length)
@@ -87,7 +91,7 @@ export function TimeSeriesBars({
         <span>{data[0]?.date}</span>
         <span>
           peak {formatValue(max)}
-          {unit}/day
+          {unit}/{period}
         </span>
         <span>{data[data.length - 1]?.date}</span>
       </div>

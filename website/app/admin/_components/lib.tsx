@@ -103,6 +103,11 @@ export {
   MAD_WARNING,
   CARD,
   CARD_INTERACTIVE,
+  SECTION,
+  STACK_SECTIONS,
+  BLOCK,
+  TILE,
+  PANEL_BACKGROUND,
   workoutColor,
 } from "./theme";
 
@@ -114,6 +119,11 @@ export function StatCard({
   sub,
   accent,
   onClick,
+  changePct,
+  previous,
+  current,
+  spark,
+  tone,
 }: {
   label: string;
   value: string;
@@ -121,40 +131,192 @@ export function StatCard({
   accent?: boolean;
   /** Present = this number opens the rows behind it. */
   onClick?: () => void;
+  /** Change vs the previous period. null = nothing to compare against. */
+  changePct?: number | null;
+  /** The two window totals, so a delta off a tiny base can be shown as an
+   *  absolute change instead of a meaningless percentage. */
+  previous?: number;
+  current?: number;
+  /** Daily values, oldest first, drawn behind the number. */
+  spark?: number[];
+  /** Which direction is good. Defaults to up-is-good. */
+  tone?: "up-good" | "up-bad" | "neutral";
 }) {
-  // Value and label mirror the app's stat cell (ProfileStatsRow): a heavy
-  // rounded number over an 11px semibold tracked caption at 55% white.
   const body = (
     <>
-      <div className="text-[11px] font-semibold tracking-[0.4px] text-white/55 uppercase">
-        {label}
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[11px] font-semibold tracking-[0.4px] text-white/50 uppercase">
+          {label}
+        </span>
+        {changePct != null && (
+          <Delta
+            pct={changePct}
+            previous={previous}
+            current={current}
+            tone={tone}
+          />
+        )}
       </div>
-      <div className="mad-num mt-1.5 text-[32px] leading-none font-extrabold text-white">
+      <div className="mad-num mt-2 text-[30px] leading-none font-extrabold text-white">
         {value}
       </div>
       {sub != null && (
-        <div className="mt-1.5 text-[13px] text-white/45">{sub}</div>
+        <div className="mt-1.5 text-[12.5px] leading-snug text-white/40">
+          {sub}
+        </div>
+      )}
+      {spark && spark.length > 1 && (
+        <Sparkline values={spark} accent={accent} />
       )}
     </>
   );
 
   const shell = accent
-    ? "rounded-2xl border border-[#d94059]/40 bg-[#d94059]/[0.12]"
+    ? "rounded-2xl border border-[#d94059]/35 bg-[#d94059]/[0.09]"
     : CARD;
 
   if (!onClick) {
-    return <div className={`${shell} p-5`}>{body}</div>;
+    return <div className={`${shell} p-4`}>{body}</div>;
   }
   return (
     <button
       onClick={onClick}
-      className={`${accent ? shell + " transition hover:border-[#d94059]/70 hover:bg-[#d94059]/20" : CARD_INTERACTIVE} group p-5 text-left`}
+      className={`${accent ? shell + " transition hover:border-[#d94059]/60 hover:bg-[#d94059]/[0.15]" : CARD_INTERACTIVE} group relative p-4 text-left`}
     >
       {body}
-      <div className="mt-2 text-[11px] font-semibold text-white/25 transition group-hover:text-[#d94059]">
-        View →
-      </div>
+      {/* A chevron rather than a "View →" line: it says the card opens
+          without spending a row of the card's height saying so. */}
+      <span className="absolute top-3.5 right-3.5 text-white/15 transition group-hover:text-[#d94059]">
+        ›
+      </span>
     </button>
+  );
+}
+
+/**
+ * Period-over-period change, coloured by whether this metric wants to rise.
+ *
+ * Below a floor of ten in the previous window a percentage is noise dressed
+ * as precision — one event against one event is "+100%", three against one is
+ * "+200%". Under that floor this shows the absolute change instead, which is
+ * both smaller and true.
+ */
+const DELTA_PCT_FLOOR = 10;
+
+function Delta({
+  pct,
+  previous,
+  current,
+  tone = "up-good",
+}: {
+  pct: number;
+  previous?: number;
+  current?: number;
+  tone?: "up-good" | "up-bad" | "neutral";
+}) {
+  const tooSmall =
+    previous != null && current != null && previous < DELTA_PCT_FLOOR;
+  const abs = tooSmall ? Math.round((current! - previous!) * 10) / 10 : null;
+  const flat = tooSmall ? abs === 0 : Math.abs(pct) < 0.5;
+  const rising = tooSmall ? (abs ?? 0) > 0 : pct > 0;
+  const good =
+    tone === "neutral" ? null : tone === "up-good" ? rising : !rising;
+  const color = flat
+    ? "text-white/35"
+    : good === null
+      ? "text-white/55"
+      : good
+        ? "text-[#7fe39a]"
+        : "text-[#ff9aae]";
+  const text = flat
+    ? "—"
+    : tooSmall
+      ? `${abs! > 0 ? "+" : ""}${abs}`
+      : `${pct > 0 ? "+" : ""}${pct}%`;
+  return (
+    <span
+      className={`text-[11px] font-semibold tabular-nums ${color}`}
+      title={
+        previous != null ? `${current} vs ${previous} the period before` : undefined
+      }
+    >
+      {text}
+    </span>
+  );
+}
+
+/**
+ * The 30-day shape behind a total. No axis and no labels on purpose — it is
+ * there to answer "rising, falling, or spiky", and anything more precise is
+ * what the full chart below is for.
+ */
+function Sparkline({
+  values,
+  accent,
+}: {
+  values: number[];
+  accent?: boolean;
+}) {
+  const max = Math.max(...values, 1);
+  const W = 100;
+  const H = 20;
+  const step = W / Math.max(values.length - 1, 1);
+  const pts = values
+    .map((v, i) => `${(i * step).toFixed(2)},${(H - (v / max) * H).toFixed(2)}`)
+    .join(" ");
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      className="mt-3 h-5 w-full"
+      aria-hidden
+    >
+      <polyline
+        points={pts}
+        fill="none"
+        stroke={accent ? "#ffb3c6" : MAD_RED}
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+        opacity={0.85}
+      />
+    </svg>
+  );
+}
+
+/**
+ * A titled group of cards. Gives the page a level above "card" so a stat grid
+ * and a whole new subject stop looking equally far apart.
+ */
+export function Section({
+  title,
+  hint,
+  actions,
+  children,
+}: {
+  title: string;
+  hint?: ReactNode;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="space-y-4">
+      <div className="flex items-end justify-between gap-4 border-b border-white/[0.06] pb-2.5">
+        <div>
+          <h2 className="text-[17px] leading-none font-extrabold text-white">
+            {title}
+          </h2>
+          {hint && (
+            <p className="mt-1.5 text-[12.5px] leading-snug text-white/40">
+              {hint}
+            </p>
+          )}
+        </div>
+        {actions && <div className="shrink-0">{actions}</div>}
+      </div>
+      {children}
+    </section>
   );
 }
 

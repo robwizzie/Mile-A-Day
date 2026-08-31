@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { CARD_INTERACTIVE, MAD_RED } from "./theme";
+import { CARD_INTERACTIVE, MAD_RED, PANEL_BACKGROUND } from "./theme";
 import { fmt, getData, Loading } from "./lib";
 import { UserModal } from "./UserModal";
 
@@ -127,12 +127,10 @@ function DrilldownDrawer({
         />
         <aside
           className="relative flex h-full w-full max-w-md flex-col border-l border-white/[0.08] shadow-2xl"
-          style={{
-            // The app's own background, so the drawer reads as part of the
-            // same product rather than a generic panel over it.
-            background:
-              "linear-gradient(180deg, #241318 0%, #1a0d12 60%, #12080c 100%)",
-          }}
+          // One flat step off the page rather than a gradient: the drawer
+          // slides over content, and a gradient panel over a gradient page
+          // reads as two different blacks fighting.
+          style={{ background: PANEL_BACKGROUND }}
         >
           <header className="flex items-start justify-between gap-3 border-b border-white/[0.08] px-5 py-4">
             <div className="min-w-0">

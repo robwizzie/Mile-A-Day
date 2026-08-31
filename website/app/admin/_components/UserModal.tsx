@@ -10,6 +10,7 @@ import {
   Loading,
   mediaSrc,
   relativeDay,
+  PANEL_BACKGROUND,
 } from "./lib";
 
 type UserDetail = {
@@ -136,10 +137,7 @@ export function UserModal({
     >
       <div
         className="w-full max-w-2xl rounded-2xl border border-white/[0.08] shadow-2xl"
-        style={{
-          background:
-            "linear-gradient(180deg, #241318 0%, #1a0d12 55%, #12080c 100%)",
-        }}
+        style={{ background: PANEL_BACKGROUND }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

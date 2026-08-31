@@ -57,7 +57,7 @@ export function AdminDashboard() {
         <header className="sticky top-0 z-40 border-b border-white/[0.08] backdrop-blur-xl">
           {/* Its own translucent wash rather than the page gradient, which
               would band against the content scrolling under it. */}
-          <div className="absolute inset-0 -z-10 bg-[#1a0d12]/85" />
+          <div className="absolute inset-0 -z-10 bg-[#0a0a0a]/85" />
           <div className="mx-auto max-w-6xl px-5 sm:px-6">
             <div className="flex items-center justify-between py-4">
               {/* MADTabHeader: 26pt heavy rounded title. */}

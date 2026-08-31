@@ -25,7 +25,11 @@
  */
 
 import { PostgresService } from "./DbService.js";
-import { START_OF_TODAY_ET_SQL, TODAY_ET_DATE_SQL } from "./dailyResetTime.js";
+import {
+  START_OF_TODAY_ET_SQL,
+  TODAY_ET_DATE_SQL,
+  localNowSql,
+} from "./dailyResetTime.js";
 import {
   DOUBLE_DOWN_TARGET_DAYS,
   STREAK_SAVE_TARGET_RUN_DAYS,
@@ -1263,6 +1267,8 @@ export const DRILLDOWN_KINDS = [
   "streak_bucket",
   "live_tracking",
   "workout_type",
+  "activation_step",
+  "at_risk",
 ] as const;
 
 export type DrilldownKind = (typeof DRILLDOWN_KINDS)[number];
@@ -1693,6 +1699,66 @@ export async function getDrilldown(
       };
     }
 
+    case "activation_step": {
+      const step = ACTIVATION_STEPS.find((x) => x.key === id);
+      if (!step) return null;
+      // Who has NOT reached this milestone — the drop, which is the half
+      // worth a list. "Who did" is the number itself.
+      const rows = await db.query<{
+        user_id: string;
+        username: string | null;
+        created_at: string | Date;
+        last_active: string | null;
+        current_streak: number;
+      }>(
+        `SELECT u.user_id, u.username, u.created_at, u.current_streak,
+                w.last_active
+         FROM users u
+         LEFT JOIN LATERAL (
+           SELECT MAX(w.local_date)::text AS last_active
+           FROM workouts w WHERE w.user_id = u.user_id AND ${COUNTING_WORKOUT}
+         ) w ON TRUE
+         WHERE NOT (${step.where})
+         ORDER BY u.created_at DESC
+         LIMIT ${DRILLDOWN_LIMIT}`,
+      );
+      return {
+        kind,
+        id,
+        title: `Have not: ${step.label.toLowerCase()}`,
+        subtitle: "Newest accounts first — where the product lost them",
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle: r.last_active ? `last ran ${r.last_active}` : "never ran",
+          stat: dateText(r.created_at),
+          meta: r.current_streak > 0 ? `${r.current_streak} day streak` : null,
+        })),
+      };
+    }
+
+    case "at_risk": {
+      const rows = await getAtRisk();
+      return {
+        kind,
+        id,
+        title: "Streaks at risk today",
+        subtitle:
+          "No qualifying mile yet in their own local day, ordered by what they stand to lose",
+        total: rows.length,
+        rows: rows.map((r) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : r.user_id.slice(0, 8),
+          subtitle: `${r.miles_today.toFixed(2)} mi today · ${r.hours_left}h left`,
+          stat: `${r.current_streak} days`,
+          meta: r.local_date,
+        })),
+      };
+    }
+
     case "workout_type": {
       const rows = await db.query<{
         user_id: string;
@@ -1729,4 +1795,320 @@ export async function getDrilldown(
       };
     }
   }
+}
+
+// ─── Trends: every headline number, with a direction ────────────────
+
+export interface TrendMetric {
+  key: string;
+  label: string;
+  /** Total over the last 30 days. */
+  current: number;
+  /** Total over the 30 days before that. */
+  previous: number;
+  /** null when there is no prior period to compare against. */
+  change_pct: number | null;
+  /** 30 daily values, oldest first, aligned to TrendsResponse.days. */
+  spark: number[];
+  /** True when this metric counts DISTINCT people, so the period total is
+   *  not the sum of its daily values and the spark is only a shape. */
+  distinct: boolean;
+}
+
+/**
+ * A number with no direction is half a number: "412 miles" reads the same on
+ * the way up and on the way down. Every metric here carries its previous
+ * period and its daily shape so the dashboard can say which way it is going.
+ *
+ * Windows are ET calendar days, like every other daily counter in the app.
+ */
+export interface TrendsResponse {
+  /** The 30 ET dates the sparklines are aligned to, oldest first. */
+  days: string[];
+  metrics: TrendMetric[];
+}
+
+async function loadTrends(): Promise<TrendsResponse> {
+  // Each entry is 60 days of one daily value; the halves become
+  // current/previous and the last 30 become the sparkline. Written as one
+  // series-per-metric rather than one wide query so a metric can key on its
+  // own date column (local_date for workouts, created_at for signups).
+  const SERIES_SQL: { key: string; label: string; distinct: boolean; sql: string }[] =
+    [
+      {
+        key: "new_users",
+        label: "New signups",
+        distinct: false,
+        sql: `SELECT d::date AS day, COUNT(u.user_id)::int AS v
+              FROM days d
+              LEFT JOIN users u
+                ON (u.created_at AT TIME ZONE 'America/New_York')::date = d::date
+              GROUP BY d`,
+      },
+      {
+        key: "active_users",
+        label: "Active people",
+        distinct: true,
+        sql: `SELECT d::date AS day, COUNT(DISTINCT w.user_id)::int AS v
+              FROM days d
+              LEFT JOIN workouts w
+                ON w.local_date = d::date AND ${COUNTING_WORKOUT}
+              GROUP BY d`,
+      },
+      {
+        key: "miles",
+        label: "Miles logged",
+        distinct: false,
+        sql: `SELECT d::date AS day, COALESCE(SUM(w.distance), 0)::float AS v
+              FROM days d
+              LEFT JOIN workouts w
+                ON w.local_date = d::date AND ${COUNTING_WORKOUT}
+              GROUP BY d`,
+      },
+      {
+        key: "photos",
+        label: "Photos posted",
+        distinct: false,
+        sql: `SELECT d::date AS day, COUNT(p.post_id)::int AS v
+              FROM days d
+              LEFT JOIN posts p
+                ON p.local_date = d::date AND NOT p.is_auto AND p.deleted_at IS NULL
+              GROUP BY d`,
+      },
+      {
+        key: "competitions",
+        label: "Competitions started",
+        distinct: false,
+        sql: `SELECT d::date AS day, COUNT(c.id)::int AS v
+              FROM days d
+              LEFT JOIN competitions c
+                ON (c.created_at AT TIME ZONE 'America/New_York')::date = d::date
+              GROUP BY d`,
+      },
+      {
+        key: "tokens",
+        label: "Streak tokens spent",
+        distinct: false,
+        sql: `SELECT d::date AS day, COUNT(sc.user_id)::int AS v
+              FROM days d
+              LEFT JOIN streak_coverage sc
+                ON (sc.created_at AT TIME ZONE 'America/New_York')::date = d::date
+              GROUP BY d`,
+      },
+    ];
+
+  // Every series walks the same generate_series, so one metric's dates
+  // describe them all — the client needs an axis, not six copies of it.
+  let days: string[] = [];
+  const results = await Promise.all(
+    SERIES_SQL.map(async (m) => {
+      const rows = await db.query<{ day: string | Date; v: number }>(
+        `WITH days AS (
+           SELECT generate_series(${TODAY_ET_DATE_SQL} - 59, ${TODAY_ET_DATE_SQL}, INTERVAL '1 day') AS d
+         )
+         ${m.sql}
+         ORDER BY day`,
+      );
+      const values = rows.map((r) => Number(r.v) || 0);
+      days = rows.slice(30).map((r) => dateText(r.day) ?? "");
+      // 60 rows: [0..29] previous window, [30..59] current window.
+      const previous = values.slice(0, 30).reduce((a, b) => a + b, 0);
+      const current = values.slice(30).reduce((a, b) => a + b, 0);
+      return {
+        key: m.key,
+        label: m.label,
+        distinct: m.distinct,
+        current: Math.round(current * 100) / 100,
+        previous: Math.round(previous * 100) / 100,
+        // No prior activity means there is nothing to be a percentage OF —
+        // reporting "+100%" against zero is the classic dashboard lie.
+        change_pct:
+          previous > 0
+            ? Math.round(((current - previous) / previous) * 1000) / 10
+            : null,
+        spark: values.slice(30),
+      };
+    }),
+  );
+  return { days, metrics: results };
+}
+
+export const getTrends = cached(60_000, loadTrends);
+
+// ─── Activation milestones ──────────────────────────────────────────
+
+export interface ActivationStep {
+  key: string;
+  label: string;
+  hint: string;
+  users: number;
+  pct: number;
+}
+
+export interface Activation {
+  total_users: number;
+  steps: ActivationStep[];
+}
+
+/**
+ * How far people get.
+ *
+ * These are MILESTONES, not a strict funnel, and the difference matters:
+ * somebody can post a photo without ever adding a friend, so each step's
+ * count is "how many users have ever done this", not "how many of the
+ * previous step converted". Presenting independent numbers as a funnel is
+ * the easiest way to make a dashboard lie, so the UI says so too.
+ *
+ * Ordered by when each typically happens, which is what makes the shape
+ * readable — the first big drop is where the product loses people.
+ */
+const ACTIVATION_STEPS: {
+  key: string;
+  label: string;
+  hint: string;
+  where: string;
+}[] = [
+  {
+    key: "signed_up",
+    label: "Signed up",
+    hint: "Every account",
+    where: "TRUE",
+  },
+  {
+    key: "onboarded",
+    label: "Finished onboarding",
+    hint: "Answered or skipped the personalisation step",
+    where: "u.onboarding_completed_at IS NOT NULL",
+  },
+  {
+    key: "first_mile",
+    label: "Logged a first mile",
+    hint: "One day clearing the 0.95 mi streak threshold",
+    where: `EXISTS (
+      SELECT 1 FROM workouts w WHERE w.user_id = u.user_id AND ${COUNTING_WORKOUT}
+      GROUP BY w.local_date HAVING SUM(w.distance) >= 0.95)`,
+  },
+  {
+    key: "three_days",
+    label: "Came back three days",
+    hint: "Three separate qualifying days — the habit starting",
+    where: `(SELECT COUNT(*) FROM (
+      SELECT w.local_date FROM workouts w
+      WHERE w.user_id = u.user_id AND ${COUNTING_WORKOUT}
+      GROUP BY w.local_date HAVING SUM(w.distance) >= 0.95) q) >= 3`,
+  },
+  {
+    key: "friend",
+    label: "Added a friend",
+    hint: "The app stops being solitaire",
+    where: `EXISTS (SELECT 1 FROM friendships f
+      WHERE f.user_id = u.user_id AND f.status = 'accepted')`,
+  },
+  {
+    key: "photo",
+    label: "Posted a photo",
+    hint: "Deliberate posts only — auto route cards don't count",
+    where: `EXISTS (SELECT 1 FROM posts p
+      WHERE p.user_id = u.user_id AND NOT p.is_auto AND p.deleted_at IS NULL)`,
+  },
+  {
+    key: "streak_7",
+    label: "Reached a 7-day streak",
+    hint: "Ever, not necessarily now — longest_streak is ratcheted",
+    where: "u.longest_streak >= 7",
+  },
+  {
+    key: "streak_30",
+    label: "Reached 30 days",
+    hint: "The point the habit is theirs, not ours",
+    where: "u.longest_streak >= 30",
+  },
+];
+
+async function loadActivation(): Promise<Activation> {
+  const arms = ACTIVATION_STEPS.map(
+    (s) => `(SELECT COUNT(*) FROM users u WHERE ${s.where})::int AS ${s.key}`,
+  ).join(", ");
+  const [row] = await db.query<Record<string, number>>(`SELECT ${arms}`);
+  const total = row.signed_up || 0;
+  return {
+    total_users: total,
+    steps: ACTIVATION_STEPS.map((s) => ({
+      key: s.key,
+      label: s.label,
+      hint: s.hint,
+      users: row[s.key] ?? 0,
+      pct: total > 0 ? Math.round(((row[s.key] ?? 0) / total) * 1000) / 10 : 0,
+    })),
+  };
+}
+
+export const getActivation = cached(60_000, loadActivation);
+
+// ─── Streaks at risk ────────────────────────────────────────────────
+
+export interface AtRiskUser {
+  user_id: string;
+  username: string | null;
+  current_streak: number;
+  miles_today: number;
+  goal_miles: number;
+  /** Hours until midnight in THEIR timezone, not ours. */
+  hours_left: number;
+  local_date: string;
+}
+
+/** Below this a broken streak isn't worth anyone's attention. */
+const AT_RISK_MIN_STREAK = 3;
+
+/**
+ * Who is about to lose a streak today.
+ *
+ * The one panel here that is about a person rather than a number: a streak
+ * app's worst day is the one where a 200-day runner forgets, and that is
+ * knowable hours before it happens.
+ *
+ * Two things it has to get right or it cries wolf:
+ *   - the threshold is the STREAK rule (a flat `SUM(distance) >= 0.95`),
+ *     NOT the daily-goal rule (`goal_miles * DAILY_GOAL_TOLERANCE`). They
+ *     are different numbers for anyone whose goal isn't 1.0.
+ *   - "today" and "hours left" are the RUNNER's local day via localNowSql,
+ *     never ET. Someone in Tokyo is not at risk at 9pm Eastern; someone in
+ *     Hawaii still has half a day.
+ *
+ * Anyone on an open injury pause is excluded — their streak is frozen, not
+ * at risk.
+ */
+export async function getAtRisk(): Promise<AtRiskUser[]> {
+  return db.query<AtRiskUser>(
+    `WITH candidates AS (
+       SELECT u.user_id, u.username, u.current_streak,
+              u.goal_miles::float AS goal_miles,
+              (${localNowSql("u.user_id")}) AS local_now
+       FROM users u
+       WHERE u.current_streak >= $1
+         AND NOT EXISTS (
+           SELECT 1 FROM streak_pauses p
+           WHERE p.user_id = u.user_id
+             AND p.resumed_on IS NULL AND p.expired_at IS NULL)
+     )
+     SELECT c.user_id, c.username, c.current_streak, c.goal_miles,
+            COALESCE(t.miles, 0)::float AS miles_today,
+            (c.local_now)::date::text AS local_date,
+            ROUND(EXTRACT(EPOCH FROM (
+              ((c.local_now)::date + INTERVAL '1 day') - c.local_now
+            )) / 3600.0, 1)::float AS hours_left
+     FROM candidates c
+     LEFT JOIN LATERAL (
+       SELECT SUM(w.distance) AS miles
+       FROM workouts w
+       WHERE w.user_id = c.user_id
+         AND w.local_date = (c.local_now)::date
+         AND ${COUNTING_WORKOUT}
+     ) t ON TRUE
+     WHERE COALESCE(t.miles, 0) < 0.95
+     ORDER BY c.current_streak DESC, hours_left ASC
+     LIMIT 50`,
+    [AT_RISK_MIN_STREAK],
+  );
 }

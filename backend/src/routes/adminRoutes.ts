@@ -29,6 +29,9 @@ import {
   activityRhythms,
   pulse,
   drilldown,
+  trends,
+  activation,
+  atRisk,
 } from "../controllers/adminController.js";
 
 // Public: Sign in with Apple (web) exchange -> admin access token.
@@ -70,6 +73,9 @@ adminRouter.get("/community", community);
 adminRouter.get("/retention", retention);
 adminRouter.get("/activity-rhythms", activityRhythms);
 adminRouter.get("/pulse", pulse);
+adminRouter.get("/trends", trends);
+adminRouter.get("/activation", activation);
+adminRouter.get("/at-risk", atRisk);
 // The rows behind any one number on the dashboard — see DRILLDOWN_KINDS.
 adminRouter.get("/drilldown", drilldown);
 

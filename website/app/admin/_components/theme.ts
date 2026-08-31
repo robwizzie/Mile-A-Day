@@ -21,12 +21,22 @@ export const MAD_WARNING = "#ff9900";
 export const MAD_ERROR = "#e63333";
 
 /**
- * MADTheme.Colors.appBackgroundGradient — near-black with a red tint, top to
- * bottom. The tint is the whole reason the app doesn't read as a generic dark
- * theme, so the dashboard takes it rather than a flat #0a0a0a.
+ * The dashboard's ground: black.
+ *
+ * The app's own `appBackgroundGradient` carries a red tint, and the dashboard
+ * wore it for a while — but a metrics screen is mostly chrome around data,
+ * and a tinted ground pushes colour into every neutral on top of it. Black
+ * lets the one accent and the chart marks be the only colour on screen, which
+ * is what a dashboard wants and a fitness app does not.
+ *
+ * A single very faint red bloom at the top keeps it from reading as a void
+ * and quietly ties it to the app; everything below is flat #0a0a0a.
  */
 export const APP_BACKGROUND =
-  "linear-gradient(180deg, #26141a 0%, #1f0f14 35%, #140a0f 70%, #0d050a 100%)";
+  "radial-gradient(120% 55% at 50% -10%, rgba(217, 64, 89, 0.06) 0%, rgba(10, 10, 10, 0) 60%), #0a0a0a";
+
+/** The panel ground for drawers and modals — flat, one step off the page. */
+export const PANEL_BACKGROUND = "#101010";
 
 /**
  * THE workout-type colour language, app-wide: runs are red, walks are blue,
@@ -66,6 +76,20 @@ export function workoutColor(type: string | null | undefined): string {
  * colour. Split the chart instead.
  */
 export const SERIES = [MAD_RED, "#0284c7", "#d97706"] as const;
+
+/**
+ * The vertical rhythm, as three steps rather than a per-card guess.
+ *
+ * `SECTION` separates one subject from the next, `BLOCK` separates rows
+ * within a subject, and `TILE` is the gap inside a grid of small things.
+ * They were `space-y-6` everywhere before, which is why a stat grid and a
+ * whole new section looked equally far apart and the page read as one
+ * undifferentiated column.
+ */
+export const SECTION = "space-y-4";
+export const STACK_SECTIONS = "space-y-12";
+export const BLOCK = "gap-5";
+export const TILE = "gap-3";
 
 /** The single hue every heat grid ramps through, as "r, g, b" for rgba(). */
 export const HEAT_HUE = "217, 64, 89";

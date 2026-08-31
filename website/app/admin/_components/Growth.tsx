@@ -13,6 +13,8 @@ import {
   MAD_SUCCESS,
   MAD_WARNING,
   pct,
+  Section,
+  STACK_SECTIONS,
   WALK_BLUE,
   relativeDay,
   StatCard,
@@ -117,8 +119,7 @@ function ReferralGraphPanel() {
 
   return (
     <Card
-      title="Who referred whom"
-      hint={`${fmt(summary.friend_referred)} people said a friend sent them. ${fmt(summary.matched)} named an account we could find; ${fmt(summary.unmatched)} typed something that matches no username.`}
+      hint={`${fmt(summary.friend_referred)} people said a friend sent them. ${fmt(summary.matched)} named an account we could find; ${fmt(summary.unmatched)} typed something that matches no username. Tap a row to see who they brought in.`}
     >
       {g.referrers.length === 0 ? (
         <p className="text-sm text-white/40">
@@ -231,10 +232,7 @@ function RetentionPanel() {
     );
 
   return (
-    <Card
-      title="Retention by signup week"
-      hint="Share of each week's signups still logging a mile N weeks later. Week 0 is the week they joined."
-    >
+    <Card hint="Share of each week's signups still logging a mile N weeks later. Week 0 is the week they joined. Tap a week to see who joined then.">
       <HeatGrid
         hue={HEAT_HUE}
         rows={r.cohorts.map((c) => ({
@@ -291,8 +289,12 @@ export function GrowthTab() {
   const unknown = r.by_source.find((s) => s.source === "unknown")?.count ?? 0;
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+    <div className={STACK_SECTIONS}>
+      <Section
+        title="Acquisition"
+        hint="Where people say they came from, answered at onboarding."
+      >
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard label="Total users" value={fmt(funnel.total)} />
         <StatCard
           label="Gave a source"
@@ -312,7 +314,7 @@ export function GrowthTab() {
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-5 lg:grid-cols-2">
         <Card
           title="Where users come from"
           hint="Self-reported at signup. Excludes users who predate the onboarding step."
@@ -353,9 +355,21 @@ export function GrowthTab() {
           />
         </Card>
       </div>
+      </Section>
 
-      <ReferralGraphPanel />
-      <RetentionPanel />
+      <Section
+        title="Referrals"
+        hint="There are no referral codes — attribution is the name a new user types at onboarding, resolved against real accounts here."
+      >
+        <ReferralGraphPanel />
+      </Section>
+
+      <Section
+        title="Retention"
+        hint="Whether the people we get stay."
+      >
+        <RetentionPanel />
+      </Section>
     </div>
   );
 }

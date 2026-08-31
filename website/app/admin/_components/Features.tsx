@@ -13,12 +13,14 @@ import {
   MAD_WARNING,
   pct,
   relativeDay,
+  Section,
   SERIES,
   SegmentedControl,
-  WALK_BLUE,
+  STACK_SECTIONS,
   StatCard,
+  WALK_BLUE,
 } from "./lib";
-import { StackedDayBars } from "./charts";
+import { StackedDayBars, TimeSeriesBars } from "./charts";
 import { useDrilldown, useOpenUser } from "./Drilldown";
 
 // ─── Types (mirror backend/src/services/adminAnalyticsService.ts) ────
@@ -212,12 +214,12 @@ function Competitions({ d }: { d: CompetitionStats }) {
   const maxWeek = Math.max(...d.by_week.map((w) => w.created), 1);
 
   return (
-    <section className="space-y-6">
-      <h2 className="text-sm font-semibold tracking-wide text-white/80 uppercase">
-        Competitions
-      </h2>
+    <Section
+      title="Competitions"
+      hint="Who is competing, in what, and whether the feature is still being started."
+    >
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard
           label="Running now"
           value={fmt(s.live)}
@@ -242,7 +244,7 @@ function Competitions({ d }: { d: CompetitionStats }) {
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-5 lg:grid-cols-2">
         <Card
           title="Created per week"
           hint="Last 12 weeks. A flat line here is the feature going quiet, whatever the all-time total says."
@@ -252,38 +254,16 @@ function Competitions({ d }: { d: CompetitionStats }) {
               Nobody has started a competition yet.
             </p>
           ) : (
-            <ul className="space-y-2">
-              {d.by_week.map((w) => (
-                <li
-                  key={w.week}
-                  className="flex items-center gap-3 text-xs text-white/50"
-                >
-                  <span className="w-20 shrink-0 tabular-nums">{w.week}</span>
-                  <span className="h-2.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
-                    <span
-                      className="block h-full rounded-full"
-                      style={{
-                        width: `${(w.created / maxWeek) * 100}%`,
-                        background: SERIES[0],
-                      }}
-                    />
-                  </span>
-                  <span className="w-24 shrink-0 text-right tabular-nums">
-                    {w.created === 0 ? (
-                      <span className="text-white/25">none</span>
-                    ) : (
-                      <>
-                        {w.created} · {w.players} in
-                      </>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <TimeSeriesBars
+              data={d.by_week.map((w) => ({ date: w.week, value: w.created }))}
+              label="Competitions started"
+              formatValue={(v) => v.toFixed(0)}
+              period="week"
+            />
           )}
         </Card>
 
-        <div className="space-y-6">
+        <div className="space-y-5">
           <Card title="Which format people pick">
             <BarList
               items={d.by_type.map((t) => ({
@@ -414,7 +394,7 @@ function Competitions({ d }: { d: CompetitionStats }) {
         )}
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-5 lg:grid-cols-2">
         <Card title="Who starts them" hint="The people carrying the feature.">
           <BarList
             items={d.top_organizers.map((o) => ({
@@ -440,7 +420,7 @@ function Competitions({ d }: { d: CompetitionStats }) {
           />
         </Card>
       </div>
-    </section>
+    </Section>
   );
 }
 
@@ -469,12 +449,12 @@ function StreakTokens({ d }: { d: TokenStats }) {
   const answered = f.accepted + f.declined + f.expired;
 
   return (
-    <section className="space-y-6">
-      <h2 className="text-sm font-semibold tracking-wide text-white/80 uppercase">
-        Streak tokens
-      </h2>
+    <Section
+      title="Streak tokens"
+      hint="Double Down, Streak Save and Assist — spent, held, and whether they are catching the streaks that matter."
+    >
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard
           label="Tokens spent"
           value={fmt(totalSpent)}
@@ -509,7 +489,7 @@ function StreakTokens({ d }: { d: TokenStats }) {
         />
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-5 lg:grid-cols-3">
         <Card
           title="Spent, by kind"
           hint="How many people have ever used each, and how many times."
@@ -652,7 +632,7 @@ function StreakTokens({ d }: { d: TokenStats }) {
           )}
         </Card>
       </div>
-    </section>
+    </Section>
   );
 }
 
@@ -662,17 +642,13 @@ function Adoption({ d }: { d: Adoption }) {
   const open = useDrilldown();
   const groups = [...new Set(d.features.map((f) => f.group))];
   return (
-    <section className="space-y-6">
-      <h2 className="text-sm font-semibold tracking-wide text-white/80 uppercase">
-        What people actually use
-      </h2>
-      <div className="grid gap-6 lg:grid-cols-3">
+    <Section
+      title="What people actually use"
+      hint={`Bar = share of all ${fmt(d.total_users)} users who ever did it. The solid part = the share still doing it in the last 30 days. Tap a row for the people behind it.`}
+    >
+      <div className="grid gap-5 lg:grid-cols-3">
         {groups.map((g) => (
-          <Card
-            key={g}
-            title={g}
-            hint="Bar = share of all users who ever did it. Solid part = the share still doing it in the last 30 days."
-          >
+          <Card key={g} title={g}>
             <ul className="space-y-3">
               {d.features
                 .filter((f) => f.group === g)
@@ -700,7 +676,7 @@ function Adoption({ d }: { d: Adoption }) {
         Out of {fmt(d.total_users)} users, {fmt(d.active_30d)} logged a mile in
         the last 30 days — that is the pool any of these can be adopted by.
       </p>
-    </section>
+    </Section>
   );
 }
 
@@ -709,12 +685,12 @@ function CommunityPanels({ d }: { d: Community }) {
   const openUser = useOpenUser();
   const ch = d.challenges;
   return (
-    <section className="space-y-6">
-      <h2 className="text-sm font-semibold tracking-wide text-white/80 uppercase">
-        Community
-      </h2>
+    <Section
+      title="Community"
+      hint="Whether people are finding each other at all."
+    >
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard
           label="Friendships"
           value={fmt(d.friends.pairs)}
@@ -741,7 +717,7 @@ function CommunityPanels({ d }: { d: Community }) {
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-5 lg:grid-cols-2">
         <Card
           title="Buddy walks — how they start"
           hint="Worth knowing before building another door into the feature."
@@ -879,7 +855,7 @@ function CommunityPanels({ d }: { d: Community }) {
           />
         </Card>
       </div>
-    </section>
+    </Section>
   );
 }
 
@@ -920,7 +896,7 @@ export function FeaturesTab() {
   const show = (v: View) => view === "all" || view === v;
 
   return (
-    <div className="space-y-10">
+    <div className={STACK_SECTIONS}>
       <div className="flex items-center justify-between gap-3">
         <SegmentedControl<View>
           value={view}
