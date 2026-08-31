@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { OverviewTab } from "./_components/Overview";
 import { UsersTab } from "./_components/Users";
 import { ContentTab } from "./_components/Content";
+import { FeaturesTab } from "./_components/Features";
 import { GrowthTab } from "./_components/Growth";
 import { ErrorsTab } from "./_components/Errors";
 
@@ -11,6 +12,7 @@ const TABS = [
   { id: "overview", label: "Overview", render: () => <OverviewTab /> },
   { id: "users", label: "Users", render: () => <UsersTab /> },
   { id: "content", label: "Content", render: () => <ContentTab /> },
+  { id: "features", label: "Features", render: () => <FeaturesTab /> },
   { id: "growth", label: "Growth", render: () => <GrowthTab /> },
   { id: "errors", label: "Errors", render: () => <ErrorsTab /> },
 ] as const;

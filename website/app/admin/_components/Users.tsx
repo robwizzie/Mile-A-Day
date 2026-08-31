@@ -26,11 +26,14 @@ type UserRow = {
   total_miles: number;
   last_active: string | null;
   post_count: number;
+  /** Deliberate photo posts. Excludes the auto route cards in post_count. */
+  photo_count: number;
+  last_photo_at: string | null;
 };
 
 type UsersResponse = { total: number; users: UserRow[] };
 
-type Sort = "recent" | "streak" | "miles" | "active";
+type Sort = "recent" | "streak" | "miles" | "active" | "photos";
 const PAGE_SIZE = 25;
 
 export function UsersTab() {
@@ -97,6 +100,7 @@ export function UsersTab() {
               { value: "streak", label: "Streak" },
               { value: "miles", label: "Miles" },
               { value: "active", label: "Active" },
+              { value: "photos", label: "Photos" },
             ]}
           />
         </div>
@@ -120,7 +124,7 @@ export function UsersTab() {
                   <th className="p-3 font-medium">User</th>
                   <th className="p-3 font-medium">Streak</th>
                   <th className="p-3 font-medium">Miles</th>
-                  <th className="p-3 font-medium">Posts</th>
+                  <th className="p-3 font-medium">Photos</th>
                   <th className="p-3 font-medium">Last active</th>
                   <th className="p-3 font-medium">Source</th>
                   <th className="p-3 font-medium">Joined</th>
@@ -156,7 +160,19 @@ export function UsersTab() {
                     <td className="p-3 text-white/70">
                       {fmt(Math.round(u.total_miles))}
                     </td>
-                    <td className="p-3 text-white/70">{fmt(u.post_count)}</td>
+                    {/* Photos, not posts: an auto route card is published FOR
+                        the user when they skip the prompt, so counting those
+                        would say the social feature is working when nobody
+                        has taken a picture. The auto cards are the grey half. */}
+                    <td className="p-3 whitespace-nowrap text-white/70">
+                      {fmt(u.photo_count)}
+                      {u.post_count > u.photo_count && (
+                        <span className="text-white/30">
+                          {" "}
+                          +{fmt(u.post_count - u.photo_count)} auto
+                        </span>
+                      )}
+                    </td>
                     <td className="p-3 whitespace-nowrap text-white/50">
                       {relativeDay(u.last_active)}
                     </td>

@@ -25,6 +25,16 @@ import {
   getReferralStats,
   type PostFilter,
 } from "../services/adminService.js";
+import {
+  getCompetitionStats,
+  getStreakTokenStats,
+  getFeatureAdoption,
+  getCommunityStats,
+  getReferralGraph,
+  getRetentionCohorts,
+  getActivityRhythms,
+  getPulse,
+} from "../services/adminAnalyticsService.js";
 import { signMediaUrlsDeep } from "../services/mediaSigningService.js";
 
 const APPLE_ISS = "https://appleid.apple.com";
@@ -87,7 +97,13 @@ export async function milesByDay(_req: Request, res: Response) {
   res.json(await getMilesByDay());
 }
 
-const USER_SORTS = new Set(["recent", "streak", "miles", "active"]);
+const USER_SORTS = new Set([
+  "recent",
+  "streak",
+  "miles",
+  "active",
+  "photos",
+]);
 
 export async function users(req: Request, res: Response) {
   const search =
@@ -107,7 +123,8 @@ export async function users(req: Request, res: Response) {
     | "recent"
     | "streak"
     | "miles"
-    | "active";
+    | "active"
+    | "photos";
   res.json(await getUsers({ search, limit, offset, sort }));
 }
 
@@ -280,4 +297,40 @@ export async function restorePost(req: Request, res: Response) {
     console.error("Error restoring post:", error.message);
     res.status(500).json({ error: "Error restoring post" });
   }
+}
+
+// ─── Feature-usage analytics ────────────────────────────────────────
+// Thin pass-throughs: every one of these is a bounded aggregate the service
+// already caches, and none of them takes a request parameter.
+
+export async function competitions(_req: Request, res: Response) {
+  res.json(await getCompetitionStats());
+}
+
+export async function streakTokens(_req: Request, res: Response) {
+  res.json(await getStreakTokenStats());
+}
+
+export async function featureAdoption(_req: Request, res: Response) {
+  res.json(await getFeatureAdoption());
+}
+
+export async function community(_req: Request, res: Response) {
+  res.json(await getCommunityStats());
+}
+
+export async function referralGraph(_req: Request, res: Response) {
+  res.json(await getReferralGraph());
+}
+
+export async function retention(_req: Request, res: Response) {
+  res.json(await getRetentionCohorts());
+}
+
+export async function activityRhythms(_req: Request, res: Response) {
+  res.json(await getActivityRhythms());
+}
+
+export async function pulse(_req: Request, res: Response) {
+  res.json(await getPulse());
 }

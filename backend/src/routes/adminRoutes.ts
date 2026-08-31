@@ -20,6 +20,14 @@ import {
   errorTimeseries,
   postForensics,
   restorePost,
+  competitions,
+  streakTokens,
+  featureAdoption,
+  community,
+  referralGraph,
+  retention,
+  activityRhythms,
+  pulse,
 } from "../controllers/adminController.js";
 
 // Public: Sign in with Apple (web) exchange -> admin access token.
@@ -49,6 +57,18 @@ adminRouter.get("/posts/summary", postsSummary);
 adminRouter.get("/posts/by-day", postsByDay);
 
 adminRouter.get("/referrals", referrals);
+// Who actually referred whom, resolved from the free-text "a friend" answer.
+adminRouter.get("/referral-graph", referralGraph);
+
+// Feature-usage analytics: is each feature being used, by how many people,
+// and how often. All bounded aggregates, cached in the service.
+adminRouter.get("/competitions", competitions);
+adminRouter.get("/streak-tokens", streakTokens);
+adminRouter.get("/feature-adoption", featureAdoption);
+adminRouter.get("/community", community);
+adminRouter.get("/retention", retention);
+adminRouter.get("/activity-rhythms", activityRhythms);
+adminRouter.get("/pulse", pulse);
 
 adminRouter.get("/errors", errors);
 adminRouter.get("/errors/summary", errorSummary);
