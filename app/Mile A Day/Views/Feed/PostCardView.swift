@@ -632,12 +632,22 @@ struct PostCardView: View {
     /// colours are stable between reads. Empty for an ordinary post, and for
     /// any crew member who walked indoors or shares no maps.
     private var companionRoutes: [CompanionRoute] {
-        post.acceptedCoauthors.enumerated().compactMap { pair -> CompanionRoute? in
+        // Colours are assigned across the WHOLE credited crew and then filtered,
+        // never assigned to the filtered list: a coauthor who walked indoors
+        // must not shift everybody behind them onto a different colour, or the
+        // same walk keys differently depending on whose route happened to load.
+        // `avoiding:` is what keeps the first companion off the author's own
+        // accent — a walking crew card drew blue beside blue without it.
+        let palette = CrewRoutePalette.companionColors(
+            count: post.acceptedCoauthors.count,
+            avoiding: ActivityCardView.color(post.workout_type)
+        )
+        return post.acceptedCoauthors.enumerated().compactMap { pair -> CompanionRoute? in
             guard let coords = pair.element.routeCoordinates else { return nil }
             return CompanionRoute(
                 id: pair.element.user_id,
                 coordinates: coords,
-                color: CrewRoutePalette.color(at: pair.offset)
+                color: palette[pair.offset]
             )
         }
     }

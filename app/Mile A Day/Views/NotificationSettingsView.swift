@@ -198,7 +198,10 @@ struct NotificationSettingsView: View {
                             description: "Friends tracking at the same time see you're out on a walk or run — never your location")
                         settingsDivider
                         settingsToggle("Photo prompt after a run", isOn: $autoShareRunsToFeed,
-                            description: "Snap a story photo of your mile — the route map posts to the feed either way")
+                            description: "Ask for a photo of your mile when you finish. Turn it off and nothing is posted automatically at all")
+                        settingsDivider
+                        settingsToggle("Post my route when I skip", isOn: $prefs.autoPostWithoutPhoto,
+                            description: "Skipping the photo still puts your route and stats on the feed. Turn off to keep the feed to walks you actually photographed")
                         settingsDivider
                         settingsToggle("New posts from friends", isOn: $prefs.friendPostsEnabled,
                             description: "Get notified when a friend shares a photo")
@@ -563,6 +566,9 @@ struct NotificationSettingsView: View {
                     // Must reach the server: the profile grid is built by a SQL
                     // query, so a local-only flag would change nothing at all.
                     "tagged_posts_on_profile": prefs.taggedPostsOnProfile,
+                    // Enforced locally (the app builds that card), sent so the
+                    // choice survives a reinstall and follows a new phone.
+                    "auto_post_without_photo": prefs.autoPostWithoutPhoto,
                     // Must reach the server: the reminder is sent by a cron, so
                     // a local-only flag could never actually silence it.
                     "friend_request_reminder_enabled": prefs.friendRequestReminderEnabled,
@@ -624,6 +630,15 @@ struct NotificationSettingsView: View {
             if let buddyInvites = settings.buddy_invites_enabled,
                 prefs.buddyInvitesEnabled != buddyInvites {
                 prefs.buddyInvitesEnabled = buddyInvites
+                changed = true
+            }
+            // A different reason from the three above — nothing server-side
+            // enforces this one — but the same conclusion: it is stored
+            // remotely so it carries to a new phone, and a fresh install has to
+            // adopt it rather than silently start posting route cards again.
+            if let autoPost = settings.auto_post_without_photo,
+                prefs.autoPostWithoutPhoto != autoPost {
+                prefs.autoPostWithoutPhoto = autoPost
                 changed = true
             }
             // Keep the local copy honest too, so a later Save of some unrelated

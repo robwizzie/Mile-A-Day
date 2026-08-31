@@ -48,6 +48,12 @@ export interface NotificationPreferences {
   // this table is the de-facto per-user preferences row. Read through
   // posts.coauthor_on_profile, which overrides it per post.
   tagged_posts_on_profile: boolean;
+  // auto_post_without_photo: when I skip the post-run photo prompt, does the
+  // rendered route/stats card still go to the feed? Off = a walk reaches the
+  // feed only if I attached a photo. Enforced client-side (the app is what
+  // builds that card), so this is carry-across-devices storage rather than a
+  // gate — the server keeps accepting `is_auto` posts from every build.
+  auto_post_without_photo: boolean;
   // Who may see my workout content (routes + photos): 'public' | 'friends' |
   // 'private'. Coarser than share_route_maps — that one decides WHETHER routes
   // are included, this decides WHO gets in at all. Both must pass.
@@ -79,6 +85,9 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   friend_request_reminder_enabled: true,
   buddy_invites_enabled: true,
   tagged_posts_on_profile: true,
+  // TRUE: every installed build posts the card today, and flipping shipped
+  // behaviour on deploy would read as a bug, not a preference.
+  auto_post_without_photo: true,
   workout_visibility: DEFAULT_WORKOUT_VISIBILITY,
 };
 
@@ -119,6 +128,7 @@ export async function getNotificationPreferences(
       row.friend_request_reminder_enabled ?? true,
     buddy_invites_enabled: row.buddy_invites_enabled ?? true,
     tagged_posts_on_profile: row.tagged_posts_on_profile ?? true,
+    auto_post_without_photo: row.auto_post_without_photo ?? true,
     // Anything unrecognised reads as the safe default rather than being
     // handed to the client as-is.
     workout_visibility: isWorkoutVisibility(row.workout_visibility)
@@ -182,6 +192,10 @@ export async function updateNotificationPreferences(
     {
       key: "tagged_posts_on_profile",
       value: prefs.tagged_posts_on_profile,
+    },
+    {
+      key: "auto_post_without_photo",
+      value: prefs.auto_post_without_photo,
     },
     { key: "workout_visibility", value: prefs.workout_visibility },
   ];

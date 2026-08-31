@@ -1075,6 +1075,11 @@ struct NotificationSettingsResponse: Codable {
     /// whether I appear in their picker at all), so this is the authority.
     /// Optional: absent on older server builds (treat as on).
     let buddy_invites_enabled: Bool?
+    /// Does a skipped photo prompt still post the route/stats card? Stored
+    /// server-side only so the choice follows the user to a new phone — the
+    /// enforcement is client-side (see `RunPostService.autoPostMile`).
+    /// Optional: absent on older server builds (treat as on).
+    let auto_post_without_photo: Bool?
 }
 
 struct FriendNotificationSetting: Codable, Identifiable {

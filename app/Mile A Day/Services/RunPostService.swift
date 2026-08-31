@@ -337,6 +337,16 @@ enum RunPostService {
     /// the FEED with no card, which is exactly what this is for.
     @MainActor
     static func autoPostMile(workoutId: String, workoutType: String) async {
+        // "Only walks I photographed reach my feed." Gated HERE rather than at
+        // each call site so every route into the photo-less card — skipping the
+        // prompt, backing out of the composer, sharing to a story only, and
+        // whatever gets added next — honours it from one place.
+        //
+        // Nothing else changes: the fresh-post window still opens, the prompt
+        // still appears, and posting a photo still works normally. All this
+        // removes is the card that would have gone up in the photo's place.
+        guard NotificationPreferences.load().autoPostWithoutPhoto else { return }
+
         let stats = todayStats(workoutId: workoutId)
         let workout = HealthKitManager.shared.todaysWorkouts.first { $0.uuid.uuidString == workoutId }
 

@@ -127,6 +127,26 @@ struct NotificationPreferences: Codable {
         set { weeklyChallengeEnabledRaw = newValue }
     }
 
+    /// When I skip the post-run photo prompt, does the rendered route/stats
+    /// card still go to the feed?
+    ///
+    /// Off = a walk or run reaches the feed only if I actually attached a photo
+    /// to it. Distinct from the "Photo prompt after a run" switch, which
+    /// suppresses the PROMPT (and so, today, the card with it) — this one keeps
+    /// the prompt and drops only the photo-less card, which is the combination
+    /// somebody who wants a photos-only feed is actually after.
+    ///
+    /// Enforced in `RunPostService.autoPostMile`, i.e. client-side: the app is
+    /// what builds that card, so there is nothing for the server to refuse.
+    /// Same optional-backing pattern as the rest — synthesized `Decodable`
+    /// IGNORES property defaults, so a non-optional addition would throw on
+    /// every existing install's saved blob and read as a prefs reset.
+    private var autoPostWithoutPhotoRaw: Bool?
+    var autoPostWithoutPhoto: Bool {
+        get { autoPostWithoutPhotoRaw ?? true }
+        set { autoPostWithoutPhotoRaw = newValue }
+    }
+
     /// Do collabs friends tag me in join my profile's Posts grid? Off = they
     /// live in the Tagged tab only, Instagram-style. Grid ONLY — the tag stays
     /// live, the post stays in Tagged, and it still reaches my friends' feeds.

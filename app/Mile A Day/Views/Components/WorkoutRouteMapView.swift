@@ -57,20 +57,80 @@ struct CompanionRoute: Identifiable {
 /// Lives here rather than beside the model it describes because `Color` is
 /// SwiftUI and PostService.swift is deliberately UIKit/Foundation only.
 enum CrewRoutePalette {
-    /// Deliberately NOT the workout-type accent: that colour belongs to the
-    /// post's author, whose line keeps it. These are for everyone else.
+    /// Seven hues spaced ~50° apart around the wheel, so no two lines on one
+    /// map can read as the same person's.
+    ///
+    /// The previous list was picked for looks alone and had two collisions in
+    /// it: `mint` sat beside `aqua`, `amber` beside `sand`, and — the one that
+    /// actually mattered — the first entry was a sky blue about 13° off
+    /// `walkBlue`, which is the colour the AUTHOR's line takes on every
+    /// walking buddy walk. So the two most prominent traces on the commonest
+    /// kind of crew card were near-identical. Spacing is the whole point of
+    /// this list now; brightness is secondary.
+    ///
+    /// Ordered so that the first few taken are also the furthest apart — a
+    /// three-person walk is far more common than an eight-person one, and it
+    /// should get the strongest separation available, not merely a valid one.
     static let colors: [Color] = [
-        Color(red: 0.31, green: 0.76, blue: 0.97),  // sky
-        Color(red: 0.98, green: 0.75, blue: 0.29),  // amber
-        Color(red: 0.53, green: 0.86, blue: 0.53),  // mint
-        Color(red: 0.79, green: 0.60, blue: 0.98),  // lilac
-        Color(red: 0.98, green: 0.55, blue: 0.62),  // rose
-        Color(red: 0.55, green: 0.93, blue: 0.87),  // aqua
-        Color(red: 0.95, green: 0.85, blue: 0.55),  // sand
+        Color(red: 1.00, green: 0.48, blue: 0.27),  // ember   ~17°
+        Color(red: 0.18, green: 0.91, blue: 0.78),  // teal   ~169°
+        Color(red: 0.69, green: 0.36, blue: 1.00),  // violet ~271°
+        Color(red: 0.85, green: 0.95, blue: 0.30),  // citron  ~69°
+        Color(red: 0.29, green: 0.49, blue: 1.00),  // cobalt ~223°
+        Color(red: 0.35, green: 0.92, blue: 0.35),  // green  ~120°
+        Color(red: 1.00, green: 0.29, blue: 0.72),  // magenta~323°
     ]
+
+    /// How close (in degrees of hue) a crew colour may come to the author's
+    /// before it counts as the same colour at a glance. 25° is where the
+    /// walkBlue/sky pair that prompted this sat — comfortably inside it.
+    private static let minimumHueSeparation: CGFloat = 25
 
     static func color(at index: Int) -> Color {
         colors[index % colors.count]
+    }
+
+    /// `count` companion colours, none of which reads as `authorColor`.
+    ///
+    /// The author's line keeps the activity accent (see `CompanionRoute`), and
+    /// that accent is a fixed handful of values — walks blue, runs red — so the
+    /// clash isn't hypothetical, it's what every walking buddy card did. Rather
+    /// than recolour the author (their colour is the one the rest of the card
+    /// is already using), the palette simply steps over anything too close.
+    ///
+    /// Deterministic and position-stable: colours are assigned by the caller's
+    /// index into the crew, so the same walk draws the same way on every read.
+    /// Falls back to the skipped entries once the distinct ones run out — at
+    /// eight people a far-apart repeat beats an index out of range.
+    static func companionColors(count: Int, avoiding authorColor: Color) -> [Color] {
+        guard count > 0 else { return [] }
+        let authorHue = hue(authorColor)
+        var distinct: [Color] = []
+        var skipped: [Color] = []
+        for color in colors {
+            if hueDistance(hue(color), authorHue) < minimumHueSeparation {
+                skipped.append(color)
+            } else {
+                distinct.append(color)
+            }
+        }
+        let ring = distinct.isEmpty ? colors : distinct + skipped
+        return (0..<count).map { ring[$0 % ring.count] }
+    }
+
+    /// Degrees, 0–360. `UIColor` is the only thing that can read a `Color`'s
+    /// components back out; every colour reaching this is an opaque sRGB
+    /// literal, so the conversion is exact.
+    private static func hue(_ color: Color) -> CGFloat {
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(color).getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        return h * 360
+    }
+
+    /// Shortest way round the wheel — 350° and 10° are 20° apart, not 340°.
+    private static func hueDistance(_ lhs: CGFloat, _ rhs: CGFloat) -> CGFloat {
+        let raw = abs(lhs - rhs).truncatingRemainder(dividingBy: 360)
+        return min(raw, 360 - raw)
     }
 }
 
@@ -91,9 +151,36 @@ struct WorkoutRouteMapView: View {
     var onSnapshot: ((RouteMapSnapshot) -> Void)? = nil
 
     @State private var snapshot: RouteMapSnapshot?
+    /// 0 → 1 for every line at once. The STAGGER is not in this value — each
+    /// line carries its own `.animation(_:value:)` with its own delay, because
+    /// a `Shape`'s `.trim` animates inside the shape without re-evaluating the
+    /// parent body. The previous per-line "pace" multiplier was therefore a
+    /// no-op: body saw this value exactly twice, at 0 and at 1, so
+    /// `min(1, trim * pace)` evaluated to 0 and 1 for every line and the whole
+    /// crew drew as one rigid object. Anything that must vary DURING the draw
+    /// has to live in the animation, never in an expression on this.
     @State private var trimProgress: CGFloat = 0
-    @State private var showMarkers = false
+    @State private var showStartMarkers = false
+    /// Held back until the lines have actually landed. Same trap as above —
+    /// gating the end pin on `trimProgress >= 1` put it on screen the instant
+    /// the animation was *scheduled*, so every route finished before it drew.
+    @State private var showEndMarkers = false
+    /// The bright bead riding each line's drawing tip. Faded out once the pack
+    /// is home rather than switched off, so it lands and settles.
+    @State private var cometOpacity: Double = 1
+    /// …and then removed outright. A bead left at zero opacity still costs its
+    /// stroke and its coloured drop shadow on every frame, eight times over on
+    /// a full crew card, for the whole time the post sits in a scrolling feed.
+    /// Can't be folded into `cometOpacity`: gating the view on the value the
+    /// fade animates TO would delete it before the fade ever ran.
+    @State private var cometVisible = true
     @State private var hasAnimated = false
+
+    /// How long one line takes to draw, and how far apart consecutive lines
+    /// leave the start. Eight people at 0.09s still get everybody moving
+    /// inside the first two thirds of a second.
+    private static let drawDuration: Double = 1.15
+    private static let lineStagger: Double = 0.09
 
     /// Region math is static so the zoom composite can reproduce the framing
     /// without an instance.
@@ -162,7 +249,7 @@ struct WorkoutRouteMapView: View {
                     project: { snapshot.point(for: $0, in: size) },
                     routeColor: companion.color,
                     trimProgress: 1,
-                    showMarkers: false
+                    showEndMarker: true
                 )
             }
             RouteOverlay(
@@ -170,7 +257,8 @@ struct WorkoutRouteMapView: View {
                 project: { snapshot.point(for: $0, in: size) },
                 routeColor: routeColor,
                 trimProgress: 1,
-                showMarkers: true
+                showStartMarker: true,
+                showEndMarker: true
             )
             overlay()
         }
@@ -205,25 +293,27 @@ struct WorkoutRouteMapView: View {
                         .clipped()
 
                     // Everyone else's lines go UNDER the author's, and without
-                    // start/end pins: five people on one map is ten markers,
-                    // which buries the route it's meant to annotate. The
-                    // legend beside the map is what says whose is whose.
+                    // start pins: five people on one map is five more markers
+                    // on top of the author's two, which buries the route they
+                    // annotate. Each companion DOES land a small dot of its own
+                    // colour where they stopped — the legend says whose line is
+                    // whose, and the dot is what lets you follow one to its end
+                    // without tracing it back to the key.
                     ForEach(Array(companionRoutes.enumerated()), id: \.element.id) {
                         index, companion in
                         RouteOverlay(
                             coordinates: companion.coordinates,
                             project: { snapshot.point(for: $0, in: geo.size) },
                             routeColor: companion.color,
-                            // Every line draws at once, but not in lockstep.
-                            // Sharing one `trimProgress` made four routes move
-                            // as a single rigid object, which reads as one
-                            // animation rather than four people; a small
-                            // per-line lead makes them race, which is the
-                            // three seconds this card is actually for. Clamped
-                            // to 1 so nobody's line is left short.
-                            trimProgress: min(1, trimProgress * companionPace(index)),
-                            showMarkers: false
+                            trimProgress: trimProgress,
+                            cometOpacity: cometVisible ? cometOpacity : 0,
+                            showStartMarker: false,
+                            showEndMarker: showEndMarkers
                         )
+                        // The stagger, applied where it actually works. Index 0
+                        // here is the FIRST COMPANION; the author leaves first
+                        // (delay 0, below) because the post is theirs.
+                        .animation(Self.lineAnimation(index: index + 1), value: trimProgress)
                     }
 
                     // Animated route overlay, projected THROUGH the snapshot.
@@ -232,8 +322,11 @@ struct WorkoutRouteMapView: View {
                         project: { snapshot.point(for: $0, in: geo.size) },
                         routeColor: routeColor,
                         trimProgress: trimProgress,
-                        showMarkers: showMarkers
+                        cometOpacity: cometVisible ? cometOpacity : 0,
+                        showStartMarker: showStartMarkers,
+                        showEndMarker: showEndMarkers
                     )
+                    .animation(Self.lineAnimation(index: 0), value: trimProgress)
                 } else {
                     // Loading placeholder
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
@@ -258,26 +351,52 @@ struct WorkoutRouteMapView: View {
                 hasAnimated = true
                 try? await Task.sleep(for: .milliseconds(300))
                 withAnimation(.easeOut(duration: 0.3)) {
-                    showMarkers = true
+                    showStartMarkers = true
                 }
-                withAnimation(.easeInOut(duration: 1.2)) {
-                    trimProgress = 1.0
+                // A beat, so the start pin lands in its OWN update. Changed in
+                // the same one as `trimProgress`, it would inherit the line
+                // animation below — `.animation(_:value:)` governs everything
+                // animatable in that subtree for the update its value changes
+                // in, so the pin would fade over 1.15s instead of dropping.
+                // It also just reads better: the pin drops, then the pack
+                // leaves it.
+                try? await Task.sleep(for: .milliseconds(120))
+
+                // Deliberately NOT inside `withAnimation`: each line's own
+                // `.animation(_:value:)` above owns the curve and the delay, and
+                // an enclosing transaction would override both and put the pack
+                // back in lockstep.
+                trimProgress = 1.0
+
+                // Everyone home. The end dots pop, and the beads that carried
+                // the lines out there settle into them.
+                try? await Task.sleep(for: .seconds(Self.packDuration(companionRoutes.count)))
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.55)) {
+                    showEndMarkers = true
                 }
+                withAnimation(.easeOut(duration: 0.45)) {
+                    cometOpacity = 0
+                }
+                try? await Task.sleep(for: .milliseconds(500))
+                cometVisible = false
             }
         }
     }
 
-    /// Speed multiplier for companion line `index`, so the crew's routes draw
-    /// as a pack rather than one welded shape.
+    /// One line's draw: same curve for everybody, a later start for each
+    /// person behind the author.
     ///
     /// Deterministic (never random): a card re-renders constantly while
-    /// scrolling, and a pace that changed per render would make the same walk
-    /// animate differently every time it came back on screen. Bounded 0.8–1.2
-    /// so nothing lags far enough behind to look stuck, and every line still
-    /// completes well inside the 1.2s draw.
-    private func companionPace(_ index: Int) -> CGFloat {
-        let offsets: [CGFloat] = [1.18, 0.86, 1.08, 0.92, 1.14, 0.82, 1.02]
-        return offsets[index % offsets.count]
+    /// scrolling, and timing that changed per render would make the same walk
+    /// animate differently every time it came back on screen.
+    private static func lineAnimation(index: Int) -> Animation {
+        .easeOut(duration: drawDuration).delay(Double(index) * lineStagger)
+    }
+
+    /// How long until the LAST line lands — the author plus one stagger step
+    /// per companion.
+    private static func packDuration(_ companionCount: Int) -> Double {
+        drawDuration + Double(companionCount) * lineStagger
     }
 
     /// Whole-point size: sub-pixel layout jitter must not re-trigger the
@@ -320,15 +439,22 @@ private struct RouteOverlay: View {
     let project: (CLLocationCoordinate2D) -> CGPoint
     let routeColor: Color
     let trimProgress: CGFloat
-    let showMarkers: Bool
+    /// Fades the drawing bead out once the line has landed.
+    var cometOpacity: Double = 0
+    var showStartMarker: Bool = false
+    var showEndMarker: Bool = false
 
     private var points: [CGPoint] {
         coordinates.map(project)
     }
 
+    /// The bead's length as a fraction of the whole line. Short enough to read
+    /// as a head rather than a second, brighter route.
+    private static let cometLength: CGFloat = 0.055
+
     var body: some View {
-        // Projected once, not per-stroke: the glow, the line and both markers
-        // all read the same array.
+        // Projected once, not per-stroke: the glow, the casing, the line, the
+        // bead and both markers all read the same array.
         let points = self.points
         return ZStack {
             if points.count >= 2 {
@@ -338,13 +464,36 @@ private struct RouteOverlay: View {
                     .stroke(routeColor.opacity(0.3), style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
                     .blur(radius: 3)
 
+                // Dark casing under the colour. Eight lines on one map cross
+                // each other constantly, and where two bright strokes overlap
+                // with nothing between them the eye reads a single line that
+                // changes colour. A hairline of map-dark on either side is what
+                // keeps them legible as separate people — the same trick every
+                // transit map uses, and it costs one stroke.
+                RoutePath(points: points)
+                    .trim(from: 0, to: trimProgress)
+                    .stroke(Color.black.opacity(0.45), style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
+
                 // Main line
                 RoutePath(points: points)
                     .trim(from: 0, to: trimProgress)
                     .stroke(routeColor, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
 
+                // The bead riding the tip while the line draws.
+                //
+                // Positioned by trimming the path itself — both ends of the
+                // window animate, so it slides along the route for free. The
+                // alternative (a cumulative arc-length table sampled per frame)
+                // is a second answer to a question `Path.trim` has already
+                // answered, and one that could disagree with the line under it.
+                RoutePath(points: points)
+                    .trim(from: max(0, trimProgress - Self.cometLength), to: trimProgress)
+                    .stroke(Color.white, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                    .shadow(color: routeColor, radius: 6)
+                    .opacity(cometOpacity)
+
                 // Start marker
-                if showMarkers, let start = points.first {
+                if showStartMarker, let start = points.first {
                     Circle()
                         .fill(.green)
                         .frame(width: 10, height: 10)
@@ -353,14 +502,17 @@ private struct RouteOverlay: View {
                         .position(start)
                 }
 
-                // End marker
-                if showMarkers, trimProgress >= 1.0, let end = points.last {
+                // End marker — this walker's own colour, so a crew card says
+                // where each person stopped without any of them wearing the
+                // same dot.
+                if showEndMarker, let end = points.last {
                     Circle()
                         .fill(routeColor)
                         .frame(width: 10, height: 10)
                         .overlay(Circle().stroke(.white, lineWidth: 2))
                         .shadow(color: routeColor.opacity(0.5), radius: 3)
                         .position(end)
+                        .transition(.scale(scale: 0.2).combined(with: .opacity))
                 }
             }
         }

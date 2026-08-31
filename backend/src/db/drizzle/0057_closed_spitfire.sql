@@ -1,0 +1,1 @@
+ALTER TABLE "notification_settings" ADD COLUMN "auto_post_without_photo" boolean DEFAULT true;

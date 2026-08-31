@@ -496,6 +496,16 @@ export const notificationSettings = pgTable(
     // The default stays ON so nothing moves for existing users. Read through
     // posts.coauthor_on_profile, which overrides it per post.
     taggedPostsOnProfile: boolean("tagged_posts_on_profile").default(true),
+    // auto_post_without_photo: when I skip the post-run photo prompt, still put
+    // the rendered route/stats card on the feed. Off = a walk only reaches the
+    // feed if I actually attached a photo to it.
+    //
+    // Enforced CLIENT-side (RunPostService.autoPostMile is what builds that
+    // card), so this column is storage and cross-device carry, not a gate — the
+    // server must keep accepting `is_auto` posts from builds that don't read it.
+    // Default TRUE: every installed build posts the card today, and a preference
+    // that changed shipped behaviour on deploy would look like a bug.
+    autoPostWithoutPhoto: boolean("auto_post_without_photo").default(true),
   },
   (table) => [
     check(

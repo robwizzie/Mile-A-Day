@@ -44,6 +44,16 @@ struct PostRunPhotoPromptView: View {
     private var cameraOpen: Bool { freshWindow.isCameraOpen(forWorkout: workoutId) }
     private var noun: String { isWalk ? "walk" : "run" }
 
+    /// Does skipping still put a route/stats card on the feed?
+    ///
+    /// Read here purely so the copy can't promise something the preference has
+    /// turned off — `RunPostService.autoPostMile` is what enforces it. Read
+    /// once per body evaluation from UserDefaults, which is what the fresh
+    /// window and the composer already do.
+    private var postsCardOnSkip: Bool {
+        NotificationPreferences.load().autoPostWithoutPhoto
+    }
+
     var body: some View {
         ZStack {
             LinearGradient(colors: [Color(red: 0.08, green: 0.06, blue: 0.10), .black],
@@ -248,10 +258,16 @@ struct PostRunPhotoPromptView: View {
     }
 
     private var subheadline: String {
+        // The "either way" half is a promise about what Skip does, so it has to
+        // follow the preference that decides it — otherwise the one screen
+        // where the choice is made states the opposite of the setting.
+        let onSkip = postsCardOnSkip
+            ? " Route and stats post to the feed either way."
+            : " Skip and this \(noun) stays off the feed — your setting."
         if midRunSnaps.isEmpty {
             return cameraOpen
-                ? "Snap a photo for your story — it disappears in 24 hours. Your \(noun)'s route and stats post to the feed either way."
-                : "The camera closes 10 minutes after you finish, but any photo you took on this \(noun) can still go up today. Route and stats post either way."
+                ? "Snap a photo for your story — it disappears in 24 hours.\(onSkip)"
+                : "The camera closes 10 minutes after you finish, but any photo you took on this \(noun) can still go up today.\(onSkip)"
         }
         let count = midRunSnaps.count
         let alt = cameraOpen ? ", or take a fresh one" : ""

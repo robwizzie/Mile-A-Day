@@ -339,6 +339,14 @@ struct BuddyPostWizardView: View {
     /// preview and the post disagree about whose line is whose, which is worse
     /// than showing no key at all.
     private var drawnRoutes: [CompanionRoute] {
+        // Assigned across the whole crew, then filtered by what loaded — the
+        // published card does the same, and colouring the FILTERED list here
+        // would hand the preview a different key from the post whenever one
+        // person's route hadn't arrived yet.
+        let palette = CrewRoutePalette.companionColors(
+            count: crewExcludingMe.count,
+            avoiding: session.accentColor
+        )
         var out: [CompanionRoute] = []
         if let mine = buddy.currentUserId,
            case .loaded(let coords)? = routes[mine] {
@@ -350,7 +358,7 @@ struct BuddyPostWizardView: View {
             out.append(CompanionRoute(
                 id: participant.userId,
                 coordinates: coords,
-                color: CrewRoutePalette.color(at: index)
+                color: palette[index]
             ))
         }
         return out
