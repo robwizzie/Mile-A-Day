@@ -76,7 +76,7 @@ type Rhythms = {
   window_days: number;
 };
 
-type Trends = { days: string[]; metrics: Trend[] };
+type Trends = { window_days: number; days: string[]; metrics: Trend[] };
 
 type Trend = {
   key: string;
@@ -133,6 +133,7 @@ export function OverviewTab() {
   const [atRisk, setAtRisk] = useState<AtRisk[]>([]);
   const [activation, setActivation] = useState<Activation | null>(null);
   const [metric, setMetric] = useState("miles");
+  const [windowDays, setWindowDays] = useState<"7" | "30" | "90">("30");
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -143,7 +144,7 @@ export function OverviewTab() {
       getData<WorkoutType[]>("workout-types"),
       getData<Pulse>("pulse"),
       getData<Rhythms>("activity-rhythms"),
-      getData<Trends | Trend[]>("trends"),
+      getData<Trends | Trend[]>(`trends?window=${windowDays}`),
       getData<AtRisk[]>("at-risk"),
       getData<Activation>("activation"),
     ])
@@ -158,14 +159,20 @@ export function OverviewTab() {
         // a new page can meet an API that still returns the bare array this
         // endpoint used to. Normalise rather than throw: the axis falls back
         // to indices and every panel still renders.
-        setTrends(Array.isArray(tr) ? { days: [], metrics: tr } : tr);
+        setTrends(
+          Array.isArray(tr)
+            ? { window_days: Number(windowDays), days: [], metrics: tr }
+            : tr,
+        );
         setAtRisk(ar);
         setActivation(act);
       })
       .catch((e) => {
         if (e?.message !== "unauthorized") setErr("Failed to load overview.");
       });
-  }, []);
+    // Re-runs when the window changes; everything else is re-fetched with
+    // it, which is cheap and keeps the whole page on one consistent read.
+  }, [windowDays]);
 
   if (err) return <p className="text-sm text-[#d94059]">{err}</p>;
   if (!overview || !engagement) return <Loading />;
@@ -204,7 +211,18 @@ export function OverviewTab() {
 
       <Section
         title="Right now"
-        hint="Today is the ET calendar day, the boundary every daily counter in the app uses. Percentages compare the last 30 days with the 30 before."
+        hint={`Today is the ET calendar day, the boundary every daily counter in the app uses. Percentages compare the last ${windowDays} days with the ${windowDays} before.`}
+        actions={
+          <SegmentedControl<"7" | "30" | "90">
+            value={windowDays}
+            onChange={setWindowDays}
+            options={[
+              { value: "7", label: "7 days" },
+              { value: "30", label: "30 days" },
+              { value: "90", label: "90 days" },
+            ]}
+          />
+        }
       >
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {/* Each card's number and its percentage are the SAME quantity over
@@ -212,7 +230,7 @@ export function OverviewTab() {
               or, worse, hanging a signups delta off a total-users count —
               reads as precision and means nothing. Today is the strip below. */}
           <StatCard
-            label="Active people · 30d"
+            label={`Active people · ${windowDays}d`}
             value={fmt(activeTrend?.current ?? engagement.mau)}
             sub={`${fmt(engagement.dau)} today · ${fmt(engagement.wau)} this week`}
             accent
@@ -222,7 +240,7 @@ export function OverviewTab() {
             spark={activeTrend?.spark}
           />
           <StatCard
-            label="Miles · 30d"
+            label={`Miles · ${windowDays}d`}
             value={fmt(Math.round(milesTrend?.current ?? 0))}
             sub={`${overview.miles_today.toFixed(1)} today · ${fmt(Math.round(overview.total_miles))} all time`}
             changePct={milesTrend?.change_pct}
@@ -231,7 +249,7 @@ export function OverviewTab() {
             spark={milesTrend?.spark}
           />
           <StatCard
-            label="New signups · 30d"
+            label={`New signups · ${windowDays}d`}
             value={fmt(signupTrend?.current ?? engagement.new_30d)}
             sub={`${fmt(overview.total_users)} users in total`}
             changePct={signupTrend?.change_pct}
@@ -240,7 +258,7 @@ export function OverviewTab() {
             spark={signupTrend?.spark}
           />
           <StatCard
-            label="Photos · 30d"
+            label={`Photos · ${windowDays}d`}
             value={fmt(photoTrend?.current ?? 0)}
             sub={`${fmt(pulse?.photos_today ?? 0)} today`}
             changePct={photoTrend?.change_pct}
@@ -261,29 +279,66 @@ export function OverviewTab() {
                     accent: true,
                     kind: "live_tracking",
                   },
-                  { label: "Photos posted", value: pulse.photos_today },
-                  { label: "Comments", value: pulse.comments_today },
-                  { label: "Competitions live", value: pulse.competitions_live },
+                  {
+                    label: "Photos posted",
+                    value: pulse.photos_today,
+                    kind: "today",
+                    id: "photos",
+                  },
+                  {
+                    label: "Comments",
+                    value: pulse.comments_today,
+                    kind: "today",
+                    id: "comments",
+                  },
+                  {
+                    label: "Competitions live",
+                    value: pulse.competitions_live,
+                    kind: "today",
+                    id: "competitions",
+                  },
                   {
                     label: "Buddy walks started",
                     value: pulse.buddy_sessions_today,
+                    kind: "today",
+                    id: "buddy",
                   },
                   {
                     label: "Streak tokens spent",
                     value: pulse.tokens_spent_today,
+                    kind: "today",
+                    id: "tokens",
                   },
                   {
                     label: "Challenges completed",
                     value: pulse.challenges_completed_today,
+                    kind: "today",
+                    id: "challenges",
                   },
-                  { label: "Badges earned", value: pulse.badges_today },
-                  { label: "New friendships", value: pulse.friends_today },
-                  { label: "Hypes", value: overview.hypes_today },
+                  {
+                    label: "Badges earned",
+                    value: pulse.badges_today,
+                    kind: "today",
+                    id: "badges",
+                  },
+                  {
+                    label: "New friendships",
+                    value: pulse.friends_today,
+                    kind: "today",
+                    id: "friends",
+                  },
+                  {
+                    label: "Hypes",
+                    value: overview.hypes_today,
+                    kind: "today",
+                    id: "hypes",
+                  },
                 ] as {
                   label: string;
                   value: number;
                   accent?: boolean;
                   kind?: string;
+                  id?: string;
                 }[]
               ).map((it) => {
                 const body = (
@@ -300,13 +355,12 @@ export function OverviewTab() {
                     </div>
                   </>
                 );
-                // Only the counters with rows behind them are pressable —
-                // making the whole strip look clickable when most of it is
-                // not is worse than a strip that plainly is not.
+                // A zero counter still opens — it says "nobody yet", which
+                // is a different answer from a counter you cannot ask.
                 return it.kind ? (
                   <button
                     key={it.label}
-                    onClick={() => open({ kind: it.kind! })}
+                    onClick={() => open({ kind: it.kind!, id: it.id })}
                     className="-mx-2 rounded-lg px-2 py-1 text-left transition hover:bg-white/[0.05]"
                   >
                     {body}
@@ -400,6 +454,9 @@ export function OverviewTab() {
                 metric === "miles" ? v.toFixed(1) : v.toFixed(0)
               }
               unit={metric === "miles" ? " mi" : ""}
+              onBarClick={(date) =>
+                open({ kind: "trend_day", id: `${metric}|${date}` })
+              }
             />
             {(trends.metrics.find((m) => m.key === metric)?.distinct ??
               false) && (
@@ -490,7 +547,8 @@ export function OverviewTab() {
               }
               formatValue={(v) => `${fmt(v)}/hr`}
               legend="Workouts finished per weekday hour"
-              cell={28}
+              cell={22}
+              fit
             />
           </Card>
 

@@ -41,7 +41,18 @@ type DrilldownData = {
   rows: DrilldownRow[];
 };
 
-type Target = { kind: string; id?: string | null };
+type Target = {
+  kind: string;
+  id?: string | null;
+  /**
+   * Turns the drawer into a PICKER: a row calls this with its user instead
+   * of opening that person's profile. Used to answer "who did they mean?"
+   * for a referral name that matches no account.
+   */
+  onPick?: (userId: string, username: string | null) => void;
+  /** Replaces the row hint in the footer when picking. */
+  pickHint?: string;
+};
 
 const DrilldownContext = createContext<(t: Target) => void>(() => {});
 const UserContext = createContext<(userId: string) => void>(() => {});
@@ -191,7 +202,14 @@ function DrilldownDrawer({
                     <li key={`${r.user_id ?? r.title}-${i}`}>
                       {r.user_id ? (
                         <button
-                          onClick={() => setOpenUser(r.user_id)}
+                          onClick={() => {
+                            if (target.onPick) {
+                              target.onPick(r.user_id!, r.username);
+                              onClose();
+                            } else {
+                              setOpenUser(r.user_id);
+                            }
+                          }}
                           className={`${CARD_INTERACTIVE} w-full px-3 py-2.5 text-left`}
                         >
                           {inner}
@@ -215,7 +233,7 @@ function DrilldownDrawer({
               <span className="ml-2" style={{ color: MAD_RED }}>
                 ·
               </span>{" "}
-              tap a row for that user
+              {target.pickHint ?? "tap a row for that user"}
             </footer>
           )}
         </aside>

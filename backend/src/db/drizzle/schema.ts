@@ -2735,3 +2735,36 @@ export const postHighlightItems = pgTable(
     }),
   ],
 );
+
+/**
+ * Manual resolution for a referral that names nobody we can find.
+ *
+ * Attribution is the free-text name a user types at onboarding, so plenty of
+ * it never resolves: a real name instead of a handle, a typo, a nickname. An
+ * admin who KNOWS who was meant records it here rather than rewriting what
+ * the user typed — `users.referral_detail` stays exactly as entered, which
+ * keeps the mapping reversible and the original answer auditable.
+ *
+ * `alias` is the normalised handle the graph already computes (trimmed,
+ * case-folded, leading "@" stripped), so a lookup is a plain equality join.
+ */
+export const referralAliases = pgTable(
+  "referral_aliases",
+  {
+    alias: text().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    // Who made the call, for when the number is questioned later.
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "referral_aliases_user_id_fkey",
+    }).onDelete("cascade"),
+    index("idx_referral_aliases_user").on(table.userId),
+  ],
+);

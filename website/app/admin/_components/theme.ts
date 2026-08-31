@@ -65,7 +65,7 @@ export function workoutColor(type: string | null | undefined): string {
 
 /**
  * The categorical set for charts drawing SEVERAL series at once, validated
- * against this dashboard's card surface (#2a1c20 — the app gradient under the
+ * against this dashboard's card surface (#1a1a1a — the black page under the
  * card's 5% white fill): every adjacent pair clears the colour-vision
  * separation floor, the normal-vision floor and 3:1 contrast, and all three
  * sit in one lightness band so no series shouts louder than the others.

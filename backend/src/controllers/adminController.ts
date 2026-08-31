@@ -36,6 +36,10 @@ import {
   getPulse,
   getDrilldown,
   getTrends,
+  TREND_WINDOWS,
+  type TrendWindow,
+  setReferralAlias,
+  clearReferralAlias,
   getActivation,
   getAtRisk,
   DRILLDOWN_KINDS,
@@ -341,8 +345,50 @@ export async function pulse(_req: Request, res: Response) {
   res.json(await getPulse());
 }
 
-export async function trends(_req: Request, res: Response) {
-  res.json(await getTrends());
+export async function trends(req: Request, res: Response) {
+  // Anything off the offered list falls back rather than 400ing — the window
+  // is a view preference, not an instruction worth failing a dashboard over.
+  const asked = parseInt(String(req.query.window ?? "30"), 10);
+  const window = (
+    TREND_WINDOWS.includes(asked as TrendWindow) ? asked : 30
+  ) as TrendWindow;
+  res.json(await getTrends(window));
+}
+
+/**
+ * POST /admin/referral-alias?alias=<typed name>&userId=<id>
+ * Links a typed referral name to a real account, or clears the link when
+ * userId is omitted. The admin proxy forwards only the query string, so the
+ * parameters travel there rather than in a body.
+ */
+export async function referralAlias(req: Request, res: Response) {
+  const alias = typeof req.query.alias === "string" ? req.query.alias : "";
+  if (!alias.trim()) {
+    return res.status(400).json({ error: "alias required" });
+  }
+  const userId =
+    typeof req.query.userId === "string" && req.query.userId.trim()
+      ? req.query.userId.trim()
+      : null;
+
+  if (!userId) {
+    await clearReferralAlias(alias);
+    return res.json({ ok: true, cleared: true });
+  }
+  const result = await setReferralAlias(
+    alias,
+    userId,
+    ((req as any).userId as string) ?? null,
+  );
+  if (!result.ok) {
+    return res.status(result.reason === "unknown_user" ? 404 : 400).json({
+      error:
+        result.reason === "unknown_user"
+          ? "No such user"
+          : "Alias cannot be empty",
+    });
+  }
+  res.json({ ok: true });
 }
 
 export async function activation(_req: Request, res: Response) {

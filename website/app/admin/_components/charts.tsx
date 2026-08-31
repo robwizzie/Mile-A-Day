@@ -18,6 +18,7 @@ export function TimeSeriesBars({
   formatValue = (v: number) =>
     v.toLocaleString(undefined, { maximumFractionDigits: 1 }),
   period = "day",
+  onBarClick,
 }: {
   data: DayPoint[];
   label: string;
@@ -28,6 +29,8 @@ export function TimeSeriesBars({
   /** What one bar covers. The axis says "peak N/<period>", so a weekly
    *  series left on the default claimed a daily peak it never measured. */
   period?: string;
+  /** Present = a bar opens what happened on that date. */
+  onBarClick?: (date: string) => void;
 }) {
   const [hover, setHover] = useState<DayPoint | null>(null);
   if (!data.length)
@@ -70,20 +73,34 @@ export function TimeSeriesBars({
       >
         {data.map((d, i) => {
           const h = (d.value / max) * (H - 20);
+          const clickable = Boolean(onBarClick) && d.value > 0;
           return (
-            <rect
-              key={d.date}
-              x={i * (barW + gap)}
-              y={H - h}
-              width={barW}
-              height={Math.max(h, d.value > 0 ? 1 : 0)}
-              rx={2}
-              fill={hover?.date === d.date ? hoverColor : color}
-              onMouseEnter={() => setHover(d)}
-              onMouseLeave={() => setHover(null)}
-            >
-              <title>{`${d.date}: ${formatValue(d.value)}${unit}`}</title>
-            </rect>
+            <g key={d.date}>
+              {/* Full-height hit target: a one-pixel bar is impossible to
+                  aim at, and a zero-value day has no bar at all. */}
+              <rect
+                x={i * (barW + gap)}
+                y={0}
+                width={barW + gap}
+                height={H}
+                fill="transparent"
+                style={{ cursor: clickable ? "pointer" : "default" }}
+                onMouseEnter={() => setHover(d)}
+                onMouseLeave={() => setHover(null)}
+                onClick={clickable ? () => onBarClick!(d.date) : undefined}
+              >
+                <title>{`${d.date}: ${formatValue(d.value)}${unit}`}</title>
+              </rect>
+              <rect
+                x={i * (barW + gap)}
+                y={H - h}
+                width={barW}
+                height={Math.max(h, d.value > 0 ? 1 : 0)}
+                rx={2}
+                fill={hover?.date === d.date ? hoverColor : color}
+                pointerEvents="none"
+              />
+            </g>
           );
         })}
       </svg>
@@ -249,6 +266,7 @@ export function HeatGrid({
   colLabel,
   legend,
   cell = 20,
+  fit = false,
   onRowClick,
 }: {
   rows: { key: string; label: string }[];
@@ -260,8 +278,17 @@ export function HeatGrid({
   formatValue?: (v: number) => string;
   colLabel?: (col: { key: string; label: string }, i: number) => boolean;
   legend?: string;
-  /** Column width in px. FIXED, never 1fr — see the header note below. */
+  /** Row height in px, and the column width too unless `fit`. */
   cell?: number;
+  /**
+   * Stretch the columns to the container instead of scrolling.
+   *
+   * Safe now only because the header labels are absolutely positioned (see
+   * below) — with labels in the flow, a flexible track grows to fit its label
+   * and the axis drifts off the cells underneath it, which is exactly the bug
+   * fixed columns were working around.
+   */
+  fit?: boolean;
   /** Present = a row label opens the rows behind that row. */
   onRowClick?: (rowKey: string) => void;
 }) {
@@ -273,13 +300,15 @@ export function HeatGrid({
     }
 
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-max">
+    <div className={fit ? "" : "overflow-x-auto"}>
+      <div className={fit ? "" : "min-w-max"}>
         <div
           className="grid gap-[2px]"
           style={{
-            gridTemplateColumns: `auto repeat(${cols.length}, ${cell}px)`,
-            justifyContent: "start",
+            gridTemplateColumns: `auto repeat(${cols.length}, ${
+              fit ? "minmax(0, 1fr)" : `${cell}px`
+            })`,
+            ...(fit ? {} : { justifyContent: "start" }),
           }}
         >
           <div />
