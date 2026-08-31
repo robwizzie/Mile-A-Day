@@ -10,11 +10,17 @@ import {
   getData,
   HEAT_HUE,
   Loading,
+  MAD_SUCCESS,
+  MAD_WARNING,
   pct,
+  Section,
+  STACK_SECTIONS,
+  WALK_BLUE,
   relativeDay,
   StatCard,
 } from "./lib";
 import { HeatGrid } from "./charts";
+import { useDrilldown, useOpenUser } from "./Drilldown";
 
 type ReferralGraph = {
   summary: {
@@ -87,6 +93,7 @@ const pretty = (s: string) =>
  * running brought in nobody.
  */
 function ReferralGraphPanel() {
+  const openUser = useOpenUser();
   const [g, setG] = useState<ReferralGraph | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -112,8 +119,7 @@ function ReferralGraphPanel() {
 
   return (
     <Card
-      title="Who referred whom"
-      hint={`${fmt(summary.friend_referred)} people said a friend sent them. ${fmt(summary.matched)} named an account we could find; ${fmt(summary.unmatched)} typed something that matches no username.`}
+      hint={`${fmt(summary.friend_referred)} people said a friend sent them. ${fmt(summary.matched)} named an account we could find; ${fmt(summary.unmatched)} typed something that matches no username. Tap a row to see who they brought in.`}
     >
       {g.referrers.length === 0 ? (
         <p className="text-sm text-white/40">
@@ -144,9 +150,8 @@ function ReferralGraphPanel() {
                     <span className="text-white/90">{r.count}</span> brought in
                     {" · "}
                     <span
-                      className={
-                        r.active > 0 ? "text-emerald-300" : "text-white/40"
-                      }
+                      className={r.active > 0 ? "" : "text-white/40"}
+                      style={r.active > 0 ? { color: MAD_SUCCESS } : undefined}
                     >
                       {r.active} still running
                     </span>
@@ -155,19 +160,23 @@ function ReferralGraphPanel() {
                 {open && (
                   <ul className="mt-2 ml-5 space-y-1.5 border-l border-white/10 pl-4">
                     {r.referred.map((u) => (
-                      <li
-                        key={u.user_id}
-                        className="flex items-baseline justify-between gap-3 text-xs"
-                      >
-                        <span className="truncate text-white/70">
-                          {u.username ? `@${u.username}` : u.name || u.user_id.slice(0, 8)}
-                        </span>
-                        <span className="shrink-0 tabular-nums text-white/40">
-                          joined {fmtDate(u.created_at)} · last run{" "}
-                          {relativeDay(u.last_active)} ·{" "}
-                          {Math.round(u.total_miles)} mi
-                          {u.current_streak > 0 && ` · ${u.current_streak}🔥`}
-                        </span>
+                      <li key={u.user_id}>
+                        <button
+                          onClick={() => openUser(u.user_id)}
+                          className="-mx-2 flex w-[calc(100%+1rem)] items-baseline justify-between gap-3 rounded-lg px-2 py-0.5 text-left text-xs transition hover:bg-white/[0.05]"
+                        >
+                          <span className="truncate text-white/70">
+                            {u.username
+                              ? `@${u.username}`
+                              : u.name || u.user_id.slice(0, 8)}
+                          </span>
+                          <span className="shrink-0 tabular-nums text-white/40">
+                            joined {fmtDate(u.created_at)} · last run{" "}
+                            {relativeDay(u.last_active)} ·{" "}
+                            {Math.round(u.total_miles)} mi
+                            {u.current_streak > 0 && ` · ${u.current_streak}🔥`}
+                          </span>
+                        </button>
                       </li>
                     ))}
                   </ul>
@@ -189,6 +198,7 @@ const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
  * has no week-4 cell to fill, which is why those read as blank rather than 0.
  */
 function RetentionPanel() {
+  const open = useDrilldown();
   const [r, setR] = useState<Retention | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -222,10 +232,7 @@ function RetentionPanel() {
     );
 
   return (
-    <Card
-      title="Retention by signup week"
-      hint="Share of each week's signups still logging a mile N weeks later. Week 0 is the week they joined."
-    >
+    <Card hint="Share of each week's signups still logging a mile N weeks later. Week 0 is the week they joined. Tap a week to see who joined then.">
       <HeatGrid
         hue={HEAT_HUE}
         rows={r.cohorts.map((c) => ({
@@ -245,6 +252,7 @@ function RetentionPanel() {
           return c.weeks.find((x) => x.week === w)?.pct ?? 0;
         }}
         title={(cohort, week, v) => `${cohort} · ${week}: ${v}% still running`}
+        onRowClick={(cohortKey) => open({ kind: "cohort", id: cohortKey })}
         formatValue={(v) => `${Math.round(v)}%`}
         legend="Each row is a signup week; the label shows its size."
       />
@@ -264,7 +272,7 @@ export function GrowthTab() {
       });
   }, []);
 
-  if (err) return <p className="text-sm text-[#c72554]">{err}</p>;
+  if (err) return <p className="text-sm text-[#d94059]">{err}</p>;
   if (!r) return <Loading />;
 
   const { funnel } = r;
@@ -281,8 +289,12 @@ export function GrowthTab() {
   const unknown = r.by_source.find((s) => s.source === "unknown")?.count ?? 0;
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+    <div className={STACK_SECTIONS}>
+      <Section
+        title="Acquisition"
+        hint="Where people say they came from, answered at onboarding."
+      >
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard label="Total users" value={fmt(funnel.total)} />
         <StatCard
           label="Gave a source"
@@ -302,7 +314,7 @@ export function GrowthTab() {
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-5 lg:grid-cols-2">
         <Card
           title="Where users come from"
           hint="Self-reported at signup. Excludes users who predate the onboarding step."
@@ -315,7 +327,7 @@ export function GrowthTab() {
                 ? `${Math.round((s.count / funnel.gave_source) * 100)}%`
                 : undefined,
             }))}
-            color="#38bdf8"
+            color={WALK_BLUE}
             emptyLabel="No attributed signups yet — data appears as new users pick a source at onboarding."
           />
         </Card>
@@ -328,7 +340,7 @@ export function GrowthTab() {
             items={r.by_goal
               .filter((g) => g.goal !== "unknown")
               .map((g) => ({ label: pretty(g.goal), value: g.count }))}
-            color="#fbbf24"
+            color={MAD_WARNING}
             emptyLabel="No signup goals recorded yet."
           />
         </Card>
@@ -338,14 +350,26 @@ export function GrowthTab() {
             items={r.by_experience
               .filter((e) => e.level !== "unknown")
               .map((e) => ({ label: pretty(e.level), value: e.count }))}
-            color="#a78bfa"
+            color={MAD_SUCCESS}
             emptyLabel="No experience levels recorded yet."
           />
         </Card>
       </div>
+      </Section>
 
-      <ReferralGraphPanel />
-      <RetentionPanel />
+      <Section
+        title="Referrals"
+        hint="There are no referral codes — attribution is the name a new user types at onboarding, resolved against real accounts here."
+      >
+        <ReferralGraphPanel />
+      </Section>
+
+      <Section
+        title="Retention"
+        hint="Whether the people we get stay."
+      >
+        <RetentionPanel />
+      </Section>
     </div>
   );
 }

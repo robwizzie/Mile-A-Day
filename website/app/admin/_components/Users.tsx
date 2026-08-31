@@ -87,7 +87,7 @@ export function UsersTab() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search username, name, or email…"
-            className="w-full max-w-xs rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-white/30 focus:border-[#c72554]/60 focus:outline-none"
+            className="w-full max-w-xs rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-white/30 focus:border-[#d94059]/60 focus:outline-none"
           />
           <SegmentedControl<Sort>
             value={sort}

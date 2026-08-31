@@ -34,6 +34,11 @@ import {
   getActivityRhythms,
   getPulse,
   resetAnalyticsCaches,
+  getDrilldown,
+  DRILLDOWN_KINDS,
+  getTrends,
+  getActivation,
+  getAtRisk,
 } from "../dist/services/adminAnalyticsService.js";
 import { getUsers } from "../dist/services/adminService.js";
 
@@ -75,6 +80,9 @@ async function snapshot() {
     retention: await getRetentionCohorts(),
     rhythms: await getActivityRhythms(),
     pulse: await getPulse(),
+    trends: await getTrends(),
+    activation: await getActivation(),
+    atRisk: await getAtRisk(),
   };
 }
 
@@ -336,6 +344,19 @@ async function main() {
     Number.isFinite(before.community.friends.avg_friends),
   );
   truthy("adoption lists every feature", before.adoption.features.length >= 15);
+  check("trends carry a 30-day axis", before.trends.days.length, 30);
+  truthy(
+    "every trend has a 30-point sparkline aligned to it",
+    before.trends.metrics.every((t) => t.spark.length === 30),
+  );
+  truthy(
+    "a trend with no prior period reports no percentage rather than +100%",
+    before.trends.metrics.every((t) => t.previous > 0 || t.change_pct === null),
+  );
+  truthy(
+    "activation lists every milestone",
+    before.activation.steps.length >= 8,
+  );
   truthy(
     "every retention cell is a real percentage",
     before.retention.cohorts.every((c) =>
@@ -515,6 +536,128 @@ async function main() {
   check("pulse: live competitions", d("pulse.competitions_live"), 2);
   check("pulse: buddy sessions today", d("pulse.buddy_sessions_today"), 1);
   check("pulse: photos today", d("pulse.photos_today"), 3);
+
+  console.log("\n--- activation, trends, at-risk ---");
+  const step = (k) => after.activation.steps.find((x) => x.key === k)?.users;
+  const stepBefore = (k) =>
+    before.activation.steps.find((x) => x.key === k)?.users ?? 0;
+  check("signed up", step("signed_up") - stepBefore("signed_up"), 6);
+  // ALICE (10 days), DAVE (3), CAROL (one hand-entered mile) and BOB, whose
+  // ghost run counts — only his OTHER workout is vehicle-speed excluded.
+  // ERIN and FRANK never ran at all.
+  check(
+    "logged a first mile",
+    step("first_mile") - stepBefore("first_mile"),
+    4,
+  );
+  check(
+    "came back three days",
+    step("three_days") - stepBefore("three_days"),
+    2,
+  );
+  check("added a friend", step("friend") - stepBefore("friend"), 3);
+  check("posted a photo", step("photo") - stepBefore("photo"), 2);
+
+  const milesTrend = after.trends.metrics.find((t) => t.key === "miles");
+  truthy("miles trend has a current window", milesTrend.current > 0);
+  check("its sparkline is 30 days", milesTrend.spark.length, 30);
+  truthy(
+    "and the window total matches the sparkline it draws",
+    Math.abs(
+      milesTrend.spark.reduce((a, b) => a + b, 0) - milesTrend.current,
+    ) < 0.01,
+  );
+
+  // ALICE ran today, so she is not at risk; DAVE ran today too. Nobody
+  // seeded has a streak >= 3 AND a missing day, except ERIN (streak 8, never
+  // ran) — who is on an open injury pause and must therefore be excluded.
+  const atRiskIds = after.atRisk.map((r) => r.user_id);
+  truthy(
+    "an injury-paused user is never called at risk",
+    !atRiskIds.includes(ERIN),
+  );
+  truthy(
+    "somebody who already ran today is not at risk",
+    !atRiskIds.includes(ALICE),
+  );
+
+  const activationDrill = await getDrilldown("activation_step", "photo");
+  truthy(
+    "the activation drill-down lists who has NOT reached the milestone",
+    activationDrill.rows.some((r) => r.user_id === DAVE) &&
+      !activationDrill.rows.some((r) => r.user_id === ALICE),
+  );
+
+  // ── Drill-downs ────────────────────────────────────────────────────
+  // Every panel number is clickable, and the list behind it must agree with
+  // the number that opened it — a drawer that says "3 people" under a bar
+  // reading 5 is worse than no drawer.
+  console.log("\n--- drill-downs ---");
+
+  const dd = (kind, id) => getDrilldown(kind, id ?? null);
+
+  const photoRows = await dd("feature", "photo_post");
+  truthy(
+    "the photo drill-down lists the two photographers",
+    [ALICE, BOB].every((u) => photoRows.rows.some((r) => r.user_id === u)),
+  );
+  truthy(
+    "and not the one whose only photo was deleted",
+    !photoRows.rows.some((r) => r.user_id === CAROL),
+  );
+  check(
+    "its per-user count matches the adoption events",
+    photoRows.rows.find((r) => r.user_id === ALICE)?.stat,
+    "2×",
+  );
+
+  const compRows = await dd("competition", COMPS[0]);
+  check("competition drill-down names it", compRows.title, "Live Clash");
+  check("and lists every invite, accepted or not", compRows.rows.length, 3);
+
+  const tokenRows = await dd("token", "streak_assist");
+  check("assist drill-down finds the rescue", tokenRows.rows.length, 1);
+  check(
+    "and credits the donor by name",
+    tokenRows.rows[0]?.subtitle,
+    `saved by @${ALICE}`,
+  );
+
+  const bucketRows = await dd("streak_bucket", "30–99");
+  truthy(
+    "the 30–99 streak band contains the 40-day streaker",
+    bucketRows.rows.some((r) => r.user_id === DAVE),
+  );
+  truthy(
+    "and not the 12-day one",
+    !bucketRows.rows.some((r) => r.user_id === ALICE),
+  );
+
+  const buddyRows = await dd("buddy_origin", "invite");
+  check("buddy origin drill-down finds the session", buddyRows.rows.length, 1);
+  check("with its crew size", buddyRows.rows[0]?.subtitle, "2 walked · active");
+
+  const typeRows = await dd("workout_type", "running");
+  truthy(
+    "workout-type drill-down excludes the deleted and excluded workouts",
+    typeRows.rows.find((r) => r.user_id === ALICE)?.subtitle === "10 workouts",
+  );
+
+  check("an unknown feature key resolves to nothing", await dd("feature", "nope"), null);
+  check("an unknown streak band resolves to nothing", await dd("streak_bucket", "7"), null);
+  check("an unknown badge resolves to nothing", await dd("badge", "nope"), null);
+
+  // Every declared kind must answer without throwing, including on ids that
+  // match nothing — the drawer opens before it knows there are rows.
+  for (const kind of DRILLDOWN_KINDS) {
+    try {
+      await dd(kind, "definitely-not-a-real-id");
+      console.log(`ok    ${kind} survives an unknown id`);
+    } catch (err) {
+      failures++;
+      console.log(`FAIL  ${kind} threw on an unknown id: ${err.message}`);
+    }
+  }
 
   if (!process.env.KEEP_SEED) await cleanup();
 

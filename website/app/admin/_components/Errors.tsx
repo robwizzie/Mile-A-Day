@@ -28,11 +28,11 @@ type UserErrorRow = {
 // Stable per-category colors; "total" is white. Unknown categories cycle the
 // palette by first-seen order so the legend and lines always agree.
 const CAT_COLORS: Record<string, string> = {
-  push: "#38bdf8",
-  api: "#c72554",
-  auth: "#fbbf24",
+  push: "#4099f2",
+  api: "#d94059",
+  auth: "#ff9900",
 };
-const PALETTE = ["#a78bfa", "#34d399", "#f472b6", "#fb923c", "#60a5fa"];
+const PALETTE = ["#a78bfa", "#33b34d", "#f472b6", "#fb923c", "#60a5fa"];
 function colorFor(cat: string, i: number): string {
   return CAT_COLORS[cat] ?? PALETTE[i % PALETTE.length];
 }
@@ -174,7 +174,7 @@ function ErrorChart({
                 onClick={() => onGroupByChange(g)}
                 className={`rounded-full px-2.5 py-0.5 text-xs ${
                   groupBy === g
-                    ? "bg-[#c72554] text-white"
+                    ? "bg-[#d94059] text-white"
                     : "border border-white/10 text-white/60"
                 }`}
               >
@@ -190,7 +190,7 @@ function ErrorChart({
               onClick={() => onRangeChange(r)}
               className={`rounded-full px-2.5 py-0.5 text-xs ${
                 range === r
-                  ? "bg-[#c72554] text-white"
+                  ? "bg-[#d94059] text-white"
                   : "border border-white/10 text-white/60"
               }`}
             >

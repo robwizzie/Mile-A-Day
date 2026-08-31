@@ -34,6 +34,12 @@ import {
   getRetentionCohorts,
   getActivityRhythms,
   getPulse,
+  getDrilldown,
+  getTrends,
+  getActivation,
+  getAtRisk,
+  DRILLDOWN_KINDS,
+  type DrilldownKind,
 } from "../services/adminAnalyticsService.js";
 import { signMediaUrlsDeep } from "../services/mediaSigningService.js";
 
@@ -333,4 +339,40 @@ export async function activityRhythms(_req: Request, res: Response) {
 
 export async function pulse(_req: Request, res: Response) {
   res.json(await getPulse());
+}
+
+export async function trends(_req: Request, res: Response) {
+  res.json(await getTrends());
+}
+
+export async function activation(_req: Request, res: Response) {
+  res.json(await getActivation());
+}
+
+export async function atRisk(_req: Request, res: Response) {
+  res.json(await getAtRisk());
+}
+
+const DRILLDOWN_KIND_SET = new Set<string>(DRILLDOWN_KINDS);
+
+/**
+ * GET /admin/drilldown?kind=<kind>&id=<id>
+ * The rows behind one dashboard number. `kind` must be one of the whitelisted
+ * set; `id` is free text but every branch binds it as a query parameter or
+ * resolves it against a code-controlled table, so it never reaches the SQL.
+ * An unknown kind or an id that matches nothing is a 404, not an empty 200 —
+ * a drawer that opens on nothing should say so.
+ */
+export async function drilldown(req: Request, res: Response) {
+  const kind = String(req.query.kind ?? "");
+  if (!DRILLDOWN_KIND_SET.has(kind)) {
+    return res.status(400).json({ error: "Unknown drilldown kind" });
+  }
+  const id =
+    typeof req.query.id === "string" && req.query.id.trim()
+      ? req.query.id.trim()
+      : null;
+  const result = await getDrilldown(kind as DrilldownKind, id);
+  if (!result) return res.status(404).json({ error: "Nothing to show" });
+  res.json(result);
 }
