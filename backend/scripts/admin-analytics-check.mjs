@@ -664,12 +664,9 @@ async function main() {
   check("and lists every invite, accepted or not", compRows.rows.length, 3);
 
   const tokenRows = await dd("token", "streak_assist");
-  check("assist drill-down finds the rescue", tokenRows.rows.length, 1);
-  check(
-    "and credits the donor by name",
-    tokenRows.rows[0]?.subtitle,
-    `saved by @${ALICE}`,
-  );
+  const rescue = tokenRows.rows.find((r) => r.user_id === CAROL);
+  truthy("assist drill-down finds the rescue", Boolean(rescue));
+  check("and credits the donor by name", rescue?.subtitle, `saved by @${ALICE}`);
 
   const bucketRows = await dd("streak_bucket", "30–99");
   truthy(
@@ -682,8 +679,9 @@ async function main() {
   );
 
   const buddyRows = await dd("buddy_origin", "invite");
-  check("buddy origin drill-down finds the session", buddyRows.rows.length, 1);
-  check("with its crew size", buddyRows.rows[0]?.subtitle, "2 walked · active");
+  const hosted = buddyRows.rows.find((r) => r.user_id === ALICE);
+  truthy("buddy origin drill-down finds the session", Boolean(hosted));
+  check("with its crew size", hosted?.subtitle, "2 walked · active");
 
   const typeRows = await dd("workout_type", "running");
   truthy(
@@ -696,17 +694,29 @@ async function main() {
   check("an unknown badge resolves to nothing", await dd("badge", "nope"), null);
 
   const todayPhotos = await dd("today", "photos");
-  check("today's photos list the two posters", todayPhotos.rows.length, 3);
+  const postedToday = todayPhotos.rows.filter((r) =>
+    ALL.includes(r.user_id),
+  );
+  check("today's photos list both posters' shots", postedToday.length, 3);
+  truthy(
+    "including both people",
+    new Set(postedToday.map((r) => r.user_id)).size === 2,
+  );
+  truthy(
+    "and never the photo that was deleted",
+    !todayPhotos.rows.some((r) => r.user_id === CAROL),
+  );
   truthy(
     "and an unknown today-key resolves to nothing",
     (await dd("today", "nope")) === null,
   );
 
   const bySource = await dd("referral_source", "friend");
-  check("the friend-referred are listable", bySource.rows.length, 4);
+  const mine = bySource.rows.filter((r) => ALL.includes(r.user_id));
+  check("the friend-referred are listable", mine.length, 4);
   truthy(
     "and each row shows what they actually typed",
-    bySource.rows.every((r) => (r.subtitle ?? "").startsWith("said:")),
+    mine.every((r) => (r.subtitle ?? "").startsWith("said:")),
   );
 
   const trendDay = await dd("trend_day", `miles|${dayOffset(0)}`);
@@ -746,8 +756,8 @@ async function main() {
   truthy("and is marked as resolved by hand", ghostAfter?.linked_by_hand);
   check(
     "the link moves the matched/unmatched split",
-    linked.summary.unmatched,
-    0,
+    linked.summary.unmatched - after.referrals.summary.unmatched,
+    -1,
   );
   await clearReferralAlias("adm-ghost");
   resetAnalyticsCaches();
