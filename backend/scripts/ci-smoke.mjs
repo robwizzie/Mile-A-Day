@@ -161,6 +161,13 @@ async function seed() {
 
 const post = await seed();
 assert.ok(post?.post_id, "createPost returned a post row");
+// The created-post projection ships the author's own route like every other
+// post-shaped read (CREATED_POST_SELECT → AUTHOR_ROUTE_SQL, $1 = the author).
+assert.equal(
+  post.route?.length,
+  3,
+  "createPost returns the author's route on the created row",
+);
 
 // Unified feed as Alice: must include Bob's photo post AND his GPS route.
 const feed = await getUnifiedFeed(ALICE, 20, null);
@@ -237,6 +244,20 @@ const posts = await getUserPosts(ALICE, BOB, 20, null);
 assert.ok(
   posts.some((p) => p.post_id === post.post_id),
   "Bob's post shows on his profile grid",
+);
+// The grid must carry the SAME route the feed does. It used to be feed-only
+// (POST_SELECT had no route column), so one post drew its map in the feed and
+// the routeless card when opened from a profile.
+assert.equal(
+  posts.find((p) => p.post_id === post.post_id)?.route?.length,
+  3,
+  "a friend gets the author's route on the profile grid (same as the feed)",
+);
+assert.equal(
+  (await getUserPosts(BOB, BOB, 20, null)).find((p) => p.post_id === post.post_id)
+    ?.route?.length,
+  3,
+  "the owner gets their own route on their profile grid",
 );
 
 // Tagged tab (getUserTaggedPosts): caption @mentions use exact-token matching,
@@ -940,6 +961,20 @@ assert.equal(
   (await getRecentWorkouts(BOB, 10, BOB))[0].has_route,
   true,
   "share_route_maps=false still reports the route to the owner",
+);
+// The profile grid honours the same consent as the feed: withheld from
+// friends, never from the owner.
+assert.equal(
+  (await getUserPosts(ALICE, BOB, 20, null)).find((p) => p.post_id === post.post_id)
+    ?.route,
+  null,
+  "share_route_maps=false withholds the author's route from the profile grid",
+);
+assert.equal(
+  (await getUserPosts(BOB, BOB, 20, null)).find((p) => p.post_id === post.post_id)
+    ?.route?.length,
+  3,
+  "share_route_maps=false still gives the owner their grid route",
 );
 // A missing viewer is a stranger, not a free pass.
 assert.equal(

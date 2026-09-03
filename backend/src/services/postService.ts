@@ -152,6 +152,9 @@ export interface PostRow {
   created_at: string;
   is_auto: boolean;
   include_route: boolean;
+  // Additive: the author's simplified route (AUTHOR_ROUTE_SQL), null when
+  // withheld/absent. Every post-shaped read ships it now, not just the feed.
+  route?: number[][] | null;
   workout_type: string | null;
   is_self: boolean;
   is_hyped: boolean;
@@ -240,9 +243,13 @@ const URL_SAFE_CURSOR = (col: string) =>
   `to_char((${col}) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') || 'Z'`;
 
 // Base post columns shared by every post-shaped read (viewer-independent).
-// Routes are deliberately NOT here — only the unified feed ships them (the
-// story viewer / memories / profile grid never render a route map, and the
-// jsonb payload is not free).
+// The AUTHOR's route is not here because this fragment has no viewer
+// placeholder; it rides POST_SELECT (AUTHOR_ROUTE_SQL, `$1` = viewer) so every
+// post-shaped read that already ships the CREW's routes (COAUTHOR_COLUMNS →
+// CREW_ROUTE_SQL) ships the author's too. It used to be feed-only: the same
+// post drew its map in the feed and the routeless card on the profile grid,
+// and a buddy post opened from the grid drew everyone's line except the
+// poster's own.
 const POST_COLUMNS = `
 	p.post_id,
 	p.user_id,
@@ -626,11 +633,33 @@ const COAUTHOR_COLUMNS = `
 	CASE WHEN p.coauthor_user_id = $1
 		THEN COALESCE(p.coauthor_on_feed, TRUE) END AS coauthor_on_feed`;
 
+/**
+ * The AUTHOR's own simplified route, gated exactly like the unified feed's
+ * post arm: the per-post `include_route` choice, never on an auto post (its
+ * media IS the baked card), and the author's global share_route_maps consent
+ * — owner exempt. `$1` must be the viewer. NULL when withheld or absent, which
+ * shipped clients already render as the routeless card.
+ */
+const AUTHOR_ROUTE_SQL = `(
+	SELECT wr.route FROM workout_routes wr
+	WHERE p.include_route AND NOT p.is_auto
+		AND (
+			COALESCE(
+				(SELECT ns.share_route_maps FROM notification_settings ns
+				  WHERE ns.user_id = p.user_id),
+				true
+			)
+			OR p.user_id = $1
+		)
+		AND wr.workout_id = p.workout_id
+)`;
+
 // SELECT list shared by feed + story-detail reads so both shapes match PostRow.
-// `$1` must be the viewer id (drives is_self / is_hyped).
+// `$1` must be the viewer id (drives is_self / is_hyped / the author's route).
 // is_hyped is exact-card state so a different same-day mile doesn't disable
 // the button; hype_count still uses the broader run tally for social proof.
 const POST_SELECT = `${POST_COLUMNS},
+	${AUTHOR_ROUTE_SQL} AS route,
 	(p.user_id = $1) AS is_self,
 	EXISTS (
 		SELECT 1 FROM hype_log h
@@ -686,9 +715,11 @@ export interface CreatePostInput {
   postedLive?: boolean;
 }
 
-// Shape the freshly inserted/updated row like a PostRow (is_self=true).
+// Shape the freshly inserted/updated row like a PostRow (is_self=true). `$1`
+// is the author here, so AUTHOR_ROUTE_SQL's owner exemption holds.
 const CREATED_POST_SELECT = `
 	SELECT ${POST_COLUMNS},
+		${AUTHOR_ROUTE_SQL} AS route,
 		true AS is_self, false AS is_hyped, 0 AS hype_count, 0 AS comment_count,
 		${COAUTHOR_COLUMNS}`;
 
