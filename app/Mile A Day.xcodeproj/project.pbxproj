@@ -673,7 +673,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.watchkitapp";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -708,7 +708,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.watchkitapp";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -728,7 +728,7 @@
 				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = NS237SS5KD;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day-Watch-Watch-AppTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -748,7 +748,7 @@
 				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = NS237SS5KD;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day-Watch-Watch-AppTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -767,7 +767,7 @@
 				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = NS237SS5KD;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day-Watch-Watch-AppUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -786,7 +786,7 @@
 				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = NS237SS5KD;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day-Watch-Watch-AppUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -816,7 +816,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.MileADayWidgets";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -844,7 +844,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.MileADayWidgets";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -999,7 +999,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1030,7 +1030,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1048,7 +1048,7 @@
 				DEVELOPMENT_TEAM = NS237SS5KD;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-DayTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -1067,7 +1067,7 @@
 				DEVELOPMENT_TEAM = NS237SS5KD;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-DayTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -1084,7 +1084,7 @@
 				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = NS237SS5KD;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-DayUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -1101,7 +1101,7 @@
 				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = NS237SS5KD;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.2.04;
+				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-DayUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
