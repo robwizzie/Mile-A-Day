@@ -715,11 +715,12 @@ export async function historyController(
       );
       session.photos = gated
         .filter((photo) => !!photo.media_url)
-        .map(({ post_id, user_id, media_url, caption }) => ({
+        .map(({ post_id, user_id, media_url, caption, is_crew }) => ({
           post_id,
           user_id,
           media_url: media_url ?? "",
           caption,
+          is_crew: is_crew === true,
         }));
     }
 

@@ -831,6 +831,15 @@ struct FriendWorkout: Codable, Identifiable {
     let exclusionReason: String?
     /// The owner's own answer, which outranks detection: "count" / "exclude".
     let duplicateDecision: String?
+    /// May the viewer launch this run's flyover (owner's flyover_visibility)?
+    /// Optional: absent from older servers ⇒ offered, today's behaviour.
+    /// `var` + default so hand-built instances (ProfileView's own-workout
+    /// bridge) don't need to state it.
+    var flyoverAllowed: Bool? = nil
+    /// OWNER-ONLY: recorded in Stealth Mode (route withheld for good). Friends
+    /// always receive false; nil = older server. `var` + default for the same
+    /// hand-built-instance reason as `flyoverAllowed`.
+    var stealth: Bool? = nil
 
     var isManualOrEdited: Bool {
         source == "manual" || source == "edited"
@@ -851,6 +860,8 @@ struct FriendWorkout: Codable, Identifiable {
         case sourceBundleId = "source_bundle_id"
         case exclusionReason = "exclusion_reason"
         case duplicateDecision = "duplicate_decision"
+        case flyoverAllowed = "flyover_allowed"
+        case stealth
     }
 
     var formattedDate: String {

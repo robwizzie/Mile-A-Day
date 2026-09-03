@@ -20,6 +20,25 @@ struct ProfilePostsGridView: View {
     /// Which grid is showing: the user's own posts, or posts they're tagged
     /// in (accepted collabs + caption @mentions) — Instagram's two profile tabs.
     private enum GridSection { case posts, tagged }
+    private enum ReaderSource: String {
+        case posts, pinned, stories, tagged
+    }
+    private struct ProfilePostReader: Identifiable {
+        let source: ReaderSource
+        let postId: String
+        var id: String { "\(source.rawValue):\(postId)" }
+    }
+    private enum FullScreenDestination: Identifiable {
+        case postReader(ProfilePostReader)
+        case highlight(PostHighlight)
+
+        var id: String {
+            switch self {
+            case .postReader(let reader): return "post-reader:\(reader.id)"
+            case .highlight(let highlight): return "highlight:\(highlight.highlight_id)"
+            }
+        }
+    }
     @State private var section: GridSection = .posts
 
     @State private var posts: [PostItem] = []
@@ -35,9 +54,7 @@ struct ProfilePostsGridView: View {
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var loaded = false
-    @State private var selectedPost: PostItem?
-    @State private var selectedPinnedPost: PostItem?
-    @State private var selectedStoryPost: PostItem?
+    @State private var fullScreenDestination: FullScreenDestination?
     @State private var addingToFeedIds: Set<String> = []
     @State private var addToFeedError: String?
     @State private var pinError: String?
@@ -55,7 +72,6 @@ struct ProfilePostsGridView: View {
     // Highlights rail.
     @State private var highlights: [PostHighlight] = []
     @State private var highlightsLoaded = false
-    @State private var openHighlight: PostHighlight?
     @State private var editingHighlight: HighlightEditorTarget?
 
     // Tagged grid — loaded lazily the first time the section is opened.
@@ -64,7 +80,6 @@ struct ProfilePostsGridView: View {
     @State private var isTaggedLoading = false
     @State private var isTaggedLoadingMore = false
     @State private var taggedLoaded = false
-    @State private var selectedTaggedPost: PostItem?
 
     private var columns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: 4), count: layout.columns)
@@ -93,66 +108,18 @@ struct ProfilePostsGridView: View {
             }
             if !highlightsLoaded { await loadHighlights() }
         }
-        // The "Tagged posts on my grid" switch lives in Settings, which is
-        // pushed FROM here — so popping back lands on a grid that's still
-        // alive and still holding the tags the user just turned off. Without
-        // this the setting reads as broken at the exact moment it's used.
+        // Profile-grid switches live in Settings, which is pushed FROM here —
+        // so popping back lands on a grid that's still alive and still holding
+        // whatever the user just hid. Without this the setting reads as broken
+        // at the exact moment it's used.
         .onReceive(NotificationCenter.default.publisher(
-            for: NSNotification.Name("MAD_TaggedPostsOnProfileChanged")
+            for: NSNotification.Name("MAD_ProfileGridSettingsChanged")
         )) { _ in
             guard isSelf else { return }
             Task { await load() }
         }
-        .sheet(item: $selectedPost) { post in
-            PostDetailView(
-                title: isSelf ? "Your Posts" : "Posts",
-                posts: $posts,
-                initialPostId: post.post_id,
-                onNeedMore: { Task { await loadMore() } },
-                // This list IS a profile grid, so a collab hidden from the
-                // viewer's grid has to leave it. Only on their OWN profile —
-                // someone else's grid isn't theirs to curate.
-                dropsCollabsHiddenFromProfile: isSelf
-            )
-        }
-        // Pins are their own array, so they need their own detail sheet or a
-        // tap would open the wrong post — `initialPostId` can only find a post
-        // that's actually in the list it was handed.
-        .sheet(item: $selectedPinnedPost) { post in
-            PostDetailView(
-                title: isSelf ? "Your Posts" : "Posts",
-                posts: $pinnedPosts,
-                initialPostId: post.post_id,
-                onNeedMore: {},
-                dropsCollabsHiddenFromProfile: isSelf
-            )
-        }
-        .sheet(item: $selectedStoryPost) { post in
-            PostDetailView(
-                title: "Your Stories",
-                posts: $storyPosts,
-                initialPostId: post.post_id,
-                onNeedMore: {}
-            )
-        }
-        .sheet(item: $selectedTaggedPost) { post in
-            // Tagged posts belong to OTHER authors — let taps on their names
-            // (and @mentions) open profiles from inside the sheet.
-            PostDetailView(
-                title: "Tagged",
-                posts: $taggedPosts,
-                initialPostId: post.post_id,
-                onNeedMore: { Task { await loadMoreTagged() } },
-                showsAuthorProfiles: true
-            )
-        }
-        .fullScreenCover(item: $openHighlight) { highlight in
-            HighlightViewerView(
-                highlight: highlight,
-                isSelf: isSelf,
-                onEdit: { editingHighlight = .existing(highlight) },
-                onChanged: { Task { await loadHighlights() } }
-            )
+        .fullScreenCover(item: $fullScreenDestination) { destination in
+            fullScreenView(destination)
         }
         .sheet(item: $editingHighlight) { target in
             HighlightEditorView(userId: userId, target: target) {
@@ -229,7 +196,7 @@ struct ProfilePostsGridView: View {
     private func highlightCircle(_ highlight: PostHighlight) -> some View {
         Button {
             MADHaptics.tap()
-            openHighlight = highlight
+            fullScreenDestination = .highlight(highlight)
         } label: {
             VStack(spacing: 6) {
                 AsyncImage(url: highlight.coverURL) { phase in
@@ -399,7 +366,7 @@ struct ProfilePostsGridView: View {
                 if !posts.isEmpty {
                     LazyVGrid(columns: columns, spacing: 4) {
                         ForEach(posts) { post in
-                            gridThumbnail(post) { selectedPost = post }
+                            gridThumbnail(post) { openReader(.posts, post) }
                                 .onAppear {
                                     if post.id == posts.last?.id { Task { await loadMore() } }
                                 }
@@ -429,7 +396,7 @@ struct ProfilePostsGridView: View {
 
             LazyVGrid(columns: columns, spacing: 4) {
                 ForEach(pinnedPosts) { post in
-                    gridThumbnail(post) { selectedPinnedPost = post }
+                    gridThumbnail(post) { openReader(.pinned, post) }
                 }
             }
         }
@@ -450,7 +417,7 @@ struct ProfilePostsGridView: View {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
                 LazyVGrid(columns: columns, spacing: 4) {
                     ForEach(taggedPosts) { post in
-                        gridThumbnail(post) { selectedTaggedPost = post }
+                        gridThumbnail(post) { openReader(.tagged, post) }
                             .onAppear {
                                 if post.id == taggedPosts.last?.id {
                                     Task { await loadMoreTagged() }
@@ -514,7 +481,7 @@ struct ProfilePostsGridView: View {
 
     private func storyCard(_ post: PostItem) -> some View {
         VStack(spacing: 6) {
-            Button { selectedStoryPost = post } label: {
+            Button { openReader(.stories, post) } label: {
                 AsyncImage(url: post.mediaURL) { phase in
                     switch phase {
                     case .success(let image): image.resizable().scaledToFill()
@@ -620,6 +587,71 @@ struct ProfilePostsGridView: View {
     }
 
     // MARK: - Thumbnail
+
+    @ViewBuilder
+    private func fullScreenView(_ destination: FullScreenDestination) -> some View {
+        switch destination {
+        case .postReader(let reader):
+            postReaderView(reader)
+        case .highlight(let highlight):
+            HighlightViewerView(
+                highlight: highlight,
+                isSelf: isSelf,
+                onEdit: { editingHighlight = .existing(highlight) },
+                onChanged: { Task { await loadHighlights() } }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func postReaderView(_ reader: ProfilePostReader) -> some View {
+        switch reader.source {
+        case .posts:
+            PostDetailView(
+                title: isSelf ? "Your Posts" : "Posts",
+                posts: $posts,
+                initialPostId: reader.postId,
+                onNeedMore: { Task { await loadMore() } },
+                // This list IS a profile grid, so a collab hidden from the
+                // viewer's grid has to leave it. Only on their OWN profile —
+                // someone else's grid isn't theirs to curate.
+                dropsCollabsHiddenFromProfile: isSelf
+            )
+        case .pinned:
+            // Pins are their own array, so they need their own reader branch or
+            // a tap would open the wrong post — `initialPostId` can only find a
+            // post that's actually in the list it was handed.
+            PostDetailView(
+                title: isSelf ? "Your Posts" : "Posts",
+                posts: $pinnedPosts,
+                initialPostId: reader.postId,
+                onNeedMore: {},
+                dropsCollabsHiddenFromProfile: isSelf
+            )
+        case .stories:
+            PostDetailView(
+                title: "Your Stories",
+                posts: $storyPosts,
+                initialPostId: reader.postId,
+                onNeedMore: {}
+            )
+        case .tagged:
+            // Tagged posts belong to OTHER authors — let taps on their names
+            // (and @mentions) open profiles from inside the full-screen reader.
+            PostDetailView(
+                title: "Tagged",
+                posts: $taggedPosts,
+                initialPostId: reader.postId,
+                onNeedMore: { Task { await loadMoreTagged() } },
+                showsAuthorProfiles: true
+            )
+        }
+    }
+
+    private func openReader(_ source: ReaderSource, _ post: PostItem) {
+        MADHaptics.tap()
+        fullScreenDestination = .postReader(ProfilePostReader(source: source, postId: post.post_id))
+    }
 
     private func thumbnail(_ post: PostItem) -> some View {
         // The real picture leads when the run has one; the workout card is only

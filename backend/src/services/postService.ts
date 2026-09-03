@@ -152,6 +152,9 @@ export interface PostRow {
   created_at: string;
   is_auto: boolean;
   include_route: boolean;
+  // Additive: the author's simplified route (AUTHOR_ROUTE_SQL), null when
+  // withheld/absent. Every post-shaped read ships it now, not just the feed.
+  route?: number[][] | null;
   workout_type: string | null;
   is_self: boolean;
   is_hyped: boolean;
@@ -240,9 +243,15 @@ const URL_SAFE_CURSOR = (col: string) =>
   `to_char((${col}) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') || 'Z'`;
 
 // Base post columns shared by every post-shaped read (viewer-independent).
-// Routes are deliberately NOT here — only the unified feed ships them (the
-// story viewer / memories / profile grid never render a route map, and the
-// jsonb payload is not free).
+// The AUTHOR's route is not here because this fragment has no viewer
+// placeholder; it rides POST_SELECT (AUTHOR_ROUTE_SQL, `$1` = viewer) so every
+// post-shaped read that already ships the CREW's routes (COAUTHOR_COLUMNS →
+// CREW_ROUTE_SQL) ships the author's too. It used to be feed-only, and the
+// profile grid's detail drew a buddy post with everyone's line except the
+// poster's own. Stealth Mode needs no predicate on either path: a workout
+// recorded in stealth has NO workout_routes row at all (enforced at write —
+// workoutService's conditional route insert + stealthService), so both
+// resolve to NULL by construction.
 const POST_COLUMNS = `
 	p.post_id,
 	p.user_id,
@@ -478,6 +487,9 @@ const BLOCKED_VS_MULTI_COAUTHOR = `EXISTS (
  *
  * Falls back to `post_coauthors.workout_id` when the post carries one (the
  * legacy accept path stamps it), so this is not buddy-only.
+ *
+ * A crew member's Stealth Mode walk has no workout_routes row (enforced at
+ * write), so it resolves to NULL here with no predicate — do not add one.
  */
 const CREW_ROUTE_SQL = `(
 	SELECT wr.route FROM workout_routes wr
@@ -626,11 +638,33 @@ const COAUTHOR_COLUMNS = `
 	CASE WHEN p.coauthor_user_id = $1
 		THEN COALESCE(p.coauthor_on_feed, TRUE) END AS coauthor_on_feed`;
 
+/**
+ * The AUTHOR's own simplified route, gated exactly like the unified feed's
+ * post arm: the per-post `include_route` choice, never on an auto post (its
+ * media IS the baked card), and the author's global share_route_maps consent
+ * — owner exempt. `$1` must be the viewer. NULL when withheld or absent, which
+ * shipped clients already render as the routeless card.
+ */
+const AUTHOR_ROUTE_SQL = `(
+	SELECT wr.route FROM workout_routes wr
+	WHERE p.include_route AND NOT p.is_auto
+		AND (
+			COALESCE(
+				(SELECT ns.share_route_maps FROM notification_settings ns
+				  WHERE ns.user_id = p.user_id),
+				true
+			)
+			OR p.user_id = $1
+		)
+		AND wr.workout_id = p.workout_id
+)`;
+
 // SELECT list shared by feed + story-detail reads so both shapes match PostRow.
-// `$1` must be the viewer id (drives is_self / is_hyped).
+// `$1` must be the viewer id (drives is_self / is_hyped / the author's route).
 // is_hyped is exact-card state so a different same-day mile doesn't disable
 // the button; hype_count still uses the broader run tally for social proof.
 const POST_SELECT = `${POST_COLUMNS},
+	${AUTHOR_ROUTE_SQL} AS route,
 	(p.user_id = $1) AS is_self,
 	EXISTS (
 		SELECT 1 FROM hype_log h
@@ -686,9 +720,11 @@ export interface CreatePostInput {
   postedLive?: boolean;
 }
 
-// Shape the freshly inserted/updated row like a PostRow (is_self=true).
+// Shape the freshly inserted/updated row like a PostRow (is_self=true). `$1`
+// is the author here, so AUTHOR_ROUTE_SQL's owner exemption holds.
 const CREATED_POST_SELECT = `
 	SELECT ${POST_COLUMNS},
+		${AUTHOR_ROUTE_SQL} AS route,
 		true AS is_self, false AS is_hyped, 0 AS hype_count, 0 AS comment_count,
 		${COAUTHOR_COLUMNS}`;
 
@@ -1778,6 +1814,9 @@ export interface FeedEntryRow {
   // Entry/linked workout's feed_role — display framing only ('daily_mile'
   // = goal-completing entry, 'extra' = post-goal bonus). Never summed.
   feed_role: string | null;
+  // Additive: HealthKit's indoor flag — null on older rows/clients means
+  // "unknown", never "outdoor".
+  is_indoor: boolean | null;
   distance: number | null;
   total_duration: number | null;
   // Moving-time display-pace divisor (rollup-aware); null on rows without it.
@@ -1792,7 +1831,27 @@ export interface FeedEntryRow {
   segments: FeedSegment[] | null;
   // Simplified GPS trace for the entry's workout, when synced (and, for
   // posts, when the author chose to include it).
-  route: [number, number][] | null;
+  route: number[][] | null;
+  // Additive: the entry's per-mile splits, so indoor cards can draw a pace
+  // wave. Pace/time only — no location — hence no share_route_maps gate (the
+  // same figures are already public via stats_snapshot). Null when absent, on
+  // stitched rollups (the anchor's splits describe only the LAST leg of the
+  // combined mile), and on auto posts (their media already IS the baked card).
+  splits:
+    | {
+        split_number: number;
+        split_duration: number;
+        split_distance: number | null;
+        split_pace: number | null;
+      }[]
+    | null;
+  // Additive: may the viewer launch this entry's flyover (owner always;
+  // friends when the author's flyover_visibility permits).
+  flyover_allowed: boolean | null;
+  // Additive, OWNER-ONLY: the entry's workout was recorded in Stealth Mode
+  // (its route withheld forever). Always false for other viewers — to them it
+  // must read exactly like share_route_maps=off.
+  stealth: boolean;
   // shared
   is_self: boolean;
   is_hyped: boolean;
@@ -1873,6 +1932,16 @@ const FEED_ENTRY_PROJECTION = `
 			page.workout_id,
 			-- Populated for posts (via their linked workout) and workouts alike.
 			wt.workout_type,
+			-- Additive: HealthKit's indoor flag, for the card's indoor/outdoor
+			-- chip. NULL = unknown (older rows) — clients make no claim then;
+			-- routeless alone must never be read as "indoor" (privacy also
+			-- blanks routes).
+			wt.is_indoor,
+			-- Additive, OWNER-ONLY: recorded in Stealth Mode. A stealth workout has
+			-- no workout_routes row (enforced at write), so the route arms below
+			-- are clean by construction; this flag only lets the OWNER's own card
+			-- say why there's no map. Friends always get false.
+			(page.owner_id = $1 AND COALESCE(wt.stealth, false)) AS stealth,
 			-- Additive, DISPLAY-ONLY: lets clients frame the entry against the
 			-- day's goal ('daily_mile' = the goal-completing entry, 'extra' =
 			-- post-goal bonus miles shown as "+0.14 mi extra" instead of a
@@ -1929,6 +1998,58 @@ const FEED_ENTRY_PROJECTION = `
 						AND wr.workout_id = wt.workout_id
 				)
 			END AS route,
+			-- Additive: per-mile splits for the entry's workout, so indoor cards
+			-- can draw a pace wave. Same arm structure as \`route\` above, but NO
+			-- share_route_maps gate — splits are pace/time, not location, and the
+			-- same figures are already public via stats_snapshot. Withheld on
+			-- stitched rollups for BOTH kinds (post stats are restated to the
+			-- day's rollup too, and the anchor's splits describe only the LAST
+			-- leg of the combined mile) and on auto posts (their media already
+			-- IS the baked card). The withholds live in the CASE conditions,
+			-- not inside the subqueries, so Postgres skips the idx_splits_workout
+			-- probe entirely for rows that would return NULL anyway — auto posts
+			-- are the feed's most common card. Inner LIMIT caps a pathological
+			-- workout.
+			CASE
+				WHEN page.kind = 'post' AND NOT p.is_auto
+					AND COALESCE(roll.segment_count, 1) <= 1 THEN (
+					SELECT jsonb_agg(jsonb_build_object(
+						'split_number', s.split_number,
+						'split_duration', s.split_duration,
+						'split_distance', s.split_distance,
+						'split_pace', s.split_pace
+					) ORDER BY s.split_number)
+					FROM (
+						SELECT ws.* FROM workout_splits ws
+						WHERE ws.workout_id = p.workout_id
+						ORDER BY ws.split_number
+						LIMIT 30
+					) s
+				)
+				WHEN page.kind <> 'post'
+					AND COALESCE(roll.segment_count, 1) <= 1 THEN (
+					SELECT jsonb_agg(jsonb_build_object(
+						'split_number', s.split_number,
+						'split_duration', s.split_duration,
+						'split_distance', s.split_distance,
+						'split_pace', s.split_pace
+					) ORDER BY s.split_number)
+					FROM (
+						SELECT ws.* FROM workout_splits ws
+						WHERE ws.workout_id = wt.workout_id
+						ORDER BY ws.split_number
+						LIMIT 30
+					) s
+				)
+			END AS splits,
+			-- Additive: may the VIEWER launch the cinematic flyover of this
+			-- entry's route? Owner always; friends when the author's
+			-- flyover_visibility allows (default 'friends'). Courtesy gate —
+			-- the coords themselves are still governed by share_route_maps
+			-- above; this only decides whether the guided tour is offered.
+			(page.owner_id = $1
+				OR COALESCE(nsp.flyover_visibility, 'friends') = 'friends')
+				AS flyover_allowed,
 			(page.owner_id = $1) AS is_self,
 			-- Unified RUN rule: a post/workout linked to a run counts the run's
 			-- 'mile' hypes (inbox / friends list) AND 'post' hypes on any linked
@@ -2421,6 +2542,16 @@ export function parseUserPostsFilter(raw: unknown): UserPostsFilter {
   return raw === "photos" || raw === "auto" || raw === "collabs" ? raw : "all";
 }
 
+const AUTO_POST_HAS_PROFILE_PHOTO = `EXISTS (
+						SELECT 1 FROM posts psp
+						WHERE p.workout_id IS NOT NULL
+							AND psp.workout_id = p.workout_id
+							AND psp.user_id = p.user_id
+							AND psp.post_id <> p.post_id
+							AND psp.deleted_at IS NULL
+							AND psp.share_to_story AND NOT psp.share_to_feed
+					)`;
+
 /**
  * Everything a post must satisfy to appear on `$2`'s profile grid as read by
  * viewer `$1`, minus the cursor bound and the ordering.
@@ -2464,6 +2595,14 @@ const userGridWhere = (
 							AND pf.deleted_at IS NULL
 					)
 				)
+			)
+			AND (
+				NOT p.is_auto
+				OR ${AUTO_POST_HAS_PROFILE_PHOTO}
+				OR COALESCE((
+					SELECT ns.auto_posts_on_profile FROM notification_settings ns
+					WHERE ns.user_id = p.user_id
+				), TRUE)
 			)
 			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL(author, viewer)}
 			-- Collab rows surface the PRIMARY author's content on the coauthor's
@@ -2515,8 +2654,7 @@ export async function getUserPosts(
     sort === "oldest"
       ? `($3::timestamptz IS NULL OR p.created_at > $3::timestamptz)`
       : `($3::timestamptz IS NULL OR p.created_at < $3::timestamptz)`;
-  const orderBy =
-    sort === "oldest" ? "p.created_at ASC" : "p.created_at DESC";
+  const orderBy = sort === "oldest" ? "p.created_at ASC" : "p.created_at DESC";
 
   // No CIRCLE_CTE here: a profile read is exactly where `workout_visibility`
   // decides who gets in, and a hardcoded circle join would have made 'public'
@@ -2987,14 +3125,18 @@ export interface BuddySessionPhoto {
   caption: string | null;
   local_date: string | null;
   is_auto: boolean;
+  /** A crew member's own slide on the shared post, not the lead photo. */
+  is_crew: boolean;
   /** Set by lockUnearnedPhotos when today's photo is withheld. */
   photo_locked?: boolean;
 }
 
 /**
- * Photos from the given buddy sessions that `viewerId` may see, at most
- * `perSession` each (oldest first — the first photo posted is the one everyone
- * recognises as "the" picture from that walk).
+ * Photos from the given buddy sessions that `viewerId` may see: at most
+ * `perSession` POSTS each (oldest first — the first photo posted is the one
+ * everyone recognises as "the" picture from that walk), and with each post
+ * every crew member's own slide (post_coauthors.media_url), so a four-person
+ * walk's history carries all four pictures, not just the poster's.
  *
  * Sign media urls before responding.
  */
@@ -3028,12 +3170,62 @@ export async function buddySessionPhotos(
 			JOIN posts p ON p.post_id = l.post_id
 		)
 		SELECT buddy_session_id, post_id, user_id, media_url, caption, local_date,
-					 is_auto
-		FROM ranked
-		WHERE rn <= $3
-		ORDER BY buddy_session_id, rn`,
+					 is_auto, is_crew
+		FROM (
+			SELECT r.buddy_session_id, r.post_id, r.user_id, r.media_url, r.caption,
+						 r.local_date, r.is_auto, FALSE AS is_crew, r.rn, 0 AS slot,
+						 NULL::timestamptz AS slide_at
+			FROM ranked r
+			WHERE r.rn <= $3
+			UNION ALL
+			-- The crew's own slides ride with their post: same access guard (the
+			-- post is what was authorized), one row per credited person who
+			-- added a picture.
+			SELECT r.buddy_session_id, r.post_id, pcc.user_id, pcc.media_url,
+						 NULL::text AS caption, r.local_date, FALSE AS is_auto,
+						 TRUE AS is_crew, r.rn, 1 AS slot, pcc.created_at AS slide_at
+			FROM ranked r
+			JOIN post_coauthors pcc ON pcc.post_id = r.post_id
+			WHERE r.rn <= $3
+				AND pcc.status = 'accepted'
+				AND pcc.media_url IS NOT NULL AND pcc.media_url <> ''
+		) all_photos
+		ORDER BY buddy_session_id, rn, slot, slide_at NULLS FIRST`,
     [viewerId, ids, Math.min(Math.max(perSession, 1), 10)],
   );
+}
+
+/**
+ * The shared post standing for each of the given buddy sessions, for the
+ * viewer who may SEE it — the batched, visibility-gated sibling of
+ * `buddySessionPost` (which answers "is this walk posted" to any participant
+ * with no content). The history screen opens this post as the walk itself:
+ * it carries everyone's photo and everyone's route, so a walk with a post
+ * needs no second read for either. Earliest post per session, same tie-break
+ * as the photo loader.
+ */
+export async function buddySessionPostIds(
+  viewerId: string,
+  sessionIds: string[],
+): Promise<Map<string, string>> {
+  const ids = sessionIds.filter((id) => /^[0-9a-f]{1,32}$/i.test(id));
+  if (ids.length === 0) return new Map();
+  const rows = await db.query<{ buddy_session_id: string; post_id: string }>(
+    `WITH linked AS (
+			SELECT DISTINCT COALESCE(p.buddy_session_id, pcb.buddy_session_id) AS buddy_session_id,
+						 p.post_id, p.created_at
+			FROM posts p
+			LEFT JOIN post_coauthors pcb
+				ON pcb.post_id = p.post_id AND pcb.buddy_session_id = ANY($2::text[])
+			WHERE (p.buddy_session_id = ANY($2::text[]) OR pcb.buddy_session_id = ANY($2::text[]))
+				AND ${DIRECT_POST_ACCESS_SQL}
+		)
+		SELECT DISTINCT ON (buddy_session_id) buddy_session_id, post_id
+		FROM linked
+		ORDER BY buddy_session_id, created_at ASC`,
+    [viewerId, ids],
+  );
+  return new Map(rows.map((r) => [r.buddy_session_id, r.post_id]));
 }
 
 /**

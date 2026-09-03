@@ -29,6 +29,7 @@ import {
   buddySessionPhotos,
   buddySessionPost,
   type BuddySessionPost,
+  buddySessionPostIds,
 } from "./postService.js";
 
 const db = PostgresService.getInstance();
@@ -1986,9 +1987,10 @@ export async function getBuddyHistory(
   if (rows.length === 0) return { sessions: [], next_before: null };
 
   const sessionIds = rows.map((r) => r.id);
-  const [participants, photos] = await Promise.all([
+  const [participants, photos, postIds] = await Promise.all([
     loadHistoryParticipants(userId, sessionIds),
     buddySessionPhotos(userId, sessionIds),
+    buddySessionPostIds(userId, sessionIds),
   ]);
 
   const bySession = new Map<string, BuddyHistoryParticipant[]>();
@@ -2003,6 +2005,12 @@ export async function getBuddyHistory(
       duration_seconds: Number(p.duration_seconds) || 0,
       place: p.place,
       is_host: p.is_host === true,
+      workout_id: p.workout_id ?? null,
+      final_distance_miles:
+        p.final_distance_miles === null || p.final_distance_miles === undefined
+          ? null
+          : Number(p.final_distance_miles),
+      has_route: p.has_route === true,
     });
     bySession.set(p.session_id, list);
   }
@@ -2015,6 +2023,7 @@ export async function getBuddyHistory(
       user_id: photo.user_id,
       media_url: photo.media_url,
       caption: photo.caption,
+      is_crew: photo.is_crew === true,
     });
     photosBySession.set(photo.buddy_session_id, list);
   }
@@ -2034,6 +2043,7 @@ export async function getBuddyHistory(
     my_place: row.my_place,
     participants: bySession.get(row.id) ?? [],
     photos: photosBySession.get(row.id) ?? [],
+    post_id: postIds.get(row.id) ?? null,
     cursor: row.cursor,
   }));
 
@@ -2060,6 +2070,16 @@ async function loadHistoryParticipants(
               AS distance_miles,
             p.duration_seconds, p.place,
             (p.user_id = s.host_user_id) AS is_host,
+            p.workout_id,
+            ROUND(p.final_distance_miles::numeric, 3)::float AS final_distance_miles,
+            -- A trace exists AND the owner shares maps (the viewer's own always
+            -- counts). A stealth walk has no workout_routes row, so it reads
+            -- exactly like maps-off here — the rule every route read keeps.
+            (p.workout_id IS NOT NULL
+              AND EXISTS (SELECT 1 FROM workout_routes wr WHERE wr.workout_id = p.workout_id)
+              AND (p.user_id = $1 OR COALESCE(
+                    (SELECT ns.share_route_maps FROM notification_settings ns
+                      WHERE ns.user_id = p.user_id), TRUE))) AS has_route,
             CASE WHEN vis.ok THEN u.username END AS username,
             CASE WHEN vis.ok THEN u.first_name END AS first_name,
             CASE WHEN vis.ok THEN u.profile_image_url END AS profile_image_url

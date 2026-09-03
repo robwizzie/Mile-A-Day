@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreLocation
 
 /// "Walks Together" on your own profile — the front door to the buddy history.
 ///
@@ -23,6 +24,12 @@ struct BuddyWalksSection: View {
     @State private var totals: BuddyHistoryTotals?
     @State private var isLoading = true
     @State private var showHistory = false
+    /// A tile's walk — opens the same detail the history's cards open.
+    @State private var detailWalk: BuddyWalkRecord?
+    /// Route thumbnails for tiles without a picture, keyed by walk id — read
+    /// off the walk's post (the poster's line, else the first crew line), one
+    /// fetch per tile that needs it, three tiles at most.
+    @State private var tileRoutes: [String: [CLLocationCoordinate2D]] = [:]
 
     private var viewerId: String? { buddy.currentUserId }
 
@@ -33,61 +40,53 @@ struct BuddyWalksSection: View {
     }
 
     var body: some View {
+        // ONE card with the label inside it, like every other Activity block —
+        // the label used to float above a card of its own, which read as a
+        // stray heading next to Hall of Streaks and Last 7 Days.
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             header
 
             if isLoading {
                 ProgressView()
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, MADTheme.Spacing.lg)
+                    .padding(.vertical, MADTheme.Spacing.md)
             } else if walks.isEmpty {
                 pitch
             } else {
-                Button {
-                    MADHaptics.tap()
-                    showHistory = true
-                } label: {
-                    VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                        tileStrip
+                VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                    // Each tile is ITS walk; the line under them is the archive.
+                    tileStrip
+                    Button {
+                        MADHaptics.tap()
+                        showHistory = true
+                    } label: {
                         summaryLine
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                     }
-                    .padding(MADTheme.Spacing.md)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(
-                            cornerRadius: MADTheme.CornerRadius.large,
-                            style: .continuous
-                        )
-                        .fill(MADTheme.Colors.madWhite.opacity(0.06))
-                    )
-                    .overlay(
-                        RoundedRectangle(
-                            cornerRadius: MADTheme.CornerRadius.large,
-                            style: .continuous
-                        )
-                        .strokeBorder(MADTheme.Colors.madWhite.opacity(0.10), lineWidth: 1)
-                    )
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
+        .padding(MADTheme.Spacing.md)
+        .profileCard()
         .task { await load() }
         .sheet(isPresented: $showHistory) {
             BuddyWalksHistoryView()
         }
+        // Its own node — a second `.sheet` on the one above would be dropped.
+        .background(
+            Color.clear.sheet(item: $detailWalk) { walk in
+                BuddyWalkDetailView(walk: walk)
+            }
+        )
     }
 
     // MARK: - Pieces
 
     private var header: some View {
         HStack(spacing: MADTheme.Spacing.sm) {
-            Image(systemName: "figure.2")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(MADTheme.Colors.madWhite)
-            Text("Walks Together")
-                .font(MADTheme.Typography.headline)
-                .foregroundStyle(MADTheme.Colors.madWhite)
+            ProfileCardLabel(text: "WALKS TOGETHER")
             Spacer()
             if !walks.isEmpty {
                 Button {
@@ -111,14 +110,31 @@ struct BuddyWalksSection: View {
     /// mode's crest when there isn't. This is the whole reason the section is
     /// worth a slot — a strip of pictures from walks you took with people is
     /// the thing that gets tapped.
+    /// Tiles at the feed's 4:5, side-scrolling so three of them can never be
+    /// squeezed by a narrow screen — a squeezed HStack crops whatever is in
+    /// it, which is how the pictures were getting cut off.
     private var tileStrip: some View {
-        HStack(spacing: MADTheme.Spacing.sm) {
-            ForEach(walks.prefix(3)) { walk in
-                tile(walk)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(walks.prefix(3)) { walk in
+                    Button {
+                        MADHaptics.tap()
+                        detailWalk = walk
+                    } label: {
+                        tile(walk)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(walk.crewText(excluding: viewerId)), \(walk.dayText)")
+                }
             }
-            Spacer(minLength: 0)
+            .padding(.horizontal, 1)
         }
+        // Sideways inside a vertical scroll: must not be able to widen the page.
+        .frame(maxWidth: .infinity)
     }
+
+    /// 4:5, like a feed slide, so a photo is cropped no harder here than there.
+    private static let tileSize = CGSize(width: 108, height: 135)
 
     private func tile(_ walk: BuddyWalkRecord) -> some View {
         ZStack {
@@ -127,9 +143,20 @@ struct BuddyWalksSection: View {
 
             if let photo = walk.photos.first {
                 BuddyHistoryTileImage(url: photo.url)
+            } else if let coords = tileRoutes[walk.id] {
+                // The walk's actual line, the way the feed draws it.
+                RouteArtView(
+                    coordinates: coords,
+                    routeColor: walk.accentColor,
+                    showsMileMarkers: false,
+                    paletteDate: walk.startedAtDate
+                )
+                .allowsHitTesting(false)
             } else {
                 VStack(spacing: 4) {
-                    Image(systemName: walk.mode.icon)
+                    // A walk with a map but no picture wears the map glyph, so
+                    // the tile promises what the tap delivers.
+                    Image(systemName: walk.hasAnyRoute ? "map.fill" : walk.mode.icon)
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(walk.accentColor)
                     Text("\(walk.groupDistanceMiles.milesText) mi")
@@ -139,7 +166,20 @@ struct BuddyWalksSection: View {
                 }
             }
         }
-        .frame(width: 76, height: 76)
+        .frame(width: Self.tileSize.width, height: Self.tileSize.height)
+        .overlay(alignment: .topTrailing) {
+            // More pictures inside than the one on the tile.
+            if walk.photos.count > 1 {
+                Text("\(walk.photos.count)")
+                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(MADTheme.Colors.madWhite)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.black.opacity(0.5)))
+                    .padding(4)
+            }
+        }
         .clipShape(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
         .overlay(alignment: .bottomLeading) {
@@ -213,14 +253,7 @@ struct BuddyWalksSection: View {
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.35))
             }
-            .padding(MADTheme.Spacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(
-                    cornerRadius: MADTheme.CornerRadius.large, style: .continuous
-                )
-                .fill(MADTheme.Colors.madWhite.opacity(0.06))
-            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -233,12 +266,28 @@ struct BuddyWalksSection: View {
             let response = try await buddy.loadHistory(limit: 3)
             walks = response.sessions
             totals = response.totals
+            await loadTileRoutes()
         } catch {
             // Silent, and keeps whatever we had: this is a nice-to-have panel
             // and blanking it on a blip would make a real history look lost.
             print("[BuddyWalksSection] load failed: \(error)")
         }
         isLoading = false
+    }
+
+    /// A tile with no picture shows its route instead — from the post, which
+    /// carries everyone's line in one read. Walks nobody posted keep the crest.
+    private func loadTileRoutes() async {
+        for walk in walks.prefix(3) where walk.photos.isEmpty && tileRoutes[walk.id] == nil {
+            guard let postId = walk.postId,
+                  let entry = try? await PostService.fetchPost(postId: postId),
+                  let item = entry.asPostItem() else { continue }
+            let coords = item.routeCoordinates
+                ?? item.acceptedCoauthors.compactMap(\.routeCoordinates).first
+            if let coords, coords.count >= 2 {
+                tileRoutes[walk.id] = coords
+            }
+        }
     }
 }
 

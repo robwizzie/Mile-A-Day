@@ -1,9 +1,13 @@
-import { Workout } from "../types/workouts.js";
+import { Workout, RoutePoint} from "../types/workouts.js";
 import {
   MIN_PLAUSIBLE_MILE_SECONDS,
   MAX_PLAUSIBLE_MILE_SECONDS,
 } from "./mileTime.js";
 import { PostgresService } from "./DbService.js";
+import {
+  stealthOverlapSql,
+  stealthRouteCleanupStatement,
+} from "./stealthService.js";
 import { VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL } from "./visibilityService.js";
 import {
   coverageActiveFor,
@@ -125,9 +129,21 @@ export async function uploadWorkouts(
         source,
         source_bundle_id,
         exclusion_reason,
-        speed_flagged
+        speed_flagged,
+        is_indoor,
+        stealth
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+        -- Stealth: what the client asserted OR what the server's own window
+        -- log says about [start, end] ($8 = device_end_date, $10 =
+        -- total_duration). NULLIF keeps "not stealth" as NULL, matching
+        -- is_indoor's absent-value convention.
+        NULLIF(
+          COALESCE($20::boolean, false)
+          OR ${stealthOverlapSql("$1", "$8", "$10")},
+          false
+        )
+      )
       ON CONFLICT (workout_id)
       DO UPDATE SET
         distance = CASE
@@ -166,7 +182,17 @@ export async function uploadWorkouts(
         -- Recompute the speed classification from the latest figures, but never
         -- clear a user soft-delete (deleted_at is intentionally not updated here).
         exclusion_reason = EXCLUDED.exclusion_reason,
-        speed_flagged = EXCLUDED.speed_flagged
+        speed_flagged = EXCLUDED.speed_flagged,
+        -- COALESCE: a re-push that doesn't carry the flag (route backfill,
+        -- older client, recalibrate) must not erase a recorded answer.
+        is_indoor = COALESCE(EXCLUDED.is_indoor, workouts.is_indoor),
+        -- STICKY: only ever false→true. A walk recorded in stealth stays
+        -- location-hidden forever, whatever a later re-upload says.
+        stealth = CASE
+          WHEN COALESCE(workouts.stealth, false) OR COALESCE(EXCLUDED.stealth, false)
+          THEN true
+          ELSE workouts.stealth
+        END
       WHERE workouts.user_id = $1
       RETURNING workout_id, (xmax = 0) AS inserted
     `;
@@ -181,9 +207,21 @@ export async function uploadWorkouts(
 			split_pace = EXCLUDED.split_pace
       `;
 
+  // INVARIANT: a stealth workout never gets a workout_routes row. The stamp
+  // was written by the statement above in the SAME transaction/connection, so
+  // this subquery sees it — an older client (or a route backfill) re-sending
+  // the trace of a walk recorded in stealth is refused right here, and every
+  // route-serving read stays clean without a stealth predicate of its own.
   const routeQuery = `
         INSERT INTO workout_routes (workout_id, route, point_count, updated_at)
-        VALUES ($1, $2::jsonb, $3, NOW())
+        -- Explicit casts: in an INSERT … SELECT, an uncast select-list param
+        -- resolves to text, which then conflicts with the varchar column the
+        -- WHERE below compares $1 against ("inconsistent types deduced").
+        SELECT $1::varchar, $2::jsonb, $3::integer, NOW()
+        WHERE NOT COALESCE(
+          (SELECT w.stealth FROM workouts w WHERE w.workout_id = $1),
+          false
+        )
         ON CONFLICT (workout_id)
         DO UPDATE SET
 			route = EXCLUDED.route,
@@ -231,6 +269,9 @@ export async function uploadWorkouts(
             : null,
           speed.exclusionReason,
           speed.speedFlagged,
+          typeof workout.isIndoor === "boolean" ? workout.isIndoor : null,
+          // Stealth is only ever asserted, never denied, from the client.
+          workout.stealth === true ? true : null,
         ],
       },
       ...workout.splits.map((split) => ({
@@ -267,6 +308,14 @@ export async function uploadWorkouts(
       ...duplicateExclusionStatements(userId, localDate),
       ...feedRoleStatements(userId, localDate),
     ]),
+    // LAST, after dedupe: duplicateExclusionStatements ranks survivors by
+    // has_route, so a route must not vanish under it mid-pass. This removes a
+    // route row that pre-dates the workout becoming stealth (a backdated
+    // window, or a re-push the conditional insert above left untouched).
+    stealthRouteCleanupStatement(
+      userId,
+      workouts.map((w) => w.workoutId),
+    ),
   ]);
 
   return workouts.map((w) => w.workoutId);
@@ -281,9 +330,9 @@ const MAX_ROUTE_POINTS = 300;
  * anything that isn't a plausible [[lat, lng], ...] polyline with >= 2 points.
  * Coordinates are rounded to 5 decimals (~1m) and long traces are downsampled.
  */
-function sanitizeRoute(route: unknown): [number, number][] | null {
+function sanitizeRoute(route: unknown): RoutePoint[] | null {
   if (!Array.isArray(route) || route.length < 2) return null;
-  const points: [number, number][] = [];
+  const points: RoutePoint[] = [];
   for (const p of route) {
     if (!Array.isArray(p) || p.length < 2) return null;
     const lat = Number(p[0]);
@@ -296,14 +345,26 @@ function sanitizeRoute(route: unknown): [number, number][] | null {
     ) {
       return null;
     }
-    points.push([
-      Math.round(lat * 100000) / 100000,
-      Math.round(lng * 100000) / 100000,
-    ]);
+    // Optional third element: altitude in meters (newer clients). Kept when
+    // sane, dropped otherwise — elevation is groundwork, never a reason to
+    // reject a route. Bounds cover Death Valley to Everest with margin.
+    const alt = p.length >= 3 ? Number(p[2]) : NaN;
+    if (Number.isFinite(alt) && alt > -500 && alt < 9500) {
+      points.push([
+        Math.round(lat * 100000) / 100000,
+        Math.round(lng * 100000) / 100000,
+        Math.round(alt * 10) / 10,
+      ]);
+    } else {
+      points.push([
+        Math.round(lat * 100000) / 100000,
+        Math.round(lng * 100000) / 100000,
+      ]);
+    }
   }
   if (points.length <= MAX_ROUTE_POINTS) return points;
   const stride = (points.length - 1) / (MAX_ROUTE_POINTS - 1);
-  const sampled: [number, number][] = [];
+  const sampled: RoutePoint[] = [];
   for (let i = 0; i < MAX_ROUTE_POINTS; i++) {
     sampled.push(points[Math.round(i * stride)]);
   }
@@ -1156,6 +1217,11 @@ export async function getRecentWorkouts(
 		-- and it already shows auto-excluded ones for the same reason. Visitors
 		-- on someone else's profile get the same view as the feed.
 		AND ($1 = $3 OR feed_role IN ('daily_mile', 'extra'))
+		-- workout_visibility gates the LIST itself, not just routes/photos:
+		-- 'friends' (the default) means a stranger who searched you up gets an
+		-- empty list, not your training log. Same predicate the feed and posts
+		-- use — visibility + friendship + blocks, owner always exempt.
+		AND ($1 = $3 OR ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$1", "$3")})
 		ORDER BY device_end_date DESC
 		LIMIT $2
 	),
@@ -1191,6 +1257,22 @@ export async function getRecentWorkouts(
 			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$1", "$3")},
 			false
 		) AS has_photo,
+		-- Additive: may the viewer launch this run's flyover (owner always;
+		-- friends when flyover_visibility permits — default 'friends').
+		COALESCE(
+			$1 = $3
+			OR COALESCE(
+				(SELECT nsf.flyover_visibility FROM notification_settings nsf
+					WHERE nsf.user_id = $1),
+				'friends'
+			) = 'friends',
+			false
+		) AS flyover_allowed,
+		-- Additive, OWNER-ONLY: was this walk recorded in Stealth Mode? Friends
+		-- always read false — to them a stealth walk must be indistinguishable
+		-- from share_route_maps=off (no route row exists either way). Trailing
+		-- column shadows r.*'s raw value, like the rollup columns below.
+		COALESCE($1 = $3 AND COALESCE(r.stealth, false), false) AS stealth,
 		-- Restate a day's 'daily_mile' anchor with the whole day's rollup, exactly
 		-- like every other read surface (getUnifiedFeed, getFriendsWorkoutFeed in
 		-- friendshipService.ts). The anchor is the leg that CROSSED the mile and
@@ -1254,8 +1336,8 @@ export async function getWorkoutRoute(
   userId: string,
   workoutId: string,
   viewerId: string,
-): Promise<[number, number][] | null> {
-  const rows = await db.query<{ route: [number, number][] | null }>(
+): Promise<RoutePoint[] | null> {
+  const rows = await db.query<{ route: RoutePoint[] | null }>(
     `SELECT wr.route
 		 FROM workouts w
 		 LEFT JOIN notification_settings ns ON ns.user_id = w.user_id

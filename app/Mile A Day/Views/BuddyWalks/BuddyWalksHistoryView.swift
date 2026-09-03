@@ -59,8 +59,11 @@ struct BuddyWalksHistoryView: View {
     /// `.task(id:)`, so changing it IS the reload.
     @State private var filterUserId: String?
 
-    @State private var recapSessionId: String?
-    @State private var photoPostId: String?
+    /// The walk being viewed. ONE destination for every tap on a card — the
+    /// photo used to open the post and the details the recap, and "why does
+    /// the top of the card go somewhere different from the bottom" was the
+    /// first thing anyone asked.
+    @State private var detailWalk: BuddyWalkRecord?
     /// The walk a "Remove from my history" tap is waiting on confirmation for.
     @State private var pendingRemoval: BuddyWalkRecord?
     @State private var removalError: String?
@@ -114,30 +117,9 @@ struct BuddyWalksHistoryView: View {
             // screen works as a first stop on a cold launch.
             await buddy.loadPartners()
         }
-        .sheet(
-            isPresented: Binding(
-                get: { recapSessionId != nil },
-                set: { if !$0 { recapSessionId = nil } }
-            )
-        ) {
-            if let recapSessionId {
-                BuddyRecapView(sessionId: recapSessionId)
-            }
+        .sheet(item: $detailWalk) { walk in
+            BuddyWalkDetailView(walk: walk, onWalkAgain: { startWalk(with: $0) })
         }
-        // Attached to a DIFFERENT node than the recap sheet: two `.sheet`
-        // modifiers on one node makes SwiftUI silently drop one (ios.md).
-        .background(
-            Color.clear.sheet(
-                isPresented: Binding(
-                    get: { photoPostId != nil },
-                    set: { if !$0 { photoPostId = nil } }
-                )
-            ) {
-                if let photoPostId {
-                    PostDetailLoaderView(postId: photoPostId)
-                }
-            }
-        )
         // The `presenting:` overload, not the plain one: SwiftUI clears
         // `isPresented` as part of handling the tap, so an action closure that
         // read `pendingRemoval` back could find it already nil and silently do
@@ -464,8 +446,8 @@ struct BuddyWalksHistoryView: View {
 
     private func walkCard(_ walk: BuddyWalkRecord) -> some View {
         VStack(spacing: 0) {
-            if let photo = walk.photos.first {
-                photoHero(photo, walk: walk)
+            if !walk.photos.isEmpty {
+                photoHero(walk)
             }
             walkDetails(walk)
         }
@@ -494,7 +476,7 @@ struct BuddyWalksHistoryView: View {
         // walks that meant something, dragging the one number this screen asks
         // people to trust. In a context menu rather than a visible button
         // because it is rare and destructive, and the whole card is already the
-        // tap target for the recap.
+        // tap target for the walk.
         .contextMenu {
             Button(role: .destructive) {
                 MADHaptics.tap()
@@ -505,34 +487,59 @@ struct BuddyWalksHistoryView: View {
         }
     }
 
-    /// The photo from that walk, big. Tapping it opens the post itself (where
-    /// the rest of the pictures, the caption and the hypes live); tapping
-    /// anywhere else on the card opens the recap.
-    private func photoHero(_ photo: BuddyWalkPhoto, walk: BuddyWalkRecord) -> some View {
+    /// Every picture from that walk — the poster's and each crew member's —
+    /// as a swipeable strip, big. Tapping any of them opens the walk, the
+    /// same place the details below open.
+    private func photoHero(_ walk: BuddyWalkRecord) -> some View {
+        Group {
+            if walk.photos.count > 1 {
+                TabView {
+                    ForEach(walk.photos) { photo in
+                        photoPage(photo, walk: walk)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .always))
+                .indexViewStyle(.page(backgroundDisplayMode: .interactive))
+            } else if let photo = walk.photos.first {
+                photoPage(photo, walk: walk)
+            }
+        }
+        // Sized exactly the way the feed sizes a slide (ZoomablePhotoSlide)
+        // — `maxWidth: .infinity` then the feed's own 4:5, so a photo is
+        // cropped no harder here than on the feed (the 4:3 this used to be
+        // lopped the top and bottom off every portrait shot). The card's
+        // height comes from its width, so a column of cards stays even.
+        .frame(maxWidth: .infinity)
+        .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        .clipped()
+    }
+
+    private func photoPage(_ photo: BuddyWalkPhoto, walk: BuddyWalkRecord) -> some View {
         Button {
             MADHaptics.tap()
-            photoPostId = photo.postId
+            detailWalk = walk
         } label: {
-            // Sized exactly the way the feed sizes a slide (ZoomablePhotoSlide)
-            // — `maxWidth: .infinity` then a FIXED aspect ratio, so the card's
-            // height comes from the card's width and not from whatever shape
-            // the photo happens to be. A column of walk cards each a different
-            // height reads as a jumble; the photo is cropped to fill either way.
             BuddyHistoryPhotoView(url: photo.url)
                 .frame(maxWidth: .infinity)
-                .aspectRatio(4.0 / 3.0, contentMode: .fit)
+                .aspectRatio(4.0 / 5.0, contentMode: .fit)
                 .clipped()
-                .overlay(alignment: .topTrailing) {
-                    if walk.photos.count > 1 {
-                        Text("1/\(walk.photos.count)")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(MADTheme.Colors.madWhite)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(Color.black.opacity(0.45)))
-                            .padding(10)
-                            .allowsHitTesting(false)
+                .overlay(alignment: .bottomLeading) {
+                    // Whose picture this is — on a strip that can hold four
+                    // people's photos, the question every page raises.
+                    if let owner = walk.participants.first(where: { $0.userId == photo.userId }) {
+                        HStack(spacing: 5) {
+                            AvatarView(name: owner.displayName, imageURL: owner.profileImageUrl, size: 18)
+                            Text(owner.userId == viewerId ? "You" : owner.displayName)
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundStyle(MADTheme.Colors.madWhite)
+                                .lineLimit(1)
+                        }
+                        .padding(.leading, 5)
+                        .padding(.trailing, 9)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Color.black.opacity(0.45)))
+                        .padding(10)
+                        .allowsHitTesting(false)
                     }
                 }
                 .contentShape(Rectangle())
@@ -543,7 +550,7 @@ struct BuddyWalksHistoryView: View {
     private func walkDetails(_ walk: BuddyWalkRecord) -> some View {
         Button {
             MADHaptics.tap()
-            recapSessionId = walk.id
+            detailWalk = walk
         } label: {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 HStack(spacing: MADTheme.Spacing.md) {
@@ -578,9 +585,17 @@ struct BuddyWalksHistoryView: View {
                             .font(.system(size: 18, weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(walk.accentColor)
-                        Text("together")
-                            .font(MADTheme.Typography.caption)
-                            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.45))
+                        // Says what the tap opens when there is no photo to
+                        // promise it: the map is in there.
+                        HStack(spacing: 3) {
+                            if walk.hasAnyRoute || walk.postId != nil {
+                                Image(systemName: "map.fill")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            Text("together")
+                                .font(MADTheme.Typography.caption)
+                        }
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.45))
                     }
                 }
 

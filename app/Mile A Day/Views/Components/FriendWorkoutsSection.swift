@@ -20,26 +20,17 @@ struct FriendWorkoutsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            // Section Header
+            // Section Header — the same caps label every profile card wears.
             HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: "figure.run.circle.fill")
-                    .font(.title3)
-                    .foregroundColor(MADTheme.Colors.madRed)
-                Text("Recent Workouts")
-                    .font(MADTheme.Typography.title3)
-                    .foregroundColor(MADTheme.Colors.primaryText)
+                ProfileCardLabel(text: "RECENT WORKOUTS")
                 Spacer()
                 Text("\(workouts.count)")
-                    .font(MADTheme.Typography.smallBold)
-                    .foregroundColor(MADTheme.Colors.secondaryText)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule()
-                            .fill(Color.white.opacity(0.08))
-                    )
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.white.opacity(0.08)))
             }
-            .padding(.top, MADTheme.Spacing.md)
 
             // Workouts List
             VStack(spacing: MADTheme.Spacing.sm) {
@@ -58,10 +49,9 @@ struct FriendWorkoutsSection: View {
                     }
                 }
             }
-            .padding(.bottom, MADTheme.Spacing.md)
         }
-        .padding(.horizontal, MADTheme.Spacing.md)
-        .madLiquidGlass()
+        .padding(MADTheme.Spacing.md)
+        .profileCard()
     }
 }
 

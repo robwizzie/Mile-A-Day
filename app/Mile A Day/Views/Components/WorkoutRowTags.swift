@@ -38,17 +38,23 @@ struct WorkoutRowTags: View {
     var source: WorkoutSource = .healthkit
     var hasRoute: Bool = false
     var hasPhoto: Bool = false
+    /// Recorded in Stealth Mode — the OWNER-only reason there's no Route chip
+    /// (friends never receive it, so their rows read as plain routeless).
+    var isStealth: Bool = false
     /// Accent for the Route chip — the workout's own type color.
     var routeColor: Color
 
     private var isManualOrEdited: Bool { source == .manual || source == .edited }
 
     var body: some View {
-        if isManualOrEdited || hasRoute || hasPhoto {
+        if isManualOrEdited || hasRoute || hasPhoto || isStealth {
             HStack(spacing: 6) {
                 ManualWorkoutBadge(source: source)
-                if hasRoute {
+                if hasRoute && !isStealth {
                     WorkoutTagChip(icon: "map.fill", label: "Route", color: routeColor)
+                }
+                if isStealth {
+                    WorkoutTagChip(icon: "eye.slash.fill", label: "Stealth", color: .gray)
                 }
                 if hasPhoto {
                     WorkoutTagChip(icon: "photo.fill", label: "Photo", color: .pink)

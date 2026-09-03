@@ -24,6 +24,17 @@ struct WorkoutDetailView: View {
     /// floating copy on demand (same mechanism as the feed cards).
     @State private var routeSnapshot: RouteMapSnapshot?
     @State private var isLoadingRoute = false
+    /// Route Art is the default face; this flips to the real Apple map — the
+    /// one place geography is offered is the detail sheet, on request.
+    @State private var showRealMap = false
+    /// Item-based flyover launch (fullScreenCover rule in ios.md).
+    @State private var flyoverLaunch: FlyoverLaunch?
+    /// "Your 23rd time on this route — 2nd fastest" — RouteMatcher over the
+    /// user's own stored routes, ranked by local WorkoutIndex durations.
+    @State private var routeStats: RouteMatcher.RouteStats?
+    /// The route card's laid-out size, captured so the art zoom composite can
+    /// match its aspect exactly (the map path derives it from the snapshot).
+    @State private var routeArtSize: CGSize = .zero
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
     @State private var deleteError: String?
@@ -97,22 +108,46 @@ struct WorkoutDetailView: View {
         MADTheme.workoutColor(workout.workoutActivityType.madTypeKey)
     }
 
-    /// Floating zoom copy for the route map, composed on demand at pinch-begin
-    /// from the retained snapshot (a bare route — no stats band, unlike the feed
-    /// card). Returns nil until the snapshot has landed.
+    /// Floating zoom copy for the route card, composed on demand at
+    /// pinch-begin (a bare route — no stats band, unlike the feed card).
+    /// Follows whichever face is showing: the art canvas by default, the real
+    /// map (from its retained snapshot) when toggled.
     private func routeZoomComposite() -> UIImage? {
-        guard let snapshot = routeSnapshot,
-              let coords = routeCoordinates, coords.count >= 2 else { return nil }
-        return WorkoutRouteMapView.zoomComposite(
-            snapshot: snapshot,
+        guard let coords = routeCoordinates, coords.count >= 2 else { return nil }
+        if showRealMap {
+            guard let snapshot = routeSnapshot else { return nil }
+            return WorkoutRouteMapView.zoomComposite(
+                snapshot: snapshot,
+                coordinates: coords,
+                routeColor: workoutColor,
+                // Derived from the card's own aspect so the lift is a pure
+                // upscale — a fixed size that didn't match would crop the route.
+                size: WorkoutRouteMapView.zoomSize(for: snapshot, targetWidth: 900)
+            ) {
+                EmptyView()
+            }
+        }
+        let size = routeArtSize.width > 1
+            ? CGSize(width: 900, height: (900 * routeArtSize.height / routeArtSize.width).rounded())
+            : CGSize(width: 900, height: 650)
+        return RouteArtView.zoomComposite(
             coordinates: coords,
             routeColor: workoutColor,
-            // Derived from the card's own aspect so the lift is a pure
-            // upscale — a fixed size that didn't match would crop the route.
-            size: WorkoutRouteMapView.zoomSize(for: snapshot, targetWidth: 900)
+            authorAvatar: ownerAvatar,
+            underlay: routeSnapshot,
+            paletteDate: workout.endDate,
+            size: size
         ) {
             EmptyView()
         }
+    }
+
+    /// This sheet only ever shows the current user's own workouts.
+    private var ownerAvatar: RouteArtAvatar {
+        RouteArtAvatar(
+            name: UserManager.shared.currentUser.name,
+            imageURL: UserManager.shared.currentUser.profileImageUrl
+        )
     }
 
     private var distanceMiles: Double {
@@ -261,7 +296,9 @@ struct WorkoutDetailView: View {
     /// endpoint doesn't ship routes).
     private var displayLinkedPost: PostItem? {
         guard var post = linkedPost else { return nil }
-        if post.route == nil, let coords = routeCoordinates, coords.count >= 2 {
+        // Never for a stealth walk: the injected route would feed the card's
+        // route slide and its Share chip — the exact leak Stealth exists for.
+        if post.route == nil, !isStealthWorkout, let coords = routeCoordinates, coords.count >= 2 {
             post.route = coords.map { [$0.latitude, $0.longitude] }
         }
         return post
@@ -663,7 +700,8 @@ struct WorkoutDetailView: View {
             dateText: correctedEndTime.formattedDate,
             source: workoutSource,
             hasRoute: heroHasRoute,
-            hasPhoto: heroHasPhoto
+            hasPhoto: heroHasPhoto,
+            isStealth: isStealthWorkout
         ) {
             // Vehicle-speed warning — surfaces a likely drive so the user can remove it.
             if vehicleSuspicion != .none {
@@ -674,6 +712,13 @@ struct WorkoutDetailView: View {
             // change your mind back would be to remember you'd changed it.
             countingControl
         }
+    }
+
+    /// Recorded in Stealth Mode (metadata, a per-workout hide, or a window
+    /// overlap). The owner still sees their own map below; nothing here may
+    /// offer it onward.
+    private var isStealthWorkout: Bool {
+        StealthModeStore.shared.isStealth(workout)
     }
 
     /// Does this run have a drawable GPS trace (drives the hero "Route" tag).
@@ -829,26 +874,88 @@ struct WorkoutDetailView: View {
     private var routeMapSection: some View {
         if let routeCoordinates, !routeCoordinates.isEmpty {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                sectionHeader("map.fill", "Route")
+                HStack {
+                    sectionHeader("map.fill", "Route")
+                    Spacer()
+                    flyoverPill
+                    routeFaceToggle
+                }
 
-                WorkoutRouteMapView(
-                    coordinates: routeCoordinates,
-                    routeColor: workoutColor,
-                    onSnapshot: { routeSnapshot = $0 }
-                )
+                Group {
+                    if showRealMap {
+                        WorkoutRouteMapView(
+                            coordinates: routeCoordinates,
+                            routeColor: workoutColor,
+                            onSnapshot: { routeSnapshot = $0 }
+                        )
+                    } else {
+                        RouteArtView(
+                            coordinates: routeCoordinates,
+                            routeColor: workoutColor,
+                            authorAvatar: ownerAvatar,
+                            // Same region + size as the map face's snapshot, so
+                            // ONE cached value serves both faces' zooms.
+                            onSnapshot: { routeSnapshot = $0 },
+                            paletteDate: workout.endDate
+                        )
+                    }
+                }
                 .frame(height: 260)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { routeArtSize = geo.size }
+                            .onChange(of: geo.size) { _, newSize in routeArtSize = newSize }
+                    }
+                )
                 .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
                 )
                 // Pinch to zoom the route, same as the feed cards. The floating
-                // copy is composed on demand from the retained snapshot — nothing
-                // heavy is baked up front.
+                // copy is composed on demand — nothing heavy is baked up front.
                 .instagramZoomable(imageProvider: { routeZoomComposite() })
+
+                // Route recognition: the habit made visible, ranked when the
+                // local index can time the repeats. A first time needs no
+                // banner; a fastest-yet earns the trophy.
+                if let stats = routeStats, stats.count >= 2 {
+                    HStack(spacing: 6) {
+                        let isPR = stats.rank == 1 && stats.ranked >= 2
+                        Image(systemName: isPR ? "trophy.fill" : "arrow.triangle.2.circlepath")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(isPR
+                                ? Color(red: 1.0, green: 0.84, blue: 0.35) : workoutColor)
+                        Text(routeStatsText(stats))
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.75))
+                    }
+                }
+
+                // Retroactive Stealth for this one walk. Disappears once hidden
+                // (isStealthWorkout flips via the store's hidden ids).
+                if !isStealthWorkout {
+                    StealthHideRouteButton(workoutId: workout.uuid.uuidString)
+                }
             }
             .padding(MADTheme.Spacing.md)
             .madLiquidGlass()
+            .fullScreenCover(item: $flyoverLaunch) { launch in
+                RouteFlyoverPlayerView(launch: launch)
+            }
+            // `routeCoordinates` is the if-let-shadowed non-optional here.
+            .task(id: routeCoordinates.count) {
+                // A stealth walk isn't in the server library, so "your Nth
+                // time" would be off by one — say nothing.
+                guard routeCoordinates.count >= 2, routeStats == nil, !isStealthWorkout else { return }
+                routeStats = await RouteMatcher.routeStats(
+                    for: routeCoordinates,
+                    workoutId: workoutId,
+                    currentDuration: workout.duration,
+                    durationFor: { healthManager.workoutRecord(forUUID: $0)?.duration }
+                )
+            }
         } else if isLoadingRoute {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
                 sectionHeader("map.fill", "Route")
@@ -865,6 +972,56 @@ struct WorkoutDetailView: View {
             .padding(MADTheme.Spacing.md)
             .madLiquidGlass()
         }
+    }
+
+    private var flyoverPill: some View {
+        FlyoverChipButton(accent: workoutColor) {
+            guard let coords = routeCoordinates, coords.count >= 2 else { return }
+            flyoverLaunch = FlyoverLaunch(
+                coordinates: coords,
+                workoutType: workout.workoutActivityType.madTypeKey,
+                stats: nil,
+                author: ownerAvatar,
+                // splitTimes are MINUTES per mile (fetchWorkoutSplits divides
+                // by 60 for the splits section) and pre-filtered to full miles
+                // — convert back to the seconds the flyover's toasts format,
+                // or "MILE 1 · 9:41" prints as "0:09".
+                splitBars: (splitTimes ?? []).enumerated().map {
+                    WorkoutSplitBar(mile: $0.offset + 1, paceSeconds: $0.element * 60,
+                                    partialDistance: 1.0)
+                },
+                // The tracker's receipt-floored figure — what every other
+                // surface shows for this workout.
+                officialDistanceMiles: distanceMiles
+            )
+        }
+    }
+
+    private func routeStatsText(_ stats: RouteMatcher.RouteStats) -> String {
+        let base = "Your \(RouteMatcher.ordinal(stats.count)) time on this route"
+        guard let rank = stats.rank, stats.ranked >= 2 else { return base }
+        if rank == 1 { return base + " — fastest yet!" }
+        return base + " — \(RouteMatcher.ordinal(rank)) fastest of \(stats.ranked)"
+    }
+
+    /// Flips the route card between the branded art canvas (default) and the
+    /// real Apple map. The label names the DESTINATION — what a tap shows.
+    private var routeFaceToggle: some View {
+        Button {
+            withAnimation(MADTheme.Animation.quick) { showRealMap.toggle() }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: showRealMap ? "paintpalette.fill" : "map.fill")
+                    .font(.system(size: 11, weight: .bold))
+                Text(showRealMap ? "Art" : "Map")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+            }
+            .foregroundColor(.white.opacity(0.8))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Color.white.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Data Fetching

@@ -21,6 +21,9 @@ struct UserProfileDetailView: View {
     @State private var closeFriendActionInProgress = false
 
     @State private var userStats: UserStats?
+    /// Today's miles off the stats payload, for the goal ring. Held beside
+    /// `userStats` because that is a locally-built view model, not the response.
+    @State private var friendTodayMiles: Double?
     /// Pure Flame — true when this user's streak is 100% natural (from the
     /// gated streak_features payload; false for un-enrolled users).
     @State private var hasPureFlame = false
@@ -44,6 +47,9 @@ struct UserProfileDetailView: View {
     @State private var hasLoadedInitial = false
     @State private var selectedWorkout: FriendWorkout?
     @State private var friendTodayChallenge: RemoteChallengeService.FriendTodayDTO?
+    /// The full user record from `GET /users/:id` — the `user` handed in came
+    /// from a list/feed projection that carries neither bio nor banner.
+    @State private var fullUser: BackendUser?
 
     // Instagram-style friend count shown in the header, tappable to browse.
     @State private var friendCount: Int?
@@ -80,26 +86,57 @@ struct UserProfileDetailView: View {
                 .ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: MADTheme.Spacing.lg) {
-                    // Profile header stays above the tab picker — it's the
-                    // identity surface and applies to every tab.
-                    profileHeader
+                VStack(spacing: 0) {
+                    // Identity surface — applies to every tab.
+                    profileHero
 
-                    if isPrivate {
-                        privateAccountView
-                    } else {
-                        // Tab picker — same pill-style grammar as Friends /
-                        // Compete / Profile mode pickers.
-                        MADPillPicker(
-                            selection: $profileTab,
-                            options: [
-                                .init(id: .activity, title: "Activity", systemImage: "flame.fill"),
-                                .init(id: .posts, title: "Posts", systemImage: "square.grid.3x3.fill"),
-                                .init(id: .stats, title: "Stats", systemImage: "chart.bar.fill"),
-                                .init(id: .badges, title: "Badges", systemImage: "trophy.fill")
-                            ]
+                    VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                        ProfileIdentityBlock(
+                            username: user.username,
+                            displayName: user.displayName,
+                            bio: fullUser?.bio ?? user.bio,
+                            showsPureFlame: hasPureFlame,
+                            onPureFlame: { showPureFlameInfo = true }
                         )
 
+                        if !isCurrentUser(), let mutualCount, mutualCount > 0 {
+                            Text("\(mutualCount) mutual friend\(mutualCount == 1 ? "" : "s")")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundColor(.white.opacity(0.55))
+                        }
+
+                        // Streak · Miles · Friends. Friends is tappable to browse.
+                        profileStatTiles
+
+                        // Friendship state + close-friend star on one row, then
+                        // the things you can DO for a friend (save streak,
+                        // nudge, compete) on the next.
+                        if !isCurrentUser() {
+                            relationshipRow
+                        }
+                        if !isCurrentUser(), friendService.isFriend(user) {
+                            actionRow
+                        }
+
+                        if isPrivate {
+                            privateAccountView
+                        } else {
+                            ProfileTabBar(
+                                selection: $profileTab,
+                                items: [
+                                    .init(id: .activity, title: "Activity"),
+                                    .init(id: .posts, title: "Posts"),
+                                    .init(id: .stats, title: "Stats"),
+                                    .init(id: .badges, title: "Badges")
+                                ]
+                            )
+                            .padding(.top, 4)
+                        }
+                    }
+                    .padding(.horizontal, MADTheme.Spacing.screenGutter)
+                    .padding(.top, 6)
+
+                    if !isPrivate {
                         // Content for the selected tab.
                         Group {
                             switch profileTab {
@@ -110,10 +147,12 @@ struct UserProfileDetailView: View {
                             }
                         }
                         .animation(.easeInOut(duration: 0.18), value: profileTab)
+                        .padding(.horizontal, MADTheme.Spacing.screenGutter)
+                        .padding(.top, MADTheme.Spacing.md)
                     }
                 }
-                .padding(.vertical, MADTheme.Spacing.md)
-                .padding(.horizontal, MADTheme.Spacing.md)
+                .padding(.bottom, MADTheme.Spacing.xl)
+                .lockedToScrollWidth()
             }
             .refreshable {
                 await refreshProfileData()
@@ -135,7 +174,11 @@ struct UserProfileDetailView: View {
             }
         }
         .sheet(item: $selectedWorkout) { workout in
-            FriendWorkoutDetailSheet(workout: workout, friendService: friendService)
+            FriendWorkoutDetailSheet(
+                workout: workout,
+                friendService: friendService,
+                owner: RouteArtAvatar(name: user.displayName, imageURL: user.profile_image_url)
+            )
         }
         .sheet(isPresented: $showCompeteSheet) {
             CreateCompetitionView(
@@ -144,6 +187,9 @@ struct UserProfileDetailView: View {
                 },
                 preselectedFriend: user
             )
+        }
+        .sheet(isPresented: $showPureFlameInfo) {
+            PureFlameInfoSheet()
         }
         .overlay(alignment: .top) {
             if let feedback = nudgeFeedback {
@@ -159,6 +205,9 @@ struct UserProfileDetailView: View {
         }
         .task {
             await loadFriendTodayChallenge()
+        }
+        .task {
+            await loadFullUser()
         }
         .task {
             await loadBadges()
@@ -183,57 +232,103 @@ struct UserProfileDetailView: View {
         }
     }
 
-    // MARK: - Close Friend Toggle
+    // MARK: - Relationship pills
 
-    /// Star pill that adds/removes this friend from the user's private close
-    /// list. Optimistic via CloseFriendsService; the other user is never told.
+    /// Friendship state and the close-friend switch as two EQUAL pills — the
+    /// same 12pt / 14×9 metric as Nudge and Compete underneath, so the four
+    /// read as one 2×2 set instead of a wide green lozenge next to a lone star.
     @ViewBuilder
-    private var closeFriendToggle: some View {
-        let isClose = closeFriends.isClose(user.user_id)
-        VStack(spacing: MADTheme.Spacing.sm) {
-            Button {
-                handleCloseFriendToggle()
-            } label: {
-                HStack(spacing: 6) {
-                    if closeFriendActionInProgress {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                            .tint(.yellow)
-                    } else {
-                        Image(systemName: isClose ? "star.fill" : "star")
-                            .font(.system(size: 12, weight: .bold))
-                    }
-                    Text(isClose ? "Close Friend" : "Add to Close Friends")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .lineLimit(1)
+    private var relationshipRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                friendStatusPill
+                if friendService.isFriend(user) {
+                    closeFriendPill
                 }
-                .foregroundColor(isClose ? .yellow : .white.opacity(0.7))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .frame(maxWidth: .infinity)
-                .background(
-                    Capsule()
-                        .fill(isClose ? Color.yellow.opacity(0.12) : Color.white.opacity(0.05))
-                        .overlay(
-                            Capsule().strokeBorder(
-                                isClose ? Color.yellow.opacity(0.45) : Color.white.opacity(0.12),
-                                lineWidth: 1
-                            )
-                        )
-                )
             }
-            .buttonStyle(.plain)
-            .disabled(closeFriendActionInProgress)
-
-            // One-time explainer of the privacy model.
-            if !hasSeenCloseFriendHint {
+            if friendService.isFriend(user), !hasSeenCloseFriendHint {
                 Text("Close friends can get notifications others don't. They're never told.")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.45))
-                    .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
             }
         }
+    }
+
+    @ViewBuilder
+    private var friendStatusPill: some View {
+        if friendService.isFriend(user) {
+            actionPill(icon: "checkmark", title: "Friends", tint: .green, busy: false, enabled: false) {}
+        } else if friendService.hasPendingRequest(from: user) {
+            actionPill(icon: "person.badge.plus", title: "Accept Request", tint: MADTheme.Colors.madRed,
+                       busy: actionInProgress, enabled: !actionInProgress) { handleAcceptRequest() }
+        } else if friendService.hasSentRequest(to: user) {
+            actionPill(icon: "clock", title: "Request Sent", tint: .white.opacity(0.5), busy: false, enabled: false) {}
+        } else {
+            actionPill(icon: "person.badge.plus", title: "Add Friend", tint: MADTheme.Colors.madRed,
+                       busy: actionInProgress, enabled: !actionInProgress) { handleSendRequest() }
+        }
+    }
+
+    /// Adds/removes this friend from the user's private close list.
+    /// Optimistic via CloseFriendsService; the other user is never told.
+    private var closeFriendPill: some View {
+        let isClose = closeFriends.isClose(user.user_id)
+        return actionPill(
+            icon: isClose ? "star.fill" : "star",
+            title: isClose ? "Close Friend" : "Add Close Friend",
+            tint: isClose ? .yellow : .white.opacity(0.7),
+            busy: closeFriendActionInProgress,
+            enabled: !closeFriendActionInProgress,
+            filled: isClose
+        ) {
+            handleCloseFriendToggle()
+        }
+        .accessibilityLabel(isClose ? "Remove from close friends" : "Add to close friends")
+    }
+
+    /// The one pill metric every action on this screen uses.
+    private func actionPill(
+        icon: String,
+        title: String,
+        tint: Color,
+        busy: Bool,
+        enabled: Bool,
+        filled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            MADHaptics.tap()
+            action()
+        } label: {
+            HStack(spacing: 5) {
+                if busy {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .tint(tint)
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: 11, weight: .bold))
+                    Text(title)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+            }
+            .foregroundColor(tint)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity)
+            .background(
+                Capsule()
+                    .fill(filled ? tint.opacity(0.08) : Color.white.opacity(0.05))
+                    .overlay(Capsule().strokeBorder(tint.opacity(filled ? 0.4 : 0.15), lineWidth: 1))
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
     }
 
     private func handleCloseFriendToggle() {
@@ -315,122 +410,53 @@ struct UserProfileDetailView: View {
     }
 
     // MARK: - Profile Header
-    private var profileHeader: some View {
-        VStack(spacing: 0) {
-            ZStack(alignment: .top) {
-                // Background gradient — clipped to the same rounded shape as
-                // the parent card (set on the outer `.clipShape` below) so
-                // the gradient doesn't bleed past the top-left / top-right
-                // corners. Without the clip, the gradient renders to the
-                // raw VStack bounds and the corners appear square.
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        MADTheme.Colors.madRed.opacity(0.3),
-                        Color.clear
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 120)
 
-                VStack(spacing: MADTheme.Spacing.lg) {
-                    // Profile Image
-                    ZStack {
-                        Circle()
-                            .fill(Color.white.opacity(0.1))
-                            .frame(width: 128, height: 128)
-
-                        ProfileImageView(user: user, size: 120)
-                    }
-                    .shadow(color: Color.black.opacity(0.3), radius: 15, x: 0, y: 5)
-                    .padding(.top, 40)
-
-                    // User Info
-                    VStack(spacing: MADTheme.Spacing.sm) {
-                        HStack(spacing: 6) {
-                            Text(user.username ?? "Unknown")
-                                .font(MADTheme.Typography.title1)
-                                .foregroundColor(MADTheme.Colors.primaryText)
-                            if hasPureFlame {
-                                // Natural-streak seal — tap explains it.
-                                Button {
-                                    showPureFlameInfo = true
-                                } label: {
-                                    PureFlameBadge(size: 20)
-                                }
-                                .buttonStyle(.plain)
-                                .sheet(isPresented: $showPureFlameInfo) {
-                                    PureFlameInfoSheet()
-                                }
-                            }
-                        }
-
-                        if user.displayName != user.username {
-                            Text(user.displayName)
-                                .font(MADTheme.Typography.body)
-                                .foregroundColor(MADTheme.Colors.secondaryText)
-                        }
-
-                        // Bio with quote-style design
-                        if let bio = user.bio, !bio.isEmpty {
-                            HStack(alignment: .top, spacing: MADTheme.Spacing.sm) {
-                                RoundedRectangle(cornerRadius: 1)
-                                    .fill(MADTheme.Colors.madRed.opacity(0.5))
-                                    .frame(width: 2)
-
-                                Text(bio)
-                                    .font(MADTheme.Typography.body)
-                                    .foregroundColor(MADTheme.Colors.secondaryText)
-                                    .multilineTextAlignment(.leading)
-                            }
-                            .padding(.horizontal, MADTheme.Spacing.lg)
-                            .padding(.top, MADTheme.Spacing.xs)
-                        }
-                    }
-
-                    // Triple-stat row (Streak · Miles · Friends). Friends is
-                    // tappable to browse and add more people.
-                    profileStatsRow
-
-                    if !isCurrentUser(), let mutualCount, mutualCount > 0 {
-                        Text("\(mutualCount) mutual friend\(mutualCount == 1 ? "" : "s")")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.55))
-                    }
-
-                    // Friend status pill (friendship state + actions menu).
-                    // Centered at natural size — used to be full-width which
-                    // made it dominate the header.
-                    HStack { friendActionButton }
-                        .frame(maxWidth: .infinity)
-
-                    // Action row — Nudge + Compete share a single horizontal
-                    // row of equal-width pills. Previously each was a
-                    // full-width stacked button; the new layout reads as one
-                    // CTA region and takes one row instead of three. Hype
-                    // stays out (context-dependent, lives on push events).
-                    if !isCurrentUser(), friendService.isFriend(user) {
-                        actionRow
-                            .padding(.horizontal, MADTheme.Spacing.lg)
-                        closeFriendToggle
-                            .padding(.horizontal, MADTheme.Spacing.lg)
-                    }
-                }
-                .padding(.horizontal, MADTheme.Spacing.md)
-                .padding(.bottom, MADTheme.Spacing.lg)
-            }
+    /// Banner (their photo or gradient preset) with the avatar in today's goal
+    /// ring hanging off it. Progress and the next-mile milestone come from the
+    /// stats payload, so a profile that hasn't loaded (or isn't shared with
+    /// the viewer) draws the bare track and no milestone rather than zeros.
+    private var profileHero: some View {
+        let goal = userStats?.goalMiles ?? 0
+        let progress: Double? = {
+            guard userStats != nil, let today = friendTodayMiles, goal > 0 else { return nil }
+            return min(today / goal, 1)
+        }()
+        return ProfileHero(
+            bannerURL: fullUser?.profile_banner_url ?? user.profile_banner_url,
+            bannerStyle: ProfileBannerStyle.resolve(fullUser?.profile_banner_style ?? user.profile_banner_style),
+            totalMiles: userStats?.totalMiles,
+            // The catalog's mile-medal rungs, once the Badges fetch lands.
+            milestoneThresholds: MileMilestones.thresholds(from: catalogBadges),
+            goalProgress: progress,
+            goalComplete: userStats?.hasCompletedGoalToday ?? false
+        ) {
+            AvatarView(
+                name: user.displayName,
+                imageURL: fullUser?.profile_image_url ?? user.profile_image_url,
+                size: 88
+            )
+        } topBar: {
+            EmptyView()
         }
-        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous))
-        .madLiquidGlass()
     }
 
-    // MARK: - Profile Stats Row
+    /// The full record, for the bio and banner the list row didn't carry.
+    private func loadFullUser() async {
+        guard let remote = try? await APIClient.fancyFetch(
+            endpoint: "/users/\(user.user_id)",
+            responseType: BackendUser.self
+        ) else { return }
+        await MainActor.run { fullUser = remote }
+    }
 
-    private var profileStatsRow: some View {
-        ProfileStatsRow(
+    // MARK: - Profile Stats
+
+    private var profileStatTiles: some View {
+        ProfileStatTiles(
             streak: userStats?.streak ?? 0,
             totalMiles: userStats?.totalMiles ?? 0,
-            friendCount: friendCount
+            friendCount: friendCount,
+            streakDoneToday: userStats?.hasCompletedGoalToday ?? false
         ) {
             UserFriendsListView(
                 userId: user.user_id,
@@ -446,39 +472,28 @@ struct UserProfileDetailView: View {
     /// Default landing tab — the most time-sensitive info.
     @ViewBuilder
     private var activityTabContent: some View {
-        VStack(spacing: MADTheme.Spacing.lg) {
-            if !isCurrentUser(), friendService.isFriend(user) {
-                friendTodayProgressCard
+        // Ordered by how close to NOW each block is: today, the week, walks
+        // together, their recent workouts, then streak history. One flat card
+        // style throughout (`profileCard` / `ProfileCardLabel`).
+        VStack(spacing: MADTheme.Spacing.md) {
+            // TODAY, as one group: how far they are and the challenge they
+            // were served, tight together (8pt) so they read as one thought.
+            VStack(spacing: MADTheme.Spacing.sm) {
+                if !isCurrentUser(), friendService.isFriend(user) {
+                    friendTodayProgressCard
+                }
+                if let today = friendTodayChallenge {
+                    FriendTodayChallengeRow(
+                        today: today,
+                        ownerName: user.displayName,
+                        ownerImageURL: user.profile_image_url
+                    )
+                }
             }
-            if !isCurrentUser(), !friendWorkouts.isEmpty {
-                Last7DaysChart(
-                    workouts: friendWorkouts,
-                    dayTotals: last7DayMiles,
-                    goalMiles: userStats?.goalMiles ?? 1.0,
-                    coveredDays: friendCoveredDays,
-                    isSelf: false
-                )
-            }
-            if let today = friendTodayChallenge {
-                FriendTodayChallengeRow(
-                    today: today,
-                    ownerName: user.displayName,
-                    ownerImageURL: user.profile_image_url
-                )
-            }
-            // "12 walks together" — the number is only interesting next to the
-            // person it's about, and the row opens the history already filtered
-            // to them. Friends only, matching the today-progress card above:
-            // buddy walks are a friends-only feature, so offering one to a
-            // stranger's profile is a button that can't work. Own profile gets
-            // the full section instead.
-            if !isCurrentUser(), friendService.isFriend(user) {
-                BuddyWalksTogetherRow(
-                    userId: user.user_id, displayName: user.displayName)
-            }
-            HallOfStreaksSection(userId: user.user_id, isSelf: isCurrentUser())
+            // Then what they've actually DONE — the workouts, the most concrete
+            // thing on the page — before the week's shape around them.
             if !friendWorkouts.isEmpty {
-                VStack(spacing: MADTheme.Spacing.md) {
+                VStack(spacing: MADTheme.Spacing.sm) {
                     FriendWorkoutsSection(
                         workouts: friendWorkouts,
                         onWorkoutTap: { workout in selectedWorkout = workout },
@@ -492,6 +507,27 @@ struct UserProfileDetailView: View {
                     }
                 }
             }
+            if !isCurrentUser(), !friendWorkouts.isEmpty {
+                Last7DaysChart(
+                    workouts: friendWorkouts,
+                    dayTotals: last7DayMiles,
+                    goalMiles: userStats?.goalMiles ?? 1.0,
+                    coveredDays: friendCoveredDays,
+                    isSelf: false
+                )
+            }
+            // "12 walks together" — the number is only interesting next to the
+            // person it's about, and the row opens the history already filtered
+            // to them. Friends only, matching the today-progress card above:
+            // buddy walks are a friends-only feature, so offering one to a
+            // stranger's profile is a button that can't work. Own profile gets
+            // the full section instead.
+            if !isCurrentUser(), friendService.isFriend(user) {
+                BuddyWalksTogetherRow(
+                    userId: user.user_id, displayName: user.displayName)
+            }
+            // History last: the streaks they've run, the longest view back.
+            HallOfStreaksSection(userId: user.user_id, isSelf: isCurrentUser())
         }
     }
 
@@ -553,6 +589,16 @@ struct UserProfileDetailView: View {
         }()
 
         VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                if nudgeIsAvailable {
+                    nudgeProfileButton
+                }
+                competeTogetherButton
+            }
+
+            // Under the pills: a CTA when a save is possible, a one-line
+            // caption when it isn't (see SaveFriendStreakView's prominent
+            // info state), nothing at all when there's no break.
             SaveFriendStreakView(
                 friendId: user.user_id,
                 friendName: user.username ?? user.displayName,
@@ -569,13 +615,6 @@ struct UserProfileDetailView: View {
                     loadUserData()
                 }
             )
-
-            HStack(spacing: 8) {
-                if nudgeIsAvailable {
-                    nudgeProfileButton
-                }
-                competeTogetherButton
-            }
         }
     }
 
@@ -955,19 +994,6 @@ struct UserProfileDetailView: View {
         )
     }
 
-    // MARK: - Friend Action Button
-    private var friendActionButton: some View {
-        let title = getActionButtonTitle()
-        let style = getActionButtonStyle()
-
-        return FriendActionButton(
-            title: title,
-            style: style,
-            isLoading: actionInProgress,
-            action: isCurrentUser() ? {} : handleFriendAction
-        )
-    }
-
     // MARK: - Load More Button
     private var loadMoreButton: some View {
         Button {
@@ -1053,6 +1079,7 @@ struct UserProfileDetailView: View {
                         goalMiles: goalMiles
                     )
                     hasPureFlame = stats.naturalStreak && stats.streak > 0
+                    friendTodayMiles = stats.todayMiles
 
                     friendWorkouts = workouts
                     last7DayMiles = stats.last7DayMiles
@@ -1070,53 +1097,11 @@ struct UserProfileDetailView: View {
         }
     }
 
-    private func getActionButtonTitle() -> String {
-        if isCurrentUser() {
-            return "Your Profile"
-        } else if friendService.isFriend(user) {
-            return "Friends"
-        } else if friendService.hasPendingRequest(from: user) {
-            return "Accept Request"
-        } else if friendService.hasSentRequest(to: user) {
-            return "Request Sent"
-        } else {
-            return "Add Friend"
-        }
-    }
-
-    private func getActionButtonStyle() -> FriendActionStyle {
-        if isCurrentUser() {
-            return .secondary
-        } else if friendService.isFriend(user) {
-            return .success
-        } else if friendService.hasPendingRequest(from: user) {
-            return .primary
-        } else if friendService.hasSentRequest(to: user) {
-            return .secondary
-        } else {
-            return .primary
-        }
-    }
-
     private func isCurrentUser() -> Bool {
         guard let currentUserId = UserDefaults.standard.string(forKey: "backendUserId") else {
             return false
         }
         return user.user_id == currentUserId
-    }
-
-    private func handleFriendAction() {
-        if isCurrentUser() { return }
-
-        if friendService.isFriend(user) {
-            return
-        } else if friendService.hasPendingRequest(from: user) {
-            handleAcceptRequest()
-        } else if friendService.hasSentRequest(to: user) {
-            return
-        } else {
-            handleSendRequest()
-        }
     }
 
     private func handleSendRequest() {
@@ -1177,6 +1162,9 @@ struct FriendWorkoutDetailSheet: View {
     /// Passed down rather than constructed here — FriendService has no shared
     /// instance, and a View struct is rebuilt constantly.
     @ObservedObject var friendService: FriendService
+    /// The friend whose run this is — rides the route line on the art card.
+    /// Optional so nothing breaks if a future presenter has no profile handy.
+    var owner: RouteArtAvatar? = nil
     @Environment(\.dismiss) private var dismiss
 
     /// The run's post, so this shows the actual photo — not just a chip saying
@@ -1190,6 +1178,12 @@ struct FriendWorkoutDetailSheet: View {
     /// floating copy on demand (same mechanism as the feed cards).
     @State private var routeSnapshot: RouteMapSnapshot?
     @State private var isLoadingRoute = false
+    /// Art by default; flips to the real Apple map on request.
+    @State private var showRealMap = false
+    /// Item-based flyover launch (fullScreenCover rule in ios.md).
+    @State private var flyoverLaunch: FlyoverLaunch?
+    /// Laid-out card size, so the art zoom composite matches its aspect.
+    @State private var routeArtSize: CGSize = .zero
 
     /// The same rule your own detail uses, sanity guard included.
     private var pace: String {
@@ -1216,13 +1210,42 @@ struct FriendWorkoutDetailSheet: View {
     private var routeMapSection: some View {
         if let routeCoordinates, !routeCoordinates.isEmpty {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                WorkoutDetailSectionHeader(icon: "map.fill", title: "Route")
-                WorkoutRouteMapView(
-                    coordinates: routeCoordinates,
-                    routeColor: workoutColor,
-                    onSnapshot: { routeSnapshot = $0 }
-                )
+                HStack {
+                    WorkoutDetailSectionHeader(icon: "map.fill", title: "Route")
+                    Spacer()
+                    flyoverPill
+                    routeFaceToggle
+                }
+                Group {
+                    if showRealMap {
+                        WorkoutRouteMapView(
+                            coordinates: routeCoordinates,
+                            routeColor: workoutColor,
+                            onSnapshot: { routeSnapshot = $0 }
+                        )
+                    } else {
+                        RouteArtView(
+                            coordinates: routeCoordinates,
+                            routeColor: workoutColor,
+                            authorAvatar: owner,
+                            // Same region + size as the map face's snapshot, so
+                            // ONE cached value serves both faces' zooms.
+                            onSnapshot: { routeSnapshot = $0 },
+                            // Same time-of-day cast as your own detail sheet —
+                            // the forked copy shipped without it and a friend's
+                            // dusk run drew the daytime canvas.
+                            paletteDate: BuddyDate.parse(workout.deviceEndDate)
+                        )
+                    }
+                }
                 .frame(height: 260)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { routeArtSize = geo.size }
+                            .onChange(of: geo.size) { _, newSize in routeArtSize = newSize }
+                    }
+                )
                 .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
@@ -1233,21 +1256,90 @@ struct FriendWorkoutDetailSheet: View {
             }
             .padding(MADTheme.Spacing.md)
             .madLiquidGlass()
+            .fullScreenCover(item: $flyoverLaunch) { launch in
+                RouteFlyoverPlayerView(launch: launch)
+            }
         }
     }
 
-    /// Floating zoom copy for the route map, composed on demand from the
-    /// retained snapshot (bare route — no stats band).
+    @ViewBuilder
+    private var flyoverPill: some View {
+        // Courtesy gate on the runner's flyover_visibility (nil = older
+        // server ⇒ offered). The route itself is already consent-gated.
+        if workout.flyoverAllowed != false {
+            flyoverPillButton
+        }
+    }
+
+    private var flyoverPillButton: some View {
+        FlyoverChipButton(accent: workoutColor) {
+            guard let coords = routeCoordinates, coords.count >= 2 else { return }
+            flyoverLaunch = FlyoverLaunch(
+                coordinates: coords,
+                workoutType: workout.workoutType,
+                stats: PostStats(
+                    distance: workout.distance,
+                    pace: workout.distance > 0 ? workout.totalDuration / workout.distance : nil,
+                    duration: workout.totalDuration,
+                    streak: nil,
+                    date: nil,
+                    calories: workout.calories,
+                    steps: nil
+                ),
+                author: owner,
+                officialDistanceMiles: workout.distance
+            )
+        }
+    }
+
+    /// Same art/map flip as your own workout detail. No privacy change: this
+    /// sheet only ever holds a route the server already served the viewer.
+    private var routeFaceToggle: some View {
+        Button {
+            withAnimation(MADTheme.Animation.quick) { showRealMap.toggle() }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: showRealMap ? "paintpalette.fill" : "map.fill")
+                    .font(.system(size: 11, weight: .bold))
+                Text(showRealMap ? "Art" : "Map")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+            }
+            .foregroundColor(.white.opacity(0.8))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(Color.white.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Floating zoom copy, composed on demand — the art canvas by default,
+    /// the real map (from its retained snapshot) when toggled. Bare route,
+    /// no stats band.
     private func routeZoomComposite() -> UIImage? {
-        guard let snapshot = routeSnapshot,
-              let coords = routeCoordinates, coords.count >= 2 else { return nil }
-        return WorkoutRouteMapView.zoomComposite(
-            snapshot: snapshot,
+        guard let coords = routeCoordinates, coords.count >= 2 else { return nil }
+        if showRealMap {
+            guard let snapshot = routeSnapshot else { return nil }
+            return WorkoutRouteMapView.zoomComposite(
+                snapshot: snapshot,
+                coordinates: coords,
+                routeColor: workoutColor,
+                // Derived from the card's own aspect so the lift is a pure
+                // upscale — a fixed size that didn't match would crop the route.
+                size: WorkoutRouteMapView.zoomSize(for: snapshot, targetWidth: 900)
+            ) {
+                EmptyView()
+            }
+        }
+        let size = routeArtSize.width > 1
+            ? CGSize(width: 900, height: (900 * routeArtSize.height / routeArtSize.width).rounded())
+            : CGSize(width: 900, height: 650)
+        return RouteArtView.zoomComposite(
             coordinates: coords,
             routeColor: workoutColor,
-            // Derived from the card's own aspect so the lift is a pure
-            // upscale — a fixed size that didn't match would crop the route.
-            size: WorkoutRouteMapView.zoomSize(for: snapshot, targetWidth: 900)
+            authorAvatar: owner,
+            underlay: routeSnapshot,
+            paletteDate: BuddyDate.parse(workout.deviceEndDate),
+            size: size
         ) {
             EmptyView()
         }

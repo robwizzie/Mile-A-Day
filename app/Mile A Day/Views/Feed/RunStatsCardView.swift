@@ -165,110 +165,75 @@ struct RunStatsCardView: View {
     }
 }
 
-/// Transparent overlay composited onto the auto ROUTE image: activity + date
-/// up top, and a scrimmed stats band (big distance, pace/time chips, streak,
-/// brand) along the bottom — so a route post carries its numbers instead of
-/// being a bare map. Same design-space/scale contract as RunStatsCardView.
+/// Transparent overlay composited onto the auto ROUTE image, and laid live
+/// over every route slide in the feed: a scrimmed band along the bottom with
+/// the big distance and one line of pace · time · date, so a route post
+/// carries its numbers instead of being a bare map. Nothing up top — the
+/// card's PHOTO/MAP toggle and Flyover chip own those corners, and the streak
+/// lives in the card footer. Same design-space/scale contract as
+/// RunStatsCardView; RunPostService bakes this exact view into auto posts.
 struct RouteStatsOverlayView: View {
     let stats: RunStatsInput
     let workoutType: String
 
-    private var accent: Color { ActivityCardView.color(workoutType) }
+    /// "23:01 /mi  ·  29:11  ·  AUG 30" — whichever of pace, time and date
+    /// the run has, in that order.
+    private var detailLine: String {
+        var parts: [String] = []
+        if let p = stats.paceSecondsPerMile, p > 0 {
+            parts.append("\(RunStatsStickerView.paceText(p)) /mi")
+        }
+        if let d = stats.durationSeconds, d > 0 {
+            parts.append(RunStatsStickerView.durationText(d))
+        }
+        if let date = stats.dateText, !date.isEmpty {
+            parts.append(date.uppercased())
+        }
+        return parts.joined(separator: "  ·  ")
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Top: activity + date chips over the map.
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: ActivityCardView.icon(workoutType))
-                        .font(.system(size: 13, weight: .bold))
-                    Text(ActivityCardView.verb(workoutType).uppercased())
-                        .font(.system(size: 12, weight: .heavy, design: .rounded))
-                        .tracking(1.5)
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(Capsule().fill(Color.black.opacity(0.6)))
-
-                Spacer()
-
-                if let date = stats.dateText, !date.isEmpty {
-                    Text(date)
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Capsule().fill(Color.black.opacity(0.6)))
-                }
-            }
-            .padding(16)
-
             Spacer()
 
-            // Bottom: stats band on a scrim so it reads over any map colors.
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(String(format: "%.2f", stats.distance))
-                        .font(.system(size: 46, weight: .black, design: .rounded))
+                        .font(.system(size: 48, weight: .black, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(.white)
+                        .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
                     Text("MI")
-                        .font(.system(size: 18, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white.opacity(0.75))
-                    Spacer()
-                    if let s = stats.streak, s > 0 {
-                        HStack(spacing: 4) {
-                            Image(systemName: "flame.fill")
-                                .font(.system(size: 12, weight: .bold))
-                            Text("\(s)")
-                                .font(.system(size: 15, weight: .black, design: .rounded))
-                                .monospacedDigit()
-                        }
-                        .foregroundColor(.orange)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 7)
-                        .background(Capsule().fill(Color.black.opacity(0.55)))
-                    }
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white.opacity(0.8))
                 }
-
-                HStack(spacing: 8) {
-                    if let p = stats.paceSecondsPerMile, p > 0 {
-                        scrimChip("speedometer", "\(RunStatsStickerView.paceText(p)) /mi")
-                    }
-                    if let d = stats.durationSeconds, d > 0 {
-                        scrimChip("clock.fill", RunStatsStickerView.durationText(d))
-                    }
-                    Spacer()
-                    MADLogoMark(size: 24, opacity: 0.9, shadow: false)
+                if !detailLine.isEmpty {
+                    Text(detailLine)
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                        .tracking(0.6)
+                        .foregroundColor(.white.opacity(0.72))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 18)
-            .padding(.top, 44)
-            // Clear of the carousel page dots.
-            .padding(.bottom, 30)
+            .padding(.top, 64)
+            .padding(.bottom, 22)
             .background(
                 LinearGradient(
-                    colors: [.clear, .black.opacity(0.55), .black.opacity(0.85)],
+                    colors: [.clear, .black.opacity(0.5), .black.opacity(0.88)],
                     startPoint: .top, endPoint: .bottom
                 )
             )
+            .overlay(alignment: .bottomTrailing) {
+                MADLogoMark(size: 22, opacity: 0.85, shadow: false)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 22)
+            }
         }
         .frame(width: RunStatsCardView.designSize.width,
                height: RunStatsCardView.designSize.height)
-    }
-
-    private func scrimChip(_ icon: String, _ text: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .bold))
-            Text(text)
-                .font(.system(size: 13, weight: .heavy, design: .rounded))
-                .monospacedDigit()
-        }
-        .foregroundColor(.white)
-        .padding(.horizontal, 11)
-        .padding(.vertical, 7)
-        .background(Capsule().fill(Color.black.opacity(0.55)))
     }
 }

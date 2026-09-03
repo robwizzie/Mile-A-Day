@@ -69,6 +69,10 @@ struct GhostRacesSection: View {
                 }
             }
         }
+        // The same glass card as Performance and Race PRs on either side of
+        // it — the header and rows used to sit loose on the page.
+        .padding(MADTheme.Spacing.md)
+        .madLiquidGlass()
         .task {
             await load()
         }
@@ -126,11 +130,11 @@ struct GhostRacesSection: View {
                 .monospacedDigit()
                 .foregroundStyle(MADTheme.Colors.madWhite)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                .fill(Color.white.opacity(0.08))
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                .fill(Color.white.opacity(0.06))
         )
     }
 

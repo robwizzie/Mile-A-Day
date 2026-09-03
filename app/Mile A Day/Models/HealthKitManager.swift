@@ -315,11 +315,6 @@ class HealthKitManager: ObservableObject {
     }
     @Published var mostMilesWorkouts: [HKWorkout] = []
     @Published var todaysSteps: Int = 0
-    /// Most recent body mass from Health, in kilograms — nil until a read
-    /// answers, and nil forever for the many people who have never entered a
-    /// weight (it is part of no required setup). Only `WorkoutEnergyEstimate`
-    /// reads it, and it substitutes a typical adult mass when this is nil.
-    @Published private(set) var bodyMassKilograms: Double?
     @Published var dailyStepsData: [Date: Int] = [:]
     @Published var dailyMileGoals: [Date: Bool] = [:]
     /// Streak tokens currently held (0–3), mirrored from the iPhone via
@@ -647,13 +642,14 @@ class HealthKitManager: ObservableObject {
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
             HKObjectType.quantityType(forIdentifier: .stepCount)!,
-            // Scales the active-energy estimate written for in-app workouts
-            // (WorkoutEnergyEstimate). Read-only, and used for nothing else —
-            // calories are the entire reason it is asked for. Adding a type
-            // here flips `getRequestStatusForAuthorization` back to
-            // `.shouldRequest` for existing installs, which is exactly the
-            // mechanism that re-prompts them once after updating.
-            HKObjectType.quantityType(forIdentifier: .bodyMass)!,
+            // Deliberately NOT here: bodyMass. It briefly was (to scale the
+            // WorkoutEnergyEstimate calories), but asking for someone's weight
+            // to show a walk's calories is a worse trade than a less
+            // personalized estimate — the estimate now always uses the
+            // typical-adult fallback. Re-adding ANY type here re-prompts every
+            // existing install once (getRequestStatusForAuthorization flips
+            // back to .shouldRequest), so grow this set only for features
+            // worth that interruption.
             HKSeriesType.workoutRoute()
         ]
     }
@@ -734,40 +730,11 @@ class HealthKitManager: ObservableObject {
                 // Enable background delivery for workouts when authorized
                 if success {
                     self.enableBackgroundDelivery()
-                    // Refreshed here rather than at the point of use: the
-                    // energy sample is written inside `finishWorkout`'s
-                    // completion chain, which has nowhere to await a query.
-                    // Every workout start runs through this call, so the
-                    // cached value is at most one session stale.
-                    self.refreshBodyMass()
                 }
 
                 completion(success)
             }
         }
-    }
-
-    /// Cache the newest body-mass sample for the workout energy estimate.
-    ///
-    /// A denied read and an empty Health profile are indistinguishable here
-    /// (Apple reports neither), and both mean the same thing to the caller —
-    /// no weight — so this never clears a value it already has: a locked
-    /// device answering nothing must not downgrade the estimate mid-session.
-    func refreshBodyMass() {
-        guard HKHealthStore.isHealthDataAvailable(),
-              let bodyMassType = HKObjectType.quantityType(forIdentifier: .bodyMass) else { return }
-        let newestFirst = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
-        let query = HKSampleQuery(
-            sampleType: bodyMassType,
-            predicate: nil,
-            limit: 1,
-            sortDescriptors: [newestFirst]
-        ) { [weak self] _, samples, _ in
-            guard let kilograms = (samples?.first as? HKQuantitySample)?
-                .quantity.doubleValue(for: .gramUnit(with: .kilo)), kilograms > 0 else { return }
-            DispatchQueue.main.async { self?.bodyMassKilograms = kilograms }
-        }
-        healthStore.execute(query)
     }
 
     /// Whether the user has explicitly turned OFF *write* access to Workouts for

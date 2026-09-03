@@ -194,7 +194,9 @@ enum RunPostService {
         return duration / distance
     }
 
-    private static func workoutCalories(_ workout: HKWorkout) -> Double {
+    /// Internal (not private): CalorieLedger counts treats with the same
+    /// figure the post cards print, so the two can never disagree.
+    static func workoutCalories(_ workout: HKWorkout) -> Double {
         if #available(iOS 18.0, *),
            let statistics = workout.statistics(for: HKQuantityType(.activeEnergyBurned)),
            let energy = statistics.sumQuantity() {
@@ -351,15 +353,17 @@ enum RunPostService {
         let workout = HealthKitManager.shared.todaysWorkouts.first { $0.uuid.uuidString == workoutId }
 
         var image: UIImage?
-        if let workout {
+        // Stealth Mode: this card is a PICTURE of the map, uploaded as media —
+        // the one route leak no server-side gate can see. A stealth walk
+        // falls through to the stats card.
+        if let workout, !StealthModeStore.shared.isStealth(workout) {
             let coords = await HealthKitManager.shared.fetchAllRouteLocations(for: workout)
                 .map { $0.coordinate }
             if coords.count >= 2 {
                 // Same accent the feed uses for this workout type — the baked
                 // card and the live cards must speak one color language.
-                let color = UIColor(ActivityCardView.color(workoutType))
                 image = await renderRouteImage(
-                    coordinates: coords, color: color,
+                    coordinates: coords, color: ActivityCardView.color(workoutType),
                     stats: stats, workoutType: workoutType
                 )
             }
@@ -407,102 +411,87 @@ enum RunPostService {
 
     @MainActor
     static func renderStatsCard(stats: RunStatsInput, workoutType: String) -> UIImage? {
+        // The routeless bake is the indoor card's still frame (track or
+        // treadmill face — the POSTER's dashboard style picks, since a PNG is
+        // rendered once on their device; it can't animate, but the visual
+        // language matches the live cards). Avatar is cache-only: this isn't
+        // async, and RouteAvatarBadge's initials fallback keeps the render
+        // deterministic on a miss.
+        //
         // The card lays itself out at design size (360×450) — scale up to the
         // 1080×1350 upload size. Rendering AT 1080 with scale 1 is the classic
         // bug: point sizes become raw pixels and the whole card reads tiny.
-        let card = RunStatsCardView(stats: stats, workoutType: workoutType)
+        let user = UserManager.shared.currentUser
+        let card = IndoorWorkoutCard(
+            stats: stats.snapshot,
+            workoutType: workoutType,
+            avatar: RouteArtAvatar(name: user.name, imageURL: user.profileImageUrl),
+            still: true
+        )
+        .frame(width: RunStatsCardView.designSize.width,
+               height: RunStatsCardView.designSize.height)
         let renderer = ImageRenderer(content: card)
         renderer.scale = 1080 / RunStatsCardView.designSize.width
         renderer.isOpaque = true
         return renderer.uiImage
     }
 
-    /// The stats/brand overlay for route images, rendered transparent at the
-    /// same design-space scale so its type sizes match the stats card's.
-    @MainActor
-    private static func renderRouteOverlay(stats: RunStatsInput, workoutType: String) -> UIImage? {
-        let overlay = RouteStatsOverlayView(stats: stats, workoutType: workoutType)
-        let renderer = ImageRenderer(content: overlay)
-        renderer.scale = 1080 / RunStatsCardView.designSize.width
-        renderer.isOpaque = false
-        return renderer.uiImage
-    }
-
-    /// Snapshot a map covering the route, draw the traced polyline + start/end
-    /// pins, then composite the stats/brand overlay so the post carries its
-    /// numbers instead of being a bare map. Uses `MKMapSnapshotter` (not
-    /// `ImageRenderer`) because live map tiles don't render through SwiftUI's
-    /// renderer.
+    /// The route as the branded art card at upload size — the same face the
+    /// live feed slide draws (canvas + glow line + the poster's badge settled
+    /// at the end + mile ticks), baked to a PNG. One `ImageRenderer` pass:
+    /// the art canvas is pure SwiftUI, which is what lets the old
+    /// MKMapSnapshotter+CoreGraphics composite go (map tiles were the only
+    /// reason it existed — they don't render through SwiftUI's renderer).
     @MainActor
     static func renderRouteImage(
         coordinates: [CLLocationCoordinate2D],
-        color: UIColor,
+        color: Color,
         stats: RunStatsInput,
         workoutType: String
     ) async -> UIImage? {
         guard coordinates.count >= 2 else { return nil }
 
-        var minLat = coordinates[0].latitude, maxLat = coordinates[0].latitude
-        var minLon = coordinates[0].longitude, maxLon = coordinates[0].longitude
-        for c in coordinates {
-            minLat = min(minLat, c.latitude); maxLat = max(maxLat, c.latitude)
-            minLon = min(minLon, c.longitude); maxLon = max(maxLon, c.longitude)
+        // Await the avatar once — this runs at post time, not in a scroll. A
+        // miss falls back to initials, so the render is deterministic either
+        // way (RouteAvatarBadge never touches AsyncImage).
+        let user = UserManager.shared.currentUser
+        let avatar = RouteArtAvatar(name: user.name, imageURL: user.profileImageUrl)
+        var avatarImages: [String: UIImage] = [:]
+        if let key = user.profileImageUrl,
+           let image = await RouteAvatarImageLoader.loadImage(for: key) {
+            avatarImages[key] = image
         }
-        let center = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,
-                                            longitude: (minLon + maxLon) / 2)
-        let span = MKCoordinateSpan(
-            latitudeDelta: max((maxLat - minLat) * 1.4, 0.003),
-            longitudeDelta: max((maxLon - minLon) * 1.4, 0.003)
-        )
 
-        let options = MKMapSnapshotter.Options()
-        options.region = MKCoordinateRegion(center: center, span: span)
-        options.size = CGSize(width: 1080, height: 1350)
-        options.scale = 1
-        options.mapType = .standard
+        // Ghost-map underlay for the bake, same as the live cards. A failed
+        // snapshot (offline) just bakes the pure canvas.
+        let underlay = await RouteMapSnapshot.generate(
+            coordinates: coordinates, size: RunStatsCardView.designSize)
 
-        let snapshotter = MKMapSnapshotter(options: options)
-        let snapshot: MKMapSnapshotter.Snapshot? = await withCheckedContinuation { cont in
-            snapshotter.start { snap, _ in cont.resume(returning: snap) }
+        let content = ZStack(alignment: .topLeading) {
+            RouteArtView.still(
+                coordinates: coordinates,
+                routeColor: color,
+                authorAvatar: avatar,
+                avatarImages: avatarImages,
+                underlay: underlay,
+                paletteDate: Date(),
+                size: RunStatsCardView.designSize
+            )
+            // Stats band + activity/date chips, laid out in the same 360×450
+            // design space the live slides scale from.
+            RouteStatsOverlayView(stats: stats, workoutType: workoutType)
+                .frame(width: RunStatsCardView.designSize.width,
+                       height: RunStatsCardView.designSize.height,
+                       alignment: .topLeading)
         }
-        guard let snapshot else { return nil }
+        .frame(width: RunStatsCardView.designSize.width,
+               height: RunStatsCardView.designSize.height)
 
-        let overlay = renderRouteOverlay(stats: stats, workoutType: workoutType)
-
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        let renderer = UIGraphicsImageRenderer(size: options.size, format: format)
-        return renderer.image { ctx in
-            snapshot.image.draw(at: .zero)
-            let cg = ctx.cgContext
-
-            // Line + pin sizes are in the 1080px space — thick enough to stay
-            // visible when the image displays at ~a third of that width.
-            cg.setStrokeColor(color.cgColor)
-            cg.setLineWidth(16)
-            cg.setLineJoin(.round)
-            cg.setLineCap(.round)
-            // Same straight polyline the live feed overlay draws, so the baked
-            // image matches what friends swipe to on the feed slide.
-            let screenPoints = coordinates.map { snapshot.point(for: $0) }
-            cg.addPath(RoutePolyline.path(through: screenPoints))
-            cg.strokePath()
-
-            drawDot(cg, at: snapshot.point(for: coordinates.first!), color: .systemGreen)
-            drawDot(cg, at: snapshot.point(for: coordinates.last!), color: color)
-
-            // Stats band + activity/date chips over the map.
-            overlay?.draw(in: CGRect(origin: .zero, size: options.size))
-        }
-    }
-
-    private static func drawDot(_ cg: CGContext, at pt: CGPoint, color: UIColor) {
-        let outer: CGFloat = 21
-        cg.setFillColor(UIColor.white.cgColor)
-        cg.fillEllipse(in: CGRect(x: pt.x - outer, y: pt.y - outer, width: outer * 2, height: outer * 2))
-        let inner: CGFloat = 13
-        cg.setFillColor(color.cgColor)
-        cg.fillEllipse(in: CGRect(x: pt.x - inner, y: pt.y - inner, width: inner * 2, height: inner * 2))
+        // Design size → 1080×1350 upload, same scale rule as renderStatsCard.
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 1080 / RunStatsCardView.designSize.width
+        renderer.isOpaque = true
+        return renderer.uiImage
     }
 
     private static func todayText() -> String {

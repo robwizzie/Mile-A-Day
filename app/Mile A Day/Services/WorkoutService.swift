@@ -484,6 +484,20 @@ class WorkoutService: ObservableObject {
     /// Also attempts to delete the matching HKWorkout from Apple Health. This only
     /// succeeds for workouts written by this app; Watch/third-party workouts are
     /// silently skipped (HealthKit enforces source ownership).
+    /// Retroactive Stealth for one workout: the server stamps it and deletes
+    /// its stored route. Irreversible — the stamp is sticky.
+    func hideRouteFromFriends(workoutId: String) async throws -> StealthHideResponse {
+        guard let currentUserId = getCurrentUserId() else {
+            throw WorkoutServiceError.notAuthenticated
+        }
+        return try await makeRequest(
+            endpoint: "/workouts/\(currentUserId)/workout/\(workoutId)/stealth",
+            method: .POST,
+            body: nil,
+            responseType: StealthHideResponse.self
+        )
+    }
+
     func deleteWorkout(workoutId: String) async throws -> WorkoutDeleteResponse {
         guard let currentUserId = getCurrentUserId() else {
             throw WorkoutServiceError.notAuthenticated
@@ -537,6 +551,10 @@ class WorkoutService: ObservableObject {
 }
 
 // MARK: - Delete Response
+
+struct StealthHideResponse: Codable {
+    let stealth: Bool
+}
 
 struct WorkoutDeleteResponse: Codable {
     let message: String?

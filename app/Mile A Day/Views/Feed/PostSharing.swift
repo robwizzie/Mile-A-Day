@@ -67,11 +67,16 @@ struct ShareLinkSheet: UIViewControllerRepresentable {
 /// the not-available state rather than the post.
 struct PostDetailLoaderView: View {
     let postId: String
+    /// From a `?flyover=1` link: launch the player over the post as soon as
+    /// its route arrives. One-shot — dismissing the player leaves the post.
+    var autoFlyover: Bool = false
     @Environment(\.dismiss) private var dismiss
 
     @State private var posts: [PostItem] = []
     @State private var isLoading = true
     @State private var failed = false
+    @State private var flyoverLaunch: FlyoverLaunch?
+    @State private var didAutoFly = false
 
     var body: some View {
         Group {
@@ -111,6 +116,15 @@ struct PostDetailLoaderView: View {
             }
         }
         .task(id: postId) { await load() }
+        .fullScreenCover(item: $flyoverLaunch) { launch in
+            RouteFlyoverPlayerView(launch: launch)
+        }
+        .onChange(of: posts.count) { _, _ in
+            guard autoFlyover, !didAutoFly, let post = posts.first else { return }
+            didAutoFly = true
+            // Same construction the card chip flies — one factory, one look.
+            flyoverLaunch = FlyoverLaunch.forPost(post)
+        }
     }
 
     private var unavailable: some View {
@@ -164,8 +178,12 @@ final class PostDeepLink: ObservableObject {
 
     /// Post to present. Cleared by the presenter on dismiss.
     @Published var pendingPostId: String?
+    /// The link asked for the cinematic: `?flyover=1` — the loader launches
+    /// the player over the post once it (and its route) arrive.
+    @Published var pendingWantsFlyover = false
 
-    func open(_ postId: String) {
+    func open(_ postId: String, wantsFlyover: Bool = false) {
+        pendingWantsFlyover = wantsFlyover
         pendingPostId = postId
     }
 
@@ -178,12 +196,16 @@ final class PostDeepLink: ObservableObject {
         }
     }
 
-    /// Handles `mileaday://p/<id>` and `https://mileaday.run/p/<id>`.
+    /// Handles `mileaday://p/<id>` and `https://mileaday.run/p/<id>`, with an
+    /// optional `?flyover=1` that opens the post already flying.
     /// Returns true when the URL was a post link.
     @discardableResult
     func handle(_ url: URL) -> Bool {
         guard let postId = PostShareLink.postId(from: url) else { return false }
-        open(postId)
+        let wantsFlyover = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .contains { $0.name == "flyover" && ($0.value ?? "1") != "0" } ?? false
+        open(postId, wantsFlyover: wantsFlyover)
         return true
     }
 }

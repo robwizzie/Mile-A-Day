@@ -31,6 +31,7 @@ import {
 } from "../services/workoutService.js";
 import { checkRaceCompletions } from "../services/competitionService.js";
 import { softDeleteWorkout } from "../services/workoutDeletionService.js";
+import { hideWorkoutRoute } from "../services/stealthService.js";
 import {
   notifyFriendsOfMileCompletion,
   notifyFriendsOfExtraWorkout,
@@ -617,6 +618,29 @@ export async function deleteWorkout(req: Request, res: Response) {
   } catch (error: any) {
     console.error("Error deleting workout:", error.message);
     res.status(500).json({ error: "Error deleting workout: " + error.message });
+  }
+}
+
+/**
+ * Retroactive Stealth for one workout: stamps `workouts.stealth` and deletes
+ * its stored route. Self-only via the route's requireSelfAccess; irreversible
+ * by design (the stamp is sticky).
+ */
+export async function hideWorkoutRouteController(req: Request, res: Response) {
+  if (!hasRequiredKeys(["userId", "workoutId"], req, res)) return;
+
+  try {
+    const { userId, workoutId } = req.params;
+    const hidden = await hideWorkoutRoute(userId, workoutId);
+    if (!hidden) {
+      return res.status(404).json({ error: "Workout not found" });
+    }
+    return res.status(200).json({ stealth: true });
+  } catch (error: any) {
+    console.error("Error hiding workout route:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error hiding workout route: " + error.message });
   }
 }
 

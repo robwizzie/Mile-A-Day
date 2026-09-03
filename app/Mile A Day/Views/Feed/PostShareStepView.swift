@@ -548,9 +548,13 @@ struct PostShareStepView: View {
     @ViewBuilder
     private var routePreviewCard: some View {
         if let coords = vm.routePreview, coords.count >= 2 {
-            WorkoutRouteMapView(
+            RouteArtView(
                 coordinates: coords,
-                routeColor: ActivityCardView.color(vm.routeWorkoutType)
+                routeColor: ActivityCardView.color(vm.routeWorkoutType),
+                authorAvatar: RouteArtAvatar(
+                    name: UserManager.shared.currentUser.name,
+                    imageURL: UserManager.shared.currentUser.profileImageUrl
+                )
             )
             .frame(width: routePreviewWidth, height: routePreviewWidth * 5 / 4)
             .overlay {

@@ -2,80 +2,108 @@
 //  SyncProgressView.swift
 //  Mile A Day
 //
-//  Shows animated progress for initial workout sync
-//  with running figure and dual progress bars
+//  The modal shown when a catch-up sync is big enough to be worth waiting on
+//  (AppLaunchSyncHandler's `silentSyncThreshold`).
+//
+//  It is presented with `interactiveDismissDisabled`, which made it a trap: if
+//  the sync errored, nothing here reported it and nothing here dismissed, so
+//  the only escape was force-quitting the app. It now always offers a way out
+//  — the sync keeps running in the background either way, surfaced by
+//  SyncStatusBanner — and it says how many workouts there are and roughly how
+//  long they'll take, rather than "this may take a few moments".
 //
 
 import SwiftUI
+// Timer.publish(...).autoconnect() properties are Combine types; SwiftUI's
+// re-export covers use sites but not stored-property type declarations.
+import Combine
 
 struct SyncProgressView: View {
     @ObservedObject var syncService = WorkoutSyncService.shared
-    @State private var runnerOffset: CGFloat = 0
     @State private var animateRunner = false
     @State private var progressStream: AsyncStream<SyncProgress>?
+    /// Ticks the estimate; also gates the escape hatch appearing.
+    @State private var tick = Date()
+    @State private var shownSince = Date()
+
+    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     let onComplete: () -> Void
 
     var body: some View {
         ZStack {
-            // Background gradient
-            LinearGradient(
-                colors: [Color.blue.opacity(0.1), Color.purple.opacity(0.1)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
 
-            VStack(spacing: 30) {
+            VStack(spacing: MADTheme.Spacing.lg) {
                 Spacer()
 
-                // Title
-                Text("Syncing Your Workouts")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundColor(.primary)
+                Text("Syncing your workouts")
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
 
                 if let progress = syncService.currentProgress {
-                    // Phase description
-                    Text(phaseDescription(progress.phase))
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.bottom, 10)
+                    Text(phaseDescription(progress))
+                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.65))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, MADTheme.Spacing.lg)
 
-                    // Running track with animated runner
                     runningTrackView(progress: progress)
-                        .padding(.horizontal, 40)
-                        .padding(.bottom, 20)
+                        .padding(.horizontal, MADTheme.Spacing.xl)
 
-                    // Progress details
                     progressDetailsView(progress: progress)
-                        .padding(.horizontal, 40)
+                        .padding(.horizontal, MADTheme.Spacing.xl)
 
-                    // Batch progress
-                    if progress.totalBatches > 0 {
-                        Text("Batch \(progress.currentBatch) of \(progress.totalBatches)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.top, 5)
+                    if progress.isFailed {
+                        failureBlock(progress)
+                            .padding(.horizontal, MADTheme.Spacing.xl)
                     }
                 } else {
                     ProgressView()
                         .scaleEffect(1.5)
+                        .tint(.white)
                         .padding()
                 }
 
                 Spacer()
 
-                // Info text
-                Text("This may take a few moments...")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.bottom, 40)
+                // Never a dead end. The work continues in the background and
+                // the banner keeps reporting it, so there is no reason to hold
+                // anyone here — and every reason not to, since the one thing
+                // that made this modal appear is having a lot to sync.
+                if canDismiss {
+                    Button {
+                        MADHaptics.tap()
+                        onComplete()
+                    } label: {
+                        Text("Continue in the background")
+                            .font(.system(size: 15, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white.opacity(0.85))
+                            .padding(.horizontal, 26)
+                            .padding(.vertical, 12)
+                            .background(Capsule().fill(Color.white.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.opacity)
+                }
+
+                Text("Keep Mile A Day open while this runs — it pauses in the background and picks up where it left off.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.45))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, MADTheme.Spacing.xl)
+                    .padding(.bottom, MADTheme.Spacing.lg)
             }
             .padding()
         }
+        .animation(.easeInOut(duration: 0.25), value: canDismiss)
         .onAppear {
+            shownSince = Date()
             startSync()
         }
+        .onReceive(clock) { tick = $0 }
         .onChange(of: syncService.currentProgress) { _, newProgress in
             if let progress = newProgress, progress.isComplete {
                 // Delay completion to show 100% state
@@ -86,50 +114,39 @@ struct SyncProgressView: View {
         }
     }
 
+    /// Offered as soon as there's anything to escape from — immediately on a
+    /// failure, and after a few seconds otherwise so it doesn't flash past on
+    /// a sync that finishes instantly.
+    private var canDismiss: Bool {
+        if syncService.currentProgress?.isFailed == true { return true }
+        return tick.timeIntervalSince(shownSince) > 4
+    }
+
     // MARK: - Subviews
 
     private func runningTrackView(progress: SyncProgress) -> some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
-                // Track background
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.gray.opacity(0.2))
-                    .frame(height: 60)
+                    .fill(Color.white.opacity(0.08))
+                    .frame(height: 54)
 
-                // Progress fill
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.blue, Color.purple],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
+                    .fill(MADTheme.Colors.redGradient)
+                    .frame(
+                        width: max(0, geometry.size.width * progress.displayProgress),
+                        height: 54
                     )
-                    .frame(width: geometry.size.width * progress.overallProgress, height: 60)
-                    .animation(.easeInOut(duration: 0.3), value: progress.overallProgress)
+                    .animation(.easeInOut(duration: 0.3), value: progress.displayProgress)
 
-                // Running figure
                 Image(systemName: animateRunner ? "figure.run" : "figure.walk")
-                    .font(.system(size: 30))
+                    .font(.system(size: 26))
                     .foregroundColor(.white)
-                    .offset(x: max(10, geometry.size.width * progress.overallProgress - 40))
-                    .animation(.easeInOut(duration: 0.3), value: progress.overallProgress)
-
-                // Mile markers (optional decorative elements)
-                HStack(spacing: 0) {
-                    ForEach(0..<5) { index in
-                        VStack {
-                            Rectangle()
-                                .fill(Color.white.opacity(0.3))
-                                .frame(width: 2, height: 20)
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                }
-                .padding(.horizontal)
+                    .offset(x: max(10, geometry.size.width * progress.displayProgress - 36))
+                    .animation(.easeInOut(duration: 0.3), value: progress.displayProgress)
             }
         }
-        .frame(height: 60)
+        .frame(height: 54)
         .onAppear {
             withAnimation(.linear(duration: 0.5).repeatForever(autoreverses: true)) {
                 animateRunner.toggle()
@@ -138,61 +155,65 @@ struct SyncProgressView: View {
     }
 
     private func progressDetailsView(progress: SyncProgress) -> some View {
-        VStack(spacing: 20) {
-            // Fetching progress
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: "iphone.and.arrow.forward")
-                        .foregroundColor(.blue)
-                    Text("Fetching from HealthKit")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    Spacer()
-                    Text("\(progress.fetchedCount)/\(progress.totalToFetch)")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.blue)
-                }
-
-                ProgressView(value: Double(progress.fetchedCount), total: Double(max(1, progress.totalToFetch)))
-                    .tint(.blue)
+        _ = tick
+        return HStack {
+            Text("\(SyncCopy.count(progress.preparedCount)) of \(SyncCopy.count(progress.totalToUpload))")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundColor(.white.opacity(0.8))
+            Spacer()
+            if let eta = progress.estimatedSecondsRemaining, !progress.isComplete {
+                Text("about \(SyncCopy.duration(eta)) left")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+            } else {
+                Text("\(Int((progress.displayProgress * 100).rounded()))%")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.white.opacity(0.55))
             }
+        }
+    }
 
-            // Uploading progress
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: "icloud.and.arrow.up")
-                        .foregroundColor(.purple)
-                    Text("Uploading to Cloud")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    Spacer()
-                    Text("\(progress.uploadedCount)/\(progress.totalToUpload)")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.purple)
+    private func failureBlock(_ progress: SyncProgress) -> some View {
+        VStack(spacing: MADTheme.Spacing.sm) {
+            Text(progress.failure?.recovery ?? "Tap retry.")
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.65))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if progress.failure?.isRetryable != false {
+                Button {
+                    MADHaptics.tap()
+                    syncService.retryFailedSync()
+                } label: {
+                    Text("Try again")
+                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 30)
+                        .padding(.vertical, 12)
+                        .background(Capsule().fill(MADTheme.Colors.redGradient))
                 }
-
-                ProgressView(value: Double(progress.uploadedCount), total: Double(max(1, progress.totalToUpload)))
-                    .tint(.purple)
+                .buttonStyle(.plain)
             }
         }
     }
 
     // MARK: - Helper Methods
 
-    private func phaseDescription(_ phase: SyncPhase) -> String {
-        switch phase {
+    private func phaseDescription(_ progress: SyncProgress) -> String {
+        switch progress.phase {
         case .idle:
-            return "Preparing to sync..."
+            return "Getting ready…"
         case .fetchingFromHealthKit:
-            return "Fetching workouts from HealthKit"
+            return "Reading your workouts from Apple Health"
         case .uploadingToBackend:
-            return "Uploading workouts to cloud"
+            return "Saving each workout's distance, pace and splits to your account"
         case .complete:
-            return "Sync complete!"
-        case .error(let errorDescription):
-            return "Error: \(errorDescription)"
+            return "All caught up"
+        case .error:
+            return progress.failure?.message ?? "Sync paused"
         }
     }
 

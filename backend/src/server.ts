@@ -22,6 +22,7 @@ import dailyStepsRoutes from "./routes/dailyStepsRoutes.js";
 import leaderboardRoutes from "./routes/leaderboardRoutes.js";
 import liveTrackingRoutes from "./routes/liveTrackingRoutes.js";
 import ghostRoutes from "./routes/ghostRoutes.js";
+import telemetryRoutes from "./routes/telemetryRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
 import buddyRoutes from "./routes/buddyRoutes.js";
 import injuryPauseRoutes from "./routes/injuryPauseRoutes.js";
@@ -79,6 +80,7 @@ app.use(express.json({ limit: "2mb" }));
 const uploadsDir = path.join(process.cwd(), "uploads", "profile-images");
 fs.mkdirSync(uploadsDir, { recursive: true });
 fs.mkdirSync(path.join(process.cwd(), "uploads", "posts"), { recursive: true });
+fs.mkdirSync(path.join(process.cwd(), "uploads", "profile-banners"), { recursive: true });
 
 // Post photos require a signed url (issued on every post/feed response);
 // profile images below stay public. Mounted BEFORE the general static
@@ -118,6 +120,14 @@ app.get("/status/schema", async (req, res) => {
       share_route_maps: await probe(
         `SELECT EXISTS (SELECT 1 FROM information_schema.columns
 					WHERE table_name = 'notification_settings' AND column_name = 'share_route_maps') AS ok`,
+      ),
+      stealth_windows_table: await probe(
+        `SELECT EXISTS (SELECT 1 FROM information_schema.tables
+					WHERE table_name = 'stealth_windows') AS ok`,
+      ),
+      workouts_stealth: await probe(
+        `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+					WHERE table_name = 'workouts' AND column_name = 'stealth') AS ok`,
       ),
       error_log_table: await probe(
         `SELECT EXISTS (SELECT 1 FROM information_schema.tables
@@ -332,6 +342,7 @@ app.use("/buddy", buddyRoutes);
 app.use("/streak", injuryPauseRoutes);
 app.use("/live", liveTrackingRoutes);
 app.use("/ghosts", ghostRoutes);
+app.use("/telemetry", telemetryRoutes);
 
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   console.error("Error:", err.message);

@@ -15,6 +15,14 @@ struct BackendUser: Codable, Identifiable, Hashable {
     let apple_id: String?
     let auth_provider: String?
     let role: String?
+    /// Profile banner — the header behind the avatar: an uploaded image path
+    /// (nil = none) and the gradient preset drawn when there is no image
+    /// (`ProfileBannerStyle`). `var` + default so every memberwise
+    /// `BackendUser(...)` call site (feed authors, mention lookups, previews)
+    /// keeps compiling, and nil on the projections that don't carry them
+    /// (friend lists, search) — the profile screen re-fetches the full record.
+    var profile_banner_url: String? = nil
+    var profile_banner_style: String? = nil
 
     var id: String { user_id }
 

@@ -200,6 +200,7 @@ struct NotificationInboxView: View {
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.top, MADTheme.Spacing.sm)
             .padding(.bottom, MADTheme.Spacing.lg)
+            .lockedToScrollWidth()
         }
     }
 

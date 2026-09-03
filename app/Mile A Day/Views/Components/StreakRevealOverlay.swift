@@ -10,9 +10,18 @@ struct StreakRevealOverlay: View {
     let onDismiss: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ObservedObject private var erasStore = StreakErasStore.shared
     @State private var displayed = 0
     @State private var appeared = false
     @State private var countDone = false
+    @State private var showStartExplainer = false
+
+    /// The date this run began, when the server's era history is loaded.
+    /// A number alone can't be checked against anything — the date is what
+    /// lets someone say "no, I ran that day" and go looking.
+    private var startDateText: String? {
+        StreakDateText.long(erasStore.currentEra?.start_date)
+    }
 
     var body: some View {
         ZStack {
@@ -71,15 +80,43 @@ struct StreakRevealOverlay: View {
                     }
                 }
 
-                Text("You've completed a mile every single day for \(streak) days — your streak starts counted, not at zero.")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.8))
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, MADTheme.Spacing.xl)
-                    .opacity(countDone ? 1 : 0)
-                    .offset(y: countDone ? 0 : 10)
-                    .animation(.easeOut(duration: 0.4).delay(0.2), value: countDone)
+                VStack(spacing: MADTheme.Spacing.sm) {
+                    Text("You've completed a mile every single day for \(streak) days — your streak starts counted, not at zero.")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    // The date, and a way to interrogate it. Someone who has
+                    // been running daily for years and is shown 325 needs to
+                    // know WHICH day we think they missed — otherwise the only
+                    // available conclusion is that the app is wrong.
+                    if let startDateText {
+                        Button {
+                            MADHaptics.tap()
+                            showStartExplainer = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "calendar")
+                                    .font(.system(size: 11, weight: .bold))
+                                Text("Every day since \(startDateText)")
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                                Image(systemName: "info.circle")
+                                    .font(.system(size: 11, weight: .bold))
+                            }
+                            .foregroundColor(.white.opacity(0.75))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Capsule().fill(Color.white.opacity(0.10)))
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, MADTheme.Spacing.xl)
+                .opacity(countDone ? 1 : 0)
+                .offset(y: countDone ? 0 : 10)
+                .animation(.easeOut(duration: 0.4).delay(0.2), value: countDone)
 
                 Button {
                     withAnimation(.easeOut(duration: 0.25)) { onDismiss() }
@@ -99,6 +136,10 @@ struct StreakRevealOverlay: View {
             .padding(MADTheme.Spacing.lg)
         }
         .onAppear { start() }
+        .task { await erasStore.refreshIfStale() }
+        .sheet(isPresented: $showStartExplainer) {
+            StreakStartExplainer(streak: streak)
+        }
     }
 
     /// Ease-out count-up over ~2s (longer streaks take a touch longer, capped)

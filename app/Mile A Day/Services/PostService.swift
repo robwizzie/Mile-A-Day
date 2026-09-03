@@ -51,6 +51,17 @@ struct PostStats: Codable, Equatable {
     }
 }
 
+/// One per-mile split as the feed serves it (mirrors `workout_splits`) — the
+/// data behind the indoor cards' pace wave. Additive: nil on older servers, on
+/// stitched-mile rollups, and on auto posts, so every consumer must treat an
+/// absent array as "no wave", never as an error.
+struct FeedSplit: Codable, Equatable {
+    let split_number: Int
+    let split_duration: Double      // seconds
+    let split_distance: Double?     // miles; the last split is usually partial
+    let split_pace: Double?         // seconds per mile
+}
+
 /// One credited participant on a multi-person collab post (Buddy Walks).
 ///
 /// snake_case to decode the backend's jsonb aggregate directly, like the rest
@@ -148,6 +159,19 @@ struct PostItem: Codable, Identifiable {
     var workout_type: String?
     /// Simplified GPS trace [[lat, lng], ...] when synced + shared.
     var route: [[Double]]?
+    /// Per-mile splits for the linked workout — the indoor pace wave's data.
+    /// Only the feed/single-post projections serve it; nil everywhere else and
+    /// on older servers, which simply means no wave.
+    var splits: [FeedSplit]? = nil
+    /// HealthKit's indoor flag, additive. nil = unknown (older rows/clients/
+    /// servers) — make NO claim then: routeless alone is never "indoor"
+    /// (privacy also blanks routes).
+    var is_indoor: Bool? = nil
+    /// May the viewer launch this post's flyover? nil = older server.
+    var flyover_allowed: Bool? = nil
+    /// OWNER-ONLY: the linked walk was recorded in Stealth Mode (route
+    /// withheld for good). Friends always receive false; nil = older server.
+    var stealth: Bool? = nil
     /// The run's ACTIVE story photo (profile posts responses) — the real
     /// picture leads wherever it exists; the workout card is secondary.
     var story_photo_url: String?
@@ -377,6 +401,17 @@ struct FeedEntry: Codable, Identifiable {
     let segments: [RunSegment]?
     /// Simplified GPS trace [[lat, lng], ...] for the entry's workout.
     let route: [[Double]]?
+    /// Per-mile splits for the entry's workout — the indoor pace wave. Nil on
+    /// older servers, stitched rollups and auto posts. Same CodingKeys rule as
+    /// everything here: listed below, or Codable synthesis dies.
+    let splits: [FeedSplit]?
+    /// HealthKit's indoor flag — nil means UNKNOWN, never "outdoor".
+    let is_indoor: Bool?
+    /// May the viewer launch this entry's flyover (author's
+    /// flyover_visibility)? nil = older server ⇒ behave as before the gate.
+    let flyover_allowed: Bool?
+    /// OWNER-ONLY: recorded in Stealth Mode. nil = older server.
+    let stealth: Bool?
     // shared
     let is_self: Bool
     var is_hyped: Bool
@@ -431,7 +466,8 @@ struct FeedEntry: Codable, Identifiable {
         // listed (or defaulted) — a new field left out kills Codable
         // synthesis for the whole struct (Xcode Cloud build 413).
         case workout_id, workout_type, feed_role, distance, total_duration
-        case moving_seconds, calories, steps, route
+        case moving_seconds, calories, steps, route, splits, is_indoor, flyover_allowed
+        case stealth
         case segment_count, segments
         case is_self, is_hyped, hype_count, comment_count, photo_locked, is_fresh
         case coauthor_user_id, coauthor_status, coauthor_username
@@ -475,7 +511,10 @@ struct FeedEntry: Codable, Identifiable {
             share_to_feed: true, share_to_story: nil, story_expires_at: nil,
             created_at: sort_ts, is_auto: is_auto, include_route: include_route,
             workout_type: workout_type,
-            route: route, story_photo_url: story_photo_url,
+            route: route, splits: splits, is_indoor: is_indoor,
+            flyover_allowed: flyover_allowed,
+            stealth: stealth,
+            story_photo_url: story_photo_url,
             is_self: is_self, is_hyped: is_hyped,
             hype_count: hype_count, comment_count: comment_count,
             is_viewed: nil, workout_on_feed: nil,

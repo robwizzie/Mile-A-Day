@@ -12,6 +12,16 @@ enum SplitCalculator {
     /// One mile in meters.
     private static let mileInMeters = 1609.34
 
+    /// ONE long-lived store for every split query.
+    ///
+    /// This used to be a fresh `HKHealthStore()` per workout. HealthKit
+    /// requires the store to outlive the query executed on it, and a local one
+    /// is released the instant `fetchDistanceSamples` returns — the same
+    /// dropped-store trap that makes a workout save with no route (ios.md).
+    /// It is also allocated once per workout, which during a historical import
+    /// means thousands of stores in a few minutes.
+    private static let healthStore = HKHealthStore()
+
     /// Calculate mile splits for a workout from its HealthKit distance samples.
     /// Returns `WorkoutSplit` objects with splitNumber, distance, duration, and pace.
     static func calculateSplits(for workout: HKWorkout) async -> [WorkoutSplit] {
@@ -104,7 +114,6 @@ enum SplitCalculator {
         distanceType: HKQuantityType
     ) async -> [HKQuantitySample] {
         await withCheckedContinuation { continuation in
-            let healthStore = HKHealthStore()
             let predicate = HKQuery.predicateForObjects(from: workout)
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
 

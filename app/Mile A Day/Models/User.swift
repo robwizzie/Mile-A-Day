@@ -10,6 +10,10 @@ struct User: Identifiable, Codable {
     var bio: String?
     var profileImageUrl: String? = nil
     var role: String? = nil
+    // Profile banner (image path + gradient preset), mirrored from the backend.
+    // Both MUST stay Optional — same persisted-blob rule as `longestStreak`.
+    var profileBannerUrl: String? = nil
+    var profileBannerStyle: String? = nil
     var streak: Int = 0
     // All-time longest streak, from the backend's ratcheted users.longest_streak.
     // MUST stay Optional: this struct is decoded from persisted UserDefaults

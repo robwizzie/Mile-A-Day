@@ -5,41 +5,20 @@ import { notFound } from "next/navigation";
 import { Apple } from "lucide-react";
 import { Footer } from "@/components/footer";
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "https://mad.mindgoblin.tech";
+import { getPublicPost, publicAuthorName, type PublicPost } from "./publicPost";
+
 const APP_STORE_URL = "https://apps.apple.com/us/app/mile-a-day/id6746970905";
 
 /**
- * Deliberately just the author. A post is friends-only content and a shared
- * link travels well past that audience, so this page is a signpost, not a
+ * Deliberately just the author (see publicPost.ts — shared with the OG
+ * unfurl image so the two can't disagree). This page is a signpost, not a
  * viewer: it confirms the link is real, says whose post it is, and hands off
  * to the app — which re-checks whether the person tapping may actually see it.
  */
-type PublicPost = {
-  post_id: string;
-  username: string | null;
-  first_name: string | null;
-};
-
-async function getPost(postId: string): Promise<PublicPost | null> {
-  try {
-    const res = await fetch(
-      `${API_URL}/public/posts/${encodeURIComponent(postId)}`,
-      {
-        next: { revalidate: 300 },
-      },
-    );
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
+const getPost = getPublicPost;
 
 function authorName(post: PublicPost): string {
-  if (post.username) return `@${post.username}`;
-  if (post.first_name) return post.first_name;
-  return "A runner";
+  return publicAuthorName(post);
 }
 
 export async function generateMetadata({

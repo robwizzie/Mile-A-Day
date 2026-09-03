@@ -65,6 +65,7 @@ struct WorkoutHeroCard<Banner: View>: View {
     private let source: WorkoutSource
     private let hasRoute: Bool
     private let hasPhoto: Bool
+    private let isStealth: Bool
     private let banner: Banner
 
     init(
@@ -76,6 +77,7 @@ struct WorkoutHeroCard<Banner: View>: View {
         source: WorkoutSource = .healthkit,
         hasRoute: Bool = false,
         hasPhoto: Bool = false,
+        isStealth: Bool = false,
         @ViewBuilder banner: () -> Banner
     ) {
         self.icon = icon
@@ -86,6 +88,7 @@ struct WorkoutHeroCard<Banner: View>: View {
         self.source = source
         self.hasRoute = hasRoute
         self.hasPhoto = hasPhoto
+        self.isStealth = isStealth
         self.banner = banner()
     }
 
@@ -118,10 +121,13 @@ struct WorkoutHeroCard<Banner: View>: View {
                 .font(MADTheme.Typography.body)
                 .foregroundColor(.secondary)
 
-            if hasRoute || hasPhoto {
+            if hasRoute || hasPhoto || isStealth {
                 HStack(spacing: MADTheme.Spacing.sm) {
-                    if hasRoute {
+                    if hasRoute && !isStealth {
                         WorkoutHeroTag(icon: "map.fill", label: "Route", color: color)
+                    }
+                    if isStealth {
+                        WorkoutHeroTag(icon: "eye.slash.fill", label: "Stealth · only on this phone", color: .gray)
                     }
                     if hasPhoto {
                         WorkoutHeroTag(icon: "photo.fill", label: "Photo", color: .pink)

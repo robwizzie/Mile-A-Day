@@ -16,6 +16,14 @@ struct EditProfileView: View {
     @State private var isSaving = false
     @State private var saveError: String?
 
+    // Banner: a gradient preset, or a photo. Picking a preset drops the photo;
+    // picking a photo keeps the preset as the fallback the server never shows.
+    @State private var bannerStyle: ProfileBannerStyle
+    @State private var bannerImage: UIImage?
+    @State private var removeBanner = false
+    @State private var showingBannerPicker = false
+    @State private var pickedBannerImage: UIImage?
+
     // Username validation
     @State private var isValidatingUsername = false
     @State private var usernameValidationMessage = ""
@@ -30,6 +38,7 @@ struct EditProfileView: View {
         self._lastName = State(initialValue: user.lastName ?? "")
         self._username = State(initialValue: user.username ?? "")
         self._bio = State(initialValue: user.bio ?? "")
+        self._bannerStyle = State(initialValue: ProfileBannerStyle.resolve(user.profileBannerStyle))
     }
 
     private var originalUsername: String {
@@ -43,6 +52,15 @@ struct EditProfileView: View {
             || username != (user.username ?? "")
             || bio != (user.bio ?? "")
             || selectedImage != nil
+            || bannerStyle != ProfileBannerStyle.resolve(user.profileBannerStyle)
+            || bannerImage != nil
+            || removeBanner
+    }
+
+    /// A photo is (or will be) the banner — a picked one, or the saved one
+    /// that hasn't been removed.
+    private var hasBannerPhoto: Bool {
+        bannerImage != nil || (!removeBanner && userManager.currentUser.profileBannerUrl != nil)
     }
 
     private var canSave: Bool {
@@ -57,9 +75,12 @@ struct EditProfileView: View {
 
                 ScrollView {
                     VStack(spacing: MADTheme.Spacing.lg) {
+                        // Banner
+                        bannerSection
+                            .padding(.top, MADTheme.Spacing.sm)
+
                         // Profile Image
                         profileImageSection
-                            .padding(.top, MADTheme.Spacing.md)
 
                         // Name Fields
                         nameSection
@@ -186,6 +207,110 @@ struct EditProfileView: View {
                 .foregroundColor(MADTheme.Colors.madRed)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Banner Section
+
+    private var bannerSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            sectionLabel("BANNER")
+
+            ProfileBannerView(
+                imageURL: removeBanner ? nil : userManager.currentUser.profileBannerUrl,
+                style: bannerStyle,
+                localImage: bannerImage,
+                scrims: false
+            )
+            .frame(height: 96)
+            .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+            )
+
+            HStack(spacing: 10) {
+                ForEach(ProfileBannerStyle.allCases) { style in
+                    bannerSwatch(style)
+                }
+                Spacer(minLength: 0)
+                Button {
+                    showingBannerPicker = true
+                } label: {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(width: 34, height: 34)
+                        .background(
+                            Circle()
+                                .fill(hasBannerPhoto ? MADTheme.Colors.madRed : Color.white.opacity(0.08))
+                                .overlay(Circle().strokeBorder(Color.white.opacity(hasBannerPhoto ? 0.9 : 0.15), lineWidth: hasBannerPhoto ? 2 : 1))
+                        )
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Choose a banner photo")
+            }
+
+            HStack {
+                Text(hasBannerPhoto ? "Your photo, cropped to fit." : "Pick a color, or use a photo from your library.")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.45))
+                Spacer(minLength: 8)
+                if hasBannerPhoto {
+                    Button("Remove photo") {
+                        bannerImage = nil
+                        removeBanner = true
+                    }
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(MADTheme.Colors.madRed)
+                }
+            }
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+        // Its own node: a second `.sheet` on the chain that already presents
+        // the avatar picker would be the one that drops.
+        .sheet(isPresented: $showingBannerPicker) {
+            ImagePicker(selectedImage: $pickedBannerImage)
+        }
+        .onChange(of: pickedBannerImage) { _, newImage in
+            guard let newImage else { return }
+            bannerImage = newImage
+            removeBanner = false
+            pickedBannerImage = nil
+        }
+    }
+
+    private func bannerSwatch(_ style: ProfileBannerStyle) -> some View {
+        let selected = style == bannerStyle && !hasBannerPhoto
+        return Button {
+            bannerStyle = style
+            // A preset IS the banner: the photo goes.
+            bannerImage = nil
+            if userManager.currentUser.profileBannerUrl != nil {
+                removeBanner = true
+            }
+        } label: {
+            ZStack {
+                Color.black
+                style.gradient
+            }
+            .frame(width: 34, height: 34)
+            .clipShape(Circle())
+            .overlay(
+                Circle().strokeBorder(
+                    selected ? Color.white : Color.white.opacity(0.15),
+                    lineWidth: selected ? 2.5 : 1
+                )
+            )
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(style.title)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
     // MARK: - Dark form styling
@@ -439,9 +564,25 @@ struct EditProfileView: View {
                     }
                 }
 
+                // Banner: upload a picked photo, or clear the saved one.
+                if let banner = bannerImage {
+                    let bannerUrl = try await ProfileImageService.uploadProfileBanner(banner, userId: backendUserId)
+                    await MainActor.run {
+                        userManager.currentUser.profileBannerUrl = bannerUrl
+                    }
+                }
+
                 // Build update body for text fields
                 var updates: [String: Any] = [:]
                 let user = userManager.currentUser
+
+                if bannerStyle != ProfileBannerStyle.resolve(user.profileBannerStyle) {
+                    updates["profile_banner_style"] = bannerStyle.rawValue
+                }
+                if bannerImage == nil, removeBanner, user.profileBannerUrl != nil {
+                    // PATCH can only ever CLEAR the banner path; uploads set it.
+                    updates["profile_banner_url"] = NSNull()
+                }
 
                 if firstName != (user.firstName ?? "") {
                     updates["first_name"] = firstName.isEmpty ? NSNull() : firstName
@@ -484,6 +625,10 @@ struct EditProfileView: View {
                         userManager.currentUser.username = username
                     }
                     userManager.currentUser.bio = bio.isEmpty ? nil : bio
+                    userManager.currentUser.profileBannerStyle = bannerStyle.rawValue
+                    if bannerImage == nil, removeBanner {
+                        userManager.currentUser.profileBannerUrl = nil
+                    }
                     userManager.saveUserData()
                     isSaving = false
                     onDismiss()

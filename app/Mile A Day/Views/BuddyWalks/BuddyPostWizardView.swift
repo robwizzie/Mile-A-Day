@@ -138,11 +138,14 @@ struct BuddyPostWizardView: View {
     private var combinedRouteCard: some View {
         let drawn = drawnRoutes
         if !drawn.isEmpty {
+            let avatars = crewRouteAvatars
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                WorkoutRouteMapView(
+                RouteArtView(
                     coordinates: drawn.first?.coordinates ?? [],
                     routeColor: drawn.first?.color ?? session.accentColor,
-                    companionRoutes: Array(drawn.dropFirst())
+                    companionRoutes: Array(drawn.dropFirst()),
+                    authorAvatar: drawn.first.flatMap { avatars[$0.id] },
+                    companionAvatars: avatars
                 )
                 .frame(height: 220)
                 .clipShape(RoundedRectangle(
@@ -364,6 +367,18 @@ struct BuddyPostWizardView: View {
         return out
     }
 
+    /// user id → the badge riding their line on the combined art card.
+    private var crewRouteAvatars: [String: RouteArtAvatar] {
+        var out: [String: RouteArtAvatar] = [:]
+        for participant in crew {
+            out[participant.userId] = RouteArtAvatar(
+                name: participant.displayName,
+                imageURL: participant.profileImageUrl
+            )
+        }
+        return out
+    }
+
     /// user id → the name to print beside their line.
     private var routeNames: [String: String] {
         var out: [String: String] = [:]
@@ -522,6 +537,12 @@ struct BuddyPostWizardView: View {
               let workout = HealthKitManager.shared.todaysWorkouts
                   .first(where: { $0.uuid.uuidString == workoutId })
         else { return }  // Leave it unset so the server pass below can try.
+        // Stealth Mode: the poster's own line stays on their phone, and the
+        // server pass would find nothing for it either.
+        if StealthModeStore.shared.isStealth(workout) {
+            routes[me] = .unavailable
+            return
+        }
         routes[me] = .loading
         let coords = await HealthKitManager.shared
             .fetchAllRouteLocations(for: workout)

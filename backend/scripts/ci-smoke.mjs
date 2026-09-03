@@ -69,6 +69,7 @@ async function cleanup() {
   await db.query(
     `DELETE FROM workout_routes WHERE workout_id LIKE 'ci-workout-%'`,
   );
+  await db.query(`DELETE FROM stealth_windows WHERE user_id LIKE 'ci-%'`);
   await db.query(`DELETE FROM workouts WHERE user_id LIKE 'ci-%'`);
   // The collab-permission assertions flip users to 'private' mid-run, and the
   // grid-vs-tagged ones flip tags off the grid; a failed run must not leave
@@ -584,8 +585,19 @@ assert.equal(
   "…and still dedupes",
 );
 hypeRes = await callSendHype(BOB, postHypeCtx(ALICE));
-assert.equal(hypeRes.code, 400, "an author can't hype their own collab");
-assert.match(hypeRes.body.error, /your own post/);
+assert.equal(
+  hypeRes.code,
+  200,
+  `an author may hype their own collab — self-hypes are allowed (got ${JSON.stringify(hypeRes.body)})`,
+);
+assert.deepEqual(
+  await db.query(
+    `SELECT target_id, context_type FROM hype_log WHERE sender_id = $1`,
+    [BOB],
+  ),
+  [{ target_id: ALICE, context_type: "post" }],
+  "…and it's filed against the PRIMARY author like every other hype",
+);
 assert.equal(
   (await callSendHype(DANA, postHypeCtx(ALICE))).code,
   200,
@@ -599,7 +611,7 @@ assert.equal(
 assert.equal(
   (await callHypers(BOB)).code,
   200,
-  "an author can read their own post's hypers even though they can't hype it",
+  "an author can read their own post's hypers",
 );
 assert.equal(
   (await callSendHype("ci-stranger", postHypeCtx(ALICE))).code,
@@ -941,11 +953,22 @@ assert.equal(
   true,
   "share_route_maps=false still reports the route to the owner",
 );
-// A missing viewer is a stranger, not a free pass.
+// A missing viewer is a stranger, not a free pass — and with the list itself
+// now behind workout_visibility ('friends' default), a stranger gets ZERO
+// rows, not a list with the routes scrubbed.
 assert.equal(
-  (await getRecentWorkouts(BOB, 10, null))[0].has_route,
-  false,
-  "no viewer id → fail closed, not open",
+  (await getRecentWorkouts(BOB, 10, null)).length,
+  0,
+  "no viewer id → fail closed: empty list",
+);
+assert.equal(
+  (await getRecentWorkouts(BOB, 10, DANA)).length,
+  0,
+  "an authenticated NON-friend gets an empty workout list",
+);
+assert.ok(
+  (await getRecentWorkouts(BOB, 10, ALICE)).length > 0,
+  "friends still see the list",
 );
 await db.query(
   `UPDATE notification_settings SET share_route_maps = TRUE WHERE user_id = $1`,
@@ -1008,9 +1031,9 @@ assert.equal(
   "private hides routes from friends",
 );
 assert.equal(
-  (await getRecentWorkouts(BOB, 10, ALICE))[0].has_photo,
-  false,
-  "private hides photo existence from friends",
+  (await getRecentWorkouts(BOB, 10, ALICE)).length,
+  0,
+  "private empties the workout list for friends (not just the photo flag)",
 );
 // ...but never from the owner.
 assert.ok(
@@ -1994,6 +2017,199 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
   );
   await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-pace-%'`);
   await db.query(`DELETE FROM users WHERE user_id = $1`, [PACER]);
+}
+
+// --- Stealth Mode. A workout recorded inside a stealth window never gets a
+// route row, the stamp is STICKY across a later re-upload, friends can't tell
+// it from share_route_maps=off, and the retroactive paths (per-workout hide,
+// backdated window) scrub routes that already landed. Every failure here is
+// silent — a route that quietly exists — so it's asserted on the real write
+// and read paths, never by reading the SQL.
+{
+  const {
+    openWindow,
+    closeWindow,
+    hideWorkoutRoute,
+    stealthStatus,
+    isStealthNow,
+  } = await import("../dist/services/stealthService.js");
+  const SAM = "ci-stealth";
+  await db.query(
+    `INSERT INTO users (user_id, email, apple_sub, username, first_name)
+     VALUES ($1, 'stealth@ci.local', 'ci-sub-stealth', 'ci_stealth', 'sam')
+     ON CONFLICT (user_id) DO NOTHING`,
+    [SAM],
+  );
+  await db.query(
+    `INSERT INTO notification_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+    [SAM],
+  );
+  for (const [a, b] of [
+    [SAM, ALICE],
+    [ALICE, SAM],
+  ]) {
+    await db.query(
+      `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1, $2, 'accepted')
+       ON CONFLICT (user_id, friend_id) DO NOTHING`,
+      [a, b],
+    );
+  }
+
+  const ROUTE = [
+    [40.7, -74.0],
+    [40.71, -74.01],
+    [40.72, -74.02],
+  ];
+  // `durationSeconds` matters: the server derives start = end - duration for
+  // the window overlap test.
+  const walk = (id, endIso, durationSeconds = 900) => ({
+    workoutId: id,
+    distance: 1.2,
+    localDate: endIso.slice(0, 10),
+    date: endIso.slice(0, 10),
+    timezoneOffset: 0,
+    workoutType: "walking",
+    deviceEndDate: endIso,
+    calories: 100,
+    totalDuration: durationSeconds,
+    source: "healthkit",
+    splits: [],
+    route: ROUTE,
+  });
+  const routeRows = async (id) =>
+    (await db.query(`SELECT 1 FROM workout_routes WHERE workout_id = $1`, [id]))
+      .length;
+  const stampOf = async (id) =>
+    (await db.query(`SELECT stealth FROM workouts WHERE workout_id = $1`, [id]))[0]
+      ?.stealth;
+
+  // 1. Open a window.
+  assert.equal(await isStealthNow(SAM), false, "no window → not stealth");
+  await openWindow(SAM, {});
+  const st1 = await stealthStatus(SAM);
+  assert.equal(st1.stealth_mode, true, "open window → stealth_mode true");
+  assert.equal(st1.stealth_until, null, "open-ended window → no until");
+  assert.equal(st1.stealth_windows.length, 1, "one window listed");
+  assert.equal(
+    typeof st1.stealth_windows[0].started_at,
+    "string",
+    "windows serialise as ISO strings, not Date objects",
+  );
+
+  // 2. A workout uploaded WITH a route inside the window: stamped, no row.
+  const W1 = "ci-workout-stealth-1";
+  const w1End = new Date().toISOString();
+  await uploadWorkouts(SAM, [walk(W1, w1End)]);
+  assert.equal(await stampOf(W1), true, "workout inside the window is stamped");
+  assert.equal(await routeRows(W1), 0, "…and its route was never stored");
+  const samFeed = await getUnifiedFeed(SAM, 20, null);
+  const w1Entry = samFeed.find(
+    (r) => r.kind === "workout" && r.workout_id === W1,
+  );
+  assert.ok(w1Entry, "owner sees their stealth workout in their own feed");
+  assert.equal(w1Entry.route, null, "…with no route");
+  assert.equal(w1Entry.stealth, true, "…flagged stealth for the OWNER");
+  const ownRow = (await getRecentWorkouts(SAM, 10, SAM)).find(
+    (r) => r.workout_id === W1,
+  );
+  assert.equal(ownRow.has_route, false, "owner: has_route false");
+  assert.equal(ownRow.stealth, true, "owner: stealth true");
+  const friendRow = (await getRecentWorkouts(SAM, 10, ALICE)).find(
+    (r) => r.workout_id === W1,
+  );
+  assert.ok(friendRow, "friend still sees the workout (distance is fine)");
+  assert.equal(friendRow.has_route, false, "friend: has_route false");
+  assert.equal(
+    friendRow.stealth,
+    false,
+    "friend: stealth reads FALSE — indistinguishable from share_route_maps=off",
+  );
+  assert.equal(
+    (await getUserRoutes(SAM)).some((r) => r.workout_id === W1),
+    false,
+    "the owner's heatmap dump excludes it",
+  );
+  assert.equal(
+    await getWorkoutRoute(SAM, W1, SAM),
+    null,
+    "no route even for the owner — nothing was stored",
+  );
+
+  // 3. Close the window, re-upload WITH a route → sticky, still refused.
+  await closeWindow(SAM);
+  assert.equal(
+    (await stealthStatus(SAM)).stealth_mode,
+    false,
+    "closed → stealth_mode false",
+  );
+  await uploadWorkouts(SAM, [walk(W1, w1End)]);
+  assert.equal(
+    await stampOf(W1),
+    true,
+    "stamp is STICKY across a re-upload after stealth was turned off",
+  );
+  assert.equal(await routeRows(W1), 0, "…and the re-sent route is refused");
+
+  // 4. A workout that STARTED after the window closed keeps its route.
+  const W2 = "ci-workout-stealth-2";
+  await uploadWorkouts(SAM, [
+    walk(W2, new Date(Date.now() + 5 * 60_000).toISOString(), 60),
+  ]);
+  assert.notEqual(await stampOf(W2), true, "post-window workout is not stealth");
+  assert.equal(await routeRows(W2), 1, "…and keeps its route");
+
+  // 5. Retroactive per-workout hide — owner only.
+  assert.equal(
+    await hideWorkoutRoute(ALICE, W2),
+    false,
+    "a friend cannot hide someone else's route",
+  );
+  assert.equal(await routeRows(W2), 1, "…and nothing changed");
+  assert.equal(
+    await hideWorkoutRoute(SAM, "ci-workout-stealth-nope"),
+    false,
+    "unknown workout → false (404)",
+  );
+  assert.equal(await hideWorkoutRoute(SAM, W2), true, "owner hides one walk");
+  assert.equal(await stampOf(W2), true, "…stamped");
+  assert.equal(await routeRows(W2), 0, "…route row deleted");
+  assert.equal(await getWorkoutRoute(SAM, W2, SAM), null, "…and unreadable");
+
+  // 6. A backdated window scrubs a route that already landed, and a future
+  //    `until` serialises.
+  const W3 = "ci-workout-stealth-3";
+  await uploadWorkouts(SAM, [
+    walk(W3, new Date(Date.now() - 2 * 3600_000).toISOString()),
+  ]);
+  assert.equal(await routeRows(W3), 1, "pre-window workout stored its route");
+  await openWindow(SAM, {
+    since: new Date(Date.now() - 3 * 3600_000),
+    until: new Date(Date.now() + 86_400_000),
+    untilProvided: true,
+  });
+  const st2 = await stealthStatus(SAM);
+  assert.equal(st2.stealth_mode, true, "backdated window is on now");
+  assert.equal(typeof st2.stealth_until, "string", "until serialises as ISO");
+  assert.equal(await stampOf(W3), true, "backdate stamped the earlier walk");
+  assert.equal(await routeRows(W3), 0, "…and deleted its stored route");
+  await closeWindow(SAM);
+  assert.equal(
+    await isStealthNow(SAM),
+    false,
+    "closing a trip-mode window ends it",
+  );
+
+  await db.query(`DELETE FROM stealth_windows WHERE user_id = $1`, [SAM]);
+  await db.query(
+    `DELETE FROM workout_routes WHERE workout_id LIKE 'ci-workout-stealth-%'`,
+  );
+  await db.query(`DELETE FROM workouts WHERE user_id = $1`, [SAM]);
+  await db.query(
+    `DELETE FROM friendships WHERE user_id = $1 OR friend_id = $1`,
+    [SAM],
+  );
+  await db.query(`DELETE FROM notification_settings WHERE user_id = $1`, [SAM]);
+  await db.query(`DELETE FROM users WHERE user_id = $1`, [SAM]);
 }
 
 console.log("ci-smoke: all assertions passed");

@@ -76,6 +76,7 @@ struct WorkoutsView: View {
                 // making the screen feel longer than it is. This is just a
                 // resting gap under the last card.
                 .padding(.bottom, MADTheme.Spacing.md)
+                .lockedToScrollWidth()
             }
         }
         .navigationTitle("Workouts")

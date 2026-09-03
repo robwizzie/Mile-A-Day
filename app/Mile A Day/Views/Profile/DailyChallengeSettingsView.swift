@@ -112,6 +112,8 @@ struct DailyChallengeSettingsView: View {
         do {
             let settings = try await friendService.getNotificationSettings()
             closeFriendsOnly = settings.h2h_close_friends_only ?? false
+            // Free hydration point for the Stealth window log (server wins).
+            StealthModeStore.shared.apply(settings)
         } catch {
             print("[ChallengeSettings] Failed to load preference: \(error)")
         }

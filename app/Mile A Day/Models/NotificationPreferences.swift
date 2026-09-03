@@ -7,6 +7,28 @@ import Foundation
 /// This is the coarse gate: it decides WHO gets in at all. The sharing toggles
 /// below it (`shareRouteMaps`, `shareWorkoutsToFeed`) decide WHAT those people
 /// then see. Both apply.
+/// Who may launch the cinematic flyover of my routes. Server-enforced at the
+/// feed projection (flyover_allowed); the coords themselves stay behind
+/// share_route_maps either way.
+enum FlyoverVisibility: String, Codable, CaseIterable, Identifiable {
+    case friends
+    case selfOnly = "self"
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .friends: return "Friends"
+        case .selfOnly: return "Only me"
+        }
+    }
+    var subtitle: String {
+        switch self {
+        case .friends: return "Friends can play the cinematic flyover of your routes"
+        case .selfOnly: return "Only you can play flyovers of your routes"
+        }
+    }
+}
+
 enum WorkoutVisibility: String, Codable, CaseIterable, Identifiable {
     case `public`
     case friends
@@ -147,6 +169,18 @@ struct NotificationPreferences: Codable {
         set { autoPostWithoutPhotoRaw = newValue }
     }
 
+    /// Do photo-less auto route/stat cards join my profile's Posts grid?
+    ///
+    /// Off = they can still reach friends' feeds (controlled by
+    /// `autoPostWithoutPhoto` above), but the profile grid stays photo-first
+    /// unless that workout also has a story/photo attached. Server-enforced
+    /// because other people read your grid from SQL, not this local store.
+    private var autoPostsOnProfileRaw: Bool?
+    var autoPostsOnProfile: Bool {
+        get { autoPostsOnProfileRaw ?? true }
+        set { autoPostsOnProfileRaw = newValue }
+    }
+
     /// Do collabs friends tag me in join my profile's Posts grid? Off = they
     /// live in the Tagged tab only, Instagram-style. Grid ONLY — the tag stays
     /// live, the post stays in Tagged, and it still reaches my friends' feeds.
@@ -178,6 +212,14 @@ struct NotificationPreferences: Codable {
     /// unrecognised stored value falls back to `.friends` rather than to
     /// something more exposed.
     private var workoutVisibilityRaw: String?
+    /// Same optional-backing pattern as shareRouteMapsRaw (persisted blob —
+    /// a new non-optional field throws on every existing install's decode).
+    private var flyoverVisibilityRaw: String?
+    var flyoverVisibility: FlyoverVisibility {
+        get { flyoverVisibilityRaw.flatMap(FlyoverVisibility.init(rawValue:)) ?? .friends }
+        set { flyoverVisibilityRaw = newValue.rawValue }
+    }
+
     var workoutVisibility: WorkoutVisibility {
         get { workoutVisibilityRaw.flatMap(WorkoutVisibility.init(rawValue:)) ?? .friends }
         set { workoutVisibilityRaw = newValue.rawValue }

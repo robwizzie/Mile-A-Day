@@ -363,6 +363,7 @@ struct WorkoutRow: View {
                     source: workoutSource,
                     hasRoute: hasRoute,
                     hasPhoto: hasPhoto,
+                    isStealth: StealthModeStore.shared.isStealth(workout),
                     routeColor: workoutColor
                 )
 

@@ -1067,6 +1067,9 @@ struct NotificationSettingsResponse: Codable {
     /// "public" | "friends" | "private" — who may see my routes and photos.
     /// Optional: absent on older server builds (treat as "friends").
     let workout_visibility: String?
+    /// "friends" | "self" — who may launch flyovers of my routes.
+    /// Optional: absent on older server builds (treat as "friends").
+    let flyover_visibility: String?
     /// Do collabs I'm tagged in join my profile's Posts grid? Server-enforced
     /// (the grid is a SQL query), so this is the authority, not the local copy.
     /// Optional: absent on older server builds (treat as on).
@@ -1080,6 +1083,17 @@ struct NotificationSettingsResponse: Codable {
     /// enforcement is client-side (see `RunPostService.autoPostMile`).
     /// Optional: absent on older server builds (treat as on).
     let auto_post_without_photo: Bool?
+    /// Do photo-less auto route/stat cards join my profile's Posts grid?
+    /// Server-enforced like tagged_posts_on_profile. Optional: absent on older
+    /// server builds (treat as on).
+    let auto_posts_on_profile: Bool?
+    /// Stealth Mode — derived by the server from its window log. All optional:
+    /// absent on older server builds (treat as off / no windows).
+    let stealth_mode: Bool?
+    /// ISO timestamp (fractional seconds — parse with BuddyDate), or null.
+    let stealth_until: String?
+    /// Recent windows, newest first; hydrates StealthModeStore (server wins).
+    let stealth_windows: [StealthWindowDTO]?
 }
 
 struct FriendNotificationSetting: Codable, Identifiable {

@@ -11,6 +11,7 @@ import {
   updateUserProfileImage,
   updateUserOnboarding,
   uploadProfileImage,
+  uploadProfileBanner,
 } from "../controllers/usersController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
 import {
@@ -78,6 +79,15 @@ router.post(
   requireSelfAccess("userId"),
   upload.single("image"),
   uploadProfileImage,
+);
+// Profile banner (the header behind the avatar). Same multer/sharp path as the
+// avatar, landscape crop. Clearing it is `PATCH /:userId { profile_banner_url:
+// null }`; the gradient preset is `profile_banner_style` on the same PATCH.
+router.post(
+  "/:userId/banner/upload",
+  requireSelfAccess("userId"),
+  upload.single("image"),
+  uploadProfileBanner,
 );
 
 export default router;

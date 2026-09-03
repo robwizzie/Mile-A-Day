@@ -79,6 +79,11 @@ export async function updateBio({ userId, bio }: { userId: string; bio: string }
 
 export async function updateProfileImage({ userId, profileImageUrl }: { userId: string; profileImageUrl: string }) {
 	await db.query('UPDATE users SET profile_image_url = $1 WHERE user_id = $2', [profileImageUrl, userId]);
+}
+
+/** Profile banner image path (null clears it — the gradient preset draws instead). */
+export async function updateProfileBanner({ userId, profileBannerUrl }: { userId: string; profileBannerUrl: string | null }) {
+	await db.query('UPDATE users SET profile_banner_url = $1 WHERE user_id = $2', [profileBannerUrl, userId]);
 
 	return { success: true };
 }
@@ -91,6 +96,17 @@ export async function updateProfileImage({ userId, profileImageUrl }: { userId: 
  * the step is done and we can measure completion. All fields are additive and
  * nullable — passing nothing but stamping the timestamp records a "skipped".
  */
+/**
+ * Referral sources whose `referral_detail` names a PERSON rather than a
+ * channel, so the attribution graph resolves it against real usernames.
+ *
+ * Lives here, not in the controller that validates the catalog, because the
+ * admin analytics read it too and a service must not import a controller. One
+ * definition or the dashboard silently stops counting a source the moment the
+ * signup form starts offering it.
+ */
+export const PERSON_REFERRAL_SOURCES = ['friend', 'developer'] as const;
+
 export async function updateOnboardingInfo({
 	userId,
 	referralSource,

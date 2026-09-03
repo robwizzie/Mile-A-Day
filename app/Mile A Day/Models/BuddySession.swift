@@ -713,8 +713,13 @@ struct BuddyWalkPhoto: Codable, Identifiable, Equatable {
     let userId: String
     let mediaUrl: String
     let caption: String?
+    /// A crew member's own slide on the shared post rather than its lead
+    /// photo. Optional: older servers don't send it.
+    var isCrew: Bool? = nil
 
-    var id: String { postId }
+    /// One post carries several pictures now (the poster's and each crew
+    /// member's), so the post id alone no longer identifies a photo.
+    var id: String { "\(postId)-\(userId)" }
 
     /// The DB stores bare paths and the server signs them at read; resolving
     /// against the API host is `ProfileImageService.fullImageURL`'s job, the
@@ -727,6 +732,7 @@ struct BuddyWalkPhoto: Codable, Identifiable, Equatable {
         case userId = "user_id"
         case mediaUrl = "media_url"
         case caption
+        case isCrew = "is_crew"
     }
 }
 
@@ -745,8 +751,20 @@ struct BuddyWalkParticipant: Codable, Identifiable, Equatable {
     let durationSeconds: Int
     let place: Int?
     let isHost: Bool
+    /// The HKWorkout the reconciler matched to this walk, when it did. All
+    /// three are nil on older servers.
+    var workoutId: String? = nil
+    /// Nil = their phone never synced a workout for this walk, so
+    /// `distanceMiles` is the live figure. Say "not synced" — never "syncing":
+    /// a walk from last month is not about to sync.
+    var finalDistanceMiles: Double? = nil
+    /// A stored trace the viewer may draw (owner consent already applied).
+    var hasRoute: Bool? = nil
 
     var id: String { userId }
+
+    /// Their workout landed and this number is the reconciled one.
+    var isSynced: Bool { finalDistanceMiles != nil }
 
     /// True when the viewer can still see who this was.
     var isNamed: Bool {
@@ -768,6 +786,9 @@ struct BuddyWalkParticipant: Codable, Identifiable, Equatable {
         case durationSeconds = "duration_seconds"
         case place
         case isHost = "is_host"
+        case workoutId = "workout_id"
+        case finalDistanceMiles = "final_distance_miles"
+        case hasRoute = "has_route"
     }
 }
 
@@ -789,9 +810,16 @@ struct BuddyWalkRecord: Codable, Identifiable, Equatable {
     let myPlace: Int?
     let participants: [BuddyWalkParticipant]
     let photos: [BuddyWalkPhoto]
+    /// The walk's shared feed post, when the viewer may see it — the card that
+    /// carries everyone's photo and everyone's route. Nil on older servers and
+    /// for a walk nobody posted.
+    var postId: String? = nil
     /// Keyset cursor. Pass the LAST record's cursor as `before` for the next
     /// page — never a hand-built timestamp.
     let cursor: String
+
+    /// Somebody on this walk has a route the viewer may draw.
+    var hasAnyRoute: Bool { participants.contains { $0.hasRoute == true } }
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -808,6 +836,7 @@ struct BuddyWalkRecord: Codable, Identifiable, Equatable {
         case myPlace = "my_place"
         case participants
         case photos
+        case postId = "post_id"
         case cursor
     }
 

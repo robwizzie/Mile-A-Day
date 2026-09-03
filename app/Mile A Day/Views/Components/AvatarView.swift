@@ -27,14 +27,17 @@ struct AvatarView: View {
     }
 
     private var initialsView: some View {
-        Text(initials)
+        Text(Self.initials(for: name))
             .font(.system(size: size * 0.4, weight: .semibold, design: .rounded))
             .foregroundColor(.white)
             .frame(width: size, height: size)
             .background(MADTheme.Colors.redGradient)
     }
 
-    private var initials: String {
+    /// The one initials rule — `RouteAvatarBadge` (which can't use AsyncImage)
+    /// draws the same fallback face through this, so the badge riding a route
+    /// line can never disagree with the header avatar above it.
+    static func initials(for name: String) -> String {
         let components = name.components(separatedBy: " ")
         if components.count >= 2 {
             return "\(components[0].prefix(1))\(components[1].prefix(1))".uppercased()

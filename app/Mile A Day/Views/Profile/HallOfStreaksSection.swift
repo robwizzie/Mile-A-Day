@@ -175,17 +175,12 @@ struct HallOfStreaksSection: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        .profileCard()
     }
 
     private func header(_ list: Shortlist) -> some View {
         HStack(spacing: MADTheme.Spacing.sm) {
-            Image(systemName: "flame.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(MADTheme.Colors.redGradient)
-            Text("Hall of Streaks")
-                .font(MADTheme.Typography.headline)
-                .foregroundColor(.primary)
+            ProfileCardLabel(text: "HALL OF STREAKS")
             Spacer()
             // Says WHY short runs are missing, in three characters. Without it
             // a user who knows they have a dozen 2-day streaks just sees them
@@ -388,17 +383,37 @@ struct HallOfStreaksSection: View {
     }
 
     private func startText(_ era: StreakEraAPI) -> String {
-        display(era.start_date, includeYear: false)
+        // A running streak that began in an earlier year has to say so, or
+        // "Oct 12 – now" implies this year and contradicts its own length.
+        display(era.start_date, includeYear: year(era.start_date) != currentYear)
     }
 
+    /// Both ends of a range, with the year shown wherever leaving it off would
+    /// misdate the run.
+    ///
+    /// The start year used to be unconditionally suppressed, which is fine for
+    /// a run inside one year and badly wrong for one that isn't: a 408-day
+    /// streak rendered as "Aug 15 – Sep 26, 2025", i.e. six weeks. That's not
+    /// cosmetic — it is the app appearing to contradict its own headline
+    /// number, and the reason a user reads their history as a data bug.
     private func rangeText(_ era: StreakEraAPI) -> String {
-        let currentYear = Calendar.current.component(.year, from: Date())
-        let eraYear = Int(era.end_date.prefix(4)) ?? currentYear
-        let includeYear = eraYear != currentYear
+        let startYear = year(era.start_date)
+        let endYear = year(era.end_date)
         if era.start_date == era.end_date {
-            return display(era.start_date, includeYear: includeYear)
+            return display(era.start_date, includeYear: endYear != currentYear)
         }
-        return "\(display(era.start_date, includeYear: false)) – \(display(era.end_date, includeYear: includeYear))"
+        // Show the start year when the run crosses a New Year, and whenever the
+        // end already carries one — "Aug 15 – Sep 26, 2025" must never be able
+        // to describe a range that didn't start in 2025.
+        let endNeedsYear = endYear != currentYear
+        let startNeedsYear = endNeedsYear || startYear != endYear
+        return "\(display(era.start_date, includeYear: startNeedsYear)) – \(display(era.end_date, includeYear: endNeedsYear))"
+    }
+
+    private var currentYear: Int { Calendar.current.component(.year, from: Date()) }
+
+    private func year(_ dateStr: String) -> Int {
+        Int(dateStr.prefix(4)) ?? currentYear
     }
 }
 

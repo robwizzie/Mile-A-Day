@@ -402,6 +402,7 @@ struct FriendsListView: View {
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.top, MADTheme.Spacing.md)
             .padding(.bottom, MADTheme.Spacing.xxl)
+            .lockedToScrollWidth()
         }
         .scrollIndicators(.hidden)
     }
@@ -476,6 +477,7 @@ struct FriendsListView: View {
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.top, MADTheme.Spacing.md)
             .padding(.bottom, MADTheme.Spacing.xxl)
+            .lockedToScrollWidth()
         }
         .scrollIndicators(.hidden)
     }

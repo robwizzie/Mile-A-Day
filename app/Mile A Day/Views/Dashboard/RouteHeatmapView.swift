@@ -38,6 +38,8 @@ struct RouteHeatmapView: View {
     /// Set after load: the fit-all region differs from the cluster region, so
     /// the Nearby/All toggle is worth showing.
     @State private var hasRemoteRoutes = false
+    /// The chained "fly my week" tour, presented full screen.
+    @State private var weeklyTour: WeeklyTourPayload?
     @State private var clusterRegion: MKCoordinateRegion?
     @State private var allRegion: MKCoordinateRegion?
 
@@ -100,6 +102,9 @@ struct RouteHeatmapView: View {
             }
             .preferredColorScheme(.dark)
             .task { await loadRoutes() }
+        .fullScreenCover(item: $weeklyTour) { tour in
+            WeeklyFlyoverPlayerView(launches: tour.launches)
+        }
         }
     }
 
@@ -146,6 +151,23 @@ struct RouteHeatmapView: View {
                     .font(.system(size: 13, weight: .heavy, design: .rounded))
                     .foregroundColor(.white)
                     .monospacedDigit()
+            }
+            if !weekLaunches.isEmpty {
+                Button {
+                    weeklyTour = WeeklyTourPayload(launches: weekLaunches)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("Fly my week")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(MADTheme.Colors.madRed.opacity(0.85)))
+                }
+                .buttonStyle(.plain)
             }
             if presentTypes.count > 1 {
                 ForEach(presentTypes, id: \.self) { type in
@@ -234,6 +256,41 @@ struct RouteHeatmapView: View {
     }
 
     // MARK: - Data
+
+    /// The last 7 days' routes, oldest first — one flyover leg each.
+    private var weekLaunches: [FlyoverLaunch] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "EEE · MMM d"
+        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        let user = UserManager.shared.currentUser
+        return routes
+            .filter { entry in
+                guard let day = formatter.date(from: entry.local_date) else { return false }
+                return day >= Calendar.current.startOfDay(for: cutoff)
+            }
+            .sorted { $0.local_date < $1.local_date }
+            .compactMap { entry in
+                guard let coords = entry.coordinates else { return nil }
+                return FlyoverLaunch(
+                    coordinates: coords,
+                    workoutType: entry.workout_type,
+                    stats: nil,
+                    author: RouteArtAvatar(name: user.name, imageURL: user.profileImageUrl),
+                    // The routes endpoint carries no distance, but this is the
+                    // OWNER's heatmap — the local index has each leg's recorded
+                    // figure. Without it the tour's cumulative odometer sums
+                    // raw polyline lengths and lands ~1–3% under the week the
+                    // dashboard shows (compounding across legs).
+                    officialDistanceMiles: HealthKitManager.shared
+                        .workoutRecord(forUUID: entry.workout_id)?.distance,
+                    legTitle: formatter.date(from: entry.local_date)
+                        .map { dayFormatter.string(from: $0).uppercased() }
+                )
+            }
+    }
 
     private func loadRoutes() async {
         guard isLoading else { return }
@@ -330,4 +387,11 @@ struct RouteHeatmapView: View {
 
 #Preview {
     RouteHeatmapView()
+}
+
+
+/// Identifiable wrapper for the weekly tour's fullScreenCover.
+struct WeeklyTourPayload: Identifiable {
+    let id = UUID()
+    let launches: [FlyoverLaunch]
 }

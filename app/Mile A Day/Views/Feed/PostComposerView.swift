@@ -296,6 +296,9 @@ final class PostComposerViewModel: ObservableObject {
         let workout = HealthKitManager.shared.todaysWorkouts
             .first { $0.uuid.uuidString == workoutId }
         guard let workout else { return }
+        // Stealth Mode: the trace stays on the phone — no toggle, no preview,
+        // no route slide.
+        guard !StealthModeStore.shared.isStealth(workout) else { return }
         routeWorkoutType = Self.workoutTypeString(workout.workoutActivityType)
         hasRoute = await HealthKitManager.shared.hasRouteData(for: workout)
     }

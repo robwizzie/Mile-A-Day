@@ -54,10 +54,24 @@ export interface NotificationPreferences {
   // builds that card), so this is carry-across-devices storage rather than a
   // gate — the server keeps accepting `is_auto` posts from every build.
   auto_post_without_photo: boolean;
+  // auto_posts_on_profile: keep photo-less auto route/stat cards in my profile
+  // Posts grid? Off = those cards still reach the feed, but my grid stays
+  // photo-first unless that workout also has a story/photo attached.
+  auto_posts_on_profile: boolean;
   // Who may see my workout content (routes + photos): 'public' | 'friends' |
   // 'private'. Coarser than share_route_maps — that one decides WHETHER routes
   // are included, this decides WHO gets in at all. Both must pass.
   workout_visibility: WorkoutVisibility;
+  // Who may launch the cinematic flyover of my routes. 'friends' | 'self'.
+  // share_route_maps still gates the coords themselves; this only puts the
+  // guided tour behind its own switch.
+  flyover_visibility: FlyoverVisibility;
+}
+
+export type FlyoverVisibility = "friends" | "self";
+export const DEFAULT_FLYOVER_VISIBILITY: FlyoverVisibility = "friends";
+function isFlyoverVisibility(v: unknown): v is FlyoverVisibility {
+  return v === "friends" || v === "self";
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferences = {
@@ -88,7 +102,9 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   // TRUE: every installed build posts the card today, and flipping shipped
   // behaviour on deploy would read as a bug, not a preference.
   auto_post_without_photo: true,
+  auto_posts_on_profile: true,
   workout_visibility: DEFAULT_WORKOUT_VISIBILITY,
+  flyover_visibility: DEFAULT_FLYOVER_VISIBILITY,
 };
 
 export async function getNotificationPreferences(
@@ -129,11 +145,15 @@ export async function getNotificationPreferences(
     buddy_invites_enabled: row.buddy_invites_enabled ?? true,
     tagged_posts_on_profile: row.tagged_posts_on_profile ?? true,
     auto_post_without_photo: row.auto_post_without_photo ?? true,
+    auto_posts_on_profile: row.auto_posts_on_profile ?? true,
     // Anything unrecognised reads as the safe default rather than being
     // handed to the client as-is.
     workout_visibility: isWorkoutVisibility(row.workout_visibility)
       ? row.workout_visibility
       : DEFAULT_WORKOUT_VISIBILITY,
+    flyover_visibility: isFlyoverVisibility(row.flyover_visibility)
+      ? row.flyover_visibility
+      : DEFAULT_FLYOVER_VISIBILITY,
   };
 }
 
@@ -197,7 +217,17 @@ export async function updateNotificationPreferences(
       key: "auto_post_without_photo",
       value: prefs.auto_post_without_photo,
     },
+    {
+      key: "auto_posts_on_profile",
+      value: prefs.auto_posts_on_profile,
+    },
     { key: "workout_visibility", value: prefs.workout_visibility },
+    {
+      key: "flyover_visibility",
+      value: isFlyoverVisibility(prefs.flyover_visibility)
+        ? prefs.flyover_visibility
+        : undefined,
+    },
   ];
 
   for (const field of fields) {

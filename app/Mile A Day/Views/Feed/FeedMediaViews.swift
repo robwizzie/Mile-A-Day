@@ -259,10 +259,11 @@ private struct ZoomGestureHost: UIViewRepresentable {
 
 // MARK: - Workout card slide
 
-/// The run/walk as a branded 4:5 card, rendered live from a post's stats —
-/// the "workout" second slide of a photo post when the run has no GPS route to
-/// show instead. Same visual language as the baked RunStatsCardView, but
-/// responsive so it fills the feed slide on any screen size.
+/// RETIRED from the feed (both routeless slides now render the animated
+/// `IndoorWorkoutCard`) — kept only as the visual-language reference the
+/// indoor scaffold copied its chrome from, and as `WorkoutStatTileGrid`'s
+/// original host. Do NOT restyle the live cards here; nothing on screen
+/// renders this view anymore.
 struct FeedWorkoutCard: View {
     let stats: PostStats
     let workoutType: String?
@@ -315,17 +316,7 @@ struct FeedWorkoutCard: View {
 
                 Spacer(minLength: 8)
 
-                let tiles = statTiles
-                if !tiles.isEmpty {
-                    VStack(spacing: 8) {
-                        ForEach(Array(stride(from: 0, to: tiles.count, by: 2)), id: \.self) { row in
-                            HStack(spacing: 8) {
-                                tileView(tiles[row])
-                                if row + 1 < tiles.count { tileView(tiles[row + 1]) }
-                            }
-                        }
-                    }
-                }
+                WorkoutStatTileGrid(stats: stats, accent: accent)
 
                 MADLogoMark(size: 28, opacity: 0.9)
                 .padding(.top, 14)
@@ -338,10 +329,35 @@ struct FeedWorkoutCard: View {
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
     }
+}
 
-    private struct Tile { let icon: String; let label: String; let value: String; var tint: Color = .white }
+/// The 2-up stat tile grid (PACE / TIME / CALORIES-or-STEPS / STREAK) — one
+/// implementation for the branded workout card AND the indoor animated cards,
+/// so the two can't drift. Renders nothing when the stats yield no tiles.
+struct WorkoutStatTileGrid: View {
+    let stats: PostStats
+    let accent: Color
+    /// The indoor cards spend their height on a hero scene + pace wave, so
+    /// they cap this at one row; the plain card keeps all four.
+    var maxTiles: Int = 4
 
-    private var statTiles: [Tile] {
+    var body: some View {
+        let tiles = Array(Self.tiles(for: stats).prefix(maxTiles))
+        if !tiles.isEmpty {
+            VStack(spacing: 8) {
+                ForEach(Array(stride(from: 0, to: tiles.count, by: 2)), id: \.self) { row in
+                    HStack(spacing: 8) {
+                        tileView(tiles[row])
+                        if row + 1 < tiles.count { tileView(tiles[row + 1]) }
+                    }
+                }
+            }
+        }
+    }
+
+    struct Tile { let icon: String; let label: String; let value: String; var tint: Color = .white }
+
+    static func tiles(for stats: PostStats) -> [Tile] {
         var out: [Tile] = []
         if let p = stats.pace, p > 0 {
             out.append(Tile(icon: "speedometer", label: "PACE", value: "\(RunStatsStickerView.paceText(p)) /mi"))

@@ -71,6 +71,9 @@ export async function getReceivedHypes(
 		FROM hype_log h
 		JOIN users u ON u.user_id = h.sender_id
 		WHERE h.target_id = $1
+			-- "You got hyped" is about other people; your own hype on your own
+			-- post is in the tally, not in this list.
+			AND h.sender_id <> h.target_id
 		ORDER BY h.created_at DESC
 		LIMIT $2`,
     [userId, limit],
@@ -209,6 +212,68 @@ export async function logHypeIfUnderLimit(
     [senderId, targetId],
   );
   return rows[0] ?? null;
+}
+
+/**
+ * Remove the viewer's own hype for a context. Mile/post use the same unified
+ * run match as the feed tally, so un-hyping a post also clears a hype the user
+ * originally sent from the mile card for that same run.
+ */
+export async function removeHypeForContext(
+  senderId: string,
+  targetId: string,
+  contextType: HypeContext["contextType"],
+  contextId: string,
+): Promise<number> {
+  let matchSql: string;
+  const params: unknown[] = [senderId, targetId, contextId];
+
+  if (contextType === "mile") {
+    const isCompositeMile = MILE_COMPOSITE_RE.test(contextId);
+    matchSql = isCompositeMile
+      ? `(
+				(h.context_type = 'mile' AND (
+					h.context_id = $3
+					OR h.context_id IN (
+						SELECT w.workout_id::text FROM workouts w
+						WHERE w.user_id = $2
+							AND (w.user_id || ':' || w.local_date::text) = $3
+					)
+				))
+				OR (h.context_type = 'post' AND h.context_id IN (
+					SELECT p.post_id::text
+					FROM posts p
+					JOIN workouts w ON w.workout_id = p.workout_id
+					WHERE p.user_id = $2 AND p.deleted_at IS NULL
+						AND (w.user_id || ':' || w.local_date::text) = $3
+				))
+			)`
+      : `EXISTS (
+				SELECT 1 FROM workouts w
+				WHERE w.workout_id::text = $3 AND w.user_id = $2
+					AND ${runHypeMatchSql("h", "w")}
+			)`;
+  } else if (contextType === "post") {
+    matchSql = `EXISTS (
+			SELECT 1 FROM posts p
+			WHERE p.post_id::text = $3 AND p.user_id = $2
+				AND ${postHypeMatchSql("h", "p")}
+		)`;
+  } else {
+    matchSql = `h.context_type = $4 AND h.context_id = $3`;
+    params.push(contextType);
+  }
+
+  const rows = await db.query<{ id: string }>(
+    `DELETE FROM hype_log h
+			WHERE h.sender_id = $1
+				AND h.target_id = $2
+				AND h.context_id IS NOT NULL
+				AND ${matchSql}
+			RETURNING id`,
+    params,
+  );
+  return rows.length;
 }
 
 // A 'mile' hype's canonical context id: `<userId>:<YYYY-MM-DD>` — one hype per

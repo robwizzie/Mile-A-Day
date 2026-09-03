@@ -63,6 +63,10 @@ struct MainTabView: View {
     /// here rather than inside a tab so it works from wherever the user is and
     /// survives a cold launch (the link may arrive before any tab is mounted).
     @StateObject private var postDeepLink = PostDeepLink.shared
+    /// One-shot: stamped by the sheet's own Save (never on display), so a
+    /// crash mid-sheet re-asks instead of silently applying nothing.
+    @State private var showPrivacyOnboarding =
+        !UserDefaults.standard.bool(forKey: PrivacyOnboardingView.seenKey)
     /// Streak-token state, for the two Assist sheets hosted at this root.
     @ObservedObject private var tokensState = StreakTokensState.shared
 
@@ -381,6 +385,14 @@ struct MainTabView: View {
         .sheet(isPresented: $reviewManager.isPresented, onDismiss: handleReviewSheetDismiss) {
             ReviewPromptView(manager: reviewManager)
         }
+        // One-time privacy walkthrough: first open after signing in (existing
+        // users see it once after updating). Hosted at root like celebrations
+        // — a sheet on a tab the user isn't looking at never appears.
+        .sheet(isPresented: $showPrivacyOnboarding) {
+            PrivacyOnboardingView {
+                showPrivacyOnboarding = false
+            }
+        }
         // A Streak Assist waiting on this user's answer. Hosted HERE, not on
         // the Dashboard, for the same reason the celebrations are: a sheet
         // presented from a tab the user isn't looking at either never appears
@@ -416,7 +428,8 @@ struct MainTabView: View {
             )
         ) {
             if let postId = postDeepLink.pendingPostId {
-                PostDetailLoaderView(postId: postId)
+                PostDetailLoaderView(postId: postId,
+                                     autoFlyover: postDeepLink.pendingWantsFlyover)
             }
         }
         .onChange(of: userManager.currentUser.streak) { _, _ in

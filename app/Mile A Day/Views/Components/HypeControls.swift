@@ -8,18 +8,27 @@ import SwiftUI
 
 // MARK: - Hype Button
 
-/// One-shot "Hype" action button. Solid-orange while actionable, faded once the
-/// viewer has hyped, and a muted disabled chip when the daily allowance is gone.
+enum HypeButtonStyle: Equatable {
+    case pill
+    case actionIcon
+    /// The redesigned post card's footer glyph: smaller than `actionIcon`,
+    /// sized to sit beside a count.
+    case compactIcon
+}
+
+/// Instagram-style hype toggle. Feed cards use the large action icon, while
+/// tighter rows can keep the labeled pill.
 struct HypeButton: View {
     let isHyped: Bool
     var isBusy: Bool = false
     /// Daily hype allowance is spent and this workout isn't hyped yet.
     var isOutOfHypes: Bool = false
+    var style: HypeButtonStyle = .pill
     let action: () -> Void
 
     @State private var pop = false
 
-    private var actionable: Bool { !isHyped && !isBusy && !isOutOfHypes }
+    private var actionable: Bool { !isBusy && (isHyped || !isOutOfHypes) }
 
     var body: some View {
         Button {
@@ -31,18 +40,35 @@ struct HypeButton: View {
             }
             action()
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: isHyped ? "hands.clap.fill" : "hands.clap")
-                    .font(.system(size: 11, weight: .bold))
-                    .opacity(isHyped ? 0.55 : 1)
-                    .scaleEffect(pop ? 1.4 : 1)
-                Text(isHyped ? "Hyped" : "Hype")
-                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+            Group {
+                if style == .actionIcon {
+                    Image(systemName: isHyped ? "hands.clap.fill" : "hands.clap")
+                        .font(.system(size: 31, weight: .regular))
+                        .scaleEffect(pop ? 1.16 : 1)
+                        .opacity(isOutOfHypes && !isHyped ? 0.35 : 1)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                } else if style == .compactIcon {
+                    Image(systemName: isHyped ? "hands.clap.fill" : "hands.clap")
+                        .font(.system(size: 22, weight: .medium))
+                        .scaleEffect(pop ? 1.18 : 1)
+                        .opacity(isOutOfHypes && !isHyped ? 0.35 : 1)
+                        .frame(width: 36, height: 40)
+                        .contentShape(Rectangle())
+                } else {
+                    HStack(spacing: 5) {
+                        Image(systemName: isHyped ? "hands.clap.fill" : "hands.clap")
+                            .font(.system(size: 17, weight: .bold))
+                            .scaleEffect(pop ? 1.2 : 1)
+                        Text(isHyped ? "Hyped" : "Hype")
+                            .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    }
+                    .padding(.horizontal, 15)
+                    .padding(.vertical, 9)
+                    .background(background)
+                }
             }
             .foregroundColor(foreground)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
-            .background(background)
             .opacity(isBusy ? 0.55 : 1)
         }
         .buttonStyle(.plain)
@@ -50,14 +76,16 @@ struct HypeButton: View {
     }
 
     private var foreground: Color {
-        if isHyped { return .white.opacity(0.35) }
+        if isHyped { return .orange }
         if isOutOfHypes { return .white.opacity(0.3) }
         return .white
     }
 
     @ViewBuilder private var background: some View {
         if isHyped {
-            Capsule().fill(Color.white.opacity(0.06))
+            Capsule()
+                .fill(Color.orange.opacity(0.12))
+                .overlay(Capsule().strokeBorder(Color.orange.opacity(0.45), lineWidth: 1))
         } else if isOutOfHypes {
             Capsule()
                 .fill(Color.white.opacity(0.06))
@@ -84,11 +112,11 @@ struct HypeTally: View {
     var body: some View {
         HStack(spacing: showsLabel ? 5 : 3) {
             Image(systemName: "hands.clap.fill")
-                .font(.system(size: showsLabel ? 12 : 10, weight: .bold))
+                .font(.system(size: showsLabel ? 18 : 13, weight: .semibold))
                 .foregroundColor(.orange)
             if showsLabel {
                 Text("\(count) hype\(count == 1 ? "" : "s")")
-                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
                     .monospacedDigit()
                     .foregroundColor(.white.opacity(0.9))
             } else {

@@ -4,10 +4,11 @@ import CoreLocation
 /// A raw walk/run in the unified feed — a run its author DIDN'T post. Renders
 /// in the same visual language as PostCardView so the feed reads uniformly no
 /// matter what a friend's device did: identical author header (avatar, name,
-/// time, type chip, menu), a full 4:5 media slide — the GPS route with the
-/// standard stats band, or the branded workout card when there's no route
-/// (the exact face an auto post bakes into its image) — the same stat strip,
-/// and the same hype/comment footer. The functional difference stays honest:
+/// "Walk · 1.08 mi · 2d", menu), a full 4:5 media slide — the GPS route with
+/// the standard stats band and the Flyover chip, or the indoor card when
+/// there's no route (the exact face an auto post bakes into its image) — and
+/// the same hype/comment footer. There is no PHOTO | MAP toggle here because
+/// a raw run has no photo: the map IS the card. The functional difference stays honest:
 /// no photo or caption — those belong to posts the author chose to make.
 /// Double-tapping anywhere on the body hypes, like posts.
 struct ActivityCardView: View {
@@ -30,8 +31,12 @@ struct ActivityCardView: View {
     /// Collapses duplicate reports of one physical double-tap (see
     /// PostCardView.lastDoubleTapAt).
     @State private var lastDoubleTapAt = Date.distantPast
-    /// The map snapshot (~400×300) kept for the zoom's on-demand composite.
-    @State private var routeSnapshot: RouteMapSnapshot?
+    /// Set by the route slide's Flyover chip (item-based cover, per ios.md).
+    @State private var flyoverLaunch: FlyoverLaunch?
+    /// The art card's ghost-map snapshot, kept for the zoom composite.
+    @State private var routeArtSnapshot: RouteMapSnapshot?
+    /// Same route-image share as the old floating route share chip.
+    @State private var routeShare: RouteSharePayload?
 
     private var distance: Double { entry.distance ?? 0 }
     private var accent: Color { Self.color(entry.workout_type) }
@@ -95,7 +100,6 @@ struct ActivityCardView: View {
             // hype by accident.
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 media
-                PostStatStrip(stats: stats, feedRole: entry.feed_role).padding(.horizontal, 2)
                 // Only when the mile took several goes — a normal single-workout
                 // day renders exactly as it did before.
                 if entry.isStitchedMile, let segments = entry.segments, segments.count > 1 {
@@ -108,35 +112,62 @@ struct ActivityCardView: View {
             )
             footer
         }
-        .padding(MADTheme.Spacing.sm)
+        .padding(MADTheme.Spacing.sm + 2)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
                 .fill(Color.white.opacity(0.04))
         )
         // Card-level so the burst plays centered over the whole card.
         .overlay(HypeBurstView(trigger: hypeBurst))
-    }
-
-    /// Shared by double-tap and the footer HypeButton, so the button plays
-    /// the same clap burst the double-tap does.
-    private func celebrateAndHype() {
-        hypeBurst += 1
-        MADHaptics.action()
-        if !entry.is_hyped {
-            onHype()
+        .fullScreenCover(item: $flyoverLaunch) { launch in
+            RouteFlyoverPlayerView(launch: launch)
+        }
+        .sheet(item: $routeShare) { payload in
+            ShareSheet(items: [payload.image])
         }
     }
 
+    /// Footer button: toggle hype with the same clap burst the double-tap uses.
+    private func celebrateAndHype() {
+        hypeBurst += 1
+        MADHaptics.action()
+        onHype()
+    }
+
     private func doubleTapHype() {
-        guard !entry.is_self else { return }
         let now = Date()
         guard now.timeIntervalSince(lastDoubleTapAt) > 0.35 else { return }
         lastDoubleTapAt = now
-        celebrateAndHype()
+        hypeBurst += 1
+        MADHaptics.action()
+        if !entry.is_hyped { onHype() }
     }
 
-    /// Same header as PostCardView: avatar + name + time on the left, the
-    /// workout-type chip and (for others) the "…" menu on the right.
+    /// "Walk · 1.08 mi · 2d" — the same line PostCardView draws under the
+    /// name, with the feed role's framing on the distance.
+    private var subtitleLine: some View {
+        HStack(spacing: 4) {
+            Image(systemName: Self.icon(entry.workout_type, paceSecondsPerMile: pace))
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(accent)
+            Text(headerSubtitle)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .lineLimit(1)
+        }
+    }
+
+    private var headerSubtitle: String {
+        var parts = [PostCardView.activityNoun(entry.workout_type, pace: pace)]
+        if distance > 0 {
+            parts.append(entry.feed_role == "extra" ? "+\(distance.milesText) mi extra" : "\(distance.milesText) mi")
+        }
+        parts.append(entry.relativeTime)
+        return parts.joined(separator: " · ")
+    }
+
+    /// Same header as PostCardView: avatar + name + subtitle on the left and
+    /// (for others) the "…" menu on the right.
     private var header: some View {
         HStack(spacing: 10) {
             Button {
@@ -149,20 +180,13 @@ struct ActivityCardView: View {
                             .font(.system(size: 15, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                             .lineLimit(1)
-                        Text(entry.relativeTime)
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundColor(.white.opacity(0.5))
+                        subtitleLine
                     }
                 }
             }
             .buttonStyle(.plain)
-            .disabled(onTapAuthor == nil)
+            .allowsHitTesting(onTapAuthor != nil)
             Spacer()
-            Image(systemName: Self.icon(entry.workout_type))
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(accent)
-                .frame(width: 30, height: 30)
-                .background(Circle().fill(accent.opacity(0.15)))
             if !entry.is_self, onBlock != nil {
                 Menu {
                     Button(role: .destructive) { onBlock?() } label: {
@@ -182,20 +206,30 @@ struct ActivityCardView: View {
     /// The run as a full 4:5 slide, exactly like a post's media: the route
     /// map with the standard stats band when a GPS trace exists, otherwise
     /// the branded workout card (the same face auto posts bake).
-    @ViewBuilder
     private var media: some View {
-        if let coords = entry.routeCoordinates {
-            routeSlide(coords)
-        } else {
-            workoutCardSlide
+        Group {
+            if let coords = entry.routeCoordinates {
+                routeSlide(coords)
+            } else {
+                workoutCardSlide
+            }
+        }
+        // Overlaid on the container — AFTER the slide's `.instagramZoomable`
+        // — or the zoom gesture host eats the chip's taps.
+        .overlay(alignment: .topLeading) {
+            if canPlayFlyover {
+                flyoverChip.padding(10)
+            }
         }
     }
 
     private func routeSlide(_ coords: [CLLocationCoordinate2D]) -> some View {
-        WorkoutRouteMapView(
+        RouteArtView(
             coordinates: coords,
             routeColor: accent,
-            onSnapshot: { routeSnapshot = $0 }
+            authorAvatar: RouteArtAvatar(name: entry.displayName, imageURL: entry.profile_image_url),
+            onSnapshot: { routeArtSnapshot = $0 },
+            paletteDate: RelativeTime.date(from: entry.sort_ts)
         )
         .frame(maxWidth: .infinity)
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
@@ -214,23 +248,42 @@ struct ActivityCardView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
         // Same pinch-zoom as post slides; the floating copy is composed on
-        // demand from the retained snapshot.
+        // demand at pinch-begin.
         .instagramZoomable(
             imageProvider: { routeZoomComposite(coords) },
-            onDoubleTap: entry.is_self ? nil : doubleTapHype
+            onDoubleTap: doubleTapHype
         )
+    }
+
+    private var canPlayFlyover: Bool {
+        (entry.routeCoordinates?.count ?? 0) >= 2 && (entry.is_self || entry.flyover_allowed != false)
+    }
+
+    private var canShareRouteImage: Bool {
+        entry.is_self && (entry.routeCoordinates?.count ?? 0) >= 2
+    }
+
+    /// ▶ FLYOVER, top-left of the route slide — the shared chip.
+    private var flyoverChip: some View {
+        FlyoverChipButton(accent: accent) {
+            guard var launch = FlyoverLaunch.forEntry(entry) else { return }
+            launch.initiallyHyped = entry.is_hyped
+            launch.onHype = { onHype() }
+            flyoverLaunch = launch
+        }
     }
 
     /// The route slide's floating zoom copy, on demand — 720×900 keeps the
     /// post slides' 4:5 so the lift is pixel-identical.
     private func routeZoomComposite(_ coords: [CLLocationCoordinate2D]) -> UIImage? {
-        guard let snapshot = routeSnapshot else { return nil }
         let type = entry.workout_type ?? "running"
         let stats = overlayStats
-        return WorkoutRouteMapView.zoomComposite(
-            snapshot: snapshot,
+        return RouteArtView.zoomComposite(
             coordinates: coords,
             routeColor: accent,
+            authorAvatar: RouteArtAvatar(name: entry.displayName, imageURL: entry.profile_image_url),
+            underlay: routeArtSnapshot,
+            paletteDate: RelativeTime.date(from: entry.sort_ts),
             size: CGSize(width: 720, height: 900)
         ) {
             if let stats {
@@ -243,17 +296,19 @@ struct ActivityCardView: View {
         }
     }
 
-    /// Routeless runs: the branded stats card, live-rendered — identical to
-    /// the image an auto post would have baked, so posted and unposted runs
-    /// are indistinguishable at a glance.
+    /// Routeless runs: the animated indoor card (track or treadmill face by
+    /// the viewer's dashboard style), fed by the entry's splits when the
+    /// server sent them.
     private var workoutCardSlide: some View {
-        FeedWorkoutCard(stats: stats, workoutType: entry.workout_type)
+        indoorCard(still: false)
             .frame(maxWidth: .infinity)
             .aspectRatio(4.0 / 5.0, contentMode: .fit)
             .instagramZoomable(
                 imageProvider: {
+                    // One helper for live + zoom, so the pinch copy can't
+                    // drift from the cell it lifted out of.
                     let renderer = ImageRenderer(content:
-                        FeedWorkoutCard(stats: stats, workoutType: entry.workout_type)
+                        indoorCard(still: true)
                             .frame(width: RunStatsCardView.designSize.width,
                                    height: RunStatsCardView.designSize.height)
                     )
@@ -261,47 +316,107 @@ struct ActivityCardView: View {
                     renderer.isOpaque = true
                     return renderer.uiImage
                 },
-                onDoubleTap: entry.is_self ? nil : doubleTapHype
+                onDoubleTap: doubleTapHype
             )
     }
 
+    private func indoorCard(still: Bool) -> IndoorWorkoutCard {
+        IndoorWorkoutCard(
+            stats: stats,
+            workoutType: entry.workout_type,
+            splits: WorkoutSplitBar.bars(from: entry.splits),
+            avatar: RouteArtAvatar(name: entry.displayName, imageURL: entry.profile_image_url),
+            isIndoor: entry.is_indoor,
+            still: still
+        )
+    }
+
     private var footer: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .center, spacing: 14) {
+            hypeControl
+            footerIconButton(
+                icon: "bubble.right",
+                label: commentActionLabel,
+                accessibilityLabel: "Comments",
+                action: { onOpenComments?() }
+            )
+            .disabled(onOpenComments == nil)
+            if canShareRouteImage {
+                footerIconButton(
+                    icon: "paperplane",
+                    label: nil,
+                    accessibilityLabel: "Share route",
+                    action: shareRoute
+                )
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 2)
+        .padding(.bottom, 2)
+    }
+
+    /// Clap + count, exactly as on a post card: the clap hypes (your own run
+    /// too), the count opens who hyped.
+    private var hypeControl: some View {
+        HStack(spacing: 4) {
+            HypeButton(
+                isHyped: entry.is_hyped,
+                isBusy: isHyping,
+                isOutOfHypes: isOutOfHypes && !entry.is_hyped,
+                style: .compactIcon,
+                action: celebrateAndHype
+            )
             if let count = entry.hype_count, count > 0 {
-                Button { onTapHypeCount?() } label: {
-                    HypeTally(count: count, showsLabel: true)
+                Button {
+                    onTapHypeCount?()
+                } label: {
+                    Text("\(count)")
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(.white.opacity(0.92))
+                        .frame(minHeight: 40)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(onTapHypeCount == nil)
-            }
-            Button { onOpenComments?() } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "bubble.right")
-                        .font(.system(size: 15, weight: .semibold))
-                    if let count = entry.comment_count, count > 0 {
-                        Text("\(count)")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                    }
-                }
-                .foregroundColor(.white.opacity(0.7))
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(onOpenComments == nil)
-            Spacer()
-            if !entry.is_self {
-                HypeButton(
-                    isHyped: entry.is_hyped,
-                    isBusy: isHyping,
-                    isOutOfHypes: isOutOfHypes && !entry.is_hyped,
-                    action: celebrateAndHype
-                )
+                .accessibilityLabel("\(count) hype\(count == 1 ? "" : "s")")
             }
         }
-        .padding(.horizontal, 2)
-        .padding(.bottom, 2)
+    }
+
+    private var commentActionLabel: String? {
+        guard let count = entry.comment_count, count > 0 else { return nil }
+        return "\(count)"
+    }
+
+    private func shareRoute() {
+        guard let coords = entry.routeCoordinates,
+              let image = routeZoomComposite(coords) else { return }
+        routeShare = RouteSharePayload(image: image)
+    }
+
+    private func footerIconButton(
+        icon: String,
+        label: String?,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .medium))
+                if let label {
+                    Text(label)
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                }
+            }
+            .foregroundColor(.white.opacity(0.92))
+            .frame(minWidth: 36, minHeight: 40)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
     }
 
     // MARK: workout type styling
@@ -313,6 +428,22 @@ struct ActivityCardView: View {
         case "cycling": return "Cycled"
         default: return "Moved"
         }
+    }
+
+    /// Pace-aware fallback for workouts third-party bridges stamp as `.other`
+    /// (Fitbit via Google Health writes walks that way, which is how a walk
+    /// card ends up saying "MOVED"). Display-only inference, never scoring:
+    /// 13:30/mi is the walk/run divide.
+    static func verb(_ type: String?, paceSecondsPerMile pace: Double?) -> String {
+        let base = verb(type)
+        guard base == "Moved", let pace, pace > 0 else { return base }
+        return pace >= 810 ? "Walked" : "Ran"
+    }
+
+    static func icon(_ type: String?, paceSecondsPerMile pace: Double?) -> String {
+        let base = icon(type)
+        guard verb(type) == "Moved", let pace, pace > 0 else { return base }
+        return pace >= 810 ? "figure.walk" : "figure.run"
     }
     static func icon(_ type: String?) -> String {
         switch (type ?? "").lowercased() {

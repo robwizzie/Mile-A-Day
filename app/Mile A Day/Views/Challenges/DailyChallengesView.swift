@@ -5,6 +5,8 @@ struct DailyChallengesView: View {
     @ObservedObject var userManager: UserManager
 
     @State private var completions: [ChallengeCompletion] = ChallengeService.shared.allCompletions()
+    /// One history re-fetch per open (see `refresh`).
+    @State private var didRequestRemoteHistory = false
     /// Recent days that went by uncompleted, each carrying the challenge that
     /// was on offer — server-derived, since nothing records which challenge a
     /// past day served. Empty on older servers, where the grid falls back to
@@ -100,6 +102,20 @@ struct DailyChallengesView: View {
 
     private func refresh() {
         completions = ChallengeService.shared.allCompletions()
+        // The missed-days cache is a snapshot of whenever it was last fetched
+        // — and "today" is never in it. Opened the next morning without a
+        // re-fetch, yesterday sat blank in the grid. One server round-trip
+        // per open (the fetch posts changedNotification, which lands here
+        // again with the flag already set).
+        if !didRequestRemoteHistory,
+           let remote = ChallengeService.shared as? RemoteChallengeService,
+           let userId = UserManager.shared.currentUser.backendUserId {
+            didRequestRemoteHistory = true
+            Task {
+                await remote.refreshCompletions(userId: userId)
+                await MainActor.run { refresh() }
+            }
+        }
         if let remote = ChallengeService.shared as? RemoteChallengeService {
             missedDays = remote.allMissedDays()
             todaysChallenge = remote.todayChallenge
@@ -510,13 +526,21 @@ struct DailyChallengesView: View {
         return (0..<14).reversed().compactMap { offset -> HistoryDay? in
             guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
             let completion = lookup[date]
+            let offered: ChallengeCompletion? = (offset == 0 && completion == nil)
+                ? todaysChallenge.map {
+                    ChallengeCompletion(
+                        date: date, challengeKey: $0.key, title: $0.title,
+                        icon: $0.icon, description: $0.description)
+                }
+                : nil
             return HistoryDay(
                 date: date,
                 isToday: offset == 0,
                 completion: completion,
                 // Only ever set on a day with no completion, so the cell can
                 // never be asked to draw both.
-                missed: completion == nil ? missedLookup[date] : nil
+                missed: completion == nil ? missedLookup[date] : nil,
+                offeredToday: offered
             )
         }
     }
@@ -530,6 +554,10 @@ private struct HistoryDay {
     let completion: ChallengeCompletion?
     /// The challenge this day offered when it wasn't completed.
     var missed: ChallengeCompletion? = nil
+    /// TODAY's challenge while it is still open. The server never lists today
+    /// as "missed" (it's still winnable), so without this the current day
+    /// drew a bare number in a row of icons.
+    var offeredToday: ChallengeCompletion? = nil
 }
 
 private struct HistoryDayCell: View {
@@ -565,6 +593,12 @@ private struct HistoryDayCell: View {
                         Image(systemName: missed.icon)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundColor(.white.opacity(0.35))
+                    } else if let offered = day.offeredToday {
+                        // Today, still open: its icon, bright, inside the
+                        // red "today" frame.
+                        Image(systemName: offered.icon)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white.opacity(0.85))
                     } else {
                         Text(dayNumber)
                             .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -586,6 +620,7 @@ private struct HistoryDayCell: View {
     private var accessibilityText: String {
         if let c = day.completion { return "\(c.title), completed" }
         if let m = day.missed { return "\(m.title), not completed" }
+        if let o = day.offeredToday { return "\(o.title), today's challenge" }
         return dayNumber
     }
 }

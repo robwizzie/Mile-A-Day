@@ -5,12 +5,9 @@ import SwiftUI
 /// comment notification all land here rather than dropping the user into a
 /// feed that then hunts for the right card.
 ///
-/// The list starts AT the opened post. It used to render from the top and
-/// scroll down to it behind an opacity mask with a 300ms settle — which meant
-/// a visible lurch, a flash of somebody else's card, and nothing at all for a
-/// post too old to be in the loaded page. Slicing instead means the tapped
-/// post is simply the first row: it's on screen in the first frame, and the
-/// user can keep scrolling into older posts exactly as before.
+/// The list opens ON the tapped post, but keeps the posts around it mounted so
+/// the profile behaves like Instagram: tap a grid cell, then scroll up to the
+/// newer posts before it or down into older ones.
 ///
 /// `posts` is a binding so hypes, caption edits and deletes made here flow
 /// straight back to the grid that opened it. Deep links have no such list —
@@ -42,52 +39,60 @@ struct PostDetailView: View {
     @State private var hypingIds: Set<String> = []
     /// Profile opened from a tapped author/coauthor name or @mention.
     @State private var profileUser: BackendUser?
+    /// A hyper tapped in the hypes list: the list dismisses first, then this
+    /// becomes `profileUser` (two sheets can't swap in one step).
+    @State private var pendingProfileUser: BackendUser?
     /// One stable service for profiles opened from this sheet (same pattern as
     /// SocialFeedView — recreating it per presentation wipes loaded friends).
     @StateObject private var profileFriendService = FriendService()
     /// Post currently being shared as a link.
     @State private var sharingURL: ShareURL?
-
-    /// The opened post first, then everything older. Newer posts are dropped
-    /// rather than scrolled past: nothing above the fold means no lurch, no
-    /// flash of someone else's card, and no dependency on the tapped post
-    /// being in the loaded page at all.
-    ///
-    /// Falls back to the whole array when the id isn't present, which is what
-    /// makes the deep-link loader (a one-element array) and any future caller
-    /// safe by construction.
-    private var visiblePosts: [PostItem] {
-        guard let start = posts.firstIndex(where: { $0.post_id == initialPostId })
-        else { return posts }
-        return Array(posts[start...])
-    }
+    @State private var didScrollToInitialPost = false
 
     var body: some View {
         NavigationStack {
             ZStack {
                 MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
 
-                ScrollView(showsIndicators: false) {
-                    LazyVStack(spacing: MADTheme.Spacing.md) {
-                        ForEach(visiblePosts) { post in
-                            card(post)
-                                .id(post.post_id)
-                                .onAppear {
-                                    if post.id == visiblePosts.last?.id { onNeedMore() }
+                ScrollViewReader { proxy in
+                    ScrollView(showsIndicators: false) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(posts.enumerated()), id: \.element.post_id) { index, post in
+                                card(post)
+                                    .id(post.post_id)
+                                    .onAppear {
+                                        if post.id == posts.last?.id { onNeedMore() }
+                                    }
+                                if index < posts.count - 1 {
+                                    PostTimelineSeparator()
+                                        .padding(.vertical, MADTheme.Spacing.md)
                                 }
+                            }
                         }
+                        .padding(MADTheme.Spacing.md)
+                        .padding(.bottom, MADTheme.Spacing.xl)
                     }
-                    .padding(MADTheme.Spacing.md)
-                    .padding(.bottom, MADTheme.Spacing.xl)
+                    .onAppear { scrollToInitialPost(proxy) }
+                    .onChange(of: posts.count) { _, _ in scrollToInitialPost(proxy) }
                 }
             }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
+                ToolbarItem(placement: .cancellationAction) {
+                    // A bare chevron: iOS 26 wraps toolbar items in its own
+                    // glass capsule, so a chevron carrying a circle of its own
+                    // read as two stacked buttons.
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 34, height: 34)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Back")
                 }
             }
             .sheet(item: $sharingURL) { share in
@@ -96,8 +101,29 @@ struct PostDetailView: View {
             .toolbarBackground(.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
-            .sheet(item: $hypersContext) { context in
-                HypersListSheet(context: context)
+            .sheet(item: $hypersContext, onDismiss: {
+                if let pending = pendingProfileUser {
+                    pendingProfileUser = nil
+                    profileUser = pending
+                }
+            }) { context in
+                // Every name in the list opens that person's profile, the way
+                // a likes list does.
+                HypersListSheet(context: context) { hyper in
+                    guard hyper.user_id != currentUserId else { return }
+                    pendingProfileUser = BackendUser(
+                        user_id: hyper.user_id,
+                        username: hyper.username,
+                        email: nil,
+                        first_name: hyper.first_name,
+                        last_name: hyper.last_name,
+                        bio: nil,
+                        profile_image_url: hyper.profile_image_url,
+                        apple_id: nil,
+                        auth_provider: nil,
+                        role: nil
+                    )
+                }
             }
             .sheet(item: $commentsPost) { post in
                 // Coauthors moderate too: on their own profile the collab post
@@ -150,6 +176,15 @@ struct PostDetailView: View {
             } message: { _ in
                 Text("This removes it from your feed and profile for good.")
             }
+        }
+    }
+
+    private func scrollToInitialPost(_ proxy: ScrollViewProxy) {
+        guard !didScrollToInitialPost,
+              posts.contains(where: { $0.post_id == initialPostId }) else { return }
+        didScrollToInitialPost = true
+        DispatchQueue.main.async {
+            proxy.scrollTo(initialPostId, anchor: .top)
         }
     }
 
@@ -293,11 +328,9 @@ struct PostDetailView: View {
             if dropsCollabsHiddenFromProfile && !onProfile {
                 await MainActor.run {
                     posts.removeAll { $0.post_id == post.post_id }
-                    // `visiblePosts` slices from `initialPostId`, so removing
-                    // the post the sheet OPENED at falls back to the whole
-                    // array and silently rewinds the reader to the newest
-                    // post. Close instead — landing back on a grid the post
-                    // has just left is the clearest confirmation anyway.
+                    // If the reader opened on the post that just left the
+                    // grid, close instead — landing back on the grid it left is
+                    // the clearest confirmation anyway.
                     if post.post_id == initialPostId { dismiss() }
                 }
             }
@@ -329,10 +362,40 @@ struct PostDetailView: View {
     }
 
     private func hype(_ post: PostItem) async {
-        guard !post.is_self, !post.is_hyped, !hypingIds.contains(post.post_id) else { return }
-        // A collab you're an author on is your own post — the server rejects
-        // the hype, so don't play the burst and then silently walk it back.
-        guard !(post.hasAcceptedCoauthor && post.coauthor_user_id == currentUserId) else { return }
+        // Own posts take a hype too — self-hypes are allowed server-side.
+        guard !hypingIds.contains(post.post_id) else { return }
+        let context = HypeContext(
+            contextType: "post",
+            contextId: post.post_id,
+            contextLabel: post.caption ?? post.displayName
+        )
+        if post.is_hyped {
+            await MainActor.run {
+                _ = hypingIds.insert(post.post_id)
+                updatePost(post.post_id) { item in
+                    guard item.is_hyped else { return }
+                    item.is_hyped = false
+                    item.hype_count = max(0, (item.hype_count ?? 1) - 1)
+                }
+            }
+            defer { Task { @MainActor in hypingIds.remove(post.post_id) } }
+            do {
+                _ = try await HypeService.removeHype(
+                    targetUserId: post.user_id,
+                    context: context
+                )
+                await MainActor.run { MADHaptics.tap() }
+            } catch {
+                await MainActor.run {
+                    updatePost(post.post_id) { item in
+                        guard !item.is_hyped else { return }
+                        item.is_hyped = true
+                        item.hype_count = (item.hype_count ?? 0) + 1
+                    }
+                }
+            }
+            return
+        }
         await MainActor.run {
             _ = hypingIds.insert(post.post_id)
             updatePost(post.post_id) { item in
@@ -354,11 +417,7 @@ struct PostDetailView: View {
         do {
             _ = try await HypeService.sendHype(
                 targetUserId: post.user_id,
-                context: HypeContext(
-                    contextType: "post",
-                    contextId: post.post_id,
-                    contextLabel: post.caption ?? post.displayName
-                )
+                context: context
             )
             await MainActor.run {
                 MADHaptics.success()
@@ -377,4 +436,22 @@ struct PostDetailView: View {
         } catch {}
     }
 
+}
+
+private struct PostTimelineSeparator: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle()
+                .fill(Color.white.opacity(0.10))
+                .frame(height: 1)
+            Circle()
+                .fill(Color.white.opacity(0.20))
+                .frame(width: 4, height: 4)
+            Rectangle()
+                .fill(Color.white.opacity(0.10))
+                .frame(height: 1)
+        }
+        .padding(.horizontal, 4)
+        .accessibilityHidden(true)
+    }
 }

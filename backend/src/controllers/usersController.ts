@@ -10,6 +10,7 @@ import {
 	checkUsernameAvailability,
 	updateBio,
 	updateProfileImage,
+	updateProfileBanner,
 	updateOnboardingInfo,
 	getUserCount,
 	getPublicStreak
@@ -68,6 +69,23 @@ export async function searchUsers(req: Request, res: Response) {
 
 const MUTABLE_FIELDS = ['username', 'first_name', 'last_name', 'bio'];
 
+// Gradient presets the client draws behind the avatar when there is no banner
+// image. Validated here so a build that ships a new preset name can't write a
+// value older builds can't draw — an unknown style decodes client-side as the
+// default look, so the worst case is still a correct profile.
+const BANNER_STYLES = new Set(['ember', 'sunrise', 'sky', 'trail', 'ghost', 'night']);
+
+/** Best-effort removal of an uploaded file we own; never throws. */
+function unlinkUploadQuietly(relativePath: unknown) {
+	if (typeof relativePath !== 'string' || !relativePath.startsWith('/uploads/')) return;
+	try {
+		const full = path.join(process.cwd(), relativePath);
+		if (fs.existsSync(full)) fs.unlinkSync(full);
+	} catch (error) {
+		console.warn('[users] could not remove upload', relativePath, error);
+	}
+}
+
 export async function updateUser(req: Request, res: Response) {
 	if (!hasRequiredKeys(['userId'], req, res)) return;
 
@@ -100,6 +118,29 @@ export async function updateUser(req: Request, res: Response) {
 		values.push(value);
 		updates.push(`${key} = $${values.length}`);
 	});
+
+	// Banner preset: one of BANNER_STYLES, or null to go back to the default.
+	if (req.body.profile_banner_style !== undefined) {
+		const style = req.body.profile_banner_style;
+		if (style !== null && (typeof style !== 'string' || !BANNER_STYLES.has(style))) {
+			return res.status(400).json({ error: 'Unknown profile_banner_style' });
+		}
+		values.push(style);
+		updates.push(`profile_banner_style = $${values.length}`);
+	}
+
+	// Banner image: this PATCH can only CLEAR it. The path is written solely by
+	// the upload endpoint, which is what ties the file to this user — accepting
+	// an arbitrary path here would let a profile point at someone else's photo.
+	if (req.body.profile_banner_url !== undefined) {
+		const url = req.body.profile_banner_url;
+		if (url !== null && url !== '') {
+			return res.status(400).json({ error: 'profile_banner_url can only be cleared here; upload via /banner/upload' });
+		}
+		unlinkUploadQuietly(existingUserResults[0].profile_banner_url);
+		values.push(null);
+		updates.push(`profile_banner_url = $${values.length}`);
+	}
 
 	if (!updates.length) {
 		return res.status(400).json({ error: 'No valid update fields present in request.' });
@@ -198,6 +239,11 @@ export async function deleteUser(req: Request, res: Response) {
 		{ query: 'DELETE FROM users WHERE user_id = $1', params: p }
 	]);
 
+	// The row is gone; drop the files it pointed at (avatar + banner). Best
+	// effort — a leftover file is not a reason to fail an account deletion.
+	unlinkUploadQuietly(results[0].profile_image_url);
+	unlinkUploadQuietly(results[0].profile_banner_url);
+
 	res.json({
 		message: `Successfully deleted user ${userId}`
 	});
@@ -277,13 +323,18 @@ export async function updateUserProfileImage(req: Request, res: Response) {
 const REFERRAL_SOURCES = new Set([
 	'app_store',
 	'friend',
+	'developer',
 	'instagram',
 	'tiktok',
 	'reddit',
 	'google',
 	'youtube',
+	'ai_chat',
+	'social_ad',
+	'flyer',
 	'other'
 ]);
+
 
 /**
  * Trim a string body field and cap it to the column's varchar length so an
@@ -363,6 +414,47 @@ export async function uploadProfileImage(req: Request, res: Response) {
 	} catch (error) {
 		res.status(500).json({
 			error: 'Profile image upload failed',
+			message: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+}
+
+/**
+ * Upload a profile banner. Landscape 3:1 (1500×500, the Twitter header size),
+ * center-cropped by sharp so the client needs no cropper. Replaces any
+ * previous banner file. The client draws its gradient preset whenever this is
+ * null, so clearing is `PATCH /users/:id { profile_banner_url: null }`.
+ */
+export async function uploadProfileBanner(req: Request, res: Response) {
+	const userId = req.params.userId;
+
+	if (!req.file) {
+		return res.status(400).json({ error: 'No image file provided' });
+	}
+
+	try {
+		const existingUser = await db.query('SELECT profile_banner_url FROM users WHERE user_id = $1', [userId]);
+		if (!existingUser.length) {
+			return res.status(404).json({ error: 'User not found' });
+		}
+		unlinkUploadQuietly(existingUser[0].profile_banner_url);
+
+		const filename = `${userId}-${Date.now()}.jpg`;
+		const outputPath = path.join(process.cwd(), 'uploads', 'profile-banners', filename);
+
+		await sharp(req.file.buffer)
+			.rotate()
+			.resize(1500, 500, { fit: 'cover' })
+			.jpeg({ quality: 82 })
+			.toFile(outputPath);
+
+		const profileBannerUrl = `/uploads/profile-banners/${filename}`;
+		await updateProfileBanner({ userId, profileBannerUrl });
+
+		res.json({ success: true, profileBannerUrl });
+	} catch (error) {
+		res.status(500).json({
+			error: 'Profile banner upload failed',
 			message: error instanceof Error ? error.message : 'Unknown error'
 		});
 	}

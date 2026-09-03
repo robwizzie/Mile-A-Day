@@ -393,6 +393,7 @@ struct SocialFeedView: View {
                 }
                 .padding(.vertical, MADTheme.Spacing.sm)
                 .padding(.bottom, MADTheme.Spacing.xxl)
+                .lockedToScrollWidth()
             }
             .scrollIndicators(.hidden)
             .refreshable {
@@ -1098,11 +1099,41 @@ struct SocialFeedView: View {
     // MARK: - Actions
 
     private func hype(_ entry: FeedEntry) async {
-        guard !entry.is_self, !entry.is_hyped, !hypingIds.contains(entry.id) else { return }
-        // A collab you're an author on is your own post — the server rejects
-        // the hype, so don't play the burst and then silently walk it back.
-        guard !(entry.coauthor_status == "accepted"
-            && entry.coauthor_user_id == currentUserId) else { return }
+        // Own posts and runs take a hype too (the server allows self-hypes;
+        // it just doesn't notify you about them).
+        guard !hypingIds.contains(entry.id) else { return }
+        let context = hypeContext(for: entry)
+        if entry.is_hyped {
+            await MainActor.run {
+                _ = hypingIds.insert(entry.id)
+                updateEntry(entry.id) { e in
+                    guard e.is_hyped else { return }
+                    e.is_hyped = false
+                    e.hype_count = max(0, (e.hype_count ?? 1) - 1)
+                }
+            }
+            defer { Task { @MainActor in hypingIds.remove(entry.id) } }
+            do {
+                let response = try await HypeService.removeHype(
+                    targetUserId: entry.user_id,
+                    context: context
+                )
+                await MainActor.run {
+                    hypesRemaining = response.hypes_remaining
+                    hypesUnlimited = response.unlimited ?? hypesUnlimited
+                    MADHaptics.tap()
+                }
+            } catch {
+                await MainActor.run {
+                    updateEntry(entry.id) { e in
+                        guard !e.is_hyped else { return }
+                        e.is_hyped = true
+                        e.hype_count = (e.hype_count ?? 0) + 1
+                    }
+                }
+            }
+            return
+        }
         // Optimistic, Instagram-style: the card flips to "Hyped" and the tally
         // bumps the instant the user acts — the network round-trip happens
         // behind it and only a rejection walks it back.
@@ -1122,14 +1153,10 @@ struct SocialFeedView: View {
                 e.hype_count = max(0, (e.hype_count ?? 1) - 1)
             }
         }
-        let ctxType = entry.isPost ? "post" : "mile"
-        let label = entry.isPost
-            ? (entry.caption ?? entry.displayName)
-            : "\(ActivityCardView.verb(entry.workout_type)) \(String(format: "%.2f", entry.distance ?? 0)) mi"
         do {
             let response = try await HypeService.sendHype(
                 targetUserId: entry.user_id,
-                context: HypeContext(contextType: ctxType, contextId: entry.entryId, contextLabel: label)
+                context: context
             )
             await MainActor.run {
                 hypesRemaining = response.hypes_remaining
@@ -1157,6 +1184,14 @@ struct SocialFeedView: View {
             // Network/server failure — undo quietly; the user can re-tap.
             await MainActor.run { revert() }
         }
+    }
+
+    private func hypeContext(for entry: FeedEntry) -> HypeContext {
+        let ctxType = entry.isPost ? "post" : "mile"
+        let label = entry.isPost
+            ? (entry.caption ?? entry.displayName)
+            : "\(ActivityCardView.verb(entry.workout_type)) \(String(format: "%.2f", entry.distance ?? 0)) mi"
+        return HypeContext(contextType: ctxType, contextId: entry.entryId, contextLabel: label)
     }
 
     private var hypeLimitBanner: some View {

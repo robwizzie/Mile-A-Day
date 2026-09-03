@@ -34,6 +34,69 @@ struct RouteMapSnapshot {
     }
 }
 
+/// Session cache for generated route snapshots. LazyVStack recycling resets a
+/// card's @State, so without this every scroll pass re-requested the same
+/// tiles (network + battery) for cards already seen. Keyed by a content hash
+/// of the coordinates plus the render size — routes are immutable per
+/// workout, so the key is stable.
+private enum RouteSnapshotCache {
+    final class Box {
+        let snapshot: RouteMapSnapshot
+        init(_ snapshot: RouteMapSnapshot) { self.snapshot = snapshot }
+    }
+
+    private static let cache: NSCache<NSString, Box> = {
+        let c = NSCache<NSString, Box>()
+        c.countLimit = 60
+        return c
+    }()
+
+    static func key(coordinates: [CLLocationCoordinate2D], size: CGSize) -> NSString {
+        var hasher = Hasher()
+        hasher.combine(coordinates.count)
+        // First/last plus a coarse sample — enough to distinguish real routes
+        // without hashing 300 × N points per feed render.
+        for c in [coordinates.first, coordinates.last].compactMap({ $0 }) {
+            hasher.combine(c.latitude); hasher.combine(c.longitude)
+        }
+        let stride = max(1, coordinates.count / 8)
+        var i = 0
+        while i < coordinates.count {
+            hasher.combine(coordinates[i].latitude)
+            hasher.combine(coordinates[i].longitude)
+            i += stride
+        }
+        return NSString(string: "\(hasher.finalize())-\(Int(size.width))x\(Int(size.height))")
+    }
+
+    static func snapshot(for key: NSString) -> RouteMapSnapshot? { cache.object(forKey: key)?.snapshot }
+    static func store(_ snapshot: RouteMapSnapshot, for key: NSString) {
+        cache.setObject(Box(snapshot), forKey: key)
+    }
+}
+
+extension RouteMapSnapshot {
+    /// One dark, POI-free snapshot covering `coordinates` at `size` — the same
+    /// options the live map view uses, shared so `RouteArtView`'s ghost-map
+    /// underlay and the baked auto-post image frame routes identically.
+    /// Session-cached: recycled feed cells re-use instead of re-requesting.
+    static func generate(coordinates: [CLLocationCoordinate2D], size: CGSize) async -> RouteMapSnapshot? {
+        guard !coordinates.isEmpty, size.width > 1, size.height > 1 else { return nil }
+        let key = RouteSnapshotCache.key(coordinates: coordinates, size: size)
+        if let cached = RouteSnapshotCache.snapshot(for: key) { return cached }
+        let options = MKMapSnapshotter.Options()
+        options.region = WorkoutRouteMapView.region(for: coordinates)
+        options.size = size
+        options.mapType = .standard
+        options.traitCollection = UITraitCollection(userInterfaceStyle: .dark)
+        options.pointOfInterestFilter = .excludingAll
+        guard let snap = try? await MKMapSnapshotter(options: options).start() else { return nil }
+        let made = RouteMapSnapshot(image: snap.image, size: size, snapshot: snap)
+        RouteSnapshotCache.store(made, for: key)
+        return made
+    }
+}
+
 /// One more person's trace on the same map — a buddy walk drawn as the one
 /// walk it was, rather than as N separate cards each showing a third of it.
 ///
@@ -134,6 +197,35 @@ enum CrewRoutePalette {
     }
 }
 
+/// The one timing signature for a route drawing itself on — shared by the map
+/// view and `RouteArtView`, so the same walk animates identically whichever
+/// face renders it. Duration/stagger live HERE and nowhere else; two copies of
+/// these numbers would drift the first time one card was "tuned".
+enum RouteDrawTiming {
+    /// How long one line takes to draw, and how far apart consecutive lines
+    /// leave the start. Slowed twice on request (1.15 → 1.8 → 2.6): the draw
+    /// is the card's whole show and deserves a beat to watch. Eight people at
+    /// 0.13s still all leave inside the first second.
+    static let drawDuration: Double = 2.6
+    static let lineStagger: Double = 0.13
+
+    /// One line's draw: same curve for everybody, a later start for each
+    /// person behind the author.
+    ///
+    /// Deterministic (never random): a card re-renders constantly while
+    /// scrolling, and timing that changed per render would make the same walk
+    /// animate differently every time it came back on screen.
+    static func lineAnimation(index: Int) -> Animation {
+        .easeOut(duration: drawDuration).delay(Double(index) * lineStagger)
+    }
+
+    /// How long until the LAST line lands — the author plus one stagger step
+    /// per companion.
+    static func packDuration(_ companionCount: Int) -> Double {
+        drawDuration + Double(companionCount) * lineStagger
+    }
+}
+
 struct WorkoutRouteMapView: View {
     let coordinates: [CLLocationCoordinate2D]
     let routeColor: Color
@@ -176,15 +268,12 @@ struct WorkoutRouteMapView: View {
     @State private var cometVisible = true
     @State private var hasAnimated = false
 
-    /// How long one line takes to draw, and how far apart consecutive lines
-    /// leave the start. Eight people at 0.09s still get everybody moving
-    /// inside the first two thirds of a second.
-    private static let drawDuration: Double = 1.15
-    private static let lineStagger: Double = 0.09
-
     /// Region math is static so the zoom composite can reproduce the framing
-    /// without an instance.
-    static func region(for coordinates: [CLLocationCoordinate2D]) -> MKCoordinateRegion {
+    /// without an instance — and `nonisolated` because it's pure math:
+    /// `SwiftUI.View` is a @MainActor protocol, so statics here inherit
+    /// isolation, and `RouteMapSnapshot.generate` (nonisolated async) calls
+    /// this. Without the keyword that call is a Swift 6 error.
+    nonisolated static func region(for coordinates: [CLLocationCoordinate2D]) -> MKCoordinateRegion {
         guard !coordinates.isEmpty else {
             return MKCoordinateRegion()
         }
@@ -383,20 +472,13 @@ struct WorkoutRouteMapView: View {
         }
     }
 
-    /// One line's draw: same curve for everybody, a later start for each
-    /// person behind the author.
-    ///
-    /// Deterministic (never random): a card re-renders constantly while
-    /// scrolling, and timing that changed per render would make the same walk
-    /// animate differently every time it came back on screen.
+    /// Timing shared with `RouteArtView` — see `RouteDrawTiming`.
     private static func lineAnimation(index: Int) -> Animation {
-        .easeOut(duration: drawDuration).delay(Double(index) * lineStagger)
+        RouteDrawTiming.lineAnimation(index: index)
     }
 
-    /// How long until the LAST line lands — the author plus one stagger step
-    /// per companion.
     private static func packDuration(_ companionCount: Int) -> Double {
-        drawDuration + Double(companionCount) * lineStagger
+        RouteDrawTiming.packDuration(companionCount)
     }
 
     /// Whole-point size: sub-pixel layout jitter must not re-trigger the
@@ -406,33 +488,29 @@ struct WorkoutRouteMapView: View {
     }
 
     private func generateSnapshot(size: CGSize) async {
-        let options = MKMapSnapshotter.Options()
-        options.region = region
-        // MUST match the view this draws into. The image is displayed
+        // Size MUST match the view this draws into. The image is displayed
         // aspect-fill while the route is drawn in the VIEW's coordinate
         // space, so a fixed 400×300 snapshot inside a 4:5 card had a third of
         // its width cropped away while the line still spanned the full frame
         // — which is how a shoreline walk got drawn out in the bay.
-        options.size = size
-        options.mapType = .standard
-        options.traitCollection = UITraitCollection(userInterfaceStyle: .dark)
-        options.pointOfInterestFilter = .excludingAll
-
-        let snapshotter = MKMapSnapshotter(options: options)
-        do {
-            let snap = try await snapshotter.start()
-            let made = RouteMapSnapshot(image: snap.image, size: size, snapshot: snap)
-            snapshot = made
-            onSnapshot?(made)
-        } catch {
-            print("[WorkoutRouteMapView] Snapshot failed: \(error)")
+        guard let made = await RouteMapSnapshot.generate(
+            coordinates: coordinates + companionRoutes.flatMap(\.coordinates),
+            size: size
+        ) else {
+            print("[WorkoutRouteMapView] Snapshot failed")
+            return
         }
+        snapshot = made
+        onSnapshot?(made)
     }
 }
 
 // MARK: - Route Overlay (pure SwiftUI drawing — no Map view)
 
-private struct RouteOverlay: View {
+/// Internal (not private) because `RouteArtView` draws its lines through the
+/// SAME recipe on its branded canvas — a second copy of these strokes would
+/// drift the first time one was touched.
+struct RouteOverlay: View {
     let coordinates: [CLLocationCoordinate2D]
     /// Coordinate → view point. Always the snapshot's own projection; never
     /// re-derived from the requested region (see `RouteMapSnapshot`).
@@ -443,9 +521,12 @@ private struct RouteOverlay: View {
     var cometOpacity: Double = 0
     var showStartMarker: Bool = false
     var showEndMarker: Bool = false
+    /// Pre-projected (and possibly LANED — see `RouteLaneOffset`) points. When
+    /// set, `coordinates`/`project` are ignored for the line itself.
+    var overridePoints: [CGPoint]? = nil
 
     private var points: [CGPoint] {
-        coordinates.map(project)
+        overridePoints ?? coordinates.map(project)
     }
 
     /// The bead's length as a fraction of the whole line. Short enough to read
@@ -521,7 +602,7 @@ private struct RouteOverlay: View {
 
 // MARK: - Route Path Shape
 
-private struct RoutePath: Shape {
+struct RoutePath: Shape {
     let points: [CGPoint]
 
     func path(in rect: CGRect) -> Path {

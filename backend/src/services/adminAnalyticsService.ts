@@ -25,6 +25,8 @@
  */
 
 import { PostgresService } from "./DbService.js";
+import { FLYOVER_PLAY_FEATURE } from "./telemetryService.js";
+import { PERSON_REFERRAL_SOURCES } from "./userService.js";
 import {
   START_OF_TODAY_ET_SQL,
   TODAY_ET_DATE_SQL,
@@ -520,6 +522,15 @@ const ADOPTION_SOURCES: {
   where?: string;
 }[] = [
   {
+    key: FLYOVER_PLAY_FEATURE,
+    label: "Played a route flyover",
+    group: "Routes",
+    from: "feature_events fe",
+    actor: "fe.user_id",
+    at: "fe.created_at",
+    where: `fe.feature = '${FLYOVER_PLAY_FEATURE}'`,
+  },
+  {
     key: "photo_post",
     label: "Posted a photo",
     group: "Social",
@@ -918,10 +929,15 @@ export interface ReferralGraph {
  * Who brought whom in.
  *
  * There is no referral-code system — attribution is the free-text name a new
- * user types when they pick "Friend" at onboarding (`users.referral_detail`).
- * So this RESOLVES that text against real usernames (trimmed, case-folded, a
- * leading "@" stripped) and reports the matched and unmatched halves
- * separately rather than pretending every typed name is an account.
+ * user types when they say a PERSON sent them (`users.referral_detail`): a
+ * friend, or one of us handing them the app. So this RESOLVES that text against
+ * real usernames (trimmed, case-folded, a leading "@" stripped) and reports the
+ * matched and unmatched halves separately rather than pretending every typed
+ * name is an account.
+ *
+ * Both person-sources are counted (`PERSON_REFERRAL_SOURCES`). Filtering to
+ * 'friend' alone would silently drop every founder referral from the one panel
+ * that answers "who is actually bringing people in".
  *
  * Each referred user carries their own activity, because the number that
  * matters isn't how many names a referrer collected — it's how many of them
@@ -947,7 +963,7 @@ async function loadReferralGraph(): Promise<ReferralGraph> {
              u.created_at, u.current_streak,
              lower(regexp_replace(btrim(u.referral_detail), '^@', '')) AS handle
       FROM users u
-      WHERE u.referral_source = 'friend'
+      WHERE u.referral_source = ANY($1::text[])
         AND COALESCE(btrim(u.referral_detail), '') <> ''
     )
     SELECT r.user_id, r.username, r.name, r.created_at, r.handle, r.current_streak,
@@ -968,7 +984,7 @@ async function loadReferralGraph(): Promise<ReferralGraph> {
     ) w ON TRUE
     ORDER BY r.created_at DESC
     LIMIT 1000
-  `);
+  `, [[...PERSON_REFERRAL_SOURCES]]);
 
   const [{ total_users }] = await db.query<{ total_users: number }>(
     `SELECT COUNT(*)::int AS total_users FROM users`,

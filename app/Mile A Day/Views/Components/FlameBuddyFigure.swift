@@ -66,6 +66,16 @@ struct FlameBuddyFigure: View {
     /// blaze instead of fading a second `.blazing` figure in over it. Ignored
     /// without `vigor`, so every legacy caller renders byte-identically.
     var blaze: CGFloat = 0
+    /// How far the lower lobe is pushed out, 0…1 — the treats card's stuffed
+    /// Flamey. Only the belly moves (nothing above the waist), and at 0 the
+    /// silhouette is byte-identical, so every other caller — and the widget
+    /// copies of this file, which don't carry the parameter — render exactly
+    /// as before.
+    var bellyBulge: CGFloat = 0
+    /// Where the eyes look, as a fraction of `size` (±0.03 is a glance). The
+    /// Fun hero's moods dart them; zero is byte-identical to before, so every
+    /// other caller — and the widget copies of this file — are untouched.
+    var gaze: CGSize = .zero
     /// Grounded flames (the Fun buddy) sit on the ground: they shrink toward
     /// their base and cast a ground shadow. A non-grounded flame (the Modern
     /// ring) shrinks toward its center so it stays framed in the circle.
@@ -77,11 +87,11 @@ struct FlameBuddyFigure: View {
             groundLayer
 
             ZStack {
-                FlameBuddyOuterShape(wobble: wobble)
+                FlameBuddyOuterShape(wobble: wobble, bellyBulge: bellyBulge)
                     .fill(outerFill)
                     .shadow(color: glowColor.opacity(effectiveGlowOpacity), radius: size * 0.16)
                     .overlay(
-                        FlameBuddyOuterShape(wobble: wobble)
+                        FlameBuddyOuterShape(wobble: wobble, bellyBulge: bellyBulge)
                             .stroke(Color.white.opacity(health == .dead ? 0.10 : 0.28), lineWidth: max(1.5, size * 0.012))
                     )
 
@@ -93,6 +103,15 @@ struct FlameBuddyFigure: View {
 
                 if showsFace {
                     face
+                        // The face is DISCRETE by design: the blink is a 12 fps
+                        // toggle of the eye's frame, the mouth is a switch. Any
+                        // animation inherited from a container (a repeating
+                        // bob started in onAppear can attach itself to later
+                        // layout changes) turned each blink into a slow,
+                        // overshooting stretch — eyes growing taller than the
+                        // sunglasses meant to cover them. Nothing in here may
+                        // ever animate implicitly.
+                        .transaction { $0.animation = nil }
                         .offset(y: size * 0.18)
                 }
             }
@@ -270,6 +289,7 @@ struct FlameBuddyFigure: View {
                 eye(isLeft: true)
                 eye(isLeft: false)
             }
+            .offset(x: gaze.width * size, y: gaze.height * size)
 
             mouth
                 .offset(y: size * 0.13)
@@ -352,6 +372,13 @@ struct FlameBuddyFigure: View {
 
 struct FlameBuddyOuterShape: Shape {
     var wobble: CGFloat
+    /// Belly, 0…1 (see FlameBuddyFigure.bellyBulge). The lower lobe grows a
+    /// rounded PAUNCH — mostly downward, a little outward — so the outline
+    /// gains a tummy under the chin rather than a wider flame (the first
+    /// attempt widened the whole lobe and just read as a bigger fire). Only
+    /// the lower lobe's points move; everything above y 0.56 is untouched,
+    /// and the bottom deliberately overshoots the frame (like the glow does).
+    var bellyBulge: CGFloat = 0
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -359,14 +386,15 @@ struct FlameBuddyOuterShape: Shape {
         let h = rect.height
         let x = { (v: CGFloat) in rect.minX + v * w }
         let y = { (v: CGFloat) in rect.minY + v * h }
+        let b = min(max(bellyBulge, 0), 1)
 
         path.move(to: CGPoint(x: x(0.50 + wobble * 0.10), y: y(0.02)))
         path.addCurve(to: CGPoint(x: x(0.28 + wobble * 0.35), y: y(0.42)), control1: CGPoint(x: x(0.35 + wobble), y: y(0.13)), control2: CGPoint(x: x(0.27 - wobble * 0.3), y: y(0.25)))
         path.addCurve(to: CGPoint(x: x(0.18 - wobble * 0.2), y: y(0.56)), control1: CGPoint(x: x(0.20), y: y(0.36)), control2: CGPoint(x: x(0.15), y: y(0.46)))
-        path.addCurve(to: CGPoint(x: x(0.08), y: y(0.72)), control1: CGPoint(x: x(0.12), y: y(0.61)), control2: CGPoint(x: x(0.08), y: y(0.66)))
-        path.addCurve(to: CGPoint(x: x(0.50), y: y(0.98)), control1: CGPoint(x: x(0.08), y: y(0.90)), control2: CGPoint(x: x(0.24), y: y(0.98)))
-        path.addCurve(to: CGPoint(x: x(0.92), y: y(0.72)), control1: CGPoint(x: x(0.76), y: y(0.98)), control2: CGPoint(x: x(0.92), y: y(0.90)))
-        path.addCurve(to: CGPoint(x: x(0.69 + wobble * 0.25), y: y(0.35)), control1: CGPoint(x: x(0.92), y: y(0.55)), control2: CGPoint(x: x(0.75 + wobble), y: y(0.48)))
+        path.addCurve(to: CGPoint(x: x(0.08 - 0.04 * b), y: y(0.72 - 0.02 * b)), control1: CGPoint(x: x(0.12 - 0.03 * b), y: y(0.61)), control2: CGPoint(x: x(0.08 - 0.04 * b), y: y(0.66)))
+        path.addCurve(to: CGPoint(x: x(0.50), y: y(0.98 + 0.09 * b)), control1: CGPoint(x: x(0.08 - 0.06 * b), y: y(0.90 + 0.05 * b)), control2: CGPoint(x: x(0.24 - 0.03 * b), y: y(0.98 + 0.09 * b)))
+        path.addCurve(to: CGPoint(x: x(0.92 + 0.04 * b), y: y(0.72 - 0.02 * b)), control1: CGPoint(x: x(0.76 + 0.03 * b), y: y(0.98 + 0.09 * b)), control2: CGPoint(x: x(0.92 + 0.06 * b), y: y(0.90 + 0.05 * b)))
+        path.addCurve(to: CGPoint(x: x(0.69 + wobble * 0.25), y: y(0.35)), control1: CGPoint(x: x(0.92 + 0.03 * b), y: y(0.55)), control2: CGPoint(x: x(0.75 + wobble), y: y(0.48)))
         path.addCurve(to: CGPoint(x: x(0.50 + wobble * 0.10), y: y(0.02)), control1: CGPoint(x: x(0.78), y: y(0.20)), control2: CGPoint(x: x(0.62), y: y(0.11)))
         path.closeSubpath()
         return path

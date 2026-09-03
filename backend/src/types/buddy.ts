@@ -214,6 +214,17 @@ export interface BuddyHistoryParticipant {
   duration_seconds: number;
   place: number | null;
   is_host: boolean;
+  /**
+   * The HKWorkout the reconciler matched to this walk, when it did. Null when
+   * their phone never synced one — `distance_miles` is then the live figure
+   * from the walk itself, and the client must say "not synced", never
+   * "syncing": an August walk is not going to sync in September.
+   */
+  workout_id: string | null;
+  final_distance_miles: number | null;
+  /** That workout has a stored GPS trace the viewer may draw (owner consent
+   * applied) — the detail screen fetches it through the usual route read. */
+  has_route: boolean;
 }
 
 /** A photo from a past walk. Media urls are signed by the controller. */
@@ -222,6 +233,9 @@ export interface BuddyHistoryPhoto {
   user_id: string;
   media_url: string;
   caption: string | null;
+  /** A crew member's own slide on the shared post (post_coauthors.media_url)
+   * rather than the post's lead photo. */
+  is_crew?: boolean;
   photo_locked?: boolean;
 }
 
@@ -243,6 +257,9 @@ export interface BuddyHistoryEntry {
   my_place: number | null;
   participants: BuddyHistoryParticipant[];
   photos: BuddyHistoryPhoto[];
+  /** The walk's shared feed post, when the viewer may see it — the one card
+   * that carries everyone's photo and everyone's route. */
+  post_id: string | null;
   /** Keyset cursor for the next page. */
   cursor: string;
 }

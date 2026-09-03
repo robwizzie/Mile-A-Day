@@ -47,6 +47,11 @@ struct InProgressWorkoutState: Codable {
     /// defaults, so a non-optional addition would throw on the blob an older
     /// build persisted mid-workout.
     var pauseIntervals: [WorkoutPauseInterval]?
+    /// Stealth Mode, LATCHED when the workout starts: the finish chain stamps
+    /// `MAD_stealth` on the HKWorkout from this, so a toggle flipped off
+    /// mid-walk can't un-hide a walk that began in stealth. Optional for the
+    /// persisted-Codable reason above.
+    var stealth: Bool?
 
     init(
         isActive: Bool = false,
@@ -68,7 +73,8 @@ struct InProgressWorkoutState: Codable {
         celebratedCatchUp: Bool? = nil,
         celebratedCompletion: Bool? = nil,
         alertedGoalComplete: Bool? = nil,
-        pauseIntervals: [WorkoutPauseInterval]? = nil
+        pauseIntervals: [WorkoutPauseInterval]? = nil,
+        stealth: Bool? = nil
     ) {
         self.isActive = isActive
         self.isPaused = isPaused
@@ -90,6 +96,7 @@ struct InProgressWorkoutState: Codable {
         self.celebratedCompletion = celebratedCompletion
         self.alertedGoalComplete = alertedGoalComplete
         self.pauseIntervals = pauseIntervals
+        self.stealth = stealth
     }
 }
 

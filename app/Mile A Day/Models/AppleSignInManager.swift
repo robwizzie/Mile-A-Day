@@ -35,6 +35,9 @@ class AppleSignInManager: NSObject, ObservableObject {
         let apple_id: String?
         let auth_provider: String?
         let role: String?
+        // Banner fields are additive on the server; absent from older responses.
+        var profile_banner_url: String? = nil
+        var profile_banner_style: String? = nil
     }
 
     /// Checks whether the Apple ID credential for the given user is still valid.

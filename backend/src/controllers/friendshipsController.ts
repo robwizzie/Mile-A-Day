@@ -19,6 +19,9 @@ import { friendRequestClientV2EnabledFor } from "../services/friendRequestFeatur
 import { getBlockedIds } from "../services/moderationService.js";
 import { hasUnlimitedActions } from "../services/privilegedUsers.js";
 import { AuthenticatedRequest } from "../middleware/auth.js";
+import { PostgresService } from "../services/DbService.js";
+
+const db = PostgresService.getInstance();
 import hasRequiredKeys from "../utils/hasRequiredKeys.js";
 import { getUser, getUsers } from "../services/userService.js";
 import {
@@ -42,6 +45,20 @@ export async function getFriends(req: Request, res: Response) {
   const user = await getUser({ userId });
   if (!user) {
     return res.status(400).send({ error: `No user found with ID ${userId}` });
+  }
+
+  // Friends-only, not Instagram-public: your circle is visible to the people
+  // in it (and you), never to whoever searched you up. An empty array — not a
+  // 403 — because shipped builds render an empty list gracefully and must not
+  // read a new status code as an error state.
+  const viewerId = (req as AuthenticatedRequest).userId;
+  if (viewerId !== userId) {
+    const friendRows = await db.query(
+      `SELECT 1 FROM friendships
+       WHERE user_id = $1 AND friend_id = $2 AND status = 'accepted'`,
+      [viewerId ?? "", userId],
+    );
+    if (friendRows.length === 0) return res.send([]);
   }
 
   const friends = await getUserFriends(userId);

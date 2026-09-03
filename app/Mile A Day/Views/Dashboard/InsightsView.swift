@@ -24,6 +24,10 @@ struct InsightsView: View {
                     WeeklyMileChartView(healthManager: healthManager, userManager: userManager)
                     WeeklyTrendCard(healthManager: healthManager, userManager: userManager)
 
+                    // Treats live here for everyone; the dashboard shows them
+                    // only when the user adds the card (DashboardCards).
+                    TreatsCard(healthManager: healthManager)
+
                     StatsGridView(user: userManager.currentUser, healthManager: healthManager)
                     RecentWorkoutsPreviewCard(healthManager: healthManager, showWorkouts: $showWorkouts)
                 }

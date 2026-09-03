@@ -23,6 +23,7 @@ struct HealthAccessSettingsView: View {
                 statusCard
                 if monitor.state != .unavailable {
                     typesCard
+                    routeMapsNote
                     readAccessNote
                     openHealthCard
                 }
@@ -219,6 +220,34 @@ struct HealthAccessSettingsView: View {
     }
 
     // MARK: - The part Apple won't tell us
+
+    private var routeMapsNote: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "map.badge.exclamationmark")
+                    .font(.system(size: 12, weight: .bold))
+                Text("WHY A WALK HAS NO MAP")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .tracking(1.1)
+            }
+            .foregroundColor(.secondary)
+
+            Text("If Route is off under Apple Health, a walk you track in Mile A Day can save without GPS, and that map cannot be recovered later. Mile A Day's route sharing, post default, and Stealth Mode settings only decide whether an existing route is shown to other people.")
+                .font(MADTheme.Typography.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                .fill(Color.teal.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .strokeBorder(Color.teal.opacity(0.22), lineWidth: 1)
+                )
+        )
+    }
 
     private var readAccessNote: some View {
         VStack(alignment: .leading, spacing: 6) {

@@ -46,6 +46,7 @@ struct MADSettingsView: View {
     enum SettingsSheet: String, Identifiable {
         case privacy
         case importHistory
+        case stealth
         var id: String { rawValue }
     }
 
@@ -85,6 +86,8 @@ struct MADSettingsView: View {
                 PrivacySettingsView()
             case .importHistory:
                 ImportHistoryView(userManager: userManager)
+            case .stealth:
+                StealthModeView()
             }
         }
         .sheet(isPresented: $showWhatsNew) {
@@ -230,12 +233,26 @@ struct MADSettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: routeDefaultRaw) { _, _ in MADHaptics.tap() }
-                Text("You can still turn the map on or off for any individual post, before or after you share it.")
+                Text("This controls new post visibility only. If outdoor walks are missing maps entirely, check Health Access and make sure Route is on.")
                     .font(.system(size: 11, design: .rounded))
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.bottom, MADTheme.Spacing.xs)
+
+            divider
+
+            Button { activeSheet = .stealth } label: {
+                MADSettingsRow(
+                    icon: "eye.slash.fill",
+                    title: "Stealth Mode",
+                    subtitle: StealthModeStore.shared.isOn
+                        ? "On — routes are hidden from friends"
+                        : "Hide where you walk, for good",
+                    iconColor: .gray
+                )
+            }
+            .buttonStyle(.plain)
 
             divider
 

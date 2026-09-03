@@ -191,41 +191,9 @@ struct DashboardHeroCard: View {
 
             statusChips
 
-            if let milestone = nextMilestone {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        Text("Next milestone")
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.48))
-                        Spacer(minLength: 0)
-                        Text(milestone.daysToGo == 1
-                             ? "1 day to Day \(milestone.value)"
-                             : "\(milestone.daysToGo) days to Day \(milestone.value)")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundColor(.white.opacity(0.64))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.78)
-                    }
-
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(Color.white.opacity(0.12))
-                            Capsule()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [.yellow, .orange, .red],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .frame(width: max(4, milestone.progress * geometry.size.width))
-                        }
-                    }
-                    .frame(height: 4)
-                }
-            }
+            // The shared bar — same labelled ladder as the heroes, so nothing
+            // on the dashboard draws the streak rung as an unlabelled capsule.
+            DashboardMilestoneBar(streak: streak)
         }
         .frame(maxWidth: .infinity, alignment: .center)
     }

@@ -154,6 +154,8 @@ class UserManager: ObservableObject {
         currentUser.bio = backendResponse.user.bio
         currentUser.profileImageUrl = backendResponse.user.profile_image_url
         currentUser.role = backendResponse.user.role
+        currentUser.profileBannerUrl = backendResponse.user.profile_banner_url
+        currentUser.profileBannerStyle = backendResponse.user.profile_banner_style
 
         // Update name if we have it from Apple
         if let fullName = profile.fullName?.formatted(), !fullName.isEmpty {
@@ -291,6 +293,31 @@ class UserManager: ObservableObject {
         )
 
         signOut()
+    }
+    #endif
+
+    /// Pulls the profile fields another device may have changed (name, bio,
+    /// avatar, banner) from `GET /users/:id` into `currentUser`. Best effort:
+    /// a failed request leaves everything as it was. The profile screen calls
+    /// it on appear so a banner set on one phone shows up on the other.
+    #if !os(watchOS)
+    @MainActor
+    func refreshProfileFromBackend() async {
+        guard let userId = currentUser.backendUserId, !userId.isEmpty else { return }
+        guard let remote = try? await APIClient.fancyFetch(
+            endpoint: "/users/\(userId)",
+            responseType: BackendUser.self
+        ) else { return }
+        if let username = remote.username, !username.isEmpty {
+            currentUser.username = username
+        }
+        currentUser.firstName = remote.first_name
+        currentUser.lastName = remote.last_name
+        currentUser.bio = remote.bio
+        currentUser.profileImageUrl = remote.profile_image_url
+        currentUser.profileBannerUrl = remote.profile_banner_url
+        currentUser.profileBannerStyle = remote.profile_banner_style
+        saveUserData()
     }
     #endif
 

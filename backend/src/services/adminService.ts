@@ -2,6 +2,7 @@ import fs from "fs";
 import { promises as fsp } from "fs";
 import path from "path";
 import { PostgresService } from "./DbService.js";
+import { PERSON_REFERRAL_SOURCES } from "./userService.js";
 import { START_OF_TODAY_ET_SQL, TODAY_ET_DATE_SQL } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
@@ -805,12 +806,17 @@ export async function getReferralStats() {
     SELECT COALESCE(experience_level, 'unknown') AS level, COUNT(*)::int AS count
     FROM users GROUP BY 1 ORDER BY count DESC
   `);
-  const friendReferrers = await db.query(`
+  // Both person-sources, not just 'friend' — a founder handing someone the app
+  // is the same question ("who names whom") and was invisible here.
+  const friendReferrers = await db.query(
+    `
     SELECT referral_detail AS detail, COUNT(*)::int AS count
     FROM users
-    WHERE referral_source = 'friend' AND referral_detail IS NOT NULL AND referral_detail <> ''
+    WHERE referral_source = ANY($1::text[]) AND referral_detail IS NOT NULL AND referral_detail <> ''
     GROUP BY 1 ORDER BY count DESC LIMIT 10
-  `);
+  `,
+    [[...PERSON_REFERRAL_SOURCES]],
+  );
   const [funnel] = await db.query(`
     SELECT
       COUNT(*)::int AS total,

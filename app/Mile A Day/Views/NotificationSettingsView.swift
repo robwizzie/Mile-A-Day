@@ -3,6 +3,7 @@ import UserNotifications
 
 struct NotificationSettingsView: View {
     @State private var prefs = NotificationPreferences.load()
+    @State private var showStealthSheet = false
     /// At-risk streak Live Activity master switch (default on; the activity
     /// only appears when the streak is genuinely about to die).
     @State private var streakRiskActivityEnabled = StreakRiskActivityManager.isEnabled
@@ -191,8 +192,12 @@ struct NotificationSettingsView: View {
                         settingsToggle("Share my walks & runs to the feed", isOn: $prefs.shareWorkoutsToFeed,
                             description: "Friends see your activity in the unified feed")
                         settingsDivider
+                        flyoverVisibilityRow
+                        settingsDivider
                         settingsToggle("Share route maps", isOn: $prefs.shareRouteMaps,
-                            description: "Show the GPS path of your walks and runs on your feed cards — turn off to keep your routes to yourself")
+                            description: "Show existing GPS paths on feed cards. If a walk has no route at all, check Health Access and Apple's Route switch")
+                        settingsDivider
+                        stealthModeRow
                         settingsDivider
                         settingsToggle("Share when I'm out right now", isOn: $prefs.shareLivePresence,
                             description: "Friends tracking at the same time see you're out on a walk or run — never your location")
@@ -205,10 +210,17 @@ struct NotificationSettingsView: View {
                         settingsDivider
                         settingsToggle("New posts from friends", isOn: $prefs.friendPostsEnabled,
                             description: "Get notified when a friend shares a photo")
+                    }
+
+                    settingsSection(title: "PROFILE GRID", icon: "square.grid.3x3.fill", iconColor: .teal) {
+                        settingsToggle("Only show routes with photos", isOn: photoOnlyProfileGridBinding,
+                            description: "Your Posts grid shows a route workout only when that workout has a photo. Photo-less route cards can still appear in friends' feeds.")
                         settingsDivider
                         settingsToggle("Tagged posts on my grid", isOn: $prefs.taggedPostsOnProfile,
-                            description: "Add collabs friends tag you in to your Posts grid — turn off and they stay in your Tagged tab only")
-                        settingsDivider
+                            description: "Add collabs friends tag you in to your Posts grid. Turn off and they stay in your Tagged tab only.")
+                    }
+
+                    settingsSection(title: "RECAPS & CHALLENGES", icon: "sparkles", iconColor: .orange) {
                         settingsToggle("Weekly recap", isOn: $prefs.weeklyRecapEnabled,
                             description: "A Sunday summary of your week's miles, ready to share")
                         settingsDivider
@@ -433,6 +445,13 @@ struct NotificationSettingsView: View {
     }
 
     // MARK: - Settings Toggle
+    private var photoOnlyProfileGridBinding: Binding<Bool> {
+        Binding(
+            get: { !prefs.autoPostsOnProfile },
+            set: { prefs.autoPostsOnProfile = !$0 }
+        )
+    }
+
     private func settingsToggle(_ label: String, isOn: Binding<Bool>, description: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Toggle(label, isOn: isOn)
@@ -450,6 +469,77 @@ struct NotificationSettingsView: View {
 
     private var settingsDivider: some View {
         Divider().overlay(Color.white.opacity(0.06))
+    }
+
+    /// Friends / Only me for the cinematic flyover — a compact two-chip row
+    /// (each option's sentence lives in the enum, shown for the selected one).
+    private var flyoverVisibilityRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Route flyovers")
+                .font(MADTheme.Typography.body)
+                .foregroundColor(.white)
+            HStack(spacing: 8) {
+                ForEach(FlyoverVisibility.allCases) { option in
+                    let selected = prefs.flyoverVisibility == option
+                    Button {
+                        guard !selected else { return }
+                        MADHaptics.tap()
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            prefs.flyoverVisibility = option
+                        }
+                    } label: {
+                        Text(option.title)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundColor(selected ? .white : .white.opacity(0.55))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Capsule().fill(selected
+                                ? MADTheme.Colors.madRed.opacity(0.85)
+                                : Color.white.opacity(0.07)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Text(prefs.flyoverVisibility.subtitle)
+                .font(.system(size: 11, design: .rounded))
+                .foregroundColor(.white.opacity(0.35))
+                .padding(.leading, 2)
+        }
+    }
+
+    /// Stealth Mode lives in its own sheet (enabling asks "also hide routes
+    /// from…"), so this is a launcher, not a toggle: ONE owner of the server
+    /// call, and this screen's Save never sends stealth keys.
+    private var stealthModeRow: some View {
+        let isOn = StealthModeStore.shared.isOn
+        return Button {
+            MADHaptics.tap()
+            showStealthSheet = true
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Stealth Mode")
+                        .font(MADTheme.Typography.body)
+                        .foregroundColor(.white)
+                    Text(isOn
+                        ? "On — walks recorded now are hidden from friends for good"
+                        : "Routes recorded while it's on are never uploaded and can never be shown, even after you turn it off. Share route maps (above) only hides maps for display.")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundColor(.white.opacity(0.35))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Text(isOn ? "On" : "Off")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundColor(isOn ? .white : .white.opacity(0.5))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(0.3))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showStealthSheet) { StealthModeView() }
     }
 
     // MARK: - Visibility picker
@@ -569,10 +659,15 @@ struct NotificationSettingsView: View {
                     // Enforced locally (the app builds that card), sent so the
                     // choice survives a reinstall and follows a new phone.
                     "auto_post_without_photo": prefs.autoPostWithoutPhoto,
+                    // Server-enforced: the profile grid is built by SQL, and
+                    // this choice must affect visitors too.
+                    "auto_posts_on_profile": prefs.autoPostsOnProfile,
                     // Must reach the server: the reminder is sent by a cron, so
                     // a local-only flag could never actually silence it.
                     "friend_request_reminder_enabled": prefs.friendRequestReminderEnabled,
                     "workout_visibility": prefs.workoutVisibility.rawValue,
+                    // Server-enforced at the feed projection (flyover_allowed).
+                    "flyover_visibility": prefs.flyoverVisibility.rawValue,
                     // Must reach the server: this doesn't only mute a push, it
                     // decides whether you appear in friends' buddy pickers at
                     // all — which is a SQL query, not a client decision.
@@ -585,7 +680,7 @@ struct NotificationSettingsView: View {
                 // change, or the reload would re-fetch the old grid.
                 await MainActor.run {
                     NotificationCenter.default.post(
-                        name: NSNotification.Name("MAD_TaggedPostsOnProfileChanged"),
+                        name: NSNotification.Name("MAD_ProfileGridSettingsChanged"),
                         object: nil
                     )
                 }
@@ -612,12 +707,21 @@ struct NotificationSettingsView: View {
     private func loadVisibilityFromServer() async {
         guard let settings = try? await friendService.getNotificationSettings()
         else { return }
+        // Free hydration point for the Stealth window log (server wins).
+        StealthModeStore.shared.apply(settings)
         let visibility = settings.workout_visibility.flatMap(WorkoutVisibility.init(rawValue:))
         let taggedOnProfile = settings.tagged_posts_on_profile
         await MainActor.run {
             var changed = false
             if let visibility, prefs.workoutVisibility != visibility {
                 prefs.workoutVisibility = visibility
+                changed = true
+            }
+            // Server-enforced like workout_visibility — its value wins.
+            if let flyoverRaw = settings.flyover_visibility,
+               let flyover = FlyoverVisibility(rawValue: flyoverRaw),
+               prefs.flyoverVisibility != flyover {
+                prefs.flyoverVisibility = flyover
                 changed = true
             }
             if let taggedOnProfile, prefs.taggedPostsOnProfile != taggedOnProfile {
@@ -639,6 +743,11 @@ struct NotificationSettingsView: View {
             if let autoPost = settings.auto_post_without_photo,
                 prefs.autoPostWithoutPhoto != autoPost {
                 prefs.autoPostWithoutPhoto = autoPost
+                changed = true
+            }
+            if let autoOnProfile = settings.auto_posts_on_profile,
+                prefs.autoPostsOnProfile != autoOnProfile {
+                prefs.autoPostsOnProfile = autoOnProfile
                 changed = true
             }
             // Keep the local copy honest too, so a later Save of some unrelated

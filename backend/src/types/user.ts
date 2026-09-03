@@ -6,6 +6,8 @@ export type User = {
 	last_name?: string;
 	bio?: string;
 	profile_image_url?: string;
+	profile_banner_url?: string | null;
+	profile_banner_style?: string | null;
 	apple_id?: string;
 	auth_provider?: 'apple' | 'google' | 'guest';
 };

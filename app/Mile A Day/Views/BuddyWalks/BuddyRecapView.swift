@@ -328,8 +328,11 @@ struct BuddyRecapView: View {
                 // Until the real workout syncs, the number on screen is the
                 // one accumulated from live reports. Say so rather than let it
                 // silently change a minute later — but quietly: it resolves
-                // itself, so it must not read like an error.
-                if participant.finalDistanceMiles == nil {
+                // itself, so it must not read like an error. ONLY while it
+                // plausibly still can: a recap opened from the history for a
+                // walk weeks old showed a spinner that was never going to
+                // stop. Past the window the live figure simply stands.
+                if participant.finalDistanceMiles == nil, Self.mayStillSync(session) {
                     HStack(spacing: 4) {
                         ProgressView()
                             .controlSize(.mini)
@@ -343,6 +346,13 @@ struct BuddyRecapView: View {
         }
         .padding(.horizontal, MADTheme.Spacing.md)
         .padding(.vertical, MADTheme.Spacing.sm + 2)
+    }
+
+    /// A workout lands within minutes of the finish (a late Watch sync within
+    /// the hour). Two hours after the walk ended, "syncing" is a lie.
+    static func mayStillSync(_ session: BuddySessionState) -> Bool {
+        guard let ended = session.endedAtDate else { return true }
+        return Date().timeIntervalSince(ended) < 2 * 3600
     }
 
     /// Thin track-and-fill bar. GeometryReader because the fill's width IS a

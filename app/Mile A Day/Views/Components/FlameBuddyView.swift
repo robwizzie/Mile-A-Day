@@ -25,6 +25,11 @@ struct FlameBuddyView: View {
     /// an ember bed; non-grounded (Modern ring) shrinks toward center to stay
     /// framed in the circle.
     var grounded: Bool = true
+    /// The Fun hero's dressing: props, a rotating bubble, darting eyes, a poke
+    /// reaction (see `FlameMood`). nil = the plain flame every other caller
+    /// gets. Drawn INSIDE the flame's own animated stack so it bobs and
+    /// shrinks with the figure.
+    var mood: FlameMood? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var ignitionDate: Date?
@@ -106,25 +111,77 @@ struct FlameBuddyView: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 1.4), value: dayEnd)
     }
 
+    // Mood gestures are SwiftUI animations on the CONTAINER — Core Animation
+    // at 60 fps, never samples of the 12 fps content clock below. A hop or a
+    // pace sampled at 12 fps read as lag, and driving it from the timeline
+    // also meant every gesture frame was a figure redraw (shadow + blur).
+    @State private var moodHopPhase = false
+    @State private var moodPacePhase = false
+    @State private var bobPhase = false
+    @State private var pokeSquash: CGFloat = 1
+
     private var animatedFlame: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 12.0)) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let vigorNow = currentVigor(at: timeline.date)
-            let bodyScale = vigorNow.map { StreakFlameClock.flameScale(vigor: $0) } ?? 1
+        ZStack {
+            // The ONLY per-frame clock: the figure's flicker and blink. 12 fps
+            // of a shadowed, blurred shape is the one cost this view has
+            // always carried; nothing else may ride it.
+            TimelineView(.animation(minimumInterval: 1.0 / 12.0)) { timeline in
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                let vigorNow = currentVigor(at: timeline.date)
 
-            ZStack {
-                if grounded, let vigorNow, vigorNow < 0.45 {
-                    EmberBaseGlow(size: size, intensity: min(1, (0.45 - vigorNow) / 0.45))
-                }
+                ZStack {
+                    if grounded, let vigorNow, vigorNow < 0.45 {
+                        EmberBaseGlow(size: size, intensity: min(1, (0.45 - vigorNow) / 0.45))
+                    }
 
-                figure(vigor: vigorNow, flicker: CGFloat(t * 5.5), blink: Int(t * 2.0) % 9 == 0)
-                    .offset(y: sin(CGFloat(t) * 1.5) * 2.2 * (resolvedPhase == .blazing ? 1 : max(0.35, bodyScale)))
+                    figure(vigor: vigorNow, flicker: CGFloat(t * 5.5), blink: moodBlink(at: t), gaze: moodGaze(at: t))
 
-                if resolvedPhase == .blazing {
-                    BlazingEmberField(time: t, size: size)
+                    if resolvedPhase == .blazing {
+                        BlazingEmberField(time: t, size: size)
+                    }
                 }
             }
+
+            if let mood {
+                // No clock of its own (see FlameMoodLayer). Shares the
+                // container's bob/hop/pace below, so props ride with him.
+                FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: currentVigor(at: Date())))
+            }
         }
+        .scaleEffect(x: 1, y: pokeSquash, anchor: .bottom)
+        .offset(x: paceOffset, y: hopOffset + bobOffset)
+        .onAppear {
+            // Off the appear commit, on purpose: a `repeatForever` animation
+            // started INSIDE onAppear is attached to the view's initial
+            // transaction, and every later layout change in the subtree —
+            // the 12 fps blink toggling the eye frame — inherited it. The eyes
+            // then opened as a 2-second overshooting stretch, taller than the
+            // sunglasses drawn over them. Starting on the next turn scopes the
+            // animation to the phase flip alone (the figure's face also
+            // refuses inherited animations outright, as belt and braces).
+            DispatchQueue.main.async {
+                startBob()
+                startMoodMotion()
+            }
+        }
+        .onChange(of: mood?.kind) { _, _ in restartMoodMotion() }
+        .onChange(of: mood?.pokedAt) { _, newValue in
+            if newValue != nil { pokeBounce() }
+        }
+    }
+
+    /// The idle bob — used to be a sine sampled on the 12 fps content clock;
+    /// now a 60 fps container animation, so the mood props ride it too.
+    private var bobOffset: CGFloat {
+        guard !reduceMotion else { return 0 }
+        let bodyScale = figureScale(vigor: currentVigor(at: Date()))
+        let amplitude: CGFloat = 2.2 * (resolvedPhase == .blazing ? 1 : max(0.35, bodyScale))
+        return bobPhase ? -amplitude : amplitude
+    }
+
+    private func startBob() {
+        guard !reduceMotion else { return }
+        withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) { bobPhase = true }
     }
 
     private var staticFlame: some View {
@@ -133,11 +190,25 @@ struct FlameBuddyView: View {
             if grounded, let vigorNow, vigorNow < 0.45 {
                 EmberBaseGlow(size: size, intensity: min(1, (0.45 - vigorNow) / 0.45))
             }
-            figure(vigor: vigorNow, flicker: 0, blink: false)
+            figure(vigor: vigorNow, flicker: 0, blink: false, gaze: .zero)
+            if let mood {
+                FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: vigorNow), still: true)
+            }
         }
     }
 
-    private func figure(vigor: Double?, flicker: CGFloat, blink: Bool) -> some View {
+    /// The scale the FIGURE actually draws at (FlameBuddyFigure's
+    /// `effectiveBodyScale`): the vigor ramp while burning, the stage's own
+    /// `bodyScale` otherwise — and blazing is 1.05, not 1. Props placed at 1
+    /// on a 1.05 face missed the eyes by enough to read as a second pair.
+    private func figureScale(vigor: Double?) -> CGFloat {
+        if let vigor, health != .dead, health != .blazing {
+            return StreakFlameClock.flameScale(vigor: vigor)
+        }
+        return health.bodyScale
+    }
+
+    private func figure(vigor: Double?, flicker: CGFloat, blink: Bool, gaze: CGSize) -> some View {
         FlameBuddyFigure(
             health: health,
             flickerPhase: flicker,
@@ -145,8 +216,92 @@ struct FlameBuddyView: View {
             size: size,
             showsFace: showsFace,
             vigor: vigor.map { CGFloat($0) },
+            gaze: gaze,
             grounded: grounded
         )
+    }
+
+    // MARK: - Mood: face (content clock — discrete, cheap)
+
+    /// The ordinary blink, or long sleepy lids before the day has started.
+    private func moodBlink(at t: TimeInterval) -> Bool {
+        if mood?.kind == .sleepy {
+            return t.truncatingRemainder(dividingBy: 4.0) < 2.4
+        }
+        return Int(t * 2.0) % 9 == 0
+    }
+
+    /// Nervous eyes dart; everyone else looks straight ahead.
+    private func moodGaze(at t: TimeInterval) -> CGSize {
+        guard mood?.kind == .nervous else { return .zero }
+        let dart = t.truncatingRemainder(dividingBy: 2.6)
+        let x: CGFloat = dart < 0.9 ? -0.025 : (dart < 1.8 ? 0.025 : 0)
+        return CGSize(width: x, height: 0)
+    }
+
+    // MARK: - Mood: gestures (container animations)
+
+    /// Ready / halfway / almost / party: a bounce whose height and tempo rise
+    /// with the mood. Zero for every other mood, so the phase flag is inert.
+    private var hopOffset: CGFloat {
+        guard !reduceMotion, let kind = mood?.kind else { return 0 }
+        let height: CGFloat
+        switch kind {
+        case .ready: height = 0.025
+        case .halfway: height = 0.035
+        case .almost: height = 0.045
+        case .party: height = 0.05
+        default: return 0
+        }
+        return moodHopPhase ? -size * height : 0
+    }
+
+    /// Nervous: pacing side to side.
+    private var paceOffset: CGFloat {
+        guard !reduceMotion, mood?.kind == .nervous else { return 0 }
+        return moodPacePhase ? size * 0.05 : -size * 0.05
+    }
+
+    private func startMoodMotion() {
+        guard !reduceMotion, let kind = mood?.kind else { return }
+        switch kind {
+        case .ready:
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { moodHopPhase = true }
+        case .halfway:
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { moodHopPhase = true }
+        case .almost:
+            withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) { moodHopPhase = true }
+        case .party:
+            withAnimation(.easeInOut(duration: 0.45).repeatForever(autoreverses: true)) { moodHopPhase = true }
+        case .nervous:
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { moodPacePhase = true }
+        default:
+            break
+        }
+    }
+
+    /// A new mood is a new tempo: land the phases without animation, then
+    /// start the new one on the next turn (re-assigning an at-target phase
+    /// inside the same update would be a no-op and keep the old timing).
+    private func restartMoodMotion() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            moodHopPhase = false
+            moodPacePhase = false
+        }
+        DispatchQueue.main.async { startMoodMotion() }
+    }
+
+    /// Poked: squash, then spring back.
+    private func pokeBounce() {
+        guard !reduceMotion else { return }
+        withAnimation(.spring(response: 0.16, dampingFraction: 0.6)) { pokeSquash = 0.88 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            // Settles without overshooting: a stretch past 1 tall-ens the
+            // whole face and the eyes with it.
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) { pokeSquash = 1 }
+        }
     }
 
     /// Continuous time-left fraction, only while the lifecycle drives a

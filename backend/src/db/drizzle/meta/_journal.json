@@ -414,6 +414,13 @@
       "when": 1788200417682,
       "tag": "0058_boring_prima",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1788397196614,
+      "tag": "0059_curvy_captain_america",
+      "breakpoints": true
     }
   ]
 }

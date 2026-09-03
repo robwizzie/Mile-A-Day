@@ -27,6 +27,11 @@ struct ProfileView: View {
     @State private var showingShareProfile = false
     @State private var showingSettings = false
     @State private var showingRouteHeatmap = false
+    /// Daily goal editor, reachable from the Activity tab's goal row — the
+    /// same sheet Settings opens, so there is one place the number is set.
+    @State private var showGoalSheet = false
+    /// Sender tapped in "Recent hypes" — opens their profile.
+    @State private var hypeProfileUser: BackendUser?
 
     // Friends count shown in the header (Instagram-style), tappable through to
     // the friends list. Owns one FriendService for the count + the list link.
@@ -63,37 +68,57 @@ struct ProfileView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            MADTabHeader(
-                title: "Profile",
-                actions: [
-                    MADHeaderAction(id: "share", systemImage: "qrcode") {
-                        showingShareProfile = true
-                    },
-                    MADHeaderAction(id: "edit", systemImage: "pencil") {
-                        showingEditProfile = true
-                    },
-                    MADHeaderAction(id: "settings", systemImage: "gearshape.fill") {
-                        showingSettings = true
-                    }
-                ]
-            )
-
+        // The banner runs under the status bar, so the scroll ignores the top
+        // safe area and the hero pads its own top bar by that inset.
+        GeometryReader { geo in
             ScrollView {
-                VStack(spacing: MADTheme.Spacing.lg) {
-                    // Profile Header (matches friend profile style)
-                    profileHeader
+                VStack(spacing: 0) {
+                    profileHero(topInset: geo.safeAreaInsets.top)
 
-                    // Tab picker — matches friend profile's 4-tab layout.
-                    MADPillPicker(
-                        selection: $profileTab,
-                        options: [
-                            .init(id: .activity, title: "Activity", systemImage: "flame.fill"),
-                            .init(id: .posts, title: "Posts", systemImage: "square.grid.3x3.fill"),
-                            .init(id: .stats, title: "Stats", systemImage: "chart.bar.fill"),
-                            .init(id: .badges, title: "Badges", systemImage: "trophy.fill")
-                        ]
-                    )
+                    VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                        ProfileIdentityBlock(
+                            username: userManager.currentUser.username,
+                            displayName: ownDisplayName,
+                            bio: userManager.currentUser.bio,
+                            // Pure Flame seal when the current streak is 100%
+                            // natural (no token rescues). Server-gated: hidden
+                            // until streak features are live for this user.
+                            showsPureFlame: tokensState.payload?.natural_streak == true
+                                && userManager.currentUser.streak > 0,
+                            onPureFlame: { showPureFlameInfo = true }
+                        )
+
+                        // Streak · Miles · Friends. Friends is tappable through
+                        // to the friends list / leaderboard.
+                        ProfileStatTiles(
+                            streak: userManager.currentUser.streak,
+                            totalMiles: userManager.currentUser.totalMiles,
+                            friendCount: ownFriendCount,
+                            streakDoneToday: ownGoalDoneToday
+                        ) {
+                            FriendsListView(friendService: friendService)
+                        }
+
+                        // Token shelf — your minted set, right under the numbers
+                        // it protects. Hidden until streak features are active.
+                        if let tokens = tokensState.payload {
+                            profileTokenShelf(tokens)
+                        }
+
+                        // Same four sections as a friend's profile, Activity first.
+                        ProfileTabBar(
+                            selection: $profileTab,
+                            items: [
+                                .init(id: .activity, title: "Activity"),
+                                .init(id: .posts, title: "Posts"),
+                                .init(id: .stats, title: "Stats"),
+                                .init(id: .badges, title: "Badges")
+                            ]
+                        )
+                        .padding(.top, 4)
+                    }
+                    .padding(.horizontal, MADTheme.Spacing.screenGutter)
+                    .padding(.top, 6)
 
                     Group {
                         switch profileTab {
@@ -104,14 +129,23 @@ struct ProfileView: View {
                         }
                     }
                     .animation(.easeInOut(duration: 0.18), value: profileTab)
+                    .padding(.horizontal, MADTheme.Spacing.screenGutter)
+                    .padding(.top, MADTheme.Spacing.md)
                 }
-                .padding(.horizontal, MADTheme.Spacing.md)
-                .padding(.top, MADTheme.Spacing.sm)
                 .padding(.bottom, 100)
+                .lockedToScrollWidth()
             }
+            .ignoresSafeArea(edges: .top)
             .scrollContentBackground(.hidden)
         }
-        .background(MADTheme.Colors.appBackgroundGradient)
+        .background(MADTheme.Colors.appBackgroundGradient.ignoresSafeArea())
+        .sheet(isPresented: $showPureFlameInfo) {
+            PureFlameInfoSheet()
+        }
+        .task {
+            // A banner or bio set on another phone shows up here.
+            await userManager.refreshProfileFromBackend()
+        }
         .toolbar(.hidden, for: .navigationBar)
         // Pushed in the tab's NavigationStack — consistent with the
         // no-slide-down direction for navigational destinations.
@@ -233,18 +267,13 @@ struct ProfileView: View {
     /// profile's Activity tab role: "what's happening right now".
     @ViewBuilder
     private var ownActivityTabContent: some View {
-        VStack(spacing: MADTheme.Spacing.lg) {
-            streakAndGoalRow
+        // Ordered by how close to NOW each block is: today's goal and
+        // challenge, then the week, then walks with people, then streak
+        // history, then what friends said about it. Every card wears the same
+        // flat chrome and caps label (`profileCard` / `ProfileCardLabel`).
+        VStack(spacing: MADTheme.Spacing.md) {
+            dailyGoalRow
             OwnTodayChallengeCard(healthManager: healthManager, userManager: userManager)
-            HallOfStreaksSection(
-                userId: userManager.currentUser.backendUserId,
-                isSelf: true
-            )
-            // Walks you've taken WITH people. On the Activity tab rather than
-            // Stats because it's a record of what happened, not a performance
-            // metric — and because it's the only place in the app outside the
-            // start sheet that says what a buddy walk is.
-            BuddyWalksSection()
             if !ownWorkouts.isEmpty || !(ownDayTotals?.isEmpty ?? true) {
                 Last7DaysChart(
                     workouts: ownWorkouts,
@@ -253,57 +282,88 @@ struct ProfileView: View {
                     isSelf: true
                 )
             }
+            // Walks you've taken WITH people. On the Activity tab rather than
+            // Stats because it's a record of what happened, not a performance
+            // metric — and because it's the only place in the app outside the
+            // start sheet that says what a buddy walk is.
+            BuddyWalksSection()
+            HallOfStreaksSection(
+                userId: userManager.currentUser.backendUserId,
+                isSelf: true
+            )
             if !receivedHypes.isEmpty {
                 recentHypesSection
             }
         }
     }
 
-    /// "You got hyped" — recent 👏 reactions friends sent you.
+    /// "You got hyped" — recent 👏 reactions friends sent you. Each row opens
+    /// the sender's profile, the way a likes list does.
     private var recentHypesSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            HStack {
-                Text("RECENT HYPES")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
-                    .tracking(1.2)
-                    .foregroundColor(.white.opacity(0.4))
-                Spacer()
-            }
+            ProfileCardLabel(text: "RECENT HYPES")
 
-            VStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(receivedHypes.prefix(8)) { hype in
-                    HStack(spacing: 12) {
-                        AvatarView(
-                            name: hype.displayName,
-                            imageURL: hype.profile_image_url,
-                            size: 40
+            VStack(spacing: 0) {
+                ForEach(Array(receivedHypes.prefix(8).enumerated()), id: \.element.id) { index, hype in
+                    Button {
+                        MADHaptics.tap()
+                        hypeProfileUser = BackendUser(
+                            user_id: hype.sender_id,
+                            username: hype.username,
+                            email: nil,
+                            first_name: hype.first_name,
+                            last_name: hype.last_name,
+                            bio: nil,
+                            profile_image_url: hype.profile_image_url,
+                            apple_id: nil,
+                            auth_provider: nil,
+                            role: nil
                         )
-                        VStack(alignment: .leading, spacing: 2) {
-                            (Text(Image(systemName: "hands.clap.fill")).foregroundColor(.orange)
-                                + Text("  ")
-                                + Text(hype.displayName).fontWeight(.bold)
-                                + Text(" \(hype.actionText)"))
-                                .font(.system(size: 14, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.9))
-                                .lineLimit(2)
-                            Text(Self.relativeHypeTime(hype.created_at))
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.45))
-                        }
-                        Spacer(minLength: 4)
+                    } label: {
+                        recentHypeRow(hype)
                     }
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(Color.orange.opacity(0.06))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .strokeBorder(Color.orange.opacity(0.18), lineWidth: 1)
-                            )
-                    )
+                    .buttonStyle(.plain)
+                    if index < min(receivedHypes.count, 8) - 1 {
+                        Divider().overlay(Color.white.opacity(0.06)).padding(.leading, 52)
+                    }
                 }
             }
         }
+        .padding(MADTheme.Spacing.md)
+        .profileCard()
+        .sheet(item: $hypeProfileUser) { user in
+            NavigationStack {
+                UserProfileDetailView(user: user, friendService: friendService)
+            }
+        }
+    }
+
+    private func recentHypeRow(_ hype: ReceivedHype) -> some View {
+        HStack(spacing: 12) {
+            AvatarView(
+                name: hype.displayName,
+                imageURL: hype.profile_image_url,
+                size: 40
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                (Text(Image(systemName: "hands.clap.fill")).foregroundColor(.orange)
+                    + Text("  ")
+                    + Text(hype.displayName).fontWeight(.bold)
+                    + Text(" \(hype.actionText)"))
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.9))
+                    .lineLimit(2)
+                Text(Self.relativeHypeTime(hype.created_at))
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.45))
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(.white.opacity(0.3))
+        }
+        .padding(.vertical, 9)
+        .contentShape(Rectangle())
     }
 
     private func loadReceivedHypes() async {
@@ -526,166 +586,80 @@ struct ProfileView: View {
         }
     }
 
-    private var profileHeader: some View {
-        VStack(spacing: 0) {
-            ZStack(alignment: .top) {
-                // Red gradient banner
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        MADTheme.Colors.madRed.opacity(0.3),
-                        Color.clear
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 120)
+    /// "First Last" for the identity line, nil when the user hasn't set one.
+    private var ownDisplayName: String? {
+        let parts = [userManager.currentUser.firstName, userManager.currentUser.lastName]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
 
-                VStack(spacing: MADTheme.Spacing.lg) {
-                    // Profile Image with edit overlay
-                    Button {
+    /// Is today's mile in? Clamp the goal first — the tolerance helper is
+    /// vacuously true at 0. A locked device reads today's distance as 0, so
+    /// the streak's own "done today" stamp also counts. ONE rule for the goal
+    /// ring, the streak tile and the daily-goal row, so they can't disagree.
+    private var ownGoalDoneToday: Bool {
+        let goal = userManager.currentUser.goalMiles
+        return (goal > 0 && ProgressCalculator.isGoalCompleted(current: healthManager.todaysDistance, goal: goal))
+            || userManager.currentUser.isStreakActiveToday
+    }
+
+    /// Banner (photo or gradient preset) with the avatar in today's goal ring
+    /// hanging off it, and the wordmark + QR/edit/settings buttons riding the
+    /// top. Tapping the avatar opens Edit Profile, same as the pencil.
+    private func profileHero(topInset: CGFloat) -> some View {
+        let goal = userManager.currentUser.goalMiles
+        let today = healthManager.todaysDistance
+        let complete = ownGoalDoneToday
+        let progress: Double? = goal > 0 ? min(today / goal, 1) : nil
+
+        return ProfileHero(
+            bannerURL: userManager.currentUser.profileBannerUrl,
+            bannerStyle: ProfileBannerStyle.resolve(userManager.currentUser.profileBannerStyle),
+            totalMiles: userManager.currentUser.totalMiles,
+            // The next mile MEDAL, from the same badge list the Total Miles
+            // screen reads — the chip and "Next Medal" can't disagree.
+            milestoneThresholds: MileMilestones.thresholds(from: userManager.currentUser.getAllBadges()),
+            goalProgress: progress,
+            goalComplete: complete,
+            topInset: topInset,
+            onTapAvatar: { showingEditProfile = true }
+        ) {
+            ownAvatarImage
+        } topBar: {
+            HStack(alignment: .center) {
+                ProfileWordmark()
+                Spacer()
+                HStack(spacing: 8) {
+                    ProfileBannerButton(systemImage: "qrcode", accessibilityLabel: "Share profile") {
+                        showingShareProfile = true
+                    }
+                    ProfileBannerButton(systemImage: "pencil", accessibilityLabel: "Edit profile") {
                         showingEditProfile = true
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white.opacity(0.1))
-                                .frame(width: 128, height: 128)
-
-                            if let image = currentProfileImage ?? getCustomProfileImage() ?? getAppleProfileImage() {
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: 120, height: 120)
-                                    .clipShape(Circle())
-                            } else {
-                                AvatarView(name: userManager.currentUser.name, imageURL: userManager.currentUser.profileImageUrl, size: 120)
-                            }
-
-                            // Camera edit badge
-                            VStack {
-                                Spacer()
-                                HStack {
-                                    Spacer()
-                                    Circle()
-                                        .fill(MADTheme.Colors.madRed)
-                                        .frame(width: 32, height: 32)
-                                        .overlay(
-                                            Image(systemName: "camera.fill")
-                                                .font(.system(size: 14, weight: .medium))
-                                                .foregroundColor(.white)
-                                        )
-                                        .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
-                                }
-                            }
-                            .frame(width: 120, height: 120)
-                        }
                     }
-                    .buttonStyle(.plain)
-                    .shadow(color: Color.black.opacity(0.3), radius: 15, x: 0, y: 5)
-                    .padding(.top, 40)
-
-                    // User Info
-                    VStack(spacing: MADTheme.Spacing.sm) {
-                        // Username (primary, large) — with the Pure Flame seal
-                        // when the current streak is 100% natural (no token
-                        // rescues). Server-gated: hidden until streak features
-                        // are live for this user.
-                        if let username = userManager.currentUser.username {
-                            HStack(spacing: 6) {
-                                Text("@\(username)")
-                                    .font(MADTheme.Typography.title1)
-                                    .foregroundColor(MADTheme.Colors.primaryText)
-                                if tokensState.payload?.natural_streak == true,
-                                   userManager.currentUser.streak > 0 {
-                                    // Tappable — the badge explains itself.
-                                    Button {
-                                        showPureFlameInfo = true
-                                    } label: {
-                                        PureFlameBadge(size: 22)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .sheet(isPresented: $showPureFlameInfo) {
-                                        PureFlameInfoSheet()
-                                    }
-                                }
-                            }
-                        }
-
-                        // Display name
-                        if let firstName = userManager.currentUser.firstName, !firstName.isEmpty {
-                            let displayName = [firstName, userManager.currentUser.lastName].compactMap { $0 }.joined(separator: " ")
-                            Text(displayName)
-                                .font(MADTheme.Typography.body)
-                                .foregroundColor(MADTheme.Colors.secondaryText)
-                        }
-
-                        // Token shelf — your minted set, right on the profile.
-                        // Hidden until streak features are active.
-                        if let tokens = tokensState.payload {
-                            profileTokenShelf(tokens)
-                                .padding(.top, 2)
-                        }
-
-                        // Bio with quote-style accent
-                        if let bio = userManager.currentUser.bio, !bio.isEmpty {
-                            HStack(alignment: .top, spacing: MADTheme.Spacing.sm) {
-                                RoundedRectangle(cornerRadius: 1)
-                                    .fill(MADTheme.Colors.madRed.opacity(0.5))
-                                    .frame(width: 2)
-
-                                Text(bio)
-                                    .font(MADTheme.Typography.body)
-                                    .foregroundColor(MADTheme.Colors.secondaryText)
-                                    .multilineTextAlignment(.leading)
-                            }
-                            .padding(.horizontal, MADTheme.Spacing.lg)
-                            .padding(.top, MADTheme.Spacing.xs)
-                        }
+                    ProfileBannerButton(systemImage: "gearshape.fill", accessibilityLabel: "Settings") {
+                        showingSettings = true
                     }
-
-                    // Triple-stat row (Streak · Miles · Friends). Friends is
-                    // tappable through to the friends list / leaderboard.
-                    ProfileStatsRow(
-                        streak: userManager.currentUser.streak,
-                        totalMiles: userManager.currentUser.totalMiles,
-                        friendCount: ownFriendCount
-                    ) {
-                        FriendsListView(friendService: friendService)
-                    }
-                    .padding(.horizontal, MADTheme.Spacing.lg)
-
-                    // Edit Profile Button
-                    Button {
-                        showingEditProfile = true
-                    } label: {
-                        HStack(spacing: MADTheme.Spacing.sm) {
-                            Image(systemName: "pencil")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text("Edit Profile")
-                                .font(MADTheme.Typography.headline)
-                        }
-                        .foregroundColor(MADTheme.Colors.madRed)
-                        .padding(.horizontal, MADTheme.Spacing.xl)
-                        .padding(.vertical, MADTheme.Spacing.sm + 2)
-                        .background(
-                            Capsule()
-                                .fill(MADTheme.Colors.madRed.opacity(0.15))
-                        )
-                    }
-                    .buttonStyle(ScaleButtonStyle())
-                    .padding(.horizontal, MADTheme.Spacing.lg)
                 }
-                .padding(.horizontal, MADTheme.Spacing.md)
-                .padding(.bottom, MADTheme.Spacing.lg)
             }
         }
-        // Clip the inner LinearGradient banner to the card shape so it
-        // doesn't bleed past the rounded top corners. Same fix as the
-        // friend profile header — madLiquidGlass styles a rounded
-        // background but doesn't clip the children.
-        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous))
-        .madLiquidGlass()
         .onAppear {
             loadProfileImage()
+        }
+    }
+
+    @ViewBuilder
+    private var ownAvatarImage: some View {
+        if let image = currentProfileImage ?? getCustomProfileImage() ?? getAppleProfileImage() {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else {
+            AvatarView(
+                name: userManager.currentUser.name,
+                imageURL: userManager.currentUser.profileImageUrl,
+                size: 88
+            )
         }
     }
 
@@ -731,20 +705,24 @@ struct ProfileView: View {
                         .foregroundColor(.white.opacity(ready > 0 ? 0.68 : 0.55))
                 }
 
+                Spacer(minLength: 4)
+
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(.white.opacity(0.35))
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
+            .frame(maxWidth: .infinity)
             .background(
-                Capsule()
-                    .fill(Color.white.opacity(0.07))
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
                     .overlay(
-                        Capsule()
-                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
                     )
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(ScaleButtonStyle())
         .sheet(isPresented: $showTokenSheet) {
@@ -752,99 +730,115 @@ struct ProfileView: View {
         }
     }
 
-    // MARK: - Streak & Goal Row
+    // MARK: - Daily Goal Row
 
-    private var streakAndGoalRow: some View {
-        let hasCompletedToday = userManager.currentUser.isStreakActiveToday
-        let streak = userManager.currentUser.streak
+    /// The day's target and whether it's in. The streak number itself lives in
+    /// the header tiles now, so this is only the goal — one compact row rather
+    /// than the old two-card block.
+    private var dailyGoalRow: some View {
+        let done = ownGoalDoneToday
         let goalMiles = userManager.currentUser.goalMiles
+        let remaining = max(0, goalMiles - healthManager.todaysDistance)
+        // Remaining CEILs — never promise the goal is closer than it is.
+        let remainingText = String(format: "%.2f to go", (remaining * 100).rounded(.up) / 100)
+        let statusText = done ? "Done today" : remainingText
+        let accent: Color = done ? .green : MADTheme.Colors.madRed
 
         return HStack(spacing: MADTheme.Spacing.md) {
-            // Streak Card
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                Text("STREAK")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundColor(hasCompletedToday ? .green : .orange)
-                    .tracking(1.5)
+            goalIcon(done: done, accent: accent)
 
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("\(streak)")
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
-
-                    Text("days")
-                        .font(MADTheme.Typography.small)
-                        .foregroundColor(.secondary)
-                }
-
-                Spacer()
-
-                HStack {
-                    Image(systemName: "flame.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(hasCompletedToday ? .green : .orange)
-                    Spacer()
-                    if hasCompletedToday {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(.green)
-                    }
-                }
-            }
-            .padding(MADTheme.Spacing.md)
-            .frame(maxWidth: .infinity)
-            .frame(height: 140)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                    .fill(
-                        LinearGradient(
-                            colors: hasCompletedToday
-                                ? [Color.green.opacity(0.15), Color.green.opacity(0.05)]
-                                : [Color.orange.opacity(0.15), Color.orange.opacity(0.05)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .stroke(
-                                hasCompletedToday ? Color.green.opacity(0.2) : Color.orange.opacity(0.2),
-                                lineWidth: 1
-                            )
-                    )
-            )
-
-            // Daily Goal Card
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("DAILY GOAL")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundColor(.secondary)
-                    .tracking(1.5)
-
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .tracking(1.0)
+                    .foregroundColor(.white.opacity(0.5))
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(String(format: "%.1f", goalMiles))
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
-
+                        .font(.system(size: 20, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                        .monospacedDigit()
                     Text("mi")
-                        .font(MADTheme.Typography.small)
-                        .foregroundColor(.secondary)
-                }
-
-                Spacer()
-
-                HStack {
-                    Image(systemName: hasCompletedToday ? "checkmark.circle.fill" : "target")
-                        .font(.system(size: 18))
-                        .foregroundColor(hasCompletedToday ? .green : MADTheme.Colors.madRed)
-                    Spacer()
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
                 }
             }
-            .padding(MADTheme.Spacing.md)
-            .frame(maxWidth: .infinity)
-            .frame(height: 140)
-            .madLiquidGlass()
+
+            Spacer()
+
+            goalStatusPill(text: statusText, done: done)
+
+            goalEditButton
         }
+        .padding(14)
+        .background(goalRowBackground)
+        .sheet(isPresented: $showGoalSheet) {
+            GoalSettingSheet(
+                currentGoal: userManager.currentUser.goalMiles,
+                onSave: { newGoal in
+                    userManager.setDailyGoal(miles: newGoal)
+                    // The widgets score today against the goal — mirror the
+                    // App Group write Settings does, or the home screen keeps
+                    // the old number.
+                    WidgetDataStore.save(
+                        todayMiles: healthManager.todaysDistance,
+                        goal: newGoal
+                    )
+                }
+            )
+            .presentationDetents([.height(300)])
+        }
+    }
+
+    /// Pencil that opens the goal editor. Lives on the row rather than behind
+    /// Settings alone so the number is changeable where it's read.
+    private var goalEditButton: some View {
+        Button {
+            MADHaptics.tap()
+            showGoalSheet = true
+        } label: {
+            Image(systemName: "pencil")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(.white.opacity(0.8))
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(Color.white.opacity(0.08)))
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Edit daily goal")
+    }
+
+    private func goalIcon(done: Bool, accent: Color) -> some View {
+        ZStack {
+            Circle()
+                .fill(accent.opacity(0.15))
+                .frame(width: 40, height: 40)
+            Image(systemName: done ? "checkmark" : "target")
+                .font(.system(size: 17, weight: .bold))
+                .foregroundColor(accent)
+        }
+    }
+
+    private func goalStatusPill(text: String, done: Bool) -> some View {
+        let fill: Color = done ? Color.green.opacity(0.12) : Color.white.opacity(0.06)
+        let stroke: Color = done ? Color.green.opacity(0.3) : Color.white.opacity(0.12)
+        return Text(text)
+            .font(.system(size: 12, weight: .heavy, design: .rounded))
+            .monospacedDigit()
+            .foregroundColor(done ? .green : .white.opacity(0.7))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(fill))
+            .overlay(Capsule().strokeBorder(stroke, lineWidth: 1))
+    }
+
+    private var goalRowBackground: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color.white.opacity(0.06))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            )
     }
 
     // MARK: - Performance Stats

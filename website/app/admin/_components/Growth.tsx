@@ -72,11 +72,15 @@ type Referrals = {
 const SOURCE_LABELS: Record<string, string> = {
   app_store: "App Store search",
   friend: "Friend",
+  developer: "Sent by the team",
   instagram: "Instagram",
   tiktok: "TikTok",
   reddit: "Reddit",
   google: "Google",
   youtube: "YouTube",
+  ai_chat: "ChatGPT / AI",
+  social_ad: "Social media ad",
+  flyer: "Flyer or poster",
   other: "Other",
   unknown: "Not asked yet",
 };
@@ -144,12 +148,12 @@ function ReferralGraphPanel() {
 
   return (
     <Card
-      hint={`${fmt(summary.friend_referred)} people said a friend sent them. ${fmt(summary.matched)} named an account we could find; ${fmt(summary.unmatched)} typed something that matches no username. Tap a row to see who they brought in.`}
+      hint={`${fmt(summary.friend_referred)} people said a person sent them — a friend, or one of the team. ${fmt(summary.matched)} named an account we could find; ${fmt(summary.unmatched)} typed something that matches no username. Tap a row to see who they brought in.`}
     >
       {g.referrers.length === 0 ? (
         <p className="text-sm text-white/40">
-          Nobody has named a friend yet — this fills in as new users pick
-          “Friend” at onboarding.
+          Nobody has named anyone yet — this fills in as new users pick
+          “Friend” or “Someone from the team” at onboarding.
         </p>
       ) : (
         <ul className="divide-y divide-white/5">

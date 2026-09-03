@@ -41,7 +41,7 @@ struct PersonalizationView: View {
                         selection: $selectedReferral
                     )
 
-                    if selectedReferral == "friend" || selectedReferral == "other" {
+                    if Self.detailPromptingSources.contains(selectedReferral ?? "") {
                         detailField
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
@@ -114,17 +114,28 @@ struct PersonalizationView: View {
 
     // MARK: - Conditional referral detail field
 
+    /// Sources that ask a follow-up. `friend` and `developer` both resolve the
+    /// answer against real usernames server-side, so they take handle-style
+    /// input; `other` is free text about a channel.
+    static let detailPromptingSources: Set<String> = ["friend", "developer", "other"]
+
     private var detailField: some View {
-        let isFriend = selectedReferral == "friend"
+        let wantsHandle = selectedReferral == "friend" || selectedReferral == "developer"
+        let prompt: String
+        switch selectedReferral {
+        case "friend": prompt = "Friend's username (optional)"
+        case "developer": prompt = "Who sent you? (optional)"
+        default: prompt = "Where'd you find us? (optional)"
+        }
         return VStack(alignment: .leading, spacing: 8) {
             TextField(
                 "",
                 text: $referralDetail,
-                prompt: Text(isFriend ? "Friend's username (optional)" : "Where'd you find us? (optional)")
+                prompt: Text(prompt)
                     .foregroundColor(.white.opacity(0.4))
             )
-            .textInputAutocapitalization(isFriend ? .never : .sentences)
-            .autocorrectionDisabled(isFriend)
+            .textInputAutocapitalization(wantsHandle ? .never : .sentences)
+            .autocorrectionDisabled(wantsHandle)
             .focused($detailFieldFocused)
             .submitLabel(.done)
             .onSubmit { detailFieldFocused = false }
@@ -231,11 +242,24 @@ struct PersonalizationView: View {
     static let referralOptions: [PersonalizationOption] = [
         PersonalizationOption(code: "app_store", label: "App Store", icon: "magnifyingglass"),
         PersonalizationOption(code: "friend", label: "Friend or family", icon: "person.2.fill"),
+        // Kept separate from "friend" on purpose: a founder handing someone the
+        // app is our own outreach, and folding it into word-of-mouth would
+        // overstate organic growth by exactly the amount of work we did.
+        PersonalizationOption(code: "developer", label: "Someone from the team", icon: "checkmark.seal.fill"),
         PersonalizationOption(code: "instagram", label: "Instagram", icon: "camera.fill"),
         PersonalizationOption(code: "tiktok", label: "TikTok", icon: "music.note"),
         PersonalizationOption(code: "reddit", label: "Reddit", icon: "bubble.left.and.bubble.right.fill"),
         PersonalizationOption(code: "google", label: "Google / search", icon: "globe"),
         PersonalizationOption(code: "youtube", label: "YouTube", icon: "play.rectangle.fill"),
+        // People genuinely arrive from an assistant recommending us, and until
+        // this chip existed every one of them landed in "Somewhere else" —
+        // indistinguishable from a channel we can't act on.
+        PersonalizationOption(code: "ai_chat", label: "ChatGPT / AI", icon: "sparkles"),
+        // PAID reach, distinct from the organic platform chips above it: an
+        // Instagram ad and an Instagram post are the same app and completely
+        // different questions about where to spend next.
+        PersonalizationOption(code: "social_ad", label: "Saw an ad", icon: "megaphone.fill"),
+        PersonalizationOption(code: "flyer", label: "Flyer or poster", icon: "doc.text.fill"),
         PersonalizationOption(code: "other", label: "Somewhere else", icon: "ellipsis")
     ]
 

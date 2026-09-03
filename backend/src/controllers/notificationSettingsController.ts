@@ -8,6 +8,14 @@ import {
 } from "../services/notificationSettingsService.js";
 import { getCloseFriendIds } from "../services/closeFriendsService.js";
 import {
+  openWindow,
+  closeWindow,
+  isStealthNow,
+  stealthStatus,
+  MAX_BACKDATE_DAYS,
+  MAX_UNTIL_DAYS,
+} from "../services/stealthService.js";
+import {
   isWorkoutVisibility,
   WORKOUT_VISIBILITY_VALUES,
 } from "../services/visibilityService.js";
@@ -15,7 +23,10 @@ import {
 export async function getPreferences(req: AuthenticatedRequest, res: Response) {
   try {
     const prefs = await getNotificationPreferences(req.userId!);
-    res.status(200).json(prefs);
+    // Stealth is composed HERE, not in getNotificationPreferences: that
+    // function runs per push inside shouldSendNotification and must stay a
+    // single row read.
+    res.status(200).json({ ...prefs, ...(await stealthStatus(req.userId!)) });
   } catch (error: any) {
     console.error("Error getting notification preferences:", error.message);
     res.status(500).json({ error: "Error getting notification preferences" });
@@ -95,8 +106,64 @@ export async function updatePreferences(
       }
     }
 
+    // Stealth Mode rides the same PUT as additive keys, but they are NOT
+    // columns: they open/close a stealth window (services/stealthService.ts)
+    // and the generic column update below ignores them (explicit field list).
+    const { stealth_mode, stealth_until, stealth_since } = req.body;
+    if (stealth_mode !== undefined && typeof stealth_mode !== "boolean") {
+      return res.status(400).json({ error: "stealth_mode must be a boolean" });
+    }
+    const DAY_MS = 86_400_000;
+    let stealthUntil: Date | null = null;
+    if (stealth_until !== undefined && stealth_until !== null) {
+      const parsed =
+        typeof stealth_until === "string" ? Date.parse(stealth_until) : NaN;
+      if (
+        !Number.isFinite(parsed) ||
+        parsed <= Date.now() ||
+        parsed > Date.now() + MAX_UNTIL_DAYS * DAY_MS
+      ) {
+        return res.status(400).json({
+          error: `stealth_until must be an ISO timestamp within the next ${MAX_UNTIL_DAYS} days, or null`,
+        });
+      }
+      stealthUntil = new Date(parsed);
+    }
+    let stealthSince: Date | null = null;
+    if (stealth_since !== undefined && stealth_since !== null) {
+      const parsed =
+        typeof stealth_since === "string" ? Date.parse(stealth_since) : NaN;
+      if (
+        !Number.isFinite(parsed) ||
+        parsed > Date.now() ||
+        parsed < Date.now() - MAX_BACKDATE_DAYS * DAY_MS
+      ) {
+        return res.status(400).json({
+          error: `stealth_since must be an ISO timestamp within the last ${MAX_BACKDATE_DAYS} days`,
+        });
+      }
+      stealthSince = new Date(parsed);
+    }
+    if (
+      stealth_mode === true ||
+      // "until" sent on its own adjusts an already-open window.
+      (stealth_mode === undefined &&
+        stealth_until !== undefined &&
+        (await isStealthNow(req.userId!)))
+    ) {
+      await openWindow(req.userId!, {
+        since: stealthSince,
+        until: stealthUntil,
+        untilProvided: stealth_until !== undefined,
+      });
+    } else if (stealth_mode === false) {
+      await closeWindow(req.userId!);
+    }
+
     const updated = await updateNotificationPreferences(req.userId!, req.body);
-    res.status(200).json(updated);
+    res
+      .status(200)
+      .json({ ...updated, ...(await stealthStatus(req.userId!)) });
   } catch (error: any) {
     console.error("Error updating notification preferences:", error.message);
     res.status(500).json({ error: "Error updating notification preferences" });

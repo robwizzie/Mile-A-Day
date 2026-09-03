@@ -429,6 +429,9 @@ export interface FeedWorkout {
   // Social-proof tally: total hypes this specific workout has received from
   // anyone (not just the viewer). Powers the "👏 N" badge on each feed row.
   hype_count: number;
+  // Additive, OWNER-ONLY: recorded in Stealth Mode (route withheld forever).
+  // Always false for other viewers.
+  stealth: boolean;
 }
 
 /**
@@ -482,7 +485,10 @@ export async function getFriendsWorkoutFeed(
 				SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
 				WHERE hc.target_id = w.user_id
 					AND ${runHypeMatchSql("hc", "w")}
-			) AS hype_count
+			) AS hype_count,
+			-- OWNER-ONLY stealth flag; friends must not be able to tell a stealth
+			-- walk from share_route_maps=off (neither has a route row).
+			(w.user_id = $1 AND COALESCE(w.stealth, false)) AS stealth
 		FROM workouts w
 		JOIN circle c ON c.uid = w.user_id
 		JOIN users u ON u.user_id = w.user_id

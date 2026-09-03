@@ -69,6 +69,30 @@ enum HypeService {
         )
     }
 
+    /// Remove the current viewer's hype for a specific event. Posts and miles
+    /// share the backend's run-level matching, so this mirrors the visible tally.
+    static func removeHype(targetUserId: String, context: HypeContext) async throws -> HypeResponse {
+        struct Body: Encodable {
+            let target_user_id: String
+            let context_type: String
+            let context_id: String
+        }
+        let bodyData = try JSONEncoder().encode(
+            Body(
+                target_user_id: targetUserId,
+                context_type: context.contextType,
+                context_id: context.contextId
+            )
+        )
+
+        return try await APIClient.fancyFetch(
+            endpoint: "/hype",
+            method: .DELETE,
+            body: bodyData,
+            responseType: HypeResponse.self
+        )
+    }
+
     static func status() async throws -> HypeStatusResponse {
         return try await APIClient.fancyFetch(
             endpoint: "/hype/status",

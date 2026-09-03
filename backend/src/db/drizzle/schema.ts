@@ -68,6 +68,31 @@ export const friendNudgeLog = pgTable(
   ],
 );
 
+// Lightweight client feature telemetry — one row per meaningful use of a
+// feature the DB can't otherwise see (a flyover PLAY leaves no other trace).
+// Feeds the admin adoption panel through the same ADOPTION_SOURCES walk as
+// every DB-derived feature, so the numbers stay comparable. The write path
+// validates `feature` against an allowlist; growth is bounded by the events
+// being explicit user actions.
+export const featureEvents = pgTable(
+  "feature_events",
+  {
+    id: bigserial({ mode: "number" }).primaryKey().notNull(),
+    userId: varchar("user_id", { length: 255 }).notNull(),
+    feature: varchar({ length: 50 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_feature_events_feature_at").using(
+      "btree",
+      table.feature.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+    ),
+  ],
+);
+
 export const workoutSplits = pgTable(
   "workout_splits",
   {
@@ -133,6 +158,14 @@ export const users = pgTable(
     appleSub: varchar("apple_sub", { length: 255 }).notNull(),
     profileImageUrl: text("profile_image_url"),
     bio: text(),
+    // Profile banner (Twitter-style header). `profile_banner_url` is an
+    // uploaded image under /uploads/profile-banners (null = none, draw the
+    // gradient); `profile_banner_style` names one of the client's gradient
+    // presets (validated against BANNER_STYLES in usersController) and is
+    // what draws whenever there is no image. Both nullable, no default —
+    // additive, no table rewrite, every existing row reads "default look".
+    profileBannerUrl: text("profile_banner_url"),
+    profileBannerStyle: varchar("profile_banner_style", { length: 24 }),
     role: varchar({ length: 20 }).default("user"),
     goalMiles: numeric("goal_miles").default("1.0").notNull(),
     currentStreak: integer("current_streak").default(0).notNull(),
@@ -267,6 +300,18 @@ export const workouts = pgTable(
     // walks don't read 82:47/mi — while total_duration stays the elapsed
     // truth for PRs, races, and recaps (a race clock doesn't pause).
     movingSeconds: doublePrecision("moving_seconds"),
+    // Additive (nullable, no default — no table rewrite): HealthKit's
+    // HKMetadataKeyIndoorWorkout, sent by newer clients at sync. NULL =
+    // unknown (older rows/clients) — consumers must make NO claim then;
+    // routeless alone is never "indoor" (privacy also blanks routes).
+    isIndoor: boolean("is_indoor"),
+    // Additive (nullable, no default — no table rewrite): recorded while the
+    // user's Stealth Mode was on (see stealth_windows). NULL = false. STICKY:
+    // only ever set true — a walk recorded in stealth stays location-hidden
+    // forever, even after the mode is turned off. INVARIANT: a stealth workout
+    // has NO workout_routes row; enforced at write (workoutService's
+    // conditional route insert + stealthService), never re-checked at read.
+    stealth: boolean("stealth"),
     // Ghost race, written ONLY when the ghost was beaten (in-app tracker
     // stamps it as HKWorkout metadata at finish, the sync carries it here).
     // Presence therefore means "won" — which is exactly what the ghost medal
@@ -408,6 +453,39 @@ export const workoutRoutes = pgTable(
   ],
 );
 
+// Stealth Mode windows: the intervals during which a user asked for their
+// routes to be withheld. A workout that OVERLAPS any window is stamped
+// `workouts.stealth` at sync and never gets a route row. Windows are kept
+// forever (toggle-off CLOSES one, never deletes it) so a Watch/third-party walk
+// that syncs days later is still classified; `ended_at` NULL = open, a FUTURE
+// ended_at is "stealth until <date>", a backdated started_at is "also hide
+// routes since…". See services/stealthService.ts.
+export const stealthWindows = pgTable(
+  "stealth_windows",
+  {
+    id: bigserial({ mode: "number" }).primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" })
+      .notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true, mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_stealth_windows_user_started").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.startedAt.asc().nullsLast(),
+    ),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "stealth_windows_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
 export const notificationSettings = pgTable(
   "notification_settings",
   {
@@ -506,11 +584,25 @@ export const notificationSettings = pgTable(
     // Default TRUE: every installed build posts the card today, and a preference
     // that changed shipped behaviour on deploy would look like a bug.
     autoPostWithoutPhoto: boolean("auto_post_without_photo").default(true),
+    // auto_posts_on_profile: show photo-less auto route/stat cards on the
+    // owner's profile grid. Off keeps the card in friends' feeds but leaves the
+    // grid photo-first unless that workout also has a story/photo attached.
+    autoPostsOnProfile: boolean("auto_posts_on_profile").default(true),
+    // Who may LAUNCH the cinematic flyover of my routes: 'friends' | 'self'.
+    // Finer than share_route_maps (whose consent still gates the coords
+    // themselves — no coords, no flyover for anyone): a user can be fine with
+    // the static map but not the guided tour of their street. Default
+    // 'friends' — and the privacy onboarding sheet asks explicitly.
+    flyoverVisibility: text("flyover_visibility").default("friends").notNull(),
   },
   (table) => [
     check(
       "notification_settings_workout_visibility_check",
       sql`workout_visibility = ANY (ARRAY['public'::text, 'friends'::text, 'private'::text])`,
+    ),
+    check(
+      "notification_settings_flyover_visibility_check",
+      sql`flyover_visibility = ANY (ARRAY['friends'::text, 'self'::text])`,
     ),
   ],
 );

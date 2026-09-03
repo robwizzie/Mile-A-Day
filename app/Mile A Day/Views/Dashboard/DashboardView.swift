@@ -541,6 +541,7 @@ struct DashboardView: View {
             )
 
             ScrollView(.vertical, showsIndicators: true) {
+                ScrollViewReader { scrollProxy in
                 VStack(spacing: 0) {
                     // HealthKit permission gate — without auth, today's
                     // distance never loads and the app silently looks broken.
@@ -568,12 +569,28 @@ struct DashboardView: View {
                     // of independently-styled banners.
                     attentionSection
 
+                    // Sibling of the attention slot, not an item in it: a
+                    // privacy state must not be evicted by a friend request.
+                    StealthAttentionRow()
+                        .padding(.horizontal, MADTheme.Spacing.md)
+                        .padding(.top, MADTheme.Spacing.sm)
+
                     gettingStartedSection
                         .padding(.horizontal, 16)
                         .padding(.top, 12)
 
                     dashboardExperienceSection
                         .frame(maxWidth: .infinity)
+                }
+                // A style switch made from the Customize sheet reflows the
+                // whole page under it; keep the row that opened the sheet in
+                // view so closing it lands where the user was.
+                .onChange(of: dashboardStyleRaw) { _, _ in
+                    guard DashboardCustomizeState.shared.isPresented else { return }
+                    DispatchQueue.main.async {
+                        scrollProxy.scrollTo("dashboard-customize-row", anchor: .bottom)
+                    }
+                }
                 }
             }
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
@@ -698,6 +715,9 @@ struct DashboardView: View {
                 )
             )
             .onAppear {
+                // Stealth window log: server wins, once per process (there is
+                // no other launch-time preferences sync).
+                Task { await StealthModeStore.shared.hydrateFromServerIfNeeded() }
                 refreshData()
                 refreshMidRunPhotoWaiting()
                 // Sync widget data immediately
@@ -921,6 +941,21 @@ struct DashboardView: View {
             .onChange(of: healthManager.retroactiveStreak) { _, _ in
                 applyHealthDataToUserManager()
                 maybeTriggerStreakReveal()
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(
+                    for: Notification.Name("MAD_InitialSyncCompleted"))
+            ) { _ in
+                // The history import is what the reveal was waiting for.
+                // A notification rather than observing WorkoutSyncService:
+                // its progress publishes once per WORKOUT, and making the
+                // dashboard a subscriber would redraw it thousands of times
+                // during the very import this is waiting out. The delay lets
+                // `isImportingHistory` clear and the streak recompute land, so
+                // the number it counts up to is the final one.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    maybeTriggerStreakReveal()
+                }
             }
             .onChange(of: currentState.isCompleted) { oldValue, newValue in
                 if newValue && !oldValue {
@@ -1165,6 +1200,14 @@ struct DashboardView: View {
     private func maybeTriggerStreakReveal() {
         guard !hasSeenStreakReveal, !showStreakReveal else { return }
         guard healthManager.hasLoadedInitialData else { return }
+        // Never mid-import. A user with years of history watched this overlay
+        // for half an hour while the number climbed from 165 to 260 — it reads
+        // as a loading screen that won't finish, and the "we checked your
+        // history" claim is simply false until we have. Neither branch below is
+        // safe either: a real 300-day streak still reading 2 would be marked
+        // seen forever and never get its moment. The import's own banner owns
+        // this stretch; the reveal fires when it lands (or next launch).
+        guard !WorkoutSyncService.shared.isImportingHistory else { return }
         let streak = max(healthManager.retroactiveStreak, userManager.currentUser.streak)
         if streak >= 3 {
             showStreakReveal = true
@@ -1539,23 +1582,34 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var dashboardExperienceSection: some View {
-        switch dashboardStyle {
-        case .fun:
-            FunDashboardBody(
-                healthManager: healthManager,
-                userManager: userManager,
-                friendService: friendService,
-                hasActiveWorkout: hasActiveWorkout,
-                showWorkoutView: $showWorkoutView
-            )
-        case .modern:
-            ModernDashboardBody(
-                healthManager: healthManager,
-                userManager: userManager,
-                hasActiveWorkout: hasActiveWorkout,
-                showWorkoutView: $showWorkoutView
-            )
+        VStack(spacing: dashboardStyle == .fun ? 18 : 14) {
+            switch dashboardStyle {
+            case .fun:
+                FunDashboardBody(
+                    healthManager: healthManager,
+                    userManager: userManager,
+                    friendService: friendService,
+                    hasActiveWorkout: hasActiveWorkout,
+                    showWorkoutView: $showWorkoutView
+                )
+            case .modern:
+                ModernDashboardBody(
+                    healthManager: healthManager,
+                    userManager: userManager,
+                    friendService: friendService,
+                    hasActiveWorkout: hasActiveWorkout,
+                    showWorkoutView: $showWorkoutView
+                )
+            }
+
+            // AFTER the switch, not inside either body: its identity (and the
+            // Customize sheet it presents) survives a style change, which is
+            // exactly what that sheet does.
+            DashboardCustomizeRow(style: dashboardStyle)
+                .padding(.horizontal, 16)
+                .id("dashboard-customize-row")
         }
+        .padding(.bottom, 100)
     }
 
     @ViewBuilder

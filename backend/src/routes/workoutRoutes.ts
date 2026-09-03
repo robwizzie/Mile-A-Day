@@ -16,6 +16,7 @@ import {
   getDuplicates,
   setDuplicateDecisionController,
   resolveDuplicates,
+  hideWorkoutRouteController,
 } from "../controllers/workoutController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
 
@@ -36,6 +37,13 @@ router.delete(
   "/:userId/workout/:workoutId",
   requireSelfAccess("userId"),
   deleteWorkout,
+);
+// Retroactive Stealth for ONE workout: stamps it and deletes its stored route
+// for good. Self-only — it's the owner's own history — and it can't be undone.
+router.post(
+  "/:userId/workout/:workoutId/stealth",
+  requireSelfAccess("userId"),
+  hideWorkoutRouteController,
 );
 // Cross-app duplicates (the same run written to HealthKit by two connected
 // apps). Self-only both ways: the read exposes the user's own workout history,

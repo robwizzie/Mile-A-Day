@@ -71,10 +71,11 @@ struct CommentsSheet: View {
         draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var sendFill: AnyShapeStyle {
-        draftIsEmpty
-            ? AnyShapeStyle(Color.white.opacity(0.15))
-            : AnyShapeStyle(MADTheme.Colors.redGradient)
+    private var viewerName: String {
+        let user = UserManager.shared.currentUser
+        if let username = user.username, !username.isEmpty { return username }
+        if !user.name.isEmpty { return user.name }
+        return "You"
     }
 
     var body: some View {
@@ -82,19 +83,14 @@ struct CommentsSheet: View {
             ZStack {
                 MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
                 VStack(spacing: 0) {
+                    commentsHeader
+                    Divider().overlay(Color.white.opacity(0.10))
                     content
                     inputBar
                 }
             }
-            .navigationTitle("Comments")
-            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                        .foregroundColor(MADTheme.Colors.madRed)
-                }
-            }
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
@@ -130,6 +126,31 @@ struct CommentsSheet: View {
         }
     }
 
+    private var commentsHeader: some View {
+        ZStack {
+            Text("Comments")
+                .font(.system(size: 16, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+            HStack {
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white.opacity(0.72))
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(Color.white.opacity(0.08)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close comments")
+            }
+        }
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+    }
+
     @ViewBuilder
     private var content: some View {
         if isLoading {
@@ -153,7 +174,7 @@ struct CommentsSheet: View {
                         thread(comment)
                     }
                 }
-                .padding(.vertical, MADTheme.Spacing.sm)
+                .padding(.vertical, 12)
             }
             .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.interactively)
@@ -190,8 +211,8 @@ struct CommentsSheet: View {
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(0.45))
             }
-            .padding(.leading, 62)
-            .padding(.vertical, 6)
+            .padding(.leading, 64)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -213,18 +234,20 @@ struct CommentsSheet: View {
     }
 
     private func row(_ comment: PostComment, isReply: Bool) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 11) {
             AvatarView(name: comment.displayName,
                        imageURL: comment.profile_image_url,
-                       size: isReply ? 28 : 36)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
+                       size: isReply ? 28 : 34)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(comment.displayName)
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                     Text(comment.relativeTime)
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.4))
+                    Spacer(minLength: 8)
+                    commentMenu(comment)
                 }
                 Text(MentionText.attributed(comment.content))
                     .font(.system(size: 14, weight: .medium, design: .rounded))
@@ -256,23 +279,41 @@ struct CommentsSheet: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, MADTheme.Spacing.md)
-        .padding(.leading, isReply ? 44 : 0)
-        .padding(.vertical, 6)
+        .padding(.leading, isReply ? 45 : 0)
+        .padding(.vertical, 8)
         .contentShape(Rectangle())
         .contextMenu {
-            if comment.is_self || canModerate {
-                Button(role: .destructive) {
-                    Task { await delete(comment) }
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
+            commentActions(comment)
+        }
+    }
+
+    private func commentMenu(_ comment: PostComment) -> some View {
+        Menu {
+            commentActions(comment)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.white.opacity(0.38))
+                .frame(width: 28, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func commentActions(_ comment: PostComment) -> some View {
+        if comment.is_self || canModerate {
+            Button(role: .destructive) {
+                Task { await delete(comment) }
+            } label: {
+                Label("Delete", systemImage: "trash")
             }
-            if !comment.is_self {
-                Button {
-                    reportingComment = comment
-                } label: {
-                    Label("Report", systemImage: "flag")
-                }
+        }
+        if !comment.is_self {
+            Button {
+                reportingComment = comment
+            } label: {
+                Label("Report", systemImage: "flag")
             }
         }
     }
@@ -315,36 +356,47 @@ struct CommentsSheet: View {
                 .background(Color.white.opacity(0.05))
             }
             Divider().overlay(Color.white.opacity(0.1))
-            HStack(spacing: 10) {
+            HStack(alignment: .bottom, spacing: 10) {
+                AvatarView(
+                    name: viewerName,
+                    imageURL: UserManager.shared.currentUser.profileImageUrl,
+                    size: 32
+                )
                 TextField("Add a comment…", text: $draft, axis: .vertical)
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundColor(.white)
                     .lineLimit(1...4)
                     .focused($inputFocused)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Capsule().fill(Color.white.opacity(0.07)))
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color.white.opacity(0.07))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(inputFocused ? 0.18 : 0.08), lineWidth: 1)
+                            )
+                    )
                 Button {
                     Task { await send() }
                 } label: {
                     if isSending {
                         ProgressView()
                             .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .frame(width: 36, height: 36)
+                            .frame(width: 44, height: 34)
                     } else {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 36, height: 36)
-                            .background(Circle().fill(sendFill))
+                        Text("Post")
+                            .font(.system(size: 14, weight: .heavy, design: .rounded))
+                            .foregroundColor(draftIsEmpty ? .white.opacity(0.32) : MADTheme.Colors.madRed)
+                            .frame(width: 44, height: 34)
                     }
                 }
                 .disabled(isSending || draftIsEmpty)
             }
             .padding(.horizontal, MADTheme.Spacing.md)
-            .padding(.vertical, 10)
+            .padding(.vertical, 11)
         }
-        .background(Color.black.opacity(0.25))
+        .background(Color.black.opacity(0.32))
     }
 
     private func stateMessage(icon: String, text: String, detail: String? = nil) -> some View {

@@ -175,8 +175,30 @@ struct SaveFriendStreakView: View {
     }
 
     /// Non-actionable explanation. Only ever shown for a friend who genuinely
-    /// has a break we can't cover — never as blanket chrome.
+    /// has a break we can't cover — never as blanket chrome. On the profile
+    /// (`.prominent`) it's a bare caption under the action pills: as a
+    /// full-width pill it out-weighed the buttons it was explaining.
+    @ViewBuilder
     private func infoPill(icon: String, text: String) -> some View {
+        if style == .prominent {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .bold))
+                    .padding(.top, 1)
+                Text(text)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundColor(.white.opacity(0.45))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+        } else {
+            compactInfoPill(icon: icon, text: text)
+        }
+    }
+
+    private func compactInfoPill(icon: String, text: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .bold))

@@ -58,21 +58,43 @@ struct DashboardStartMileButton: View {
     }
 }
 
+/// The streak's next rung — and ONLY the streak's. It sits a few points under
+/// the day's mile numbers on both heroes, and as a continuous capsule it read
+/// as a second distance bar: people asked why their mile was "40% done" after
+/// they had finished it. So it is now a row of DAY notches — one per day of
+/// the climb from the rung just passed to the one ahead (capped at 12, then
+/// each notch stands for a slice of the span) — under a flame title and a
+/// "Day 4 of 7" caption. Discrete steps can't be mistaken for a distance, and
+/// there is no marker or third label row to collide with what's below.
 struct DashboardMilestoneBar: View {
     let streak: Int
-    var title: String = "Next milestone"
+    var title: String = "Streak milestone"
+
+    private static let maxNotches = 12
 
     var body: some View {
         if let milestone = StreakMilestone.next(after: streak) {
+            let from = StreakMilestone.previous(before: streak)
+            let span = max(1, milestone.value - from)
+            let done = max(0, min(span, streak - from))
+            let notches = min(span, Self.maxNotches)
+            // Notches lit = the climb so far, scaled onto the row. A day in
+            // hand always lights at least one notch, and the last only lights
+            // when the rung is actually reached (it never is here — reaching
+            // it moves the target — so a full row is impossible by design).
+            let lit = done == 0 ? 0 : max(1, min(notches - 1, Int((Double(done) / Double(span) * Double(notches)).rounded(.down))))
+
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 6) {
-                    Text(title)
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.orange)
+                    Text(title.uppercased())
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .tracking(1.0)
                         .foregroundColor(.white.opacity(0.56))
                     Spacer(minLength: 0)
-                    Text(milestone.daysToGo == 1
-                         ? "1 day to Day \(milestone.value)"
-                         : "\(milestone.daysToGo) days to Day \(milestone.value)")
+                    Text("Day \(streak) of \(milestone.value)")
                         .font(.system(size: 11, weight: .heavy, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(.white.opacity(0.70))
@@ -80,27 +102,35 @@ struct DashboardMilestoneBar: View {
                         .minimumScaleFactor(0.72)
                 }
 
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.white.opacity(0.12))
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 1.0, green: 0.68, blue: 0.14),
-                                        Color(red: 1.0, green: 0.34, blue: 0.16),
-                                        MADTheme.Colors.madRed
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: max(5, milestone.progress * geometry.size.width))
+                HStack(spacing: 3) {
+                    ForEach(0..<notches, id: \.self) { index in
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(index < lit
+                                  ? AnyShapeStyle(LinearGradient(
+                                        colors: [
+                                            Color(red: 1.0, green: 0.68, blue: 0.14),
+                                            Color(red: 1.0, green: 0.34, blue: 0.16)
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom))
+                                  : AnyShapeStyle(Color.white.opacity(0.12)))
+                            .frame(height: 6)
                     }
                 }
-                .frame(height: 6)
+
+                HStack(spacing: 0) {
+                    Text(milestone.daysToGo == 1
+                         ? "1 day to Day \(milestone.value)"
+                         : "\(milestone.daysToGo) days to Day \(milestone.value)")
+                        .foregroundColor(.white.opacity(0.42))
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .tracking(0.6)
+                .monospacedDigit()
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Streak milestone: day \(streak) of \(milestone.value), \(milestone.daysToGo) days to go")
         }
     }
 }
@@ -189,6 +219,8 @@ struct WeekMileDaysRow: View {
 struct ModernDashboardBody: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
+    /// Only the optional friends' activity card reads it.
+    @ObservedObject var friendService: FriendService
     let hasActiveWorkout: Bool
     @Binding var showWorkoutView: Bool
 
@@ -226,16 +258,17 @@ struct ModernDashboardBody: View {
                 ModernBadgesTile(userManager: userManager, healthManager: healthManager)
             }
 
-            NavigationLink {
-                DailyChallengesView(healthManager: healthManager, userManager: userManager)
-            } label: {
-                ModernChallengeRow(healthManager: healthManager, userManager: userManager)
-            }
-            .buttonStyle(.plain)
+            // Everything below the day's cards is the user's to arrange
+            // (DashboardCards): default here is just the daily challenge.
+            DashboardCardsBlock(
+                style: .modern,
+                healthManager: healthManager,
+                userManager: userManager,
+                friendService: friendService
+            )
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
-        .padding(.bottom, 100)
     }
 }
 
@@ -282,20 +315,18 @@ struct FunDashboardBody: View {
                 ModernBadgesTile(userManager: userManager, healthManager: healthManager)
             }
 
-            StreakTokensCard()
-
-            NavigationLink {
-                DailyChallengesView(healthManager: healthManager, userManager: userManager)
-            } label: {
-                DailyChallengeCard(healthManager: healthManager, userManager: userManager)
-            }
-            .buttonStyle(.plain)
-
-            FriendActivityStripView(friendService: friendService)
+            // Everything below the day's cards is the user's to arrange
+            // (DashboardCards): default here is Streak Tokens, the daily
+            // challenge and friends' activity — what always shipped.
+            DashboardCardsBlock(
+                style: .fun,
+                healthManager: healthManager,
+                userManager: userManager,
+                friendService: friendService
+            )
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
-        .padding(.bottom, 100)
     }
 
     private var statusColor: Color {
@@ -421,7 +452,7 @@ private struct ModernHeroCard: View {
                 longest: userManager.currentUser.longestStreak ?? 0
             )
 
-            DashboardMilestoneBar(streak: userManager.currentUser.streak, title: "Next milestone")
+            DashboardMilestoneBar(streak: userManager.currentUser.streak)
         }
         .padding(18)
         .padding(.top, 20)
@@ -927,7 +958,7 @@ private struct ModernMilestoneCard: View {
     let streak: Int
 
     var body: some View {
-        DashboardMilestoneBar(streak: streak, title: "Next milestone")
+        DashboardMilestoneBar(streak: streak)
             .padding(16)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -986,7 +1017,7 @@ private struct ModernTile<Accessory: View>: View {
     }
 }
 
-private struct ModernChallengeRow: View {
+struct ModernChallengeRow: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     @State private var todaysChallenge: DailyChallenge?
@@ -1217,8 +1248,43 @@ private struct FlameBuddyHeroCard: View {
     @State private var showShareSheet = false
     @State private var showTokens = false
     @ObservedObject private var tokensState = StreakTokensState.shared
+    /// The last poke on the buddy — the squash plays from it; the quip is
+    /// live until the clear task fires.
+    @State private var pokedAt: Date?
+    @State private var pokeQuip: String?
+    @State private var pokeClearTask: Task<Void, Never>?
 
     private var trustedDone: Bool { isGoalCompleted && distanceIsFresh }
+
+    /// What the flame is feeling: resolved from the same state the phase and
+    /// health already read, so it can never disagree with the face.
+    private var mood: FlameMood {
+        var mood = FlameMood.resolve(
+            phase: flamePhase,
+            progress: progress,
+            isAtRisk: userManager.currentUser.isStreakAtRisk && !trustedDone,
+            hasActiveWorkout: hasActiveWorkout,
+            streak: heroStreakValue
+        )
+        mood.pokedAt = pokedAt
+        mood.pokeQuip = pokeQuip
+        return mood
+    }
+
+    /// Tapping the buddy pokes him (the rest of the card still opens the
+    /// share sheet — a child gesture wins over the card's). The quip stays
+    /// up 2.4s, then the mood bubble gets its turn back.
+    private func poke() {
+        MADHaptics.emphasis()
+        pokeQuip = FlameMood.pokeQuips.randomElement() ?? "Hey!"
+        pokedAt = Date()
+        pokeClearTask?.cancel()
+        pokeClearTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(2400))
+            guard !Task.isCancelled else { return }
+            pokeQuip = nil
+        }
+    }
     private var health: FlameHealth {
         FlameHealth.forState(
             isCompleted: isGoalCompleted,
@@ -1269,10 +1335,13 @@ private struct FlameBuddyHeroCard: View {
                                 size: buddySize,
                                 phase: flamePhase,
                                 dayEnd: StreakFlameClock.nextLocalMidnight(),
-                                coalWarmth: min(progress, 1)
+                                coalWarmth: min(progress, 1),
+                                mood: mood
                             )
                             .frame(width: buddySize * 1.50, height: buddySize * 1.34)
                             .offset(y: -28)
+                            .contentShape(Rectangle())
+                            .onTapGesture { poke() }
                         }
 
                         FunHeroGround()

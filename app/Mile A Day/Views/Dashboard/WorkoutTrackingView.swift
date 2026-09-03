@@ -2492,7 +2492,9 @@ struct WorkoutTrackingView: View {
             lastSaveTime: Date(),
             routePoints: [],
             isUsingPedometer: selectedLocationType == .indoor,
-            liveActivityID: nil
+            liveActivityID: nil,
+            // Latched at START (see InProgressWorkoutState.stealth).
+            stealth: StealthModeStore.shared.isOn ? true : nil
         )
         InProgressWorkoutStore.save(initialState)
 
@@ -2851,7 +2853,10 @@ struct WorkoutTrackingView: View {
                let energySample = WorkoutEnergyEstimate.sample(
                    meters: distanceMeters,
                    activeSeconds: activeSeconds,
-                   bodyMassKilograms: self.healthManager.bodyMassKilograms,
+                   // Always the typical-adult fallback: the bodyMass read was
+                   // removed on purpose (asking for weight wasn't worth a more
+                   // personalized calorie line).
+                   bodyMassKilograms: nil,
                    start: startDate,
                    end: endDate
                ) {
@@ -2885,6 +2890,14 @@ struct WorkoutTrackingView: View {
             if let friendId = race.friendUserId {
                 metadata[WorkoutLocationManager.ghostFriendMetadataKey] = friendId
             }
+        }
+        // Stealth Mode: the latch from START, OR'd with "on now" — turning it
+        // OFF mid-walk keeps the walk hidden, turning it ON mid-walk hides it.
+        // The sync reads this back off the HKWorkout and keeps the trace on
+        // the phone; the route is still written to HealthKit below (the owner
+        // keeps their own map in Apple Fitness).
+        if InProgressWorkoutStore.load()?.stealth == true || StealthModeStore.shared.isOn {
+            metadata[StealthModeStore.metadataKey] = true
         }
         let addMetadataThenSave = {
             if metadata.isEmpty {

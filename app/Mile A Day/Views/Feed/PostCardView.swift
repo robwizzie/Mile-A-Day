@@ -1,11 +1,13 @@
 import SwiftUI
 import CoreLocation
 
-/// A single post in the social feed: author header, media, caption, hype +
-/// social-proof tally, and a report/block/delete menu. The media is a single
-/// photo, or a swipeable full-size carousel when the run has more to show —
-/// always the real PHOTO first, then the route/stats card, then the route map
-/// (each slide full 4:5, with page dots).
+/// A single post in the social feed: author header, media, caption, the
+/// hype/comment/share row with the streak chip, and a report/block/delete
+/// menu. The media has two FACES behind a PHOTO | MAP toggle in its corner:
+/// the photo (a swipeable carousel when the run has more than one — the
+/// author's, the crew's) leads, and the map (the route with its stats band,
+/// or the indoor card when there is no trace) is one tap away. The Flyover
+/// chip rides the map face.
 ///
 /// Media interactions are Instagram's: pinch a photo to zoom it in place
 /// (no modal — it floats over the UI and springs back), and double-tap a
@@ -65,14 +67,25 @@ struct PostCardView: View {
     var onSetIncludeRoute: ((Bool) -> Void)? = nil
 
     @State private var hypeBurst = 0
+    /// The legend chip that was tapped: that walker's line leads, the rest
+    /// dim. `"author"` for the poster, else a coauthor's user id.
+    @State private var highlightedRouteId: String? = nil
     /// Collapses the same physical double-tap arriving from two recognizers
     /// (the card-level SwiftUI gesture AND the zoom host's UIKit one) into a
     /// single burst + hype.
     @State private var lastDoubleTapAt = Date.distantPast
-    /// The route slide's raw map snapshot (~400×300) — the only piece kept
-    /// around; the zoom's floating composite is rendered on demand from it.
-    @State private var routeSnapshot: RouteMapSnapshot?
-
+    /// Set by the route slide's Flyover chip; item-based so the cover can't
+    /// race a stale value (the fullScreenCover rule in ios.md).
+    @State private var flyoverLaunch: FlyoverLaunch?
+    /// The media page on screen: the photo face's slides come first, the map
+    /// face is the last page. Both the PHOTO | MAP toggle and a swipe move it.
+    @State private var mediaPage = 0
+    /// The art card's ghost-map snapshot, kept for the pinch-zoom composite
+    /// (same contract the map view had).
+    @State private var routeArtSnapshot: RouteMapSnapshot?
+    /// Paper-plane route share payload: same rendered route image the old map
+    /// chip shared, just moved into the Instagram-style action row.
+    @State private var routeShare: RouteSharePayload?
     /// True if the current user is the post author.
     private var isMine: Bool {
         post.is_self
@@ -97,15 +110,14 @@ struct PostCardView: View {
             // out so double-tapping a button can't hype by accident.
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 media
-                // Under the carousel rather than on the map slide: the stats
-                // band already owns the bottom of that slide, and the key is
-                // about the whole card anyway — it's the crew.
                 crewGroupLine
-                crewRouteLegend
-                if let stats = post.stats_snapshot {
-                    PostStatStrip(stats: stats, feedRole: post.feed_role).padding(.horizontal, 2)
+                // The names-to-colours key belongs to the map, so it shows only
+                // while the map face is up — under it rather than on it, since
+                // the stats band owns the bottom of that face.
+                if currentFace == .map {
+                    crewRouteLegend
                 }
-                // The strip above shows the day's combined mile when this post is
+                // The header shows the day's combined mile when this post is
                 // attached to the workout that completed one made of several
                 // walks; without the breakdown that total looks like a single run.
                 if let segments = post.segments, segments.count > 1 {
@@ -113,21 +125,6 @@ struct PostCardView: View {
                         segments: segments,
                         accent: ActivityCardView.color(post.workout_type)
                     )
-                }
-                if let caption = post.caption, !caption.isEmpty {
-                    Text(MentionText.attributed(caption))
-                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.9))
-                        .padding(.horizontal, 2)
-                        // @mention links route to the mentioned user's profile
-                        // instead of leaving the app — the scheme is ours alone.
-                        .environment(\.openURL, OpenURLAction { url in
-                            if let username = MentionText.username(from: url) {
-                                onTapMention?(username)
-                                return .handled
-                            }
-                            return .systemAction
-                        })
                 }
             }
             .contentShape(Rectangle())
@@ -139,11 +136,54 @@ struct PostCardView: View {
             }
             footer
         }
-        .padding(MADTheme.Spacing.sm)
+        .padding(MADTheme.Spacing.sm + 2)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
                 .fill(Color.white.opacity(0.04))
         )
+        .fullScreenCover(item: $flyoverLaunch) { launch in
+            RouteFlyoverPlayerView(launch: launch)
+        }
+        .sheet(item: $routeShare) { payload in
+            ShareSheet(items: [payload.image])
+        }
+    }
+
+    /// "Walk · 1.08 mi · 2d" under the name: what it was (in the walk-blue /
+    /// run-red language), how far, how long ago. The distance carries the feed
+    /// role's framing ("+0.14 mi extra" once the goal was already banked), so
+    /// the numbers no longer need a chip row of their own.
+    private var subtitleLine: some View {
+        HStack(spacing: 4) {
+            Image(systemName: ActivityCardView.icon(post.workout_type, paceSecondsPerMile: post.stats_snapshot?.pace))
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(ActivityCardView.color(post.workout_type))
+            Text(headerSubtitle)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .lineLimit(1)
+        }
+    }
+
+    private var headerSubtitle: String {
+        var parts = [Self.activityNoun(post.workout_type, pace: post.stats_snapshot?.pace)]
+        if let d = post.stats_snapshot?.distance, d > 0 {
+            parts.append(post.feed_role == "extra" ? "+\(d.milesText) mi extra" : "\(d.milesText) mi")
+        }
+        parts.append(post.relativeTime)
+        return parts.joined(separator: " · ")
+    }
+
+    /// "Walk" / "Run" — the noun form of `ActivityCardView.verb`, with the
+    /// same pace-aware fallback for `.other`-typed workouts.
+    static func activityNoun(_ type: String?, pace: Double?) -> String {
+        switch ActivityCardView.verb(type, paceSecondsPerMile: pace) {
+        case "Ran": return "Run"
+        case "Walked": return "Walk"
+        case "Hiked": return "Hike"
+        case "Cycled": return "Ride"
+        default: return "Workout"
+        }
     }
 
     /// Name style shared by the header's tappable name segments.
@@ -196,7 +236,7 @@ struct PostCardView: View {
                     AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
                 }
                 .buttonStyle(.plain)
-                .disabled(onTapAuthor == nil)
+                .allowsHitTesting(onTapAuthor != nil)
 
                 // Only ever two overlap on the author; more than that and the
                 // stack reads as mush at 40pt. The count lives in the byline.
@@ -220,11 +260,9 @@ struct PostCardView: View {
                     nameText(post.multiCollabByline)
                 }
                 .buttonStyle(.plain)
-                .disabled(onTapAuthor == nil)
+                .allowsHitTesting(onTapAuthor != nil)
 
-                Text(post.relativeTime)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.5))
+                subtitleLine
             }
         }
     }
@@ -246,7 +284,7 @@ struct PostCardView: View {
                         AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
                     }
                     .buttonStyle(.plain)
-                    .disabled(onTapAuthor == nil)
+                    .allowsHitTesting(onTapAuthor != nil)
                     .padding(.trailing, 8)
                     .padding(.bottom, 4)
                     Button { onTapCoauthor?() } label: {
@@ -255,23 +293,21 @@ struct PostCardView: View {
                             .overlay(Circle().strokeBorder(Color.black.opacity(0.7), lineWidth: 2))
                     }
                     .buttonStyle(.plain)
-                    .disabled(onTapCoauthor == nil)
+                    .allowsHitTesting(onTapCoauthor != nil)
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 0) {
                         Button { onTapAuthor?() } label: { nameText(post.displayName) }
                             .buttonStyle(.plain)
-                            .disabled(onTapAuthor == nil)
+                            .allowsHitTesting(onTapAuthor != nil)
                         Text(" & ")
                             .font(.system(size: 15, weight: .bold, design: .rounded))
                             .foregroundColor(.white.opacity(0.6))
                         Button { onTapCoauthor?() } label: { nameText(post.coauthorDisplayName) }
                             .buttonStyle(.plain)
-                            .disabled(onTapCoauthor == nil)
+                            .allowsHitTesting(onTapCoauthor != nil)
                     }
-                    Text(post.relativeTime)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.5))
+                    subtitleLine
                 }
             } else {
                 Button {
@@ -281,33 +317,16 @@ struct PostCardView: View {
                         AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
                         VStack(alignment: .leading, spacing: 1) {
                             nameText(post.displayName)
-                            Text(post.relativeTime)
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.5))
+                            subtitleLine
                         }
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(onTapAuthor == nil)
+                .allowsHitTesting(onTapAuthor != nil)
             }
             if let win = post.stats_snapshot?.ghostWin { ghostChip(margin: win.margin) }
             Spacer()
-            if let type = post.workout_type {
-                Image(systemName: ActivityCardView.icon(type))
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(ActivityCardView.color(type))
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(ActivityCardView.color(type).opacity(0.15)))
-            }
             Menu {
-                // Sharing is not a moderation action — it sits above the
-                // divider-less group of them, and applies to any post that
-                // actually lives on the feed (a story has no permalink).
-                if let onShare, post.share_to_feed != false {
-                    Button(action: onShare) {
-                        Label("Share link", systemImage: "square.and.arrow.up")
-                    }
-                }
                 if post.is_self {
                     if let onEditCaption {
                         Button(action: onEditCaption) {
@@ -401,7 +420,7 @@ struct PostCardView: View {
     /// Image slides, real moment first: when the run has a story photo it
     /// leads, and the post media (photo or route/stats card) becomes the
     /// second slide — never a cramped corner thumbnail. Photos the server
-    /// withheld arrive blank and drop out here; `mediaSlides` puts a single
+    /// withheld arrive blank and drop out here; `photoSlides` puts a single
     /// lock in their place, ahead of whatever survived.
     private var photoURLs: [URL] {
         if let storyPhotoURL {
@@ -424,27 +443,23 @@ struct PostCardView: View {
         return stats
     }
 
-    /// The celebration both hype paths share — the Instagram-style clap
-    /// burst + haptic, then the hype call if this post isn't hyped yet.
-    /// Double-tap AND the footer HypeButton land here so tapping the button
-    /// feels identical to double-tapping the photo.
+    /// Footer button: toggle hype with the same clap burst the double-tap uses.
     private func celebrateAndHype() {
         hypeBurst += 1
         MADHaptics.action()
-        if !post.is_hyped {
-            onHype()
-        }
+        onHype()
     }
 
-    /// Double-tap anywhere on the post body: clap burst + hype (friends'
-    /// posts only, once — a re-double-tap replays the burst without
-    /// double-counting).
+    /// Double-tap anywhere on the post body: clap burst + hype (once — a
+    /// re-double-tap replays the burst without double-counting). Your own
+    /// post included: self-hypes are allowed, like liking your own photo.
     private func doubleTapHype() {
-        guard !isMine else { return }
         let now = Date()
         guard now.timeIntervalSince(lastDoubleTapAt) > 0.35 else { return }
         lastDoubleTapAt = now
-        celebrateAndHype()
+        hypeBurst += 1
+        MADHaptics.action()
+        if !post.is_hyped { onHype() }
     }
 
     /// Shown in place of a WITHHELD PHOTO — a frosted "run to unlock" card,
@@ -499,14 +514,14 @@ struct PostCardView: View {
         }
     }
 
-    /// The carousel's pages in swipe order: the lock (standing in for ANY
+    /// The PHOTO face's pages in swipe order: the lock (standing in for ANY
     /// withheld photo, however many were held back) → the photos that survived
-    /// the gate → the route map, or the stats card when there's no route.
+    /// the gate → the crew's photos. The route/stats card is not a page here
+    /// any more — it's the MAP face.
     ///
-    /// The lock only ever replaces a picture. An auto route/stats card, a route
-    /// map, and the page dots all survive it — so a viewer who hasn't run yet
-    /// can still swipe a friend's run, just not see their photo.
-    private var mediaSlides: [MediaSlide] {
+    /// The lock only ever replaces a picture, so a viewer who hasn't run yet
+    /// can still flip to a friend's map, just not see their photo.
+    private var photoSlides: [MediaSlide] {
         var slides: [MediaSlide] = []
         if post.isPhotoLocked { slides.append(.locked) }
         for url in photoURLs {
@@ -514,23 +529,51 @@ struct PostCardView: View {
             // so the swipe reads "photo → stats".
             slides.append(.photo(url: url, badged: !slides.isEmpty && post.is_auto == true))
         }
-        // The crew's photos ride BEHIND the author's and AHEAD of the map: a
-        // buddy walk reads "their shot → everyone else's shots → where we all
-        // went", which is the walk in the order it's remembered. Empty on
-        // every ordinary post.
+        // The crew's photos ride BEHIND the author's: a buddy walk reads "their
+        // shot → everyone else's shots". Empty on every ordinary post.
         slides.append(contentsOf: crewPhotoSlides)
-        if let coords = routeSlideCoordinates {
-            slides.append(.route(coords: coords))
-        } else if !companionRoutes.isEmpty, post.is_auto != true {
-            // The author walked indoors (or shares no maps) but their crew
-            // didn't. The walk still HAS a map — it just isn't the poster's —
-            // and dropping it would be the old bug in miniature: a group card
-            // showing bare numbers while the routes it's about exist.
-            slides.append(.route(coords: []))
-        } else if let stats = workoutCardStats {
-            slides.append(.statsCard(stats: stats))
-        }
         return slides
+    }
+
+    /// What the MAP face shows: the route — the crew's lines too, or only
+    /// theirs when the author walked indoors (a group card with bare numbers
+    /// while the routes it's about exist is the old bug in miniature) — else
+    /// the run as the indoor card. nil = nothing to flip to.
+    private var mapSlide: MediaSlide? {
+        if let coords = routeSlideCoordinates { return .route(coords: coords) }
+        if !companionRoutes.isEmpty, post.is_auto != true { return .route(coords: []) }
+        if let stats = workoutCardStats { return .statsCard(stats: stats) }
+        return nil
+    }
+
+    private enum MediaFace: Equatable {
+        case photo, map
+    }
+
+    /// Every page in swipe order: the photo face's slides, then the map face.
+    private var mediaPages: [MediaSlide] {
+        photoSlides + (mapSlide.map { [$0] } ?? [])
+    }
+
+    /// The map face's page index, when there is one.
+    private var mapPageIndex: Int? {
+        mapSlide == nil ? nil : photoSlides.count
+    }
+
+    /// The face on screen, read off the page — so a swipe and a toggle tap
+    /// can't disagree about what's showing.
+    private var currentFace: MediaFace {
+        if let mapPageIndex, mediaPage >= mapPageIndex { return .map }
+        return photoSlides.isEmpty ? .map : .photo
+    }
+
+    private var hasFaceToggle: Bool { !photoSlides.isEmpty && mapSlide != nil }
+
+    /// "MAP" when there's a route to draw, "STATS" for the indoor card —
+    /// never "indoor": routeless can also mean maps switched off.
+    private var mapFaceTitle: String {
+        if case .statsCard = mapSlide { return "STATS" }
+        return "MAP"
     }
 
     @ViewBuilder
@@ -542,13 +585,13 @@ struct PostCardView: View {
             ZoomablePhotoSlide(
                 url: url,
                 badge: badged ? ("Stats", "chart.bar.fill") : nil,
-                onDoubleTap: isMine ? nil : doubleTapHype
+                onDoubleTap: doubleTapHype
             )
         case .crewPhoto(let url, let name):
             ZoomablePhotoSlide(
                 url: url,
                 badge: (name, "person.fill"),
-                onDoubleTap: isMine ? nil : doubleTapHype
+                onDoubleTap: doubleTapHype
             )
         case .route(let coords):
             routeSlide(coords)
@@ -557,48 +600,114 @@ struct PostCardView: View {
         }
     }
 
-    /// A single slide, or a full-size swipeable carousel. The hype burst plays
-    /// centered over whichever slide is showing.
+    /// One 4:5 media box: a swipeable carousel of every page (photos first,
+    /// the map last) with the PHOTO | MAP toggle top-right jumping between the
+    /// two faces, and the Flyover chip top-left on every face. Both chips
+    /// are overlaid on this container — i.e. AFTER every slide's
+    /// `.instagramZoomable` — or the zoom gesture host eats their taps. The
+    /// hype burst plays centered over whichever page is showing.
     @ViewBuilder
     private var media: some View {
-        let slides = mediaSlides
+        let pages = mediaPages
         Group {
-            if slides.count > 1 {
-                TabView {
-                    ForEach(Array(slides.enumerated()), id: \.offset) { _, slide in
-                        slideView(slide)
+            if pages.count > 1 {
+                TabView(selection: $mediaPage) {
+                    ForEach(Array(pages.enumerated()), id: \.offset) { index, slide in
+                        slideView(slide).tag(index)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .always))
                 .indexViewStyle(.page(backgroundDisplayMode: .interactive))
-                .frame(maxWidth: .infinity)
-                .aspectRatio(4.0 / 5.0, contentMode: .fit)
-            } else if let only = slides.first {
+            } else if let only = pages.first {
                 slideView(only)
             } else {
-                // No media at all — the empty-state placeholder.
-                ZoomablePhotoSlide(
-                    url: nil,
-                    badge: nil,
-                    onDoubleTap: isMine ? nil : doubleTapHype
-                )
+                emptyMedia
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        .overlay(alignment: .topTrailing) {
+            if hasFaceToggle {
+                faceToggle.padding(10)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            // On EVERY face, not just the map: the flight doesn't need the map
+            // showing to launch, and the chip is how people learn it exists.
+            if canPlayFlyover {
+                flyoverChip.padding(10)
             }
         }
         .overlay(HypeBurstView(trigger: hypeBurst))
     }
 
-    /// The run itself as a branded stats card — the second slide when a photo
-    /// post has no GPS route to show. The card-level double-tap covers it.
-    /// Zooms like every other slide; the card is pure SwiftUI so its zoom
-    /// copy renders on demand at pinch-begin from the same inputs.
+    /// No media at all — the empty-state placeholder.
+    private var emptyMedia: some View {
+        ZoomablePhotoSlide(
+            url: nil,
+            badge: nil,
+            onDoubleTap: doubleTapHype
+        )
+    }
+
+    /// PHOTO | MAP in the media's top-right corner. Photo leads. Dark glass
+    /// with the live face lifted to white, so it sits on any photo or map.
+    private var faceToggle: some View {
+        HStack(spacing: 2) {
+            faceSegment("PHOTO", .photo)
+            faceSegment(mapFaceTitle, .map)
+        }
+        .padding(3)
+        .background(Capsule().fill(Color.black.opacity(0.55)))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+    }
+
+    private func faceSegment(_ title: String, _ target: MediaFace) -> some View {
+        let selected = currentFace == target
+        return Button {
+            guard !selected else { return }
+            MADHaptics.tap()
+            withAnimation(.easeInOut(duration: 0.25)) {
+                mediaPage = target == .map ? (mapPageIndex ?? 0) : 0
+            }
+        } label: {
+            Text(title)
+                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .tracking(0.8)
+                .foregroundColor(selected ? .black : .white.opacity(0.85))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(selected ? Color.white.opacity(0.94) : Color.clear))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Show \(title.lowercased())")
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
+    /// ▶ FLYOVER, top-left of the media — the shared chip, in the workout's colour.
+    private var flyoverChip: some View {
+        FlyoverChipButton(accent: ActivityCardView.color(post.workout_type)) {
+            flyoverLaunch = makeFlyoverLaunch(routeSlideCoordinates ?? [])
+        }
+    }
+
+    /// The run itself as the animated indoor card — the second face when a
+    /// photo post has no GPS route to show (track or treadmill face by the
+    /// viewer's dashboard style). The card-level double-tap covers it. Zooms
+    /// like every other slide; the card is pure SwiftUI so its zoom copy
+    /// renders on demand at pinch-begin as a still frame of the same inputs.
     private func workoutCardSlide(_ stats: PostStats) -> some View {
-        FeedWorkoutCard(stats: stats, workoutType: post.workout_type)
+        indoorCard(stats, still: false)
             .frame(maxWidth: .infinity)
             .aspectRatio(4.0 / 5.0, contentMode: .fit)
             .instagramZoomable(
                 imageProvider: {
+                    // SAME construction as the live card (one helper), still
+                    // frame only — a divergent zoom copy is the live-vs-baked
+                    // drift class WorkoutStatTileGrid exists to prevent.
                     let renderer = ImageRenderer(content:
-                        FeedWorkoutCard(stats: stats, workoutType: post.workout_type)
+                        indoorCard(stats, still: true)
                             .frame(width: RunStatsCardView.designSize.width,
                                    height: RunStatsCardView.designSize.height)
                     )
@@ -606,8 +715,19 @@ struct PostCardView: View {
                     renderer.isOpaque = true
                     return renderer.uiImage
                 },
-                onDoubleTap: isMine ? nil : doubleTapHype
+                onDoubleTap: doubleTapHype
             )
+    }
+
+    private func indoorCard(_ stats: PostStats, still: Bool) -> IndoorWorkoutCard {
+        IndoorWorkoutCard(
+            stats: stats,
+            workoutType: post.workout_type,
+            splits: WorkoutSplitBar.bars(from: post.splits),
+            avatar: RouteArtAvatar(name: post.displayName, imageURL: post.profile_image_url),
+            isIndoor: post.is_indoor,
+            still: still
+        )
     }
 
     /// Stats to overlay on the live route slide — same band the auto post
@@ -680,7 +800,9 @@ struct PostCardView: View {
 
     /// The names-to-colours key under a combined map. Without it a card with
     /// four lines on it is just four lines — the whole point is seeing which
-    /// one is yours.
+    /// one is yours. Each chip is a BUTTON: tap a walker to bring their line
+    /// to the front and dim the rest (two people who walked the same loop
+    /// are laned apart, but a tap is how you're sure); tap again to clear.
     @ViewBuilder
     private var crewRouteLegend: some View {
         let companions = companionRoutes
@@ -694,11 +816,13 @@ struct PostCardView: View {
             // one thing it must not do.
             FlowLayout(spacing: 10) {
                 legendChip(
+                    id: Self.authorRouteId,
                     name: post.displayName,
                     color: ActivityCardView.color(post.workout_type)
                 )
                 ForEach(companions) { companion in
                     legendChip(
+                        id: companion.id,
                         name: byId[companion.id] ?? "a friend",
                         color: companion.color
                     )
@@ -708,24 +832,73 @@ struct PostCardView: View {
         }
     }
 
-    private func legendChip(name: String, color: Color) -> some View {
-        HStack(spacing: 5) {
-            Capsule()
-                .fill(color)
-                .frame(width: 14, height: 4)
-            Text(name)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.75))
-                .lineLimit(1)
+    /// Sentinel the art view uses for the poster's own line.
+    private static let authorRouteId = "author"
+
+    private func legendChip(id: String, name: String, color: Color) -> some View {
+        let selected = highlightedRouteId == id
+        let dimmed = highlightedRouteId != nil && !selected
+        return Button {
+            MADHaptics.tap()
+            withAnimation(.easeInOut(duration: 0.2)) {
+                highlightedRouteId = selected ? nil : id
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: selected ? "scope" : "hand.tap.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white.opacity(dimmed ? 0.35 : 0.8))
+                Capsule()
+                    .fill(color)
+                    .frame(width: selected ? 18 : 14, height: 4)
+                Text(name)
+                    .font(.system(size: 12, weight: selected ? .heavy : .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(dimmed ? 0.4 : (selected ? 0.95 : 0.75)))
+                    .lineLimit(1)
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .black))
+                        .foregroundColor(color)
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(
+                Capsule().fill(selected ? color.opacity(0.18) : Color.white.opacity(0.07))
+            )
+            .overlay(
+                Capsule().strokeBorder(
+                    selected ? color.opacity(0.78) : Color.white.opacity(0.13),
+                    lineWidth: selected ? 1.5 : 1
+                )
+            )
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(selected ? "\(name)'s route, highlighted" : "Highlight \(name)'s route")
+    }
+
+    /// Riders for the crew's lines, keyed the same way `companionRoutes` is
+    /// (user id), so each badge lands on its owner's line.
+    private var companionRouteAvatars: [String: RouteArtAvatar] {
+        Dictionary(
+            post.acceptedCoauthors.map {
+                ($0.user_id, RouteArtAvatar(name: $0.displayName, imageURL: $0.profile_image_url))
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     private func routeSlide(_ coords: [CLLocationCoordinate2D]) -> some View {
-        WorkoutRouteMapView(
+        RouteArtView(
             coordinates: coords,
             routeColor: ActivityCardView.color(post.workout_type),
             companionRoutes: companionRoutes,
-            onSnapshot: { routeSnapshot = $0 }
+            authorAvatar: RouteArtAvatar(name: post.displayName, imageURL: post.profile_image_url),
+            companionAvatars: companionRouteAvatars,
+            onSnapshot: { routeArtSnapshot = $0 },
+            paletteDate: RelativeTime.date(from: post.created_at),
+            highlightedRouteId: highlightedRouteId
         )
         .frame(maxWidth: .infinity)
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
@@ -743,33 +916,48 @@ struct PostCardView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-        .overlay(alignment: .topLeading) {
-            // The stats band carries its own activity chip up top; only badge
-            // the bare-map fallback (posts without a stats snapshot).
-            if routeOverlayStats == nil {
-                slideBadge("Route", icon: "map.fill")
-            }
-        }
-        // Same pinch-zoom as the photo slides. The floating copy (map +
-        // route + stats band) is composed at pinch-begin from the small
-        // retained snapshot — nothing big is baked per card up front.
+        // Same pinch-zoom as the photo slides. The floating copy (canvas +
+        // route + stats band) is composed at pinch-begin — nothing big is
+        // baked per card up front.
         .instagramZoomable(
             imageProvider: { routeZoomComposite(coords) },
-            onDoubleTap: isMine ? nil : doubleTapHype
+            onDoubleTap: doubleTapHype
         )
+    }
+
+    /// The whole crew flies — construction shared with the `?flyover=1` deep
+    /// link via `FlyoverLaunch.forPost`; the card only adds the hype wiring
+    /// (closures belong to the surface, not the factory).
+    private func makeFlyoverLaunch(_ coords: [CLLocationCoordinate2D]) -> FlyoverLaunch? {
+        guard var launch = FlyoverLaunch.forPost(post) else { return nil }
+        launch.initiallyHyped = post.is_hyped
+        launch.onHype = { onHype() }
+        return launch
+    }
+
+    private var canPlayFlyover: Bool {
+        let hasRoute = (routeSlideCoordinates?.count ?? 0) >= 2 || !companionRoutes.isEmpty
+        return hasRoute && (isMine || post.flyover_allowed != false)
+    }
+
+    private var canShareRouteImage: Bool {
+        isMine && ((routeSlideCoordinates?.count ?? 0) >= 2 || !companionRoutes.isEmpty)
     }
 
     /// The route slide's floating zoom copy, on demand. 720×900 keeps the
     /// photo slides' 4:5 so the lift is pixel-identical.
     private func routeZoomComposite(_ coords: [CLLocationCoordinate2D]) -> UIImage? {
-        guard let snapshot = routeSnapshot else { return nil }
         let type = post.workout_type ?? "running"
         let stats = routeOverlayStats
-        return WorkoutRouteMapView.zoomComposite(
-            snapshot: snapshot,
+        return RouteArtView.zoomComposite(
             coordinates: coords,
             routeColor: ActivityCardView.color(post.workout_type),
             companionRoutes: companionRoutes,
+            authorAvatar: RouteArtAvatar(name: post.displayName, imageURL: post.profile_image_url),
+            companionAvatars: companionRouteAvatars,
+            underlay: routeArtSnapshot,
+            paletteDate: RelativeTime.date(from: post.created_at),
+            highlightedRouteId: highlightedRouteId,
             size: CGSize(width: 720, height: 900)
         ) {
             if let stats {
@@ -780,21 +968,6 @@ struct PostCardView: View {
                     .scaleEffect(720 / RunStatsCardView.designSize.width, anchor: .topLeading)
             }
         }
-    }
-
-    private func slideBadge(_ text: String, icon: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .bold))
-            Text(text)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-        }
-        .foregroundColor(.white)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Capsule().fill(Color.black.opacity(0.55)))
-        .padding(10)
-        .allowsHitTesting(false)
     }
 
     /// "rob added you to this post" — Accept / Decline, shown only to the
@@ -827,45 +1000,173 @@ struct PostCardView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 10) {
-            if let count = post.hype_count, count > 0 {
-                Button { onTapHypeCount?() } label: {
-                    HypeTally(count: count, showsLabel: true)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(onTapHypeCount == nil)
-            }
-            // Instagram-style comments entry: bubble + count, everyone incl.
-            // the author.
-            Button { onOpenComments?() } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "bubble.right")
-                        .font(.system(size: 15, weight: .semibold))
-                    if let count = post.comment_count, count > 0 {
-                        Text("\(count)")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                    }
-                }
-                .foregroundColor(.white.opacity(0.7))
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(onOpenComments == nil)
-            Spacer()
-            if !isMine {
-                HypeButton(
-                    isHyped: post.is_hyped,
-                    isBusy: isHyping,
-                    isOutOfHypes: isOutOfHypes && !post.is_hyped,
-                    action: celebrateAndHype
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 14) {
+                hypeControl
+                footerIconButton(
+                    icon: "bubble.right",
+                    label: commentActionLabel,
+                    accessibilityLabel: "Comments",
+                    action: { onOpenComments?() }
                 )
+                .disabled(onOpenComments == nil)
+                if canShareRouteImage || (onShare != nil && post.share_to_feed != false) {
+                    footerIconButton(
+                        icon: "paperplane",
+                        label: nil,
+                        accessibilityLabel: canShareRouteImage ? "Share route" : "Share post",
+                        action: sharePostOrRoute
+                    )
+                }
+                Spacer(minLength: 0)
+                if let streak = post.stats_snapshot?.streak, streak > 0 {
+                    streakChip(streak)
+                }
+            }
+            captionLine
+            if let timestamp = absoluteTimestamp {
+                Text(timestamp)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.46))
+                    .textCase(.uppercase)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .accessibilityLabel("Posted \(timestamp)")
             }
         }
         .padding(.horizontal, 2)
         .padding(.bottom, 2)
     }
+
+    /// Clap + count. The clap hypes — your own post too — and the count opens
+    /// who hyped (the old "N hypes" line, folded into the row; each name in
+    /// that list opens a profile).
+    private var hypeControl: some View {
+        HStack(spacing: 4) {
+            HypeButton(
+                isHyped: post.is_hyped,
+                isBusy: isHyping,
+                isOutOfHypes: isOutOfHypes && !post.is_hyped,
+                style: .compactIcon,
+                action: celebrateAndHype
+            )
+            if let count = post.hype_count, count > 0 {
+                Button {
+                    onTapHypeCount?()
+                } label: {
+                    Text("\(count)")
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(.white.opacity(0.92))
+                        .frame(minHeight: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(onTapHypeCount == nil)
+                .accessibilityLabel("\(count) hype\(count == 1 ? "" : "s")")
+            }
+        }
+    }
+
+    /// "6 DAY STREAK" — the streak the post was made on, in the app's orange.
+    private func streakChip(_ streak: Int) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "flame.fill")
+                .font(.system(size: 10, weight: .bold))
+            Text("\(streak) DAY STREAK")
+                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .tracking(0.6)
+                .monospacedDigit()
+        }
+        .foregroundColor(.orange)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(Color.orange.opacity(0.12)))
+        .overlay(Capsule().strokeBorder(Color.orange.opacity(0.3), lineWidth: 1))
+        .fixedSize()
+        .accessibilityLabel("\(streak) day streak")
+    }
+
+    private var commentActionLabel: String? {
+        guard let count = post.comment_count, count > 0 else { return nil }
+        return "\(count)"
+    }
+
+    private func sharePostOrRoute() {
+        if canShareRouteImage, let image = routeZoomComposite(routeSlideCoordinates ?? []) {
+            routeShare = RouteSharePayload(image: image)
+            return
+        }
+        onShare?()
+    }
+
+    @ViewBuilder
+    private var captionLine: some View {
+        if let caption = post.caption, !caption.isEmpty {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(post.displayName)
+                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Text(MentionText.attributed(caption))
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+                    // @mention links route to the mentioned user's profile
+                    // instead of leaving the app — the scheme is ours alone.
+                    .environment(\.openURL, OpenURLAction { url in
+                        if let username = MentionText.username(from: url) {
+                            onTapMention?(username)
+                            return .handled
+                        }
+                        return .systemAction
+                    })
+            }
+            .padding(.top, 1)
+        }
+    }
+
+    private func footerIconButton(
+        icon: String,
+        label: String?,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .medium))
+                if let label {
+                    Text(label)
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                }
+            }
+            .foregroundColor(.white.opacity(0.92))
+            .frame(minWidth: 36, minHeight: 40)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var absoluteTimestamp: String? {
+        guard let date = RelativeTime.date(from: post.created_at) else { return nil }
+        let thisYear = Calendar.current.isDate(date, equalTo: Date(), toGranularity: .year)
+        return (thisYear ? Self.timestampFormatter : Self.timestampWithYearFormatter).string(from: date)
+    }
+
+    private static let timestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d · h:mm a"
+        return formatter
+    }()
+
+    private static let timestampWithYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy · h:mm a"
+        return formatter
+    }()
 }
 
 /// One 4:5 media slide with cached loading and Instagram pinch-zoom. The

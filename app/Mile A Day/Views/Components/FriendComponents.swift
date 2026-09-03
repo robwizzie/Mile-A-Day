@@ -728,6 +728,8 @@ struct RecentWorkout: Codable {
     let duplicateOf: String?
     /// The user's own answer, which outranks detection: "count" / "exclude".
     let duplicateDecision: String?
+    /// OWNER-ONLY: recorded in Stealth Mode. Optional: absent on older servers.
+    let stealth: Bool?
 
     var isManualOrEdited: Bool {
         source == "manual" || source == "edited"
@@ -758,6 +760,7 @@ struct RecentWorkout: Codable {
         case exclusionReason = "exclusion_reason"
         case duplicateOf = "duplicate_of"
         case duplicateDecision = "duplicate_decision"
+        case stealth
     }
     
     /// Extracts just the date part (yyyy-MM-dd) from the local_date string

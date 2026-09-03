@@ -22,6 +22,7 @@ import {
   HypeContext,
   getReceivedHypes,
   getContextHypers,
+  removeHypeForContext,
 } from "../services/hypeService.js";
 
 const db = PostgresService.getInstance();
@@ -146,9 +147,9 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
     if (!targetUserId || typeof targetUserId !== "string") {
       return res.status(400).json({ error: "target_user_id is required" });
     }
-    if (senderId === targetUserId) {
-      return res.status(400).json({ error: "You can't hype yourself" });
-    }
+    // Self-hypes are allowed (you can like your own post): the row counts in
+    // the tally like anyone else's, but nobody is notified and it earns no
+    // social badge — see the recipient loop and the badge call below.
 
     // Parse optional context. All three must be present together, or all absent.
     let context: HypeContext | undefined;
@@ -193,18 +194,11 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
       if (!resolved.ok) {
         return res.status(400).json({ error: resolved.error });
       }
-      // Both sides of a collab own the post — neither may hype it. (The
-      // primary-author case is the plain self-hype check above; this is the
-      // coauthor, for whom `target_user_id` is the OTHER person.)
-      if (
-        resolved.targetId === senderId ||
-        resolved.authors.coauthor_user_id === senderId
-      ) {
-        return res.status(400).json({ error: "You can't hype your own post" });
-      }
+      // Either author of a collab may hype it too — filed against the
+      // primary author like every other hype, so the tally stays one pool.
       targetUserId = resolved.targetId;
       postCoauthorId = resolved.authors.coauthor_user_id;
-    } else {
+    } else if (senderId !== targetUserId) {
       const allowed = await isFriendOrCoParticipant(senderId, targetUserId);
       if (!allowed) {
         return res.status(403).json({
@@ -305,8 +299,11 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
       });
     }
 
-    // Re-evaluate hype badges (first hype, X hypes) in the background.
-    evaluateSocialBadgesForUser(senderId).catch(() => {});
+    // Re-evaluate hype badges (first hype, X hypes) in the background —
+    // hyping yourself doesn't count toward them.
+    if (senderId !== targetUserId) {
+      evaluateSocialBadgesForUser(senderId).catch(() => {});
+    }
 
     const [countAfter, unlimited] = await Promise.all([
       getDailyHypeCount(senderId),
@@ -317,10 +314,10 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
     // in hype_log (see resolvePostHypeTarget) — the coauthor's copy is the
     // push alone, which is what keeps the card's tally honest while still
     // telling the person whose post it also is.
-    const recipients = [targetUserId];
-    if (postCoauthorId && postCoauthorId !== senderId) {
-      recipients.push(postCoauthorId);
-    }
+    // Nobody gets told about their own hype.
+    const recipients = [targetUserId, postCoauthorId].filter(
+      (id): id is string => !!id && id !== senderId,
+    );
     const sender = await getUser({ userId: senderId });
     const senderName = sender?.username ?? "Someone";
     for (const recipientId of recipients) {
@@ -365,6 +362,89 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
   } catch (error: any) {
     console.error("Error sending hype:", error.message);
     res.status(500).json({ error: "Error sending hype" });
+  }
+}
+
+export async function removeHype(req: AuthenticatedRequest, res: Response) {
+  const senderId = req.userId!;
+  let targetUserId = req.body?.target_user_id;
+  const rawContextType = req.body?.context_type;
+  const rawContextId = req.body?.context_id;
+
+  try {
+    if (!targetUserId || typeof targetUserId !== "string") {
+      return res.status(400).json({ error: "target_user_id is required" });
+    }
+    if (
+      !["mile", "badge", "pr", "challenge", "post"].includes(rawContextType)
+    ) {
+      return res.status(400).json({
+        error:
+          "context_type must be one of 'mile' | 'badge' | 'pr' | 'challenge' | 'post'",
+      });
+    }
+    if (!rawContextId) {
+      return res.status(400).json({ error: "context_id is required" });
+    }
+
+    const contextType = rawContextType as HypeContext["contextType"];
+    let contextId = String(rawContextId);
+
+    if (contextType === "post") {
+      const resolved = await resolvePostHypeTarget(
+        senderId,
+        contextId,
+        targetUserId,
+      );
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      targetUserId = resolved.targetId;
+    } else if (senderId !== targetUserId) {
+      const allowed = await isFriendOrCoParticipant(senderId, targetUserId);
+      if (!allowed) {
+        return res.status(403).json({
+          error:
+            "You can only unhype friends or people in your active competitions",
+        });
+      }
+    }
+
+    if (contextType === "mile") {
+      try {
+        const canonical = await canonicalizeMileContext(targetUserId, {
+          contextType: "mile",
+          contextId,
+          contextLabel: "",
+        });
+        contextId = canonical.contextId;
+      } catch {
+        return res.status(400).json({ error: "Invalid mile context" });
+      }
+    }
+
+    const removed = await removeHypeForContext(
+      senderId,
+      targetUserId,
+      contextType,
+      contextId,
+    );
+    const [countAfter, unlimited] = await Promise.all([
+      getDailyHypeCount(senderId),
+      hasUnlimitedHypes(senderId),
+    ]);
+
+    res.status(200).json({
+      message: removed > 0 ? "Hype removed" : "No hype to remove",
+      removed: removed > 0,
+      hypes_remaining: unlimited
+        ? HYPE_DAILY_LIMIT
+        : Math.max(0, HYPE_DAILY_LIMIT - countAfter),
+      unlimited,
+    });
+  } catch (error: any) {
+    console.error("Error removing hype:", error.message);
+    res.status(500).json({ error: "Error removing hype" });
   }
 }
 
