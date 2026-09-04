@@ -302,8 +302,21 @@ export function Section({
 }) {
   return (
     <section className="space-y-4">
-      <div className="flex items-end justify-between gap-4 border-b border-white/[0.06] pb-2.5">
-        <div>
+      {/* This header wraps on CONTENT, not on a breakpoint. `actions` is
+          usually a SegmentedControl — one nowrap line of pills, ~700px of
+          min-content for the 7-metric Trends one — and as a `shrink-0` row
+          item it took that width off the top: the title column collapsed to
+          64px (the hint rendered one word per line, 16 of them) and the
+          DOCUMENT, not just the card, measured 1047px on a 390px phone, which
+          is the horizontal scroll and the clipped-looking cards on every tab.
+          `flex-wrap` + `basis-72` gives the title a readable measure and drops
+          the control to its own full-width line only when it genuinely won't
+          fit beside it — a 3-pill control still sits inline at 768px, the
+          7-pill one stacks and wraps into the width it gets. `min-w-0` is what
+          lets the hint wrap at all; `max-w-full` keeps the control from
+          becoming the new overflow once it's on its own line. */}
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 border-b border-white/[0.06] pb-2.5">
+        <div className="min-w-0 flex-1 basis-72">
           <h2 className="text-[17px] leading-none font-extrabold text-white">
             {title}
           </h2>
@@ -313,7 +326,7 @@ export function Section({
             </p>
           )}
         </div>
-        {actions && <div className="shrink-0">{actions}</div>}
+        {actions && <div className="min-w-0 max-w-full">{actions}</div>}
       </div>
       {children}
     </section>
@@ -335,9 +348,13 @@ export function Card({
 }) {
   return (
     <div className={`${CARD} p-5 ${className}`}>
+      {/* Same trap as Section, smaller blast radius: card actions are short
+          buttons, so they keep shrink-0 and the title takes the slack — but
+          the title needs min-w-0 to wrap at all, and the row wraps if an
+          action ever grows. */}
       {(title || actions) && (
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
             {title && (
               <h2 className="text-[15px] font-bold text-white/90">{title}</h2>
             )}
