@@ -88,11 +88,18 @@ async function snapshot() {
   };
 }
 
-const dayOffset = (n) => {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - n);
-  return d.toISOString().slice(0, 10);
-};
+// ET calendar days, the same clock as the service's TODAY_ET_DATE_SQL. This
+// used to be the UTC date, which is already TOMORROW for four hours every
+// evening (8 PM–midnight ET): the d=0 rows then sat outside every ET-aligned
+// window, "14 person-days" read 12, and the gate went red on any evening run
+// — including the one that merges a fix. Negative n = days ahead.
+const ET_DAY = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const dayOffset = (n) => ET_DAY.format(new Date(Date.now() - n * 86_400_000));
 
 async function cleanup() {
   // Children first. `users` cascades to most of this, but the columns that
