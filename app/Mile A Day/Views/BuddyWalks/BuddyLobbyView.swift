@@ -173,7 +173,7 @@ struct BuddyLobbyView: View {
 
     // MARK: - Countdown
 
-    /// The shared countdown — and the way out of it.
+    /// The shared countdown — the way out of it, and the way through it.
     ///
     /// It used to be an eight-second commitment with no brakes: once Start was
     /// tapped there was no control on the screen at all, and the walk began.
@@ -181,8 +181,17 @@ struct BuddyLobbyView: View {
     /// pressed by accident), so the host can call the whole thing off and
     /// everyone else can step out — both of which the server still allows right
     /// up until `started_at` passes.
+    ///
+    /// The other thing that happens in this window is that you are already
+    /// walking. Eight seconds of staring at a number is the whole cost of a
+    /// synced start, and it is only worth paying when there is somebody to sync
+    /// WITH — so "Start now" spends it, for this phone. See `startNow`.
     private func countdown(remaining: TimeInterval, session: BuddySessionState) -> some View {
-        VStack(spacing: MADTheme.Spacing.lg) {
+        // Anyone else actually in the walk. Solo there is nobody for the
+        // caption below to be about, and it would read as a bug.
+        let others = session.activeParticipants.contains { $0.userId != buddy.currentUserId }
+
+        return VStack(spacing: MADTheme.Spacing.lg) {
             Text("Starting together")
                 .font(MADTheme.Typography.headline)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.8))
@@ -197,8 +206,37 @@ struct BuddyLobbyView: View {
                 .font(MADTheme.Typography.body)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
 
-            exitButton(session, compact: true)
-                .padding(.top, MADTheme.Spacing.md)
+            VStack(spacing: MADTheme.Spacing.sm) {
+                Button {
+                    startNow(session)
+                } label: {
+                    Text("Start now")
+                        .font(MADTheme.Typography.bodyBold)
+                        .foregroundStyle(MADTheme.Colors.madWhite)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, MADTheme.Spacing.sm + 2)
+                        .background(Capsule().fill(session.accentColor))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, MADTheme.Spacing.xl)
+
+                // Says what the button does NOT do. It moves this phone only —
+                // `started_at` is untouched — so under a heading that reads
+                // "Starting together" the label alone would promise the whole
+                // group, and the walk would look broken to the person who
+                // tapped it and then watched nobody else appear.
+                if others {
+                    Text("Everyone else starts when it hits zero.")
+                        .font(MADTheme.Typography.small)
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, MADTheme.Spacing.lg)
+                }
+
+                exitButton(session, compact: true)
+                    .padding(.top, MADTheme.Spacing.xs)
+            }
+            .padding(.top, MADTheme.Spacing.sm)
         }
     }
 
@@ -223,9 +261,10 @@ struct BuddyLobbyView: View {
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(isHost ? 0.75 : 0.6))
                 .padding(.horizontal, compact ? 18 : 0)
                 .padding(.vertical, compact ? 10 : 0)
-                // On the countdown this is the only control on screen and has
-                // to be findable at a glance; in the lobby it sits under the
-                // primary action and must not compete with it.
+                // On the countdown it sits under "Start now" and needs enough
+                // weight to be seen against it — that screen is where "wait,
+                // no" gets pressed; in the lobby it sits under Start and must
+                // not compete with it.
                 .background(
                     Capsule()
                         .fill(MADTheme.Colors.madWhite.opacity(compact ? 0.12 : 0))
@@ -963,8 +1002,9 @@ struct BuddyLobbyView: View {
     /// wizard card) would otherwise hand them straight into a brand-new
     /// tracking session for a mile they already ended.
     private func handOffIfStarted() {
-        guard !hasHandedOff, let session, session.status == .active else { return }
-        guard session.me(buddy.currentUserId)?.status != .finished else { return }
+        // Cheap early-out first: this runs ten times a second. The status and
+        // already-finished checks are `performHandOff`'s, not restated here.
+        guard !hasHandedOff, let session else { return }
         // Don't drop somebody into a workout while they're staring at "Cancel
         // this buddy walk?". The countdown keeps ticking under the dialog, and
         // handing off mid-decision means the screen answers the question for
@@ -975,6 +1015,39 @@ struct BuddyLobbyView: View {
         // no snapshot has landed yet, so nothing has been decided.
         guard needsJoinConfirm == false else { return }
         guard let startedAt = session.startedAtDate, startedAt <= now else { return }
+        performHandOff(session)
+    }
+
+    /// Skip the wait, for this phone only.
+    ///
+    /// Safe to hand off before `started_at`, because the countdown is the only
+    /// thing still in the future: `activateSession` already flipped the session
+    /// AND every lobby participant to `active` when Start was pressed, so the
+    /// server accepts this user's progress immediately — `recordProgress` even
+    /// clamps its speed ceiling with a `GREATEST(..., 1)` written for exactly
+    /// this case, "the pre-start countdown, when started_at is still in the
+    /// future". Nothing downstream needs the clock to have run out either: the
+    /// tracker's `startBuddyWorkoutIfReady` keys off the session id alone, the
+    /// race-time progress bar floors elapsed at 0, and sync reconciliation
+    /// matches on the workout's END date, which only moves later.
+    ///
+    /// It does NOT move `started_at`, so it starts nobody else — that would be
+    /// a server change, and at a 5s poll it would still leave the others most
+    /// of the countdown. The caption says so rather than letting the button
+    /// imply it.
+    private func startNow(_ session: BuddySessionState) {
+        // No tap haptic — `performHandOff` fires .success() either way, and
+        // back-to-back buzzes on one press read as a stutter.
+        performHandOff(session)
+    }
+
+    /// The one place the lobby ever hands a session to the tracker. Both the
+    /// countdown elapsing and an explicit "Start now" come through here so the
+    /// once-only latch and the never-restart-a-finished-walk guard can't be
+    /// written twice and drift.
+    private func performHandOff(_ session: BuddySessionState) {
+        guard !hasHandedOff, session.status == .active else { return }
+        guard session.me(buddy.currentUserId)?.status != .finished else { return }
         hasHandedOff = true
         MADHaptics.success()
         onStart(session)
