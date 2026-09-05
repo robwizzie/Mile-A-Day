@@ -178,7 +178,7 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
             // renders a half marathon target as "117:59".
             say(
                 "Racing \(ghostName). \(BestEffortStore.formatClock(ghostSeconds)) "
-                    + "for \(milesSpoken(self.targetDistance)) — \(paceWords(goalPace)).",
+                    + "for \(milesSpoken(self.targetDistance)) — \(paceText(goalPace)).",
                 force: true
             )
         } else {
@@ -394,7 +394,7 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         // A split needs a clock that actually ran. A workout adopted mid-run,
         // or a mile crossed while the clock was frozen, has nothing to report.
         guard !skippedAMile, split > 1, let average = sample.averagePace else { return nil }
-        return "Mile \(mile). \(clockWords(split)). Average \(paceWords(average))."
+        return "Mile \(mile). \(clockText(split)). Average \(paceText(average))."
     }
 
     /// Quarter / half / three-quarter / last stretch, as fractions of the
@@ -469,7 +469,7 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         // land, or a slow GPS second permanently offsets every later call.
         lastIntervalMark = (sample.distance / interval).rounded(.down) * interval
         guard let pace = sample.recentPace ?? sample.averagePace else { return nil }
-        return "You're at \(milesSpoken(sample.distance)), running at \(paceWords(pace))."
+        return "You're at \(milesSpoken(sample.distance)), running at \(paceText(pace))."
     }
 
     /// Fading or holding, judged against what it currently takes to win.
@@ -486,7 +486,7 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
 
         let drift = recent - required
         if drift > 20 {
-            return "You're slipping. \(paceWords(required)) to take it back."
+            return "You're slipping. \(paceText(required)) to take it back."
         }
         if drift < -20, (sample.delta ?? 0) > 0 {
             return "That's the pace. You're pulling away."
@@ -497,7 +497,7 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     /// What it takes from here, when that's still a real question.
     private func chaseLine(_ sample: Sample) -> String {
         guard let required = sample.requiredPace else { return "" }
-        return "\(paceWords(required)) to win."
+        return "\(paceText(required)) to win."
     }
 
     private func holdLine(_ sample: Sample) -> String {
@@ -561,25 +561,30 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         return "Dead even."
     }
 
-    /// "8 oh 5" — spoken, so the synthesizer reads it as a time rather than
-    /// two numbers.
-    private func clockWords(_ seconds: Double) -> String {
+    /// "8:05" — the WRITTEN form, because every line is also text.
+    ///
+    /// This used to return "8 oh 5", the form the synthesizer needs, and that
+    /// string went to the screen as well as the speaker — so a 20:03 split was
+    /// printed on the tracking screen as "20 oh 3". `Self.spokenForm` now does
+    /// that translation at the one point a line becomes audio, which lets this
+    /// build for the eye.
+    private func clockText(_ seconds: Double) -> String {
         let whole = max(0, Int(seconds.rounded()))
         let minutes = whole / 60
         let secs = whole % 60
-        // Spoken bare (a mile split), so this one has to be plural-correct:
-        // "Mile 2. 8 minutes." `paceWords` never routes an exact-minute value
+        // Read bare (a mile split), so this one has to be plural-correct:
+        // "Mile 2. 8 minutes." `paceText` never routes an exact-minute value
         // here — it has its own "8 minute pace" phrasing — so the two can't
         // disagree.
         if secs == 0 { return "\(minutes) minute\(minutes == 1 ? "" : "s")" }
-        return "\(minutes) \(secs < 10 ? "oh " : "")\(secs)"
+        return String(format: "%d:%02d", minutes, secs)
     }
 
-    /// "8:40 pace", spoken.
-    private func paceWords(_ secondsPerMile: Double) -> String {
+    /// "8:40 pace".
+    private func paceText(_ secondsPerMile: Double) -> String {
         let whole = max(0, Int(secondsPerMile.rounded()))
         if whole % 60 == 0 { return "\(whole / 60) minute pace" }
-        return "\(clockWords(secondsPerMile)) pace"
+        return "\(clockText(secondsPerMile)) pace"
     }
 
     /// "1.25 miles" / "3 miles" — trailing zeros are noise to a synthesizer.
@@ -637,7 +642,7 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         guard Self.isEnabled else { return true }
 
         activateSession()
-        let utterance = AVSpeechUtterance(string: line)
+        let utterance = AVSpeechUtterance(string: Self.spokenForm(line))
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         // The session is activated with `.duckOthers` one line above, and the
         // duck ramps over ~200ms. Speaking into that ramp put the first
@@ -649,6 +654,75 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         synthesizer.speak(utterance)
         return true
     }
+
+    /// The same line, rewritten for the synthesizer.
+    ///
+    /// The screen and the speaker want different strings for one thought: a
+    /// 20:03 split is written "20:03" and READ ALOUD "twenty oh three". Using
+    /// the spoken form for both is what printed "20 oh 3" on the tracking
+    /// screen; using the written form for both makes the voice say "twenty
+    /// colon zero three", or read it as two unrelated numbers, depending on
+    /// which voice is installed. So the line is built for the eye and
+    /// translated here — once, at the only point where it becomes audio.
+    ///
+    /// Only `M:SS` is rewritten. A colon is the one thing that never appears
+    /// in a coach line for any other reason (distances are "1.25 miles",
+    /// counts are "Mile 2"), so the pattern can't catch anything it shouldn't.
+    private static func spokenForm(_ line: String) -> String {
+        guard let regex = clockRegex else { return line }
+        var out = ""
+        var cursor = line.startIndex
+        for match in regex.matches(in: line, range: NSRange(line.startIndex..., in: line)) {
+            guard
+                let whole = Range(match.range, in: line),
+                let first = Range(match.range(at: 1), in: line),
+                let second = Range(match.range(at: 2), in: line)
+            else { continue }
+            let third = Range(match.range(at: 3), in: line).map { String(line[$0]) }
+            out += line[cursor..<whole.lowerBound]
+            out += Self.spokenClock(String(line[first]), String(line[second]), third)
+            cursor = whole.upperBound
+        }
+        out += line[cursor...]
+        return out
+    }
+
+    /// Reads the captured fields of `clockRegex`, which do not have fixed
+    /// meanings — hence raw positional names rather than minutes/seconds.
+    ///
+    /// TWO fields is `M:SS`, a split or a pace: "8", "05" -> "8 oh 5". "oh" is
+    /// what a person says for a leading zero, and it is the only reliable way
+    /// to stop a synthesizer reading 8:05 as two separate numbers. Written
+    /// down it looks like a typo, which is precisely why it may only exist on
+    /// this side of the split.
+    ///
+    /// THREE is `H:MM:SS`, and the first field shifts from minutes to HOURS —
+    /// the trap this signature exists to make obvious. It only ever comes from
+    /// `BestEffortStore.formatClock`, i.e. a race target of an hour or more
+    /// (the half-marathon ghost). Runner shorthand ("two oh seven eighteen")
+    /// is ambiguous read aloud at that length, and this is one line at the
+    /// start of a race rather than something repeated every mile, so it is
+    /// spelled out in full instead.
+    private static func spokenClock(_ first: String, _ second: String, _ third: String?) -> String {
+        if let third {
+            let hours = Int(first) ?? 0
+            let minutes = Int(second) ?? 0
+            let seconds = Int(third) ?? 0
+            var parts = ["\(hours) hour\(hours == 1 ? "" : "s")"]
+            if minutes > 0 { parts.append("\(minutes) minute\(minutes == 1 ? "" : "s")") }
+            if seconds > 0 { parts.append("\(seconds) second\(seconds == 1 ? "" : "s")") }
+            return parts.joined(separator: " ")
+        }
+        // Unreachable from clockText/paceText (both spell an exact minute out
+        // in words), but a bare minute count is the right answer if it ever is.
+        if second == "00" { return first }
+        if second.hasPrefix("0") { return "\(first) oh \(second.dropFirst())" }
+        return "\(first) \(second)"
+    }
+
+    private static let clockRegex = try? NSRegularExpression(
+        pattern: #"\b(\d{1,3}):([0-5]\d)(?::([0-5]\d))?\b"#
+    )
 
     /// Stop mid-sentence. Muting while the coach is talking has to shut it up
     /// NOW — waiting out the line it already started is the whole reason the
