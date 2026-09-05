@@ -426,6 +426,18 @@ export async function createPostController(
     if (error?.message === "workout_already_posted") {
       return res.status(409).json({ error: "workout_already_posted" });
     }
+    // Somebody already shared this buddy walk. The `error` string stays the
+    // one shipped builds match on — they show "already posted", which is
+    // true — while `reason` and `post_id` are the additive half that lets a
+    // current build send the user to add their photo to that post instead.
+    if (error?.message === "buddy_walk_already_posted") {
+      return res.status(409).json({
+        error: "workout_already_posted",
+        reason: "buddy_walk_already_posted",
+        post_id: error.postId ?? null,
+        buddy_session_id: error.buddySessionId ?? null,
+      });
+    }
     // Coauthor must be an accepted friend with no blocks either way.
     if (error?.message === "invalid_coauthor") {
       return res.status(400).json({ error: "invalid_coauthor" });

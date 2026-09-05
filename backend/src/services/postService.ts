@@ -743,6 +743,78 @@ const CREATED_POST_SELECT = `
  *   workout) frees it again. The per-slot partial unique indexes enforce the
  *   same-slot case; the cross-slot pre-check above closes the other-slot gap.
  */
+/**
+ * The live feed post for the buddy walk this workout belongs to, if somebody
+ * has already shared it.
+ *
+ * Session resolution is deliberately NOT "trust `buddy_session_id` from the
+ * client". The posts that create duplicates are the ones made through doors
+ * that never set it, and every shipped build predates the field — so a guard
+ * that only reads the client's value would miss precisely the cases it exists
+ * for. The client's value is used when present (it is the cheapest exact
+ * answer) and the workout is used otherwise.
+ *
+ * Nor can the workout be matched on `buddy_session_participants.workout_id`
+ * alone: `reconcileBuddySessions` stamps that a minute or two AFTER the walk,
+ * i.e. after whoever posts on finishing has already posted, so it is null at
+ * exactly the moment this guard runs. The time-overlap arm is what covers that
+ * window — the same shape `reconcileBuddySessions` itself matches with.
+ *
+ * Posts by the CALLER are excluded: replacing your own auto card with your own
+ * photo is the upsert path above, not a duplicate.
+ */
+async function buddyWalkPostForWorkout(
+  userId: string,
+  workoutId: string,
+  declaredSessionId: string | null,
+): Promise<{ post_id: string; buddy_session_id: string } | null> {
+  const rows = await db.query<{ post_id: string; buddy_session_id: string }>(
+    `WITH session AS (
+			SELECT bsp.session_id AS id
+			  FROM buddy_session_participants bsp
+			  JOIN buddy_sessions s ON s.id = bsp.session_id
+			  JOIN workouts w
+			    ON w.workout_id = $2::varchar AND w.user_id = $1::varchar
+			 WHERE bsp.user_id = $1::varchar
+			   AND bsp.status IN ('active', 'finished')
+			   AND s.started_at IS NOT NULL
+			   AND (
+			         bsp.session_id = $3::text
+			      OR bsp.workout_id = $2::varchar
+			      OR (
+			           -- The walk's window overlaps the workout's window.
+			           s.started_at <= w.device_end_date
+			           AND COALESCE(s.ended_at, s.started_at + INTERVAL '6 hours')
+			               >= (w.device_end_date
+			                   - (COALESCE(w.total_duration, 0) || ' seconds')::interval)
+			         )
+			       )
+			 ORDER BY (bsp.session_id = $3::text) DESC,
+			          (bsp.workout_id = $2::varchar) DESC,
+			          s.started_at DESC
+			 LIMIT 1
+		)
+		SELECT p.post_id, session.id AS buddy_session_id
+		  FROM session
+		  JOIN posts p
+		    ON p.deleted_at IS NULL
+		   AND p.share_to_feed
+		   AND p.user_id <> $1::varchar
+		   AND (
+		         p.buddy_session_id = session.id
+		      OR EXISTS (
+		           SELECT 1 FROM post_coauthors pc
+		            WHERE pc.post_id = p.post_id
+		              AND pc.buddy_session_id = session.id
+		         )
+		       )
+		 ORDER BY p.created_at ASC
+		 LIMIT 1`,
+    [userId, workoutId, declaredSessionId],
+  );
+  return rows[0] ?? null;
+}
+
 export async function createPost(input: CreatePostInput): Promise<PostRow> {
   // A workout can have ONE live feed post and ONE live story-only photo
   // (separate partial unique indexes); pick the arbiter matching the row
@@ -837,6 +909,35 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       [input.workoutId, input.userId],
     );
     if (existingShare[0]) throw new Error("workout_already_posted");
+  }
+
+  // ── One post per BUDDY WALK, enforced where it can actually be enforced ──
+  //
+  // Everyone on a buddy walk records their OWN HKWorkout, so the guard above
+  // — keyed on (workout_id, user_id) — can never see that the walk it belongs
+  // to has already been shared by somebody else. Until now the invariant was
+  // upheld only by the recap's UI reading `recap.post`, which means any OTHER
+  // door into the composer (the post-run photo prompt, the feed FAB, the snap
+  // gallery) produced a second card for the same walk: two posts, the crew
+  // split across them, one map with everyone's route and one with a single
+  // line, and a crew-photo nudge asking someone who had already posted.
+  //
+  // Resolving the session from the WORKOUT rather than trusting the client is
+  // the whole point: the doors that cause this are exactly the ones that send
+  // no `buddy_session_id`, and every shipped build predates the field.
+  if (input.shareToFeed && input.workoutId) {
+    const existingWalkPost = await buddyWalkPostForWorkout(
+      input.userId,
+      input.workoutId,
+      input.buddySessionId ?? null,
+    );
+    if (existingWalkPost) {
+      const err: any = new Error("buddy_walk_already_posted");
+      // The client is meant to add a crew photo to THIS post instead.
+      err.postId = existingWalkPost.post_id;
+      err.buddySessionId = existingWalkPost.buddy_session_id;
+      throw err;
+    }
   }
   // Only the slot's AUTO post may be overwritten in place — for legacy
   // requests too. Legacy upserts used to overwrite ANYTHING the caller owned,
@@ -3393,6 +3494,26 @@ export async function sweepCrewPhotoNudges(): Promise<number> {
         AND pca.photo_nudge_sent_at IS NULL
         AND (pca.media_url IS NULL OR pca.media_url = '')
         AND p.deleted_at IS NULL AND p.share_to_feed
+        -- ...and not to somebody who ALREADY shared this walk themselves.
+        -- Before the create-time guard existed, a second card for the same
+        -- walk was reachable through any composer door that didn't know about
+        -- buddy sessions, and this sweep then pushed "1 photo so far" at the
+        -- person who had just posted the other one. The guard stops new
+        -- duplicates; this stops the nudge nagging about the ones already out
+        -- there, and covers the case where their own card is the auto route
+        -- card rather than a photo.
+        AND NOT EXISTS (
+          SELECT 1
+            FROM buddy_session_participants own
+            JOIN posts mine
+              ON mine.user_id = pca.user_id
+             AND mine.deleted_at IS NULL
+             AND mine.share_to_feed
+             AND mine.workout_id = own.workout_id
+           WHERE own.session_id = pca.buddy_session_id
+             AND own.user_id = pca.user_id
+             AND own.workout_id IS NOT NULL
+        )
         AND s.status = 'completed'
         AND s.ended_at BETWEEN NOW() - INTERVAL '6 hours'
                            AND NOW() - INTERVAL '55 minutes'

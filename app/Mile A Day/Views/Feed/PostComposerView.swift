@@ -465,6 +465,18 @@ final class PostComposerViewModel: ObservableObject {
                 toSave.save()
             }
             return true
+        } catch let APIError.apiError(message)
+            where message == "workout_already_posted" && buddySessionId != nil
+        {
+            // Somebody on this walk got there first. The server now refuses the
+            // second card (it resolves the session from the WORKOUT, so it
+            // catches the doors that never sent a session id) — and because
+            // every door now stamps the session, their post is findable, which
+            // means the recap can offer the thing this user actually wants.
+            errorMessage =
+                "Someone already shared this walk. Open it from your buddy walk "
+                + "recap and add your photo to it — one post, everyone on it."
+            return false
         } catch let APIError.apiError(message) where message == "mile_not_completed" {
             // The server recomputes this gate from ITS workouts table, so this
             // 403 while local HealthKit already shows the mile done means the
@@ -800,6 +812,12 @@ struct PostComposerView: View {
     // `canvasSection` node — a third cover on the ZStack or the background Color
     // (which already own the camera + terms covers) would silently drop one.
     @State private var showLibraryImport = false
+    /// The walk's own snaps, offered right here. See `snapsFromThisWalkButton`.
+    @State private var showSnapGallery = false
+    /// Whether the stash HAS anything, cached. `hasEntriesToday()` enumerates
+    /// the sandbox directory, which is not something to do from a `body` —
+    /// the dashboard's photo-waiting banner caches it for the same reason.
+    @State private var hasWalkSnaps = false
     /// Seeded from the local cache so a returning poster never waits on (or
     /// races) the network check in `resolveTermsIfNeeded`.
     @State private var termsState: TermsState =
@@ -848,6 +866,27 @@ struct PostComposerView: View {
         model.buddySessionId = buddySessionId
         model.buddyCrewNames = buddyCrewNames
         model.crewPhotoPostId = crewPhotoPostId
+        // EVERY door, not just the wizard. The buddy context used to be
+        // supplied only by `BuddyPostWizardView`, so the same photo of the
+        // same walk became a crew post from the recap and a solo post from the
+        // post-run prompt, the feed FAB or the snap gallery — unlinked from
+        // the session (invisible to everyone else's recap, which is what let a
+        // second card be made) and crediting nobody (one route on the map
+        // where the other card drew two). Resolving it here means the door
+        // stops mattering.
+        //
+        // Never overrides what a caller passed, and never applies to the
+        // crew-photo composer: that one is already adding to the walk's post.
+        if crewPhotoPostId == nil, buddySessionId == nil,
+           let workoutId = stats.workoutId,
+           let session = RunPostService.buddySessionForWorkout(workoutId) {
+            let crew = session.activeParticipants
+                .filter { $0.userId != BuddySessionService.shared.currentUserId }
+                .sorted { $0.bestDistance > $1.bestDistance }
+            model.buddySessionId = session.id
+            model.buddyCoauthorIds = crew.map(\.userId)
+            model.buddyCrewNames = crew.map(\.displayName)
+        }
         _vm = StateObject(wrappedValue: model)
         self.autoOpenCamera = autoOpenCamera
         self.backNavigation = backNavigation
@@ -888,6 +927,7 @@ struct PostComposerView: View {
                         // prompt's "Choose from this walk". Only offered when the
                         // post is tied to a workout (empty state only).
                         if vm.pickedImage == nil, vm.stats.workoutId != nil {
+                            snapsFromThisWalkButton
                             chooseFromLibraryButton
                         }
                         if vm.pickedImage != nil {
@@ -994,6 +1034,10 @@ struct PostComposerView: View {
                     didAutoOpenCamera = true
                     requestCamera()
                 }
+                // Resolved HERE, not in the button's own lifecycle: the button
+                // renders nothing when the answer is false, and a view whose
+                // body is empty never gets `.onAppear` to flip it true.
+                hasWalkSnaps = MidRunPhotoStash.hasEntriesToday()
             }
             .task { await resolveTermsIfNeeded() }
             .task { await vm.checkRouteAvailability() }
@@ -1464,6 +1508,53 @@ struct PostComposerView: View {
               let workout = HealthKitManager.shared.todaysWorkouts
                 .first(where: { $0.uuid.uuidString == wid }) else { return "walk or run" }
         return workout.workoutActivityType == .walking ? "walk" : "run"
+    }
+
+    /// The photos taken DURING this walk, offered where the post is made.
+    ///
+    /// `MidRunPhotoStash` was read by exactly one screen — the post-run photo
+    /// prompt — so the moment you arrived at the composer any other way, the
+    /// shots you took out there were unreachable and the only offer was the
+    /// camera roll. On a buddy walk that is the ordinary path (the recap and
+    /// its post wizard are what open after the walk, and neither knew the
+    /// stash existed), which is why "it didn't prompt me like a normal walk
+    /// does — I had to go and find the photos myself".
+    ///
+    /// A stashed snap is `.library`, never `.camera`: its claim to the walk is
+    /// the timestamp it was taken at, and the server's camera-window tier
+    /// would refuse a `.camera` declaration made after the ten minutes.
+    @ViewBuilder
+    private var snapsFromThisWalkButton: some View {
+        if hasWalkSnaps {
+            Button { showSnapGallery = true } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "camera.on.rectangle")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Photos from this \(activityNoun)")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Capsule().fill(MADTheme.Colors.redGradient))
+            }
+            .buttonStyle(.plain)
+            // Its OWN node: this file already hangs a fullScreenCover for the
+            // library importer off `canvasSection`, and two on one node means
+            // SwiftUI silently drops one.
+            .fullScreenCover(isPresented: $showSnapGallery) {
+                SnapGalleryView(
+                    title: "Your snaps",
+                    onUse: { entry in
+                        vm.pickedImage = entry.image
+                        vm.photoSource = .library
+                        vm.errorMessage = nil
+                        showSnapGallery = false
+                    },
+                    onStashChanged: { hasWalkSnaps = MidRunPhotoStash.hasEntriesToday() }
+                )
+            }
+        }
     }
 
     /// Secondary CTA under the camera placeholder: pick a photo the user
