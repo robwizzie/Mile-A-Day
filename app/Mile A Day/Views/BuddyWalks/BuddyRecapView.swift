@@ -1,4 +1,7 @@
 import SwiftUI
+// `previewLoadedImage` is a stored property of UIKit type; SwiftUI's
+// re-export covers use sites only (same trap as `import Combine`).
+import UIKit
 
 /// Post-session results.
 ///
@@ -25,6 +28,18 @@ struct BuddyRecapView: View {
     @State private var openPostId: String?
     /// Every walk you've taken with these people, from the link below.
     @State private var showHistory = false
+
+    /// The walk's post, once one exists — fetched so this screen can SHOW what
+    /// was made rather than describing it in a sentence.
+    ///
+    /// Read through `PostService.fetchPost`, the same `getFeedEntryForPost`
+    /// projection the feed uses, rather than by widening `BuddySessionPostRef`
+    /// with a media_url: that projection is already authorized, already signed,
+    /// and already subject to `lockUnearnedPhotos`. A new field carrying a
+    /// photo would be a new surface showing someone else's picture, which is
+    /// exactly the shape of leak the post rules exist to prevent.
+    @State private var postPreview: PostItem?
+    @State private var previewLoadedImage: UIImage?
 
     /// What the "add your photo" composer needs: which post to join, and whose
     /// it is (the share step says so rather than making the user guess).
@@ -460,6 +475,13 @@ struct BuddyRecapView: View {
         post: BuddySessionPostRef
     ) -> some View {
         VStack(spacing: MADTheme.Spacing.sm) {
+            // What was actually made, at the top, where the confirmation strip
+            // used to be. "Shared to the feed ✓" plus a text link asked the
+            // person who had just posted to go somewhere else to see the thing
+            // they had just posted — on the one screen whose whole job is to
+            // show them the walk.
+            postPreviewCard(session, post: post)
+
             // The AUTHOR is never offered "add your photo": their picture is
             // the post's own media, and they have no `post_coauthors` row, so
             // `myPhotoAdded` is false for them by construction — reading it
@@ -469,8 +491,8 @@ struct BuddyRecapView: View {
             } else {
                 addYourPhotoButton(session, post: post)
             }
-            seeThePostLink(session, post: post)
         }
+        .task(id: post.postId) { await loadPostPreview(post.postId) }
     }
 
     private func isAuthor(_ post: BuddySessionPostRef) -> Bool {
@@ -574,8 +596,15 @@ struct BuddyRecapView: View {
         return "\(whose) covers this walk — today's photo window has closed."
     }
 
-    /// The exit this screen never had: go look at the thing you just made.
-    private func seeThePostLink(
+    /// The walk's post, shown rather than described.
+    ///
+    /// The photo leads when there is one (it is what people came to see); a
+    /// route-only card draws the art instead, which is what the feed shows for
+    /// that post too. Tapping anywhere opens the real, fully-wired post —
+    /// hypes, comments, the crew's slides — so this stays a PREVIEW and never
+    /// becomes a second, half-wired feed card living inside a sheet.
+    @ViewBuilder
+    private func postPreviewCard(
         _ session: BuddySessionState,
         post: BuddySessionPostRef
     ) -> some View {
@@ -583,20 +612,92 @@ struct BuddyRecapView: View {
             MADHaptics.tap()
             openPostId = post.postId
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "photo.on.rectangle.angled")
-                    .font(.system(size: 13, weight: .semibold))
-                Text("See the post")
-                    .font(MADTheme.Typography.smallBold)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+            ZStack(alignment: .bottomLeading) {
+                Group {
+                    // `media_url` is "" when the earn-to-view gate withheld the
+                    // photo from this viewer, so an empty string is a real
+                    // state here, not a missing value.
+                    if let preview = postPreview,
+                       !preview.media_url.isEmpty,
+                       let url = preview.mediaURL {
+                        FeedImageView(url: url, loadedImage: $previewLoadedImage)
+                    } else {
+                        // Loading, or a post whose photo this viewer hasn't
+                        // earned yet. Neither is an error worth a broken-image
+                        // icon on the screen that celebrates the walk.
+                        ZStack {
+                            MADTheme.Colors.madWhite.opacity(0.06)
+                            if postPreview == nil {
+                                ProgressView().tint(MADTheme.Colors.madWhite)
+                            } else {
+                                Image(systemName: "photo.on.rectangle.angled")
+                                    .font(.system(size: 26, weight: .semibold))
+                                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.35))
+                            }
+                        }
+                    }
+                }
+                .aspectRatio(4.0 / 5.0, contentMode: .fill)
+                .frame(maxWidth: .infinity)
+                .clipped()
+
+                // A scrim so the caption below stays legible over any photo.
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.65)],
+                    startPoint: .center,
+                    endPoint: .bottom
+                )
+                .allowsHitTesting(false)
+
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(previewCaption(session, post: post))
+                        .font(MADTheme.Typography.smallBold)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .opacity(0.7)
+                }
+                .foregroundStyle(MADTheme.Colors.madWhite)
+                .padding(MADTheme.Spacing.md)
             }
-            .foregroundStyle(session.accentColor)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, MADTheme.Spacing.sm)
-            .contentShape(Rectangle())
+            .clipShape(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                    .strokeBorder(session.accentColor.opacity(0.3), lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
+    }
+
+    /// One line naming what this is — the crew, not just "shared".
+    private func previewCaption(
+        _ session: BuddySessionState,
+        post: BuddySessionPostRef
+    ) -> String {
+        let names = crewNames(session)
+        if isAuthor(post) {
+            return names.isEmpty ? "Shared to the feed" : "You and \(names)"
+        }
+        let whose = post.authorName.map { "\($0)'s post" } ?? "This walk"
+        return post.myPhotoAdded ? "\(whose) — your photo's on it" : whose
+    }
+
+    /// Fetch the post so the card above can draw it. Failure is silent on
+    /// purpose: the confirmation and the crew line below still say what
+    /// happened, and a red error on the screen that celebrates a walk would
+    /// be worse than a card that simply doesn't fill in.
+    private func loadPostPreview(_ postId: String) async {
+        if postPreview?.post_id == postId { return }
+        do {
+            postPreview = try await PostService.fetchPost(postId: postId).asPostItem()
+        } catch {
+            print("[BuddyRecap] post preview load failed: \(error)")
+        }
     }
 
     /// Where the post CTA goes once the walk has been shared.
