@@ -33,6 +33,7 @@ struct ActivityCardView: View {
     @State private var lastDoubleTapAt = Date.distantPast
     /// Set by the route slide's Flyover chip (item-based cover, per ios.md).
     @State private var flyoverLaunch: FlyoverLaunch?
+    @State private var showSplits = false
     /// The art card's ghost-map snapshot, kept for the zoom composite.
     @State private var routeArtSnapshot: RouteMapSnapshot?
     /// Same route-image share as the old floating route share chip.
@@ -215,12 +216,38 @@ struct ActivityCardView: View {
             }
         }
         // Overlaid on the container — AFTER the slide's `.instagramZoomable`
-        // — or the zoom gesture host eats the chip's taps.
+        // — or the zoom gesture host eats the chip's taps. SPLITS sits beside
+        // FLYOVER on any workout that carries them, indoor or out.
         .overlay(alignment: .topLeading) {
-            if canPlayFlyover {
-                flyoverChip.padding(10)
+            if canPlayFlyover || hasSplits {
+                HStack(spacing: 6) {
+                    if canPlayFlyover { flyoverChip }
+                    if hasSplits { splitsChip }
+                }
+                .padding(10)
             }
         }
+        // On the MEDIA node: the card root owns the flyover cover and the
+        // share sheet, and two presentations on one node drop one.
+        .sheet(isPresented: $showSplits) {
+            WorkoutSplitsSheet(
+                bars: splitBars,
+                stats: stats,
+                workoutType: entry.workout_type,
+                isIndoor: entry.is_indoor,
+                ownerName: entry.is_self ? "You" : entry.displayName
+            )
+        }
+    }
+
+    private var splitBars: [WorkoutSplitBar] {
+        WorkoutSplitBar.bars(from: entry.splits)
+    }
+
+    private var hasSplits: Bool { !splitBars.isEmpty }
+
+    private var splitsChip: some View {
+        SplitsChipButton(accent: accent) { showSplits = true }
     }
 
     private func routeSlide(_ coords: [CLLocationCoordinate2D]) -> some View {
