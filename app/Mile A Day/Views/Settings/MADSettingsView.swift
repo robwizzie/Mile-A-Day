@@ -42,6 +42,8 @@ struct MADSettingsView: View {
     @State private var deleteAccountErrorMessage: String?
     @State private var isRecalibratingStreak = false
     @State private var recalibrateResultMessage: String?
+    @State private var isBackfillingRoutes = false
+    @State private var routeBackfillProgress: String?
 
     /// The modals this page presents, so a single `.sheet(item:)` drives all of
     /// them. Two `.sheet`s on the same node compete and one silently never
@@ -400,6 +402,24 @@ struct MADSettingsView: View {
             }
             .buttonStyle(.plain)
             .disabled(isRecalibratingStreak)
+
+            divider
+
+            // The automatic sweep heals ~75 workouts a session, two years
+            // back, only after a quiet sync — so an old post's map (and its
+            // Flyover) could take weeks of launches to appear. This runs the
+            // same pipeline to the end, now, and says what it found.
+            Button { Task { await backfillRoutes() } } label: {
+                MADSettingsRow(
+                    icon: "map.fill",
+                    title: "Add Maps to Past Workouts",
+                    subtitle: routeBackfillProgress
+                        ?? "Send routes from Apple Health so older posts get a map and Flyover",
+                    iconColor: .teal
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isBackfillingRoutes)
         }
     }
 
@@ -611,6 +631,49 @@ struct MADSettingsView: View {
         // backend keeps the GREATEST, so this back-corrects a stale day and
         // never lowers a good one. Best-effort and independent of the result.
         await DailyStepsSyncService.shared.backfillRecentDays(30)
+    }
+
+    /// Every past workout with a route in HealthKit but no map on the server,
+    /// pushed to the end — see `WorkoutSyncService.backfillAllRoutes`. The
+    /// result lands in the same alert Recalibrate uses; both are "we went
+    /// through your history and here is what changed".
+    private func backfillRoutes() async {
+        guard !isBackfillingRoutes else { return }
+        isBackfillingRoutes = true
+        routeBackfillProgress = "Checking your workouts…"
+        defer {
+            isBackfillingRoutes = false
+            routeBackfillProgress = nil
+        }
+
+        let summary = await WorkoutSyncService.shared.backfillAllRoutes { progress in
+            if progress.pushed > 0 {
+                routeBackfillProgress = "Sent \(progress.pushed) so far…"
+            } else if progress.total > 0 {
+                routeBackfillProgress = "Checked \(progress.probed) of \(progress.total)…"
+            }
+        }
+
+        if summary.busy {
+            recalibrateResultMessage =
+                "A sync is already running. Give it a moment and try again."
+            return
+        }
+        let pushedWord = summary.pushed == 1 ? "workout" : "workouts"
+        var lines: [String] = []
+        if summary.pushed > 0 {
+            lines.append("Added maps to \(summary.pushed) past \(pushedWord). Their posts will show the route and Flyover from now on.")
+        } else {
+            lines.append("Every workout that has a route in Apple Health already has its map.")
+        }
+        if summary.noRoute > 0 {
+            let word = summary.noRoute == 1 ? "workout has" : "workouts have"
+            lines.append("\(summary.noRoute) \(word) no GPS route in Apple Health — treadmill, no Watch, or route sharing was off when it was recorded — so there's nothing to send for those.")
+        }
+        if summary.failed {
+            lines.append("We couldn't finish — check your connection and run this again; it picks up where it stopped.")
+        }
+        recalibrateResultMessage = lines.joined(separator: " ")
     }
 
     // MARK: - Development

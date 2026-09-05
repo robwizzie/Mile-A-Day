@@ -470,6 +470,137 @@ class WorkoutSyncService: ObservableObject {
     /// up to one route-bearing batch, and remembers what's done. Safe by
     /// construction: the workout upsert is idempotent and `workout_routes`
     /// only updates when a payload HAS a route.
+    struct RouteBackfillProgress {
+        /// Workouts examined so far, of `total` candidates.
+        let probed: Int
+        let total: Int
+        /// Routes pushed to the server so far.
+        let pushed: Int
+    }
+
+    struct RouteBackfillSummary {
+        /// Workouts that got a map on the server in this run.
+        let pushed: Int
+        /// Workouts with a route in HealthKit that were already on the server.
+        let alreadyDone: Int
+        /// Workouts with no GPS trace in HealthKit (treadmill, Watch-less, or
+        /// route sharing was off when they were recorded).
+        let noRoute: Int
+        /// True when an upload failed part-way; what was pushed stays pushed.
+        let failed: Bool
+        /// True when another sync held the lock — nothing was attempted.
+        let busy: Bool
+    }
+
+    /// Every past workout with a route in HealthKit but no map on the server,
+    /// pushed — the user-initiated, run-to-completion form of the automatic
+    /// sweep below. That sweep heals at most ~75 workouts per session, only
+    /// inside a two-year window, and only after a sync finds nothing new; a
+    /// long history took weeks of launches to reach the back of, and posts
+    /// from before route capture existed never got their Flyover. This runs
+    /// the same pipeline (probe → route-capped upload batches → registry) to
+    /// the end in one go, reporting as it goes, and marks progress after every
+    /// batch so an interrupted run resumes where it stopped.
+    ///
+    /// Same rules as the sweep: stealth walks are settled on sight and never
+    /// pushed; a workout with no trace is settled only once it is old enough
+    /// that a late Watch route can no longer land. Holds the `isSyncing` lock
+    /// like every other upload path, so it can't interleave with a sync.
+    func backfillAllRoutes(
+        progress: @escaping (RouteBackfillProgress) -> Void
+    ) async -> RouteBackfillSummary {
+        guard !isSyncing else {
+            return RouteBackfillSummary(pushed: 0, alreadyDone: 0, noRoute: 0, failed: false, busy: true)
+        }
+        isSyncing = true
+        defer { isSyncing = false }
+
+        var done = Set(UserDefaults.standard.array(forKey: routeBackfilledIdsKey) as? [String] ?? [])
+        guard let workouts = try? await fetchWorkoutsSince(.distantPast) else {
+            return RouteBackfillSummary(pushed: 0, alreadyDone: 0, noRoute: 0, failed: true, busy: false)
+        }
+
+        var stealthSettled: [String] = []
+        var alreadyDone = 0
+        let candidates = workouts.filter { workout in
+            let id = workout.uuid.uuidString
+            if done.contains(id) { alreadyDone += 1; return false }
+            if StealthModeStore.shared.isStealth(workout) {
+                stealthSettled.append(id)
+                return false
+            }
+            return true
+        }
+        let total = candidates.count
+        var probed = 0
+        var pushed = 0
+        var noRoute = 0
+        var failed = false
+        func report() async {
+            let snapshot = RouteBackfillProgress(probed: probed, total: total, pushed: pushed)
+            await MainActor.run { progress(snapshot) }
+        }
+        func remember(_ ids: [String]) {
+            guard !ids.isEmpty else { return }
+            done.formUnion(ids)
+            UserDefaults.standard.set(Array(done), forKey: routeBackfilledIdsKey)
+        }
+        remember(stealthSettled)
+        await report()
+
+        // Probe in bounded concurrent chunks, exactly like the sweep — the
+        // limit-1 existence probes are cheap individually, and a chunk keeps
+        // a multi-year history from opening hundreds of queries at once.
+        var routeBearing: [HKWorkout] = []
+        for chunkStart in stride(from: 0, to: candidates.count, by: Self.maxRouteBackfillProbes) {
+            let chunk = Array(candidates[chunkStart..<min(chunkStart + Self.maxRouteBackfillProbes, candidates.count)])
+            var hasRoute = [Bool](repeating: false, count: chunk.count)
+            await withTaskGroup(of: (Int, Bool).self) { group in
+                for (index, workout) in chunk.enumerated() {
+                    group.addTask {
+                        (index, await HealthKitManager.shared.hasRouteData(for: workout))
+                    }
+                }
+                for await (index, flag) in group { hasRoute[index] = flag }
+            }
+            var settled: [String] = []
+            for (index, workout) in chunk.enumerated() {
+                if hasRoute[index] {
+                    routeBearing.append(workout)
+                } else {
+                    noRoute += 1
+                    if workout.endDate < Date().addingTimeInterval(-3 * 86400) {
+                        settled.append(workout.uuid.uuidString)
+                    }
+                }
+            }
+            remember(settled)
+            probed += chunk.count
+            await report()
+        }
+
+        // Route-capped batches to the end. Each batch is remembered as soon
+        // as it lands, so a failure keeps everything before it.
+        for chunkStart in stride(from: 0, to: routeBearing.count, by: Self.maxRouteFetchBatch) {
+            let batch = Array(routeBearing[chunkStart..<min(chunkStart + Self.maxRouteFetchBatch, routeBearing.count)])
+            do {
+                try await uploadBatchWithRetry(batch)
+                remember(batch.map { $0.uuid.uuidString })
+                pushed += batch.count
+                print("[WorkoutSyncService] ✅ Route backfill (all) pushed \(batch.count) workout(s)")
+                await report()
+            } catch {
+                print("[WorkoutSyncService] ⚠️ Route backfill (all) failed: \(error)")
+                failed = true
+                break
+            }
+        }
+
+        return RouteBackfillSummary(
+            pushed: pushed, alreadyDone: alreadyDone, noRoute: noRoute, failed: failed, busy: false
+        )
+    }
+
     private func backfillMissingRoutes() async {
         guard !hasRunRouteBackfillThisSession else { return }
         hasRunRouteBackfillThisSession = true
