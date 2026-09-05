@@ -1170,6 +1170,46 @@ export const dailyChallenges = pgTable(
   ],
 );
 
+/**
+ * "We have already told this person that this sender hyped this thing."
+ *
+ * Separate from `hype_log` on purpose. Un-hyping DELETES the hype_log row, so
+ * that table cannot answer "have we notified about this before?" — a
+ * hype → un-hype → re-hype produced a second push, and a few rounds of it
+ * produced a few. Instagram treats a like notification as a fact about a
+ * PAIR (this person liked this post), not about the event, so re-liking is
+ * never news; this table is that fact, and nothing deletes from it.
+ *
+ * Rows are cheap and append-only. `context_id` is never null here: a
+ * context-less hype has nothing to be idempotent about and keeps its old
+ * behaviour (the daily abuse ceiling is its backstop).
+ */
+export const hypeNotifyLog = pgTable(
+  "hype_notify_log",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    senderId: text("sender_id").notNull(),
+    recipientId: text("recipient_id").notNull(),
+    contextType: text("context_type").notNull(),
+    contextId: text("context_id").notNull(),
+    notifiedAt: timestamp("notified_at", {
+      withTimezone: true,
+      mode: "string",
+    })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("hype_notify_log_once_idx").using(
+      "btree",
+      table.senderId.asc().nullsLast(),
+      table.recipientId.asc().nullsLast(),
+      table.contextType.asc().nullsLast(),
+      table.contextId.asc().nullsLast(),
+    ),
+  ],
+);
+
 export const hypeLog = pgTable(
   "hype_log",
   {

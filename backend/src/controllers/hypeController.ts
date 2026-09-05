@@ -12,6 +12,7 @@ import {
 import { hasUnlimitedHypes } from "../services/privilegedUsers.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import {
+  claimFirstHypeNotification,
   logHypeIfUnderLimit,
   getDailyHypeCount,
   getHypeResetsAt,
@@ -340,12 +341,30 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
         // every data field (shipped clients decode data as [String: String]).
         pushData.context_id = context.contextId;
       }
-      await sendPush(recipientId, {
-        title: "🔥 You got hyped!",
-        body,
-        type: "hype_received",
-        data: pushData,
-      });
+      // Ring only the FIRST time this person is told that this sender hyped
+      // this thing. Un-hyping deletes the hype_log row, so without a separate
+      // record a re-hype looked identical to a first hype and sent a second
+      // banner — tap-tap-tap on the same post and the phone lit up each time.
+      // The inbox row is still written either way: the history is worth
+      // keeping, the buzz isn't.
+      const firstTime = context
+        ? await claimFirstHypeNotification(
+            senderId,
+            recipientId,
+            context.contextType,
+            context.contextId,
+          )
+        : true;
+      await sendPush(
+        recipientId,
+        {
+          title: "🔥 You got hyped!",
+          body,
+          type: "hype_received",
+          data: pushData,
+        },
+        { inboxOnly: !firstTime },
+      );
     }
 
     // Unlimited (admin/founder) senders never report a depleted allowance:

@@ -215,6 +215,43 @@ export async function logHypeIfUnderLimit(
 }
 
 /**
+ * Have we already told `recipientId` that `senderId` hyped this exact thing?
+ *
+ * Claims on first call and returns TRUE; every later call for the same
+ * (sender, recipient, context) returns FALSE. That is the whole un-hype fix:
+ * `removeHypeForContext` DELETES the hype_log row, so hype_log itself can
+ * never answer "did we already push about this" — a hype → un-hype → re-hype
+ * looked exactly like a first hype and sent a second banner, and a few rounds
+ * of tapping sent a few.
+ *
+ * The rule this encodes is Instagram's: a like notification is a fact about a
+ * PAIR — this person liked this post — not about the event. Re-establishing a
+ * fact somebody has already been told is not news. Nothing ever deletes from
+ * `hype_notify_log`, so un-hyping cannot rearm the banner.
+ *
+ * Context-less hypes (badge/pr/challenge, a "hype back" from a push) have no
+ * stable key to be idempotent on and keep their old behaviour; the daily abuse
+ * ceiling is their backstop.
+ */
+export async function claimFirstHypeNotification(
+  senderId: string,
+  recipientId: string,
+  contextType: string,
+  contextId: string,
+): Promise<boolean> {
+  const rows = await db.query<{ id: string }>(
+    `INSERT INTO hype_notify_log
+			(sender_id, recipient_id, context_type, context_id)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (sender_id, recipient_id, context_type, context_id)
+		 DO NOTHING
+		 RETURNING id`,
+    [senderId, recipientId, contextType, contextId],
+  );
+  return rows.length > 0;
+}
+
+/**
  * Remove the viewer's own hype for a context. Mile/post use the same unified
  * run match as the feed tally, so un-hyping a post also clears a hype the user
  * originally sent from the mile card for that same run.
