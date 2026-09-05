@@ -3,9 +3,9 @@ import MapKit
 import UIKit
 
 // The route Flyover: a full-screen cinematic camera flight along the workout's
-// GPS trace — overview swoop-in, a cruise that follows the line while the
-// accent trail brightens and the runner's badge flies the tip, then a
-// pull-back reveal of the whole route. Crew walks fly EVERYONE: each person's
+// GPS trace — overview swoop-in, a low chase camera that follows just behind
+// and above the runner while the accent trail brightens and their badge
+// flies the tip, then a pull-back reveal of the whole route. Crew walks fly EVERYONE: each person's
 // badge rides their own line, the HUD picks whose path the camera follows,
 // identical paths are offset into side-by-side lanes, and the closing
 // overview frames the whole crew.
@@ -1138,7 +1138,7 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     private let allCoordinates: [CLLocationCoordinate2D]
 
     // Timeline: distance-scaled cruise between a swoop-in and a pull-back.
-    private let introDuration = 2.2
+    private let introDuration = 2.6
     private let outroDuration = 2.4
     private var cruiseDuration: Double {
         // ~9s per mile of the LONGEST flyable track, so the shared fraction
@@ -1146,15 +1146,35 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         let miles = people.map(\.track.totalMiles).max() ?? 0
         return min(36, max(9, miles * 9))
     }
-    private var cruiseAltitude: Double {
-        min(900, max(230, boundingDiagonalMeters * 0.30))
+    // The cruise is a CHASE camera: low, oblique, just behind and above the
+    // runner, looking at a point on the path ahead of them so they sit in
+    // the lower third of the frame with the road ahead filling the top —
+    // the view of someone flying alongside, not a map being panned. Three
+    // numbers define it and they are tied to ONE distance so the framing is
+    // the same on a 400m track and a ten-mile loop:
+    //
+    //   `cruiseDistance` — camera-to-look-at distance (MKMapCamera's
+    //       `fromDistance`, NOT altitude: altitude is distance·cos(pitch),
+    //       so 170m at 66° is a camera ~70m up and ~155m back).
+    //   `leadMeters`     — how far ahead of the runner the look-at point is.
+    //       At 0.3·distance the runner lands about a third up the screen
+    //       regardless of scale (the angle below the horizon between look-at
+    //       and runner is what places them, and that ratio fixes the angle).
+    //   `lookaheadMeters` — how far ahead the HEADING looks, longer than
+    //       the lead so the camera leans into a bend before the runner is
+    //       in it rather than whipping round once they are.
+    //
+    // It used to fly at 230–900m and pitch 58 with the look-at ~15m ahead:
+    // an overview that happened to move, with the runner a dot near centre.
+    private static let cruisePitch: CGFloat = 66
+    private var cruiseDistance: Double {
+        min(520, max(170, boundingDiagonalMeters * 0.18))
     }
     private var overviewAltitude: Double {
         min(7000, max(700, boundingDiagonalMeters * 2.1))
     }
-    private var lookaheadMeters: Double {
-        min(80, max(30, (followedTrack?.totalMeters ?? 0) * 0.03))
-    }
+    private var leadMeters: Double { cruiseDistance * 0.30 }
+    private var lookaheadMeters: Double { cruiseDistance * 0.45 }
     private var followedTrack: FlyoverTrack? {
         people.indices.contains(followed) ? people[followed].track : nil
     }
@@ -1350,16 +1370,18 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
 
     /// Waiting for the OVERVIEW alone loads only the tiles the intro needs —
     /// the cruise then flies into unloaded imagery. So before takeoff, walk
-    /// the camera through the cruise corridor at cruise altitude, waiting for
-    /// each stop to render; MapKit caches the tiles, and the real flight
+    /// the camera through the cruise corridor with the chase camera, waiting
+    /// for each stop to render; MapKit caches the tiles, and the real flight
     /// re-visits them warm. Every wait is deadline-capped so offline degrades
-    /// to "fly over what loaded".
+    /// to "fly over what loaded". Stops are ~250m apart: the chase camera is
+    /// low, so each stop holds less ground at full resolution than the old
+    /// high cruise did, and the gaps between stops are what pop in mid-flight.
     @MainActor
     private func prewarmAndTakeOff() async {
         guard let track = followedTrack else { return }
         let deadline = Date().addingTimeInterval(10)
         await waitForRender(budget: 1.5, deadline: deadline)
-        let steps = max(3, min(9, Int(track.totalMeters / 400)))
+        let steps = max(3, min(14, Int(track.totalMeters / 250)))
         for i in 0...steps {
             guard !stopped, mapView != nil, Date() < deadline else { break }
             mapView?.camera = cruiseCameraTarget(fraction: Double(i) / Double(steps))
@@ -1526,7 +1548,11 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             let fraction = cruiseT / cruiseDuration
             currentFraction = fraction
             let target = track.bearing(atFraction: fraction, lookaheadMeters: lookaheadMeters)
-            smoothedHeading = approachAngle(smoothedHeading, toward: target, rate: 2.4, dt: dt)
+            // The rate rides the playback speed: the path's bearing changes
+            // per SECOND OF FLIGHT, so a fixed real-time rate lagged every
+            // bend at 2× and twitched at ¼×. Low and close, that lag is the
+            // runner sliding sideways out of frame.
+            smoothedHeading = approachAngle(smoothedHeading, toward: target, rate: 2.0 * speed, dt: dt)
             mapView.camera = cruiseCamera(fraction: fraction, heading: smoothedHeading)
             setStroke(fraction)
             moveRiders(to: fraction)
@@ -1713,22 +1739,22 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
                     heading: smoothedHeading)
     }
 
-    /// Camera slightly AHEAD of the rider so the badge flies in the lower
-    /// third of the screen instead of dead center.
+    /// The chase camera: looking at the path `leadMeters` ahead of the
+    /// rider, from `cruiseDistance` away at `cruisePitch`, so the rider
+    /// flies in the lower third with the road ahead above them. Near the
+    /// finish the look-at converges on the endpoint and the rider glides up
+    /// to centre — the camera settling on the line, which is the right end.
+    ///
+    /// MapKit clamps `pitch` to what the map can show at this distance and
+    /// keeps `fromDistance`; a clamp therefore only lifts the camera a
+    /// little, never breaks the framing, so the geometry above stays valid
+    /// whatever the ceiling turns out to be on a given device.
     private func cruiseCamera(fraction: Double, heading: Double) -> MKMapCamera {
         guard let track = followedTrack else { return overviewCamera(pitch: 35) }
-        let rider = track.coordinate(atFraction: fraction)
-        let aheadFraction = min(1, fraction + (lookaheadMeters * 0.6) / max(track.totalMeters, 1))
-        let ahead = track.coordinate(atFraction: aheadFraction)
-        let center = CLLocationCoordinate2D(
-            latitude: rider.latitude + (ahead.latitude - rider.latitude) * 0.5,
-            longitude: rider.longitude + (ahead.longitude - rider.longitude) * 0.5
-        )
-        return MKMapCamera(lookingAtCenter: center,
-                           fromDistance: cruiseAltitude,
-                           // Flatter than a chase cam: more of the drawn
-                           // trail stays in frame behind the rider.
-                           pitch: 58,
+        let leadFraction = min(1, fraction + leadMeters / max(track.totalMeters, 1))
+        return MKMapCamera(lookingAtCenter: track.coordinate(atFraction: leadFraction),
+                           fromDistance: cruiseDistance,
+                           pitch: Self.cruisePitch,
                            heading: heading)
     }
 
