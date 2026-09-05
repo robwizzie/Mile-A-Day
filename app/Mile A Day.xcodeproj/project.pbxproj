@@ -733,7 +733,6 @@
 		72912833304BAE3F002A5E15 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = NS237SS5KD;
@@ -750,7 +749,6 @@
 				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.MileADayNotificationService";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -764,7 +762,6 @@
 		72912834304BAE3F002A5E15 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = NS237SS5KD;
@@ -781,7 +778,6 @@
 				MARKETING_VERSION = 1.2.05;
 				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.MileADayNotificationService";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
