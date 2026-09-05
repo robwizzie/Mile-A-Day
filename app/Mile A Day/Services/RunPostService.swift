@@ -197,12 +197,34 @@ enum RunPostService {
     /// Internal (not private): CalorieLedger counts treats with the same
     /// figure the post cards print, so the two can never disagree.
     static func workoutCalories(_ workout: HKWorkout) -> Double {
+        let attached: Double
         if #available(iOS 18.0, *),
            let statistics = workout.statistics(for: HKQuantityType(.activeEnergyBurned)),
            let energy = statistics.sumQuantity() {
-            return energy.doubleValue(for: .kilocalorie())
+            attached = energy.doubleValue(for: .kilocalorie())
+        } else {
+            attached = workout.totalEnergyBurned?.doubleValue(for: .kilocalorie()) ?? 0
         }
-        return workout.totalEnergyBurned?.doubleValue(for: .kilocalorie()) ?? 0
+        if attached > 0 { return attached }
+        return estimatedCalories(workout)
+    }
+
+    /// The same ACSM estimate the tracker writes into Apple Health for its
+    /// own phone workouts, applied to a workout that arrived with NO energy
+    /// attached. That is every walk a third-party bridge delivers (Google
+    /// Health / Fitbit write the workout and never link energy samples to
+    /// it) and every workout on a phone that hasn't granted Active Energy —
+    /// Apple never reports a denied read, so those simply come back empty.
+    /// Reading them as zero meant a friend with hundreds of walks had "not
+    /// even one donut" to show for them. Distance × pace × the typical-adult
+    /// mass, exactly what the tracker would have written; `duration` is
+    /// pause-excluded, which is what the equation wants.
+    static func estimatedCalories(_ workout: HKWorkout) -> Double {
+        WorkoutEnergyEstimate.activeKilocalories(
+            meters: workout.madDistanceMiles * 1609.344,
+            activeSeconds: workout.duration,
+            bodyMassKilograms: nil
+        ) ?? 0
     }
 
     private static func dateText(for date: Date) -> String {
