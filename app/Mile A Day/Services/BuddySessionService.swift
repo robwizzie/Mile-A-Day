@@ -815,11 +815,29 @@ final class BuddySessionService: ObservableObject {
         }
     }
 
+    /// The walk that just finished, kept after its recap is dismissed.
+    ///
+    /// `clearFinishedSession` drops `session` so the dashboard stops offering
+    /// a walk that's over — but the composer needs it for longer than that.
+    /// The post-run photo prompt is revealed the moment the recap sheet goes
+    /// away, i.e. immediately AFTER this runs, so a photo posted from it found
+    /// no session at all and went out as a solo card: unlinked from the walk
+    /// and crediting nobody. Keeping the last completed session here is what
+    /// makes `RunPostService.buddyPostContext` work from every door, at any
+    /// point in the flow.
+    ///
+    /// Not persisted: it only has to outlive the sheet, and a stale walk
+    /// surviving a relaunch is a worse failure than a missed credit.
+    @Published private(set) var lastFinishedSession: BuddySessionState?
+
     /// Clear a finished session once its recap has been seen, so the dashboard
     /// stops offering it.
     func clearFinishedSession() {
         guard let session, session.status == .completed || session.status == .cancelled
         else { return }
+        // Completed only — a CANCELLED walk was never taken, so nothing should
+        // later credit a crew for it.
+        if session.status == .completed { self.lastFinishedSession = session }
         self.session = nil
     }
 

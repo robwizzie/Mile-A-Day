@@ -327,6 +327,44 @@ enum RunPostService {
             .id
     }
 
+    /// The buddy walk this workout belongs to, if any — the inverse of
+    /// `buddyWorkoutId` above, and deliberately built ON it so the two can't
+    /// disagree about which HKWorkout is "the walk".
+    ///
+    /// This exists because the "one post per buddy walk" rule used to live
+    /// entirely in the recap's UI. Every other door into the composer — the
+    /// post-run photo prompt, the feed FAB, the snap gallery — knew nothing
+    /// about buddy sessions, so a photo of a walk posted through one of them
+    /// became a solo card: no `buddy_session_id`, so nobody else's recap could
+    /// find it and offer "add your photo", and no coauthors, so its map drew
+    /// one line while the second post drew everyone's.
+    ///
+    /// Returns nil for a workout that isn't this walk's, and for a session
+    /// this user isn't in — both of which are the ordinary case.
+    @MainActor
+    static func buddySessionForWorkout(_ workoutId: String) -> BuddySessionState? {
+        let buddy = BuddySessionService.shared
+        // The LIVE session first, then the one whose recap was just dismissed.
+        // `clearFinishedSession` runs on the recap's Done button, and the photo
+        // prompt is revealed the instant that sheet goes away — so without the
+        // second candidate the most ordinary path of all (see the walk's
+        // result, close it, post the photo) found no session and made the solo
+        // card this whole change exists to stop.
+        for candidate in [buddy.session, buddy.lastFinishedSession] {
+            guard let session = candidate,
+                  let me = session.me(buddy.currentUserId),
+                  me.status != .left, me.status != .declined
+            else { continue }
+            guard let resolved = buddyWorkoutId(
+                reconciled: me.workoutId,
+                startedAt: session.startedAtDate,
+                endedAt: session.endedAtDate
+            ) else { continue }
+            if resolved == workoutId { return session }
+        }
+        return nil
+    }
+
     /// Render the auto image (route map or stats card), upload it, and create the
     /// linked feed post. Called when the user skips the post-run photo prompt.
     ///

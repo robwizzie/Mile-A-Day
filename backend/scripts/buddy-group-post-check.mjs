@@ -35,6 +35,7 @@ import { PostgresService } from "../dist/services/DbService.js";
 import {
   addCrewPhoto,
   buddySessionPost,
+  createPost,
   getUnifiedFeed,
   lockUnearnedPhotos,
   sweepCrewPhotoNudges,
@@ -513,6 +514,126 @@ async function main() {
     "...and picks up exactly where they left off",
     Number(afterRejoin[0]?.distance_miles),
     0.73,
+  );
+
+  // ── 11. The create-time guard: one post per WALK, whatever door you used ──
+  //
+  // Everything above is server TRUTH the recap can read. None of it is a
+  // guard: `createPost`'s only duplicate rule keys on (workout_id, user_id),
+  // and everyone on a buddy walk records their own workout under their own id,
+  // so the server had no way to see that the walk was already shared. The
+  // invariant lived entirely in one screen's UI — so a photo posted from the
+  // post-run prompt, the feed FAB or the snap gallery still made a second
+  // card, with no crew on it and no session link, which is exactly how it
+  // happened in production.
+  const today = (await db.query(`SELECT CURRENT_DATE::text AS d`))[0].d;
+
+  async function tryPost(userId, workoutId, extra = {}) {
+    try {
+      await createPost({
+        userId,
+        mediaUrl: `/uploads/posts/${userId}-second.jpg`,
+        workoutId,
+        localDate: today,
+        shareToFeed: true,
+        shareToStory: false,
+        isAuto: false,
+        ...extra,
+      });
+      return null;
+    } catch (e) {
+      return e;
+    }
+  }
+
+  // Re-stamp the reconciled link the earlier sections may have moved.
+  await db.query(
+    `UPDATE buddy_session_participants SET workout_id = $3, status = 'finished'
+      WHERE session_id = $1 AND user_id = $2`,
+    [sessionId, PAL, `grp-w-${PAL}`],
+  );
+
+  const refused = await tryPost(PAL, `grp-w-${PAL}`);
+  check(
+    "a second post for the same walk is refused",
+    refused?.message,
+    "buddy_walk_already_posted",
+  );
+  // Refusing is only half of it: the client has to be able to send the user
+  // to the post their photo actually belongs on.
+  check("...and names the post to add the photo to", refused?.postId, postId);
+
+  // The case that ACTUALLY produced the duplicate: the participant row's
+  // workout_id is stamped by the reconciler a minute or two AFTER the walk, so
+  // at the moment someone posts on finishing it is still null. A guard that
+  // could only match on it would miss every real occurrence.
+  await db.query(
+    `UPDATE buddy_session_participants SET workout_id = NULL
+      WHERE session_id = $1 AND user_id = $2`,
+    [sessionId, PAL],
+  );
+  const refusedUnlinked = await tryPost(PAL, `grp-w-${PAL}`);
+  check(
+    "...still refused before the reconciler has linked the workout",
+    refusedUnlinked?.message,
+    "buddy_walk_already_posted",
+  );
+
+  // A story-only share is not the walk's feed card and must stay allowed.
+  const storyOnly = await tryPost(PAL, `grp-w-${PAL}`, {
+    shareToFeed: false,
+    shareToStory: true,
+  });
+  check("a story-only photo of the walk is still allowed", storyOnly, null);
+
+  // Nobody else's post may block a walker who wasn't on the walk.
+  await db.query(
+    `INSERT INTO workouts
+       (workout_id, user_id, workout_type, distance, total_duration,
+        device_end_date, date, local_date, timezone_offset, calories, steps,
+        feed_role)
+     VALUES ('grp-w-out-solo', $1, 'walking', 1.2, 1800,
+             NOW() - INTERVAL '20 minutes', CURRENT_DATE, CURRENT_DATE, 0,
+             90, 2400, 'daily_mile')
+     ON CONFLICT (workout_id) DO NOTHING`,
+    [OUT],
+  );
+  const stranger = await tryPost(OUT, "grp-w-out-solo");
+  check("someone who wasn't on the walk is unaffected", stranger, null);
+
+  // ── 12. The nudge stops nagging someone who already posted ──
+  //
+  // The duplicates already in the wild keep their two cards, and the sweep
+  // used to push "2 of you were out — 1 photo so far" at the person holding
+  // the other one. Their own card is proof enough that they shared the walk.
+  await db.query(
+    `UPDATE buddy_session_participants SET workout_id = $3
+      WHERE session_id = $1 AND user_id = $2`,
+    [sessionId, SHY, `grp-w-${SHY}`],
+  );
+  await db.query(
+    `UPDATE post_coauthors SET photo_nudge_sent_at = NULL, media_url = NULL
+      WHERE post_id = $1 AND user_id = $2`,
+    [postId, SHY],
+  );
+  // SHY's own separate card for the same walk — a duplicate made before the
+  // guard existed.
+  await db.query(
+    `INSERT INTO posts (user_id, media_url, workout_id, local_date,
+                        share_to_feed, is_auto)
+     VALUES ($1, '/uploads/posts/grp-shy-own.jpg', $2, CURRENT_DATE, TRUE, FALSE)`,
+    [SHY, `grp-w-${SHY}`],
+  );
+  await sweepCrewPhotoNudges();
+  const shyClaim = await db.query(
+    `SELECT photo_nudge_sent_at FROM post_coauthors
+      WHERE post_id = $1 AND user_id = $2`,
+    [postId, SHY],
+  );
+  check(
+    "nobody is nudged about a walk they already posted themselves",
+    shyClaim[0]?.photo_nudge_sent_at ?? null,
+    null,
   );
 
   if (!process.env.KEEP_SEED) await cleanup();
