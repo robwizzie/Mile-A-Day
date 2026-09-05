@@ -1517,12 +1517,27 @@ struct WorkoutTrackingView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(coachEnabled ? "Mute voice coach" : "Unmute voice coach")
 
-            Text(line)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(coachEnabled ? 0.75 : 0.5))
-                .multilineTextAlignment(.leading)
-                .lineLimit(2)
-                .id(line)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(line)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(coachEnabled ? 0.75 : 0.5))
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+                    .id(line)
+                // The voice is as good as code can make it; the rest is a
+                // download the app cannot start and Settings cannot deep-link
+                // to. This hint lived only on the settings page — a screen
+                // nobody opens mid-walk — so "it sounds robotic" went
+                // unanswered at the one moment the answer would land: while
+                // the robot is talking.
+                if coachEnabled, GhostCoach.usingBasicVoice {
+                    Text("Basic voice. A natural one is a free download: Settings › Accessibility › Spoken Content › Voices.")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.45))
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
+                }
+            }
         }
         .padding(.horizontal, 24)
     }
