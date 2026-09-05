@@ -76,6 +76,13 @@ struct FlameBuddyFigure: View {
     /// Fun hero's moods dart them; zero is byte-identical to before, so every
     /// other caller — and the widget copies of this file — are untouched.
     var gaze: CGSize = .zero
+    /// Dozing: lids down and a small, slack mouth — the Fun hero before the
+    /// day has started. This is a FACE, not a blink: the sleepy mood used to
+    /// be a slow blink (open two seconds in every five), so the buddy under
+    /// the zzz's was wide awake and grinning almost half the time. Defaulted
+    /// off, so every other caller — and the widget copies of this file — are
+    /// untouched.
+    var asleep: Bool = false
     /// Grounded flames (the Fun buddy) sit on the ground: they shrink toward
     /// their base and cast a ground shadow. A non-grounded flame (the Modern
     /// ring) shrinks toward its center so it stays framed in the circle.
@@ -304,6 +311,17 @@ struct FlameBuddyFigure: View {
                 Capsule().fill(Color.white.opacity(0.86)).frame(width: size * 0.085, height: size * 0.018).rotationEffect(.degrees(-42))
             }
             .frame(width: size * 0.13, height: size * 0.13)
+        } else if asleep {
+            // A closed lid is an arc bowing UP — the same curve as the frown,
+            // which on a mouth reads as sad and on an eye reads as peaceful.
+            // Sat a touch below the open eye's centre, where a lid lands.
+            FlameBuddyFrownShape()
+                .stroke(
+                    Color(red: 0.20, green: 0.07, blue: 0.04),
+                    style: StrokeStyle(lineWidth: max(2, size * 0.02), lineCap: .round)
+                )
+                .frame(width: size * 0.12, height: size * 0.045)
+                .offset(y: size * 0.03)
         } else {
             Ellipse()
                 .fill(Color(red: 0.20, green: 0.07, blue: 0.04))
@@ -331,6 +349,21 @@ struct FlameBuddyFigure: View {
 
     @ViewBuilder
     private var mouth: some View {
+        if asleep {
+            // A small, slack "o" — the snore. Small is what keeps it from
+            // reading as surprise: the gasp this file warns about is a big
+            // mouth taller than wide under open eyes, and this is a little
+            // one under closed lids.
+            Ellipse()
+                .fill(Color(red: 0.24, green: 0.04, blue: 0.04).opacity(0.9))
+                .frame(width: size * 0.055, height: size * 0.06)
+        } else {
+            awakeMouth
+        }
+    }
+
+    @ViewBuilder
+    private var awakeMouth: some View {
         switch health {
         case .blazing, .healthy:
             // A grin, not a gasp. This was a plain Capsule TALLER than it was
@@ -359,6 +392,7 @@ struct FlameBuddyFigure: View {
     }
 
     private var accessibilityText: String {
+        if asleep { return "Flame buddy dozing. The day hasn't started yet." }
         switch health {
         case .blazing: return "Flame buddy blazing. Today's mile is complete."
         case .healthy: return "Flame buddy healthy."

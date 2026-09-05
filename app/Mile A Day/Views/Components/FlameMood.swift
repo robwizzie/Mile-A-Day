@@ -285,22 +285,62 @@ struct FlameMoodLayer: View {
         .offset(x: eyeX + size * 0.13 * scale, y: faceY - size * 0.13 * scale)
     }
 
-    /// Before the day has started: zzz's drifting up from the head.
+    /// Before the day has started: Z's rising off his head, the way a
+    /// cartoon sleeper's do — from the temple, up and away to the right,
+    /// each a little bigger than the last and growing as it climbs, held
+    /// solid for most of the trip and gone in the last stretch. Three of
+    /// them a third of a period apart, so one is always on its way and no
+    /// two ever bunch.
+    ///
+    /// It used to be three small lowercase z's parked beside the TIP at 85%
+    /// white on an `easeOut` — they shot off, hung half-faded at the top,
+    /// and read as a dim "zzz" caption floating next to an awake face.
+    /// Cream, like the bubble, with a shadow so they hold over the glow.
+    ///
+    /// Still frames (Reduce Motion, previews) draw the trail already laid
+    /// out along the path instead of three Z's stacked on the start point.
     private var zzz: some View {
-        ForEach(0..<3, id: \.self) { index in
-            Text("z")
-                .font(.system(size: size * (0.06 + 0.02 * CGFloat(index)), weight: .black, design: .rounded))
-                .foregroundColor(.white.opacity(0.85))
-                .offset(x: moving ? size * 0.10 : 0, y: moving ? -size * 0.22 : 0)
-                .opacity(moving ? 0 : 0.9)
+        let parked = still || reduceMotion
+        return ForEach(0..<3, id: \.self) { index in
+            let i = CGFloat(index)
+            let restScale: CGFloat = 0.75 + 0.25 * i
+            let restX: CGFloat = size * 0.06 * i
+            let restY: CGFloat = -size * 0.11 * i
+            zGlyph(index: index)
+                .scaleEffect(parked ? restScale : (moving ? 1.3 : 0.7))
+                .offset(
+                    x: parked ? restX : (moving ? size * 0.15 : 0),
+                    y: parked ? restY : (moving ? -size * 0.30 : 0)
+                )
                 .animation(moving
-                    ? .easeOut(duration: 3.0).repeatForever(autoreverses: false).delay(Double(index) * 1.0)
+                    ? .linear(duration: Self.zzzPeriod).repeatForever(autoreverses: false).delay(Double(index) * Self.zzzPeriod / 3)
+                    : nil, value: moving)
+                // Held at full opacity, then a short fade at the very end of
+                // the climb: the delay INSIDE the repeat is per cycle, the
+                // one outside is the same stagger as the motion, so the two
+                // animations share a period and stay in phase.
+                .opacity(parked ? 1 - 0.25 * Double(index) : (moving ? 0 : 1))
+                .animation(moving
+                    ? .linear(duration: Self.zzzFade).delay(Self.zzzPeriod - Self.zzzFade)
+                        .repeatForever(autoreverses: false).delay(Double(index) * Self.zzzPeriod / 3)
                     : nil, value: moving)
                 .offset(
-                    x: size * 0.22 * scale + CGFloat(index) * size * 0.03,
-                    y: topY + size * 0.06
+                    x: eyeX + size * 0.14 * scale,
+                    y: faceY - size * 0.22 * scale
                 )
         }
+    }
+
+    private static let zzzPeriod = 3.6
+    private static let zzzFade = 0.9
+
+    private func zGlyph(index: Int) -> some View {
+        Text("Z")
+            .font(.system(size: size * (0.075 + 0.015 * CGFloat(index)), weight: .black, design: .rounded))
+            .foregroundColor(Color(red: 1.0, green: 0.97, blue: 0.91))
+            .shadow(color: Color(red: 0.24, green: 0.10, blue: 0.08).opacity(0.55),
+                    radius: max(1, size * 0.006), y: max(1, size * 0.004))
+            .rotationEffect(.degrees(-14))
     }
 
     /// Nearly there: a pair of twinkling sparkles.
