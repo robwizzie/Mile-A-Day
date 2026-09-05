@@ -421,6 +421,13 @@
       "when": 1788397196614,
       "tag": "0059_curvy_captain_america",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1788572750247,
+      "tag": "0060_great_gertrude_yorkes",
+      "breakpoints": true
     }
   ]
 }
