@@ -6,9 +6,13 @@ import { getUser } from "../services/userService.js";
 import { sendPush } from "../services/pushNotificationService.js";
 import { shouldSendNotification } from "../services/notificationSettingsService.js";
 import {
+  lockUnearnedPhotos,
   visiblePostAuthors,
   VisiblePostAuthors,
+  visiblePostPreviews,
 } from "../services/postService.js";
+import { getDailyGoalStatus } from "../services/workoutService.js";
+import { signMediaUrl } from "../services/mediaSigningService.js";
 import { hasUnlimitedHypes } from "../services/privilegedUsers.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import {
@@ -25,6 +29,18 @@ import {
   getContextHypers,
   removeHypeForContext,
 } from "../services/hypeService.js";
+
+/**
+ * Absolute base for media URLs put INTO a push payload.
+ *
+ * The notification service extension fetches these from its own process, so a
+ * relative path — which is all `signMediaUrl` returns, and all any in-app
+ * consumer needs — is unusable there. Same default as the website's proxy so
+ * the two can't disagree about where this API lives.
+ */
+const PUSH_MEDIA_BASE_URL = (
+  process.env.PUBLIC_API_URL ?? "https://mad.mindgoblin.tech"
+).replace(/\/+$/, "");
 
 const db = PostgresService.getInstance();
 
@@ -134,6 +150,61 @@ function buildHypeBackBody(
       return `${senderName} hyped your '${context.contextLabel}' challenge 🔥`;
     case "post":
       return `${senderName} hyped your post 🔥`;
+  }
+}
+
+/**
+ * The post's photo, absolute and signed, for a hype push's banner thumbnail.
+ *
+ * Instagram puts the liked photo on the notification, and the in-app inbox has
+ * done that since it started sending `context_id`; the lock-screen banner is
+ * the surface that never could. Attaching it needs two things the payload
+ * didn't carry: `mutable-content` (already sent) and a URL the notification
+ * service extension can fetch on its own. The extension runs in a separate
+ * process with no session, no API base and no auth, so a bare path or a
+ * protected URL is useless to it — hence absolute, and signed with the same
+ * short-lived HMAC the app's own image loads use.
+ *
+ * Visibility goes through `visiblePostPreviews` and `lockUnearnedPhotos` — the
+ * same pair the inbox uses — rather than a direct read. For a hype the
+ * recipient is the post's own author, so both are satisfied trivially, and
+ * that is exactly why it would be tempting to skip them; the day this is
+ * reused for a push about somebody ELSE's post, skipping them is a photo on a
+ * lock screen that the feed would have withheld.
+ *
+ * Returns null for anything that isn't a resolvable post photo. A banner
+ * without a picture is the old banner, which is fine.
+ *
+ * Exported for ci-smoke, which drives it directly: the push itself can't be
+ * observed from a test (APNs isn't reachable and the inbox row deliberately
+ * drops this key), so the resolver is the only place the gate can be pinned.
+ */
+export async function hypePushImageURL(
+  recipientId: string,
+  context: { contextType: string; contextId: string },
+): Promise<string | null> {
+  if (context.contextType !== "post") return null;
+  try {
+    const [preview] = await visiblePostPreviews(recipientId, [
+      context.contextId,
+    ]);
+    if (!preview) return null;
+    let gate: { completed: boolean; localDate: string };
+    try {
+      const goal = await getDailyGoalStatus(recipientId);
+      gate = { completed: goal.completed, localDate: goal.localDate };
+    } catch {
+      // Fail OPEN, like the inbox's own gate: a stats hiccup should not blank
+      // the thumbnail. The recipient is the author here either way.
+      gate = { completed: true, localDate: "" };
+    }
+    lockUnearnedPhotos([preview], recipientId, gate);
+    if (!preview.media_url || preview.photo_locked) return null;
+    const signed = signMediaUrl(preview.media_url);
+    return `${PUSH_MEDIA_BASE_URL}${signed}`;
+  } catch (e: any) {
+    console.error("[Hype] push image resolve failed:", e?.message ?? e);
+    return null;
   }
 }
 
@@ -332,15 +403,6 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
         recipientId === postCoauthorId
           ? `${senderName} hyped your collab post 🔥`
           : buildHypeBackBody(senderName, context);
-      const pushData: Record<string, string> = { user_id: senderId };
-      if (context) {
-        pushData.context_type = context.contextType;
-        pushData.context_label = context.contextLabel;
-        // For post hypes this is the post uuid — the inbox uses it to show
-        // the post's thumbnail and open the post on tap. String-valued like
-        // every data field (shipped clients decode data as [String: String]).
-        pushData.context_id = context.contextId;
-      }
       // Ring only the FIRST time this person is told that this sender hyped
       // this thing. Un-hyping deletes the hype_log row, so without a separate
       // record a re-hype looked identical to a first hype and sent a second
@@ -355,6 +417,28 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
             context.contextId,
           )
         : true;
+      const pushData: Record<string, string> = { user_id: senderId };
+      if (context) {
+        pushData.context_type = context.contextType;
+        pushData.context_label = context.contextLabel;
+        // For post hypes this is the post uuid — the inbox uses it to show
+        // the post's thumbnail and open the post on tap. String-valued like
+        // every data field (shipped clients decode data as [String: String]).
+        pushData.context_id = context.contextId;
+        // ...and the picture itself, for the notification service extension
+        // to attach so the BANNER carries the thumbnail the in-app inbox has
+        // always had. Absolute and signed, because the extension is its own
+        // process: it knows nothing about the app's API base or auth, and
+        // must be able to fetch this with a bare GET.
+        //
+        // Only when a banner is actually going out. A re-hype is inbox-only,
+        // the inbox strips this key anyway, and resolving it costs a post
+        // read plus a signature for nothing.
+        if (firstTime) {
+          const image = await hypePushImageURL(recipientId, context);
+          if (image) pushData.image_url = image;
+        }
+      }
       await sendPush(
         recipientId,
         {

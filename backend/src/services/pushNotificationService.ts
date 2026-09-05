@@ -619,20 +619,31 @@ export async function sendPush(
   );
 }
 
+/**
+ * `data` keys that exist only for the delivered banner and must NOT be kept.
+ *
+ * `image_url` is a SIGNED media url with a short expiry — it is for the
+ * notification service extension to fetch once, in the seconds after delivery.
+ * The inbox row outlives that by weeks, and the inbox already resolves its own
+ * thumbnail at READ time (`post_preview`), freshly signed. Persisting the
+ * push's copy would leave a dead signature in every inbox response and give a
+ * future client something stale to be tempted by.
+ */
+const EPHEMERAL_DATA_KEYS = new Set(["image_url"]);
+
 async function storeInAppNotification(
   userId: string,
   payload: PushPayload,
 ): Promise<void> {
+  const data = Object.fromEntries(
+    Object.entries(payload.data ?? {}).filter(
+      ([k]) => !EPHEMERAL_DATA_KEYS.has(k),
+    ),
+  );
   await db.query(
     `INSERT INTO in_app_notifications (user_id, title, body, type, data)
 		VALUES ($1, $2, $3, $4, $5)`,
-    [
-      userId,
-      payload.title,
-      payload.body,
-      payload.type,
-      JSON.stringify(payload.data ?? {}),
-    ],
+    [userId, payload.title, payload.body, payload.type, JSON.stringify(data)],
   );
 }
 

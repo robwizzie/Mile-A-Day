@@ -10,6 +10,14 @@ import SwiftUI
 
 enum HypeButtonStyle: Equatable {
     case pill
+    /// The pill, sized for a dense list row.
+    ///
+    /// The Notifications inbox row already carries an avatar, a title, a
+    /// three-line body and a trailing post thumbnail; the full-size pill
+    /// competed with all of it and read as the loudest thing in a row whose
+    /// subject is somebody ELSE's action. Same shape and colour — this is
+    /// still the one hype language — just quieter.
+    case smallPill
     case actionIcon
     /// The redesigned post card's footer glyph: smaller than `actionIcon`,
     /// sized to sit beside a count.
@@ -56,16 +64,31 @@ struct HypeButton: View {
                         .frame(width: 36, height: 40)
                         .contentShape(Rectangle())
                 } else {
-                    HStack(spacing: 5) {
+                    let small = style == .smallPill
+                    let pill = HStack(spacing: small ? 4 : 5) {
                         Image(systemName: isHyped ? "hands.clap.fill" : "hands.clap")
-                            .font(.system(size: 17, weight: .bold))
+                            .font(.system(size: small ? 13 : 17, weight: .bold))
                             .scaleEffect(pop ? 1.2 : 1)
                         Text(isHyped ? "Hyped" : "Hype")
-                            .font(.system(size: 14, weight: .heavy, design: .rounded))
+                            .font(.system(size: small ? 12 : 14, weight: .heavy, design: .rounded))
                     }
-                    .padding(.horizontal, 15)
-                    .padding(.vertical, 9)
+                    .padding(.horizontal, small ? 11 : 15)
+                    .padding(.vertical, small ? 6 : 9)
                     .background(background)
+                    if small {
+                        // The pill shrinks; the TARGET doesn't. A ~26pt control
+                        // in a scrolling list is a miss waiting to happen, so
+                        // the hit area is padded back out around the pill and
+                        // made a rectangle. That padding is real layout — it
+                        // takes the frame back to roughly the full pill's size
+                        // — but it sits OUTSIDE `background`, so what the eye
+                        // reads is the smaller pill and what the thumb gets is
+                        // still ~38pt. Only this branch: `.pill` ships in the
+                        // friends list and keeps its exact hit shape.
+                        pill.padding(5).contentShape(Rectangle())
+                    } else {
+                        pill
+                    }
                 }
             }
             .foregroundColor(foreground)

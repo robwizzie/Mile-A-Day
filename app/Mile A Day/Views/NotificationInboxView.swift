@@ -776,7 +776,7 @@ struct NotificationInboxView: View {
                     if canShowHypeButton(notification) {
                         let hyped = isAlreadyHyped(notification)
                         HStack(spacing: 10) {
-                            HypeButton(isHyped: hyped) {
+                            HypeButton(isHyped: hyped, style: .smallPill) {
                                 performHype(notification)
                             }
                             // Same tally the feed shows for this event — the

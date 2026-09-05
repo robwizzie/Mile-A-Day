@@ -45,7 +45,7 @@ const {
 } = await import("../dist/services/weeklyChallengeService.js");
 // Hype authorization is controller-level (it's where the friend/visibility
 // gate lives), so the collab assertions below drive the real handlers.
-const { sendHype, getContextHypersController, removeHype } =
+const { sendHype, getContextHypersController, removeHype, hypePushImageURL } =
   await import("../dist/controllers/hypeController.js");
 
 const db = PostgresService.getInstance();
@@ -259,8 +259,9 @@ assert.equal(
   "a friend gets the author's route on the profile grid (same as the feed)",
 );
 assert.equal(
-  (await getUserPosts(BOB, BOB, 20, null)).find((p) => p.post_id === post.post_id)
-    ?.route?.length,
+  (await getUserPosts(BOB, BOB, 20, null)).find(
+    (p) => p.post_id === post.post_id,
+  )?.route?.length,
   3,
   "the owner gets their own route on their profile grid",
 );
@@ -672,7 +673,11 @@ assert.equal(
     { userId: CARL, body: postHypeCtx(ALICE), query: {} },
     rmRes,
   );
-  assert.equal(rmOut.code, 200, `un-hyping succeeds (got ${JSON.stringify(rmOut.body)})`);
+  assert.equal(
+    rmOut.code,
+    200,
+    `un-hyping succeeds (got ${JSON.stringify(rmOut.body)})`,
+  );
   assert.equal(
     (
       await db.query(
@@ -702,16 +707,25 @@ assert.equal(
   // The claim itself, directly: first caller gets the banner, everyone after
   // gets false. This is the boolean the controller passes to sendPush as
   // `inboxOnly`, so it is the whole ring-or-don't decision.
-  const { claimFirstHypeNotification } = await import(
-    "../dist/services/hypeService.js"
-  );
+  const { claimFirstHypeNotification } =
+    await import("../dist/services/hypeService.js");
   assert.equal(
-    await claimFirstHypeNotification("ci-claim-a", "ci-claim-b", "post", "ctx-1"),
+    await claimFirstHypeNotification(
+      "ci-claim-a",
+      "ci-claim-b",
+      "post",
+      "ctx-1",
+    ),
     true,
     "the first claim for a pair+context rings",
   );
   assert.equal(
-    await claimFirstHypeNotification("ci-claim-a", "ci-claim-b", "post", "ctx-1"),
+    await claimFirstHypeNotification(
+      "ci-claim-a",
+      "ci-claim-b",
+      "post",
+      "ctx-1",
+    ),
     false,
     "…and every claim after it is silent",
   );
@@ -860,6 +874,68 @@ assert.equal(
   runMiddleware("/uploads/posts/ci-bob-photo.jpg").status,
   403,
   "unsigned request rejected",
+);
+
+// The hype push's banner thumbnail. The notification service extension fetches
+// this from its OWN process — no session, no API base, no auth — so the only
+// url that works there is absolute and signed, and it has to survive the very
+// middleware that guards /uploads/posts. Asserting "it looks signed" would not
+// prove that; running it back through `runMiddleware` does.
+const pushImage = await hypePushImageURL(ALICE, {
+  contextType: "post",
+  contextId: collabPost.post_id,
+});
+assert.ok(
+  pushImage?.startsWith("https://"),
+  `hype push image is absolute (got ${pushImage})`,
+);
+const pushImagePath = pushImage.slice(new URL(pushImage).origin.length);
+assert.match(
+  pushImagePath,
+  /^\/uploads\/posts\/ci-alice-collab\.jpg\?e=\d+&s=[0-9a-f]{32}$/,
+  "…and points at the post's own photo, signed",
+);
+assert.equal(
+  runMiddleware(pushImagePath).passed,
+  true,
+  "…and the extension's bare GET would actually be served",
+);
+// Visibility is the whole reason this goes through visiblePostPreviews rather
+// than a direct read: a lock screen is the worst place to leak a photo.
+//
+// It has to be proven on a post the EARN gate can't answer for, or the test
+// passes for the wrong reason — lockUnearnedPhotos withholds today's photos
+// from anyone who hasn't run, so a stranger asking about a post made today is
+// refused twice and a missing circle check looks fine. Back-dating one throwaway
+// post takes the earn gate out of the picture and leaves the circle check as
+// the only thing that can say no.
+const staleShot = await alicePost(
+  "yesterday's photo",
+  "/uploads/posts/ci-alice-stale.jpg",
+);
+await db.query(
+  `UPDATE posts SET local_date = ($2::date - INTERVAL '1 day')::date
+	 WHERE post_id = $1`,
+  [staleShot.post_id, localDate],
+);
+const staleCtx = { contextType: "post", contextId: staleShot.post_id };
+assert.ok(
+  (await hypePushImageURL(ALICE, staleCtx))?.includes("ci-alice-stale.jpg"),
+  "control: the author still gets the thumbnail for a back-dated post",
+);
+assert.equal(
+  await hypePushImageURL("ci-outsider", staleCtx),
+  null,
+  "someone who can't see the post gets no thumbnail",
+);
+await db.query(`DELETE FROM posts WHERE post_id = $1`, [staleShot.post_id]);
+assert.equal(
+  await hypePushImageURL(ALICE, {
+    contextType: "mile",
+    contextId: `${ALICE}:${localDate}`,
+  }),
+  null,
+  "a mile hype has no photo to attach",
 );
 
 // Earn-to-view gate: a viewer who hasn't run yet loses today's PHOTOS and
@@ -1066,14 +1142,16 @@ assert.equal(
 // The profile grid honours the same consent as the feed: withheld from
 // friends, never from the owner.
 assert.equal(
-  (await getUserPosts(ALICE, BOB, 20, null)).find((p) => p.post_id === post.post_id)
-    ?.route,
+  (await getUserPosts(ALICE, BOB, 20, null)).find(
+    (p) => p.post_id === post.post_id,
+  )?.route,
   null,
   "share_route_maps=false withholds the author's route from the profile grid",
 );
 assert.equal(
-  (await getUserPosts(BOB, BOB, 20, null)).find((p) => p.post_id === post.post_id)
-    ?.route?.length,
+  (await getUserPosts(BOB, BOB, 20, null)).find(
+    (p) => p.post_id === post.post_id,
+  )?.route?.length,
   3,
   "share_route_maps=false still gives the owner their grid route",
 );
@@ -2204,8 +2282,9 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     (await db.query(`SELECT 1 FROM workout_routes WHERE workout_id = $1`, [id]))
       .length;
   const stampOf = async (id) =>
-    (await db.query(`SELECT stealth FROM workouts WHERE workout_id = $1`, [id]))[0]
-      ?.stealth;
+    (
+      await db.query(`SELECT stealth FROM workouts WHERE workout_id = $1`, [id])
+    )[0]?.stealth;
 
   // 1. Open a window.
   assert.equal(await isStealthNow(SAM), false, "no window → not stealth");
@@ -2279,7 +2358,11 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
   await uploadWorkouts(SAM, [
     walk(W2, new Date(Date.now() + 5 * 60_000).toISOString(), 60),
   ]);
-  assert.notEqual(await stampOf(W2), true, "post-window workout is not stealth");
+  assert.notEqual(
+    await stampOf(W2),
+    true,
+    "post-window workout is not stealth",
+  );
   assert.equal(await routeRows(W2), 1, "…and keeps its route");
 
   // 5. Retroactive per-workout hide — owner only.
