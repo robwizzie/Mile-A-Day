@@ -217,17 +217,20 @@ struct FlameBuddyView: View {
             showsFace: showsFace,
             vigor: vigor.map { CGFloat($0) },
             gaze: gaze,
+            asleep: mood?.kind == .sleepy,
             grounded: grounded
         )
     }
 
     // MARK: - Mood: face (content clock — discrete, cheap)
 
-    /// The ordinary blink, or long sleepy lids before the day has started.
+    /// The ordinary blink. Asleep is not a blink: the sleepy mood used to be
+    /// drawn as long lids on this clock (closed 2.4 s in every 4), which is
+    /// a buddy who is AWAKE for 40% of every cycle — and the blink frame is a
+    /// squashed sliver, not a lid. Sleeping is a face the figure draws
+    /// (`asleep`), so here the sleeper simply never blinks.
     private func moodBlink(at t: TimeInterval) -> Bool {
-        if mood?.kind == .sleepy {
-            return t.truncatingRemainder(dividingBy: 4.0) < 2.4
-        }
+        if mood?.kind == .sleepy { return false }
         return Int(t * 2.0) % 9 == 0
     }
 
