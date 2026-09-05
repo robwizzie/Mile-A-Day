@@ -80,6 +80,7 @@ struct PostCardView: View {
     /// The media page on screen: the photo face's slides come first, the map
     /// face is the last page. Both the PHOTO | MAP toggle and a swipe move it.
     @State private var mediaPage = 0
+    @State private var showSplits = false
     /// The art card's ghost-map snapshot, kept for the pinch-zoom composite
     /// (same contract the map view had).
     @State private var routeArtSnapshot: RouteMapSnapshot?
@@ -634,11 +635,42 @@ struct PostCardView: View {
         .overlay(alignment: .topLeading) {
             // On EVERY face, not just the map: the flight doesn't need the map
             // showing to launch, and the chip is how people learn it exists.
-            if canPlayFlyover {
-                flyoverChip.padding(10)
+            // SPLITS sits beside it — the detail behind the numbers, on any
+            // workout that has them, indoor or out.
+            if canPlayFlyover || hasSplits {
+                HStack(spacing: 6) {
+                    if canPlayFlyover { flyoverChip }
+                    if hasSplits { splitsChip }
+                }
+                .padding(10)
             }
         }
         .overlay(HypeBurstView(trigger: hypeBurst))
+        // On the MEDIA node: the card root already owns the flyover cover
+        // and the share sheet, and two presentations on one node drop one.
+        .sheet(isPresented: $showSplits) {
+            WorkoutSplitsSheet(
+                bars: splitBars,
+                stats: post.stats_snapshot,
+                workoutType: post.workout_type,
+                isIndoor: post.is_indoor,
+                ownerName: post.is_self ? "You" : post.displayName
+            )
+        }
+    }
+
+    /// The post's per-mile splits, shaped for drawing. Empty on older servers,
+    /// stitched rollups and auto posts — the chip then simply isn't there.
+    private var splitBars: [WorkoutSplitBar] {
+        WorkoutSplitBar.bars(from: post.splits)
+    }
+
+    private var hasSplits: Bool { !splitBars.isEmpty }
+
+    private var splitsChip: some View {
+        SplitsChipButton(accent: ActivityCardView.color(post.workout_type)) {
+            showSplits = true
+        }
     }
 
     /// No media at all — the empty-state placeholder.
