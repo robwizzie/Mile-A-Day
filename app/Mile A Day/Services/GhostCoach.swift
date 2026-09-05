@@ -299,7 +299,25 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
             hasSeededProgress = true
             lastMileCompleted = Int(sample.distance)
             lastMileClock = sample.raceClock
-            lastIntervalMark = sample.distance
+            // Snapped to the interval grid, like `intervalLine` itself does:
+            // seeding at the raw distance put every later callout off-grid
+            // until the next whole mile re-anchored it.
+            let interval = Self.intervalMiles
+            lastIntervalMark = interval > 0
+                ? (sample.distance / interval).rounded(.down) * interval
+                : sample.distance
+            // Milestones already behind the runner are not news. `start()`
+            // clears `firedMilestones` (a fresh workout must get its halfway),
+            // but the coach is also started MID-RUN — relaunch recovery, a
+            // re-entered tracker — and this seed used to leave the set empty,
+            // so the first tick found "half" unfired at 0.98 mi and said
+            // "Half way to your goal." twelve strides from the finish. In a
+            // race it was worse: quarter, half and three-quarters queued up
+            // one floor-window apart.
+            for milestone in Self.milestones
+            where sample.distance >= milestone.fraction * targetDistance {
+                firedMilestones.insert(milestone.id)
+            }
             return
         }
 
