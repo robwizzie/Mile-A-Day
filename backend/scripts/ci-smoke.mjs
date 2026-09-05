@@ -45,7 +45,7 @@ const {
 } = await import("../dist/services/weeklyChallengeService.js");
 // Hype authorization is controller-level (it's where the friend/visibility
 // gate lives), so the collab assertions below drive the real handlers.
-const { sendHype, getContextHypersController } =
+const { sendHype, getContextHypersController, hypePushImageURL } =
   await import("../dist/controllers/hypeController.js");
 
 const db = PostgresService.getInstance();
@@ -771,6 +771,68 @@ assert.equal(
   runMiddleware("/uploads/posts/ci-bob-photo.jpg").status,
   403,
   "unsigned request rejected",
+);
+
+// The hype push's banner thumbnail. The notification service extension fetches
+// this from its OWN process — no session, no API base, no auth — so the only
+// url that works there is absolute and signed, and it has to survive the very
+// middleware that guards /uploads/posts. Asserting "it looks signed" would not
+// prove that; running it back through `runMiddleware` does.
+const pushImage = await hypePushImageURL(ALICE, {
+  contextType: "post",
+  contextId: collabPost.post_id,
+});
+assert.ok(
+  pushImage?.startsWith("https://"),
+  `hype push image is absolute (got ${pushImage})`,
+);
+const pushImagePath = pushImage.slice(new URL(pushImage).origin.length);
+assert.match(
+  pushImagePath,
+  /^\/uploads\/posts\/ci-alice-collab\.jpg\?e=\d+&s=[0-9a-f]{32}$/,
+  "…and points at the post's own photo, signed",
+);
+assert.equal(
+  runMiddleware(pushImagePath).passed,
+  true,
+  "…and the extension's bare GET would actually be served",
+);
+// Visibility is the whole reason this goes through visiblePostPreviews rather
+// than a direct read: a lock screen is the worst place to leak a photo.
+//
+// It has to be proven on a post the EARN gate can't answer for, or the test
+// passes for the wrong reason — lockUnearnedPhotos withholds today's photos
+// from anyone who hasn't run, so a stranger asking about a post made today is
+// refused twice and a missing circle check looks fine. Back-dating one throwaway
+// post takes the earn gate out of the picture and leaves the circle check as
+// the only thing that can say no.
+const staleShot = await alicePost(
+  "yesterday's photo",
+  "/uploads/posts/ci-alice-stale.jpg",
+);
+await db.query(
+  `UPDATE posts SET local_date = ($2::date - INTERVAL '1 day')::date
+	 WHERE post_id = $1`,
+  [staleShot.post_id, localDate],
+);
+const staleCtx = { contextType: "post", contextId: staleShot.post_id };
+assert.ok(
+  (await hypePushImageURL(ALICE, staleCtx))?.includes("ci-alice-stale.jpg"),
+  "control: the author still gets the thumbnail for a back-dated post",
+);
+assert.equal(
+  await hypePushImageURL("ci-outsider", staleCtx),
+  null,
+  "someone who can't see the post gets no thumbnail",
+);
+await db.query(`DELETE FROM posts WHERE post_id = $1`, [staleShot.post_id]);
+assert.equal(
+  await hypePushImageURL(ALICE, {
+    contextType: "mile",
+    contextId: `${ALICE}:${localDate}`,
+  }),
+  null,
+  "a mile hype has no photo to attach",
 );
 
 // Earn-to-view gate: a viewer who hasn't run yet loses today's PHOTOS and
