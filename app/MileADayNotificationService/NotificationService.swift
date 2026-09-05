@@ -47,7 +47,7 @@ class NotificationService: UNNotificationServiceExtension {
             let content,
             let url = Self.imageURL(in: request.content.userInfo)
         else {
-            contentHandler(request.content)
+            deliver(fallback: request.content)
             return
         }
 
@@ -76,17 +76,24 @@ class NotificationService: UNNotificationServiceExtension {
         deliver()
     }
 
-    /// Hands the content back EXACTLY once.
+    /// Hands the content back EXACTLY once. The ONLY door out of this class.
     ///
-    /// Both the URLSession completion and `serviceExtensionTimeWillExpire` can
-    /// reach here — a cancelled request still calls its completion — and they
-    /// arrive on different threads, so the handler is consumed under a lock.
-    /// Calling it twice is undefined behaviour; not calling it drops the
-    /// notification entirely.
-    private func deliver() {
+    /// Three callers can reach here — the URLSession completion, the no-image
+    /// early return, and `serviceExtensionTimeWillExpire` — a cancelled request
+    /// still calls its completion, and they arrive on different threads, so the
+    /// handler is consumed under a lock. Calling it twice is undefined
+    /// behaviour; not calling it drops the notification entirely. Delivering
+    /// directly from a call site instead of through here is what breaks that,
+    /// since it leaves `contentHandler` armed for a second delivery.
+    ///
+    /// `fallback` covers the one case with nothing better to send: if
+    /// `mutableCopy()` failed there is no `bestAttemptContent`, and an empty
+    /// `UNNotificationContent()` would blank a notification we were only ever
+    /// asked to decorate.
+    private func deliver(fallback: UNNotificationContent? = nil) {
         lock.lock()
         let handler = contentHandler
-        let content = bestAttemptContent
+        let content = bestAttemptContent ?? fallback
         contentHandler = nil
         lock.unlock()
         handler?(content ?? UNNotificationContent())
