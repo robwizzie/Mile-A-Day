@@ -504,8 +504,19 @@ async function isUserInQuietHours(userId: string): Promise<boolean> {
 export async function sendPush(
   userId: string,
   payload: PushPayload,
-  opts: { bypassDailyCap?: boolean } = {},
+  opts: { bypassDailyCap?: boolean; inboxOnly?: boolean } = {},
 ): Promise<void> {
+  // Record it, don't ring. For an event the user has already been told about
+  // — a re-hype of something they were pushed about before — the history is
+  // still worth keeping and the phone is not worth buzzing. Deliberately the
+  // same shape as the quiet-hours branch below, which has always stored the
+  // inbox row while withholding the banner.
+  if (opts.inboxOnly) {
+    await storeInAppNotification(userId, payload).catch((err) =>
+      console.error("[Push] inbox-only store failed:", err?.message ?? err),
+    );
+    return;
+  }
   // ONE expression for "does this push consume a unit of the 18/day budget",
   // read by every notification_log write below so the throttle check and the
   // ledger can never disagree. Two ways to not charge:

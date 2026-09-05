@@ -1128,6 +1128,55 @@ async function userHasFeedFeature(userId: string): Promise<boolean> {
  *  - social challenges are skipped for users with no accepted friends
  *  - feed challenges are skipped for users whose app build lacks the feed
  */
+/**
+ * Today's challenge, rendered for a NOTIFICATION.
+ *
+ * Exists so the daily reminder can say what the challenge actually is. It
+ * used to say nothing at all: the only pushes the challenge system has ever
+ * sent are `challenge_won` (to the winner, next morning) and the Head-to-Head
+ * `lead_change`, so unless you opened the app you never learned there was a
+ * challenge, let alone which one.
+ *
+ * Resolution is `selectChallengeForUser` — the SAME deterministic walk the
+ * dashboard uses, so the reminder cannot name one challenge and the app show
+ * another — but the stamp is deliberately NOT written here. Stamping is the
+ * record of what a user was SERVED, and a cron that stamped on their behalf
+ * would be recording a challenge they were never shown, for a day they may
+ * never open the app on. Reading without writing keeps this a description of
+ * their day rather than a decision about it.
+ *
+ * The Head-to-Head rival is likewise read from an EXISTING pin only (the
+ * reminder's own duel copy handles that case); a preview here never assigns
+ * one, so nobody is entered into a duel by a notification.
+ */
+export async function challengeForNotification(
+  userId: string,
+  localDate: string,
+): Promise<{ key: string; title: string; description: string } | null> {
+  try {
+    // A recorded completion wins over a re-pick, exactly as on the dashboard.
+    const completionRow = await getCompletionRow(userId, localDate);
+    const row = completionRow
+      ? await getChallengeRowByKey(completionRow.challenge_key)
+      : await selectChallengeForUser(userId, localDate);
+    if (!row) return null;
+    const rendered = await renderChallenge(userId, row);
+    return {
+      key: row.challenge_key,
+      title: rendered.title,
+      description: rendered.description,
+    };
+  } catch (e: any) {
+    // A reminder that can't name the challenge is still a reminder. Never let
+    // this break the send.
+    console.error(
+      "[Challenges] notification render failed:",
+      e?.message ?? e,
+    );
+    return null;
+  }
+}
+
 async function selectChallengeForUser(
   userId: string,
   localDate: string,

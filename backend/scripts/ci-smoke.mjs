@@ -45,7 +45,7 @@ const {
 } = await import("../dist/services/weeklyChallengeService.js");
 // Hype authorization is controller-level (it's where the friend/visibility
 // gate lives), so the collab assertions below drive the real handlers.
-const { sendHype, getContextHypersController, hypePushImageURL } =
+const { sendHype, getContextHypersController, removeHype, hypePushImageURL } =
   await import("../dist/controllers/hypeController.js");
 
 const db = PostgresService.getInstance();
@@ -62,6 +62,10 @@ const nowIso = new Date().toISOString();
 async function cleanup() {
   // CI always runs on a fresh database; this makes local re-runs work too.
   await db.query(`DELETE FROM hype_log WHERE sender_id LIKE 'ci-%'`);
+  // The notify claims outlive an un-hype BY DESIGN, so nothing in the product
+  // deletes them — which means the seed has to, or claims from the previous
+  // run make this file's assertions depend on how many times it has been run.
+  await db.query(`DELETE FROM hype_notify_log WHERE sender_id LIKE 'ci-%'`);
   // The route-privacy assertions block a user mid-run; a failed run must not
   // leave that block behind to poison the next one.
   await db.query(`DELETE FROM user_blocks WHERE blocker_id LIKE 'ci-%'`);
@@ -255,8 +259,9 @@ assert.equal(
   "a friend gets the author's route on the profile grid (same as the feed)",
 );
 assert.equal(
-  (await getUserPosts(BOB, BOB, 20, null)).find((p) => p.post_id === post.post_id)
-    ?.route?.length,
+  (await getUserPosts(BOB, BOB, 20, null)).find(
+    (p) => p.post_id === post.post_id,
+  )?.route?.length,
   3,
   "the owner gets their own route on their profile grid",
 );
@@ -634,6 +639,104 @@ assert.equal(
   200,
   "an author can read their own post's hypers",
 );
+// --- Un-hype, then re-hype: the banner rings ONCE ----------------------------
+//
+// Un-hyping DELETES the hype_log row, so hype_log can never answer "have we
+// already told them about this?" — a hype → un-hype → re-hype looked exactly
+// like a first hype and pushed again, and a few rounds of tapping pushed a few
+// times. `hype_notify_log` is the fact that survives the delete: one row per
+// (sender, recipient, context), never removed. CARL's hype above already
+// claimed it.
+{
+  const carlClaims = async () =>
+    (
+      await db.query(
+        `SELECT COUNT(*)::int AS n FROM hype_notify_log
+          WHERE sender_id = $1 AND recipient_id = $2 AND context_id = $3`,
+        [CARL, ALICE, collabPost.post_id],
+      )
+    )[0].n;
+  const aliceInbox = async () =>
+    (
+      await db.query(
+        `SELECT COUNT(*)::int AS n FROM in_app_notifications
+          WHERE user_id = $1 AND type = 'hype_received'`,
+        [ALICE],
+      )
+    )[0].n;
+
+  assert.equal(await carlClaims(), 1, "the first hype claims the one banner");
+  const inboxAfterFirst = await aliceInbox();
+
+  const { res: rmRes, out: rmOut } = fakeRes();
+  await removeHype(
+    { userId: CARL, body: postHypeCtx(ALICE), query: {} },
+    rmRes,
+  );
+  assert.equal(
+    rmOut.code,
+    200,
+    `un-hyping succeeds (got ${JSON.stringify(rmOut.body)})`,
+  );
+  assert.equal(
+    (
+      await db.query(
+        `SELECT COUNT(*)::int AS n FROM hype_log WHERE sender_id = $1`,
+        [CARL],
+      )
+    )[0].n,
+    0,
+    "…and really removes the hype row (which is why hype_log can't dedupe the push)",
+  );
+  assert.equal(
+    await carlClaims(),
+    1,
+    "…but the notify claim SURVIVES the un-hype",
+  );
+
+  assert.equal(
+    (await callSendHype(CARL, postHypeCtx(ALICE))).code,
+    200,
+    "re-hyping is allowed",
+  );
+  assert.equal(
+    await carlClaims(),
+    1,
+    "…and does NOT ring a second time (no second claim)",
+  );
+  // The claim itself, directly: first caller gets the banner, everyone after
+  // gets false. This is the boolean the controller passes to sendPush as
+  // `inboxOnly`, so it is the whole ring-or-don't decision.
+  const { claimFirstHypeNotification } =
+    await import("../dist/services/hypeService.js");
+  assert.equal(
+    await claimFirstHypeNotification(
+      "ci-claim-a",
+      "ci-claim-b",
+      "post",
+      "ctx-1",
+    ),
+    true,
+    "the first claim for a pair+context rings",
+  );
+  assert.equal(
+    await claimFirstHypeNotification(
+      "ci-claim-a",
+      "ci-claim-b",
+      "post",
+      "ctx-1",
+    ),
+    false,
+    "…and every claim after it is silent",
+  );
+  await db.query(`DELETE FROM hype_notify_log WHERE sender_id = 'ci-claim-a'`);
+  // Silent, not invisible: the history still records it.
+  assert.ok(
+    (await aliceInbox()) > inboxAfterFirst,
+    "…while the in-app inbox still records the re-hype",
+  );
+}
+
 assert.equal(
   (await callSendHype("ci-stranger", postHypeCtx(ALICE))).code,
   400,
@@ -1039,14 +1142,16 @@ assert.equal(
 // The profile grid honours the same consent as the feed: withheld from
 // friends, never from the owner.
 assert.equal(
-  (await getUserPosts(ALICE, BOB, 20, null)).find((p) => p.post_id === post.post_id)
-    ?.route,
+  (await getUserPosts(ALICE, BOB, 20, null)).find(
+    (p) => p.post_id === post.post_id,
+  )?.route,
   null,
   "share_route_maps=false withholds the author's route from the profile grid",
 );
 assert.equal(
-  (await getUserPosts(BOB, BOB, 20, null)).find((p) => p.post_id === post.post_id)
-    ?.route?.length,
+  (await getUserPosts(BOB, BOB, 20, null)).find(
+    (p) => p.post_id === post.post_id,
+  )?.route?.length,
   3,
   "share_route_maps=false still gives the owner their grid route",
 );
@@ -2177,8 +2282,9 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     (await db.query(`SELECT 1 FROM workout_routes WHERE workout_id = $1`, [id]))
       .length;
   const stampOf = async (id) =>
-    (await db.query(`SELECT stealth FROM workouts WHERE workout_id = $1`, [id]))[0]
-      ?.stealth;
+    (
+      await db.query(`SELECT stealth FROM workouts WHERE workout_id = $1`, [id])
+    )[0]?.stealth;
 
   // 1. Open a window.
   assert.equal(await isStealthNow(SAM), false, "no window → not stealth");
@@ -2252,7 +2358,11 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
   await uploadWorkouts(SAM, [
     walk(W2, new Date(Date.now() + 5 * 60_000).toISOString(), 60),
   ]);
-  assert.notEqual(await stampOf(W2), true, "post-window workout is not stealth");
+  assert.notEqual(
+    await stampOf(W2),
+    true,
+    "post-window workout is not stealth",
+  );
   assert.equal(await routeRows(W2), 1, "…and keeps its route");
 
   // 5. Retroactive per-workout hide — owner only.
