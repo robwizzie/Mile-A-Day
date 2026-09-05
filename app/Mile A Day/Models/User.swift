@@ -136,8 +136,15 @@ struct User: Identifiable, Codable {
             lastCompletionDate = nil
         }
         
-        // Check for milestone badges
-        checkForMilestoneBadges()
+        // NOT `checkForMilestoneBadges()`. The server awards badges and its
+        // list REPLACES this one on every refresh (`refreshBadgesFromServer`),
+        // and this local evaluator judges from local stats — `totalMiles`
+        // drifts upward, `mostMilesInOneDay` counts un-deduped walks — so it
+        // awarded medals the server hadn't. The medals card then read the
+        // persisted list on launch (67) and the server's a second later (66),
+        // every launch, because this re-awarded the extra one each time the
+        // HealthKit numbers came in. UserManager's shim already documents the
+        // evaluator as retired; this was the call that kept it alive.
     }
     
     // Legacy method for backward compatibility - now just updates daily stats
