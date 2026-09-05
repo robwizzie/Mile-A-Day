@@ -33,6 +33,14 @@ struct WorkoutPhotoImportPicker: View {
     @State private var isFetchingFull = false
     @State private var didFinish = false
 
+    /// Where the last pick landed. The picker is a fresh view every time it
+    /// is presented — the composer's "Change", the prompt's second look —
+    /// and a fresh grid opens at the top of the window, so choosing the wrong
+    /// photo meant scrolling all the way back down to try the next one.
+    /// Process-lifetime is the right scope: the window is the same walk, and
+    /// the position only matters between two opens minutes apart.
+    private static var lastPickedIdentifier: String?
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -144,20 +152,43 @@ struct WorkoutPhotoImportPicker: View {
             let spacing: CGFloat = 2
             let columnCount = 3
             let side = (geo.size.width - spacing * CGFloat(columnCount - 1)) / CGFloat(columnCount)
-            ScrollView {
-                LazyVGrid(
-                    columns: Array(
-                        repeating: GridItem(.fixed(side), spacing: spacing),
-                        count: columnCount
-                    ),
-                    spacing: spacing
-                ) {
-                    ForEach(assets, id: \.localIdentifier) { asset in
-                        AssetThumbnailView(asset: asset, side: side)
-                            .onTapGesture { select(asset) }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVGrid(
+                        columns: Array(
+                            repeating: GridItem(.fixed(side), spacing: spacing),
+                            count: columnCount
+                        ),
+                        spacing: spacing
+                    ) {
+                        ForEach(assets, id: \.localIdentifier) { asset in
+                            AssetThumbnailView(asset: asset, side: side)
+                                .onTapGesture { select(asset) }
+                        }
                     }
                 }
+                // Both hooks, because which one sees the loaded grid depends
+                // on whether the grid is in the hierarchy while the fetch
+                // runs: appear covers a grid mounted after the load, the
+                // change covers one mounted before it.
+                .onAppear { returnToLastPick(proxy) }
+                .onChange(of: isLoading) { _, _ in returnToLastPick(proxy) }
             }
+        }
+    }
+
+    /// Scroll back to the photo picked last time, centred, once the grid has
+    /// it. A photo that has since left the window (or the library) is simply
+    /// not found, and the grid stays at the top as before.
+    private func returnToLastPick(_ proxy: ScrollViewProxy) {
+        guard !isLoading,
+              let id = Self.lastPickedIdentifier,
+              assets.contains(where: { $0.localIdentifier == id })
+        else { return }
+        // Next turn: the lazy grid needs a layout pass before it can scroll
+        // to an item it has not drawn yet.
+        DispatchQueue.main.async {
+            proxy.scrollTo(id, anchor: .center)
         }
     }
 
@@ -214,6 +245,7 @@ struct WorkoutPhotoImportPicker: View {
     private func select(_ asset: PHAsset) {
         guard !isFetchingFull, !didFinish else { return }
         isFetchingFull = true
+        Self.lastPickedIdentifier = asset.localIdentifier
 
         let options = PHImageRequestOptions()
         options.deliveryMode = .highQualityFormat
