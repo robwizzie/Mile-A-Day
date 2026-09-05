@@ -1887,10 +1887,12 @@ struct WorkoutTrackingView: View {
 
     /// The third card on the activity step: do this mile WITH someone.
     ///
-    /// Featured, because it's the only option here that isn't just a HealthKit
-    /// activity type. Live "friends out right now" belongs on the Friends tab,
-    /// so the Dashboard keeps this as a generic buddy entry point plus invite
-    /// count only.
+    /// Drawn exactly like the other two. It used to be "featured" (brighter
+    /// fill, stronger stroke) on the grounds that it's the one option that
+    /// isn't a HealthKit activity type — but a highlighted third card read as
+    /// the one you were supposed to pick. Live "friends out right now" belongs
+    /// on the Friends tab, so the Dashboard keeps this as a generic buddy
+    /// entry point plus invite count only.
     ///
     /// The whole flow stays INSIDE this cover: setup sheet and lobby present
     /// over the wizard (`BuddyWizardFlowModifier` on the body), so Cancel and
@@ -1904,7 +1906,7 @@ struct WorkoutTrackingView: View {
                 leading: { optionGlyph("figure.2") },
                 title: "With a Buddy",
                 subtitle: BuddyStartPrompt.subtitle(invites: buddyService.invites),
-                featured: true,
+                featured: false,
                 badge: BuddyStartPrompt.badge(
                     invites: buddyService.invites,
                     hasStartedOnce: hasOpenedBuddyStartOnce
