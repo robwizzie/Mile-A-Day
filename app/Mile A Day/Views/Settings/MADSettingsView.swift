@@ -25,6 +25,9 @@ struct MADSettingsView: View {
 
     @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStyle.modern.rawValue
     @AppStorage(RouteSharingDefault.key) private var routeDefaultRaw = RouteSharingDefault.ask.rawValue
+    /// Same key the tracking screen's speaker button and the Ghost Race sheet
+    /// write, so all three are one switch.
+    @AppStorage(GhostCoach.enabledKey) private var coachEnabled = true
 
     @State private var activeSheet: SettingsSheet?
     @State private var showWhatsNew = false
@@ -208,6 +211,65 @@ struct MADSettingsView: View {
                     iconColor: MADTheme.Colors.warning
                 )
             }
+
+            divider
+
+            // The coach speaks on every workout, so its switch belongs on the
+            // page everyone opens — not only inside the Ghost Race sheet,
+            // which is where it used to live and which you never see on an
+            // ordinary walk.
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                // Deliberately NOT a MADSettingsRow: that row ends in a
+                // disclosure chevron, and a chevron beside a switch promises a
+                // page that isn't there. Same metrics, different ending.
+                HStack(spacing: MADTheme.Spacing.md) {
+                    ZStack {
+                        Circle()
+                            .fill(MADTheme.Colors.walkBlue.opacity(0.15))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: coachEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(MADTheme.Colors.walkBlue)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Voice Coach")
+                            .font(MADTheme.Typography.body)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+                        Text(
+                            coachEnabled
+                                ? "Calls your splits, halfway and your goal out loud"
+                                : "Silent — its lines still show on the tracking screen"
+                        )
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: $coachEnabled)
+                        .labelsHidden()
+                        .toggleStyle(SwitchToggleStyle(tint: MADTheme.Colors.madRed))
+                }
+                .padding(.vertical, MADTheme.Spacing.xs)
+                .onChange(of: coachEnabled) { _, on in
+                    MADHaptics.tap()
+                    if !on { GhostCoach.shared.silenceCurrentLine() }
+                }
+
+                // The rest of "it sounds robotic" is a download we cannot make
+                // for them: enhanced and premium voices ship from Settings,
+                // not in the app. Saying where beats leaving it unanswerable.
+                if coachEnabled, GhostCoach.usingBasicVoice {
+                    Text("Sounds robotic? Only the basic system voice is installed. Settings → Accessibility → Spoken Content → Voices adds a natural one, and the coach picks it up on its own.")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.bottom, MADTheme.Spacing.xs)
         }
     }
 

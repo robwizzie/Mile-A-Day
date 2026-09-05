@@ -137,6 +137,9 @@ struct WorkoutTrackingView: View {
     @ObservedObject private var livePresence = LivePresenceService.shared
     /// Published coach lines, echoed on screen under the delta chip.
     @ObservedObject private var coach = GhostCoach.shared
+    /// The coach's own on/off, mirrored so the in-workout speaker button and
+    /// the Settings row are the same switch rather than two that drift.
+    @AppStorage(GhostCoach.enabledKey) private var coachEnabled = true
     @State private var hypeToast: String?
     @AppStorage("hasAnsweredLivePresenceConsent") private var hasAnsweredLivePresenceConsent = false
     @State private var showPresenceConsent = false
@@ -1468,20 +1471,60 @@ struct WorkoutTrackingView: View {
             // accessibility story for it — volume down, speech unavailable, or
             // a locked screen before the `audio` background mode kicks in.
             if let line = coach.lastLine {
-                Text(line)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.75))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .padding(.horizontal, 24)
+                coachLine(line)
                     .transition(.opacity)
-                    .id(line)
             }
         }
         .animation(.spring(response: 0.3), value: locationManager.isAutoPaused)
         .animation(.spring(response: 0.3), value: locationManager.isPaused)
         .animation(.spring(response: 0.3), value: raceFinalDelta != nil)
         .animation(.easeInOut(duration: 0.25), value: coach.lastLine)
+    }
+
+    /// The coach's last line, and the only way to shut it up mid-walk.
+    ///
+    /// The coach speaks on EVERY workout — splits, the interval call, halfway,
+    /// and the goal — but its only switch used to live inside the Ghost Race
+    /// options sheet, a screen you never open on an ordinary walk. So the one
+    /// thing a person wants at the moment it talks at them ("stop") was the
+    /// one thing not on screen. It is now: the speaker sits beside the line it
+    /// just said, which is exactly where you look when it speaks.
+    ///
+    /// Muting keeps the TEXT — `GhostCoach.say` publishes the line either way
+    /// — so the button never disappears out from under someone who wants it
+    /// back, and the coach stays readable with the volume down.
+    private func coachLine(_ line: String) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Button {
+                MADHaptics.tap()
+                coachEnabled.toggle()
+                // Don't make them listen to the rest of the sentence they
+                // just muted.
+                if !coachEnabled { GhostCoach.shared.silenceCurrentLine() }
+            } label: {
+                Image(systemName: coachEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(coachEnabled ? .white.opacity(0.7) : .orange)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        Circle().fill(
+                            coachEnabled
+                                ? Color.white.opacity(0.10)
+                                : Color.orange.opacity(0.18)
+                        )
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(coachEnabled ? "Mute voice coach" : "Unmute voice coach")
+
+            Text(line)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(coachEnabled ? 0.75 : 0.5))
+                .multilineTextAlignment(.leading)
+                .lineLimit(2)
+                .id(line)
+        }
+        .padding(.horizontal, 24)
     }
 
     /// Ghost race readout: live ahead/behind while the mile is in progress,

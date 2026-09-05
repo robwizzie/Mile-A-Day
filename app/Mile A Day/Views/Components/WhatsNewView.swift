@@ -27,6 +27,85 @@ enum WhatsNewCatalog {
     /// names, no "beta"), one short line per feature.
     static let releases: [WhatsNewRelease] = [
         WhatsNewRelease(
+            id: 4,
+            versionLabel: "September 2026 Update",
+            headline: "Nobody walks alone",
+            features: [
+                WhatsNewFeature(
+                    icon: "figure.2.arms.open",
+                    title: "Buddy Walks",
+                    blurb: "Start a walk or run together, from anywhere. Everyone counts down to the same second, your miles climb side by side, and friends can join partway through.",
+                    tint: MADTheme.Colors.madRed
+                ),
+                WhatsNewFeature(
+                    icon: "person.2.fill",
+                    title: "One walk, one post",
+                    blurb: "A buddy walk goes to the feed once, with everyone's photos in the carousel and everyone's route on the map — not the same walk five times over.",
+                    tint: .purple
+                ),
+                WhatsNewFeature(
+                    icon: "scribble.variable",
+                    title: "Route Art",
+                    blurb: "Your route, drawn rather than plotted — coloured by the time of day you went out, with your miles ticked along the line.",
+                    tint: .mint
+                ),
+                WhatsNewFeature(
+                    icon: "airplane",
+                    title: "Fly your route back",
+                    blurb: "Tap Flyover on any route and watch the whole walk from above, at your pace or four times it, with your splits called out as you pass them.",
+                    tint: MADTheme.Colors.walkBlue
+                ),
+                WhatsNewFeature(
+                    icon: "stopwatch.fill",
+                    title: "Ghost races, and a voice in your ear",
+                    blurb: "Race your own best over any distance and hear where you stand without breaking stride. Mute it any time from the tracking screen.",
+                    tint: .orange
+                ),
+                WhatsNewFeature(
+                    icon: "calendar",
+                    title: "Weekly Challenges",
+                    blurb: "One theme a week, with a target sized to what you actually run — alongside the daily challenge you already know.",
+                    tint: .indigo
+                ),
+                WhatsNewFeature(
+                    icon: "trophy.fill",
+                    title: "Compete, rebuilt",
+                    blurb: "The tab now opens on what's live and what you've won, and every daily challenge shows exactly how it was completed.",
+                    tint: Color(red: 1.0, green: 0.84, blue: 0.35)
+                ),
+                WhatsNewFeature(
+                    icon: "cross.case.fill",
+                    title: "Recovery Mode",
+                    blurb: "Injured? Pause your streak instead of losing it. Your flame waits for you, bandaged, until you're ready.",
+                    tint: .teal
+                ),
+                WhatsNewFeature(
+                    icon: "pause.circle.fill",
+                    title: "Pause mid-walk",
+                    blurb: "Stop at a crossing, a shop, or a conversation. Paused time doesn't count against your pace, and it survives a locked phone.",
+                    tint: .cyan
+                ),
+                WhatsNewFeature(
+                    icon: "eye.slash.fill",
+                    title: "Stealth Mode",
+                    blurb: "Walk without recording a map at all. The mile still counts; the route is never stored, so there's nothing to share by accident.",
+                    tint: .gray
+                ),
+                WhatsNewFeature(
+                    icon: "square.grid.2x2.fill",
+                    title: "A dashboard you arrange",
+                    blurb: "Switch cards on, off, and into the order you want — so the first thing you see is the thing you actually open the app for.",
+                    tint: .pink
+                ),
+                WhatsNewFeature(
+                    icon: "fork.knife",
+                    title: "Well Earned",
+                    blurb: "A light-hearted look at the energy your walks and runs burned, in Insights. Just for fun — nothing to log and nothing to count.",
+                    tint: .green
+                ),
+            ]
+        ),
+        WhatsNewRelease(
             id: 3,
             versionLabel: "Summer 2026 Update",
             headline: "The biggest update yet",
