@@ -1,5 +1,6 @@
 import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
+import { challengeForNotification } from "./dailyChallengeService.js";
 
 const db = PostgresService.getInstance();
 
@@ -35,10 +36,39 @@ interface ReminderMatchup {
  *   from the server eliminates that race — completion state is read at fire
  *   time from the authoritative workouts table.
  */
-const GENERIC_COPY = {
+interface ReminderCopy {
+  title: string;
+  body: string;
+}
+
+const GENERIC_COPY: ReminderCopy = {
   title: "Mile still waiting…",
   body: "Don't forget to log your daily mile! Lace up and get moving.",
 };
+
+/**
+ * Today's challenge, said out loud.
+ *
+ * The challenge system has only ever pushed `challenge_won` (to the winner,
+ * the next morning) and the Head-to-Head `lead_change` — so unless you opened
+ * the app you never learned there WAS a challenge today, never mind which.
+ * The reminder already fires once, at the user's hour, only when the mile
+ * isn't done; naming the challenge there turns "go for a walk" into "here is
+ * the specific thing on offer", which is the whole point of having one.
+ *
+ * The challenge's own description is the body verbatim: it is already written
+ * for the user (the dashboard card shows exactly this string), and rewriting
+ * it here would be a second copy to drift.
+ */
+function challengeCopy(challenge: {
+  title: string;
+  description: string;
+}): ReminderCopy {
+  return {
+    title: `Today's challenge: ${challenge.title}`,
+    body: `${challenge.description} Your mile isn't done yet.`,
+  };
+}
 
 /**
  * Head-to-Head has exactly two pushes — `lead_change` when somebody overtakes
@@ -179,13 +209,20 @@ export async function sendPendingDailyReminders(): Promise<void> {
   const matchups = await matchupsFor(candidates);
 
   await Promise.all(
-    candidates.map(async ({ user_id }) => {
+    candidates.map(async ({ user_id, local_date }) => {
       try {
+        // A duel names the rival and the standing, which beats naming the
+        // challenge — it IS the challenge, said in the form that decides
+        // whether to go out. Everything else names today's challenge.
         const duel = matchups.get(user_id);
-        await sendPush(user_id, {
-          ...(duel ? duelCopy(duel) : GENERIC_COPY),
-          type: "daily_reminder",
-        });
+        let copy: ReminderCopy;
+        if (duel) {
+          copy = duelCopy(duel);
+        } else {
+          const challenge = await challengeForNotification(user_id, local_date);
+          copy = challenge ? challengeCopy(challenge) : GENERIC_COPY;
+        }
+        await sendPush(user_id, { ...copy, type: "daily_reminder" });
       } catch (err: any) {
         console.error(
           `[DailyReminder] Failed for user ${user_id}: ${err?.message ?? err}`,
