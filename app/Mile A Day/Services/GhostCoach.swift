@@ -627,14 +627,110 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         lastSpokeAt = Date()
         DispatchQueue.main.async { self.lastLine = line }
 
+        // Muted still COUNTS as delivered: the line goes on screen, the floor
+        // advances, and `hold` doesn't park it as pending. The on-screen echo
+        // is the documented half of this feature ("works with the coach
+        // switched off") — but `say` used to bail before publishing, so
+        // muting silenced the text too, and with the text gone so did the
+        // only mute button on the tracking screen. You could turn the coach
+        // off mid-walk and have no way to turn it back on.
+        guard Self.isEnabled else { return true }
+
         activateSession()
         let utterance = AVSpeechUtterance(string: line)
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        // The session is activated with `.duckOthers` one line above, and the
+        // duck ramps over ~200ms. Speaking into that ramp put the first
+        // syllable underneath whatever the user is listening to, which reads
+        // as the coach clipping its own words.
+        utterance.preUtteranceDelay = 0.2
         utterance.postUtteranceDelay = 0
-        utterance.voice = AVSpeechSynthesisVoice(language: Locale.current.identifier)
-            ?? AVSpeechSynthesisVoice(language: "en-US")
+        utterance.voice = Self.preferredVoice
         synthesizer.speak(utterance)
         return true
+    }
+
+    /// Stop mid-sentence. Muting while the coach is talking has to shut it up
+    /// NOW — waiting out the line it already started is the whole reason the
+    /// user reached for the button.
+    func silenceCurrentLine() {
+        synthesizer.stopSpeaking(at: .immediate)
+        deactivateSession()
+    }
+
+    // MARK: - Voice
+
+    /// The best voice actually installed for the user's language.
+    ///
+    /// This is what "why does it sound like a robot" was. The old line asked
+    /// for `AVSpeechSynthesisVoice(language: Locale.current.identifier)`, and
+    /// that argument is wrong twice over:
+    ///
+    ///  - `Locale.current.identifier` is an ICU identifier with an UNDERSCORE
+    ///    ("en_US"); the initialiser wants BCP-47 ("en-US"). It therefore
+    ///    returned nil on essentially every device and fell through to the
+    ///    hardcoded `en-US` — so a British or Australian user was read to in
+    ///    an American accent regardless.
+    ///  - `AVSpeechSynthesisVoice(language:)` hands back the DEFAULT-quality
+    ///    voice for that language, which is the small compact one shipped in
+    ///    the OS image. That is the flat, buzzy voice people mean by "robotic";
+    ///    the enhanced and premium voices are a different instrument.
+    ///
+    /// So: enumerate what's installed and take the best, preferring the user's
+    /// exact region and falling back to any voice in the same language.
+    /// Novelty voices (Bells, Bubbles, and friends) are excluded — they are
+    /// default-quality, so a user who installed one for fun could otherwise
+    /// have it picked as their coach — and so is Personal Voice, which is
+    /// authorization-gated and far too personal to conscript by surprise.
+    ///
+    /// Computed once per process: the list doesn't change while the app runs
+    /// unless the user leaves to download a voice, and `speechVoices()` is too
+    /// heavy to call on every line.
+    private static let preferredVoice: AVSpeechSynthesisVoice? = {
+        let language = Locale.current.language
+        let code = language.languageCode?.identifier ?? "en"
+        // `language.region.map`, NOT `region?.identifier.map` — the latter maps
+        // over the identifier's CHARACTERS and yields ["en-U", "en-S"].
+        let regional: String? = language.region.map { "\(code)-\($0.identifier)" }
+
+        func rank(_ voice: AVSpeechSynthesisVoice) -> Int {
+            switch voice.quality {
+            case .premium: return 3
+            case .enhanced: return 2
+            default: return 1
+            }
+        }
+
+        let usable = AVSpeechSynthesisVoice.speechVoices().filter {
+            !$0.voiceTraits.contains(.isNoveltyVoice)
+                && !$0.voiceTraits.contains(.isPersonalVoice)
+        }
+
+        // Exact region first ("en-GB"), then the language at large ("en-*").
+        // `identifier` breaks ties so the coach doesn't change voice between
+        // launches when two voices are equally good.
+        func best(_ matching: (AVSpeechSynthesisVoice) -> Bool) -> AVSpeechSynthesisVoice? {
+            usable.filter(matching).max { a, b in
+                if rank(a) != rank(b) { return rank(a) < rank(b) }
+                // Equal quality: the lowest identifier wins, so the coach
+                // keeps the same voice from launch to launch.
+                return a.identifier > b.identifier
+            }
+        }
+
+        if let regional, let voice = best({ $0.language == regional }) { return voice }
+        if let voice = best({ $0.language.hasPrefix(code + "-") }) { return voice }
+        // Nothing in their language at all: the system default beats silence.
+        return AVSpeechSynthesisVoice(language: "en-US")
+    }()
+
+    /// True when the OS only has the small built-in voice for this user — i.e.
+    /// when the coach is as good as code can make it and the rest is a
+    /// download. Settings uses this to say where that download lives instead
+    /// of leaving "it sounds robotic" as an unanswerable complaint.
+    static var usingBasicVoice: Bool {
+        guard let voice = preferredVoice else { return true }
+        return voice.quality == .default
     }
 
     /// Activated only around an utterance. `.duckOthers` lowers music instead
