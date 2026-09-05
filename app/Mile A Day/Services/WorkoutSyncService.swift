@@ -1315,6 +1315,17 @@ class WorkoutSyncService: ObservableObject {
     }
 
     private func activeEnergyKilocalories(for workout: HKWorkout) async -> Double {
+        let attached = await attachedActiveEnergyKilocalories(for: workout)
+        // A workout that arrived with no energy — a third-party bridge, or a
+        // phone that never granted Active Energy — used to sync as 0 kcal and
+        // stay 0 on every friend's card forever. Same estimate the cards use
+        // locally (`RunPostService.workoutCalories`), so the number a friend
+        // sees is the number the owner sees.
+        if attached > 0 { return attached }
+        return RunPostService.estimatedCalories(workout)
+    }
+
+    private func attachedActiveEnergyKilocalories(for workout: HKWorkout) async -> Double {
         if #available(iOS 18.0, *) {
             guard HKHealthStore.isHealthDataAvailable(),
                 let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)
