@@ -388,7 +388,13 @@ struct MainTabView: View {
         // One-time privacy walkthrough: first open after signing in (existing
         // users see it once after updating). Hosted at root like celebrations
         // — a sheet on a tab the user isn't looking at never appears.
-        .sheet(isPresented: $showPrivacyOnboarding) {
+        .sheet(isPresented: $showPrivacyOnboarding, onDismiss: {
+            // Now, not on Save: the Dashboard's What's New / monthly recap /
+            // style chooser all wait for this sheet to be off screen, and
+            // `onDismiss` is the one hook that fires after the animation
+            // whether it was saved or swiped away.
+            NotificationCenter.default.post(name: PrivacyOnboardingView.doneNotification, object: nil)
+        }) {
             PrivacyOnboardingView {
                 showPrivacyOnboarding = false
             }

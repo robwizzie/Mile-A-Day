@@ -776,22 +776,23 @@ struct DashboardView: View {
                 // rules as the tour — never stack on a celebration, the
                 // tracker, the first-run tour, or the pending-notifications
                 // sheet (two sheets presented together = one silently drops).
-                if WhatsNewManager.shouldAutoPresent {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                        if WhatsNewManager.shouldAutoPresent,
-                           !celebrationManager.isShowingCelebration,
-                           !showWorkoutView,
-                           !showWelcomeTour,
-                           !showPendingSheet,
-                           !showMonthlyRecap {
-                            showWhatsNew = true
-                        }
-                    }
-                }
+                maybePresentWhatsNew()
 
                 // Monthly recap ("Your July") — once per month, lowest
                 // priority of all auto-surfaces; if anything else claims
                 // this visit, it simply takes the next one.
+                maybePresentMonthlyRecap()
+                maybePresentDashboardStyleChooser()
+            }
+            // The privacy walkthrough is hosted at MainTabView ROOT and is up
+            // on the first launch after an update — the same launch every
+            // auto-surface below wants. A sheet presented from this tab while
+            // it is showing dismisses it (that is how What's New closed the
+            // privacy questions unanswered), so each of them stands down on
+            // `PrivacyOnboardingView.hasBeenSeen` and takes its turn here,
+            // once the walkthrough has actually left the screen.
+            .onReceive(NotificationCenter.default.publisher(for: PrivacyOnboardingView.doneNotification)) { _ in
+                maybePresentWhatsNew()
                 maybePresentMonthlyRecap()
                 maybePresentDashboardStyleChooser()
             }
@@ -1218,6 +1219,26 @@ struct DashboardView: View {
 
     /// Present last month's recap once per month — the least urgent of all
     /// auto-surfaces, so it yields to literally everything else on screen.
+    /// What's New, once per release — after a settle delay, and only when no
+    /// other surface owns the screen. Stands down while the root-hosted
+    /// privacy walkthrough is still pending (see the `doneNotification`
+    /// receiver), which re-runs this once that sheet is gone.
+    private func maybePresentWhatsNew() {
+        guard WhatsNewManager.shouldAutoPresent,
+              PrivacyOnboardingView.hasBeenSeen else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            if WhatsNewManager.shouldAutoPresent,
+               PrivacyOnboardingView.hasBeenSeen,
+               !celebrationManager.isShowingCelebration,
+               !showWorkoutView,
+               !showWelcomeTour,
+               !showPendingSheet,
+               !showMonthlyRecap {
+                showWhatsNew = true
+            }
+        }
+    }
+
     private func maybePresentMonthlyRecap() {
         guard !showMonthlyRecap else { return }
         guard let stats = MonthlyRecapStats.computePreviousMonth(
@@ -1227,7 +1248,8 @@ struct DashboardView: View {
         ), MonthlyRecapManager.shouldAutoPresent(stats) else { return }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            guard !celebrationManager.isShowingCelebration,
+            guard PrivacyOnboardingView.hasBeenSeen,
+                  !celebrationManager.isShowingCelebration,
                   !showWorkoutView,
                   !showWelcomeTour,
                   !showWhatsNew,
@@ -1248,6 +1270,7 @@ struct DashboardView: View {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
             guard !DashboardStylePreference.hasChosen,
+                  PrivacyOnboardingView.hasBeenSeen,
                   !celebrationManager.isShowingCelebration,
                   !showWorkoutView,
                   !showWelcomeTour,
