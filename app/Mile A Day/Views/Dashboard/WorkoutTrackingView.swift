@@ -834,6 +834,11 @@ struct WorkoutTrackingView: View {
                         .padding(.trailing, 20)
                     }
                 }
+                // Centred like a nav title, independent of the two sides'
+                // widths. The whole tracking screen sits on the one red
+                // gradient for walks AND runs, so without this nothing on it
+                // said which one was being recorded.
+                .overlay(alignment: .center) { activityChip }
                 .padding(.top, 16)
 
                 // Scrollable metrics. The inner stack is pinned to at least the
@@ -1085,6 +1090,32 @@ struct WorkoutTrackingView: View {
     /// "run"/"walk" for user-facing copy, matching the active workout type.
     private var activityNoun: String {
         selectedActivityType == .running ? "run" : "walk"
+    }
+
+    /// "RUN · OUTDOOR" in the top bar of the live screen — the same two
+    /// choices the wizard took, stated where the workout is happening. Reads
+    /// the same `selectedActivityType` every other surface does (Live
+    /// Activity, Watch, friends' presence), so it can't disagree with them.
+    private var activityChip: some View {
+        HStack(spacing: 5) {
+            Image(systemName: selectedActivityType == .running ? "figure.run" : "figure.walk")
+                .font(.system(size: 11, weight: .bold))
+            Text(selectedActivityType == .running ? "RUN" : "WALK")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .tracking(1.4)
+            Text("·")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .opacity(0.5)
+            Text(selectedLocationType == .indoor ? "INDOOR" : "OUTDOOR")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .tracking(1.4)
+                .opacity(0.8)
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(Color.white.opacity(0.14)))
+        .accessibilityElement(children: .combine)
     }
 
     private func showImportToast(_ text: String, ok: Bool) {
@@ -2154,6 +2185,16 @@ struct WorkoutTrackingView: View {
             // Restart timer and Live Activity
             startWorkoutTimer()
             startLiveActivity()
+
+            // And the friends' presence. `LivePresenceService` keeps its
+            // session id in memory only, and `tick()` returns early without
+            // one — so after a relaunch the heartbeats stopped, the server
+            // aged the session out, and the person was still walking while
+            // the Friends tab said nobody was out. Start a fresh session with
+            // the restored type; the server upserts per user.
+            livePresence.startSession(
+                workoutType: selectedActivityType == .running ? "running" : "walking"
+            )
 
             // And the coach. `GhostCoach` is a singleton whose `isActive` is a
             // process-lifetime flag, so a relaunch mid-workout came back with

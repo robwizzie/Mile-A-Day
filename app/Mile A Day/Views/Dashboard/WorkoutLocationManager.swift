@@ -1189,6 +1189,14 @@ struct InProgressWorkoutBanner: View {
         current.currentDistance
     }
 
+    /// "Run" / "Walk" — the persisted type, so the banner says WHICH workout
+    /// is in progress. It said "Workout in progress" for both, the one
+    /// mid-workout surface that didn't name the activity while the Live
+    /// Activity, the Watch and the Friends tab all did.
+    private var activityName: String {
+        current.activityType == "Running" ? "Run" : "Walk"
+    }
+
     var body: some View {
         Button(action: onResume) {
             HStack(spacing: 12) {
@@ -1214,7 +1222,7 @@ struct InProgressWorkoutBanner: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(isPaused ? "Workout paused" : "Workout in progress")
+                    Text(isPaused ? "\(activityName) paused" : "\(activityName) in progress")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundColor(.white)
