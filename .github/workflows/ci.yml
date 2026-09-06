@@ -122,6 +122,12 @@ jobs:
       # wrong topic) must never read as a dead token and wipe registrations.
       - name: APNs key + token-pruning check
         run: node scripts/push-config-check.mjs
+      # The win-back reminder: on days 7/14/30 of a quiet stretch the daily
+      # reminder swaps its copy for the gap and the friends' week. A wrong
+      # anchor (day 7 landing on day 8) or a friends query reading the wrong
+      # row direction is a plausible push nobody can tell is wrong.
+      - name: Win-back reminder check
+        run: node scripts/win-back-check.mjs
 
   website:
     name: Website (lint + build)
