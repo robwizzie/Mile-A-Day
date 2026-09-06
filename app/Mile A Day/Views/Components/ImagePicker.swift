@@ -412,6 +412,11 @@ struct BannerPhotoConfirmView: View {
                             )
                         )
                         .padding(.horizontal, MADTheme.Spacing.md)
+                        // A label on its own would be dropped: the overlaid
+                        // Image is decorative by default and Color.clear is
+                        // not an element, so there is nothing for VoiceOver to
+                        // hang it on until this makes one.
+                        .accessibilityElement()
                         .accessibilityLabel("Preview of your banner photo")
 
                     Text("Banners are cropped to a wide strip. This is the part that shows.")
