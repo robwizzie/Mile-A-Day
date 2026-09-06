@@ -68,6 +68,12 @@ struct DashboardView: View {
     @State private var showBuddyLobby = false
     @State private var activeBuddySessionId: String?
     @State private var buddyRecapSessionId: String?
+    /// Why a tapped buddy link couldn't be opened. Its own state, not
+    /// `buddyService.errorMessage`: that one is only ever RENDERED inside
+    /// `BuddyStartSheet`, which is not on screen when a push or an inbox row
+    /// is tapped — so every failure of the thing the user just tapped was
+    /// invisible, which is indistinguishable from the tap doing nothing.
+    @State private var buddyLinkError: String?
     /// Whether to show a compact "Resume workout" banner when an in‑progress workout exists
     /// but the full‑screen tracker is not currently visible.
     @State private var showInProgressBanner = false
@@ -711,6 +717,7 @@ struct DashboardView: View {
                     recapSessionId: $buddyRecapSessionId,
                     showWorkoutView: $showWorkoutView,
                     deepLinkRouter: deepLinkRouter,
+                    linkError: $buddyLinkError,
                     onPendingLink: consumePendingBuddyLink
                 )
             )
@@ -1505,9 +1512,14 @@ struct DashboardView: View {
                     // straight back into tracking — the "it made me end my
                     // mile again" bug — so land on the result instead.
                     buddyRecapSessionId = session.id
+                } else {
+                    // Joined, but there is nothing to present. Should be
+                    // unreachable (a closed session throws above), and saying
+                    // so is still better than a tap that goes nowhere.
+                    buddyLinkError = "That walk isn't open any more."
                 }
             } catch {
-                buddyService.errorMessage =
+                buddyLinkError =
                     (error as? LocalizedError)?.errorDescription
                     ?? "Couldn't open that buddy walk."
             }

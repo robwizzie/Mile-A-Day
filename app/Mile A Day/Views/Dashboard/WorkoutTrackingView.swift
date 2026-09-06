@@ -809,23 +809,19 @@ struct WorkoutTrackingView: View {
         GeometryReader { screen in
             VStack(spacing: 0) {
                 HStack {
-                    // A BARE chevron. The activity chip below is centred on the
-                    // SCREEN, independent of what either side of this row is
-                    // holding, so the label that used to sit here ("Dashboard",
-                    // ~95pt of it) ran straight into the chip's leading edge —
-                    // the two were a few points apart on a Pro Max and touching
-                    // on anything narrower. The chevron alone is the app's own
-                    // back convention and it hands the whole gap back.
                     Button(action: { dismiss() }) {
-                        Image(systemName: "chevron.left")
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
-                            .contentShape(Rectangle())
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.left")
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                            Text("Dashboard")
+                                .font(.body)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
                     }
-                    .accessibilityLabel("Back to Dashboard")
                     Spacer()
                     // Mid-run snap: see something worth keeping, capture it in
                     // one tap, keep moving — the end-of-run prompt asks whether
@@ -843,11 +839,6 @@ struct WorkoutTrackingView: View {
                         .padding(.trailing, 20)
                     }
                 }
-                // Centred like a nav title, independent of the two sides'
-                // widths. The whole tracking screen sits on the one red
-                // gradient for walks AND runs, so without this nothing on it
-                // said which one was being recorded.
-                .overlay(alignment: .center) { activityChip }
                 .padding(.top, 16)
 
                 // Scrollable metrics. The inner stack is pinned to at least the
@@ -1107,29 +1098,35 @@ struct WorkoutTrackingView: View {
         selectedActivityType == .running ? "run" : "walk"
     }
 
-    /// "RUN · OUTDOOR" in the top bar of the live screen — the same two
-    /// choices the wizard took, stated where the workout is happening. Reads
-    /// the same `selectedActivityType` every other surface does (Live
-    /// Activity, Watch, friends' presence), so it can't disagree with them.
-    private var activityChip: some View {
+    /// "RUN · OUTDOOR" — the same two choices the wizard took, stated where
+    /// the workout is happening. Reads the same `selectedActivityType` every
+    /// other surface does (Live Activity, Watch, friends' presence), so it
+    /// can't disagree with them.
+    ///
+    /// It sits in the DISTANCE caption slot and carries no chrome. It used to
+    /// be a filled capsule centred in the top bar, which is a whole row's
+    /// width of the screen's most contested space for a fact that cannot
+    /// change mid-workout — and it collided with the back button, since the
+    /// overlay was centred on the SCREEN and knew nothing about what either
+    /// side of that row was holding. The caption slot is free: it was reading
+    /// "DISTANCE" over a number with "miles" written underneath it.
+    private var activityCaption: some View {
         HStack(spacing: 5) {
             Image(systemName: selectedActivityType == .running ? "figure.run" : "figure.walk")
                 .font(.system(size: 11, weight: .bold))
+                .accessibilityHidden(true)
             Text(selectedActivityType == .running ? "RUN" : "WALK")
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
-                .tracking(1.4)
+                .tracking(1.5)
             Text("·")
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
                 .opacity(0.5)
             Text(selectedLocationType == .indoor ? "INDOOR" : "OUTDOOR")
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
-                .tracking(1.4)
-                .opacity(0.8)
+                .tracking(1.5)
+                .opacity(0.75)
         }
-        .foregroundColor(.white)
-        .padding(.horizontal, 11)
-        .padding(.vertical, 6)
-        .background(Capsule().fill(Color.white.opacity(0.14)))
+        .foregroundColor(.white.opacity(0.7))
         .accessibilityElement(children: .combine)
     }
 
@@ -1296,11 +1293,7 @@ struct WorkoutTrackingView: View {
 
     private var distanceDisplay: some View {
         VStack(spacing: 12) {
-            Text("DISTANCE")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundColor(.white.opacity(0.7))
-                .tracking(1.5)
+            activityCaption
 
             // Floored, never rounded up: a "1.00" here before the ring hits
             // 100% and the celebration fires reads as the app refusing to
