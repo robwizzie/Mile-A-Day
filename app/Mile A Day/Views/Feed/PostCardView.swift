@@ -169,7 +169,7 @@ struct PostCardView: View {
     private var headerSubtitle: String {
         var parts = [Self.activityNoun(post.workout_type, pace: post.stats_snapshot?.pace)]
         if let d = post.stats_snapshot?.distance, d > 0 {
-            parts.append(post.feed_role == "extra" ? "+\(d.milesText) mi extra" : "\(d.milesText) mi")
+            parts.append(post.feed_role == "extra" ? "+\(d.distanceFormatted) extra" : d.distanceFormatted)
         }
         parts.append(post.relativeTime)
         return parts.joined(separator: " · ")

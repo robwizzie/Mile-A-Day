@@ -168,7 +168,7 @@ struct DashboardHeroCard: View {
                     // Dimmed while the value is still last-known, not fresh.
                     .foregroundColor(.white.opacity(distanceIsFresh ? 1 : 0.45))
                     .contentTransition(.numericText())
-                Text(String(format: "of %.1f mi", goalDistance))
+                Text("of \(goalDistance.distanceFormatted1)")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
             }
@@ -258,7 +258,7 @@ struct DashboardHeroCard: View {
             return [("arrow.triangle.2.circlepath", "Syncing today", .orange)]
         }
 
-        let toGo = String(format: "%.2f mi", max(goalDistance - currentDistance, 0))
+        let toGo = "\(max(goalDistance - currentDistance, 0).distanceToGoText) \(DistanceUnits.current.abbreviation)"
         let time = formattedTimeOnly
         if time.isEmpty {
             return [("figure.run", "\(toGo) to go", statusColor)]
@@ -474,11 +474,11 @@ struct DashboardHeroCard: View {
         if trustedDone { return "Streak safe — see you tomorrow" }
         // Never do arithmetic on a number we don't trust yet.
         if !distanceIsFresh { return "Syncing today's miles…" }
-        let toGo = String(format: "%.2f", max(goalDistance - currentDistance, 0))
+        let toGo = "\(max(goalDistance - currentDistance, 0).distanceToGoText) \(DistanceUnits.current.abbreviation)"
         let time = timeRemainingText.isEmpty ? "" : formattedTimeOnly
         return time.isEmpty
-            ? "\(toGo) mi to go"
-            : "\(toGo) mi to go · \(time) left"
+            ? "\(toGo) to go"
+            : "\(toGo) to go · \(time) left"
     }
 
     private func updateTimeRemaining() {
