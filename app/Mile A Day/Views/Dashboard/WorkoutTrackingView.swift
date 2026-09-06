@@ -1289,18 +1289,18 @@ struct WorkoutTrackingView: View {
             // Floored, never rounded up: a "1.00" here before the ring hits
             // 100% and the celebration fires reads as the app refusing to
             // count a finished mile (0.995 used to render exactly that).
-            Text(currentDistance.milesText)
+            Text(currentDistance.distanceText)
                 .font(.system(size: 80, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
                 .contentTransition(.numericText())
 
-            Text("miles")
+            Text(DistanceUnits.current.plural)
                 .font(.title2)
                 .foregroundColor(.white.opacity(0.8))
 
             if startingDistance > 0 {
                 VStack(spacing: 4) {
-                    Text("Daily Total: \(totalDailyDistance.milesText) mi")
+                    Text("Daily Total: \(totalDailyDistance.distanceFormatted)")
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .foregroundColor(.white.opacity(0.6))
@@ -1733,7 +1733,7 @@ struct WorkoutTrackingView: View {
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
 
-                Text("\(startingDistance.milesText) miles reached")
+                Text("\(startingDistance.distanceText) \(DistanceUnits.current.plural) reached")
                     .font(.title3)
                     .foregroundColor(.white.opacity(0.9))
             }

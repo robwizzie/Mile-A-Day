@@ -16,6 +16,9 @@ struct PersonalizationView: View {
     @State private var referralDetail: String = ""
     @State private var selectedGoal: String?
     @State private var selectedExperience: String?
+    // Preselected from the device's measurement system, so a plain Continue
+    // keeps following the device; only a CHANGE here pins a preference.
+    @State private var selectedUnit: String? = DistanceUnit.systemDefault.rawValue
     @State private var isSubmitting = false
     @FocusState private var detailFieldFocused: Bool
 
@@ -56,6 +59,12 @@ struct PersonalizationView: View {
                         title: "How would you describe your running?",
                         options: Self.experienceOptions,
                         selection: $selectedExperience
+                    )
+
+                    section(
+                        title: "Show distances in",
+                        options: Self.unitOptions,
+                        selection: $selectedUnit
                     )
 
                     Color.clear.frame(height: 8)
@@ -210,6 +219,14 @@ struct PersonalizationView: View {
 
         let userId = userManager.currentUser.backendUserId
 
+        // Local only — display units never reach the server (storage is
+        // miles everywhere). Pin a preference only when it differs from the
+        // device; otherwise keep following the device's setting.
+        if let raw = selectedUnit, let unit = DistanceUnit(rawValue: raw),
+           unit != DistanceUnit.systemDefault {
+            DistanceUnits.current = unit
+        }
+
         Task {
             // Best-effort: never block onboarding on this optional call.
             if let userId, !userId.isEmpty {
@@ -269,6 +286,11 @@ struct PersonalizationView: View {
         PersonalizationOption(code: "race", label: "Train for a race", icon: "flag.checkered"),
         PersonalizationOption(code: "weight", label: "Get healthier", icon: "heart.fill"),
         PersonalizationOption(code: "fun", label: "Just for fun", icon: "sparkles")
+    ]
+
+    static let unitOptions: [PersonalizationOption] = [
+        PersonalizationOption(code: DistanceUnit.miles.rawValue, label: "Miles", icon: "road.lanes"),
+        PersonalizationOption(code: DistanceUnit.kilometers.rawValue, label: "Kilometers", icon: "globe.europe.africa.fill")
     ]
 
     static let experienceOptions: [PersonalizationOption] = [
