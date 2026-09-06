@@ -91,6 +91,7 @@ struct ConfettiPiece2: Identifiable {
 }
 
 struct ConfettiPieceView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let particle: ConfettiPiece2
     let screenSize: CGSize
 
@@ -136,6 +137,7 @@ struct ConfettiPieceView: View {
             withAnimation(.linear(duration: particle.duration).delay(particle.delay)) {
                 rotation = Double.random(in: 360...1080)
             }
+            guard !reduceMotion else { return }
             withAnimation(.linear(duration: particle.duration * 0.4).delay(particle.delay).repeatForever(autoreverses: false)) {
                 rotation3D = 360
             }

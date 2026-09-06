@@ -387,6 +387,7 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
                 .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Profile photo")
             .allowsHitTesting(onTapAvatar != nil)
             .overlay(alignment: .bottom) {
                 GoalRingLabel(progress: goalProgress, isComplete: goalComplete)
@@ -431,6 +432,7 @@ struct ProfileIdentityBlock: View {
                         PureFlameBadge(size: 20)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Pure Flame badge")
                 }
                 if let username, !username.isEmpty,
                    let displayName, !displayName.isEmpty, displayName != username {

@@ -9,6 +9,7 @@ import SwiftUI
 // Duolingo-inspired flame that ignites with a satisfying multi-phase animation
 
 struct FlameAnimationView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var isIgnited: Bool
     var size: CGFloat = 80
 
@@ -178,6 +179,9 @@ struct FlameAnimationView: View {
     }
 
     private func startFlickerLoop() {
+        // The reveal already played; the endless flicker is what Reduce
+        // Motion asks us to skip.
+        guard !reduceMotion else { return }
         withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
             flickerPhase = true
         }
