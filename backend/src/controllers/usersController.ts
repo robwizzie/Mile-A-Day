@@ -13,7 +13,8 @@ import {
 	updateProfileBanner,
 	updateOnboardingInfo,
 	getUserCount,
-	getPublicStreak
+	getPublicStreak,
+	searchUsers as searchUsersByName
 } from '../services/userService.js';
 
 const db = PostgresService.getInstance();
@@ -32,31 +33,12 @@ export async function getUser(req: Request, res: Response) {
 	res.json(results[0]);
 }
 
-// TODO user should be excluded from their own results
 export async function searchUsers(req: Request, res: Response) {
 	if (!hasRequiredKeys(['query'], req, res)) return;
 
 	const { query } = req.query;
-
-	// Match username OR first/last/full name. Email is intentionally NOT
-	// searchable — searching by email leaks who owns an address.
-	// Username matches rank first so an exact handle isn't buried under names.
-	// BACKWARDS COMPAT: the shipped App Store app decodes search results into a
-	// BackendUser whose `email` is a NON-optional String, so omitting the key
-	// hard-fails Codable and breaks user search. Return an empty-string email —
-	// present for the old client, no real address exposed. Drop it once the
-	// email-optional app build has fully rolled out.
-	const results = await db.query(
-		`SELECT user_id, username, first_name, last_name, bio, profile_image_url, current_streak, '' AS email
-		 FROM users
-		 WHERE username ILIKE $1
-		    OR first_name ILIKE $1
-		    OR last_name ILIKE $1
-		    OR (COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) ILIKE $1
-		 ORDER BY (username ILIKE $1) DESC, username ASC
-		 LIMIT 50`,
-		[`%${query}%`]
-	);
+	// The caller never appears in their own results — see userService.searchUsers.
+	const results = await searchUsersByName(String(query), (req as any).userId ?? null);
 
 	if (!results.length) {
 		return res.status(404).json({

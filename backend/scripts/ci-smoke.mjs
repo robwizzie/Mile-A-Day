@@ -30,6 +30,7 @@ const { signMediaUrl, verifyPostsMediaAccess, stripMediaQuery } =
 const { getNotificationPreferences, updateNotificationPreferences } =
   await import("../dist/services/notificationSettingsService.js");
 const { getFriendGhosts } = await import("../dist/services/ghostService.js");
+const { searchUsers } = await import("../dist/services/userService.js");
 const { paceReference, paceTargetSeconds } =
   await import("../dist/services/dailyChallengeService.js");
 const {
@@ -2417,6 +2418,27 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
   );
   await db.query(`DELETE FROM notification_settings WHERE user_id = $1`, [SAM]);
   await db.query(`DELETE FROM users WHERE user_id = $1`, [SAM]);
+}
+
+// --- People search never lists the caller. A results list exists to add
+// friends, and the one row that can't be tapped is you.
+{
+  const seen = (rows) => rows.map((r) => r.user_id);
+  const asAlice = seen(await searchUsers("ci_", ALICE));
+  assert.ok(asAlice.includes(BOB), "Alice's search finds Bob");
+  assert.ok(!asAlice.includes(ALICE), "…and never Alice herself");
+  const asBob = seen(await searchUsers("ci_", BOB));
+  assert.ok(asBob.includes(ALICE), "Bob's search finds Alice");
+  assert.ok(!asBob.includes(BOB), "…and never Bob himself");
+  const anonymous = seen(await searchUsers("ci_", null));
+  assert.ok(
+    anonymous.includes(ALICE) && anonymous.includes(BOB),
+    "with no caller nobody is excluded",
+  );
+  assert.ok(
+    (await searchUsers("ci_alice", BOB)).every((r) => r.email === ""),
+    "email stays present-but-empty for the shipped decoder",
+  );
 }
 
 // --- Auto posts fly. The route card published for someone who skips the
