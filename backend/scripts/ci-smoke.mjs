@@ -2439,6 +2439,8 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     (await searchUsers("ci_alice", BOB)).every((r) => r.email === ""),
     "email stays present-but-empty for the shipped decoder",
   );
+}
+
 // --- Auto posts fly. The route card published for someone who skips the
 // photo prompt used to ship NO route (its media already IS a rendered route),
 // which meant the feed's most common card could never Flyover. The chip
