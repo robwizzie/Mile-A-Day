@@ -185,6 +185,7 @@ struct StarShape: Shape {
 
 // MARK: - Shimmer Effect
 struct ShimmerEffect: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase: CGFloat = 0
 
     func body(content: Content) -> some View {
@@ -203,6 +204,7 @@ struct ShimmerEffect: ViewModifier {
                 .mask(content)
             )
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(.linear(duration: 2).repeatForever(autoreverses: false)) {
                     phase = 400
                 }
@@ -218,6 +220,7 @@ extension View {
 
 // MARK: - Pulse Glow Effect
 struct PulseGlowModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isAnimating = false
     let color: Color
     let maxScale: CGFloat
@@ -227,6 +230,7 @@ struct PulseGlowModifier: ViewModifier {
             .shadow(color: color.opacity(isAnimating ? 0.6 : 0), radius: isAnimating ? 20 : 5)
             .scaleEffect(isAnimating ? maxScale : 1)
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
                     isAnimating = true
                 }

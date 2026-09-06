@@ -974,8 +974,10 @@ struct WorkoutTrackingView: View {
                     Image(uiImage: thumb)
                         .resizable()
                         .scaledToFill()
+                        .accessibilityLabel("Photos from this workout")
                 } else {
                     Image(systemName: "photo.on.rectangle")
+                        .accessibilityLabel("Photos from this workout")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1039,6 +1041,7 @@ struct WorkoutTrackingView: View {
             showLibraryImport = true
         } label: {
             midRunCircleIcon("photo.badge.plus")
+                .accessibilityLabel("Add a photo from your library")
         }
         .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showLibraryImport) {
@@ -1134,6 +1137,7 @@ struct WorkoutTrackingView: View {
             showMidRunCamera = true
         } label: {
             midRunCircleIcon("camera.fill")
+                .accessibilityLabel("Take a photo")
         }
         .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showMidRunCamera) {

@@ -1,7 +1,10 @@
 import { PostgresService } from "./DbService.js";
 import { areFriends } from "./friendshipService.js";
 import { sendPush } from "./pushNotificationService.js";
-import { shouldSendNotification } from "./notificationSettingsService.js";
+import {
+  allowedRecipients,
+  shouldSendNotification,
+} from "./notificationSettingsService.js";
 import { CLIENT_FEATURES, userSupports } from "./clientFeatures.js";
 import { evaluateSocialBadgesForUser } from "./badgeService.js";
 import { logError } from "./errorLogService.js";
@@ -388,18 +391,21 @@ async function notifyInvitees(
     const hostName =
       hostRows[0]?.first_name || hostRows[0]?.username || "A friend";
 
-    for (const inviteeId of inviteeIds) {
-      if (!(await shouldSendNotification(inviteeId, hostUserId, "buddy"))) {
-        continue;
-      }
-      await sendPush(inviteeId, {
-        title: "Buddy Walk",
-        body: `${hostName} wants to walk with you — starting now`,
-        type: "buddy_invite",
-        category: "BUDDY_INVITE",
-        data: { session_id: sessionId, host_user_id: hostUserId },
-      });
-    }
+    // Two queries for the whole crew, then the pushes in parallel: an invite
+    // is "starting now", and a room of eight used to wait on sixteen
+    // sequential preference reads before the first one went out.
+    const recipients = await allowedRecipients(inviteeIds, hostUserId, "buddy");
+    await Promise.all(
+      recipients.map((inviteeId) =>
+        sendPush(inviteeId, {
+          title: "Buddy Walk",
+          body: `${hostName} wants to walk with you — starting now`,
+          type: "buddy_invite",
+          category: "BUDDY_INVITE",
+          data: { session_id: sessionId, host_user_id: hostUserId },
+        }),
+      ),
+    );
   } catch (err) {
     void logError("buddy", "failed to notify buddy invitees", {
       userId: hostUserId,
@@ -1129,17 +1135,21 @@ async function notifySessionStarted(
           AND ($2::text IS NULL OR user_id <> $2)`,
       [sessionId, hostUserId],
     );
-    for (const row of rows) {
-      if (!(await shouldSendNotification(row.user_id, hostUserId, "buddy"))) {
-        continue;
-      }
-      await sendPush(row.user_id, {
-        title: "Buddy Walk started",
-        body: "Your buddy walk is underway — get moving!",
-        type: "buddy_started",
-        data: { session_id: sessionId },
-      });
-    }
+    const recipients = await allowedRecipients(
+      rows.map((r) => r.user_id),
+      hostUserId,
+      "buddy",
+    );
+    await Promise.all(
+      recipients.map((userId) =>
+        sendPush(userId, {
+          title: "Buddy Walk started",
+          body: "Your buddy walk is underway — get moving!",
+          type: "buddy_started",
+          data: { session_id: sessionId },
+        }),
+      ),
+    );
   } catch (err) {
     void logError("buddy", "failed to notify session start", {
       userId: hostUserId,
