@@ -37,3 +37,7 @@ docs/superpowers/
 .codex/agents/
 .codex/hooks/
 .codex/hooks.json
+
+# Undo files written by backend/scripts/backfill-post-pace.mjs — an operator
+# artifact of a one-off rewrite, never source.
+backend/post-pace-backfill-*.json

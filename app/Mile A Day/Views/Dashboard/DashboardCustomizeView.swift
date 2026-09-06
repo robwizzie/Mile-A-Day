@@ -82,6 +82,26 @@ struct DashboardCardsBlock: View {
                     .allowsHitTesting(false)
             }
             .buttonStyle(.plain)
+        } else if weeklyChallengeService.loadFailed {
+            // A FETCH that failed is not an absence, and saying "a new one
+            // lands every Sunday" on a Sunday — with a challenge sitting on
+            // the server — is the card telling the user something untrue
+            // about their own week. Offer the retry instead.
+            Button {
+                MADHaptics.tap()
+                Task { await weeklyChallengeService.refresh() }
+            } label: {
+                DashboardQuietCard(
+                    style: style, icon: "arrow.clockwise", tint: MADTheme.Colors.madRed,
+                    title: "Couldn't load this week's challenge",
+                    subtitle: "Tap to try again.")
+            }
+            .buttonStyle(.plain)
+        } else if !weeklyChallengeService.hasLoadedOnce {
+            DashboardQuietCard(
+                style: style, icon: "calendar.badge.checkmark", tint: MADTheme.Colors.madRed,
+                title: "Loading this week's challenge…",
+                subtitle: "One moment.")
         } else {
             DashboardQuietCard(
                 style: style, icon: "calendar.badge.checkmark", tint: MADTheme.Colors.madRed,

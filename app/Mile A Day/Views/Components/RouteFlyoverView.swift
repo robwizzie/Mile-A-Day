@@ -67,11 +67,11 @@ extension FlyoverLaunch {
         guard let coords = entry.routeCoordinates, coords.count >= 2 else { return nil }
         let stats = PostStats(
             distance: (entry.distance ?? 0) > 0 ? entry.distance : nil,
-            pace: {
-                guard let divisor = entry.moving_seconds ?? entry.total_duration,
-                      divisor > 0, let d = entry.distance, d > 0 else { return nil }
-                return divisor / d
-            }(),
+            pace: DisplayPace.secondsPerMile(
+                distanceMiles: entry.distance ?? 0,
+                movingSeconds: entry.moving_seconds,
+                elapsedSeconds: entry.total_duration
+            ),
             duration: entry.total_duration,
             streak: nil, date: nil,
             calories: entry.calories, steps: entry.steps
@@ -796,13 +796,14 @@ struct RouteFlyoverPlayerView: View {
             // The odometer — the FOLLOWED track's own geographic miles (plus
             // any earlier legs of a chained tour).
             HStack(alignment: .firstTextBaseline, spacing: 7) {
-                // The stats band's own formatter (`%.2f`, rounding), NOT the
-                // tracker's floor: this number is compared against the card
-                // it was launched from, and a floor put "1.05" under a card
-                // that rounds the same 1.055 to "1.06". Mid-flight it may
-                // read a whole mile a few metres before the mark drops; the
-                // landing figure being the card's figure is what matters.
-                Text(String(format: "%.2f", odometerBase + miles))
+                // The stats band's own formatter — which is the app's floor
+                // (`milesText`) now that the band no longer rounds: this
+                // number is compared against the card it was launched from,
+                // and the two formatters put "1.04" on the map over a card
+                // reading "1.03". Mid-flight it may read a whole mile a few
+                // metres before the mark drops; the landing figure being the
+                // card's figure is what matters.
+                Text((odometerBase + miles).milesText)
                     .font(.system(size: 44, weight: .black, design: .rounded))
                     .monospacedDigit()
                     .foregroundColor(.white)

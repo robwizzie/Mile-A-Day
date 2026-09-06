@@ -22,6 +22,11 @@ struct WeeklyChallengeResponse: Codable {
     let friends: [LeaderboardEntry]
     let my_rank: Int?
     let next_challenge: NextChallenge?
+    /// How LAST week finished. Optional twice over: nil from a server that
+    /// predates the field, and nil for a user who was never served a challenge
+    /// that week — and this type is persisted as a UserDefaults blob, where a
+    /// non-optional addition throws on every existing install's snapshot.
+    let last_week: LastWeek?
 
     struct Challenge: Codable {
         let challenge_key: String
@@ -71,6 +76,28 @@ struct WeeklyChallengeResponse: Codable {
             if let first_name, !first_name.isEmpty { return first_name }
             return "Someone"
         }
+    }
+
+    /// The week just gone, as it actually finished.
+    ///
+    /// `value` is the completion's stored figure when they finished it and a
+    /// fresh measurement when they didn't — a week missed by a mile and a week
+    /// missed by fifty metres are not the same week to the person who walked
+    /// them, and the history endpoint reports NULL for both.
+    struct LastWeek: Codable {
+        let week_start: String
+        let week_end: String
+        let challenge_key: String
+        let title: String
+        let icon: String
+        let gradient_start: String
+        let gradient_end: String
+        let unit: String
+        let target: Double
+        let value: Double
+        /// 0...1, already clamped server-side.
+        let percent: Double
+        let completed: Bool
     }
 
     struct NextChallenge: Codable {

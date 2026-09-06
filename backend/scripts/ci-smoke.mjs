@@ -43,6 +43,7 @@ const {
   resolveTarget,
   evaluateWeeklyChallengeForUser,
   getWeeklyLeaderboard,
+  getWeeklyChallengeForUser,
 } = await import("../dist/services/weeklyChallengeService.js");
 // Hype authorization is controller-level (it's where the friend/visibility
 // gate lives), so the collab assertions below drive the real handlers.
@@ -2502,6 +2503,162 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
   await db.query(`DELETE FROM posts WHERE post_id = $1`, [autoPost.post_id]);
   await db.query(`DELETE FROM workout_routes WHERE workout_id = $1`, [AUTO_W]);
   await db.query(`DELETE FROM workouts WHERE workout_id = $1`, [AUTO_W]);
+}
+
+// ── moving_seconds only divides a pace when it COVERED the workout ──────────
+// `moving_seconds` is the display-pace divisor. A moving clock that witnessed
+// a fraction of the session (thin GPS, a locked phone's batched fixes, a
+// pre-fix build's flat per-segment cap) divides the WHOLE distance by that
+// fraction and prints a pace nobody walked: a 34:18 walk of 1.03 mi came back
+// carrying 523s of moving time, and every surface read "8:25 /mi" directly
+// above splits that said "33:05". Withheld server-side rather than in the app
+// so shipped builds are fixed by the deploy — falling back to elapsed is what
+// they already do for a null.
+{
+  // Two clean days of Bob's own, so each workout is its own day's anchor and
+  // the rollup can't blend the honest clock into the broken one.
+  const taken = new Set(
+    (
+      await db.query(
+        `SELECT DISTINCT local_date::text AS d FROM workouts WHERE user_id = $1`,
+        [BOB],
+      )
+    ).map((r) => r.d),
+  );
+  const freeDays = [];
+  for (let back = 1; freeDays.length < 2 && back < 60; back += 1) {
+    const d = new Date(Date.now() - back * 86400000).toISOString().slice(0, 10);
+    if (!taken.has(d)) freeDays.push(d);
+  }
+  assert.equal(freeDays.length, 2, "two unused days to seed the pace divisor on");
+
+  const at = (id, day, movingSeconds) => ({
+    workoutId: id,
+    distance: 1.0368,
+    localDate: day,
+    date: day,
+    timezoneOffset: 0,
+    workoutType: "walking",
+    deviceEndDate: `${day}T12:00:00Z`,
+    calories: 90,
+    totalDuration: 2058,
+    movingSeconds,
+    source: "healthkit",
+    splits: [],
+  });
+  await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-move-%'`);
+  await uploadWorkouts(BOB, [
+    at("ci-move-honest", freeDays[0], 1900), // a few waits at lights
+    at("ci-move-gap", freeDays[1], 523), // the witness gap that started this
+  ]);
+  // Bob's OWN feed: the camera window holds a fresh workout off other
+  // viewers' feeds, and the owner is exempt from it.
+  const rows = Object.fromEntries(
+    (await getUnifiedFeed(BOB, 200, null))
+      .filter(
+        (r) => r.kind === "workout" && String(r.workout_id).startsWith("ci-move-"),
+      )
+      .map((r) => [r.workout_id, r]),
+  );
+  assert.equal(
+    rows["ci-move-honest"]?.moving_seconds,
+    1900,
+    "a moving clock that covered the workout still divides the pace",
+  );
+  assert.equal(
+    rows["ci-move-gap"]?.moving_seconds,
+    2058,
+    "a moving clock covering a quarter of the workout is replaced by elapsed (523 here is the 8:25 /mi bug)",
+  );
+  assert.equal(
+    rows["ci-move-gap"]?.total_duration,
+    2058,
+    "…and elapsed time itself is untouched — only the divisor was ever in question",
+  );
+  await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-move-%'`);
+}
+
+// ── last_week: the week just gone, reported ON this week's payload ──────────
+// Sunday swaps the challenge for one nobody has seen. Without this the week
+// just spent left no trace on any surface a user would look at: they were told
+// what to do next without being told how the last one went. It is on the
+// weekly payload rather than the history endpoint because the two are one
+// question — and because `user_weekly_challenge_completions.final_value` is
+// NULL for every unfinished week, which makes one missed by fifty metres look
+// identical to one nobody walked.
+{
+  const WK = "ci-lastweek";
+  await db.query(`DELETE FROM user_weekly_challenge_completions WHERE user_id = $1`, [WK]);
+  await db.query(`DELETE FROM user_weekly_challenges WHERE user_id = $1`, [WK]);
+  await db.query(`DELETE FROM workouts WHERE user_id = $1`, [WK]);
+  await db.query(
+    `INSERT INTO users (user_id, email, apple_sub, username, first_name)
+     VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id) DO NOTHING`,
+    [WK, "lastweek@ci.local", "ci-sub-lastweek", "ci_lastweek", "lastweek"],
+  );
+  await db.query(
+    `INSERT INTO notification_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+    [WK],
+  );
+
+  const win = await weekWindowForUser(WK);
+  const prevStart = new Date(
+    Date.parse(`${win.weekStart}T00:00:00Z`) - 7 * 86400000,
+  )
+    .toISOString()
+    .slice(0, 10);
+
+  // Never served that week ⇒ null, not a zeroed-out card for a challenge the
+  // user was never given.
+  assert.equal(
+    (await getWeeklyChallengeForUser(WK))?.last_week ?? null,
+    null,
+    "a week the user was never served reports no result at all",
+  );
+
+  const served = await serveWeek(WK, prevStart);
+  assert.ok(served, "last week can be served");
+
+  // Missed, but not by nothing: one real walk inside that week.
+  const midWeek = new Date(Date.parse(`${prevStart}T00:00:00Z`) + 2 * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  await db.query(
+    `INSERT INTO workouts (workout_id, user_id, distance, local_date, date,
+       timezone_offset, workout_type, device_end_date, calories, total_duration)
+     VALUES ($1,$2,$3,$4::date,$4::date,0,'walking',($4 || 'T12:00:00Z')::timestamptz,80,1800)
+     ON CONFLICT (workout_id) DO NOTHING`,
+    ["ci-lastweek-walk", WK, 1.5, midWeek],
+  );
+
+  const missed = (await getWeeklyChallengeForUser(WK)).last_week;
+  assert.equal(missed.week_start, prevStart, "last_week is the week BEFORE this one");
+  assert.equal(missed.challenge_key, served.challenge.challenge_key, "…and reports what was SERVED, never a re-pick");
+  assert.equal(missed.completed, false, "an unfinished week is not completed");
+  assert.ok(
+    missed.value > 0,
+    "…and still reports how far they actually got (final_value is NULL for every missed week)",
+  );
+
+  // Finished: the value is the completion's own stored figure, not a re-measure.
+  await db.query(
+    `INSERT INTO user_weekly_challenge_completions
+       (user_id, week_start, challenge_key, target, final_value)
+     VALUES ($1,$2::date,$3,$4,$5) ON CONFLICT (user_id, week_start) DO NOTHING`,
+    [WK, prevStart, served.challenge.challenge_key, served.target, served.target + 2],
+  );
+  const done = (await getWeeklyChallengeForUser(WK)).last_week;
+  assert.equal(done.completed, true, "a completed week reads as completed");
+  assert.equal(
+    done.value,
+    served.target + 2,
+    "…and reports the figure it was awarded on, not a fresh measurement",
+  );
+  assert.equal(done.percent, 1, "percent is clamped at the target");
+
+  await db.query(`DELETE FROM user_weekly_challenge_completions WHERE user_id = $1`, [WK]);
+  await db.query(`DELETE FROM user_weekly_challenges WHERE user_id = $1`, [WK]);
+  await db.query(`DELETE FROM workouts WHERE user_id = $1`, [WK]);
 }
 
 console.log("ci-smoke: all assertions passed");

@@ -2321,6 +2321,15 @@ export const buddySessionParticipants = pgTable(
     // choice decides which instrument that phone measures with (GPS vs
     // pedometer). NULL = never chosen, which the client reads as outdoor.
     locationType: text("location_type"),
+    // The walker has MANUALLY paused (their instruction, not the tracker's
+    // movement guess — the roster must never render an auto-pause, which is a
+    // deliberately lenient chip that flaps). Written on every progress report,
+    // and reports keep flowing through a pause precisely so a paused buddy
+    // reads as paused rather than ageing into "out of range".
+    //
+    // Nullable with NO default, the additive convention here: an older client
+    // never sends the flag, and NULL is exactly the behaviour it already has.
+    isPaused: boolean("is_paused"),
     // Per-VIEWER removal of a finished walk from the history screen. Only ever
     // hides this participant's own row from their own archive — the walk
     // happened, and the other people on it keep it. Nothing is deleted, so an

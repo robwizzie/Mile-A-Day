@@ -177,6 +177,45 @@ async function testLateJoin() {
     0.6,
   );
 
+  // A MANUAL pause is a state the roster has to be able to draw, and reports
+  // keep flowing through one on purpose — otherwise a paused walker ages into
+  // "out of range" (90s), and vanishing reads as a crash rather than a break.
+  // It is the newest report that decides, never a clamp: a pause must be able
+  // to end.
+  check(
+    "nobody is paused before anybody says so",
+    participant(afterProgress, LATE)?.is_paused,
+    false,
+  );
+  // Same distance every time: the pause reports must not move the numbers a
+  // later assertion in this file is standing on.
+  await recordProgress(created.id, LATE, 0.6, 300, true);
+  check(
+    "a reported pause reaches the roster",
+    participant(await getSessionState(created.id, HOST), LATE)?.is_paused,
+    true,
+  );
+  await recordProgress(created.id, LATE, 0.6, 300, false);
+  check(
+    "...and resuming clears it",
+    participant(await getSessionState(created.id, HOST), LATE)?.is_paused,
+    false,
+  );
+  // An older client sends no flag at all. It must neither set the state nor
+  // strand it — undefined writes NULL, which reads as not paused.
+  await recordProgress(created.id, LATE, 0.6, 300);
+  check(
+    "a client that never sends the flag reads as not paused",
+    participant(await getSessionState(created.id, HOST), LATE)?.is_paused,
+    false,
+  );
+  // Pausing is not a distance event: the pooled total is exactly where it was.
+  check(
+    "...and none of it disturbed the pooled distance",
+    (await getSessionState(created.id, HOST)).group_distance_miles,
+    0.6,
+  );
+
   // Indoor vs outdoor is one person's answer about where they are: the host
   // changing their own must not disturb anybody else's.
   const afterHostChoice = await setParticipantLocationType(

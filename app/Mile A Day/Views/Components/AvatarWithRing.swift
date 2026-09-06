@@ -6,6 +6,14 @@ import SwiftUI
 ///
 /// `progress` is clamped to [0, 1]. When `progress >= 1`, the ring renders as
 /// a full solid green ring and a checkmark badge appears in the bottom-right.
+///
+/// The whole thing FITS inside `size × size`. That is not free: a stroke is
+/// centred on its path, so a ring drawn at diameter `size` puts half its width
+/// outside the declared frame, and any ancestor that clips — a ScrollView, and
+/// the buddy roster is one — shaves the arc flat along its own edge. The ring
+/// paths are inset by `ringWidth / 2` so the OUTER edge lands exactly on
+/// `size`. Anything a caller hangs off this with `.offset` still draws outside
+/// layout bounds and still needs room from its host.
 struct AvatarWithRing: View {
     let name: String
     let imageURL: String?
@@ -23,6 +31,12 @@ struct AvatarWithRing: View {
     enum Badge {
         case check        // green checkmark — goal completed
         case live         // pulsing red dot — workout in progress
+        /// Two bars — the walker has stopped ON PURPOSE. Distinct from the
+        /// dimmed-to-a-hairline treatment a host uses for someone who has gone
+        /// quiet: one says "they chose to stop", the other says "we can't hear
+        /// them", and drawing the same thing for both is what makes a break
+        /// look like a crash.
+        case paused
     }
 
     private var clamped: Double { max(0, min(1, progress)) }
@@ -34,7 +48,7 @@ struct AvatarWithRing: View {
             // is always read as a ring, not an unframed avatar.
             Circle()
                 .stroke(Color.white.opacity(0.08), lineWidth: ringWidth)
-                .frame(width: size, height: size)
+                .frame(width: size - ringWidth, height: size - ringWidth)
 
             // Progress arc
             Circle()
@@ -53,7 +67,7 @@ struct AvatarWithRing: View {
                     style: StrokeStyle(lineWidth: ringWidth, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
-                .frame(width: size, height: size)
+                .frame(width: size - ringWidth, height: size - ringWidth)
                 .animation(.spring(response: 0.6, dampingFraction: 0.85), value: clamped)
 
             AvatarView(name: name, imageURL: imageURL, size: size - (ringWidth * 2) - 4)
@@ -78,6 +92,13 @@ struct AvatarWithRing: View {
                 .foregroundColor(.white)
                 .frame(width: size * 0.32, height: size * 0.32)
                 .background(Circle().fill(Color.green))
+                .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1.5))
+        case .paused:
+            Image(systemName: "pause.fill")
+                .font(.system(size: size * 0.20, weight: .black))
+                .foregroundColor(.white)
+                .frame(width: size * 0.32, height: size * 0.32)
+                .background(Circle().fill(MADTheme.Colors.warning))
                 .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1.5))
         case .live:
             ZStack {

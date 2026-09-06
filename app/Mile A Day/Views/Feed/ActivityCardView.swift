@@ -58,12 +58,16 @@ struct ActivityCardView: View {
     }
 
     private var pace: Double? {
-        // Moving time when the tracker recorded it (additive server field),
-        // elapsed otherwise — the same fallback the server bakes into
-        // restated snapshots, so post and workout cards agree.
-        guard let divisor = entry.moving_seconds ?? entry.total_duration,
-              divisor > 0, distance > 0 else { return nil }
-        return divisor / distance
+        // Moving time when the tracker recorded it (additive server field)
+        // AND that clock covered the workout, elapsed otherwise — the same
+        // rule the server applies before serving `moving_seconds` and the
+        // one the author's own post bakes, so a card and its splits can't
+        // report two different walks.
+        DisplayPace.secondsPerMile(
+            distanceMiles: distance,
+            movingSeconds: entry.moving_seconds,
+            elapsedSeconds: entry.total_duration
+        )
     }
 
     /// Stats band input for the route slide — same band the auto post bakes

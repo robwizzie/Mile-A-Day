@@ -312,7 +312,7 @@ struct RunStatsStickerView: View, Equatable {
         Group {
             if datum.kind == .distance {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(String(format: "%.2f", input.distance))
+                    Text(input.distance.milesText)
                         .font(.system(size: 40, weight: .black, design: .rounded))
                         .foregroundColor(.white)
                         .monospacedDigit()

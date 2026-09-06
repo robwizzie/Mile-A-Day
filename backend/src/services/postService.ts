@@ -242,6 +242,44 @@ export interface StoryGroup {
 const URL_SAFE_CURSOR = (col: string) =>
   `to_char((${col}) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') || 'Z'`;
 
+/**
+ * Share of a workout's elapsed time its moving clock must account for before
+ * that clock is allowed to divide a displayed pace.
+ *
+ * The tracker records `moving_seconds` so a wait at a light doesn't drag a
+ * pace down, and every client prefers it whenever it is present. But the
+ * moving clock can only report what it WITNESSED, and a witness gap — thin
+ * GPS, a locked phone whose fixes arrive in batches, or a build carrying the
+ * old per-segment cap — leaves a real workout with a moving time covering a
+ * fraction of itself. Dividing the whole distance by that fraction prints a
+ * pace nobody walked: a 34:18 walk of 1.03 mi arrived with 8.7 minutes of
+ * moving time, and every surface read "8:25 /mi" directly above splits that
+ * said 33:05.
+ *
+ * Withholding it HERE rather than in the app is deliberate: the figure is
+ * additive and nullable by contract ("null on old rows/Watch syncs — clients
+ * fall back to total_duration"), so every shipped build is fixed by the
+ * deploy, including the ones that will never be updated. Falling back to
+ * elapsed can only ever report a pace SLOWER than the truth, which is the
+ * safe direction for a number people compare to each other.
+ *
+ * Mirrored in the app by `DisplayPace.minimumMovingCoverage` (Utils/) and by
+ * the Live Activity's own copy; the three must move together.
+ */
+const MIN_MOVING_COVERAGE = 0.5;
+
+/**
+ * `w`'s moving time when it may be believed, NULL otherwise — drop-in for a
+ * bare `<alias>.moving_seconds` anywhere a pace divides by it.
+ */
+const displayMovingSecondsSql = (w: string) => `(CASE
+		WHEN ${w}.moving_seconds > 0
+			AND ${w}.total_duration > 0
+			AND ${w}.moving_seconds <= ${w}.total_duration
+			AND ${w}.moving_seconds >= ${w}.total_duration * ${MIN_MOVING_COVERAGE}
+		THEN ${w}.moving_seconds
+	END)`;
+
 // Base post columns shared by every post-shaped read (viewer-independent).
 // The AUTHOR's route is not here because this fragment has no viewer
 // placeholder; it rides POST_SELECT (AUTHOR_ROUTE_SQL, `$1` = viewer) so every
@@ -295,7 +333,7 @@ const POST_COLUMNS = `
 				COUNT(*) FILTER (WHERE m.feed_role <> 'hidden')::int AS segment_count,
 				SUM(m.distance)::double precision AS distance,
 				SUM(m.total_duration)::double precision AS duration,
-				SUM(COALESCE(m.moving_seconds, m.total_duration))::double precision AS moving_duration
+				SUM(COALESCE(${displayMovingSecondsSql('m')}, m.total_duration))::double precision AS moving_duration
 			FROM workouts m
 			WHERE m.user_id = w_.user_id AND m.local_date = w_.local_date
 				AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
@@ -2072,7 +2110,7 @@ const FEED_ENTRY_PROJECTION = `
 			-- (rollup-aware on anchors). Null on old rows/Watch syncs — clients
 			-- fall back to total_duration.
 			CASE WHEN page.kind = 'workout'
-				THEN COALESCE(roll.moving_duration, wt.moving_seconds)::double precision END AS moving_seconds,
+				THEN COALESCE(roll.moving_duration, ${displayMovingSecondsSql('wt')})::double precision END AS moving_seconds,
 			CASE WHEN page.kind = 'workout'
 				THEN COALESCE(roll.calories, wt.calories)::double precision END AS calories,
 			CASE WHEN page.kind = 'workout'
@@ -2248,7 +2286,7 @@ const FEED_ENTRY_PROJECTION = `
 				SUM(m.total_duration)::double precision AS total_duration,
 				-- Per-row fallback to elapsed: a day mixing in-app legs (which
 				-- carry moving time) with Watch legs (which don't) still sums.
-				SUM(COALESCE(m.moving_seconds, m.total_duration))::double precision AS moving_duration,
+				SUM(COALESCE(${displayMovingSecondsSql('m')}, m.total_duration))::double precision AS moving_duration,
 				SUM(m.calories)::double precision AS calories,
 				SUM(m.steps)::int AS steps,
 				jsonb_agg(

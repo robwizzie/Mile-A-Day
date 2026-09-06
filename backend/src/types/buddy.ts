@@ -158,6 +158,13 @@ export interface BuddyParticipantView {
   duration_seconds: number;
   /** True when last_progress_at is older than BUDDY_STALE_PROGRESS_SECONDS. */
   is_stale: boolean;
+  /**
+   * The walker MANUALLY paused, and is still on the walk. Additive: false from
+   * a client that never sends the flag, which is exactly what those clients
+   * mean. Never the tracker's auto-pause GUESS — that one is deliberately
+   * lenient and flaps, and a roster badge that flickers is worse than none.
+   */
+  is_paused: boolean;
   is_host: boolean;
   place: number | null;
   final_distance_miles: number | null;
