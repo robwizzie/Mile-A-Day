@@ -483,7 +483,8 @@ const BLOCKED_VS_MULTI_COAUTHOR = `EXISTS (
  *    `share_route_maps`, then TRUE. NULL override = "follow my setting", which
  *    is every row that predates the override, so the global switch keeps
  *    covering them.
- *  - `NOT p.is_auto`: an auto card's media already IS a rendered route.
+ *  - No `is_auto` gate (same reason as AUTHOR_ROUTE_SQL): the Flyover needs
+ *    the lines even when the card's media is already a rendered route.
  *
  * Falls back to `post_coauthors.workout_id` when the post carries one (the
  * legacy accept path stamps it), so this is not buddy-only.
@@ -493,7 +494,7 @@ const BLOCKED_VS_MULTI_COAUTHOR = `EXISTS (
  */
 const CREW_ROUTE_SQL = `(
 	SELECT wr.route FROM workout_routes wr
-	WHERE p.include_route AND NOT p.is_auto
+	WHERE p.include_route
 		AND (
 			COALESCE(
 				pca.include_route,
@@ -640,14 +641,23 @@ const COAUTHOR_COLUMNS = `
 
 /**
  * The AUTHOR's own simplified route, gated exactly like the unified feed's
- * post arm: the per-post `include_route` choice, never on an auto post (its
- * media IS the baked card), and the author's global share_route_maps consent
- * — owner exempt. `$1` must be the viewer. NULL when withheld or absent, which
- * shipped clients already render as the routeless card.
+ * post arm: the per-post `include_route` choice and the author's global
+ * share_route_maps consent — owner exempt. `$1` must be the viewer. NULL
+ * when withheld or absent, which shipped clients already render as the
+ * routeless card.
+ *
+ * Auto posts (the route card published for someone who skips the photo
+ * prompt) ship their route too. They were excluded because the card's media
+ * already IS a rendered route — but the route is what the Flyover flies, so
+ * the exclusion meant the feed's most common card could never fly, and a
+ * user whose history is mostly auto posts got no Flyover anywhere on the
+ * feed after a full backfill. The client keeps the duplicate SLIDE hidden
+ * on auto posts (PostCardView.routeSlideCoordinates); it is the chip that
+ * needs the coordinates.
  */
 const AUTHOR_ROUTE_SQL = `(
 	SELECT wr.route FROM workout_routes wr
-	WHERE p.include_route AND NOT p.is_auto
+	WHERE p.include_route
 		AND (
 			COALESCE(
 				(SELECT ns.share_route_maps FROM notification_settings ns
@@ -2083,7 +2093,7 @@ const FEED_ENTRY_PROJECTION = `
 			CASE
 				WHEN page.kind = 'post' THEN (
 					SELECT wr.route FROM workout_routes wr
-					WHERE p.include_route AND NOT p.is_auto
+					WHERE p.include_route
 						AND (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
 						AND wr.workout_id = p.workout_id
 				)
