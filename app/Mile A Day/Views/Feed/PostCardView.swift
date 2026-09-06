@@ -413,6 +413,10 @@ struct PostCardView: View {
 
     /// Route slide coordinates — hidden for auto posts, whose media already IS
     /// the rendered route/stats card (a second identical slide would be noise).
+    /// The SLIDE only: the Flyover chip reads `post.routeCoordinates` directly,
+    /// so an auto card still flies — the server ships its route for exactly
+    /// that (AUTHOR_ROUTE_SQL), and a user whose history is mostly auto posts
+    /// otherwise had no Flyover anywhere on the feed.
     private var routeSlideCoordinates: [CLLocationCoordinate2D]? {
         guard post.is_auto != true else { return nil }
         return post.routeCoordinates
@@ -968,7 +972,9 @@ struct PostCardView: View {
     }
 
     private var canPlayFlyover: Bool {
-        let hasRoute = (routeSlideCoordinates?.count ?? 0) >= 2 || !companionRoutes.isEmpty
+        // The raw route, not the slide's: an auto post hides its route slide
+        // (the media is already the route) but flies like any other card.
+        let hasRoute = (post.routeCoordinates?.count ?? 0) >= 2 || !companionRoutes.isEmpty
         return hasRoute && (isMine || post.flyover_allowed != false)
     }
 

@@ -465,6 +465,7 @@ extension Color {
 // MARK: - Rarity Banner View
 
 struct RarityBannerView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let rarity: BadgeRarity
     let rarityText: String
     let rarityColor: Color
@@ -513,6 +514,7 @@ struct RarityBannerView: View {
         )
         .shadow(color: rarityColor.opacity(0.5), radius: 15, x: 0, y: 5)
         .onAppear {
+            guard !reduceMotion else { return }
             withAnimation(.linear(duration: 2).repeatForever(autoreverses: false)) {
                 shimmer = 2
             }
@@ -535,6 +537,7 @@ struct RarityBannerView: View {
 /// the center (behind the medal) and the edges so it reads as a soft halo of
 /// god-rays rather than a hard pinwheel.
 struct LightRays: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let color: Color
     var rayCount: Int = 12
 
@@ -558,6 +561,7 @@ struct LightRays: View {
             .blendMode(.screen)
             .rotationEffect(.degrees(angle))
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(.linear(duration: 18).repeatForever(autoreverses: false)) {
                     angle = 360
                 }
@@ -615,6 +619,7 @@ struct ConfettiParticle: Identifiable {
 }
 
 struct ConfettiPiece: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let particle: ConfettiParticle
     let screenHeight: CGFloat
     
@@ -634,6 +639,7 @@ struct ConfettiPiece: View {
                     offset = screenHeight + 100
                     opacity = 0
                 }
+                guard !reduceMotion else { return }
                 withAnimation(.linear(duration: particle.duration).delay(particle.delay).repeatForever(autoreverses: false)) {
                     currentRotation = particle.rotation + 720
                 }
