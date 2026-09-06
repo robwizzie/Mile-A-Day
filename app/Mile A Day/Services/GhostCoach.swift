@@ -214,6 +214,17 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         /// The distance the goal is stated over. Defaults to the mile so every
         /// existing caller keeps its meaning.
         var targetDistance: Double = 1.0
+        /// Miles toward the DAY'S GOAL — this walk plus everything already
+        /// banked today, the figure the ring and the Live Activity's "Daily:"
+        /// line both show. Nil falls back to `distance`, which is only ever
+        /// right on a day whose first workout this is.
+        ///
+        /// It exists because "your goal" is a statement about the DAY and
+        /// every other number here is about this workout. Measuring the goal
+        /// against the workout told someone who had already banked 0.52 mi,
+        /// and had just crossed the mile on their second walk, that they were
+        /// "half way to your goal" — over a ring reading 100%.
+        var goalProgress: Double?
 
         init(
             distance: Double,
@@ -221,7 +232,8 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
             delta: TimeInterval?,
             ghostSeconds: Double?,
             recentPace: Double?,
-            targetDistance: Double = 1.0
+            targetDistance: Double = 1.0,
+            goalProgress: Double? = nil
         ) {
             self.distance = distance
             self.raceClock = raceClock
@@ -229,6 +241,7 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
             self.ghostSeconds = ghostSeconds
             self.recentPace = recentPace
             self.targetDistance = targetDistance
+            self.goalProgress = goalProgress
         }
 
         /// Seconds per mile needed over what's left to finish level with the
@@ -314,8 +327,13 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
             // "Half way to your goal." twelve strides from the finish. In a
             // race it was worse: quarter, half and three-quarters queued up
             // one floor-window apart.
+            // Measured the same way the lines are: a walk started on a day
+            // whose goal is ALREADY met seeds every milestone as behind, and
+            // the coach says nothing about a goal there is nothing left to
+            // say about.
+            let seedMeasure = goalMeasure(sample)
             for milestone in Self.milestones
-            where sample.distance >= milestone.fraction * targetDistance {
+            where seedMeasure >= milestone.fraction * targetDistance {
                 firedMilestones.insert(milestone.id)
             }
             return
@@ -415,13 +433,25 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         return "Mile \(mile). \(clockText(split)). Average \(paceText(average))."
     }
 
+    /// What the milestones are measured against.
+    ///
+    /// A RACE is run over this workout, so its fractions are the workout's.
+    /// The day's goal is not: it is a fact about the whole day, and the walk
+    /// in progress may be the second or third of them. Reading the workout
+    /// there is what made "half way to your goal" arrive on a day already
+    /// past its mile.
+    private func goalMeasure(_ sample: Sample) -> Double {
+        targetIsExplicit ? sample.distance : (sample.goalProgress ?? sample.distance)
+    }
+
     /// Quarter / half / three-quarter / last stretch, as fractions of the
     /// target. Only the halfway line fires when there's no ghost — the others
     /// are race furniture, and a plain run doesn't need a countdown.
     private func milestoneLine(_ sample: Sample) -> String? {
+        let measure = goalMeasure(sample)
         for milestone in Self.milestones {
             let at = milestone.fraction * targetDistance
-            guard sample.distance >= at else { continue }
+            guard measure >= at else { continue }
             guard !firedMilestones.contains(milestone.id) else { continue }
             guard isRacing || milestone.id == "half" else { continue }
             firedMilestones.insert(milestone.id)

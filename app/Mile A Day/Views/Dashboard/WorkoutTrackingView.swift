@@ -2684,7 +2684,12 @@ struct WorkoutTrackingView: View {
                     delta: raceDeltaSeconds,
                     ghostSeconds: raceGhost?.seconds,
                     recentPace: locationManager.recentPaceSecondsPerMile,
-                    targetDistance: coachTargetDistance
+                    targetDistance: coachTargetDistance,
+                    // The DAY's miles, not this walk's — the same figure the
+                    // ring fills with and the Live Activity prints as
+                    // "Daily:". Only the goal milestones read it; splits,
+                    // intervals, pace and the race stay on this workout.
+                    goalProgress: totalDailyDistance
                 )
             )
             // Foreground heartbeat driver (self-throttled to ~45s). The

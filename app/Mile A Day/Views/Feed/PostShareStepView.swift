@@ -75,6 +75,9 @@ struct PostShareStepView: View {
                         if vm.hasRoute { routeToggle }
                     }
 
+                    if let notice = vm.crewHandoffNotice {
+                        ComposerNoticeBanner(text: notice)
+                    }
                     if let error = vm.errorMessage {
                         Text(error)
                             .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -97,7 +100,11 @@ struct PostShareStepView: View {
                 if vm.isPublishing {
                     ProgressView().tint(.white)
                 } else {
-                    Button("Share", action: onShare)
+                    // The button names what it does. "Share" on a screen whose
+                    // every other control has just disappeared (no caption, no
+                    // destination, no route) reads as the same failed action
+                    // being offered a second time.
+                    Button(vm.isCrewPhoto ? "Add photo" : "Share", action: onShare)
                         .fontWeight(.bold)
                         .foregroundColor(shareEnabled
                             ? MADTheme.Colors.madRed : .white.opacity(0.3))

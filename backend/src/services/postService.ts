@@ -815,8 +815,16 @@ async function buddyWalkPostForWorkout(
   userId: string,
   workoutId: string,
   declaredSessionId: string | null,
-): Promise<{ post_id: string; buddy_session_id: string } | null> {
-  const rows = await db.query<{ post_id: string; buddy_session_id: string }>(
+): Promise<{
+  post_id: string;
+  user_id: string;
+  buddy_session_id: string;
+} | null> {
+  const rows = await db.query<{
+    post_id: string;
+    user_id: string;
+    buddy_session_id: string;
+  }>(
     `WITH session AS (
 			SELECT bsp.session_id AS id
 			  FROM buddy_session_participants bsp
@@ -842,12 +850,20 @@ async function buddyWalkPostForWorkout(
 			          s.started_at DESC
 			 LIMIT 1
 		)
-		SELECT p.post_id, session.id AS buddy_session_id
+		SELECT p.post_id, p.user_id, session.id AS buddy_session_id
 		  FROM session
 		  JOIN posts p
 		    ON p.deleted_at IS NULL
 		   AND p.share_to_feed
-		   AND p.user_id <> $1::varchar
+		   -- Excluded by WORKOUT, not by author. It used to be
+		   -- p.user_id <> $1, which let the walk's own author post a SECOND
+		   -- card from another leg of it: a mile walked in two goes gave them
+		   -- an un-posted workout, the feed FAB offered it, and one walk got
+		   -- two cards — the exact outcome this rule exists to prevent, just
+		   -- reached from the inside. The only post that must be invisible
+		   -- here is the one for THIS workout, because replacing that one is
+		   -- the upsert path (ON CONFLICT on workout_id), not a second card.
+		   AND p.workout_id IS DISTINCT FROM $2::varchar
 		   AND (
 		         p.buddy_session_id = session.id
 		      OR EXISTS (
@@ -984,6 +1000,12 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       // The client is meant to add a crew photo to THIS post instead.
       err.postId = existingWalkPost.post_id;
       err.buddySessionId = existingWalkPost.buddy_session_id;
+      // Whose card it is decides what the app can offer. Someone ELSE's and
+      // this user has a `post_coauthors` row on it, so their photo can join
+      // it as a slide. Their OWN and they have no such row — the author is
+      // credited by identity, never by a coauthor row — so the only honest
+      // line is that this walk is already shared.
+      err.mine = existingWalkPost.user_id === input.userId;
       throw err;
     }
   }
