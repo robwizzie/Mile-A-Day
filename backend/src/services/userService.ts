@@ -143,6 +143,34 @@ export async function updateOnboardingInfo({
 	return { success: true };
 }
 
+/**
+ * People search by handle or name. Email is deliberately NOT searchable —
+ * searching by email leaks who owns an address. Username matches rank first
+ * so an exact handle isn't buried under names. The caller is excluded: the
+ * only thing "you" can mean in a results list built for adding friends is a
+ * row that can't be tapped.
+ *
+ * BACKWARDS COMPAT: the shipped App Store app decodes search results into a
+ * BackendUser whose `email` is a NON-optional String, so omitting the key
+ * hard-fails Codable and breaks user search. Return an empty-string email —
+ * present for the old client, no real address exposed. Drop it once the
+ * email-optional app build has fully rolled out.
+ */
+export async function searchUsers(query: string, callerId: string | null) {
+	return db.query(
+		`SELECT user_id, username, first_name, last_name, bio, profile_image_url, current_streak, '' AS email
+		 FROM users
+		 WHERE (username ILIKE $1
+		    OR first_name ILIKE $1
+		    OR last_name ILIKE $1
+		    OR (COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) ILIKE $1)
+		   AND ($2::text IS NULL OR user_id <> $2::text)
+		 ORDER BY (username ILIKE $1) DESC, username ASC
+		 LIMIT 50`,
+		[`%${query}%`, callerId]
+	);
+}
+
 export async function checkUsernameAvailability(username: string): Promise<boolean> {
 	// Drizzle ORM equivalent of `SELECT user_id FROM users WHERE username = $1`.
 	const existingUser = await orm.select({ userId: schema.users.userId }).from(schema.users).where(eq(schema.users.username, username));

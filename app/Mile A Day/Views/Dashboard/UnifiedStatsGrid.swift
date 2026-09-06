@@ -40,18 +40,18 @@ struct UnifiedStatsGrid: View {
 
     var formattedFastestPace: String {
         if statsType == .allTime {
-            let pace = bestAllTimeFastestPace
+            let pace = bestAllTimeFastestPace.pacePerDisplayUnit
             if pace > 0 {
                 let minutes = Int(pace)
                 let seconds = Int((pace - Double(minutes)) * 60)
-                return String(format: "%d:%02d /mi", minutes, seconds)
+                return String(format: "%d:%02d %@", minutes, seconds, DistanceUnits.current.paceSuffix)
             }
         } else {
             if statsData.fastestPace > 0 {
-                let totalMinutes = statsData.fastestPace
+                let totalMinutes = statsData.fastestPace.pacePerDisplayUnit
                 let minutes = Int(totalMinutes)
                 let seconds = Int((totalMinutes - Double(minutes)) * 60)
-                return String(format: "%d:%02d /mi", minutes, seconds)
+                return String(format: "%d:%02d %@", minutes, seconds, DistanceUnits.current.paceSuffix)
             }
         }
         return "Not yet recorded"
@@ -142,11 +142,11 @@ struct UnifiedStatsGrid: View {
                     statsCard(
                         icon: "map.fill",
                         iconColor: .blue,
-                        title: statsType == .allTime ? "Total Miles" : "Streak Miles",
+                        title: statsType == .allTime ? "Total Distance" : "Streak Distance",
                         isLoading: isCalculating && statsType == .currentStreak && !hasLoadedOnce,
-                        value: String(format: "%.1f mi", totalMiles),
+                        value: totalMiles.distanceFormatted1,
                         subtitle: streakDays > 0 && statsType == .currentStreak
-                            ? String(format: "%.1f avg/day", avgMilesPerDay)
+                            ? String(format: "%.1f avg/day", avgMilesPerDay.inDisplayUnit)
                             : (statsType == .allTime ? "All time" : " "),
                         subtitleColor: .blue
                     )
@@ -179,7 +179,7 @@ struct UnifiedStatsGrid: View {
                         iconColor: .purple,
                         title: "Most in One Day",
                         isLoading: isCalculating && statsType == .currentStreak && !hasLoadedOnce,
-                        value: String(format: "%.1f mi", mostMiles),
+                        value: mostMiles.distanceFormatted1,
                         subtitle: statsType == .allTime ? "All time" : "Current streak",
                         subtitleColor: .purple
                     )
@@ -217,9 +217,9 @@ struct UnifiedStatsGrid: View {
                     statsCard(
                         icon: "map.fill",
                         iconColor: .red,
-                        title: "Total Miles",
+                        title: "Total Distance",
                         isLoading: false,
-                        value: String(format: "%.1f mi", user.totalMiles),
+                        value: user.totalMiles.distanceFormatted1,
                         subtitle: "Lifetime",
                         subtitleColor: .red
                     )
@@ -230,7 +230,7 @@ struct UnifiedStatsGrid: View {
                         iconColor: .cyan,
                         title: "Avg Per Day",
                         isLoading: isCalculating && !hasLoadedOnce,
-                        value: String(format: "%.2f mi", avgMilesPerDay),
+                        value: avgMilesPerDay.distanceFormatted,
                         subtitle: "Current streak",
                         subtitleColor: .cyan
                     )

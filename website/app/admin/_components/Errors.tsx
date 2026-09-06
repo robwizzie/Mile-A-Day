@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Card, getData, Loading } from "./lib";
+import { Card, fmtDateTime, getData, Loading } from "./lib";
 
 type ErrorRow = {
   id: string;
@@ -307,6 +307,131 @@ function ErrorChart({
 
 /** Which user each error is attached to (for push errors that's the
  *  recipient). Click a user to load and inspect their individual errors. */
+
+type CronJob = {
+  job: string;
+  ok: boolean;
+  at: string;
+  ms: number;
+  error?: string;
+  failures: number;
+};
+type CronStatus = { booted_at: string; jobs: CronJob[] };
+
+/** "3m ago" for a timestamp that is minutes old — relativeDay is day-grained. */
+function ago(iso: string): string {
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86_400)}d ago`;
+}
+
+/**
+ * Every scheduled job's last run since the server booted. A job that has
+ * never appeared here since boot hasn't had its turn yet — the hourly ones
+ * show within the hour, the 9 AM batch only after 9 AM ET. A failed row is
+ * the same failure the chart above counts under "cron" and the push the
+ * admin phones got.
+ */
+function CronPanel() {
+  const [status, setStatus] = useState<CronStatus | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = useCallback(() => {
+    getData<CronStatus>("cron")
+      .then(setStatus)
+      .catch((e) => {
+        if (e?.message !== "unauthorized") setErr("Failed to load job status.");
+      });
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const failing = status?.jobs.filter((j) => !j.ok).length ?? 0;
+  return (
+    <Card
+      title="Scheduled jobs"
+      hint={
+        status
+          ? `Last run per job since the server booted ${fmtDateTime(status.booted_at)}. A failure here is logged under "cron" above and pushed to admin accounts (once per job per six hours).`
+          : undefined
+      }
+      actions={
+        <button
+          onClick={load}
+          className="rounded-md border border-white/10 px-2 py-1 text-xs text-white/60 hover:text-white"
+        >
+          Refresh
+        </button>
+      }
+    >
+      {err ? (
+        <p className="text-sm text-white/40">{err}</p>
+      ) : !status ? (
+        <Loading />
+      ) : status.jobs.length === 0 ? (
+        <p className="text-sm text-white/40">
+          No job has run since boot yet — the every-minute drain shows first.
+        </p>
+      ) : (
+        <>
+          <p className="mb-3 text-xs text-white/50">
+            {status.jobs.length} job{status.jobs.length === 1 ? "" : "s"} seen ·{" "}
+            {failing === 0 ? (
+              <span className="text-[#33b34d]">all passing on their last run</span>
+            ) : (
+              <span className="text-[#d94059]">
+                {failing} failing on their last run
+              </span>
+            )}
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs text-white/40">
+                <tr>
+                  <th className="py-1 pr-3 font-medium">Job</th>
+                  <th className="py-1 pr-3 font-medium">Last run</th>
+                  <th className="py-1 pr-3 font-medium">Took</th>
+                  <th className="py-1 pr-3 font-medium">Failures</th>
+                  <th className="py-1 font-medium">Last error</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {status.jobs.map((j) => (
+                  <tr key={j.job}>
+                    <td className="py-1.5 pr-3 font-mono text-xs text-white/80">
+                      <span
+                        className={`mr-2 inline-block h-2 w-2 rounded-full ${j.ok ? "bg-[#33b34d]" : "bg-[#d94059]"}`}
+                        aria-label={j.ok ? "passed" : "failed"}
+                      />
+                      {j.job}
+                    </td>
+                    <td className="py-1.5 pr-3 whitespace-nowrap text-white/60">
+                      {ago(j.at)}
+                    </td>
+                    <td className="py-1.5 pr-3 whitespace-nowrap text-white/60">
+                      {j.ms < 1000 ? `${j.ms} ms` : `${(j.ms / 1000).toFixed(1)} s`}
+                    </td>
+                    <td className="py-1.5 pr-3 text-white/60">{j.failures}</td>
+                    <td className="py-1.5 text-xs text-white/50">
+                      {j.error ? (
+                        <span className="text-[#d94059]/90">{j.error}</span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
 export function ErrorsTab() {
   const [users, setUsers] = useState<UserErrorRow[] | null>(null);
   const [series, setSeries] = useState<ErrorTimeseriesRow[]>([]);
@@ -371,6 +496,8 @@ export function ErrorsTab() {
         groupBy={groupBy}
         onGroupByChange={setGroupBy}
       />
+
+      <CronPanel />
 
       <Card
         title="Errors by user"

@@ -3,6 +3,7 @@ import {
   resolveDueMatchups,
   notifyPendingWinners,
 } from "../services/h2hMatchupService.js";
+import { runJob } from "./cronRunner.js";
 
 /**
  * Head-to-Head daily-challenge lifecycle:
@@ -16,16 +17,8 @@ import {
  */
 export function startH2hChallengeCron(): void {
   cron.schedule("20 * * * *", async () => {
-    try {
-      await resolveDueMatchups();
-    } catch (error: any) {
-      console.error("[CRON] Error resolving H2H matchups:", error.message);
-    }
-    try {
-      await notifyPendingWinners();
-    } catch (error: any) {
-      console.error("[CRON] Error notifying H2H winners:", error.message);
-    }
+    await runJob("h2h.resolve_due", resolveDueMatchups);
+    await runJob("h2h.notify_winners", notifyPendingWinners);
   });
 
   console.log("H2H challenge cron scheduled (hourly resolve + winner notify).");

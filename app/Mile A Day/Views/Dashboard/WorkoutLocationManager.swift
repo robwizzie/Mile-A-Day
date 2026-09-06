@@ -732,6 +732,28 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // forward and beat the presence heartbeat (both self-throttled).
         armTrackingWatchdog()
         LivePresenceService.shared.tick()
+        reportBuddyProgress()
+    }
+
+    /// Buddy Walk progress from the DATA callbacks, not the view timer.
+    ///
+    /// The tracker's 1 Hz tick is the only thing that used to call
+    /// `reportProgress`, and that timer suspends the moment the phone locks
+    /// — i.e. for the whole of a real walk. Every friend's roster then showed
+    /// this person frozen at the distance they had when they pocketed the
+    /// phone, "stale" after 90s, and the pooled goal stopped moving. The
+    /// location/pedometer callbacks keep firing under the `location`
+    /// background mode, so the report rides them (self-throttled to 5s in the
+    /// service; a no-op outside a buddy walk).
+    private func reportBuddyProgress() {
+        let distance = liveDistance
+        let paused = pausedSeconds
+        Task { @MainActor in
+            BuddySessionService.shared.reportProgressFromCallback(
+                distanceMiles: distance,
+                pausedSeconds: paused
+            )
+        }
     }
 
     /// Single entry point for outdoor pedometer readings (live stream +
@@ -913,6 +935,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // Presence heartbeat rides the same callback: view timers suspend in
         // the background, delegate callbacks don't. Self-throttled to ~45s.
         LivePresenceService.shared.tick()
+        reportBuddyProgress()
 
         // In pedometer mode location is only a background keep-alive —
         // distance comes from CMPedometer and there's no meaningful route.

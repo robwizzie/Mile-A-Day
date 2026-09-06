@@ -874,6 +874,9 @@ struct WorkoutTrackingView: View {
                             BuddyMidWalkJoinStrip { sessionId in
                                 adoptedBuddySessionId = sessionId
                                 onBuddySessionAdopted?(sessionId)
+                                // The workout is already persisted without a
+                                // room; stamp it so a relaunch rejoins.
+                                InProgressWorkoutStore.setBuddySession(sessionId)
                             }
                             .padding(.horizontal, 20)
                         }
@@ -1293,18 +1296,18 @@ struct WorkoutTrackingView: View {
             // Floored, never rounded up: a "1.00" here before the ring hits
             // 100% and the celebration fires reads as the app refusing to
             // count a finished mile (0.995 used to render exactly that).
-            Text(currentDistance.milesText)
+            Text(currentDistance.distanceText)
                 .font(.system(size: 80, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
                 .contentTransition(.numericText())
 
-            Text("miles")
+            Text(DistanceUnits.current.plural)
                 .font(.title2)
                 .foregroundColor(.white.opacity(0.8))
 
             if startingDistance > 0 {
                 VStack(spacing: 4) {
-                    Text("Daily Total: \(totalDailyDistance.milesText) mi")
+                    Text("Daily Total: \(totalDailyDistance.distanceFormatted)")
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .foregroundColor(.white.opacity(0.6))
@@ -1737,7 +1740,7 @@ struct WorkoutTrackingView: View {
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
 
-                Text("\(startingDistance.milesText) miles reached")
+                Text("\(startingDistance.distanceText) \(DistanceUnits.current.plural) reached")
                     .font(.title3)
                     .foregroundColor(.white.opacity(0.9))
             }
@@ -2108,6 +2111,20 @@ struct WorkoutTrackingView: View {
             if startBuddyWorkoutIfReady() { return }
 
             guard let saved = InProgressWorkoutStore.load(), saved.isActive else { return }
+
+            // Buddy walk: the room rides the persisted workout. Re-adopt it
+            // before anything below starts reporting, and ask the server for
+            // the session — `BuddySessionService.session` is in-memory only,
+            // so after a relaunch every progress report was a no-op and the
+            // finish never reached the server (the walk stayed `active` for
+            // the whole crew until the sweep).
+            if effectiveBuddySessionId == nil, let restoredSession = saved.buddySessionId {
+                adoptedBuddySessionId = restoredSession
+                onBuddySessionAdopted?(restoredSession)
+                Task { @MainActor in
+                    await BuddySessionService.shared.refreshMySessions()
+                }
+            }
 
             // Restore core state. The clock is settled AFTER tracking restarts
             // below, once `pausedSeconds` has been rehydrated — computing it
@@ -2599,7 +2616,9 @@ struct WorkoutTrackingView: View {
             isUsingPedometer: selectedLocationType == .indoor,
             liveActivityID: nil,
             // Latched at START (see InProgressWorkoutState.stealth).
-            stealth: StealthModeStore.shared.isOn ? true : nil
+            stealth: StealthModeStore.shared.isOn ? true : nil,
+            // The room this workout belongs to, so a relaunch rejoins it.
+            buddySessionId: effectiveBuddySessionId
         )
         InProgressWorkoutStore.save(initialState)
 

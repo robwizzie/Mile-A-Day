@@ -122,7 +122,37 @@ struct BuddyRecapView: View {
                     }
                 }
         )
-        .task { await load() }
+        .task {
+            await load()
+            // A friend can still be out when YOUR recap opens (it opens on
+            // your own Finish). Keep re-reading while the session is active
+            // so the standings settle on this screen instead of freezing at
+            // "too close to call" with a winner the server picked a minute
+            // later. Cancelled with the sheet.
+            while !Task.isCancelled, recap?.session.status == .active {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                if Task.isCancelled { return }
+                await load(showSpinner: false)
+            }
+        }
+    }
+
+    /// Crew members still moving — the recap is honest about them rather
+    /// than ranking a walk that isn't over.
+    private func stillOutNames(_ session: BuddySessionState) -> [String] {
+        guard session.status == .active else { return [] }
+        return session.participants
+            .filter { $0.status == .active && $0.userId != buddy.currentUserId }
+            .map(\.displayName)
+    }
+
+    private func joined(_ names: [String]) -> String {
+        switch names.count {
+        case 0: return ""
+        case 1: return names[0]
+        case 2: return "\(names[0]) and \(names[1])"
+        default: return "\(names[0]) and \(names.count - 1) others"
+        }
     }
 
     /// "Add your photo" — the ordinary composer, pointed at the walk's
@@ -736,17 +766,18 @@ struct BuddyRecapView: View {
         )
     }
 
-    /// "Sam and Alex" — everyone on the post except the viewer.
+    /// "Sam and Alex" — everyone on the post except the viewer. Active OR
+    /// finished: the recap opens on YOUR finish, and a friend still walking is
+    /// still on the walk — filtering to `.finished` named nobody on every
+    /// recap opened before the last person was done.
     private func crewNames(_ session: BuddySessionState) -> String {
-        let names = session.participants
-            .filter { $0.status == .finished && $0.userId != buddy.currentUserId }
-            .map(\.displayName)
-        switch names.count {
-        case 0: return ""
-        case 1: return names[0]
-        case 2: return "\(names[0]) and \(names[1])"
-        default: return "\(names[0]) and \(names.count - 1) others"
-        }
+        joined(
+            session.participants
+                .filter {
+                    ($0.status == .finished || $0.status == .active)
+                        && $0.userId != buddy.currentUserId
+                }
+                .map(\.displayName))
     }
 
     /// Has this walk already been shared? Reads the same registry the photo
@@ -792,6 +823,7 @@ struct BuddyRecapView: View {
     // MARK: - Copy
 
     private func headlineText(_ session: BuddySessionState) -> String {
+        if !stillOutNames(session).isEmpty { return "Still going" }
         switch session.mode {
         case .together:
             return "Nice walk together"
@@ -810,6 +842,10 @@ struct BuddyRecapView: View {
     /// The line under the big number. The number itself is rendered above at
     /// hero size, so this only has to say what it counts.
     private func subheadText(_ session: BuddySessionState) -> String {
+        let out = stillOutNames(session)
+        if !out.isEmpty {
+            return "miles so far — \(joined(out)) \(out.count == 1 ? "is" : "are") still out"
+        }
         switch session.mode {
         case .together:
             return "miles between you"

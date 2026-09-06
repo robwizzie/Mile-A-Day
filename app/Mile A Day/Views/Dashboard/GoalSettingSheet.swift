@@ -21,23 +21,41 @@ struct GoalSettingSheet: View {
         "v\(appVersion) (\(buildNumber))"
     }
 
+    private var unit: DisplayDistanceUnit { DistanceUnits.current }
+
+    /// The stepper's number in the display unit, written back as miles.
+    private var displayGoal: Binding<Double> {
+        Binding(
+            get: { newGoalMiles.inDisplayUnit },
+            set: { newGoalMiles = $0 / DistanceUnits.current.perMile }
+        )
+    }
+
+    // Exact race distances in miles, so a km user reads "5.00 km" and a
+    // miles user "3.10 mi" for the same goal.
+    static let oneMile = 1.0
+    static let fiveK = 5.0 / 1.609344
+    static let tenK = 10.0 / 1.609344
+
     var body: some View {
         NavigationStack {
             Form {
                 Section("Daily Goal") {
-                    Stepper(value: $newGoalMiles, in: 0.1...26.2, step: 0.1) {
+                    // The goal is stored in miles; the stepper walks it in
+                    // whatever the user reads (0.1 km steps for a km user).
+                    Stepper(value: displayGoal, in: 0.1...(26.2 * unit.perMile), step: 0.1) {
                         HStack {
-                            Text("Miles:")
-                            Text(newGoalMiles.milesFormatted)
+                            Text("\(unit.title):")
+                            Text(newGoalMiles.distanceFormatted)
                                 .fontWeight(.bold)
                         }
                     }
                 }
 
                 Section("Common Goals") {
-                    Button("1 mile") { newGoalMiles = 1.0 }
-                    Button("5K (3.1 miles)") { newGoalMiles = 3.1 }
-                    Button("10K (6.2 miles)") { newGoalMiles = 6.2 }
+                    Button("1 mile (\(Self.oneMile.distanceFormatted))") { newGoalMiles = Self.oneMile }
+                    Button("5K (\(Self.fiveK.distanceFormatted))") { newGoalMiles = Self.fiveK }
+                    Button("10K (\(Self.tenK.distanceFormatted))") { newGoalMiles = Self.tenK }
                 }
 
                 Section("App Info") {

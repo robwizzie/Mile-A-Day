@@ -161,7 +161,7 @@ struct ActivityCardView: View {
     private var headerSubtitle: String {
         var parts = [PostCardView.activityNoun(entry.workout_type, pace: pace)]
         if distance > 0 {
-            parts.append(entry.feed_role == "extra" ? "+\(distance.milesText) mi extra" : "\(distance.milesText) mi")
+            parts.append(entry.feed_role == "extra" ? "+\(distance.distanceFormatted) extra" : distance.distanceFormatted)
         }
         parts.append(entry.relativeTime)
         return parts.joined(separator: " · ")
