@@ -50,6 +50,13 @@ type ReferralGraph = {
   }[];
 };
 
+type RetentionMark = {
+  window: [number, number];
+  eligible: number;
+  retained: number;
+  pct: number;
+};
+
 type Retention = {
   max_week: number;
   cohorts: {
@@ -57,6 +64,8 @@ type Retention = {
     size: number;
     weeks: { week: number; users: number; pct: number }[];
   }[];
+  // Older backends serve the grid without these; the row just doesn't draw.
+  marks?: { d1: RetentionMark; d7: RetentionMark; d30: RetentionMark };
 };
 
 type Referrals = {
@@ -294,8 +303,32 @@ function RetentionPanel() {
         (7 * 86_400_000),
     );
 
+  const marks = r.marks;
+  const markCard = (label: string, m: RetentionMark) => (
+    <StatCard
+      label={label}
+      value={m.eligible ? `${Math.round(m.pct)}%` : "—"}
+      sub={
+        m.eligible
+          ? `${fmt(m.retained)} of ${fmt(m.eligible)} · days ${m.window[0]}–${m.window[1]}`
+          : "no signups old enough yet"
+      }
+    />
+  );
+
   return (
     <Card hint="Share of each week's signups still logging a mile N weeks later. Week 0 is the week they joined. Tap a week to see who joined then.">
+      {marks && (
+        // The three numbers everyone asks for first. Signups from the last
+        // 90 days that are old enough for the bracket to have passed; a
+        // daily-mile app can't demand the exact day, so each mark is a short
+        // bracket of days since signup.
+        <div className="mb-5 grid grid-cols-3 gap-3">
+          {markCard("Day 1", marks.d1)}
+          {markCard("Day 7", marks.d7)}
+          {markCard("Day 30", marks.d30)}
+        </div>
+      )}
       <HeatGrid
         hue={HEAT_HUE}
         rows={r.cohorts.map((c) => ({
