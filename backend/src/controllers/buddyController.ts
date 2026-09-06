@@ -488,7 +488,7 @@ export async function progressController(
 ) {
   if (!requireEnabled(res)) return;
   try {
-    const { distanceMiles, durationSeconds } = req.body ?? {};
+    const { distanceMiles, durationSeconds, paused } = req.body ?? {};
     if (distanceMiles === undefined || durationSeconds === undefined) {
       return res.status(400).json({ error: "progress_required" });
     }
@@ -498,6 +498,10 @@ export async function progressController(
         req.userId!,
         Number(distanceMiles),
         Number(durationSeconds),
+        // Additive and OPTIONAL, not coerced: `Boolean(undefined)` is false,
+        // which would let a client that never sends the flag write a state it
+        // has no opinion about.
+        typeof paused === "boolean" ? paused : undefined,
       ),
     );
   } catch (error) {

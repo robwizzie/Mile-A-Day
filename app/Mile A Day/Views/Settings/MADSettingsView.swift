@@ -28,6 +28,9 @@ struct MADSettingsView: View {
     /// Same key the tracking screen's speaker button and the Ghost Race sheet
     /// write, so all three are one switch.
     @AppStorage(GhostCoach.enabledKey) private var coachEnabled = true
+    // Absent = follow the device, so the picker shows the device's unit until
+    // the user picks one; picking writes the key (see DistanceUnits).
+    @AppStorage(DistanceUnits.key) private var distanceUnitRaw = DisplayDistanceUnit.systemDefault.rawValue
 
     @State private var activeSheet: SettingsSheet?
     @State private var showWhatsNew = false
@@ -42,6 +45,8 @@ struct MADSettingsView: View {
     @State private var deleteAccountErrorMessage: String?
     @State private var isRecalibratingStreak = false
     @State private var recalibrateResultMessage: String?
+    @State private var isBackfillingRoutes = false
+    @State private var routeBackfillProgress: String?
 
     /// The modals this page presents, so a single `.sheet(item:)` drives all of
     /// them. Two `.sheet`s on the same node compete and one silently never
@@ -159,7 +164,7 @@ struct MADSettingsView: View {
                 MADSettingsRow(
                     icon: "target",
                     title: "Daily Goal",
-                    subtitle: "\(String(format: "%.1f", userManager.currentUser.goalMiles)) miles per day",
+                    subtitle: "\(userManager.currentUser.goalMiles.distanceFormatted1) per day",
                     iconColor: .green
                 )
             }
@@ -183,6 +188,32 @@ struct MADSettingsView: View {
                 .onChange(of: dashboardStyleRaw) { _, newValue in
                     DashboardStylePreference.current = DashboardStyle(rawValue: newValue) ?? .modern
                     DashboardStylePreference.markChosen()
+                    MADHaptics.tap()
+                }
+            }
+            .padding(.bottom, MADTheme.Spacing.xs)
+
+            divider
+
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                MADSettingsRow(
+                    icon: "ruler",
+                    title: "Units",
+                    subtitle: DistanceUnits.isChosen
+                        ? "Shown in \(DistanceUnits.current.plural)"
+                        : "Following your device (\(DisplayDistanceUnit.systemDefault.plural))",
+                    iconColor: .teal
+                )
+                Picker("Units", selection: $distanceUnitRaw) {
+                    ForEach(DisplayDistanceUnit.allCases) { unit in
+                        Text(unit.title).tag(unit.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: distanceUnitRaw) { _, newValue in
+                    // Storage stays miles everywhere; this only moves the
+                    // formatter. Widgets keep miles until their next data write.
+                    DistanceUnits.current = DisplayDistanceUnit(rawValue: newValue) ?? .systemDefault
                     MADHaptics.tap()
                 }
             }
@@ -400,7 +431,33 @@ struct MADSettingsView: View {
             }
             .buttonStyle(.plain)
             .disabled(isRecalibratingStreak)
+
+            divider
+
+            // The automatic sweep heals ~75 workouts a session, two years
+            // back, only after a quiet sync — so an old post's map (and its
+            // Flyover) could take weeks of launches to appear. This runs the
+            // same pipeline to the end, now, and says what it found.
+            Button { Task { await backfillRoutes() } } label: {
+                MADSettingsRow(
+                    icon: "map.fill",
+                    title: "Add Maps to Past Workouts",
+                    subtitle: routeBackfillProgress
+                        ?? "Send routes from Apple Health so older posts get a map and Flyover",
+                    iconColor: .teal
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isBackfillingRoutes)
         }
+    }
+
+    /// "Español · change in iOS Settings" — the language the app is
+    /// currently running in, named in that language.
+    private var languageSubtitle: String {
+        let code = Locale.current.language.languageCode?.identifier ?? "en"
+        let name = Locale.current.localizedString(forLanguageCode: code)?.capitalized ?? "English"
+        return "\(name) · \(String(localized: "change in iOS Settings"))"
     }
 
     /// The row says what's wrong before you tap it, so a broken permission is
@@ -449,6 +506,26 @@ struct MADSettingsView: View {
                     title: "App Tour",
                     subtitle: "Take a guided walkthrough of the app",
                     iconColor: MADTheme.Colors.madRed
+                )
+            }
+            .buttonStyle(.plain)
+
+            divider
+
+            // The app follows the device language; iOS lets a user pick a
+            // different one PER APP once the app ships more than one
+            // localization, and that switch lives on the app's own page in
+            // Settings — the one place we can send them.
+            Button {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                MADSettingsRow(
+                    icon: "globe",
+                    title: "Language",
+                    subtitle: languageSubtitle,
+                    iconColor: .blue
                 )
             }
             .buttonStyle(.plain)
@@ -525,7 +602,7 @@ struct MADSettingsView: View {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(iconColor)
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .font(.system(size: 11, weight: .heavy, design: .rounded))
                     .tracking(1.2)
                     .foregroundColor(.secondary)
@@ -611,6 +688,49 @@ struct MADSettingsView: View {
         // backend keeps the GREATEST, so this back-corrects a stale day and
         // never lowers a good one. Best-effort and independent of the result.
         await DailyStepsSyncService.shared.backfillRecentDays(30)
+    }
+
+    /// Every past workout with a route in HealthKit but no map on the server,
+    /// pushed to the end — see `WorkoutSyncService.backfillAllRoutes`. The
+    /// result lands in the same alert Recalibrate uses; both are "we went
+    /// through your history and here is what changed".
+    private func backfillRoutes() async {
+        guard !isBackfillingRoutes else { return }
+        isBackfillingRoutes = true
+        routeBackfillProgress = "Checking your workouts…"
+        defer {
+            isBackfillingRoutes = false
+            routeBackfillProgress = nil
+        }
+
+        let summary = await WorkoutSyncService.shared.backfillAllRoutes { progress in
+            if progress.pushed > 0 {
+                routeBackfillProgress = "Sent \(progress.pushed) so far…"
+            } else if progress.total > 0 {
+                routeBackfillProgress = "Checked \(progress.probed) of \(progress.total)…"
+            }
+        }
+
+        if summary.busy {
+            recalibrateResultMessage =
+                "A sync is already running. Give it a moment and try again."
+            return
+        }
+        let pushedWord = summary.pushed == 1 ? "workout" : "workouts"
+        var lines: [String] = []
+        if summary.pushed > 0 {
+            lines.append("Added maps to \(summary.pushed) past \(pushedWord). Their posts will show the route and Flyover from now on.")
+        } else {
+            lines.append("Every workout that has a route in Apple Health already has its map.")
+        }
+        if summary.noRoute > 0 {
+            let word = summary.noRoute == 1 ? "workout has" : "workouts have"
+            lines.append("\(summary.noRoute) \(word) no GPS route in Apple Health — treadmill, no Watch, or route sharing was off when it was recorded — so there's nothing to send for those.")
+        }
+        if summary.failed {
+            lines.append("We couldn't finish — check your connection and run this again; it picks up where it stopped.")
+        }
+        recalibrateResultMessage = lines.joined(separator: " ")
     }
 
     // MARK: - Development

@@ -117,7 +117,11 @@ export async function getNotificationPreferences(
 
   if (rows.length === 0) return { ...DEFAULT_PREFERENCES };
 
-  const row = rows[0];
+  return prefsFromRow(rows[0]);
+}
+
+/** A notification_settings row as preferences, every field defaulted. */
+function prefsFromRow(row: any): NotificationPreferences {
   return {
     nudges_enabled: row.nudges_enabled ?? true,
     flexes_enabled: row.flexes_enabled ?? true,
@@ -441,82 +445,135 @@ export async function filterRecipientsForNotification(
   });
 }
 
+/**
+ * The categories a recipient can switch off. One union, shared by the
+ * single-recipient check and the batched one, so a new category can't be
+ * gated in one and not the other.
+ */
+export type NotificationCategory =
+  | "nudge"
+  | "flex"
+  | "hype"
+  | "friend_activity"
+  | "friend_personal_best"
+  | "competition_invite"
+  | "competition_update"
+  | "competition_milestone"
+  // Buddy Walks. Deliberately its OWN category rather than reusing "hype"
+  // (which every other social push overloads): buddy_invite is in
+  // HIGH_PRIORITY_TYPES, so it bypasses quiet hours and the daily cap and
+  // this pref is the only thing that can stop it. Overloading "hype" would
+  // mean muting hypes to mute buddy invites — not a real toggle (4.5.4).
+  | "buddy"
+  // Its own category on purpose — see weekly_challenge_enabled above.
+  | "weekly_challenge";
+
+/** The recipient's own switch for this category. */
+function prefsAllow(
+  prefs: NotificationPreferences,
+  notificationType: NotificationCategory,
+): boolean {
+  switch (notificationType) {
+    case "nudge":
+      return prefs.nudges_enabled;
+    case "flex":
+      return prefs.flexes_enabled;
+    case "hype":
+      return prefs.hypes_enabled;
+    case "friend_activity":
+      return prefs.friend_activity_enabled;
+    case "friend_personal_best":
+      return prefs.friend_personal_best_enabled;
+    case "competition_invite":
+      return prefs.competition_invites_enabled;
+    case "weekly_challenge":
+      return prefs.weekly_challenge_enabled;
+    case "competition_update":
+      return prefs.competition_updates_enabled;
+    case "competition_milestone":
+      return prefs.competition_milestones_enabled;
+    case "buddy":
+      return prefs.buddy_invites_enabled;
+  }
+}
+
+interface FriendMuteRow {
+  user_id: string;
+  muted: boolean | null;
+  nudges_muted: boolean | null;
+  activity_muted: boolean | null;
+}
+
+/** The recipient's per-friend mute for this sender, when they set one. */
+function friendMuteBlocks(
+  fs: FriendMuteRow | undefined,
+  notificationType: NotificationCategory,
+): boolean {
+  if (!fs) return false;
+  if (fs.muted) return true;
+  if (notificationType === "nudge" && fs.nudges_muted) return true;
+  if (
+    (notificationType === "friend_activity" ||
+      notificationType === "friend_personal_best") &&
+    fs.activity_muted
+  )
+    return true;
+  return false;
+}
+
+/**
+ * Which of `targetUserIds` may be sent this category from `senderId` — the
+ * batched form of shouldSendNotification, in TWO queries however many
+ * recipients there are. Fan-outs (a buddy invite to a whole crew, a session
+ * start to every participant) used to ask per recipient: two round trips
+ * each, so a room of eight was sixteen queries before the first push went
+ * out. Order is preserved and duplicates collapse.
+ */
+export async function allowedRecipients(
+  targetUserIds: string[],
+  senderId: string | null,
+  notificationType: NotificationCategory,
+): Promise<string[]> {
+  const targets = [...new Set(targetUserIds)];
+  if (targets.length === 0) return [];
+
+  const [settingsRows, muteRows] = await Promise.all([
+    db.query(
+      `SELECT * FROM notification_settings WHERE user_id = ANY($1::text[])`,
+      [targets],
+    ),
+    senderId
+      ? db.query<FriendMuteRow>(
+          `SELECT user_id, muted, nudges_muted, activity_muted
+             FROM friend_notification_settings
+            WHERE friend_id = $2 AND user_id = ANY($1::text[])`,
+          [targets, senderId],
+        )
+      : Promise.resolve([] as FriendMuteRow[]),
+  ]);
+  const prefsByUser = new Map(
+    settingsRows.map((row: any) => [row.user_id as string, prefsFromRow(row)]),
+  );
+  const muteByUser = new Map(muteRows.map((r) => [r.user_id, r]));
+
+  return targets.filter((id) => {
+    // No settings row = every default (notification_settings is created
+    // lazily on first write, so most users have no row).
+    const prefs = prefsByUser.get(id) ?? DEFAULT_PREFERENCES;
+    if (!prefsAllow(prefs, notificationType)) return false;
+    return !friendMuteBlocks(muteByUser.get(id), notificationType);
+  });
+}
+
 export async function shouldSendNotification(
   targetUserId: string,
   senderId: string | null,
-  notificationType:
-    | "nudge"
-    | "flex"
-    | "hype"
-    | "friend_activity"
-    | "friend_personal_best"
-    | "competition_invite"
-    | "competition_update"
-    | "competition_milestone"
-    // Buddy Walks. Deliberately its OWN category rather than reusing "hype"
-    // (which every other social push overloads): buddy_invite is in
-    // HIGH_PRIORITY_TYPES, so it bypasses quiet hours and the daily cap and
-    // this pref is the only thing that can stop it. Overloading "hype" would
-    // mean muting hypes to mute buddy invites — not a real toggle (4.5.4).
-    | "buddy"
-    // Its own category on purpose — see weekly_challenge_enabled above.
-    | "weekly_challenge",
+  notificationType: NotificationCategory,
 ): Promise<boolean> {
-  const prefs = await getNotificationPreferences(targetUserId);
-
-  // Check global preference for this notification type
-  switch (notificationType) {
-    case "nudge":
-      if (!prefs.nudges_enabled) return false;
-      break;
-    case "flex":
-      if (!prefs.flexes_enabled) return false;
-      break;
-    case "hype":
-      if (!prefs.hypes_enabled) return false;
-      break;
-    case "friend_activity":
-      if (!prefs.friend_activity_enabled) return false;
-      break;
-    case "friend_personal_best":
-      if (!prefs.friend_personal_best_enabled) return false;
-      break;
-    case "competition_invite":
-      if (!prefs.competition_invites_enabled) return false;
-      break;
-    case "weekly_challenge":
-      if (!prefs.weekly_challenge_enabled) return false;
-      break;
-    case "competition_update":
-      if (!prefs.competition_updates_enabled) return false;
-      break;
-    case "competition_milestone":
-      if (!prefs.competition_milestones_enabled) return false;
-      break;
-    case "buddy":
-      if (!prefs.buddy_invites_enabled) return false;
-      break;
-  }
-
-  // Check friend-specific muting if there's a sender
-  if (senderId) {
-    const friendSettings = await db.query(
-      "SELECT muted, nudges_muted, activity_muted FROM friend_notification_settings WHERE user_id = $1 AND friend_id = $2",
-      [targetUserId, senderId],
-    );
-
-    if (friendSettings.length > 0) {
-      const fs = friendSettings[0];
-      if (fs.muted) return false;
-      if (notificationType === "nudge" && fs.nudges_muted) return false;
-      if (
-        (notificationType === "friend_activity" ||
-          notificationType === "friend_personal_best") &&
-        fs.activity_muted
-      )
-        return false;
-    }
-  }
-
-  return true;
+  const allowed = await allowedRecipients(
+    [targetUserId],
+    senderId,
+    notificationType,
+  );
+  return allowed.length === 1;
 }

@@ -130,7 +130,7 @@ struct BadgesView: View {
                         .frame(width: 80, height: 80)
                         .rotationEffect(.degrees(-90))
                     
-                    Text("\(Int(progress * 100))%")
+                    Text(ProgressCalculator.formatProgress(progress))
                         .font(.system(size: 18, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                 }

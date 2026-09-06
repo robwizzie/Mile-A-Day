@@ -17,7 +17,7 @@ import Observation
 enum CalorieLedger {
     /// Plain-English provenance, printed wherever the number is.
     static let sourceSentence =
-        "Counts the active calories Apple Health recorded for your walks and runs — the same workouts Mile A Day counts toward your miles. Other activity, resting calories and your Watch's all-day ring aren't included."
+        "Counts the active calories Apple Health recorded for your walks and runs — the same workouts Mile A Day counts toward your miles. A workout that arrived without calories (some third-party apps) is estimated from its distance and pace. Other activity, resting calories and your Watch's all-day ring aren't included."
 
     static func kilocalories(_ workout: HKWorkout) -> Double {
         RunPostService.workoutCalories(workout)

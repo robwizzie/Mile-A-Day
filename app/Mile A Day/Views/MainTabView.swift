@@ -233,10 +233,19 @@ struct MainTabView: View {
                     }
                     selectedTab = 0
                 case "buddy_finished":
-                    // The walk is already over — there's no lobby to return to,
-                    // so the inbox row is the right landing spot.
+                    // The walk is over, so this lands on the RECAP —
+                    // `consumePendingBuddyLink` takes that branch itself for a
+                    // session this user has already finished. A CANCELLED walk
+                    // is the exception: there is no session left to open and
+                    // joining one errors, so that goes to the inbox.
+                    let data = notification.userInfo?["data"] as? [String: String]
                     selectedTab = 0
-                    showNotificationInbox = true
+                    if let sessionId = data?["session_id"], !sessionId.isEmpty,
+                       data?["cancelled"] != "true" {
+                        DeepLinkRouter.shared.requestOpenBuddySession(sessionId: sessionId)
+                    } else {
+                        showNotificationInbox = true
+                    }
                 case "competition_flex", "competition_milestone", "friend_nudge",
                      "friend_activity", "streak_broken", "personal_best",
                      "lead_change", "clash_tie",
@@ -388,7 +397,13 @@ struct MainTabView: View {
         // One-time privacy walkthrough: first open after signing in (existing
         // users see it once after updating). Hosted at root like celebrations
         // — a sheet on a tab the user isn't looking at never appears.
-        .sheet(isPresented: $showPrivacyOnboarding) {
+        .sheet(isPresented: $showPrivacyOnboarding, onDismiss: {
+            // Now, not on Save: the Dashboard's What's New / monthly recap /
+            // style chooser all wait for this sheet to be off screen, and
+            // `onDismiss` is the one hook that fires after the animation
+            // whether it was saved or swiped away.
+            NotificationCenter.default.post(name: PrivacyOnboardingView.doneNotification, object: nil)
+        }) {
             PrivacyOnboardingView {
                 showPrivacyOnboarding = false
             }
@@ -515,16 +530,34 @@ struct MainTabView: View {
                 await WeeklyChallengeService.shared.refresh()
                 selectedTab = 1
             case "buddy_invite", "buddy_joined", "buddy_started":
-                // Only the type survives a cold launch — the session id isn't
-                // stored — so land on the Dashboard and let its
-                // refreshMySessions() surface the invite on the buddy pill.
+                // The payload DOES survive a cold launch
+                // (`pendingNotificationData`, same store the post deep link
+                // above reads), so park the session id and open the walk —
+                // this used to drop it and land on the Dashboard, where an
+                // invite is a number on a pill and the tap read as a no-op.
+                let sessionId = notificationService.pendingNotificationData["session_id"]
                 selectedTab = 0
                 notificationService.pendingNotificationType = nil
+                if let sessionId, !sessionId.isEmpty {
+                    DeepLinkRouter.shared.requestOpenBuddySession(sessionId: sessionId)
+                }
+            case "buddy_finished":
+                // The walk is over, so this opens the RECAP rather than a
+                // lobby — `consumePendingBuddyLink` picks that branch itself
+                // for a session this user has already finished.
+                let finishedId = notificationService.pendingNotificationData["session_id"]
+                let cancelled = notificationService.pendingNotificationData["cancelled"] == "true"
+                selectedTab = 0
+                notificationService.pendingNotificationType = nil
+                if let finishedId, !finishedId.isEmpty, !cancelled {
+                    DeepLinkRouter.shared.requestOpenBuddySession(sessionId: finishedId)
+                } else {
+                    showNotificationInbox = true
+                }
             case "competition_flex", "competition_milestone", "friend_nudge",
                  "friend_activity", "streak_broken", "personal_best",
                  "lead_change", "clash_tie",
                  "friend_post", "story_reaction",
-                 "buddy_finished",
                  "coauthor_invite", "coauthor_accepted", "mention", "post_comment",
                  "crew_photo", "crew_photo_nudge":
                 selectedTab = 0

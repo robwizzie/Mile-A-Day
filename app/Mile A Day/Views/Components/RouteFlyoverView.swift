@@ -67,11 +67,11 @@ extension FlyoverLaunch {
         guard let coords = entry.routeCoordinates, coords.count >= 2 else { return nil }
         let stats = PostStats(
             distance: (entry.distance ?? 0) > 0 ? entry.distance : nil,
-            pace: {
-                guard let divisor = entry.moving_seconds ?? entry.total_duration,
-                      divisor > 0, let d = entry.distance, d > 0 else { return nil }
-                return divisor / d
-            }(),
+            pace: DisplayPace.secondsPerMile(
+                distanceMiles: entry.distance ?? 0,
+                movingSeconds: entry.moving_seconds,
+                elapsedSeconds: entry.total_duration
+            ),
             duration: entry.total_duration,
             streak: nil, date: nil,
             calories: entry.calories, steps: entry.steps
@@ -796,6 +796,13 @@ struct RouteFlyoverPlayerView: View {
             // The odometer — the FOLLOWED track's own geographic miles (plus
             // any earlier legs of a chained tour).
             HStack(alignment: .firstTextBaseline, spacing: 7) {
+                // The stats band's own formatter — which is the app's floor
+                // (`milesText`) now that the band no longer rounds: this
+                // number is compared against the card it was launched from,
+                // and the two formatters put "1.04" on the map over a card
+                // reading "1.03". Mid-flight it may read a whole mile a few
+                // metres before the mark drops; the landing figure being the
+                // card's figure is what matters.
                 Text((odometerBase + miles).milesText)
                     .font(.system(size: 44, weight: .black, design: .rounded))
                     .monospacedDigit()
@@ -1068,6 +1075,10 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         let track: FlyoverTrack
         /// Polyline meters → official miles (1 when unknown, e.g. companions).
         let distanceScale: Double
+        /// The recorded figure the odometer lands on, when calibration was
+        /// accepted — the number the card shows, kept as-is rather than
+        /// reconstructed from `distanceScale`.
+        let calibratedMiles: Double?
         let mileMarks: [(mile: Int, coordinate: CLLocationCoordinate2D, fraction: Double)]
         let annotation: FlyoverAnnotation
     }
@@ -1213,9 +1224,13 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         // friend's stitched-day anchor, whose row restates the DAY's rollup
         // over a final-leg route — and raw geo is the honest story then.
         var scale = 1.0
+        var calibratedMiles: Double? = nil
         if let officialMiles, officialMiles > 0, track.totalMiles > 0 {
             let ratio = officialMiles / track.totalMiles
-            if ratio > 0.9, ratio < 1.15 { scale = ratio }
+            if ratio > 0.9, ratio < 1.15 {
+                scale = ratio
+                calibratedMiles = officialMiles
+            }
         }
         let annotation = FlyoverAnnotation()
         annotation.isRider = true
@@ -1225,6 +1240,7 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             avatar: avatar,
             track: track,
             distanceScale: scale,
+            calibratedMiles: calibratedMiles,
             mileMarks: track.mileMarks(distanceScale: scale),
             annotation: annotation
         )
@@ -1559,12 +1575,24 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     }
 
     private func report(_ phase: FlyoverPhase, fraction: Double) {
-        let meters = followedTrack?.metersTraveled(atFraction: fraction) ?? 0
-        let scale = people.indices.contains(followed) ? people[followed].distanceScale : 1
+        let person = people.indices.contains(followed) ? people[followed] : nil
+        let meters = person?.track.metersTraveled(atFraction: fraction) ?? 0
+        let miles: Double
+        if let official = person?.calibratedMiles,
+           let total = person?.track.totalMeters, total > 0 {
+            // The recorded figure × the fraction of the line covered — NOT
+            // metres × scale. That product is official/total × total, which
+            // in floating point lands a hair under the recorded number at
+            // the finish (1.0599…), and a two-decimal display then read 1.05
+            // beside a card that said 1.06. This form is exactly `official`
+            // at the line.
+            miles = official * (meters / total)
+        } else {
+            miles = meters / 1609.344
+        }
         let milestone = pendingMilestone
         pendingMilestone = nil
-        emit(FlyoverTick(phase: phase, fraction: fraction,
-                         miles: meters * scale / 1609.344, milestone: milestone))
+        emit(FlyoverTick(phase: phase, fraction: fraction, miles: miles, milestone: milestone))
     }
 
     /// The ONE door every tick leaves through. Synchronous from the display

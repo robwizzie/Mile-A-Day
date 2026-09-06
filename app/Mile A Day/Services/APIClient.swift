@@ -176,6 +176,21 @@ class APIClient {
         case 404:
             throw APIError.notFound
         case 409:
+            // The buddy-walk conflict is a different sentence to the caller
+            // than "you already posted this": the post belongs to someone
+            // else on the same walk. The server says so in `reason` and hands
+            // over the post — additive fields an older build simply ignores,
+            // and the `error` string it matches on is unchanged.
+            if let detail = try? JSONDecoder().decode(ConflictEnvelope.self, from: data),
+               detail.reason == "buddy_walk_already_posted" {
+                throw APIError.buddyWalkAlreadyPosted(
+                    postId: detail.post_id,
+                    // Absent on the deploy that shipped `reason` without it —
+                    // false is the older behaviour (somebody else's card),
+                    // which is also the far more common one.
+                    mine: detail.mine ?? false
+                )
+            }
             throw APIError.conflict(extractErrorMessage(from: data) ?? "Conflict")
         case 410:
             throw APIError.gone(extractErrorMessage(from: data) ?? "No longer available")
@@ -260,6 +275,11 @@ enum APIError: LocalizedError {
     case accountMismatch
     case badRequest(String)
     case conflict(String)
+    /// A 409 whose body says the conflict is somebody ELSE's post: this user
+    /// is on a buddy walk that is already on the feed. Carries that post so
+    /// the caller can offer to add a photo to it — the generic `.conflict`
+    /// copy tells this user to delete a post they do not have.
+    case buddyWalkAlreadyPosted(postId: String?, mine: Bool)
     case rateLimited(String)
     /// HTTP 410 — the resource existed but is permanently gone (e.g. an expired
     /// pending notification past its same-day window). Terminal; don't retry.
@@ -289,6 +309,8 @@ enum APIError: LocalizedError {
             return "Bad request: \(message)"
         case .conflict(let message):
             return message
+        case .buddyWalkAlreadyPosted:
+            return "Someone already shared this walk."
         case .rateLimited(let message):
             return message
         case .gone(let message):
@@ -321,6 +343,18 @@ extension APIError {
 private struct ErrorEnvelope: Decodable {
     let error: String?
     let detail: String?
+}
+
+/// The additive half of a conflict body. `error` stays the string shipped
+/// builds match on; these say WHICH conflict it is and what to do about it.
+private struct ConflictEnvelope: Decodable {
+    let reason: String?
+    let post_id: String?
+    /// The existing card is the CALLER's own — a second leg of a walk they
+    /// already posted. They cannot add a crew slide to it, so the app must
+    /// say "already shared" rather than offer a handoff the server would
+    /// refuse.
+    let mine: Bool?
 }
 
 private func extractErrorMessage(from data: Data) -> String? {

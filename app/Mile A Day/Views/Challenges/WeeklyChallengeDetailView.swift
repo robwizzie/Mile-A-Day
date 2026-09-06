@@ -274,7 +274,7 @@ struct WeeklyLeaderboardRow: View {
 
             Spacer(minLength: 4)
 
-            Text("\(Int((entry.percent * 100).rounded()))%")
+            Text(ProgressCalculator.formatWholePercent(Double(Int((entry.percent * 100).rounded()))))
                 .font(.system(size: 14, weight: .heavy, design: .rounded))
                 .foregroundColor(entry.completed ? .green : .white.opacity(0.75))
                 .fixedSize()

@@ -236,7 +236,7 @@ struct MonthlyRecapView: View {
                 )
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 0) {
-                Text("\(Int(round(completionFraction * 100)))%")
+                Text(ProgressCalculator.formatProgress(completionFraction))
                     .font(.system(size: 19, weight: .black, design: .rounded))
                     .monospacedDigit()
                     .foregroundColor(.white)

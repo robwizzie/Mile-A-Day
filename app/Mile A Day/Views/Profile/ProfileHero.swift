@@ -312,7 +312,7 @@ struct NextMilestoneChip: View {
             }
             .foregroundColor(.white.opacity(0.7))
             HStack(spacing: 4) {
-                Text("\(Int(target).formatted(.number.grouping(.automatic))) mi")
+                Text("\(Int(target.inDisplayUnit).formatted(.number.grouping(.automatic))) \(DistanceUnits.current.abbreviation)")
                     .font(.system(size: 13, weight: .black, design: .rounded))
                     .foregroundColor(.white)
                 Text("·")
@@ -387,6 +387,7 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
                 .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Profile photo")
             .allowsHitTesting(onTapAvatar != nil)
             .overlay(alignment: .bottom) {
                 GoalRingLabel(progress: goalProgress, isComplete: goalComplete)
@@ -431,6 +432,7 @@ struct ProfileIdentityBlock: View {
                         PureFlameBadge(size: 20)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Pure Flame badge")
                 }
                 if let username, !username.isEmpty,
                    let displayName, !displayName.isEmpty, displayName != username {
@@ -475,7 +477,7 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
                 accent: streakDoneToday ? .green : MADTheme.Colors.madRed,
                 trailingIcon: streakDoneToday ? "checkmark.circle.fill" : nil
             )
-            tile(label: "MILES", value: milesText, accent: nil)
+            tile(label: DistanceUnits.current.plural.uppercased(), value: milesText, accent: nil)
             NavigationLink(destination: friendsDestination()) {
                 tile(
                     label: friendCount == 1 ? "FRIEND" : "FRIENDS",
@@ -538,10 +540,11 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
     }
 
     private var milesText: String {
-        if totalMiles >= 100 {
-            return String(format: "%.0f", totalMiles)
+        let shown = totalMiles.inDisplayUnit
+        if shown >= 100 {
+            return String(format: "%.0f", shown)
         }
-        return String(format: "%.1f", totalMiles)
+        return String(format: "%.1f", shown)
     }
 }
 

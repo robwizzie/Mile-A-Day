@@ -1,5 +1,5 @@
 {
-  "id": "c3ca881d-7568-481d-a8dc-5f0f7ea92ba0",
+  "id": "692ac4a2-8e11-45ae-aaf8-41b995e1ddda",
   "prevId": "79f6d2b4-e963-4abb-8d18-660ccc0bb62c",
   "version": "7",
   "dialect": "postgresql",
@@ -476,6 +476,12 @@
         "location_type": {
           "name": "location_type",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_paused": {
+          "name": "is_paused",
+          "type": "boolean",
           "primaryKey": false,
           "notNull": false
         },
@@ -1212,13 +1218,6 @@
           "type": "boolean",
           "primaryKey": false,
           "notNull": false,
-          "default": false
-        },
-        "legacy_team_scoring": {
-          "name": "legacy_team_scoring",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
           "default": false
         },
         "winner": {

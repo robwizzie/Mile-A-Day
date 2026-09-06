@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { runStreakFeaturesSweep } from "../services/streakFeatureService.js";
 import { streakFeaturesGloballyEnabled } from "../services/streakFeatureCore.js";
 import { expirePausesPastCap } from "../services/injuryPauseService.js";
+import { runJob } from "./cronRunner.js";
 
 /**
  * Hourly streak-token sweep. Each run settles YESTERDAY for enrolled users
@@ -20,25 +21,21 @@ export function startStreakFeaturesCron(): void {
     // Retire injury pauses past the 180-day cap first, so the sweep below
     // settles those users as unpaused. Isolated: a failure here must not cost
     // everyone else their sweep.
-    try {
+    await runJob("streaks.expire_injury_pauses", async () => {
       const expired = await expirePausesPastCap();
       if (expired > 0) {
         console.log(`[CRON] Injury pauses past cap expired: ${expired}.`);
       }
-    } catch (error: any) {
-      console.error("[CRON] Injury-pause cap sweep failed:", error.message);
-    }
+    });
 
-    try {
+    await runJob("streaks.features_sweep", async () => {
       const { processed, saved, breaks } = await runStreakFeaturesSweep();
       if (processed > 0) {
         console.log(
           `[CRON] Streak-features sweep: ${processed} users, ${saved} saves, ${breaks} breaks.`,
         );
       }
-    } catch (error: any) {
-      console.error("[CRON] Streak-features sweep failed:", error.message);
-    }
+    });
   });
 
   console.log("Streak-features cron scheduled (hourly sweep at :10).");

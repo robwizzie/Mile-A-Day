@@ -182,6 +182,7 @@ private struct PinnedBadgeSlotFilled: View {
 /// Heavy dashed outline in the badge's rarity color + soft inner glow + a
 /// pulsing scale animation so the "this slot is in motion" signal is loud.
 private struct PinnedBadgeSlotSkeleton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let badge: Badge
     @State private var pulse: Bool = false
 
@@ -221,6 +222,7 @@ private struct PinnedBadgeSlotSkeleton: View {
             }
             .frame(width: 90, height: 90)
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
                     pulse = true
                 }

@@ -19,6 +19,7 @@ import SwiftUI
 import Combine
 
 struct SyncProgressView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var syncService = WorkoutSyncService.shared
     @State private var animateRunner = false
     @State private var progressStream: AsyncStream<SyncProgress>?
@@ -148,6 +149,7 @@ struct SyncProgressView: View {
         }
         .frame(height: 54)
         .onAppear {
+            guard !reduceMotion else { return }
             withAnimation(.linear(duration: 0.5).repeatForever(autoreverses: true)) {
                 animateRunner.toggle()
             }
@@ -167,7 +169,7 @@ struct SyncProgressView: View {
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
             } else {
-                Text("\(Int((progress.displayProgress * 100).rounded()))%")
+                Text(ProgressCalculator.formatProgress(progress.displayProgress))
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundColor(.white.opacity(0.55))

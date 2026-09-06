@@ -1054,12 +1054,16 @@ struct MADSettingsRow: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                // Both are `String` properties, so `Text(_:)` would take them
+                // verbatim; wrapping in a key looks each up in the String
+                // Catalog and falls back to the text itself when it isn't
+                // there (computed subtitles like "1.0 mi per day").
+                Text(LocalizedStringKey(title))
                     .font(MADTheme.Typography.body)
                     .fontWeight(.medium)
                     .foregroundColor(.primary)
 
-                Text(subtitle)
+                Text(LocalizedStringKey(subtitle))
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(.secondary)
             }

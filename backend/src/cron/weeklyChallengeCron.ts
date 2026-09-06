@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import { PostgresService } from "../services/DbService.js";
+import { runJob } from "./cronRunner.js";
 import { sendPush } from "../services/pushNotificationService.js";
 import { shouldSendNotification } from "../services/notificationSettingsService.js";
 import {
@@ -207,15 +208,8 @@ export function startWeeklyChallengeCron(): void {
   // Hourly, at :20 — off the :00 mark (and clear of the recap cron) so this
   // isn't contending with every other scheduled job on the hour.
   cron.schedule("20 * * * *", async () => {
-    try {
-      await sendWeeklyChallengeAnnouncements();
-      await sendWeeklyChallengeNudges();
-    } catch (error: any) {
-      console.error(
-        "[CRON] Weekly challenge pass failed:",
-        error?.message ?? error,
-      );
-    }
+    await runJob("weekly_challenge.announce", sendWeeklyChallengeAnnouncements);
+    await runJob("weekly_challenge.nudge", sendWeeklyChallengeNudges);
   });
 
   console.log("Weekly challenge cron scheduled (hourly at :20).");

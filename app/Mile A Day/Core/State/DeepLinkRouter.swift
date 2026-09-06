@@ -41,6 +41,20 @@ final class DeepLinkRouter: ObservableObject {
         if let sessionId { pendingBuddySessionId = sessionId }
     }
 
+    /// The same, raised only AFTER a sheet has finished dismissing.
+    ///
+    /// A caller inside a sheet (the notification inbox) must use this one: the
+    /// buddy lobby is a `fullScreenCover` on the Dashboard, and a presentation
+    /// raised in the same transaction as a dismissal is the one SwiftUI
+    /// silently drops — the exact trap `PostDeepLink.openAfterDismiss` exists
+    /// for, and the reason `BuddyFlowModifier` already waits out the recap
+    /// sheet before opening the start sheet.
+    func requestOpenBuddySessionAfterDismiss(sessionId: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.pendingBuddySessionId = sessionId
+        }
+    }
+
     /// Asks the Friends tab to present the friend-requests sheet. Callers should
     /// also switch to the Friends tab (`MAD_SwitchTab`, tab 3) — this only parks
     /// the intent to open the sheet once that view is alive.

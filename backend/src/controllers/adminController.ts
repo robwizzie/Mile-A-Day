@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { generateAccessToken } from "../services/tokenService.js";
 import { logError } from "../services/errorLogService.js";
+import { getCronStatus } from "../cron/cronRunner.js";
 import {
   getUserByAppleSub,
   getOverview,
@@ -219,6 +220,11 @@ export async function errors(req: Request, res: Response) {
       ? req.query.userId
       : null;
   res.json(await getErrors(category, limit, userId));
+}
+
+/** Every scheduled job's last run since this process booted (cronRunner). */
+export async function cronStatus(_req: Request, res: Response) {
+  res.json(getCronStatus());
 }
 
 export async function errorSummary(_req: Request, res: Response) {

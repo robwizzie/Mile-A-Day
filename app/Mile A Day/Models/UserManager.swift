@@ -780,7 +780,9 @@ class UserManager: ObservableObject {
     #endif
 
     /// Legacy shim — kept so existing callers compile. Delegates to the server-side fetch.
-    /// The local `checkForMilestoneBadges()` evaluator is no longer used.
+    /// The local `checkForMilestoneBadges()` evaluator is retired: nothing calls it
+    /// any more (`updateFromHealthKit` used to, which is what made the medal count
+    /// flicker between the local guess and the server's answer on every launch).
     func checkForRetroactiveBadges() {
         Task { await refreshBadgesFromServer() }
     }

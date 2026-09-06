@@ -1,7 +1,10 @@
 import { PostgresService } from "./DbService.js";
 import { areFriends } from "./friendshipService.js";
 import { sendPush } from "./pushNotificationService.js";
-import { shouldSendNotification } from "./notificationSettingsService.js";
+import {
+  allowedRecipients,
+  shouldSendNotification,
+} from "./notificationSettingsService.js";
 import { CLIENT_FEATURES, userSupports } from "./clientFeatures.js";
 import { evaluateSocialBadgesForUser } from "./badgeService.js";
 import { logError } from "./errorLogService.js";
@@ -155,6 +158,7 @@ async function loadParticipants(
     final_distance_miles: number | null;
     workout_id: string | null;
     location_type: BuddyLocationType | null;
+    is_paused: boolean;
   }>(
     // Staleness means "was reporting, then stopped" — NOT "hasn't reported
     // yet". A participant's first progress report is up to 5s out, so falling
@@ -166,7 +170,11 @@ async function loadParticipants(
             (p.status = 'active'
              AND COALESCE(p.last_progress_at, s.started_at, NOW())
                    < NOW() - ($2 || ' seconds')::interval
-            ) AS is_stale
+            ) AS is_stale,
+            -- Only a walker still ON the walk can be paused: a finished row
+            -- keeps whatever flag its last report carried, and rendering that
+            -- would put a pause badge on someone who is done.
+            (p.status = 'active' AND COALESCE(p.is_paused, false)) AS is_paused
        FROM buddy_session_participants p
        JOIN users u ON u.user_id = p.user_id
        JOIN buddy_sessions s ON s.id = p.session_id
@@ -185,6 +193,7 @@ async function loadParticipants(
     distance_miles: Number(r.distance_miles) || 0,
     duration_seconds: Number(r.duration_seconds) || 0,
     is_stale: r.is_stale === true,
+    is_paused: r.is_paused === true,
     is_host: r.user_id === hostUserId,
     place: r.place,
     final_distance_miles:
@@ -301,6 +310,38 @@ export function validateGoal(
   return raw;
 }
 
+/**
+ * The host's UTC offset in minutes — their notification settings' offset,
+ * else the offset stamped on their latest workout, else Eastern. The same
+ * resolution liveTrackingService uses for a friend's local date.
+ */
+async function hostUtcOffsetMinutes(hostUserId: string): Promise<number> {
+  const rows = await db.query<{ offset: number | null }>(
+    `SELECT COALESCE(
+              (SELECT ns.timezone_offset_minutes FROM notification_settings ns
+                WHERE ns.user_id = $1::text),
+              (SELECT w.timezone_offset FROM workouts w
+                WHERE w.user_id = $1::varchar
+                ORDER BY w.device_end_date DESC LIMIT 1)
+            )::int AS offset`,
+    [hostUserId],
+  );
+  const offset = rows[0]?.offset;
+  return offset === null || offset === undefined ? -240 : Number(offset);
+}
+
+/**
+ * `local_date` for a session: the calendar day of the instant it happens
+ * (the scheduled start, else now) in the HOST's timezone. It used to be the
+ * CREATION instant in New York, which filed a 9:30 PM Pacific walk under
+ * tomorrow, an Australian morning under yesterday, and every scheduled walk
+ * under the day it was booked — and this date drives "Today/Yesterday",
+ * partner history and the earn-to-view photo gate.
+ */
+const SESSION_LOCAL_DATE_SQL = (whenParam: string, offsetParam: string) =>
+  `(((COALESCE(${whenParam}::timestamptz, NOW()) AT TIME ZONE 'UTC')
+      + (${offsetParam}::int || ' minutes')::interval)::date)`;
+
 export async function createSession(
   hostUserId: string,
   input: CreateSessionInput,
@@ -308,6 +349,7 @@ export async function createSession(
   const { mode, activityType } = input;
 
   const goalValue = validateGoal(mode, input.goalValue ?? null);
+  const hostOffset = await hostUtcOffsetMinutes(hostUserId);
 
   const inviteIds = Array.from(new Set(input.inviteUserIds ?? [])).filter(
     (id) => id !== hostUserId,
@@ -330,7 +372,7 @@ export async function createSession(
            (join_code, host_user_id, mode, goal_value, activity_type, status,
             origin, scheduled_start_at, local_date)
          VALUES ($1, $2, $3, $4, $5, 'lobby', $6, $7::timestamptz,
-                 ((NOW() AT TIME ZONE 'America/New_York')::date))
+                 ${SESSION_LOCAL_DATE_SQL("$7", "$8")})
          RETURNING id`,
         [
           joinCode,
@@ -340,6 +382,7 @@ export async function createSession(
           activityType,
           input.origin ?? "invite",
           input.scheduledStartAt ?? null,
+          String(hostOffset),
         ],
       );
       sessionId = inserted[0]?.id ?? null;
@@ -365,17 +408,40 @@ export async function createSession(
   );
 
   await recordEvent(sessionId, hostUserId, "created", { mode, goalValue });
-  void notifyInvitees(sessionId, hostUserId, eligible);
+  void notifyInvitees(
+    sessionId,
+    hostUserId,
+    eligible,
+    input.scheduledStartAt ?? null,
+  );
 
   const session = await getSessionRow(sessionId);
   if (!session) throw new BadRequestError("session_not_found");
   return toState(session, await loadParticipants(sessionId, hostUserId));
 }
 
+/**
+ * "starting now" / "in 20 minutes" / "in 3 hours" / "in 2 days" — an invite
+ * to a walk booked for Thursday used to say "starting now".
+ */
+export function inviteWhenText(scheduledStartAt: string | null): string {
+  if (!scheduledStartAt) return "starting now";
+  const minutes = Math.round(
+    (new Date(scheduledStartAt).getTime() - Date.now()) / 60_000,
+  );
+  if (minutes < 2) return "starting now";
+  if (minutes < 60) return `in ${minutes} minutes`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `in ${hours} ${hours === 1 ? "hour" : "hours"}`;
+  const days = Math.round(hours / 24);
+  return `in ${days} ${days === 1 ? "day" : "days"}`;
+}
+
 async function notifyInvitees(
   sessionId: string,
   hostUserId: string,
   inviteeIds: string[],
+  scheduledStartAt: string | null = null,
 ): Promise<void> {
   if (inviteeIds.length === 0) return;
   try {
@@ -388,18 +454,21 @@ async function notifyInvitees(
     const hostName =
       hostRows[0]?.first_name || hostRows[0]?.username || "A friend";
 
-    for (const inviteeId of inviteeIds) {
-      if (!(await shouldSendNotification(inviteeId, hostUserId, "buddy"))) {
-        continue;
-      }
-      await sendPush(inviteeId, {
-        title: "Buddy Walk",
-        body: `${hostName} wants to walk with you — starting now`,
-        type: "buddy_invite",
-        category: "BUDDY_INVITE",
-        data: { session_id: sessionId, host_user_id: hostUserId },
-      });
-    }
+    // Two queries for the whole crew, then the pushes in parallel: an invite
+    // is "starting now", and a room of eight used to wait on sixteen
+    // sequential preference reads before the first one went out.
+    const recipients = await allowedRecipients(inviteeIds, hostUserId, "buddy");
+    await Promise.all(
+      recipients.map((inviteeId) =>
+        sendPush(inviteeId, {
+          title: "Buddy Walk",
+          body: `${hostName} wants to walk with you — ${inviteWhenText(scheduledStartAt)}`,
+          type: "buddy_invite",
+          category: "BUDDY_INVITE",
+          data: { session_id: sessionId, host_user_id: hostUserId },
+        }),
+      ),
+    );
   } catch (err) {
     void logError("buddy", "failed to notify buddy invitees", {
       userId: hostUserId,
@@ -469,15 +538,30 @@ export async function joinSession(
   // in (a reconnect, a second tap) must stay silent.
   let previous: string | null = null;
 
-  // The walk is already underway, so there is no lobby left to wait in.
-  const arrivalStatus = session.status === "active" ? "active" : "joined";
-
   const client = await db.getClient();
+  let arrivalStatus: "active" | "joined" = "joined";
   try {
     await client.query("BEGIN");
     await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
       `buddy_session:${sessionId}`,
     ]);
+
+    // Decide arrival status UNDER the lock, from a fresh read: the status
+    // fetched above can be a lobby that activateSession (which takes the
+    // same lock) has since started. Deciding from the stale read landed the
+    // joiner as 'joined' in an 'active' session — invisible to the roster
+    // and refused on every progress report.
+    const locked = await client.query<{ status: string }>(
+      `SELECT status FROM buddy_sessions WHERE id = $1`,
+      [sessionId],
+    );
+    const liveStatus = locked.rows[0]?.status;
+    if (liveStatus !== "lobby" && liveStatus !== "active") {
+      await client.query("ROLLBACK");
+      throw new BadRequestError("session_closed");
+    }
+    // The walk is already underway, so there is no lobby left to wait in.
+    arrivalStatus = liveStatus === "active" ? "active" : "joined";
 
     const already = await client.query<{ status: string }>(
       `SELECT status FROM buddy_session_participants
@@ -790,6 +874,12 @@ export async function updateSession(
             activity_type = $4,
             scheduled_start_at = CASE WHEN $5 THEN $6::timestamptz
                                       ELSE scheduled_start_at END,
+            -- A moved walk is a different day and a different "15 minutes
+            -- before": restamp the day and let the reminder fire again.
+            local_date = CASE WHEN $5 THEN ${SESSION_LOCAL_DATE_SQL("$6", "$7")}
+                              ELSE local_date END,
+            scheduled_reminder_sent_at = CASE WHEN $5 THEN NULL
+                                              ELSE scheduled_reminder_sent_at END,
             state_version = state_version + 1
       WHERE id = $1 AND status = 'lobby'
       RETURNING id`,
@@ -800,6 +890,7 @@ export async function updateSession(
       activityType,
       patch.scheduledStartAt !== undefined,
       patch.scheduledStartAt ?? null,
+      String(await hostUtcOffsetMinutes(userId)),
     ],
   );
   // Lost the race to a start that landed first. Report it as the state the
@@ -870,31 +961,50 @@ async function activateSession(
   sessionId: string,
   actorUserId: string | null,
 ): Promise<boolean> {
-  const started = await db.query<{ id: string }>(
-    `UPDATE buddy_sessions
-        SET status = 'active',
-            started_at = NOW() + ($2 || ' seconds')::interval,
-            ends_at = CASE
-              WHEN mode = 'race_time' AND goal_value IS NOT NULL
-                THEN NOW() + ($2 || ' seconds')::interval
-                     + (goal_value || ' minutes')::interval
-              ELSE NULL
-            END,
-            state_version = state_version + 1
-      WHERE id = $1 AND status = 'lobby'
-      RETURNING id`,
-    [sessionId, String(BUDDY_START_COUNTDOWN_SECONDS)],
-  );
-  if (started.length === 0) return false;
-
-  // Everyone still in the lobby becomes active. Invitees who never responded
-  // are left behind rather than dragged in.
-  await db.query(
-    `UPDATE buddy_session_participants
-        SET status = 'active'
-      WHERE session_id = $1 AND status IN ('joined', 'ready')`,
-    [sessionId],
-  );
+  // Under the session's advisory lock, in ONE transaction with the roster
+  // flip: a join that lands between the status flip and the roster update
+  // used to be left 'joined' in an 'active' session.
+  const client = await db.getClient();
+  let started = false;
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+      `buddy_session:${sessionId}`,
+    ]);
+    const flipped = await client.query<{ id: string }>(
+      `UPDATE buddy_sessions
+          SET status = 'active',
+              started_at = NOW() + ($2 || ' seconds')::interval,
+              ends_at = CASE
+                WHEN mode = 'race_time' AND goal_value IS NOT NULL
+                  THEN NOW() + ($2 || ' seconds')::interval
+                       + (goal_value || ' minutes')::interval
+                ELSE NULL
+              END,
+              state_version = state_version + 1
+        WHERE id = $1 AND status = 'lobby'
+        RETURNING id`,
+      [sessionId, String(BUDDY_START_COUNTDOWN_SECONDS)],
+    );
+    started = flipped.rows.length > 0;
+    if (started) {
+      // Everyone still in the lobby becomes active. Invitees who never
+      // responded are left behind rather than dragged in.
+      await client.query(
+        `UPDATE buddy_session_participants
+            SET status = 'active'
+          WHERE session_id = $1 AND status IN ('joined', 'ready')`,
+        [sessionId],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  if (!started) return false;
   await recordEvent(sessionId, actorUserId, "started");
   void notifySessionStarted(sessionId, actorUserId);
   return true;
@@ -932,19 +1042,40 @@ export async function cancelSession(
   if (!session) throw new BadRequestError("session_not_found");
   if (session.host_user_id !== userId) throw new BadRequestError("not_host");
 
-  const cancelled = await db.query<{ id: string }>(
+  if (!(await cancelInternal(sessionId, userId, true))) {
+    throw new BadRequestError("session_not_cancellable");
+  }
+
+  const fresh = await getSessionRow(sessionId);
+  if (!fresh) throw new BadRequestError("session_not_found");
+  return toState(fresh, await loadParticipants(sessionId, fresh.host_user_id));
+}
+
+/**
+ * The one cancel: a host calling it off (`notify`), or the sweep retiring a
+ * lobby nobody started / a promoted walk nobody took (silent — there is no
+ * news in a walk that didn't happen). Returns false when the session was
+ * not in a cancellable state.
+ */
+async function cancelInternal(
+  sessionId: string,
+  actorUserId: string | null,
+  notify: boolean,
+): Promise<boolean> {
+  const cancelled = await db.query<{ id: string; host_user_id: string }>(
     `UPDATE buddy_sessions
         SET status = 'cancelled', ended_at = NOW(),
             state_version = state_version + 1
-      WHERE id = $1 AND host_user_id = $2
+      WHERE id = $1
+        AND ($2::text IS NULL OR host_user_id = $2::text)
         AND (status = 'lobby'
-             OR (status = 'active' AND started_at > NOW()))
-      RETURNING id`,
-    [sessionId, userId],
+             OR (status = 'active' AND started_at > NOW())
+             -- The sweep's case: a running walk nobody reported a metre on.
+             OR ($2::text IS NULL AND status = 'active'))
+      RETURNING id, host_user_id`,
+    [sessionId, actorUserId],
   );
-  if (cancelled.length === 0) {
-    throw new BadRequestError("session_not_cancellable");
-  }
+  if (cancelled.length === 0) return false;
 
   // Everyone still in the room is released. Deliberately NOT 'finished':
   // finished is what the history reads, and a walk nobody took must never
@@ -957,12 +1088,11 @@ export async function cancelSession(
     [sessionId],
   );
 
-  await recordEvent(sessionId, userId, "cancelled");
-  void notifySessionCancelled(sessionId, userId);
-
-  const fresh = await getSessionRow(sessionId);
-  if (!fresh) throw new BadRequestError("session_not_found");
-  return toState(fresh, await loadParticipants(sessionId, fresh.host_user_id));
+  await recordEvent(sessionId, actorUserId, "cancelled");
+  if (notify) {
+    void notifySessionCancelled(sessionId, cancelled[0].host_user_id);
+  }
+  return true;
 }
 
 /**
@@ -1087,13 +1217,17 @@ async function sendScheduledReminders(): Promise<void> {
         AND scheduled_reminder_sent_at IS NULL
         AND scheduled_start_at <= NOW() + INTERVAL '15 minutes'
         AND scheduled_start_at > NOW()
+        -- A walk booked (or a routine spawned) inside the last 15 minutes
+        -- has JUST sent its invite; a reminder on its heels is the same push
+        -- twice on one tick.
+        AND created_at < NOW() - INTERVAL '15 minutes'
       RETURNING id, scheduled_start_at`,
   );
 
   for (const session of claimed) {
     try {
-      const participants = await db.query<{ user_id: string }>(
-        `SELECT user_id FROM buddy_session_participants
+      const participants = await db.query<{ user_id: string; status: string }>(
+        `SELECT user_id, status FROM buddy_session_participants
           WHERE session_id = $1 AND status IN ('invited', 'joined', 'ready')`,
         [session.id],
       );
@@ -1103,7 +1237,10 @@ async function sendScheduledReminders(): Promise<void> {
           title: "Buddy Walk soon",
           body: "Your walk starts in about 15 minutes",
           type: "buddy_invite",
-          category: "BUDDY_INVITE",
+          // Join / Not now buttons only for someone who hasn't answered;
+          // to a person already in the room they are a question already
+          // answered.
+          ...(p.status === "invited" ? { category: "BUDDY_INVITE" } : {}),
           data: { session_id: session.id },
         });
       }
@@ -1129,17 +1266,21 @@ async function notifySessionStarted(
           AND ($2::text IS NULL OR user_id <> $2)`,
       [sessionId, hostUserId],
     );
-    for (const row of rows) {
-      if (!(await shouldSendNotification(row.user_id, hostUserId, "buddy"))) {
-        continue;
-      }
-      await sendPush(row.user_id, {
-        title: "Buddy Walk started",
-        body: "Your buddy walk is underway — get moving!",
-        type: "buddy_started",
-        data: { session_id: sessionId },
-      });
-    }
+    const recipients = await allowedRecipients(
+      rows.map((r) => r.user_id),
+      hostUserId,
+      "buddy",
+    );
+    await Promise.all(
+      recipients.map((userId) =>
+        sendPush(userId, {
+          title: "Buddy Walk started",
+          body: "Your buddy walk is underway — get moving!",
+          type: "buddy_started",
+          data: { session_id: sessionId },
+        }),
+      ),
+    );
   } catch (err) {
     void logError("buddy", "failed to notify session start", {
       userId: hostUserId,
@@ -1174,6 +1315,12 @@ export async function recordProgress(
   userId: string,
   distanceMiles: number,
   durationSeconds: number,
+  /**
+   * The walker's MANUAL pause, additive. Undefined from a client that predates
+   * the flag, and written as NULL — which is that client's behaviour today, so
+   * it can neither set nor strand the state.
+   */
+  paused?: boolean,
 ): Promise<BuddySessionState> {
   if (!Number.isFinite(distanceMiles) || distanceMiles < 0) {
     throw new BadRequestError("invalid_distance");
@@ -1182,8 +1329,24 @@ export async function recordProgress(
     throw new BadRequestError("invalid_duration");
   }
 
-  const status = await participantStatus(sessionId, userId);
+  let status = await participantStatus(sessionId, userId);
   if (status === null) throw new BadRequestError("not_a_participant");
+  if (status === "joined" || status === "ready") {
+    // Belt and braces for the join/promotion race: someone reporting miles
+    // is by definition walking, so a 'joined' row in a running session is
+    // lifted rather than refused for the rest of the walk.
+    const lifted = await db.query<{ status: string }>(
+      `UPDATE buddy_session_participants p
+          SET status = 'active'
+         FROM buddy_sessions s
+        WHERE p.session_id = $1 AND p.user_id = $2
+          AND p.status IN ('joined', 'ready')
+          AND s.id = p.session_id AND s.status = 'active'
+        RETURNING p.status`,
+      [sessionId, userId],
+    );
+    if (lifted.length > 0) status = "active";
+  }
   if (status !== "active") throw new BadRequestError("not_active");
 
   const maxMilesPerSecond = BUDDY_MAX_SPEED_MPS / METERS_PER_MILE;
@@ -1205,6 +1368,9 @@ export async function recordProgress(
               )
             ),
             duration_seconds = GREATEST(p.duration_seconds, $4::integer),
+            -- NOT clamped like the two above: a pause is a state, and the
+            -- newest report is always the truth about it.
+            is_paused = $6::boolean,
             last_progress_at = NOW()
        FROM buddy_sessions s
       WHERE p.session_id = $1 AND p.user_id = $2 AND p.status = 'active'
@@ -1215,6 +1381,7 @@ export async function recordProgress(
       distanceMiles,
       Math.floor(durationSeconds),
       maxMilesPerSecond,
+      paused === undefined ? null : paused,
     ],
   );
 
@@ -1243,7 +1410,7 @@ export async function finishParticipation(
   );
   await bumpVersion(sessionId);
   await recordEvent(sessionId, userId, "finished");
-  await finalizeIfDue(sessionId);
+  await finalizeIfDue(sessionId, userId);
 
   const session = await getSessionRow(sessionId);
   if (!session) throw new BadRequestError("session_not_found");
@@ -1263,7 +1430,10 @@ export async function finishParticipation(
  * Idempotent: the guarded UPDATE on status makes a concurrent second call a
  * no-op.
  */
-export async function finalizeIfDue(sessionId: string): Promise<void> {
+export async function finalizeIfDue(
+  sessionId: string,
+  actorUserId: string | null = null,
+): Promise<void> {
   const session = await getSessionRow(sessionId);
   if (!session || session.status !== "active") return;
 
@@ -1279,7 +1449,7 @@ export async function finalizeIfDue(sessionId: string): Promise<void> {
   );
 
   if (participants.length === 0) {
-    await closeSession(sessionId, null);
+    await closeSession(sessionId, null, actorUserId);
     return;
   }
 
@@ -1325,12 +1495,13 @@ export async function finalizeIfDue(sessionId: string): Promise<void> {
     winnerId = top && !isTie ? top.user_id : null;
   }
 
-  await closeSession(sessionId, winnerId);
+  await closeSession(sessionId, winnerId, actorUserId);
 }
 
 async function closeSession(
   sessionId: string,
   winnerId: string | null,
+  actorUserId: string | null = null,
 ): Promise<void> {
   const closed = await db.query<{ id: string }>(
     `UPDATE buddy_sessions
@@ -1365,8 +1536,13 @@ async function closeSession(
     [sessionId],
   );
 
+  // Link every finisher whose real workout already synced (the host who
+  // finished on the Watch and synced before tapping Finish, or whose upload
+  // landed while a friend was still out), then rank on the real numbers.
+  await linkSyncedWorkouts(sessionId);
+
   await recordEvent(sessionId, winnerId, "completed", { winnerId });
-  void notifySessionFinished(sessionId);
+  void notifySessionFinished(sessionId, actorUserId);
 
   // Buddy medals are aggregate-driven; recompute for everyone who took part.
   try {
@@ -1383,15 +1559,25 @@ async function closeSession(
   }
 }
 
-async function notifySessionFinished(sessionId: string): Promise<void> {
+async function notifySessionFinished(
+  sessionId: string,
+  actorUserId: string | null = null,
+): Promise<void> {
   try {
     const rows = await db.query<{ user_id: string }>(
       `SELECT user_id FROM buddy_session_participants
         WHERE session_id = $1 AND status = 'finished'`,
       [sessionId],
     );
-    for (const row of rows) {
-      await sendPush(row.user_id, {
+    // The person whose Finish closed the walk is looking at the recap
+    // already; everyone else gets it subject to their buddy switch.
+    const recipients = await allowedRecipients(
+      rows.map((r) => r.user_id).filter((id) => id !== actorUserId),
+      null,
+      "buddy",
+    );
+    for (const userId of recipients) {
+      await sendPush(userId, {
         title: "Buddy Walk complete",
         body: "See how your crew did",
         type: "buddy_finished",
@@ -1426,6 +1612,13 @@ export async function reconcileBuddySessions(
   if (uploadedWorkoutIds.length === 0) return;
 
   try {
+    // The session need not be COMPLETED: in a two-person walk the first
+    // finisher's HKWorkout syncs seconds after they tap Finish, while the
+    // friend is still out — and nothing re-ran this once the walk ended, so
+    // that person stayed "not synced" (no route, no final distance) for
+    // good. A finished participant of a still-running walk links now, and
+    // closeSession links whatever synced before it. 72 hours, not 12: a
+    // Watch that syncs the next morning still lands.
     await db.query(
       `UPDATE buddy_session_participants p
           SET workout_id = w.workout_id,
@@ -1435,8 +1628,9 @@ export async function reconcileBuddySessions(
           AND p.user_id = $1
           AND p.workout_id IS NULL
           AND p.status = 'finished'
-          AND s.status = 'completed'
-          AND s.ended_at > NOW() - INTERVAL '12 hours'
+          AND s.status IN ('active', 'completed')
+          AND s.started_at IS NOT NULL
+          AND s.started_at > NOW() - INTERVAL '72 hours'
           AND w.workout_id = ANY($2::varchar[])
           AND w.user_id = $1
           AND w.deleted_at IS NULL
@@ -1472,6 +1666,62 @@ export async function reconcileBuddySessions(
     void logError("buddy", "failed to reconcile buddy sessions", {
       userId,
       context: { error: String(err) },
+    });
+  }
+}
+
+/**
+ * Link every finished participant of ONE session to their already-synced
+ * workout — the close-time twin of reconcileBuddySessions, for the person
+ * whose upload landed before the walk was over (or before they tapped
+ * Finish). Picks the counted workout that overlaps the session most, then
+ * re-ranks on the real numbers.
+ */
+export async function linkSyncedWorkouts(sessionId: string): Promise<void> {
+  try {
+    await db.query(
+      `UPDATE buddy_session_participants p
+          SET workout_id = best.workout_id,
+              final_distance_miles = best.distance
+         FROM (
+           SELECT DISTINCT ON (bp.user_id) bp.user_id, w.workout_id, w.distance
+             FROM buddy_session_participants bp
+             JOIN buddy_sessions s ON s.id = bp.session_id
+             JOIN workouts w
+               ON w.user_id = bp.user_id
+              AND w.deleted_at IS NULL
+              AND w.exclusion_reason IS NULL
+              AND w.device_end_date >= s.started_at
+              AND (w.device_end_date - (w.total_duration || ' seconds')::interval)
+                    <= COALESCE(s.ended_at, NOW()) + INTERVAL '10 minutes'
+            WHERE bp.session_id = $1
+              AND bp.status = 'finished'
+              AND bp.workout_id IS NULL
+              AND s.started_at IS NOT NULL
+            ORDER BY bp.user_id, w.device_end_date DESC
+         ) best
+        WHERE p.session_id = $1
+          AND p.user_id = best.user_id
+          AND p.workout_id IS NULL`,
+      [sessionId],
+    );
+    await db.query(
+      `UPDATE buddy_session_participants p
+          SET place = ranked.rn
+         FROM (
+           SELECT bp.user_id,
+                  RANK() OVER (
+                    ORDER BY COALESCE(bp.final_distance_miles, bp.distance_miles) DESC
+                  ) AS rn
+             FROM buddy_session_participants bp
+            WHERE bp.session_id = $1 AND bp.status = 'finished'
+         ) ranked
+        WHERE p.session_id = $1 AND p.user_id = ranked.user_id`,
+      [sessionId],
+    );
+  } catch (err) {
+    void logError("buddy", "failed to link synced workouts at close", {
+      context: { sessionId, error: String(err) },
     });
   }
 }
@@ -1641,8 +1891,15 @@ export async function getJoinableFriendSessions(userId: string): Promise<
              SELECT 1 FROM buddy_session_participants live
               WHERE live.session_id = s.id AND live.status = 'active'
            ))
-          -- Waiting: bounded by the same 3h the abandoned-lobby sweep uses.
-          OR (s.status = 'lobby' AND s.created_at > NOW() - INTERVAL '3 hours')
+          -- Waiting: an unscheduled lobby for the 3h the abandoned-lobby
+          -- sweep allows it; a scheduled one only around its start (a room
+          -- for Thursday is not an offer to walk now).
+          OR (s.status = 'lobby' AND (
+                (s.scheduled_start_at IS NULL
+                 AND s.created_at > NOW() - INTERVAL '3 hours')
+             OR (s.scheduled_start_at IS NOT NULL
+                 AND s.scheduled_start_at BETWEEN NOW() - INTERVAL '30 minutes'
+                                              AND NOW() + INTERVAL '30 minutes')))
         )
         AND NOT EXISTS (
           SELECT 1 FROM buddy_session_participants mine
@@ -1675,7 +1932,11 @@ export async function getMySessions(userId: string): Promise<{
       WHERE p.user_id = $1
         AND s.status IN ('lobby', 'active')
         AND p.status IN ('invited', 'joined', 'ready', 'active')
-      ORDER BY s.created_at DESC`,
+      -- The walk I'm actually IN outranks a lobby I'm waiting in, whichever
+      -- was created later: two memberships (own booked lobby + a friend's
+      -- walk joined mid-run) used to resolve to whichever row was newer.
+      ORDER BY (p.status = 'active') DESC, (s.status = 'active') DESC,
+               s.created_at DESC`,
     [userId],
   );
 
@@ -1784,6 +2045,26 @@ export async function sweepAbandonedSessions(): Promise<number> {
 
   for (const row of stale) {
     try {
+      // Someone who never reported a metre didn't walk — a promoted routine
+      // nobody took used to be finalized as a real walk for everyone
+      // (pushes, medals, history). They are released, not finished.
+      await db.query(
+        `UPDATE buddy_session_participants
+            SET status = 'left'
+          WHERE session_id = $1 AND status = 'active'
+            AND last_progress_at IS NULL`,
+        [row.id],
+      );
+      const walked = await db.query<{ n: number }>(
+        `SELECT COUNT(*)::int AS n FROM buddy_session_participants
+          WHERE session_id = $1 AND status IN ('active', 'finished')`,
+        [row.id],
+      );
+      if (Number(walked[0]?.n ?? 0) === 0) {
+        // Nobody moved: the walk never happened, so it never enters history.
+        await cancelInternal(row.id, null, false);
+        continue;
+      }
       await db.query(
         `UPDATE buddy_session_participants
             SET status = 'finished', finished_at = COALESCE(finished_at, NOW())
@@ -1798,14 +2079,31 @@ export async function sweepAbandonedSessions(): Promise<number> {
     }
   }
 
-  // Lobbies nobody ever started are cancelled rather than left to accumulate.
-  await db.query(
-    `UPDATE buddy_sessions
-        SET status = 'cancelled', ended_at = NOW(),
-            state_version = state_version + 1
+  // Lobbies nobody ever started are cancelled rather than left to accumulate
+  // — UNSCHEDULED ones. A walk booked for Thursday is a lobby on purpose, and
+  // this sweep used to cancel it three hours after booking, silently.
+  const abandonedLobbies = await db.query<{ id: string }>(
+    `SELECT id FROM buddy_sessions
       WHERE status = 'lobby'
-        AND created_at < NOW() - INTERVAL '3 hours'`,
+        AND (
+          (scheduled_start_at IS NULL
+           AND created_at < NOW() - INTERVAL '3 hours')
+          -- A scheduled walk nobody started within the promotion window
+          -- (promoteDueScheduledSessions refuses one more than 30 minutes
+          -- late) is over too.
+          OR (scheduled_start_at IS NOT NULL
+              AND scheduled_start_at < NOW() - INTERVAL '30 minutes')
+        )`,
   );
+  for (const row of abandonedLobbies) {
+    try {
+      await cancelInternal(row.id, null, false);
+    } catch (err) {
+      void logError("buddy", "failed to cancel abandoned buddy lobby", {
+        context: { sessionId: row.id, error: String(err) },
+      });
+    }
+  }
 
   return stale.length;
 }

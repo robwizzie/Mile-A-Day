@@ -23,6 +23,10 @@ struct BuddyFlowModifier: ViewModifier {
     @Binding var recapSessionId: String?
     @Binding var showWorkoutView: Bool
     @ObservedObject var deepLinkRouter: DeepLinkRouter
+    /// Why a tapped buddy link went nowhere. Presented HERE rather than on the
+    /// dashboard's own chain for the same reason everything else in this file
+    /// is: that chain is already at the type-checker's limit.
+    @Binding var linkError: String?
     /// `consumePendingBuddyLink(code:sessionId:)` — the dashboard owns it
     /// because it also clears the router's parked intent.
     let onPendingLink: (String?, String?) -> Void
@@ -61,6 +65,17 @@ struct BuddyFlowModifier: ViewModifier {
                         }
                     }
             )
+            .alert(
+                "Buddy Walk",
+                isPresented: Binding(
+                    get: { linkError != nil },
+                    set: { if !$0 { linkError = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { linkError = nil }
+            } message: {
+                Text(linkError ?? "")
+            }
             .onReceive(NotificationCenter.default.publisher(for: .madOpenBuddyLobby)) { _ in
                 showLobby = true
             }

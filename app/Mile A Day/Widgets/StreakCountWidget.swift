@@ -500,7 +500,7 @@ struct HomeScreenStreakView: View {
         } else if entry.isGoalCompleted {
             StreakStatusChip(icon: "flame.fill", text: Text("Streak safe"), color: MADWidgetStyle.green)
         } else {
-            StreakStatusChip(icon: nil, text: Text("\(Int(entry.liveProgress * 100))% today"), color: MADWidgetStyle.secondaryText)
+            StreakStatusChip(icon: nil, text: Text("\(entry.liveProgress.formatted(.percent.precision(.fractionLength(0)))) today"), color: MADWidgetStyle.secondaryText)
         }
     }
 }

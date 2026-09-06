@@ -305,10 +305,10 @@ struct FriendsListView: View {
             Spacer(minLength: MADTheme.Spacing.sm)
 
             HStack(spacing: 8) {
-                headerCircleButton(systemImage: "magnifyingglass") {
+                headerCircleButton(systemImage: "magnifyingglass", label: "Find people") {
                     showingSearch = true
                 }
-                headerCircleButton(systemImage: "star") {
+                headerCircleButton(systemImage: "star", label: "Close friends") {
                     showingCloseFriends = true
                 }
                 // Badge counts only incoming requests — sent ones aren't a
@@ -316,6 +316,7 @@ struct FriendsListView: View {
                 // knows about. Surfacing the sent count would over-alert.
                 headerCircleButton(
                     systemImage: "person.crop.circle.badge.plus",
+                    label: "Friend requests",
                     badgeCount: friendService.friendRequests.count
                 ) {
                     showingRequestsSheet = true
@@ -327,10 +328,13 @@ struct FriendsListView: View {
         .padding(.bottom, 4)
     }
 
-    private func headerCircleButton(systemImage: String, badgeCount: Int = 0, action: @escaping () -> Void) -> some View {
+    private func headerCircleButton(systemImage: String, label: String, badgeCount: Int = 0, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: systemImage)
+                    // Icon-only control: the glyph is the whole button, so
+                    // VoiceOver needs the name spelled out (with the badge).
+                    .accessibilityLabel(badgeCount > 0 ? "\(label), \(badgeCount) new" : label)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white.opacity(0.85))
                     .frame(width: 38, height: 38)
@@ -507,6 +511,7 @@ struct FriendsListView: View {
                     AvatarView(name: item.displayName, imageURL: item.profile_image_url, size: 44)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("\(item.displayName)'s profile")
 
                 // Tapping the body expands the row to reveal workout details.
                 Button {
@@ -1225,8 +1230,8 @@ struct FriendsListView: View {
         if isCompleted {
             return String(format: "Goal complete · %.2f mi today", todayMiles)
         }
-        let percent = Int((min(todayMiles / goal, 1.0)) * 100)
-        return String(format: "%.2f / %.0f mi · %d%%", todayMiles, goal, percent)
+        let percent = ProgressCalculator.formatProgress(min(todayMiles / goal, 1.0))
+        return "\(String(format: "%.2f / %.0f mi", todayMiles, goal)) · \(percent)"
     }
 
     // MARK: Personal rank fetch
@@ -1278,6 +1283,10 @@ struct FriendsListView: View {
                                 .tint(.orange)
                         } else {
                             Image(systemName: "bell.and.waves.left.and.right.fill")
+                                // Reads for the icon-only variant; hidden
+                                // beside the text so it isn't said twice.
+                                .accessibilityLabel("Nudge again")
+                                .accessibilityHidden(!iconOnly)
                                 .font(.system(size: 10, weight: .semibold))
                             if !iconOnly {
                                 Text("Nudge again")

@@ -499,6 +499,7 @@ private struct ModernHeroCard: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "shield.lefthalf.filled")
+                    .accessibilityLabel("Streak savers")
                     .font(.system(size: 11, weight: .bold))
                 Text("\(readyTokens)")
                     .font(.system(size: 12, weight: .black, design: .rounded))
@@ -725,9 +726,9 @@ private struct HeroStatColumn: View {
         VStack(spacing: 0) {
             ModernHeroStatLine(
                 icon: "figure.run",
-                value: currentDistance.milesText,
-                unit: "mi",
-                label: "Mileage",
+                value: currentDistance.distanceText,
+                unit: DistanceUnits.current.abbreviation,
+                label: "Distance",
                 tint: MADTheme.Colors.madRed
             )
             ModernHeroDivider()
@@ -743,7 +744,7 @@ private struct HeroStatColumn: View {
                 ModernHeroStatLine(
                     icon: "timer",
                     value: Self.formatPace(pace),
-                    unit: "/mi",
+                    unit: DistanceUnits.current.paceSuffix,
                     label: "Best pace",
                     tint: MADTheme.Colors.walkBlue
                 )
@@ -766,9 +767,11 @@ private struct HeroStatColumn: View {
         return .orange
     }
 
+    /// `pace` is MINUTES per mile; shown per display unit.
     private static func formatPace(_ pace: TimeInterval) -> String {
-        let minutes = Int(pace)
-        let seconds = Int((pace - Double(minutes)) * 60)
+        let shown = pace.pacePerDisplayUnit
+        let minutes = Int(shown)
+        let seconds = Int((shown - Double(minutes)) * 60)
         return String(format: "%d:%02d", minutes, seconds)
     }
 }
@@ -819,7 +822,7 @@ private struct ModernStepsTile: View {
         NavigationLink {
             StepsView(healthManager: healthManager, userManager: userManager)
         } label: {
-            ModernTile(icon: "shoeprints.fill", title: "Steps", value: steps.formatted(), subtitle: "\(Int(progress * 100))% of 10k", tint: tint) {
+            ModernTile(icon: "shoeprints.fill", title: "Steps", value: steps.formatted(), subtitle: "\(ProgressCalculator.formatProgress(progress)) of 10k", tint: tint) {
                 Capsule()
                     .fill(Color.white.opacity(0.10))
                     .frame(height: 5)
@@ -888,7 +891,7 @@ private struct ModernBadgesTile: View {
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
-                    Text("\(Int(progress * 100))% unlocked")
+                    Text("\(ProgressCalculator.formatProgress(progress)) unlocked")
                         .font(.system(size: 11, weight: .heavy, design: .rounded))
                         .foregroundColor(.yellow)
                         .lineLimit(1)
@@ -1156,7 +1159,7 @@ struct ModernChallengeRow: View {
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundColor(accentColor)
                 Spacer()
-                Text("\(Int(round(progress * 100)))%")
+                Text(ProgressCalculator.formatProgress(progress))
                     .font(.system(size: 11, weight: .heavy, design: .rounded))
                     .monospacedDigit()
                     .foregroundColor(.white.opacity(0.58))
@@ -1503,6 +1506,7 @@ private struct FlameBuddyHeroCard: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "shield.lefthalf.filled")
+                    .accessibilityLabel("Streak savers")
                     .font(.system(size: 11, weight: .bold))
                 Text("\(readyTokens)")
                     .font(.system(size: 12, weight: .black, design: .rounded))
@@ -1601,8 +1605,8 @@ private struct FlameBuddyHeroCard: View {
             // claim the goal is closer than it is (0.995 logged used to
             // round up to "1.00 mi" on an incomplete day).
             value: trustedDone
-                ? "\(currentDistance.milesText) mi"
-                : "\(((max(goalDistance - currentDistance, 0) * 100.0 - 1e-6).rounded(.up) / 100.0).milesText) mi",
+                ? currentDistance.distanceFormatted
+                : "\(max(goalDistance - currentDistance, 0).distanceToGoText) \(DistanceUnits.current.abbreviation)",
             tint: trustedDone ? .green : statusColor
         )
         ModernMetricPill(

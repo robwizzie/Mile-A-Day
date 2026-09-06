@@ -294,8 +294,22 @@ struct ProgressCalculator {
     /// - Parameter progress: Progress value between 0.0 and 1.0
     /// - Returns: Formatted percentage string
     static func formatProgress(_ progress: Double) -> String {
-        let percentage = Int(progress * 100)
-        return "\(percentage)%"
+        formatWholePercent(Double(Int(progress * 100)))
+    }
+
+    /// Formats an already-computed whole percent value for display.
+    /// - Parameter percent: Percent value on a 0...100 scale
+    /// - Returns: Formatted percentage string
+    static func formatWholePercent(_ percent: Double) -> String {
+        (percent / 100).formatted(.percent.precision(.fractionLength(0)))
+    }
+
+    /// Formats a signed whole percent value for display.
+    /// - Parameter percent: Percent value on a -100...100 scale
+    /// - Returns: Formatted percentage string with a plus sign for positive values
+    static func formatSignedWholePercent(_ percent: Double) -> String {
+        let prefix = percent >= 0 ? "+" : ""
+        return "\(prefix)\(formatWholePercent(Double(Int(percent))))"
     }
 }
 

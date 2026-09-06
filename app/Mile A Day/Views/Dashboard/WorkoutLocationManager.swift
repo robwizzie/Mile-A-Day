@@ -101,6 +101,12 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// cap. A segment implying more is a multipath jump/GPS re-lock: accept
     /// the new position, never the jump.
     private static let maxPlausibleSpeed: Double = 12
+    /// Slowest speed a stretch of ground is assumed to have been covered at
+    /// when deciding how much TIME it was worth (m/s; 0.4 ~= 67 min/mile).
+    /// This is what bounds a witness GAP: an anchor held through a coffee
+    /// stop resumes with one segment whose `dt` is the whole stop, and only
+    /// the walking part of it may be credited.
+    private static let slowestOnFootSpeed: Double = 0.4
 
     /// OUTDOOR pedometer odometer: the phone's per-user-calibrated pedometer
     /// distance across this tracking session (miles) — the same estimator
@@ -130,9 +136,15 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     private var trackingStartedAt: Date?
     /// Seconds of witnessed movement this session — the DISPLAY-pace divisor
     /// (elapsed time stays the truth for records; a race clock doesn't
-    /// pause). Sum of accepted segments' dt, capped per segment so a red
-    /// light waited out at a held anchor doesn't ride in on the resume fix.
+    /// pause). Credited by `creditMovingTime`, which BOTH instruments feed:
+    /// the number it divides is `liveDistance`, and that is the max of the
+    /// GPS and pedometer spans, so a clock watching only one of them reports
+    /// a pace for ground the other one measured.
     private(set) var movingSeconds: TimeInterval = 0
+    /// The instant `movingSeconds` has already been credited through — the
+    /// one thing keeping two instruments from counting the same seconds
+    /// twice (they witness the same walk, a few seconds apart).
+    private var movingCreditedThrough: Date?
     /// When distance last accrued — one of the auto-pause evidence sources.
     private var lastAccrualAt: Date?
     /// Last fix whose VALID doppler cleared the stationary bar while not
@@ -428,6 +440,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         pedometerErrored = false
         trackingStartedAt = Date()
         movingSeconds = 0
+        movingCreditedThrough = nil
         effortCurve = [(0, initialDistance)]
         lastEffortSample = (0, initialDistance)
         lastAccrualAt = nil
@@ -530,6 +543,8 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         cancelTrackingWatchdog()
         applyLocationPowerProfile()
         persistPauseState()
+        // Tell the room now, not on the next heartbeat.
+        reportBuddyProgress(force: true)
     }
 
     /// Resume from a manual pause.
@@ -560,6 +575,8 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         armTrackingWatchdog(force: true)
         applyLocationPowerProfile()
         persistPauseState()
+        // Same as pause: the room learns about the edge now.
+        reportBuddyProgress(force: true)
     }
 
     /// GPS precision follows the pause state: full accuracy while the workout
@@ -589,6 +606,14 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             guard let self else { return }
             self.pollMotionWitnesses()
             self.refreshAutoPauseState()
+            // The crew's only other news source is the location callback, and
+            // a manual pause drops the accuracy profile to 100m — so a walker
+            // standing still can go a long time without delivering a fix. With
+            // no report the roster ages them out at 90s, and "out of range" is
+            // the one thing a deliberate break must not look like. Self-
+            // throttled to 5s in the service, so this costs nothing while
+            // fixes are flowing.
+            self.reportBuddyProgress()
             // Live Activity freshness rides this heartbeat, NOT the tracker
             // view's timer — that one stops on lock and on dismiss, which is
             // exactly when the lock screen was flipping to TRACKING
@@ -732,6 +757,35 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // forward and beat the presence heartbeat (both self-throttled).
         armTrackingWatchdog()
         LivePresenceService.shared.tick()
+        reportBuddyProgress()
+    }
+
+    /// Buddy Walk progress from the DATA callbacks, not the view timer.
+    ///
+    /// The tracker's 1 Hz tick is the only thing that used to call
+    /// `reportProgress`, and that timer suspends the moment the phone locks
+    /// — i.e. for the whole of a real walk. Every friend's roster then showed
+    /// this person frozen at the distance they had when they pocketed the
+    /// phone, "stale" after 90s, and the pooled goal stopped moving. The
+    /// location/pedometer callbacks keep firing under the `location`
+    /// background mode, so the report rides them (self-throttled to 5s in the
+    /// service; a no-op outside a buddy walk).
+    /// - Parameter force: skip the service's 5s throttle. Only the pause and
+    ///   resume EDGES pass true — a state change that waits behind a heartbeat
+    ///   leaves the crew watching a number stop moving with nothing on screen
+    ///   to say why.
+    private func reportBuddyProgress(force: Bool = false) {
+        let distance = liveDistance
+        let paused = pausedSeconds
+        let pausedNow = isPaused
+        Task { @MainActor in
+            BuddySessionService.shared.reportProgressFromCallback(
+                distanceMiles: distance,
+                pausedSeconds: paused,
+                isPaused: pausedNow,
+                force: force
+            )
+        }
     }
 
     /// Single entry point for outdoor pedometer readings (live stream +
@@ -751,8 +805,18 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // ≥ ~2 m of new step distance = the walker is actually
         // stepping right now. Feeds stepsCorroborateMovement.
         if miles - lastPedometerProgressMiles >= 0.0012 {
+            let stepped = miles - lastPedometerProgressMiles
+            let since = lastPedometerProgressAt ?? trackingStartedAt ?? Date()
             lastPedometerProgressMiles = miles
             lastPedometerProgressAt = Date()
+            // Steps are the other half of the moving clock. `liveDistance`
+            // is max(GPS span, pedometer span), so on the walks where the
+            // pedometer wins — thin GPS, tree cover, a pocketed phone — the
+            // distance was credited by an instrument the clock never
+            // watched, and the pace it printed was for a walk nobody timed.
+            // Deduped against the GPS side by the shared watermark, so the
+            // two witnessing the same stretch credit it once.
+            creditMovingTime(from: since, to: Date(), metres: stepped * 1609.344)
         }
         // Same rebase as indoors: the raw odometer keeps running through a
         // pause, so paused ground is measured and then subtracted rather than
@@ -913,6 +977,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // Presence heartbeat rides the same callback: view timers suspend in
         // the background, delegate callbacks don't. Self-throttled to ~45s.
         LivePresenceService.shared.tick()
+        reportBuddyProgress()
 
         // In pedometer mode location is only a background keep-alive —
         // distance comes from CMPedometer and there's no meaningful route.
@@ -1033,6 +1098,29 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         }
     }
 
+    /// Credit the moving clock for a stretch of ground, from whichever
+    /// instrument witnessed it.
+    ///
+    /// Two rules, and both are load-bearing:
+    ///  - Never twice. `movingCreditedThrough` is the watermark both callers
+    ///    share, so a fix and a step batch covering the same seconds credit
+    ///    them once — the clock is a union of movement evidence, not a sum.
+    ///  - Never more than the ground can account for. A witness gap (held
+    ///    anchor, batched delivery, a stop) arrives as one segment with a
+    ///    long `dt`, and only `metres / slowestOnFootSpeed` of it was walked.
+    ///
+    /// Paused time is not movement, and `pause()` already blocks accrual —
+    /// the guard is here too because the pedometer keeps reporting through a
+    /// pause by design.
+    private func creditMovingTime(from start: Date, to end: Date, metres: Double) {
+        guard !isPaused, metres > 0 else { return }
+        let from = max(start, movingCreditedThrough ?? start)
+        defer { movingCreditedThrough = max(movingCreditedThrough ?? end, end) }
+        let span = end.timeIntervalSince(from)
+        guard span > 0 else { return }
+        movingSeconds += min(span, metres / Self.slowestOnFootSpeed)
+    }
+
     /// Add a fix's contribution to `currentDistance` — with the noise floor
     /// raw delta-summing lacked. Distance is a sum of segment lengths, so GPS
     /// jitter only ever ADDS (it never averages out); un-floored accrual is
@@ -1087,11 +1175,16 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         let distanceInMiles = meters * 0.000621371
         // Backstop against anything the speed cap missed (e.g. huge dt gaps).
         if distanceInMiles < 0.1 {
-            // Per-segment dt cap: accepted segments arrive every ~6-21s while
-            // walking, so 20s covers them — but a resume fix after a held-
-            // anchor wait (red light) can't ride the whole wait in as
-            // "moving".
-            movingSeconds += min(max(dt, 0), 20)
+            // The segment's OWN ground decides how much of its dt was walked
+            // — the same rule the distance side already follows. A flat 20s
+            // cap lived here, and it was only ever right for the dense-fix
+            // case: fixes arrive in batches on a locked phone and thin out
+            // to nothing in an urban canyon, so one accepted segment can
+            // cover minutes and hundreds of metres. It credited every one of
+            // those metres and 20 seconds, which is how a 34-minute walk
+            // reported 8 minutes of moving time and printed an 8:25 /mi
+            // pace on a card whose own splits said 33:05.
+            creditMovingTime(from: anchor.timestamp, to: newLocation.timestamp, metres: meters)
             lastAccrualAt = Date()
             DispatchQueue.main.async {
                 self.currentDistance += distanceInMiles
@@ -1189,6 +1282,14 @@ struct InProgressWorkoutBanner: View {
         current.currentDistance
     }
 
+    /// "Run" / "Walk" — the persisted type, so the banner says WHICH workout
+    /// is in progress. It said "Workout in progress" for both, the one
+    /// mid-workout surface that didn't name the activity while the Live
+    /// Activity, the Watch and the Friends tab all did.
+    private var activityName: String {
+        current.activityType == "Running" ? "Run" : "Walk"
+    }
+
     var body: some View {
         Button(action: onResume) {
             HStack(spacing: 12) {
@@ -1214,7 +1315,7 @@ struct InProgressWorkoutBanner: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(isPaused ? "Workout paused" : "Workout in progress")
+                    Text(isPaused ? "\(activityName) paused" : "\(activityName) in progress")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundColor(.white)

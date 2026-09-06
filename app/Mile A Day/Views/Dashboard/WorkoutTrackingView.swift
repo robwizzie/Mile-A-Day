@@ -606,7 +606,12 @@ struct WorkoutTrackingView: View {
                 },
                 title: "Ghost Race",
                 subtitle: ghostRaceSubtitle,
-                featured: true,
+                // NOT featured — same surface and stroke as "Just Track It".
+                // The buddy card on the step before learned this already: a
+                // brighter card among plain ones reads as the one you are
+                // supposed to pick, and neither of these two is. The "NEW"
+                // badge is what introduces the feature, and it retires itself
+                // after the first race.
                 badge: hasArmedGhostRaceOnce ? nil : "NEW",
                 // No time here on purpose. The next screen is where the target
                 // is chosen, and printing one before that reads as a decision
@@ -869,6 +874,9 @@ struct WorkoutTrackingView: View {
                             BuddyMidWalkJoinStrip { sessionId in
                                 adoptedBuddySessionId = sessionId
                                 onBuddySessionAdopted?(sessionId)
+                                // The workout is already persisted without a
+                                // room; stamp it so a relaunch rejoins.
+                                InProgressWorkoutStore.setBuddySession(sessionId)
                             }
                             .padding(.horizontal, 20)
                         }
@@ -969,8 +977,10 @@ struct WorkoutTrackingView: View {
                     Image(uiImage: thumb)
                         .resizable()
                         .scaledToFill()
+                        .accessibilityLabel("Photos from this workout")
                 } else {
                     Image(systemName: "photo.on.rectangle")
+                        .accessibilityLabel("Photos from this workout")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1034,6 +1044,7 @@ struct WorkoutTrackingView: View {
             showLibraryImport = true
         } label: {
             midRunCircleIcon("photo.badge.plus")
+                .accessibilityLabel("Add a photo from your library")
         }
         .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showLibraryImport) {
@@ -1087,6 +1098,38 @@ struct WorkoutTrackingView: View {
         selectedActivityType == .running ? "run" : "walk"
     }
 
+    /// "RUN · OUTDOOR" — the same two choices the wizard took, stated where
+    /// the workout is happening. Reads the same `selectedActivityType` every
+    /// other surface does (Live Activity, Watch, friends' presence), so it
+    /// can't disagree with them.
+    ///
+    /// It sits in the DISTANCE caption slot and carries no chrome. It used to
+    /// be a filled capsule centred in the top bar, which is a whole row's
+    /// width of the screen's most contested space for a fact that cannot
+    /// change mid-workout — and it collided with the back button, since the
+    /// overlay was centred on the SCREEN and knew nothing about what either
+    /// side of that row was holding. The caption slot is free: it was reading
+    /// "DISTANCE" over a number with "miles" written underneath it.
+    private var activityCaption: some View {
+        HStack(spacing: 5) {
+            Image(systemName: selectedActivityType == .running ? "figure.run" : "figure.walk")
+                .font(.system(size: 11, weight: .bold))
+                .accessibilityHidden(true)
+            Text(selectedActivityType == .running ? "RUN" : "WALK")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .tracking(1.5)
+            Text("·")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .opacity(0.5)
+            Text(selectedLocationType == .indoor ? "INDOOR" : "OUTDOOR")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .tracking(1.5)
+                .opacity(0.75)
+        }
+        .foregroundColor(.white.opacity(0.7))
+        .accessibilityElement(children: .combine)
+    }
+
     private func showImportToast(_ text: String, ok: Bool) {
         if ok { MADHaptics.success() }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -1103,6 +1146,7 @@ struct WorkoutTrackingView: View {
             showMidRunCamera = true
         } label: {
             midRunCircleIcon("camera.fill")
+                .accessibilityLabel("Take a photo")
         }
         .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showMidRunCamera) {
@@ -1249,27 +1293,23 @@ struct WorkoutTrackingView: View {
 
     private var distanceDisplay: some View {
         VStack(spacing: 12) {
-            Text("DISTANCE")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundColor(.white.opacity(0.7))
-                .tracking(1.5)
+            activityCaption
 
             // Floored, never rounded up: a "1.00" here before the ring hits
             // 100% and the celebration fires reads as the app refusing to
             // count a finished mile (0.995 used to render exactly that).
-            Text(currentDistance.milesText)
+            Text(currentDistance.distanceText)
                 .font(.system(size: 80, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
                 .contentTransition(.numericText())
 
-            Text("miles")
+            Text(DistanceUnits.current.plural)
                 .font(.title2)
                 .foregroundColor(.white.opacity(0.8))
 
             if startingDistance > 0 {
                 VStack(spacing: 4) {
-                    Text("Daily Total: \(totalDailyDistance.milesText) mi")
+                    Text("Daily Total: \(totalDailyDistance.distanceFormatted)")
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .foregroundColor(.white.opacity(0.6))
@@ -1300,7 +1340,7 @@ struct WorkoutTrackingView: View {
                 .animation(.easeOut(duration: 0.5), value: progress)
 
             VStack(spacing: 4) {
-                Text("\(Int(progress * 100))%")
+                Text(ProgressCalculator.formatProgress(progress))
                     .font(.system(size: 36, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
 
@@ -1517,12 +1557,27 @@ struct WorkoutTrackingView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(coachEnabled ? "Mute voice coach" : "Unmute voice coach")
 
-            Text(line)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(coachEnabled ? 0.75 : 0.5))
-                .multilineTextAlignment(.leading)
-                .lineLimit(2)
-                .id(line)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(line)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(coachEnabled ? 0.75 : 0.5))
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+                    .id(line)
+                // The voice is as good as code can make it; the rest is a
+                // download the app cannot start and Settings cannot deep-link
+                // to. This hint lived only on the settings page — a screen
+                // nobody opens mid-walk — so "it sounds robotic" went
+                // unanswered at the one moment the answer would land: while
+                // the robot is talking.
+                if coachEnabled, GhostCoach.usingBasicVoice {
+                    Text("Basic voice. A natural one is a free download: Settings › Accessibility › Spoken Content › Voices.")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.45))
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
+                }
+            }
         }
         .padding(.horizontal, 24)
     }
@@ -1687,7 +1742,7 @@ struct WorkoutTrackingView: View {
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
 
-                Text("\(startingDistance.milesText) miles reached")
+                Text("\(startingDistance.distanceText) \(DistanceUnits.current.plural) reached")
                     .font(.title3)
                     .foregroundColor(.white.opacity(0.9))
             }
@@ -1856,10 +1911,12 @@ struct WorkoutTrackingView: View {
 
     /// The third card on the activity step: do this mile WITH someone.
     ///
-    /// Featured, because it's the only option here that isn't just a HealthKit
-    /// activity type. Live "friends out right now" belongs on the Friends tab,
-    /// so the Dashboard keeps this as a generic buddy entry point plus invite
-    /// count only.
+    /// Drawn exactly like the other two. It used to be "featured" (brighter
+    /// fill, stronger stroke) on the grounds that it's the one option that
+    /// isn't a HealthKit activity type — but a highlighted third card read as
+    /// the one you were supposed to pick. Live "friends out right now" belongs
+    /// on the Friends tab, so the Dashboard keeps this as a generic buddy
+    /// entry point plus invite count only.
     ///
     /// The whole flow stays INSIDE this cover: setup sheet and lobby present
     /// over the wizard (`BuddyWizardFlowModifier` on the body), so Cancel and
@@ -1873,7 +1930,7 @@ struct WorkoutTrackingView: View {
                 leading: { optionGlyph("figure.2") },
                 title: "With a Buddy",
                 subtitle: BuddyStartPrompt.subtitle(invites: buddyService.invites),
-                featured: true,
+                featured: false,
                 badge: BuddyStartPrompt.badge(
                     invites: buddyService.invites,
                     hasStartedOnce: hasOpenedBuddyStartOnce
@@ -2057,6 +2114,20 @@ struct WorkoutTrackingView: View {
 
             guard let saved = InProgressWorkoutStore.load(), saved.isActive else { return }
 
+            // Buddy walk: the room rides the persisted workout. Re-adopt it
+            // before anything below starts reporting, and ask the server for
+            // the session — `BuddySessionService.session` is in-memory only,
+            // so after a relaunch every progress report was a no-op and the
+            // finish never reached the server (the walk stayed `active` for
+            // the whole crew until the sweep).
+            if effectiveBuddySessionId == nil, let restoredSession = saved.buddySessionId {
+                adoptedBuddySessionId = restoredSession
+                onBuddySessionAdopted?(restoredSession)
+                Task { @MainActor in
+                    await BuddySessionService.shared.refreshMySessions()
+                }
+            }
+
             // Restore core state. The clock is settled AFTER tracking restarts
             // below, once `pausedSeconds` has been rehydrated — computing it
             // here would count every past pause as active time.
@@ -2154,6 +2225,16 @@ struct WorkoutTrackingView: View {
             // Restart timer and Live Activity
             startWorkoutTimer()
             startLiveActivity()
+
+            // And the friends' presence. `LivePresenceService` keeps its
+            // session id in memory only, and `tick()` returns early without
+            // one — so after a relaunch the heartbeats stopped, the server
+            // aged the session out, and the person was still walking while
+            // the Friends tab said nobody was out. Start a fresh session with
+            // the restored type; the server upserts per user.
+            livePresence.startSession(
+                workoutType: selectedActivityType == .running ? "running" : "walking"
+            )
 
             // And the coach. `GhostCoach` is a singleton whose `isActive` is a
             // process-lifetime flag, so a relaunch mid-workout came back with
@@ -2537,7 +2618,9 @@ struct WorkoutTrackingView: View {
             isUsingPedometer: selectedLocationType == .indoor,
             liveActivityID: nil,
             // Latched at START (see InProgressWorkoutState.stealth).
-            stealth: StealthModeStore.shared.isOn ? true : nil
+            stealth: StealthModeStore.shared.isOn ? true : nil,
+            // The room this workout belongs to, so a relaunch rejoins it.
+            buddySessionId: effectiveBuddySessionId
         )
         InProgressWorkoutStore.save(initialState)
 
@@ -2601,7 +2684,12 @@ struct WorkoutTrackingView: View {
                     delta: raceDeltaSeconds,
                     ghostSeconds: raceGhost?.seconds,
                     recentPace: locationManager.recentPaceSecondsPerMile,
-                    targetDistance: coachTargetDistance
+                    targetDistance: coachTargetDistance,
+                    // The DAY's miles, not this walk's — the same figure the
+                    // ring fills with and the Live Activity prints as
+                    // "Daily:". Only the goal milestones read it; splits,
+                    // intervals, pace and the race stay on this workout.
+                    goalProgress: totalDailyDistance
                 )
             )
             // Foreground heartbeat driver (self-throttled to ~45s). The

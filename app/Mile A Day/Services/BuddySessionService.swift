@@ -80,6 +80,11 @@ final class BuddySessionService: ObservableObject {
     /// Published so the tracker's offer appears and disappears on its own.
     @Published private(set) var recentlyLeftSessionId: String?
     @Published private(set) var recentlyLeftAt: Date?
+    /// Friends the host asked for who are NOT on the lobby the server handed
+    /// back — the server drops anyone it can't invite (no buddy-capable
+    /// build, a block) without an error, and the lobby simply showed fewer
+    /// faces than were tapped. Display names, for the lobby's note.
+    @Published private(set) var droppedInviteeNames: [String] = []
 
     /// Set once the app has told the backend this build has the buddy UI.
     private var hasEnrolled = false
@@ -183,6 +188,7 @@ final class BuddySessionService: ObservableObject {
                 "/buddy/sessions/mine", responseType: BuddyMySessionsResponse.self)
             apply(response.active)
             invites = response.invites
+            await retryPendingFinishIfNeeded()
         } catch {
             // A silent failure here is correct: this runs on every foreground
             // and must never surface an alert for a transient network blip.
@@ -454,6 +460,10 @@ final class BuddySessionService: ObservableObject {
             responseType: BuddySessionState.self
         )
         apply(state)
+        let onRoster = Set(state.participants.map(\.userId))
+        droppedInviteeNames = inviteUserIds
+            .filter { !onRoster.contains($0) }
+            .map { id in candidates.first { $0.userId == id }?.displayName ?? "a friend" }
         startPolling()
         return state
     }
@@ -691,7 +701,12 @@ final class BuddySessionService: ObservableObject {
     /// Called from the tracker's existing 1 Hz tick; this collapses that to one
     /// network call every `progressInterval`. `force` bypasses the throttle for
     /// the final report before finishing, so the last few metres always land.
-    func reportProgress(distanceMiles: Double, durationSeconds: TimeInterval, force: Bool = false) async {
+    func reportProgress(
+        distanceMiles: Double,
+        durationSeconds: TimeInterval,
+        isPaused: Bool = false,
+        force: Bool = false
+    ) async {
         guard let id = activeSessionId else { return }
         if !force, let last = lastProgressReport,
             Date().timeIntervalSince(last) < progressInterval
@@ -709,6 +724,10 @@ final class BuddySessionService: ObservableObject {
                     json: [
                         "distanceMiles": distanceMiles,
                         "durationSeconds": Int(durationSeconds),
+                        // Additive. The server treats a missing key as "no
+                        // opinion" and writes NULL, so an older build behaves
+                        // exactly as it does today.
+                        "paused": isPaused,
                     ],
                     responseType: BuddySessionState.self
                 ))
@@ -722,6 +741,14 @@ final class BuddySessionService: ObservableObject {
 
     /// Mark this participant done. Distance is reported one last time first so
     /// the recap and placements use the true final number.
+    ///
+    /// A failed finish is REMEMBERED (UserDefaults) and retried from the next
+    /// `refreshMySessions` — every foreground and dashboard mount. It used to
+    /// print and move on: the phone had saved the mile and shown the recap,
+    /// while the server still had this person `active`, so the walk never
+    /// completed for anyone, the standings never ranked, and the crew's
+    /// "finished" push never went out — until the abandoned-session sweep
+    /// closed it hours later.
     func finish(finalDistanceMiles: Double, durationSeconds: TimeInterval) async {
         guard let id = session?.id else { return }
         await reportProgress(
@@ -730,16 +757,113 @@ final class BuddySessionService: ObservableObject {
             force: true
         )
         do {
-            apply(
-                try await request(
-                    "/buddy/sessions/\(id)/finish",
-                    method: .POST,
-                    responseType: BuddySessionState.self
-                ))
+            try await postFinish(sessionId: id)
+            Self.clearPendingFinish()
         } catch {
             print("[BuddySessionService] finish failed: \(error)")
+            Self.savePendingFinish(
+                PendingFinish(
+                    sessionId: id,
+                    distanceMiles: finalDistanceMiles,
+                    durationSeconds: durationSeconds
+                ))
         }
         stopPolling()
+    }
+
+    private func postFinish(sessionId: String) async throws {
+        apply(
+            try await request(
+                "/buddy/sessions/\(sessionId)/finish",
+                method: .POST,
+                responseType: BuddySessionState.self
+            ))
+    }
+
+    /// A Finish the server never received. Persisted, because the case it
+    /// exists for — the request dropped as the user locked the phone and
+    /// walked off — is also the case where the app is next opened cold.
+    private struct PendingFinish: Codable {
+        let sessionId: String
+        let distanceMiles: Double
+        let durationSeconds: TimeInterval
+    }
+    private static let pendingFinishKey = "MAD_BuddyPendingFinishV1"
+
+    private static func savePendingFinish(_ pending: PendingFinish) {
+        guard let data = try? JSONEncoder().encode(pending) else { return }
+        UserDefaults.standard.set(data, forKey: pendingFinishKey)
+    }
+
+    private static func clearPendingFinish() {
+        UserDefaults.standard.removeObject(forKey: pendingFinishKey)
+    }
+
+    private static func loadPendingFinish() -> PendingFinish? {
+        guard let data = UserDefaults.standard.data(forKey: pendingFinishKey) else { return nil }
+        return try? JSONDecoder().decode(PendingFinish.self, from: data)
+    }
+
+    /// Re-send a remembered Finish, once the server has told us where we
+    /// stand. Only while the server STILL has this person `active` on that
+    /// exact session — anything else (the session completed or was swept,
+    /// we're on a different walk, we were marked finished by another path)
+    /// means the record is settled and the note is dropped.
+    private func retryPendingFinishIfNeeded() async {
+        guard let pending = Self.loadPendingFinish() else { return }
+        guard let session, session.id == pending.sessionId, session.status == .active,
+            session.me(currentUserId)?.status == .active
+        else {
+            Self.clearPendingFinish()
+            return
+        }
+        await reportProgress(
+            distanceMiles: pending.distanceMiles,
+            durationSeconds: pending.durationSeconds,
+            force: true
+        )
+        do {
+            try await postFinish(sessionId: pending.sessionId)
+            Self.clearPendingFinish()
+            stopPolling()
+        } catch {
+            print("[BuddySessionService] finish retry failed: \(error)")
+        }
+    }
+
+    /// Progress driven by `WorkoutLocationManager`'s data callbacks — the
+    /// only driver that keeps firing on a locked phone. Synchronous and
+    /// cheap on the common path (no buddy walk ⇒ return; inside the 5s
+    /// throttle ⇒ return), so it can ride every fix. The duration is taken
+    /// from the persisted workout's own start: the location manager's clock
+    /// restarts on a recovery, and a report that said "3 minutes in" on a
+    /// walk 40 minutes old would drag the crew's pace figures with it.
+    func reportProgressFromCallback(
+        distanceMiles: Double,
+        pausedSeconds: TimeInterval,
+        isPaused: Bool = false,
+        force: Bool = false
+    ) {
+        guard activeSessionId != nil else { return }
+        // `force` is for the pause/resume EDGE. Everything else here is a
+        // heartbeat and can wait for the throttle, but a state change that
+        // waits reads as the roster being wrong: the crew watches a figure
+        // stop moving with nothing to say why.
+        if !force, let last = lastProgressReport,
+            Date().timeIntervalSince(last) < progressInterval
+        {
+            return
+        }
+        guard let start = InProgressWorkoutStore.load()?.startTime else { return }
+        let duration = max(0, Date().timeIntervalSince(start) - pausedSeconds)
+        Task {
+            await reportProgress(
+                distanceMiles: distanceMiles,
+                durationSeconds: duration,
+                isPaused: isPaused,
+                force: force
+            )
+        }
     }
 
     func recap(sessionId: String) async throws -> BuddyRecapResponse {
@@ -802,9 +926,13 @@ final class BuddySessionService: ObservableObject {
     private func apply(_ state: BuddySessionState?) {
         guard let state else {
             session = nil
+            droppedInviteeNames = []
             stopPolling()
             return
         }
+        // The dropped-invitee note belongs to ONE lobby; a different session
+        // arriving (a join, a fresh room) retires it.
+        if state.id != session?.id { droppedInviteeNames = [] }
         // Anything actually changed → the room is live again, so poll fast.
         // `state_version` is bumped by every server-side mutation, which makes
         // it exactly the "did something happen" signal the backoff needs.
@@ -900,6 +1028,10 @@ final class BuddySessionService: ObservableObject {
                 .rateLimited(let message),
                 .apiError(let message):
                 throw BuddyServiceError.api(message)
+            // Raised only by `POST /posts`, never by a buddy endpoint — but
+            // this switch carries no `default`, so it needs a home.
+            case .buddyWalkAlreadyPosted:
+                throw BuddyServiceError.api("buddy_walk_already_posted")
             case .notFound:
                 // The feature flag is off server-side, or the session is gone.
                 throw BuddyServiceError.api("session_not_found")

@@ -14,6 +14,19 @@ import SwiftUI
 struct PrivacyOnboardingView: View {
     /// Marked at CONTINUE, not display — reopening after a crash re-asks.
     static let seenKey = "privacyOnboardingSeenV1"
+    /// True once the walkthrough has been SAVED (the flag is stamped on Save,
+    /// never on display). Other one-shot surfaces stand down on this: the
+    /// sheet is hosted at MainTabView root, and a second sheet presented from
+    /// a tab while it is up silently dismisses it — What's New did exactly
+    /// that on first launch after an update, and the privacy questions were
+    /// gone before anyone answered them.
+    static var hasBeenSeen: Bool {
+        UserDefaults.standard.bool(forKey: seenKey)
+    }
+    /// Posted when the sheet goes away (saved or not), so the surfaces that
+    /// stood down for it can take their turn. Both are fine: a swipe-dismiss
+    /// leaves `hasBeenSeen` false and the walkthrough returns next launch.
+    static let doneNotification = Notification.Name("MAD_PrivacyOnboardingDone")
 
     let onDone: () -> Void
 

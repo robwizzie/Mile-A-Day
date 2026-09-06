@@ -19,8 +19,15 @@ final class WeeklyChallengeService: ObservableObject {
     /// "still loading" from "genuinely unavailable".
     @Published private(set) var hasLoadedOnce = false
     /// The server has no weekly challenge for this user (older deploy, or an
-    /// empty catalog). Views hide the feature rather than showing an error.
+    /// empty catalog) — a 404, and ONLY a 404. Views hide the feature.
     @Published private(set) var unavailable = false
+    /// The last load failed for some other reason (offline, a 500, a decode).
+    /// Distinct from `unavailable` because the two need opposite copy: one is
+    /// "there isn't one this week", the other is "we couldn't fetch it" with a
+    /// way to try again. Collapsing them is what let a dashboard card tell a
+    /// user "a new one lands every Sunday" ON a Sunday, with a challenge
+    /// waiting on the server the whole time.
+    @Published private(set) var loadFailed = false
 
     private let defaults = UserDefaults.standard
     private let snapshotKey = "weeklyChallengeSnapshotV1"
@@ -34,6 +41,23 @@ final class WeeklyChallengeService: ObservableObject {
 
     private init() {
         restoreSnapshot()
+    }
+
+    /// When the last successful load landed — the throttle behind
+    /// `refreshIfStale`.
+    private var lastLoadedAt: Date?
+
+    /// A load the Dashboard can call on every appearance without hammering the
+    /// endpoint. It fires on tab switches, and the read behind it is not
+    /// cheap: a measure, a baseline, a friends leaderboard and last week's
+    /// result. Pull-to-refresh and push taps still call `refresh()` directly —
+    /// those are a user asking for fresh data, which is never stale.
+    func refreshIfStale(maxAge: TimeInterval = 60) async {
+        if current != nil, let lastLoadedAt,
+           Date().timeIntervalSince(lastLoadedAt) < maxAge {
+            return
+        }
+        await refresh()
     }
 
     func refresh() async {
@@ -51,12 +75,19 @@ final class WeeklyChallengeService: ObservableObject {
             )
             current = response
             unavailable = false
+            loadFailed = false
+            lastLoadedAt = Date()
             saveSnapshot(response)
-        } catch {
-            // A 404 is the expected answer from a server that predates the
-            // feature — not an error worth showing. Keep whatever we had.
-            print("[WeeklyChallenge] Load failed: \(error.localizedDescription)")
+        } catch APIError.notFound {
+            // The expected answer from a server that predates the feature, or
+            // one with an empty catalog. Genuinely "there isn't one".
             if current == nil { unavailable = true }
+            loadFailed = false
+        } catch {
+            // Anything else is a failure to FETCH, not an absence. Keep
+            // whatever we had and let the card offer a retry.
+            print("[WeeklyChallenge] Load failed: \(error.localizedDescription)")
+            loadFailed = current == nil
         }
     }
 

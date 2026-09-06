@@ -221,6 +221,11 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     /// outline — never removed from the roster, because a friend who vanishes
     /// mid-walk reads as a crash.
     let isStale: Bool
+    /// They MANUALLY paused and are still on the walk. Optional twice over:
+    /// nil from a server that predates the flag, and nil is what an older
+    /// client's own reports leave behind — both read as not paused. Never the
+    /// tracker's auto-pause GUESS, which is lenient by design and flaps.
+    let isPaused: Bool?
     let isHost: Bool
     let place: Int?
     let finalDistanceMiles: Double?
@@ -257,6 +262,7 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
         case distanceMiles = "distance_miles"
         case durationSeconds = "duration_seconds"
         case isStale = "is_stale"
+        case isPaused = "is_paused"
         case isHost = "is_host"
         case place
         case finalDistanceMiles = "final_distance_miles"

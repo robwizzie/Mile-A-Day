@@ -80,6 +80,7 @@ struct PostCardView: View {
     /// The media page on screen: the photo face's slides come first, the map
     /// face is the last page. Both the PHOTO | MAP toggle and a swipe move it.
     @State private var mediaPage = 0
+    @State private var showSplits = false
     /// The art card's ghost-map snapshot, kept for the pinch-zoom composite
     /// (same contract the map view had).
     @State private var routeArtSnapshot: RouteMapSnapshot?
@@ -168,7 +169,7 @@ struct PostCardView: View {
     private var headerSubtitle: String {
         var parts = [Self.activityNoun(post.workout_type, pace: post.stats_snapshot?.pace)]
         if let d = post.stats_snapshot?.distance, d > 0 {
-            parts.append(post.feed_role == "extra" ? "+\(d.milesText) mi extra" : "\(d.milesText) mi")
+            parts.append(post.feed_role == "extra" ? "+\(d.distanceFormatted) extra" : d.distanceFormatted)
         }
         parts.append(post.relativeTime)
         return parts.joined(separator: " · ")
@@ -412,6 +413,10 @@ struct PostCardView: View {
 
     /// Route slide coordinates — hidden for auto posts, whose media already IS
     /// the rendered route/stats card (a second identical slide would be noise).
+    /// The SLIDE only: the Flyover chip reads `post.routeCoordinates` directly,
+    /// so an auto card still flies — the server ships its route for exactly
+    /// that (AUTHOR_ROUTE_SQL), and a user whose history is mostly auto posts
+    /// otherwise had no Flyover anywhere on the feed.
     private var routeSlideCoordinates: [CLLocationCoordinate2D]? {
         guard post.is_auto != true else { return nil }
         return post.routeCoordinates
@@ -634,11 +639,42 @@ struct PostCardView: View {
         .overlay(alignment: .topLeading) {
             // On EVERY face, not just the map: the flight doesn't need the map
             // showing to launch, and the chip is how people learn it exists.
-            if canPlayFlyover {
-                flyoverChip.padding(10)
+            // SPLITS sits beside it — the detail behind the numbers, on any
+            // workout that has them, indoor or out.
+            if canPlayFlyover || hasSplits {
+                HStack(spacing: 6) {
+                    if canPlayFlyover { flyoverChip }
+                    if hasSplits { splitsChip }
+                }
+                .padding(10)
             }
         }
         .overlay(HypeBurstView(trigger: hypeBurst))
+        // On the MEDIA node: the card root already owns the flyover cover
+        // and the share sheet, and two presentations on one node drop one.
+        .sheet(isPresented: $showSplits) {
+            WorkoutSplitsSheet(
+                bars: splitBars,
+                stats: post.stats_snapshot,
+                workoutType: post.workout_type,
+                isIndoor: post.is_indoor,
+                ownerName: post.is_self ? "You" : post.displayName
+            )
+        }
+    }
+
+    /// The post's per-mile splits, shaped for drawing. Empty on older servers,
+    /// stitched rollups and auto posts — the chip then simply isn't there.
+    private var splitBars: [WorkoutSplitBar] {
+        WorkoutSplitBar.bars(from: post.splits)
+    }
+
+    private var hasSplits: Bool { !splitBars.isEmpty }
+
+    private var splitsChip: some View {
+        SplitsChipButton(accent: ActivityCardView.color(post.workout_type)) {
+            showSplits = true
+        }
     }
 
     /// No media at all — the empty-state placeholder.
@@ -936,7 +972,9 @@ struct PostCardView: View {
     }
 
     private var canPlayFlyover: Bool {
-        let hasRoute = (routeSlideCoordinates?.count ?? 0) >= 2 || !companionRoutes.isEmpty
+        // The raw route, not the slide's: an auto post hides its route slide
+        // (the media is already the route) but flies like any other card.
+        let hasRoute = (post.routeCoordinates?.count ?? 0) >= 2 || !companionRoutes.isEmpty
         return hasRoute && (isMine || post.flyover_allowed != false)
     }
 

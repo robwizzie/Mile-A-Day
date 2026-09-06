@@ -105,6 +105,14 @@ jobs:
       # would wipe other people's miles) and the per-viewer history hide.
       - name: Buddy live join/leave/cancel/hide check
         run: node scripts/buddy-live-check.mjs
+      # The walk's lifecycle end to end. A scheduled walk was cancelled by the
+      # 3h lobby sweep before anyone arrived, local_date was stamped in New
+      # York for everyone, a finisher's synced workout only linked if the
+      # session had already completed, the Friends tab offered rooms the join
+      # endpoint refused, and a walk nobody moved on entered both archives as
+      # a completed walk. None of it throws; this file asserts each by behaviour.
+      - name: Buddy lifecycle check
+        run: node scripts/buddy-lifecycle-check.mjs
       # Profile-grid controls, the collab reach/route switches and Story
       # Highlights. The reach switch lives inside collabReachSql — the fragment
       # getFeed, the unified feed and direct post access all ask — so too
@@ -137,6 +145,24 @@ jobs:
       # and the new one give OPPOSITE answers.
       - name: Competition team scoring check
         run: node scripts/competition-team-scoring-check.mjs
+      # Every scheduled job runs through cronRunner.runJob — the one place a
+      # cron failure becomes an error_log row and an admin push instead of a
+      # console line nobody reads. Pins the row, the alert, the per-job
+      # cooldown and the kill switch.
+      - name: Cron runner check
+        run: node scripts/cron-runner-check.mjs
+      # The streak last call: local 10 PM, live streak, no mile. An hour
+      # predicate off by one, a missed reminder-hour guard or a stale stored
+      # streak all fail silently, so the hour arithmetic is pinned against
+      # seeded timezone offsets at one fixed instant.
+      - name: Streak last-call check
+        run: node scripts/last-call-check.mjs
+      # The win-back reminder: on days 7/14/30 of a quiet stretch the daily
+      # reminder swaps its copy for the gap and the friends' week. A wrong
+      # anchor (day 7 landing on day 8) or a friends query reading the wrong
+      # row direction is a plausible push nobody can tell is wrong.
+      - name: Win-back reminder check
+        run: node scripts/win-back-check.mjs
 
   website:
     name: Website (lint + build)

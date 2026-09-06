@@ -242,6 +242,44 @@ export interface StoryGroup {
 const URL_SAFE_CURSOR = (col: string) =>
   `to_char((${col}) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') || 'Z'`;
 
+/**
+ * Share of a workout's elapsed time its moving clock must account for before
+ * that clock is allowed to divide a displayed pace.
+ *
+ * The tracker records `moving_seconds` so a wait at a light doesn't drag a
+ * pace down, and every client prefers it whenever it is present. But the
+ * moving clock can only report what it WITNESSED, and a witness gap — thin
+ * GPS, a locked phone whose fixes arrive in batches, or a build carrying the
+ * old per-segment cap — leaves a real workout with a moving time covering a
+ * fraction of itself. Dividing the whole distance by that fraction prints a
+ * pace nobody walked: a 34:18 walk of 1.03 mi arrived with 8.7 minutes of
+ * moving time, and every surface read "8:25 /mi" directly above splits that
+ * said 33:05.
+ *
+ * Withholding it HERE rather than in the app is deliberate: the figure is
+ * additive and nullable by contract ("null on old rows/Watch syncs — clients
+ * fall back to total_duration"), so every shipped build is fixed by the
+ * deploy, including the ones that will never be updated. Falling back to
+ * elapsed can only ever report a pace SLOWER than the truth, which is the
+ * safe direction for a number people compare to each other.
+ *
+ * Mirrored in the app by `DisplayPace.minimumMovingCoverage` (Utils/) and by
+ * the Live Activity's own copy; the three must move together.
+ */
+const MIN_MOVING_COVERAGE = 0.5;
+
+/**
+ * `w`'s moving time when it may be believed, NULL otherwise — drop-in for a
+ * bare `<alias>.moving_seconds` anywhere a pace divides by it.
+ */
+const displayMovingSecondsSql = (w: string) => `(CASE
+		WHEN ${w}.moving_seconds > 0
+			AND ${w}.total_duration > 0
+			AND ${w}.moving_seconds <= ${w}.total_duration
+			AND ${w}.moving_seconds >= ${w}.total_duration * ${MIN_MOVING_COVERAGE}
+		THEN ${w}.moving_seconds
+	END)`;
+
 // Base post columns shared by every post-shaped read (viewer-independent).
 // The AUTHOR's route is not here because this fragment has no viewer
 // placeholder; it rides POST_SELECT (AUTHOR_ROUTE_SQL, `$1` = viewer) so every
@@ -295,7 +333,7 @@ const POST_COLUMNS = `
 				COUNT(*) FILTER (WHERE m.feed_role <> 'hidden')::int AS segment_count,
 				SUM(m.distance)::double precision AS distance,
 				SUM(m.total_duration)::double precision AS duration,
-				SUM(COALESCE(m.moving_seconds, m.total_duration))::double precision AS moving_duration
+				SUM(COALESCE(${displayMovingSecondsSql('m')}, m.total_duration))::double precision AS moving_duration
 			FROM workouts m
 			WHERE m.user_id = w_.user_id AND m.local_date = w_.local_date
 				AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
@@ -483,7 +521,8 @@ const BLOCKED_VS_MULTI_COAUTHOR = `EXISTS (
  *    `share_route_maps`, then TRUE. NULL override = "follow my setting", which
  *    is every row that predates the override, so the global switch keeps
  *    covering them.
- *  - `NOT p.is_auto`: an auto card's media already IS a rendered route.
+ *  - No `is_auto` gate (same reason as AUTHOR_ROUTE_SQL): the Flyover needs
+ *    the lines even when the card's media is already a rendered route.
  *
  * Falls back to `post_coauthors.workout_id` when the post carries one (the
  * legacy accept path stamps it), so this is not buddy-only.
@@ -493,7 +532,7 @@ const BLOCKED_VS_MULTI_COAUTHOR = `EXISTS (
  */
 const CREW_ROUTE_SQL = `(
 	SELECT wr.route FROM workout_routes wr
-	WHERE p.include_route AND NOT p.is_auto
+	WHERE p.include_route
 		AND (
 			COALESCE(
 				pca.include_route,
@@ -640,14 +679,23 @@ const COAUTHOR_COLUMNS = `
 
 /**
  * The AUTHOR's own simplified route, gated exactly like the unified feed's
- * post arm: the per-post `include_route` choice, never on an auto post (its
- * media IS the baked card), and the author's global share_route_maps consent
- * — owner exempt. `$1` must be the viewer. NULL when withheld or absent, which
- * shipped clients already render as the routeless card.
+ * post arm: the per-post `include_route` choice and the author's global
+ * share_route_maps consent — owner exempt. `$1` must be the viewer. NULL
+ * when withheld or absent, which shipped clients already render as the
+ * routeless card.
+ *
+ * Auto posts (the route card published for someone who skips the photo
+ * prompt) ship their route too. They were excluded because the card's media
+ * already IS a rendered route — but the route is what the Flyover flies, so
+ * the exclusion meant the feed's most common card could never fly, and a
+ * user whose history is mostly auto posts got no Flyover anywhere on the
+ * feed after a full backfill. The client keeps the duplicate SLIDE hidden
+ * on auto posts (PostCardView.routeSlideCoordinates); it is the chip that
+ * needs the coordinates.
  */
 const AUTHOR_ROUTE_SQL = `(
 	SELECT wr.route FROM workout_routes wr
-	WHERE p.include_route AND NOT p.is_auto
+	WHERE p.include_route
 		AND (
 			COALESCE(
 				(SELECT ns.share_route_maps FROM notification_settings ns
@@ -767,8 +815,16 @@ async function buddyWalkPostForWorkout(
   userId: string,
   workoutId: string,
   declaredSessionId: string | null,
-): Promise<{ post_id: string; buddy_session_id: string } | null> {
-  const rows = await db.query<{ post_id: string; buddy_session_id: string }>(
+): Promise<{
+  post_id: string;
+  user_id: string;
+  buddy_session_id: string;
+} | null> {
+  const rows = await db.query<{
+    post_id: string;
+    user_id: string;
+    buddy_session_id: string;
+  }>(
     `WITH session AS (
 			SELECT bsp.session_id AS id
 			  FROM buddy_session_participants bsp
@@ -794,12 +850,20 @@ async function buddyWalkPostForWorkout(
 			          s.started_at DESC
 			 LIMIT 1
 		)
-		SELECT p.post_id, session.id AS buddy_session_id
+		SELECT p.post_id, p.user_id, session.id AS buddy_session_id
 		  FROM session
 		  JOIN posts p
 		    ON p.deleted_at IS NULL
 		   AND p.share_to_feed
-		   AND p.user_id <> $1::varchar
+		   -- Excluded by WORKOUT, not by author. It used to be
+		   -- p.user_id <> $1, which let the walk's own author post a SECOND
+		   -- card from another leg of it: a mile walked in two goes gave them
+		   -- an un-posted workout, the feed FAB offered it, and one walk got
+		   -- two cards — the exact outcome this rule exists to prevent, just
+		   -- reached from the inside. The only post that must be invisible
+		   -- here is the one for THIS workout, because replacing that one is
+		   -- the upsert path (ON CONFLICT on workout_id), not a second card.
+		   AND p.workout_id IS DISTINCT FROM $2::varchar
 		   AND (
 		         p.buddy_session_id = session.id
 		      OR EXISTS (
@@ -936,6 +1000,12 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       // The client is meant to add a crew photo to THIS post instead.
       err.postId = existingWalkPost.post_id;
       err.buddySessionId = existingWalkPost.buddy_session_id;
+      // Whose card it is decides what the app can offer. Someone ELSE's and
+      // this user has a `post_coauthors` row on it, so their photo can join
+      // it as a slide. Their OWN and they have no such row — the author is
+      // credited by identity, never by a coauthor row — so the only honest
+      // line is that this walk is already shared.
+      err.mine = existingWalkPost.user_id === input.userId;
       throw err;
     }
   }
@@ -2062,7 +2132,7 @@ const FEED_ENTRY_PROJECTION = `
 			-- (rollup-aware on anchors). Null on old rows/Watch syncs — clients
 			-- fall back to total_duration.
 			CASE WHEN page.kind = 'workout'
-				THEN COALESCE(roll.moving_duration, wt.moving_seconds)::double precision END AS moving_seconds,
+				THEN COALESCE(roll.moving_duration, ${displayMovingSecondsSql('wt')})::double precision END AS moving_seconds,
 			CASE WHEN page.kind = 'workout'
 				THEN COALESCE(roll.calories, wt.calories)::double precision END AS calories,
 			CASE WHEN page.kind = 'workout'
@@ -2083,7 +2153,7 @@ const FEED_ENTRY_PROJECTION = `
 			CASE
 				WHEN page.kind = 'post' THEN (
 					SELECT wr.route FROM workout_routes wr
-					WHERE p.include_route AND NOT p.is_auto
+					WHERE p.include_route
 						AND (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
 						AND wr.workout_id = p.workout_id
 				)
@@ -2238,7 +2308,7 @@ const FEED_ENTRY_PROJECTION = `
 				SUM(m.total_duration)::double precision AS total_duration,
 				-- Per-row fallback to elapsed: a day mixing in-app legs (which
 				-- carry moving time) with Watch legs (which don't) still sums.
-				SUM(COALESCE(m.moving_seconds, m.total_duration))::double precision AS moving_duration,
+				SUM(COALESCE(${displayMovingSecondsSql('m')}, m.total_duration))::double precision AS moving_duration,
 				SUM(m.calories)::double precision AS calories,
 				SUM(m.steps)::int AS steps,
 				jsonb_agg(

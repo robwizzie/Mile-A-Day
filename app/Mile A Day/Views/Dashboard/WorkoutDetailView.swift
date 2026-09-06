@@ -1165,6 +1165,15 @@ struct SplitBarRow: View {
     let fraction: CGFloat
     let isFastest: Bool
     let color: Color
+    /// Overrides "Mile N" — the feed's splits sheet names a partial last
+    /// split by its distance ("Last 0.06 mi"). Nil keeps the detail screen
+    /// byte-identical.
+    var label: String? = nil
+    /// Read under the time — the split's pace on the splits sheet.
+    var detailLabel: String? = nil
+    /// A partial split draws softer, so a 0.1-mile tail doesn't carry a full
+    /// mile's weight in the row.
+    var dimmed: Bool = false
 
     /// Animate the bar growing in the first time it appears.
     @State private var grown = false
@@ -1175,10 +1184,11 @@ struct SplitBarRow: View {
 
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
-            Text("Mile \(mile)")
+            Text(label ?? "Mile \(mile)")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundColor(.secondary)
-                .frame(width: 52, alignment: .leading)
+                .lineLimit(1)
+                .frame(width: label == nil ? 52 : 84, alignment: .leading)
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -1193,6 +1203,7 @@ struct SplitBarRow: View {
                             )
                         )
                         .frame(width: max(8, geo.size.width * fraction * (grown ? 1 : 0)))
+                        .opacity(dimmed ? 0.5 : 1)
                 }
             }
             .frame(height: 10)
@@ -1203,12 +1214,20 @@ struct SplitBarRow: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(MADTheme.Colors.success)
                 }
-                Text(timeLabel)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundColor(isFastest ? MADTheme.Colors.success : .primary)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(timeLabel)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(isFastest ? MADTheme.Colors.success : .primary)
+                    if let detailLabel {
+                        Text(detailLabel)
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
-            .frame(width: 74, alignment: .trailing)
+            .frame(width: detailLabel == nil ? 74 : 92, alignment: .trailing)
         }
         .onAppear {
             // All bars grow together — the old per-mile delay made them ripple

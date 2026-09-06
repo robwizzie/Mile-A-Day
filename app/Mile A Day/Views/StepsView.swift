@@ -130,7 +130,7 @@ struct TodaysStepsCard: View {
                     .animation(MADTheme.Animation.standard, value: steps)
 
                 HStack(spacing: MADTheme.Spacing.xs) {
-                    Text("\(Int(progress * 100))% of 10k goal")
+                    Text("\(ProgressCalculator.formatProgress(progress)) of 10k goal")
                         .font(MADTheme.Typography.caption)
                         .fontWeight(.medium)
                         .foregroundColor(color)
@@ -292,6 +292,7 @@ struct StepsCalendarView: View {
 // MARK: - Calendar Day View
 
 struct CalendarDayView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let date: Date
     let steps: Int
     let mileGoalReached: Bool
@@ -402,9 +403,10 @@ struct CalendarDayView: View {
                         Circle()
                             .stroke(MADTheme.Colors.madRed, lineWidth: 2)
                             .frame(width: 39, height: 39)
-                            .scaleEffect(isPulsing ? 1.08 : 1.0)
+                            .scaleEffect(isPulsing && !reduceMotion ? 1.08 : 1.0)
                             .animation(
-                                .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                                reduceMotion ? nil :
+                                    .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
                                 value: isPulsing
                             )
                     }
@@ -555,7 +557,7 @@ struct DateDetailView: View {
                                         .font(MADTheme.Typography.headline)
                                         .foregroundColor(.secondary)
 
-                                    Text("\(Int(progress * 100))% of goal")
+                                    Text("\(ProgressCalculator.formatProgress(progress)) of goal")
                                         .font(MADTheme.Typography.caption)
                                         .fontWeight(.medium)
                                         .foregroundColor(color)

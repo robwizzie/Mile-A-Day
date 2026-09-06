@@ -50,7 +50,7 @@ struct RunStatsInput: Equatable {
     func datum(for kind: RunStatKind) -> RunStatDatum? {
         switch kind {
         case .distance:
-            let miles = String(format: "%.2f", distance)
+            let miles = distance.milesText
             return RunStatDatum(kind: .distance, value: isExtra ? "+\(miles) mi" : "\(miles) mi")
         case .pace:
             guard let p = paceSecondsPerMile, p > 0 else { return nil }
@@ -216,6 +216,13 @@ final class PostComposerViewModel: ObservableObject {
     /// feed card is not a story and not a post of your own — so `publish()`
     /// treats it as feed-bound and the share step hides the picker.
     @Published var crewPhotoPostId: String?
+    /// Not an error: this walk is already on the feed and this photo is
+    /// joining that card. It has its own slot because red error text beside
+    /// "tap Share again" reads as a warning about the very thing we are
+    /// asking for — and the user did nothing wrong. The one report this
+    /// exists for was a second walker being told to "delete it first",
+    /// about a post that was never hers.
+    @Published var crewHandoffNotice: String?
     /// Display names for `buddyCoauthorIds`, same order — set once by the
     /// wizard so the share step can SHOW the crew it's crediting instead of
     /// offering the manual co-poster picker beside an invisible roster.
@@ -465,17 +472,51 @@ final class PostComposerViewModel: ObservableObject {
                 toSave.save()
             }
             return true
-        } catch let APIError.apiError(message)
-            where message == "workout_already_posted" && buddySessionId != nil
-        {
-            // Somebody on this walk got there first. The server now refuses the
-            // second card (it resolves the session from the WORKOUT, so it
-            // catches the doors that never sent a session id) — and because
-            // every door now stamps the session, their post is findable, which
-            // means the recap can offer the thing this user actually wants.
-            errorMessage =
-                "Someone already shared this walk. Open it from your buddy walk "
-                + "recap and add your photo to it — one post, everyone on it."
+        } catch let APIError.buddyWalkAlreadyPosted(postId, mine) {
+            // This walk is already on the feed. Whose card it is decides
+            // what can be offered: somebody ELSE's and this photo still has a
+            // home on it, so the composer BECOMES the add-your-photo composer
+            // rather than a dead end — same picture, same canvas, one more tap
+            // on the same button, and `publish()` takes the crew branch above.
+            //
+            // Two things were wrong with what this did before. It caught
+            // `.apiError`, but a 409 throws `.conflict`, so the branch was
+            // unreachable and every conflict fell through to "You've already
+            // shared a post for this workout. Delete it first" — advice to
+            // delete a post the user does not own. And it gated on the
+            // client's own `buddySessionId`, which is nil for anyone whose
+            // composer opened after the walk closed (`lastFinishedSession` is
+            // cleared by the recap's Done button); the SERVER resolves the
+            // walk from the workout, so its answer is the one to trust.
+            if mine {
+                // Their OWN card, from another leg of the same walk. There is
+                // no coauthor row for an author, so a handoff would 400 —
+                // and there is nothing to add anyway: the walk is on the feed
+                // with their name on it.
+                crewPhotoPostId = nil
+                crewHandoffNotice = nil
+                errorMessage =
+                    "You've already shared this walk — one post per walk, and "
+                    + "every leg of it is on that one. Delete it if you want to "
+                    + "swap the photo."
+            } else if let postId, !postId.isEmpty {
+                // The composer BECOMES the add-your-photo composer: the share
+                // step re-renders into its crew shape (no caption, no
+                // destination, no route toggle — the card owns all three) and
+                // the button renames itself "Add photo". Nothing here is
+                // phrased as a failure, because nothing failed.
+                crewPhotoPostId = postId
+                errorMessage = nil
+                crewHandoffNotice =
+                    "This walk is already on the feed — one post, everyone on it. "
+                    + "Your photo joins it as your own slide. Tap Add photo."
+            } else {
+                // No post id (an older server): there is nothing to hand off
+                // to, so this one IS a dead end and says where to go instead.
+                errorMessage =
+                    "Someone already shared this walk. Open it from your buddy "
+                    + "walk recap and add your photo to it — one post, everyone on it."
+            }
             return false
         } catch let APIError.apiError(message) where message == "mile_not_completed" {
             // The server recomputes this gate from ITS workouts table, so this
@@ -522,6 +563,38 @@ final class PostComposerViewModel: ObservableObject {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? "Couldn't share your post. Try again."
             return false
         }
+    }
+}
+
+/// An informational line in the composer — the walk is already posted and this
+/// photo is joining it. Deliberately NOT `MADTheme.Colors.error`: the error
+/// slot means "you have to fix something", and this is the app explaining
+/// where the picture is going.
+struct ComposerNoticeBanner: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "person.2.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(MADTheme.Colors.walkBlue)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(MADTheme.Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                .fill(MADTheme.Colors.walkBlue.opacity(0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                        .strokeBorder(MADTheme.Colors.walkBlue.opacity(0.35), lineWidth: 1)
+                )
+        )
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -941,6 +1014,9 @@ struct PostComposerView: View {
                                     vm.resetStickerPlacement()
                                 }
                             }
+                        }
+                        if let notice = vm.crewHandoffNotice {
+                            ComposerNoticeBanner(text: notice)
                         }
                         if let error = vm.errorMessage {
                             Text(error)

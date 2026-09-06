@@ -718,6 +718,29 @@ struct NotificationInboxView: View {
         case "streak_assist_accepted":
             // Your donated mile landed on their streak — go look at them.
             openActorProfileOrFriends(notification)
+        case "buddy_invite", "buddy_joined", "buddy_started", "buddy_finished":
+            // The walk itself, via the same parked intent the push tap uses —
+            // `consumePendingBuddyLink` joins the session and then picks the
+            // right destination (lobby while it's live, recap for one this
+            // user already finished). These four fell through to `default`
+            // and switched to the Dashboard, so the single most time-critical
+            // row in the inbox — "someone wants to walk with you, now" — was
+            // the one that did nothing when tapped.
+            //
+            // Dismiss FIRST: the lobby is a fullScreenCover on the dashboard
+            // and cannot present underneath this sheet. A CANCELLED walk is
+            // the one exception — there is no session left to open and
+            // joining one errors, which is a worse tap than none.
+            if let sessionId = notification.data?["session_id"], !sessionId.isEmpty,
+               notification.data?["cancelled"] != "true" {
+                dismiss()
+                switchTab(0)
+                DeepLinkRouter.shared.requestOpenBuddySessionAfterDismiss(sessionId: sessionId)
+            } else {
+                // An older push with no session id in `data` — the buddy pill
+                // on the Dashboard still lists the invite.
+                switchTab(0)
+            }
         default:
             // Streak token outcomes, reminders, recaps, and any future type:
             // land on the Dashboard rather than dead-ending the tap.
@@ -976,6 +999,10 @@ struct NotificationInboxView: View {
         case "badge_earned": return "BADGE"
         case "lead_change": return "LEAD CHANGE"
         case "clash_tie": return "CLASH TIE"
+        case "buddy_invite": return "WALK INVITE"
+        case "buddy_joined": return "WALK JOINED"
+        case "buddy_started": return "WALK STARTED"
+        case "buddy_finished": return "WALK DONE"
         default: return "UPDATE"
         }
     }
@@ -1019,6 +1046,11 @@ struct NotificationInboxView: View {
         // Someone put their photo on a walk you were on, and the nudge to put
         // yours on it. Same glyph for both: they're the same card.
         case "crew_photo", "crew_photo_nudge": return ("photo.stack.fill", .orange)
+        // Buddy Walks — the two-figure glyph the rest of the feature uses.
+        // A walk that has finished is a result, not an invitation.
+        case "buddy_invite", "buddy_joined", "buddy_started":
+            return ("figure.2", MADTheme.Colors.walkBlue)
+        case "buddy_finished": return ("flag.checkered", MADTheme.Colors.walkBlue)
         default: return ("bell.fill", .white.opacity(0.5))
         }
     }

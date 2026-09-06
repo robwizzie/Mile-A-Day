@@ -68,10 +68,18 @@ private extension WorkoutActivityAttributes.ContentState {
 
     /// Current pace in seconds per mile, when there's enough distance to be
     /// meaningful. Divides by MOVING time when the tracker sent it, so a
-    /// stop at a light doesn't drag the number toward absurdity.
+    /// stop at a light doesn't drag the number toward absurdity — but only
+    /// while that clock has actually covered the walk. A moving figure far
+    /// under elapsed is a witness gap (thin GPS, a pocketed phone), and
+    /// dividing the full distance by a fraction of the time prints a pace
+    /// nobody walked. Widget targets can't see `DisplayPace`, so the rule is
+    /// copied here; keep the two in step.
     var paceSecondsPerMile: TimeInterval? {
         guard distance > 0.05 else { return nil }
-        let divisor = (movingSeconds ?? 0) > 0 ? movingSeconds! : elapsedTime
+        let moving = movingSeconds ?? 0
+        let covers = elapsedTime > 0 && moving <= elapsedTime && moving >= elapsedTime * 0.5
+        let divisor = covers ? moving : elapsedTime
+        guard divisor > 0 else { return nil }
         return divisor / distance
     }
 
@@ -490,7 +498,7 @@ struct WorkoutLiveActivityView: View {
                         .frame(width: 50, height: 50)
                         .rotationEffect(.degrees(-90))
 
-                    Text("\(Int(progress * 100))%")
+                    Text(progress.formatted(.percent.precision(.fractionLength(0))))
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.white)
                 }

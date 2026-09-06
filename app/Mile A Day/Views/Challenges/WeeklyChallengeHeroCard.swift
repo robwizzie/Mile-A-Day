@@ -34,6 +34,12 @@ struct WeeklyChallengeHeroCard: View {
             VStack(alignment: .leading, spacing: 14) {
                 header
                 progressBar
+                // Last week's result rides BOTH sizes, including the compact
+                // dashboard card. Sunday swaps the challenge for one nobody
+                // has seen, and without this the week just spent left no
+                // trace anywhere the user would look — they were told what to
+                // do next without ever being told how the last one went.
+                lastWeekStrip
                 if !compact { footer }
             }
             .padding(MADTheme.Spacing.md)
@@ -140,11 +146,62 @@ struct WeeklyChallengeHeroCard: View {
 
                 Spacer(minLength: 4)
 
-                Text("\(Int((response.progress.percent * 100).rounded()))%")
+                Text(ProgressCalculator.formatWholePercent(Double(Int((response.progress.percent * 100).rounded()))))
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundColor(gradientColors[0])
             }
         }
+    }
+
+    /// "LAST WEEK · Big Day — 1.5 / 4 miles". One line, its own tint, under a
+    /// divider so it reads as a different week rather than more of this one.
+    ///
+    /// Shown for a MISSED week too, with how far they actually got: the
+    /// history endpoint stores NULL for anything unfinished, which makes a
+    /// week missed by fifty metres look identical to one nobody walked.
+    @ViewBuilder
+    private var lastWeekStrip: some View {
+        if let last = response.last_week {
+            let tint = last.completed ? MADTheme.Colors.success : Color.white.opacity(0.5)
+            Divider().overlay(Color.white.opacity(0.08))
+
+            HStack(spacing: 8) {
+                Image(systemName: last.completed ? "checkmark.seal.fill" : last.icon)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(tint)
+                    .accessibilityHidden(true)
+
+                Text("LAST WEEK")
+                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.4))
+                    .fixedSize()
+
+                Text(last.title)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.8))
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                Text(lastWeekResultText(last))
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(tint)
+                    .lineLimit(1)
+                    // Short and derived from a number, never open-ended text.
+                    .fixedSize()
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// "Done" when they finished it, otherwise how far they got — the number
+    /// is the point, so it never reads as a bare failure.
+    private func lastWeekResultText(_ last: WeeklyChallengeResponse.LastWeek) -> String {
+        if last.completed { return "Done" }
+        let value = WeeklyChallengeFormat.value(last.value, unit: last.unit)
+        let target = WeeklyChallengeFormat.value(last.target, unit: last.unit)
+        return "\(value) / \(target)"
     }
 
     /// Where you sit among friends, plus the "why this number" line. Both are

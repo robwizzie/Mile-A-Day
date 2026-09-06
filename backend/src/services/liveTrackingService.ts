@@ -236,8 +236,20 @@ export async function friendsOutNow(userId: string): Promise<FriendOutNow[]> {
            JOIN buddy_session_participants theirs
              ON theirs.session_id = bs.id
             AND theirs.user_id = f.friend_id
-            AND theirs.status NOT IN ('left', 'declined')
+            -- IN the room, not merely invited to it: a friend out solo who
+            -- never answered someone else's invite carried that room.
+            AND theirs.status IN ('joined', 'ready', 'active')
           WHERE bs.status IN ('lobby', 'active')
+            -- The viewer must be able to JOIN it: friends with the host and
+            -- not blocked either way — the same test joinSession applies.
+            AND (bs.host_user_id = $1 OR EXISTS (
+              SELECT 1 FROM friendships hf
+               WHERE hf.user_id = $1 AND hf.friend_id = bs.host_user_id
+                 AND hf.status = 'accepted'))
+            AND NOT EXISTS (
+              SELECT 1 FROM user_blocks b
+               WHERE (b.blocker_id = $1 AND b.blocked_id = bs.host_user_id)
+                  OR (b.blocker_id = bs.host_user_id AND b.blocked_id = $1))
             -- Same window getJoinableFriendSessions uses, and it must stay the
             -- same one: this row's Join button posts to that endpoint, so a
             -- narrower bound here just hides an offer the server would accept
@@ -249,8 +261,12 @@ export async function friendsOutNow(userId: string): Promise<FriendOutNow[]> {
                  SELECT 1 FROM buddy_session_participants live
                   WHERE live.session_id = bs.id AND live.status = 'active'
                ))
-              OR (bs.status = 'lobby'
-                  AND bs.created_at > NOW() - INTERVAL '3 hours')
+              OR (bs.status = 'lobby' AND (
+                    (bs.scheduled_start_at IS NULL
+                     AND bs.created_at > NOW() - INTERVAL '3 hours')
+                 OR (bs.scheduled_start_at IS NOT NULL
+                     AND bs.scheduled_start_at BETWEEN NOW() - INTERVAL '30 minutes'
+                                                   AND NOW() + INTERVAL '30 minutes')))
             )
             -- Already in it? Then it isn't an offer.
             AND NOT EXISTS (

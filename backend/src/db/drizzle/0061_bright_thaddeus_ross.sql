@@ -1,0 +1,1 @@
+ALTER TABLE "buddy_session_participants" ADD COLUMN "is_paused" boolean;

@@ -16,6 +16,9 @@ struct PersonalizationView: View {
     @State private var referralDetail: String = ""
     @State private var selectedGoal: String?
     @State private var selectedExperience: String?
+    // Preselected from the device's measurement system, so a plain Continue
+    // keeps following the device; only a CHANGE here pins a preference.
+    @State private var selectedUnit: String? = DisplayDistanceUnit.systemDefault.rawValue
     @State private var isSubmitting = false
     @FocusState private var detailFieldFocused: Bool
 
@@ -56,6 +59,12 @@ struct PersonalizationView: View {
                         title: "How would you describe your running?",
                         options: Self.experienceOptions,
                         selection: $selectedExperience
+                    )
+
+                    section(
+                        title: "Show distances in",
+                        options: Self.unitOptions,
+                        selection: $selectedUnit
                     )
 
                     Color.clear.frame(height: 8)
@@ -210,6 +219,14 @@ struct PersonalizationView: View {
 
         let userId = userManager.currentUser.backendUserId
 
+        // Local only — display units never reach the server (storage is
+        // miles everywhere). Pin a preference only when it differs from the
+        // device; otherwise keep following the device's setting.
+        if let raw = selectedUnit, let unit = DisplayDistanceUnit(rawValue: raw),
+           unit != DisplayDistanceUnit.systemDefault {
+            DistanceUnits.current = unit
+        }
+
         Task {
             // Best-effort: never block onboarding on this optional call.
             if let userId, !userId.isEmpty {
@@ -271,6 +288,11 @@ struct PersonalizationView: View {
         PersonalizationOption(code: "fun", label: "Just for fun", icon: "sparkles")
     ]
 
+    static let unitOptions: [PersonalizationOption] = [
+        PersonalizationOption(code: DisplayDistanceUnit.miles.rawValue, label: "Miles", icon: "road.lanes"),
+        PersonalizationOption(code: DisplayDistanceUnit.kilometers.rawValue, label: "Kilometers", icon: "globe.europe.africa.fill")
+    ]
+
     static let experienceOptions: [PersonalizationOption] = [
         PersonalizationOption(code: "beginner", label: "Just starting out", icon: "figure.walk"),
         PersonalizationOption(code: "casual", label: "I run sometimes", icon: "figure.run"),
@@ -299,7 +321,9 @@ private struct ChipView: View {
             HStack(spacing: 7) {
                 Image(systemName: option.icon)
                     .font(.system(size: 13, weight: .bold))
-                Text(option.label)
+                // The label is data (a catalog entry), so it's looked up as a
+                // key explicitly — `Text(String)` never localizes.
+                Text(LocalizedStringKey(option.label))
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
             }
             .foregroundColor(isSelected ? .white : .white.opacity(0.8))

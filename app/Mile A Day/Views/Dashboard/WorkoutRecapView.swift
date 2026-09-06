@@ -66,7 +66,7 @@ struct WorkoutRecapView: View {
 
     private var formattedPace: String {
         guard distance > 0.01 else { return "--" }
-        let paceSeconds = duration / distance
+        let paceSeconds = (duration / distance).pacePerDisplayUnit
         let minutes = Int(paceSeconds) / 60
         let seconds = Int(paceSeconds) % 60
         return String(format: "%d'%02d\"", minutes, seconds)
@@ -254,9 +254,9 @@ struct WorkoutRecapView: View {
     private var statsGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible())], spacing: 12) {
             RecapStatCell(icon: "clock.fill", label: "Time", value: formattedTime)
-            RecapStatCell(icon: "speedometer", label: "Avg Pace", value: "\(formattedPace) /mi")
+            RecapStatCell(icon: "speedometer", label: "Avg Pace", value: "\(formattedPace) \(DistanceUnits.current.paceSuffix)")
             RecapStatCell(icon: activityIcon, label: "Activity", value: activityName)
-            RecapStatCell(icon: "chart.bar.fill", label: "Daily Total", value: totalDailyDistance.milesFormatted)
+            RecapStatCell(icon: "chart.bar.fill", label: "Daily Total", value: totalDailyDistance.distanceFormatted)
         }
         .opacity(showStats ? 1 : 0)
         .offset(y: showStats ? 0 : 12)
@@ -280,7 +280,7 @@ struct WorkoutRecapView: View {
 
                 // Floored: "1.00 / 1.00" must never appear while goalMet is
                 // still false (0.995 used to render exactly that).
-                Text("\(totalDailyDistance.milesText) / \(goalDistance.milesText) mi")
+                Text("\(totalDailyDistance.distanceText) / \(goalDistance.distanceFormatted)")
                     .font(.subheadline)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
@@ -319,7 +319,7 @@ struct WorkoutRecapView: View {
                     Image(systemName: "figure.walk.motion")
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.7))
-                    Text(String(format: "%.2f mi to go — you've got this", milesRemaining))
+                    Text("\(milesRemaining.distanceToGoText) \(DistanceUnits.current.abbreviation) to go — you've got this")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundColor(.white.opacity(0.9))
@@ -373,6 +373,8 @@ struct WorkoutRecapView: View {
 }
 
 private struct TreadmillDistanceAdjustmentCard: View {
+    private static let manualEntryDistanceIncreaseThreshold = 0.25
+
     let workoutId: String
     let recordedDistance: Double
     let currentDistance: Double
@@ -395,7 +397,11 @@ private struct TreadmillDistanceAdjustmentCard: View {
 
     private var addsMoreThan25Percent: Bool {
         guard recordedDistance > 0, let enteredDistance else { return false }
-        return enteredDistance > recordedDistance * 1.25
+        return enteredDistance > recordedDistance * (1 + Self.manualEntryDistanceIncreaseThreshold)
+    }
+
+    private var manualEntryDistanceIncreaseText: String {
+        Self.manualEntryDistanceIncreaseThreshold.formatted(.percent.precision(.fractionLength(0)))
     }
 
     private var canSave: Bool {
@@ -489,7 +495,7 @@ private struct TreadmillDistanceAdjustmentCard: View {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 12, weight: .bold))
-                    Text("Adding more than 25% will mark this workout as manually entered.")
+                    Text("Adding more than \(manualEntryDistanceIncreaseText) will mark this workout as manually entered.")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
                 .foregroundColor(.orange)
@@ -521,7 +527,7 @@ private struct TreadmillDistanceAdjustmentCard: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This treadmill distance adds more than 25% to the recorded workout, so it will be visible as a manual entry.")
+            Text("This treadmill distance adds more than \(manualEntryDistanceIncreaseText) to the recorded workout, so it will be visible as a manual entry.")
         }
         .sheet(isPresented: $showEditSheet) {
             EditWorkoutView(

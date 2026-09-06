@@ -1048,6 +1048,21 @@ export const getReferralGraph = cached(30_000, loadReferralGraph);
 
 // ─── Retention cohorts ──────────────────────────────────────────────
 
+/**
+ * One day-N retention mark. `window` is the day-since-signup bracket that
+ * counts as "came back on day N": a daily-mile app can't demand the exact
+ * day (a Sunday signup who walks Tuesday is retained), so D1 is days 1–2,
+ * D7 is 6–8, D30 is 28–32. `eligible` is signups old enough for the whole
+ * bracket to have passed, bounded to the last 90 days so the number moves
+ * with what the app does now rather than what it did at launch.
+ */
+export interface RetentionMark {
+  window: [number, number];
+  eligible: number;
+  retained: number;
+  pct: number;
+}
+
 export interface RetentionCohorts {
   max_week: number;
   cohorts: {
@@ -1055,7 +1070,17 @@ export interface RetentionCohorts {
     size: number;
     weeks: { week: number; users: number; pct: number }[];
   }[];
+  /** The three numbers everyone asks for first: D1, D7 and D30. */
+  marks: { d1: RetentionMark; d7: RetentionMark; d30: RetentionMark };
 }
+
+/** Day-since-signup brackets for the D1/D7/D30 marks, and the signup bound. */
+export const RETENTION_MARK_WINDOWS: Record<"d1" | "d7" | "d30", [number, number]> = {
+  d1: [1, 2],
+  d7: [6, 8],
+  d30: [28, 32],
+};
+export const RETENTION_MARK_SIGNUP_DAYS = 90;
 
 /**
  * Weekly signup cohorts × week-N retention, where "retained" means the user
@@ -1103,8 +1128,11 @@ async function loadRetention(): Promise<RetentionCohorts> {
     if (c.week > maxWeek) maxWeek = c.week;
   }
 
+  const marks = await loadRetentionMarks();
+
   return {
     max_week: maxWeek,
+    marks,
     cohorts: sizes.map((s) => {
       const weeks = byCohort.get(s.cohort) ?? new Map<number, number>();
       return {
@@ -1121,6 +1149,49 @@ async function loadRetention(): Promise<RetentionCohorts> {
       };
     }),
   };
+}
+
+/**
+ * D1/D7/D30 over signups in the last RETENTION_MARK_SIGNUP_DAYS days that are
+ * old enough for each bracket to have fully passed. "Retained" = a COUNTING
+ * workout with a local_date inside the bracket, measured from the signup's
+ * ET calendar day — the same clock the cohort grid uses, so the two agree.
+ */
+async function loadRetentionMarks(): Promise<RetentionCohorts["marks"]> {
+  const keys = ["d1", "d7", "d30"] as const;
+  const rows = await Promise.all(
+    keys.map((key) => {
+      const [from, to] = RETENTION_MARK_WINDOWS[key];
+      return db.query<{ eligible: number; retained: number }>(
+        `WITH signup AS (
+           SELECT u.user_id,
+                  (u.created_at AT TIME ZONE 'America/New_York')::date AS joined
+           FROM users u
+           WHERE (u.created_at AT TIME ZONE 'America/New_York')::date
+                   BETWEEN ${TODAY_ET_DATE_SQL} - ${RETENTION_MARK_SIGNUP_DAYS}
+                       AND ${TODAY_ET_DATE_SQL} - $2::int
+         )
+         SELECT COUNT(*)::int AS eligible,
+                COUNT(*) FILTER (WHERE EXISTS (
+                  SELECT 1 FROM workouts w
+                  WHERE w.user_id = s.user_id AND ${COUNTING_WORKOUT}
+                    AND w.local_date BETWEEN s.joined + $1::int AND s.joined + $2::int
+                ))::int AS retained
+         FROM signup s`,
+        [from, to],
+      );
+    }),
+  );
+  const mark = (i: number): RetentionMark => {
+    const { eligible, retained } = rows[i][0];
+    return {
+      window: RETENTION_MARK_WINDOWS[keys[i]],
+      eligible,
+      retained,
+      pct: eligible ? Math.round((retained / eligible) * 1000) / 10 : 0,
+    };
+  };
+  return { d1: mark(0), d7: mark(1), d30: mark(2) };
 }
 
 export const getRetentionCohorts = cached(60_000, loadRetention);

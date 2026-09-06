@@ -255,7 +255,8 @@ struct CompetitionDayDetailSheet: View {
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundColor(.green)
             } else if miles > 0 {
-                Text(String(format: "%.0f%% of target", min(100, miles / max(competition.options.goal, 0.1) * 100)))
+                let progress = min(1, miles / max(competition.options.goal, 0.1))
+                Text("\(ProgressCalculator.formatProgress(progress)) of target")
                     .font(.system(size: 10, weight: .medium, design: .rounded))
                     .foregroundColor(.orange)
             } else {

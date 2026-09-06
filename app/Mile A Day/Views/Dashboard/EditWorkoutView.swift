@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct EditWorkoutView: View {
+    private static let manualEntryDistanceIncreaseThreshold = 0.25
+
     let workoutId: String
     let currentDistance: Double
     let currentDuration: TimeInterval
@@ -53,7 +55,11 @@ struct EditWorkoutView: View {
 
     private var addsMoreThan25Percent: Bool {
         guard currentDistance > 0, let d = distance else { return false }
-        return d > currentDistance * 1.25
+        return d > currentDistance * (1 + Self.manualEntryDistanceIncreaseThreshold)
+    }
+
+    private var manualEntryDistanceIncreaseText: String {
+        Self.manualEntryDistanceIncreaseThreshold.formatted(.percent.precision(.fractionLength(0)))
     }
 
     private var editSource: WorkoutSource {
@@ -196,18 +202,18 @@ struct EditWorkoutView: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This edit adds more than 25% to the recorded distance, so it will be visible as a manual entry.")
+            Text("This edit adds more than \(manualEntryDistanceIncreaseText) to the recorded distance, so it will be visible as a manual entry.")
         }
     }
 
     private var editWarningText: String {
         switch editSource {
         case .manual:
-            return "Adding more than 25% marks this workout as manually entered."
+            return "Adding more than \(manualEntryDistanceIncreaseText) marks this workout as manually entered."
         case .edited:
             return "Changing time or type marks this workout as manually edited."
         case .healthkit:
-            return "Distance corrections within 25% are not flagged as manual."
+            return "Distance corrections within \(manualEntryDistanceIncreaseText) are not flagged as manual."
         }
     }
 

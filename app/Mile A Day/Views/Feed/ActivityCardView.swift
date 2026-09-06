@@ -33,6 +33,7 @@ struct ActivityCardView: View {
     @State private var lastDoubleTapAt = Date.distantPast
     /// Set by the route slide's Flyover chip (item-based cover, per ios.md).
     @State private var flyoverLaunch: FlyoverLaunch?
+    @State private var showSplits = false
     /// The art card's ghost-map snapshot, kept for the zoom composite.
     @State private var routeArtSnapshot: RouteMapSnapshot?
     /// Same route-image share as the old floating route share chip.
@@ -57,12 +58,16 @@ struct ActivityCardView: View {
     }
 
     private var pace: Double? {
-        // Moving time when the tracker recorded it (additive server field),
-        // elapsed otherwise — the same fallback the server bakes into
-        // restated snapshots, so post and workout cards agree.
-        guard let divisor = entry.moving_seconds ?? entry.total_duration,
-              divisor > 0, distance > 0 else { return nil }
-        return divisor / distance
+        // Moving time when the tracker recorded it (additive server field)
+        // AND that clock covered the workout, elapsed otherwise — the same
+        // rule the server applies before serving `moving_seconds` and the
+        // one the author's own post bakes, so a card and its splits can't
+        // report two different walks.
+        DisplayPace.secondsPerMile(
+            distanceMiles: distance,
+            movingSeconds: entry.moving_seconds,
+            elapsedSeconds: entry.total_duration
+        )
     }
 
     /// Stats band input for the route slide — same band the auto post bakes
@@ -160,7 +165,7 @@ struct ActivityCardView: View {
     private var headerSubtitle: String {
         var parts = [PostCardView.activityNoun(entry.workout_type, pace: pace)]
         if distance > 0 {
-            parts.append(entry.feed_role == "extra" ? "+\(distance.milesText) mi extra" : "\(distance.milesText) mi")
+            parts.append(entry.feed_role == "extra" ? "+\(distance.distanceFormatted) extra" : distance.distanceFormatted)
         }
         parts.append(entry.relativeTime)
         return parts.joined(separator: " · ")
@@ -215,12 +220,38 @@ struct ActivityCardView: View {
             }
         }
         // Overlaid on the container — AFTER the slide's `.instagramZoomable`
-        // — or the zoom gesture host eats the chip's taps.
+        // — or the zoom gesture host eats the chip's taps. SPLITS sits beside
+        // FLYOVER on any workout that carries them, indoor or out.
         .overlay(alignment: .topLeading) {
-            if canPlayFlyover {
-                flyoverChip.padding(10)
+            if canPlayFlyover || hasSplits {
+                HStack(spacing: 6) {
+                    if canPlayFlyover { flyoverChip }
+                    if hasSplits { splitsChip }
+                }
+                .padding(10)
             }
         }
+        // On the MEDIA node: the card root owns the flyover cover and the
+        // share sheet, and two presentations on one node drop one.
+        .sheet(isPresented: $showSplits) {
+            WorkoutSplitsSheet(
+                bars: splitBars,
+                stats: stats,
+                workoutType: entry.workout_type,
+                isIndoor: entry.is_indoor,
+                ownerName: entry.is_self ? "You" : entry.displayName
+            )
+        }
+    }
+
+    private var splitBars: [WorkoutSplitBar] {
+        WorkoutSplitBar.bars(from: entry.splits)
+    }
+
+    private var hasSplits: Bool { !splitBars.isEmpty }
+
+    private var splitsChip: some View {
+        SplitsChipButton(accent: accent) { showSplits = true }
     }
 
     private func routeSlide(_ coords: [CLLocationCoordinate2D]) -> some View {

@@ -30,6 +30,7 @@ const { signMediaUrl, verifyPostsMediaAccess, stripMediaQuery } =
 const { getNotificationPreferences, updateNotificationPreferences } =
   await import("../dist/services/notificationSettingsService.js");
 const { getFriendGhosts } = await import("../dist/services/ghostService.js");
+const { searchUsers } = await import("../dist/services/userService.js");
 const { paceReference, paceTargetSeconds } =
   await import("../dist/services/dailyChallengeService.js");
 const {
@@ -44,6 +45,7 @@ const {
   resolveTarget,
   evaluateWeeklyChallengeForUser,
   getWeeklyLeaderboard,
+  getWeeklyChallengeForUser,
 } = await import("../dist/services/weeklyChallengeService.js");
 // Hype authorization is controller-level (it's where the friend/visibility
 // gate lives), so the collab assertions below drive the real handlers.
@@ -2465,6 +2467,246 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
   );
   await db.query(`DELETE FROM notification_settings WHERE user_id = $1`, [SAM]);
   await db.query(`DELETE FROM users WHERE user_id = $1`, [SAM]);
+}
+
+// --- People search never lists the caller. A results list exists to add
+// friends, and the one row that can't be tapped is you.
+{
+  const seen = (rows) => rows.map((r) => r.user_id);
+  const asAlice = seen(await searchUsers("ci_", ALICE));
+  assert.ok(asAlice.includes(BOB), "Alice's search finds Bob");
+  assert.ok(!asAlice.includes(ALICE), "…and never Alice herself");
+  const asBob = seen(await searchUsers("ci_", BOB));
+  assert.ok(asBob.includes(ALICE), "Bob's search finds Alice");
+  assert.ok(!asBob.includes(BOB), "…and never Bob himself");
+  const anonymous = seen(await searchUsers("ci_", null));
+  assert.ok(
+    anonymous.includes(ALICE) && anonymous.includes(BOB),
+    "with no caller nobody is excluded",
+  );
+  assert.ok(
+    (await searchUsers("ci_alice", BOB)).every((r) => r.email === ""),
+    "email stays present-but-empty for the shipped decoder",
+  );
+}
+
+// --- Auto posts fly. The route card published for someone who skips the
+// photo prompt used to ship NO route (its media already IS a rendered route),
+// which meant the feed's most common card could never Flyover. The chip
+// needs the coordinates; the client hides the duplicate slide, not the chip.
+{
+  // Its own workout: uq_posts_workout_active allows one live post per
+  // workout, and ci-workout-bob already carries Bob's photo post.
+  const AUTO_W = "ci-workout-bob-auto";
+  await uploadWorkouts(BOB, [
+    {
+      workoutId: AUTO_W,
+      distance: 1.2,
+      localDate,
+      date: nowIso,
+      timezoneOffset: 0,
+      workoutType: "walking",
+      deviceEndDate: nowIso,
+      calories: 90,
+      totalDuration: 900,
+      source: "healthkit",
+      splits: [],
+      route: [
+        [40.1, -75.1],
+        [40.101, -75.101],
+        [40.102, -75.102],
+      ],
+    },
+  ]);
+  const [autoPost] = await db.query(
+    `INSERT INTO posts (user_id, media_url, workout_id, local_date, share_to_feed, share_to_story, is_auto, include_route)
+	   VALUES ($1, $2, $3, $4, TRUE, FALSE, TRUE, TRUE)
+	   RETURNING post_id`,
+    [BOB, "/uploads/posts/ci-bob-auto-fly.jpg", AUTO_W, localDate],
+  );
+  const asFriend = await getFeedEntryForPost(ALICE, autoPost.post_id);
+  assert.equal(
+    asFriend?.route?.length,
+    CI_ROUTE_LEN,
+    "an auto post ships the author's route on the post-shaped read",
+  );
+  const feedRow = (await getUnifiedFeed(ALICE, 50, null)).find(
+    (r) => r.kind === "post" && r.workout_id === AUTO_W,
+  );
+  assert.ok(feedRow, "the auto post is on the friend's unified feed");
+  assert.equal(
+    feedRow.route?.length,
+    CI_ROUTE_LEN,
+    "…and carries the route there too (feed == direct read)",
+  );
+  // Consent still rules: the author's include_route off withholds it.
+  await db.query(`UPDATE posts SET include_route = FALSE WHERE post_id = $1`, [
+    autoPost.post_id,
+  ]);
+  assert.equal(
+    (await getFeedEntryForPost(ALICE, autoPost.post_id))?.route ?? null,
+    null,
+    "include_route off still withholds an auto post's route",
+  );
+  await db.query(`DELETE FROM posts WHERE post_id = $1`, [autoPost.post_id]);
+  await db.query(`DELETE FROM workout_routes WHERE workout_id = $1`, [AUTO_W]);
+  await db.query(`DELETE FROM workouts WHERE workout_id = $1`, [AUTO_W]);
+}
+
+// ── moving_seconds only divides a pace when it COVERED the workout ──────────
+// `moving_seconds` is the display-pace divisor. A moving clock that witnessed
+// a fraction of the session (thin GPS, a locked phone's batched fixes, a
+// pre-fix build's flat per-segment cap) divides the WHOLE distance by that
+// fraction and prints a pace nobody walked: a 34:18 walk of 1.03 mi came back
+// carrying 523s of moving time, and every surface read "8:25 /mi" directly
+// above splits that said "33:05". Withheld server-side rather than in the app
+// so shipped builds are fixed by the deploy — falling back to elapsed is what
+// they already do for a null.
+{
+  // Two clean days of Bob's own, so each workout is its own day's anchor and
+  // the rollup can't blend the honest clock into the broken one.
+  const taken = new Set(
+    (
+      await db.query(
+        `SELECT DISTINCT local_date::text AS d FROM workouts WHERE user_id = $1`,
+        [BOB],
+      )
+    ).map((r) => r.d),
+  );
+  const freeDays = [];
+  for (let back = 1; freeDays.length < 2 && back < 60; back += 1) {
+    const d = new Date(Date.now() - back * 86400000).toISOString().slice(0, 10);
+    if (!taken.has(d)) freeDays.push(d);
+  }
+  assert.equal(freeDays.length, 2, "two unused days to seed the pace divisor on");
+
+  const at = (id, day, movingSeconds) => ({
+    workoutId: id,
+    distance: 1.0368,
+    localDate: day,
+    date: day,
+    timezoneOffset: 0,
+    workoutType: "walking",
+    deviceEndDate: `${day}T12:00:00Z`,
+    calories: 90,
+    totalDuration: 2058,
+    movingSeconds,
+    source: "healthkit",
+    splits: [],
+  });
+  await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-move-%'`);
+  await uploadWorkouts(BOB, [
+    at("ci-move-honest", freeDays[0], 1900), // a few waits at lights
+    at("ci-move-gap", freeDays[1], 523), // the witness gap that started this
+  ]);
+  // Bob's OWN feed: the camera window holds a fresh workout off other
+  // viewers' feeds, and the owner is exempt from it.
+  const rows = Object.fromEntries(
+    (await getUnifiedFeed(BOB, 200, null))
+      .filter(
+        (r) => r.kind === "workout" && String(r.workout_id).startsWith("ci-move-"),
+      )
+      .map((r) => [r.workout_id, r]),
+  );
+  assert.equal(
+    rows["ci-move-honest"]?.moving_seconds,
+    1900,
+    "a moving clock that covered the workout still divides the pace",
+  );
+  assert.equal(
+    rows["ci-move-gap"]?.moving_seconds,
+    2058,
+    "a moving clock covering a quarter of the workout is replaced by elapsed (523 here is the 8:25 /mi bug)",
+  );
+  assert.equal(
+    rows["ci-move-gap"]?.total_duration,
+    2058,
+    "…and elapsed time itself is untouched — only the divisor was ever in question",
+  );
+  await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-move-%'`);
+}
+
+// ── last_week: the week just gone, reported ON this week's payload ──────────
+// Sunday swaps the challenge for one nobody has seen. Without this the week
+// just spent left no trace on any surface a user would look at: they were told
+// what to do next without being told how the last one went. It is on the
+// weekly payload rather than the history endpoint because the two are one
+// question — and because `user_weekly_challenge_completions.final_value` is
+// NULL for every unfinished week, which makes one missed by fifty metres look
+// identical to one nobody walked.
+{
+  const WK = "ci-lastweek";
+  await db.query(`DELETE FROM user_weekly_challenge_completions WHERE user_id = $1`, [WK]);
+  await db.query(`DELETE FROM user_weekly_challenges WHERE user_id = $1`, [WK]);
+  await db.query(`DELETE FROM workouts WHERE user_id = $1`, [WK]);
+  await db.query(
+    `INSERT INTO users (user_id, email, apple_sub, username, first_name)
+     VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id) DO NOTHING`,
+    [WK, "lastweek@ci.local", "ci-sub-lastweek", "ci_lastweek", "lastweek"],
+  );
+  await db.query(
+    `INSERT INTO notification_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+    [WK],
+  );
+
+  const win = await weekWindowForUser(WK);
+  const prevStart = new Date(
+    Date.parse(`${win.weekStart}T00:00:00Z`) - 7 * 86400000,
+  )
+    .toISOString()
+    .slice(0, 10);
+
+  // Never served that week ⇒ null, not a zeroed-out card for a challenge the
+  // user was never given.
+  assert.equal(
+    (await getWeeklyChallengeForUser(WK))?.last_week ?? null,
+    null,
+    "a week the user was never served reports no result at all",
+  );
+
+  const served = await serveWeek(WK, prevStart);
+  assert.ok(served, "last week can be served");
+
+  // Missed, but not by nothing: one real walk inside that week.
+  const midWeek = new Date(Date.parse(`${prevStart}T00:00:00Z`) + 2 * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  await db.query(
+    `INSERT INTO workouts (workout_id, user_id, distance, local_date, date,
+       timezone_offset, workout_type, device_end_date, calories, total_duration)
+     VALUES ($1,$2,$3,$4::date,$4::date,0,'walking',($4 || 'T12:00:00Z')::timestamptz,80,1800)
+     ON CONFLICT (workout_id) DO NOTHING`,
+    ["ci-lastweek-walk", WK, 1.5, midWeek],
+  );
+
+  const missed = (await getWeeklyChallengeForUser(WK)).last_week;
+  assert.equal(missed.week_start, prevStart, "last_week is the week BEFORE this one");
+  assert.equal(missed.challenge_key, served.challenge.challenge_key, "…and reports what was SERVED, never a re-pick");
+  assert.equal(missed.completed, false, "an unfinished week is not completed");
+  assert.ok(
+    missed.value > 0,
+    "…and still reports how far they actually got (final_value is NULL for every missed week)",
+  );
+
+  // Finished: the value is the completion's own stored figure, not a re-measure.
+  await db.query(
+    `INSERT INTO user_weekly_challenge_completions
+       (user_id, week_start, challenge_key, target, final_value)
+     VALUES ($1,$2::date,$3,$4,$5) ON CONFLICT (user_id, week_start) DO NOTHING`,
+    [WK, prevStart, served.challenge.challenge_key, served.target, served.target + 2],
+  );
+  const done = (await getWeeklyChallengeForUser(WK)).last_week;
+  assert.equal(done.completed, true, "a completed week reads as completed");
+  assert.equal(
+    done.value,
+    served.target + 2,
+    "…and reports the figure it was awarded on, not a fresh measurement",
+  );
+  assert.equal(done.percent, 1, "percent is clamped at the target");
+
+  await db.query(`DELETE FROM user_weekly_challenge_completions WHERE user_id = $1`, [WK]);
+  await db.query(`DELETE FROM user_weekly_challenges WHERE user_id = $1`, [WK]);
+  await db.query(`DELETE FROM workouts WHERE user_id = $1`, [WK]);
 }
 
 console.log("ci-smoke: all assertions passed");

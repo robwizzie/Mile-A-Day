@@ -355,7 +355,7 @@ struct GoalCompletedCelebrationView: View {
                 iconColor: MADTheme.Colors.madRed,
                 value: String(format: "%.2f", stats.todaysDistance),
                 unit: "mi",
-                extra: stats.percentOver > 0 ? "+\(Int(stats.percentOver))%" : nil
+                extra: stats.percentOver > 0 ? ProgressCalculator.formatSignedWholePercent(stats.percentOver) : nil
             )
 
             if stats.todaysTotalDuration > 0 {
@@ -1038,7 +1038,7 @@ struct CelebrationShareCardView: View {
                             iconColor: MADTheme.Colors.madRed,
                             value: String(format: "%.2f", stats.todaysDistance),
                             unit: "mi",
-                            extra: stats.percentOver > 0 ? "+\(Int(stats.percentOver))%" : nil
+                            extra: stats.percentOver > 0 ? ProgressCalculator.formatSignedWholePercent(stats.percentOver) : nil
                         )
 
                         if stats.todaysTotalDuration > 0 {

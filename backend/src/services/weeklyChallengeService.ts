@@ -1334,6 +1334,94 @@ export interface WeeklyChallengeResponse {
   /** Whose week window the board is measured over. Always the viewer's. */
   window_owner: "viewer";
   next_challenge: { title: string; icon: string; description: string } | null;
+  /**
+   * How LAST week actually went — additive, and null when the user was never
+   * served a challenge that week (a new account, or the week before the
+   * feature shipped).
+   *
+   * It rides this payload rather than the history endpoint because the two
+   * are one question: on Sunday the week rolls over, the card swaps to a
+   * challenge nobody has seen, and the week just spent disappears without
+   * ever reporting its result. `value` is the completion's stored figure when
+   * they finished, and a fresh measurement when they didn't — a week they
+   * missed by a mile and a week they missed by fifty metres are not the same
+   * week, and `final_value` is NULL for both.
+   */
+  last_week: {
+    week_start: string;
+    week_end: string;
+    challenge_key: string;
+    title: string;
+    icon: string;
+    gradient_start: string;
+    gradient_end: string;
+    unit: string;
+    target: number;
+    value: number;
+    percent: number;
+    completed: boolean;
+  } | null;
+}
+
+/**
+ * The week before `weekStart`, as it finished. Null when nothing was served.
+ *
+ * Reads what was SERVED (never re-picks): a past week is a record of what the
+ * user was actually set, and re-deriving it would rewrite their history every
+ * time the rotation changes — the same rule `getWeeklyHistory` follows.
+ */
+async function lastWeekResult(
+  userId: string,
+  weekStart: string,
+): Promise<WeeklyChallengeResponse["last_week"]> {
+  const prevStart = addDays(weekStart, -7);
+  const prevEnd = addDays(prevStart, 6);
+
+  const rows = await db.query<{
+    challenge_key: string;
+    title: string;
+    icon: string;
+    gradient_start: string;
+    gradient_end: string;
+    unit: string;
+    metric: string;
+    target: number;
+    final_value: number | null;
+  }>(
+    `SELECT
+			uwc.challenge_key, wc.title, wc.icon, wc.gradient_start, wc.gradient_end,
+			wc.unit, wc.metric, uwc.target, c.final_value
+		FROM user_weekly_challenges uwc
+		JOIN weekly_challenges wc ON wc.challenge_key = uwc.challenge_key
+		LEFT JOIN user_weekly_challenge_completions c
+			ON c.user_id = uwc.user_id AND c.week_start = uwc.week_start
+		WHERE uwc.user_id = $1 AND uwc.week_start = $2::date`,
+    [userId, prevStart],
+  );
+
+  const row = rows[0];
+  if (!row) return null;
+
+  const completed = row.final_value !== null;
+  // A missed week still gets measured, so the card can say how close it was.
+  const value = completed
+    ? Number(row.final_value)
+    : await measure(userId, row.metric as WeeklyMetric, prevStart, prevEnd);
+
+  return {
+    week_start: prevStart,
+    week_end: prevEnd,
+    challenge_key: row.challenge_key,
+    title: row.title,
+    icon: row.icon,
+    gradient_start: row.gradient_start,
+    gradient_end: row.gradient_end,
+    unit: row.unit,
+    target: row.target,
+    value,
+    percent: row.target > 0 ? Math.min(1, value / row.target) : 0,
+    completed,
+  };
 }
 
 /** The full weekly-challenge payload for a user's own read. */
@@ -1344,7 +1432,7 @@ export async function getWeeklyChallengeForUser(
   const served = await serveWeek(userId, window.weekStart);
   if (!served) return null;
 
-  const [value, completion, streak, friends] = await Promise.all([
+  const [value, completion, streak, friends, lastWeek] = await Promise.all([
     measure(
       userId,
       served.challenge.metric,
@@ -1365,6 +1453,7 @@ export async function getWeeklyChallengeForUser(
       served.challenge.challenge_key,
       served.challenge.metric,
     ),
+    lastWeekResult(userId, window.weekStart),
   ]);
 
   const completed = completion.length > 0;
@@ -1420,6 +1509,7 @@ export async function getWeeklyChallengeForUser(
             .replace("{pb_pace}", "your recent best"),
         }
       : null,
+    last_week: lastWeek,
   };
 }
 

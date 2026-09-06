@@ -743,7 +743,7 @@ struct UserProfileDetailView: View {
 
                     Text(isComplete
                         ? String(format: "%.2f mi · Goal 1 mi", today)
-                        : String(format: "%d%% of today's mile", Int(progress * 100)))
+                        : "\(ProgressCalculator.formatProgress(progress)) of today's mile")
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.5))
                 }
