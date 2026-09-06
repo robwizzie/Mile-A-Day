@@ -15,6 +15,8 @@ import {
   getQuantityDateRangeBatch,
   getActivityBreakdownBatch,
   getUsersWithManualWorkouts,
+  deviceMeasuredWorkoutSql,
+  deviceMeasuredDistanceSql,
 } from "./workoutService.js";
 import { getStepsDateRangeBatch } from "./dailyStepsService.js";
 import { sendOrQueueCompetitionNotification } from "./pushNotificationService.js";
@@ -273,6 +275,7 @@ export async function getCompetition(
             competition.start_date,
             competition.end_date ?? undefined,
             competition.workouts,
+            usesDeviceMeasuredScoring(competition),
           )
         : Promise.resolve([]),
     ]);
@@ -1036,6 +1039,7 @@ export async function getCompetitionTeamStats(competition: Competition) {
         start,
         end,
         competition.workouts,
+        usesDeviceMeasuredScoring(competition),
       );
 
   const totals: Record<string, number> = {};
@@ -1065,6 +1069,32 @@ export async function getCompetitionTeamStats(competition: Competition) {
     unit: competition.options.unit,
     stats,
   };
+}
+
+/**
+ * The day competitions stopped counting hand-entered miles.
+ *
+ * Standings are recomputed LIVE on every read — finished competitions
+ * included — so without a cutoff this rule would silently rewrite the scores
+ * of every competition that has already been decided. A competition that was
+ * over before this date keeps the numbers it ended with; anything still
+ * running when it shipped (and everything since) is scored device-measured,
+ * and stays that way after it ends because its `end_date` is on or after the
+ * cutoff.
+ */
+const DEVICE_MEASURED_SCORING_FROM = "2026-09-06";
+
+/**
+ * Does this competition score device-measured miles only (see
+ * `deviceMeasuredWorkoutSql`)? Everything except a competition that had
+ * already ended when the rule shipped.
+ */
+export function usesDeviceMeasuredScoring(competition: {
+  end_date: string | null;
+}): boolean {
+  return !(
+    competition.end_date && competition.end_date < DEVICE_MEASURED_SCORING_FROM
+  );
 }
 
 interface UserData {
@@ -1110,6 +1140,7 @@ export async function getUserScores(
           competition.start_date,
           competition.end_date ?? undefined,
           competition.workouts,
+          usesDeviceMeasuredScoring(competition),
         ),
     isStepUnit
       ? Promise.resolve(new Set<string>())
@@ -1396,14 +1427,20 @@ export async function checkRaceCompletions(userId: string): Promise<void> {
     const today = getTodayET();
     const endDate = race.end_date ?? today;
 
+    // Same miles getUserScores would credit, or a race resolves off a total
+    // its own standings never showed.
+    const deviceOnly = usesDeviceMeasuredScoring(race);
     const [result] = await db.query<{ total: number }>(
-      `SELECT COALESCE(SUM(distance), 0) as total
+      `SELECT COALESCE(SUM(${
+        deviceOnly ? deviceMeasuredDistanceSql("workouts") : "distance"
+      }), 0) as total
 			FROM workouts
 			WHERE user_id = $1
 				AND local_date >= $2
 				AND local_date <= $3
 				AND workout_type = ANY($4::text[])
-				AND deleted_at IS NULL AND exclusion_reason IS NULL`,
+				AND deleted_at IS NULL AND exclusion_reason IS NULL
+				${deviceOnly ? `AND ${deviceMeasuredWorkoutSql("workouts")}` : ""}`,
       [userId, startDate, endDate, workoutTypes],
     );
 

@@ -1204,9 +1204,11 @@ struct CompetitionLeaderboardRow: View {
 }
 
 // MARK: - Manual Workouts Info Sheet
-/// Surfaces the list of manually-entered workouts for one user, with the
-/// reason they're flagged. Reached by tapping the orange ⚠ on a leaderboard
-/// row. Read-only — manual flag is a server-side property.
+/// Explains the orange ⚠ on a leaderboard row: this person entered or edited
+/// a workout by hand, so some of what they logged is NOT in their score.
+/// Competitions score device-measured miles only — the server drops a
+/// hand-entered workout outright and credits an edited one at the distance the
+/// device recorded. Read-only; the flag is a server-side property.
 struct ManualWorkoutsInfoSheet: View {
     let user: CompetitionUser
     @Environment(\.dismiss) private var dismiss
@@ -1240,7 +1242,7 @@ struct ManualWorkoutsInfoSheet: View {
                         .font(.system(size: 22, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
 
-                    Text("\(user.displayName) has logged at least one workout manually in this competition.")
+                    Text("\(user.displayName) entered or edited at least one workout by hand in this competition.")
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.7))
                         .multilineTextAlignment(.center)
@@ -1251,12 +1253,12 @@ struct ManualWorkoutsInfoSheet: View {
                     infoRow(
                         icon: "questionmark.circle.fill",
                         title: "Why does this matter?",
-                        body: "Manual entries can't be verified by HealthKit so they're flagged for transparency."
+                        body: "Nothing can verify a workout that was typed in, so competitions only score what a device recorded."
                     )
                     infoRow(
-                        icon: "checkmark.shield.fill",
-                        title: "Still counts",
-                        body: "Manual workouts still contribute to scores — the badge is informational only."
+                        icon: "minus.circle.fill",
+                        title: "Doesn't count here",
+                        body: "Hand-entered workouts are left out of this competition. An edited workout counts at the distance your device recorded, not the edited number."
                     )
                 }
                 .padding(.horizontal, 20)

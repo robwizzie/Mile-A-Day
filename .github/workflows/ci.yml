@@ -122,6 +122,14 @@ jobs:
       # wrong topic) must never read as a dead token and wipe registrations.
       - name: APNs key + token-pruning check
         run: node scripts/push-config-check.mjs
+      # Competitions score DEVICE-MEASURED miles only — a hand-entered workout
+      # is dropped, an edited one counts what the device recorded. Nothing here
+      # fails loudly: a missed call site just reports a standing that includes
+      # miles nobody ran, and the calendar breakdown under the score is a
+      # second query that has to agree with it. The cutoff (competitions that
+      # were already over keep the numbers they ended with) is pinned too.
+      - name: Competition device-measured scoring check
+        run: node scripts/competition-scoring-check.mjs
 
   website:
     name: Website (lint + build)
