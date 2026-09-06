@@ -15,6 +15,7 @@ import {
   postsList,
   referrals,
   errors,
+  cronStatus,
   errorSummary,
   errorsByUser,
   errorTimeseries,
@@ -86,6 +87,8 @@ adminRouter.get("/errors", errors);
 adminRouter.get("/errors/summary", errorSummary);
 adminRouter.get("/errors/by-user", errorsByUser);
 adminRouter.get("/errors/timeseries", errorTimeseries);
+// Scheduled-job health: last run, duration and error per job since boot.
+adminRouter.get("/cron", cronStatus);
 // Support tooling: post rows incl. soft-deleted + on-disk file checks, and
 // soft-delete undo — for "my photo disappeared" investigations.
 adminRouter.get("/posts/:userId/forensics", postForensics);

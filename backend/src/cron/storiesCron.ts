@@ -2,6 +2,7 @@ import cron from "node-cron";
 import fs from "fs";
 import path from "path";
 import { PostgresService } from "../services/DbService.js";
+import { runJob } from "./cronRunner.js";
 
 const db = PostgresService.getInstance();
 
@@ -67,11 +68,7 @@ export function startStoriesCron(): void {
   cron.schedule(
     "30 3 * * *",
     async () => {
-      try {
-        await sweepOrphanedMedia();
-      } catch (error: any) {
-        console.error("[CRON] Error sweeping orphaned media:", error.message);
-      }
+      await runJob("media.sweep_orphans", sweepOrphanedMedia);
     },
     { timezone: "America/New_York" },
   );

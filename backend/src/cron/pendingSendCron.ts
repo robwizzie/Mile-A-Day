@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import { drainDueScheduled } from "../services/pendingNotificationService.js";
+import { runJob } from "./cronRunner.js";
 
 /**
  * Delivers time-delayed friend notifications once their delay elapses — today
@@ -10,11 +11,7 @@ export function startPendingSendCron(): void {
   // Off the :00 second/every-minute default a hair to avoid clustering with
   // other minute jobs.
   cron.schedule("* * * * *", async () => {
-    try {
-      await drainDueScheduled();
-    } catch (err: any) {
-      console.error("[PendingSendCron] drain failed:", err?.message ?? err);
-    }
+    await runJob("notifications.drain_scheduled", drainDueScheduled);
   });
   console.log(
     "[PendingSendCron] Scheduled scheduled-notification drain (every minute).",

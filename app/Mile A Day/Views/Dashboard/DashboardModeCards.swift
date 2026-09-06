@@ -726,9 +726,9 @@ private struct HeroStatColumn: View {
         VStack(spacing: 0) {
             ModernHeroStatLine(
                 icon: "figure.run",
-                value: currentDistance.milesText,
-                unit: "mi",
-                label: "Mileage",
+                value: currentDistance.distanceText,
+                unit: DistanceUnits.current.abbreviation,
+                label: "Distance",
                 tint: MADTheme.Colors.madRed
             )
             ModernHeroDivider()
@@ -744,7 +744,7 @@ private struct HeroStatColumn: View {
                 ModernHeroStatLine(
                     icon: "timer",
                     value: Self.formatPace(pace),
-                    unit: "/mi",
+                    unit: DistanceUnits.current.paceSuffix,
                     label: "Best pace",
                     tint: MADTheme.Colors.walkBlue
                 )
@@ -767,9 +767,11 @@ private struct HeroStatColumn: View {
         return .orange
     }
 
+    /// `pace` is MINUTES per mile; shown per display unit.
     private static func formatPace(_ pace: TimeInterval) -> String {
-        let minutes = Int(pace)
-        let seconds = Int((pace - Double(minutes)) * 60)
+        let shown = pace.pacePerDisplayUnit
+        let minutes = Int(shown)
+        let seconds = Int((shown - Double(minutes)) * 60)
         return String(format: "%d:%02d", minutes, seconds)
     }
 }
@@ -1603,8 +1605,8 @@ private struct FlameBuddyHeroCard: View {
             // claim the goal is closer than it is (0.995 logged used to
             // round up to "1.00 mi" on an incomplete day).
             value: trustedDone
-                ? "\(currentDistance.milesText) mi"
-                : "\(((max(goalDistance - currentDistance, 0) * 100.0 - 1e-6).rounded(.up) / 100.0).milesText) mi",
+                ? currentDistance.distanceFormatted
+                : "\(max(goalDistance - currentDistance, 0).distanceToGoText) \(DistanceUnits.current.abbreviation)",
             tint: trustedDone ? .green : statusColor
         )
         ModernMetricPill(

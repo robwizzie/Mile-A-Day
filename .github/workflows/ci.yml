@@ -122,6 +122,12 @@ jobs:
       # wrong topic) must never read as a dead token and wipe registrations.
       - name: APNs key + token-pruning check
         run: node scripts/push-config-check.mjs
+      # Every scheduled job runs through cronRunner.runJob — the one place a
+      # cron failure becomes an error_log row and an admin push instead of a
+      # console line nobody reads. Pins the row, the alert, the per-job
+      # cooldown and the kill switch.
+      - name: Cron runner check
+        run: node scripts/cron-runner-check.mjs
       # The streak last call: local 10 PM, live streak, no mile. An hour
       # predicate off by one, a missed reminder-hour guard or a stale stored
       # streak all fail silently, so the hour arithmetic is pinned against

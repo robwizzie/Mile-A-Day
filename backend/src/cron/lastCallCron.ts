@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import { sendPendingLastCalls } from "../services/lastCallService.js";
+import { runJob } from "./cronRunner.js";
 
 /**
  * Hourly at :05 — the streak last call for users whose local clock just
@@ -10,11 +11,7 @@ import { sendPendingLastCalls } from "../services/lastCallService.js";
  */
 export function startLastCallCron(): void {
   cron.schedule("5 * * * *", async () => {
-    try {
-      await sendPendingLastCalls();
-    } catch (error: any) {
-      console.error("[CRON] Error sending streak last calls:", error.message);
-    }
+    await runJob("streak.last_call", () => sendPendingLastCalls());
   });
 
   console.log("Streak last-call cron scheduled (hourly at :05, local 10 PM).");

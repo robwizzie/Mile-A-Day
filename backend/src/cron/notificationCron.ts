@@ -15,6 +15,7 @@ import { sendPendingDailyReminders } from "../services/dailyReminderService.js";
 import { reconcileStaleStreaks } from "../services/leaderboardService.js";
 import { expireStalePendingNotifications } from "../services/pendingNotificationService.js";
 import { sendPendingFriendRequestReminders } from "../services/friendRequestReminderService.js";
+import { runJob } from "./cronRunner.js";
 
 export function startNotificationCron(): void {
   // All "overnight result" notifications fire together at 9 AM ET so users
@@ -31,47 +32,19 @@ export function startNotificationCron(): void {
   // so we run flushBatchedNotifications first to clear the midnight queue,
   // then the result-detection jobs in the same order they ran overnight.
   // User-triggered notifications (mile finished, nudges, flexes, hypes) are
-  // unchanged and continue to send immediately.
+  // unchanged and continue to send immediately. Each step is its own job so
+  // one failing never costs the next its turn.
   cron.schedule(
     "0 9 * * *",
     async () => {
       console.log("[CRON] 9 AM overnight notification batch starting...");
-      try {
-        await flushBatchedNotifications();
-        console.log("[CRON] Batched notification flush complete.");
-      } catch (error: any) {
-        console.error("[CRON] Error flushing notifications:", error.message);
-      }
-      try {
-        await checkClashTies();
-        console.log("[CRON] Clash tie check complete.");
-      } catch (error: any) {
-        console.error("[CRON] Error checking clash ties:", error.message);
-      }
-      try {
-        await checkStreaksBroken();
-        console.log("[CRON] Personal streak broken check complete.");
-      } catch (error: any) {
-        console.error("[CRON] Error checking broken streaks:", error.message);
-      }
-      try {
-        await checkStreakLifeLoss();
-        console.log("[CRON] Competition streak life-loss check complete.");
-      } catch (error: any) {
-        console.error("[CRON] Error checking streak life loss:", error.message);
-      }
-      try {
-        await checkTargetMissed();
-        console.log("[CRON] Target-missed check complete.");
-      } catch (error: any) {
-        console.error("[CRON] Error checking target missed:", error.message);
-      }
-      try {
-        await notifyIntervalResults();
-        console.log("[CRON] Interval recap complete.");
-      } catch (error: any) {
-        console.error("[CRON] Error sending interval recap:", error.message);
-      }
+      await runJob("notifications.flush_batched", flushBatchedNotifications);
+      await runJob("notifications.clash_ties", checkClashTies);
+      await runJob("notifications.streaks_broken", checkStreaksBroken);
+      await runJob("notifications.streak_life_loss", checkStreakLifeLoss);
+      await runJob("notifications.target_missed", checkTargetMissed);
+      await runJob("notifications.interval_results", notifyIntervalResults);
+      console.log("[CRON] 9 AM overnight notification batch complete.");
     },
     {
       timezone: "America/New_York",
@@ -82,13 +55,7 @@ export function startNotificationCron(): void {
   cron.schedule(
     "0 18 * * *",
     async () => {
-      console.log("[CRON] Checking competitions ending soon...");
-      try {
-        await checkCompetitionsEndingSoon();
-        console.log("[CRON] Ending soon check complete.");
-      } catch (error: any) {
-        console.error("[CRON] Error checking ending soon:", error.message);
-      }
+      await runJob("notifications.ending_soon", checkCompetitionsEndingSoon);
     },
     {
       timezone: "America/New_York",
@@ -99,24 +66,13 @@ export function startNotificationCron(): void {
   // current local hour matches their configured reminder hour and who haven't
   // completed today's mile. Per-user TZ filtering is in the SQL.
   cron.schedule("0 * * * *", async () => {
-    console.log("[CRON] Sending pending daily reminders...");
-    try {
-      await sendPendingDailyReminders();
-      console.log("[CRON] Daily reminder send complete.");
-    } catch (error: any) {
-      console.error("[CRON] Error sending daily reminders:", error.message);
-    }
-
+    await runJob("notifications.daily_reminders", sendPendingDailyReminders);
     // Expire stale pending-friend-notification rows (ask-mode). Lazy expiry on
     // read already guarantees correctness; this is hygiene to keep the table tidy.
-    try {
-      await expireStalePendingNotifications();
-    } catch (error: any) {
-      console.error(
-        "[CRON] Error expiring stale pending notifications:",
-        error.message,
-      );
-    }
+    await runJob(
+      "notifications.expire_pending",
+      expireStalePendingNotifications,
+    );
   });
 
   // Every hour at :35 — remind users about friend requests they've left
@@ -126,27 +82,17 @@ export function startNotificationCron(): void {
   // clear of the other hourly jobs (:00 daily reminders, :10 streak features,
   // :20 h2h, :50 weekly recap). Per-user TZ + cooldown filtering is in the SQL.
   cron.schedule("35 * * * *", async () => {
-    try {
-      await sendPendingFriendRequestReminders();
-    } catch (error: any) {
-      console.error(
-        "[CRON] Error sending friend request reminders:",
-        error.message,
-      );
-    }
+    await runJob(
+      "notifications.friend_request_reminders",
+      sendPendingFriendRequestReminders,
+    );
   });
 
   // Clean up old notification logs at 3 AM ET daily
   cron.schedule(
     "0 3 * * *",
     async () => {
-      console.log("[CRON] Cleaning up old notification logs...");
-      try {
-        await cleanupNotificationLogs();
-        console.log("[CRON] Notification log cleanup complete.");
-      } catch (error: any) {
-        console.error("[CRON] Error cleaning up logs:", error.message);
-      }
+      await runJob("notifications.cleanup_logs", cleanupNotificationLogs);
     },
     {
       timezone: "America/New_York",
@@ -159,15 +105,12 @@ export function startNotificationCron(): void {
   // Running every 6h keeps the leaderboard fresh across timezones as each
   // user's local day rolls over. Bounded to users with current_streak > 0.
   cron.schedule("0 */6 * * *", async () => {
-    console.log("[CRON] Reconciling stale streaks...");
-    try {
+    await runJob("streaks.reconcile_stale", async () => {
       const { checked, changed } = await reconcileStaleStreaks();
       console.log(
         `[CRON] Streak reconcile complete: ${changed}/${checked} updated.`,
       );
-    } catch (error: any) {
-      console.error("[CRON] Error reconciling streaks:", error.message);
-    }
+    });
   });
 
   console.log(

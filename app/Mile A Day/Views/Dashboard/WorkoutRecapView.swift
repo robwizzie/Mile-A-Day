@@ -66,7 +66,7 @@ struct WorkoutRecapView: View {
 
     private var formattedPace: String {
         guard distance > 0.01 else { return "--" }
-        let paceSeconds = duration / distance
+        let paceSeconds = (duration / distance).pacePerDisplayUnit
         let minutes = Int(paceSeconds) / 60
         let seconds = Int(paceSeconds) % 60
         return String(format: "%d'%02d\"", minutes, seconds)
@@ -254,9 +254,9 @@ struct WorkoutRecapView: View {
     private var statsGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible())], spacing: 12) {
             RecapStatCell(icon: "clock.fill", label: "Time", value: formattedTime)
-            RecapStatCell(icon: "speedometer", label: "Avg Pace", value: "\(formattedPace) /mi")
+            RecapStatCell(icon: "speedometer", label: "Avg Pace", value: "\(formattedPace) \(DistanceUnits.current.paceSuffix)")
             RecapStatCell(icon: activityIcon, label: "Activity", value: activityName)
-            RecapStatCell(icon: "chart.bar.fill", label: "Daily Total", value: totalDailyDistance.milesFormatted)
+            RecapStatCell(icon: "chart.bar.fill", label: "Daily Total", value: totalDailyDistance.distanceFormatted)
         }
         .opacity(showStats ? 1 : 0)
         .offset(y: showStats ? 0 : 12)
@@ -280,7 +280,7 @@ struct WorkoutRecapView: View {
 
                 // Floored: "1.00 / 1.00" must never appear while goalMet is
                 // still false (0.995 used to render exactly that).
-                Text("\(totalDailyDistance.milesText) / \(goalDistance.milesText) mi")
+                Text("\(totalDailyDistance.distanceText) / \(goalDistance.distanceFormatted)")
                     .font(.subheadline)
                     .fontWeight(.bold)
                     .foregroundColor(.white)
@@ -319,7 +319,7 @@ struct WorkoutRecapView: View {
                     Image(systemName: "figure.walk.motion")
                         .font(.subheadline)
                         .foregroundColor(.white.opacity(0.7))
-                    Text(String(format: "%.2f mi to go — you've got this", milesRemaining))
+                    Text("\(milesRemaining.distanceToGoText) \(DistanceUnits.current.abbreviation) to go — you've got this")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundColor(.white.opacity(0.9))

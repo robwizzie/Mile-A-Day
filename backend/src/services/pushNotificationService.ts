@@ -138,6 +138,10 @@ function getApnsToken(): string | null {
 
 export type NotificationType =
   | "friend_request"
+  // Operational alert to ADMIN accounts only (a scheduled job failed —
+  // cronRunner). Shipped builds decode the inbox `type` as a plain string,
+  // so an unknown type is a row with no destination, never a decode failure.
+  | "ops_alert"
   // Deliberately NOT in HIGH_PRIORITY_TYPES, unlike friend_request itself: this
   // one is a nudge about something already sitting in the app, so quiet hours
   // and the daily cap must both apply to it.
@@ -464,6 +468,9 @@ const HIGH_PRIORITY_TYPES: NotificationType[] = [
   // mile's "you did it" to tomorrow's flush is exactly the flakiness this
   // push exists to fix.
   "goal_reached",
+  // An admin asked to be told when a scheduled job fails; cronRunner's
+  // per-job cooldown is what keeps this from being spam, not the cap.
+  "ops_alert",
 ];
 
 async function getDailyNotificationCount(userId: string): Promise<number> {
