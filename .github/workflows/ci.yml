@@ -105,6 +105,14 @@ jobs:
       # would wipe other people's miles) and the per-viewer history hide.
       - name: Buddy live join/leave/cancel/hide check
         run: node scripts/buddy-live-check.mjs
+      # The walk's lifecycle end to end. A scheduled walk was cancelled by the
+      # 3h lobby sweep before anyone arrived, local_date was stamped in New
+      # York for everyone, a finisher's synced workout only linked if the
+      # session had already completed, the Friends tab offered rooms the join
+      # endpoint refused, and a walk nobody moved on entered both archives as
+      # a completed walk. None of it throws; this file asserts each by behaviour.
+      - name: Buddy lifecycle check
+        run: node scripts/buddy-lifecycle-check.mjs
       # Profile-grid controls, the collab reach/route switches and Story
       # Highlights. The reach switch lives inside collabReachSql — the fragment
       # getFeed, the unified feed and direct post access all ask — so too
