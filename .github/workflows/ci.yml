@@ -122,6 +122,12 @@ jobs:
       # wrong topic) must never read as a dead token and wipe registrations.
       - name: APNs key + token-pruning check
         run: node scripts/push-config-check.mjs
+      # The streak last call: local 10 PM, live streak, no mile. An hour
+      # predicate off by one, a missed reminder-hour guard or a stale stored
+      # streak all fail silently, so the hour arithmetic is pinned against
+      # seeded timezone offsets at one fixed instant.
+      - name: Streak last-call check
+        run: node scripts/last-call-check.mjs
 
   website:
     name: Website (lint + build)
