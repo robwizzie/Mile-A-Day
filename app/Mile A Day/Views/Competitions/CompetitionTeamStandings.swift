@@ -2,9 +2,11 @@ import SwiftUI
 
 // MARK: - Team Standings
 // Card shown above the individual leaderboard when a competition has teams.
-// Teams ranked by score (straight sum of member scores, computed server-side),
-// tap a team to expand its member rows. Individual standings stay untouched
-// below — team play is a layer on top, not a replacement.
+// A team is scored SERVER-SIDE as one competitor over its members' combined
+// miles — never as a sum of their individual scores — so member rows show what
+// each person CONTRIBUTED rather than points that wouldn't add up. Tap a team
+// to expand them. Individual standings stay untouched below: team play is a
+// layer on top, not a replacement.
 
 struct CompetitionTeamStandings: View {
     let competition: Competition
@@ -108,6 +110,13 @@ struct CompetitionTeamStandings: View {
                                 .foregroundColor(.white.opacity(0.45))
                         }
 
+                        // Streaks: the pool of lives belongs to the TEAM, and
+                        // a team that has spent one is the only thing on this
+                        // row that says the standing is fragile.
+                        if competition.type == .streaks, let lives = team.remaining_lives {
+                            teamLives(lives)
+                        }
+
                         Text(competition.teamScoreLabel(team))
                             .font(.system(size: 15, weight: .bold, design: .rounded))
                             .foregroundColor(isLeading ? .yellow : .white.opacity(0.85))
@@ -158,6 +167,33 @@ struct CompetitionTeamStandings: View {
         )
     }
 
+    /// The team's shared lives, as hearts. Zero reads as "out" in words — an
+    /// empty row of outlines is easy to skim straight past.
+    @ViewBuilder
+    private func teamLives(_ lives: Int) -> some View {
+        if lives <= 0 {
+            Text("OUT")
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Color.white.opacity(0.08)))
+        } else {
+            HStack(spacing: 2) {
+                ForEach(0..<min(lives, 3), id: \.self) { _ in
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(MADTheme.Colors.madRed.opacity(0.9))
+                }
+                if lives > 3 {
+                    Text("×\(lives)")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundColor(MADTheme.Colors.madRed.opacity(0.9))
+                }
+            }
+        }
+    }
+
     private func memberRow(_ member: CompetitionUser) -> some View {
         let isMe = member.user_id == UserDefaults.standard.string(forKey: "backendUserId")
         return HStack(spacing: MADTheme.Spacing.sm) {
@@ -206,9 +242,22 @@ extension Competition {
         formattedScore(team.score ?? 0)
     }
 
-    /// Score label for one member inside a team row.
+    /// Label for one member inside a team row — what they CONTRIBUTED, in the
+    /// competition's own unit.
+    ///
+    /// Not their score. The team is scored as one competitor over the members'
+    /// combined miles, so member points don't sum to the team's number: "Red
+    /// Team 4 pts" over "Alice 3 pts, Bob 2 pts" reads as arithmetic that got
+    /// away from us. Miles are the thing that does add up, and they answer the
+    /// question a member row is actually asked — who carried this.
+    ///
+    /// Falls back to the score for older servers that send no contribution,
+    /// which is byte-identical to what shipped.
     func memberScoreLabel(_ user: CompetitionUser) -> String {
-        formattedScore(user.score ?? 0)
+        if let contribution = user.team_contribution {
+            return options.formatQuantityWithUnit(contribution)
+        }
+        return formattedScore(user.score ?? 0)
     }
 
     private func formattedScore(_ score: Double) -> String {

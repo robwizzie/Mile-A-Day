@@ -40,6 +40,8 @@ const {
   measure,
   measureBatch,
   getCatalog,
+  pbReferencePace,
+  renderDescription,
   resolveTarget,
   evaluateWeeklyChallengeForUser,
   getWeeklyLeaderboard,
@@ -1969,6 +1971,24 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     "with no prior best, every complete in-window mile counts",
   );
 
+  // The card has to SAY the time to beat, or the challenge can't be played —
+  // nobody can recall what four weeks of their own splits contained. With no
+  // reference there is no bar, and the sentence must not invent one.
+  const pbRow = (await getCatalog()).find(
+    (c) => c.challenge_key === "personal_best",
+  );
+  assert.ok(pbRow, "personal_best is in the catalog");
+  assert.equal(
+    await pbReferencePace(WENDY, win.weekStart),
+    null,
+    "no qualifying split before the week => no reference pace",
+  );
+  const pbNoBar = await renderDescription(WENDY, pbRow, 1, win.weekStart);
+  assert.ok(
+    !pbNoBar.includes("{") && !pbNoBar.includes("faster than"),
+    `with no reference the description promises no bar: ${pbNoBar}`,
+  );
+
   // Now give her a 10:00 mile a fortnight ago. Only the 9:50 beats it — the
   // 10:00 ties and the 10:10 is slower.
   await addWorkout(WENDY, "ci-wk-prior", day(-14), 1.0);
@@ -2002,6 +2022,34 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     await measure(WENDY, "pb_mile_splits", win.weekStart, win.weekEnd),
     1,
     "an excluded workout never sets the personal-best bar",
+  );
+
+  // The pace PRINTED must be the pace SCORED. Same reference, same exclusions,
+  // same rolling window — the 5:00 drive and the aged-out 8:20 are as invisible
+  // to the sentence as they are to the count.
+  assert.equal(
+    await pbReferencePace(WENDY, win.weekStart),
+    600,
+    "the reference pace is the 4-week best the scorer uses (an all-time or unfiltered read gives 500 or 300)",
+  );
+  const pbDescription = await renderDescription(WENDY, pbRow, 1, win.weekStart);
+  assert.ok(
+    pbDescription.includes("10:00/mi"),
+    `the description names the time to beat: ${pbDescription}`,
+  );
+  assert.ok(
+    !pbDescription.includes("{"),
+    `and leaves no unsubstituted token: ${pbDescription}`,
+  );
+  assert.ok(
+    pbDescription.includes("1 mile ") && !pbDescription.includes("1 miles"),
+    `and a target of 1 reads as one mile: ${pbDescription}`,
+  );
+  assert.ok(
+    (await renderDescription(WENDY, pbRow, 3, win.weekStart)).includes(
+      "3 miles",
+    ),
+    "while a target of 3 pluralizes",
   );
 
   // Both new metrics feed the friends leaderboard through measureBatch. If it

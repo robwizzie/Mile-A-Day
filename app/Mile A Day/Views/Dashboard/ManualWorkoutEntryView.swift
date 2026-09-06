@@ -403,7 +403,11 @@ struct ManualWorkoutEntryView: View {
                 .font(.system(size: 14))
                 .foregroundColor(.orange.opacity(0.8))
 
-            Text("Manual workouts are flagged so friends can see they were hand-entered.")
+            // Say it here, not on the leaderboard afterwards: a hand-entered
+            // workout still counts toward miles and streaks, and only
+            // competitions refuse it — which is exactly the difference someone
+            // is entitled to know BEFORE they type in a walk they really took.
+            Text("Manual workouts are flagged as hand-entered. They still count toward your miles and streak, but not toward competitions.")
                 .font(.system(size: 12, weight: .regular, design: .rounded))
                 .foregroundColor(.white.opacity(0.4))
         }

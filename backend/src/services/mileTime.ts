@@ -65,3 +65,18 @@ export function isPlausibleMileSeconds(seconds: unknown): boolean {
     value <= MAX_PLAUSIBLE_MILE_SECONDS
   );
 }
+
+/**
+ * "9:12" from seconds per mile — the one mile-pace formatter.
+ *
+ * Both challenge families print a pace the user has to beat (`beat_your_pace`
+ * daily, `personal_best` weekly) and they had started from two separate copies
+ * of this rounding. A pace that reads 9:12 on one screen and 9:13 on the other
+ * is the kind of difference nobody reports and everybody notices.
+ */
+export function formatMilePace(secondsPerMile: number): string {
+  const total = Math.round(secondsPerMile);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s < 10 ? `0${s}` : s}`;
+}

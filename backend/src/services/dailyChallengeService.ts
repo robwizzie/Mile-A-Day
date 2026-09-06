@@ -1,5 +1,9 @@
 import { PostgresService } from "./DbService.js";
-import { MIN_PLAUSIBLE_MILE_SECONDS, countedWorkoutSql } from "./mileTime.js";
+import {
+  MIN_PLAUSIBLE_MILE_SECONDS,
+  countedWorkoutSql,
+  formatMilePace,
+} from "./mileTime.js";
 import {
   DailyChallenge,
   TodaysChallengeResponse,
@@ -1494,15 +1498,8 @@ async function renderDescription(
   if (prior === null) return "Set a new personal best pace today";
   return challenge.description_template.replace(
     "{avg_pace}",
-    formatPace(paceTargetSeconds(prior) / 60.0),
+    formatMilePace(paceTargetSeconds(prior)),
   );
-}
-
-function formatPace(minutesPerMile: number): string {
-  const m = Math.floor(minutesPerMile);
-  const s = Math.round((minutesPerMile - m) * 60);
-  const ss = s < 10 ? `0${s}` : `${s}`;
-  return `${m}:${ss}`;
 }
 
 // ─── Startup seed ───────────────────────────────────────────────────

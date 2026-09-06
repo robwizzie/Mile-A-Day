@@ -94,3 +94,9 @@ paths = [
   '''(.*?)\.env\.production''',
   '''(.*?)\.env\.development''',
 ]
+
+[[allowlists]]
+description = "Namespaced client-side storage keys. `MAD_`-prefixed string literals are UserDefaults / App Group / HealthKit-metadata key names (e.g. MAD_BuddyPendingFinishV1, MAD_stealth, MAD_moving_seconds) — they name where a value is stored, they are not the value. They trip generic-api-key purely on entropy."
+regexes = [
+  '''MAD_[A-Za-z0-9_]+''',
+]

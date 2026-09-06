@@ -1651,6 +1651,51 @@ export async function getQuantityDateRange(
 }
 
 /**
+ * What a COMPETITION is allowed to count.
+ *
+ * `workouts.source` is 'healthkit' (a device recorded it — the in-app tracker,
+ * the Watch, Apple Fitness, or anything that reaches HealthKit), 'manual' (a
+ * user typed the whole workout into ManualWorkoutEntryView) or 'edited' (a
+ * device workout whose distance/duration the user changed afterwards).
+ *
+ * Competitions score DEVICE-MEASURED miles only: a hand-entered workout is
+ * dropped outright, and an EDITED one counts the figure the device recorded
+ * (`original_distance`) rather than the number typed over it — including the
+ * sub-25% corrections the edit sheet leaves unflagged as 'healthkit'. Editing
+ * stays a legitimate treadmill correction everywhere else in the app; it just
+ * can't be the thing that wins a competition, because nothing verifies it.
+ *
+ * This is deliberately narrower than `countedWorkoutSql`, which answers "does
+ * this workout count at all" (deleted / duplicate / vehicle). Both apply.
+ *
+ * `alias` is a table alias from the caller's own query, never request input.
+ */
+export function deviceMeasuredWorkoutSql(alias: string): string {
+  return `${alias}.source <> 'manual'`;
+}
+
+/**
+ * The distance a competition may credit — see `deviceMeasuredWorkoutSql`.
+ *
+ * Keyed on `original_distance`, NOT on `source = 'edited'`: only
+ * `updateWorkout` ever writes that column, it writes it on the FIRST edit
+ * whatever that edit was, and what it holds is the figure the device recorded.
+ * `source` cannot carry this — EditWorkoutView deliberately leaves a
+ * distance-only correction under 25% unflagged ('healthkit'), which would
+ * otherwise be a 24%-at-a-time way to inflate a competition score with nothing
+ * showing on the row.
+ *
+ * LEAST of the two, not the recorded figure flat: an edit that corrects a
+ * treadmill walk DOWNWARD is the user telling us they did less than the phone
+ * thought, and crediting the device's number over their own correction would
+ * over-pay them for owning up. An edit can only ever lower what a competition
+ * credits, in either direction.
+ */
+export function deviceMeasuredDistanceSql(alias: string): string {
+  return `LEAST(${alias}.distance, COALESCE(${alias}.original_distance, ${alias}.distance))`;
+}
+
+/**
  * Batched variant of getQuantityDateRange — returns one row per (user_id, local_date)
  * for an entire set of users in a single query. Used by competitionService to score
  * all participants at once instead of looping per user.
@@ -1660,20 +1705,29 @@ export async function getQuantityDateRangeBatch(
   startDate: string,
   endDate?: string,
   workoutTypes?: ("running" | "walking")[],
+  deviceMeasuredOnly = false,
 ): Promise<{ user_id: string; local_date: string; total_distance: number }[]> {
   if (userIds.length === 0) return [];
+
+  const distanceExpr = deviceMeasuredOnly
+    ? deviceMeasuredDistanceSql("workouts")
+    : "distance";
+  const sourceFilter = deviceMeasuredOnly
+    ? `AND ${deviceMeasuredWorkoutSql("workouts")}`
+    : "";
 
   const query = `
 		SELECT
 			user_id,
 			TO_CHAR(local_date, 'YYYY-MM-DD') as local_date,
-			SUM(distance) as total_distance
+			SUM(${distanceExpr}) as total_distance
 		FROM workouts
 		WHERE user_id = ANY($1::text[])
 			AND local_date >= $2
 			AND local_date <= $3
 			AND workout_type = ANY($4::text[])
 			AND deleted_at IS NULL AND exclusion_reason IS NULL
+			${sourceFilter}
 		GROUP BY user_id, local_date
 		ORDER BY user_id, local_date ASC
 	`;
@@ -1695,6 +1749,7 @@ export async function getActivityBreakdownBatch(
   startDate: string,
   endDate?: string,
   workoutTypes?: ("running" | "walking")[],
+  deviceMeasuredOnly = false,
 ): Promise<
   {
     user_id: string;
@@ -1706,12 +1761,19 @@ export async function getActivityBreakdownBatch(
 > {
   if (userIds.length === 0) return [];
 
+  const distanceExpr = deviceMeasuredOnly
+    ? deviceMeasuredDistanceSql("workouts")
+    : "distance";
+  const sourceFilter = deviceMeasuredOnly
+    ? `AND ${deviceMeasuredWorkoutSql("workouts")}`
+    : "";
+
   const query = `
 		SELECT
 			user_id,
 			TO_CHAR(local_date, 'YYYY-MM-DD') as local_date,
 			workout_type,
-			SUM(distance) as total_distance,
+			SUM(${distanceExpr}) as total_distance,
 			COUNT(*)::int as workout_count
 		FROM workouts
 		WHERE user_id = ANY($1::text[])
@@ -1719,6 +1781,7 @@ export async function getActivityBreakdownBatch(
 			AND local_date <= $3
 			AND workout_type = ANY($4::text[])
 			AND deleted_at IS NULL AND exclusion_reason IS NULL
+			${sourceFilter}
 		GROUP BY user_id, local_date, workout_type
 		ORDER BY user_id, local_date ASC
 	`;
@@ -1779,7 +1842,15 @@ export async function updateWorkout(
 			distance = COALESCE($3, distance),
 			total_duration = COALESCE($4, total_duration),
 			workout_type = COALESCE($5, workout_type),
-			source = COALESCE($8, 'edited'),
+			-- STICKY, like the sync upsert's own source CASE: a workout that was
+			-- typed in by hand stays 'manual' however many times it is edited
+			-- afterwards. Otherwise "enter 26 miles, then edit it" laundered a
+			-- hand-entered workout into an 'edited' one, which competitions still
+			-- credit (at its original_distance — i.e. the typed number).
+			source = CASE
+				WHEN source = 'manual' THEN 'manual'
+				ELSE COALESCE($8, 'edited')
+			END,
 			original_distance = COALESCE(original_distance, $6),
 			original_duration = COALESCE(original_duration, $7)
 		WHERE workout_id = $1 AND user_id = $2
