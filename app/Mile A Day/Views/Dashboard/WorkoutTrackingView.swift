@@ -606,7 +606,12 @@ struct WorkoutTrackingView: View {
                 },
                 title: "Ghost Race",
                 subtitle: ghostRaceSubtitle,
-                featured: true,
+                // NOT featured — same surface and stroke as "Just Track It".
+                // The buddy card on the step before learned this already: a
+                // brighter card among plain ones reads as the one you are
+                // supposed to pick, and neither of these two is. The "NEW"
+                // badge is what introduces the feature, and it retires itself
+                // after the first race.
                 badge: hasArmedGhostRaceOnce ? nil : "NEW",
                 // No time here on purpose. The next screen is where the target
                 // is chosen, and printing one before that reads as a decision
@@ -804,19 +809,23 @@ struct WorkoutTrackingView: View {
         GeometryReader { screen in
             VStack(spacing: 0) {
                 HStack {
+                    // A BARE chevron. The activity chip below is centred on the
+                    // SCREEN, independent of what either side of this row is
+                    // holding, so the label that used to sit here ("Dashboard",
+                    // ~95pt of it) ran straight into the chip's leading edge —
+                    // the two were a few points apart on a Pro Max and touching
+                    // on anything narrower. The chevron alone is the app's own
+                    // back convention and it hands the whole gap back.
                     Button(action: { dismiss() }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "chevron.left")
-                                .font(.title3)
-                                .fontWeight(.semibold)
-                            Text("Dashboard")
-                                .font(.body)
-                                .fontWeight(.medium)
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
+                        Image(systemName: "chevron.left")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                            .contentShape(Rectangle())
                     }
+                    .accessibilityLabel("Back to Dashboard")
                     Spacer()
                     // Mid-run snap: see something worth keeping, capture it in
                     // one tap, keep moving — the end-of-run prompt asks whether

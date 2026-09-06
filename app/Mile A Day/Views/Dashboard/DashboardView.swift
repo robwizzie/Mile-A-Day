@@ -728,6 +728,16 @@ struct DashboardView: View {
                 // Fetch fastest mile pace from backend database
                 fetchFastestPaceFromBackend()
 
+                // The weekly challenge, which the Dashboard shows as a card but
+                // only ever LOADED on pull-to-refresh. Its snapshot is
+                // week-stamped and a stale week is discarded, so every Sunday —
+                // the one day the card matters most — a user who opened the
+                // Dashboard and didn't visit Compete or pull down was told "No
+                // weekly challenge yet" while the server had one waiting. The
+                // read is also what STAMPS the week if the Sunday cron hasn't
+                // reached them yet, same as CompeteHomeView's `.task`.
+                Task { await weeklyChallengeService.refreshIfStale() }
+
                 // Goal celebration is now triggered by .onChange(of: healthManager.hasLoadedInitialData)
                 // which fires when both today's distance and workout index have loaded
 
