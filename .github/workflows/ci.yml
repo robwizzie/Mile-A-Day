@@ -122,6 +122,12 @@ jobs:
       # wrong topic) must never read as a dead token and wipe registrations.
       - name: APNs key + token-pruning check
         run: node scripts/push-config-check.mjs
+      # Every scheduled job runs through cronRunner.runJob — the one place a
+      # cron failure becomes an error_log row and an admin push instead of a
+      # console line nobody reads. Pins the row, the alert, the per-job
+      # cooldown and the kill switch.
+      - name: Cron runner check
+        run: node scripts/cron-runner-check.mjs
       # The win-back reminder: on days 7/14/30 of a quiet stretch the daily
       # reminder swaps its copy for the gap and the friends' week. A wrong
       # anchor (day 7 landing on day 8) or a friends query reading the wrong

@@ -6,6 +6,7 @@ import {
 } from "../services/buddySessionService.js";
 import { spawnDueRecurringWalks } from "../services/buddyRecurringService.js";
 import { sweepCrewPhotoNudges } from "../services/postService.js";
+import { runJob } from "./cronRunner.js";
 
 /**
  * Buddy session backstop sweep.
@@ -33,53 +34,34 @@ import { sweepCrewPhotoNudges } from "../services/postService.js";
 export function startBuddySessionCron(): void {
   cron.schedule("*/5 * * * *", async () => {
     if (!buddySessionsEnabled()) return;
-    try {
-      // Routines BEFORE promotion: a routine spawns a session with a
-      // scheduled start, and doing it in this order means one that's already
-      // due gets promoted on the same tick instead of waiting five minutes.
+    // Routines BEFORE promotion: a routine spawns a session with a
+    // scheduled start, and doing it in this order means one that's already
+    // due gets promoted on the same tick instead of waiting five minutes.
+    await runJob("buddy.spawn_recurring", async () => {
       const spawned = await spawnDueRecurringWalks();
       if (spawned > 0) {
         console.log(`[CRON] Spawned ${spawned} recurring buddy walk(s).`);
       }
-    } catch (error: any) {
-      console.error(
-        "[CRON] Error spawning recurring buddy walks:",
-        error.message,
-      );
-    }
-    try {
-      // Scheduled walks first: starting one late is worse than reaping an
-      // abandoned one late.
-      await promoteDueScheduledSessions();
-    } catch (error: any) {
-      console.error(
-        "[CRON] Error promoting scheduled buddy sessions:",
-        error.message,
-      );
-    }
-    try {
+    });
+    // Scheduled walks first: starting one late is worse than reaping an
+    // abandoned one late.
+    await runJob("buddy.promote_scheduled", promoteDueScheduledSessions);
+    await runJob("buddy.sweep_abandoned", async () => {
       const swept = await sweepAbandonedSessions();
       if (swept > 0) {
         console.log(`[CRON] Swept ${swept} abandoned buddy session(s).`);
       }
-    } catch (error: any) {
-      console.error(
-        "[CRON] Error sweeping abandoned buddy sessions:",
-        error.message,
-      );
-    }
-    try {
-      // "3 of you were out, 1 photo so far" — an hour after the walk, for
-      // participants who haven't put their own picture on its post yet. The
-      // 5-minute cadence is why the window can be a tight one-to-six hours:
-      // nothing waits long for its tick.
+    });
+    // "3 of you were out, 1 photo so far" — an hour after the walk, for
+    // participants who haven't put their own picture on its post yet. The
+    // 5-minute cadence is why the window can be a tight one-to-six hours:
+    // nothing waits long for its tick.
+    await runJob("buddy.crew_photo_nudges", async () => {
       const nudged = await sweepCrewPhotoNudges();
       if (nudged > 0) {
         console.log(`[CRON] Sent ${nudged} crew-photo nudge(s).`);
       }
-    } catch (error: any) {
-      console.error("[CRON] Error sending crew-photo nudges:", error.message);
-    }
+    });
   });
 
   console.log(

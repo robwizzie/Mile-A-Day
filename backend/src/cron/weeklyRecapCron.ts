@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import { PostgresService } from "../services/DbService.js";
+import { runJob } from "./cronRunner.js";
 import { sendPush } from "../services/pushNotificationService.js";
 
 const db = PostgresService.getInstance();
@@ -127,11 +128,7 @@ export function startWeeklyRecapCron(): void {
   // Hourly at :50 — the SQL predicate (local Sunday 5 PM + log table) decides
   // who actually gets one, so most runs are no-ops.
   cron.schedule("50 * * * *", async () => {
-    try {
-      await sendWeeklyRecaps();
-    } catch (error: any) {
-      console.error("[CRON] Error sending weekly recaps:", error.message);
-    }
+    await runJob("weekly_recap.send", sendWeeklyRecaps);
   });
 
   console.log("Weekly recap cron scheduled (hourly, fires local Sun 5 PM).");
