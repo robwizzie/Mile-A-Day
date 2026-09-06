@@ -8,6 +8,7 @@ import {
 } from "../services/clientFeatures.js";
 import {
   measure,
+  renderDescription,
   serveWeek,
   sundayWeekStartSql,
   weekWindowForUser,
@@ -110,16 +111,20 @@ export async function sendWeeklyChallengeAnnouncements(): Promise<void> {
       const served = await serveWeek(user.user_id, user.week_start);
       if (!served) continue;
 
-      const target =
-        served.challenge.target_step >= 1
-          ? Math.round(served.target).toLocaleString("en-US")
-          : served.target.toFixed(1);
+      // The SAME renderer the card uses. Substituting the template here by
+      // hand is how this push would have announced a literal "{pb_pace}" —
+      // and, before that, a challenge whose sentence differed from the one
+      // waiting in the app.
+      const body = await renderDescription(
+        user.user_id,
+        served.challenge,
+        served.target,
+        user.week_start,
+      );
 
       await sendPush(user.user_id, {
         title: `This week: ${served.challenge.title}`,
-        body: served.challenge.description_template
-          .replace("{target}", target)
-          .replace("{unit}", served.challenge.unit),
+        body,
         type: "weekly_challenge_new",
         // Every value a STRING: shipped builds decode the notification inbox's
         // data as [String: String], and one number breaks the whole decode.

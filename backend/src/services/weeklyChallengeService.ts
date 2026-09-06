@@ -1,5 +1,9 @@
 import { PostgresService } from "./DbService.js";
-import { countedWorkoutSql, realMileSplitSql } from "./mileTime.js";
+import {
+  countedWorkoutSql,
+  formatMilePace,
+  realMileSplitSql,
+} from "./mileTime.js";
 import { DAILY_GOAL_TOLERANCE } from "./workoutService.js";
 import { weekOfEpoch } from "./challengeRotation.js";
 import { getBlockedIds } from "./moderationService.js";
@@ -339,6 +343,55 @@ function addDays(ymd: string, days: number): string {
 // MARK: - Progress
 
 /**
+ * How far back `personal_best` looks for the time you have to beat, and what
+ * counts as a mile split worth comparing.
+ *
+ * The window ROLLS rather than being all-time, for the reason mileTime.ts
+ * records about the daily `beat_your_pace`: one great mile — or one bad split
+ * that slipped through the plausibility floor — would otherwise raise the bar
+ * permanently and leave the challenge unwinnable for that user forever. It is
+ * derived from the MEASURE window's own start, not from today, which is what
+ * lets `computeBaseline` score each historical week against its own prior four.
+ *
+ * Three places need this exact reference and must never carry their own copy:
+ * the single-user `measure` arm (the card's progress), the batched leaderboard
+ * arm (the friends board), and `pbReferencePace` (the pace printed on the
+ * card). A drift between the first two makes someone's board row disagree with
+ * their own screen; a drift in the third advertises a bar the scorer isn't
+ * using, which is worse — it looks like the challenge moved while you ran.
+ */
+const PB_REFERENCE_DAYS = 28;
+
+/** "This split is a believable, complete mile from a workout that counts." */
+function pbSplitFilterSql(workout: string, split: string): string {
+  return `${countedWorkoutSql(workout)}
+				AND ${realMileSplitSql(`${split}.split_pace`)}
+				AND ${split}.split_distance >= ${DAILY_GOAL_TOLERANCE}`;
+}
+
+/**
+ * The pace to beat, in seconds per mile: the user's best qualifying split in
+ * the four weeks BEFORE `weekStart`. Null when they have none, in which case
+ * every complete mile counts — anyone's first real mile is a personal best.
+ */
+export async function pbReferencePace(
+  userId: string,
+  weekStart: string,
+): Promise<number | null> {
+  const rows = await db.query<{ p: string | null }>(
+    `SELECT MIN(ws.split_pace)::text AS p
+		FROM workout_splits ws
+		JOIN workouts w ON w.workout_id = ws.workout_id
+		WHERE w.user_id = $1
+			AND w.local_date BETWEEN ($2::date - ${PB_REFERENCE_DAYS}) AND ($2::date - 1)
+			AND ${pbSplitFilterSql("w", "ws")}`,
+    [userId, weekStart],
+  );
+  const value = rows[0]?.p ? parseFloat(rows[0].p) : NaN;
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/**
  * A user's value for one metric over an inclusive local-date range.
  *
  * Every workout-derived arm carries `countedWorkoutSql` — a Strava duplicate of
@@ -514,19 +567,15 @@ export async function measure(
 				FROM workout_splits ws
 				JOIN workouts w ON w.workout_id = ws.workout_id
 				WHERE w.user_id = $1
-					AND w.local_date BETWEEN ($2::date - 28) AND ($2::date - 1)
-					AND ${countedWorkoutSql("w")}
-					AND ${realMileSplitSql("ws.split_pace")}
-					AND ws.split_distance >= ${DAILY_GOAL_TOLERANCE}
+					AND w.local_date BETWEEN ($2::date - ${PB_REFERENCE_DAYS}) AND ($2::date - 1)
+					AND ${pbSplitFilterSql("w", "ws")}
 			)
 			SELECT COUNT(*) AS v
 			FROM workout_splits ws
 			JOIN workouts w ON w.workout_id = ws.workout_id
 			CROSS JOIN prior
 			WHERE w.user_id = $1 AND w.local_date BETWEEN $2::date AND $3::date
-				AND ${countedWorkoutSql("w")}
-				AND ${realMileSplitSql("ws.split_pace")}
-				AND ws.split_distance >= ${DAILY_GOAL_TOLERANCE}
+				AND ${pbSplitFilterSql("w", "ws")}
 				AND (prior.p IS NULL OR ws.split_pace < prior.p)`,
         params,
       );
@@ -1033,19 +1082,16 @@ export async function measureBatch(
 					FROM workout_splits ws
 					JOIN workouts w ON w.workout_id = ws.workout_id
 					WHERE w.user_id = ANY($1::text[])
-						AND w.local_date BETWEEN ($2::date - 28) AND ($2::date - 1)
-						AND ${counted}
-						AND ${realMileSplitSql("ws.split_pace")}
-						AND ws.split_distance >= ${DAILY_GOAL_TOLERANCE}
+						AND w.local_date BETWEEN ($2::date - ${PB_REFERENCE_DAYS}) AND ($2::date - 1)
+						AND ${pbSplitFilterSql("w", "ws")}
 					GROUP BY w.user_id
 				)
 				SELECT w.user_id, COUNT(*) AS v
 				FROM workout_splits ws
 				JOIN workouts w ON w.workout_id = ws.workout_id
 				LEFT JOIN prior ON prior.user_id = w.user_id
-				WHERE ${range} AND ${counted}
-					AND ${realMileSplitSql("ws.split_pace")}
-					AND ws.split_distance >= ${DAILY_GOAL_TOLERANCE}
+				WHERE ${range}
+					AND ${pbSplitFilterSql("w", "ws")}
 					AND (prior.p IS NULL OR ws.split_pace < prior.p)
 				GROUP BY w.user_id`;
       break;
@@ -1211,14 +1257,53 @@ export async function getWeeklyLeaderboard(
 
 // MARK: - Read models
 
-function renderDescription(row: WeeklyChallengeRow, target: number): string {
-  const formatted =
-    row.target_step >= 1
-      ? Math.round(target).toLocaleString("en-US")
-      : target.toFixed(1);
-  return row.description_template
-    .replace("{target}", formatted)
-    .replace("{unit}", row.unit);
+/**
+ * The target as the card prints it. Whole numbers for step-of-1 metrics, one
+ * decimal otherwise.
+ */
+function formatWeeklyTarget(
+  row: Pick<WeeklyChallengeRow, "target_step">,
+  target: number,
+): string {
+  return row.target_step >= 1
+    ? Math.round(target).toLocaleString("en-US")
+    : target.toFixed(1);
+}
+
+/**
+ * The one renderer for a weekly challenge's sentence.
+ *
+ * `{pb_pace}` is why this is async and takes a user: `personal_best` asks you
+ * to beat a time, and a challenge that never says WHICH time can't be played —
+ * you'd have to guess what four weeks of your own splits contained. The pace
+ * comes from `pbReferencePace`, i.e. the same reference the scorer uses, so
+ * the number on the card is the number being judged.
+ *
+ * Both surfaces that render a description — the payload and the Monday
+ * announcement push — go through here. The push used to substitute `{target}`
+ * itself, which is exactly how it would have shipped a literal "{pb_pace}".
+ */
+export async function renderDescription(
+  userId: string,
+  row: WeeklyChallengeRow,
+  target: number,
+  weekStart: string,
+): Promise<string> {
+  const plural = Math.round(target) === 1 ? "" : "s";
+  const base = row.description_template
+    .replace("{target}", formatWeeklyTarget(row, target))
+    .replace("{unit}", row.unit)
+    .replace("{s}", plural);
+
+  if (!base.includes("{pb_pace}")) return base;
+
+  const prior = await pbReferencePace(userId, weekStart);
+  if (prior === null) {
+    // No qualifying split in the reference window, so the scorer counts every
+    // complete mile. Say that rather than printing a bar that doesn't exist.
+    return `Log ${formatWeeklyTarget(row, target)} mile${plural} — you have no timed mile from the last 4 weeks, so your first one sets the bar.`;
+  }
+  return base.replace("{pb_pace}", `${formatMilePace(prior)}/mi`);
 }
 
 export interface WeeklyChallengeResponse {
@@ -1284,7 +1369,15 @@ export async function getWeeklyChallengeForUser(
 
   const completed = completion.length > 0;
   const nextStart = addDays(window.weekStart, 7);
-  const nextRow = await selectChallengeForWeek(userId, nextStart);
+  const [challengeDescription, nextRow] = await Promise.all([
+    renderDescription(
+      userId,
+      served.challenge,
+      served.target,
+      window.weekStart,
+    ),
+    selectChallengeForWeek(userId, nextStart),
+  ]);
 
   return {
     week_start: window.weekStart,
@@ -1293,7 +1386,7 @@ export async function getWeeklyChallengeForUser(
     challenge: {
       challenge_key: served.challenge.challenge_key,
       title: served.challenge.title,
-      description: renderDescription(served.challenge, served.target),
+      description: challengeDescription,
       icon: served.challenge.icon,
       gradient_start: served.challenge.gradient_start,
       gradient_end: served.challenge.gradient_end,
@@ -1320,7 +1413,11 @@ export async function getWeeklyChallengeForUser(
           icon: nextRow.icon,
           description: nextRow.description_template
             .replace("{target}", "…")
-            .replace("{unit}", nextRow.unit),
+            .replace("{unit}", nextRow.unit)
+            .replace("{s}", "s")
+            // Next week's reference window hasn't closed either, so the pace
+            // to beat is as unfrozen as the target.
+            .replace("{pb_pace}", "your recent best"),
         }
       : null,
   };
@@ -1514,7 +1611,7 @@ const WEEKLY_CATALOG: Array<
     challenge_key: "personal_best",
     title: "Personal Best",
     description_template:
-      "Log {target} miles faster than your best from the last 4 weeks.",
+      "Log {target} mile{s} faster than {pb_pace} — your best from the last 4 weeks.",
     icon: "stopwatch.fill",
     gradient_start: "EE0979",
     gradient_end: "FF6A00",
