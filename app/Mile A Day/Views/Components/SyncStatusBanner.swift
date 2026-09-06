@@ -156,7 +156,7 @@ struct SyncStatusBanner: View {
         } else if progress.totalToUpload > 0 && !progress.isComplete {
             // A percentage, not "412/1284" jammed against a bar that already
             // shows the same thing — the exact counts live one tap away.
-            Text("\(Int((progress.displayProgress * 100).rounded()))%")
+            Text(ProgressCalculator.formatWholePercent(Double(Int((progress.displayProgress * 100).rounded()))))
                 .font(.caption)
                 .fontWeight(.semibold)
                 .foregroundColor(.secondary)
@@ -334,7 +334,7 @@ struct HistoryImportDetailView: View {
         _ = tick
         return VStack(spacing: MADTheme.Spacing.sm) {
             HStack(alignment: .firstTextBaseline) {
-                Text("\(Int((progress.displayProgress * 100).rounded()))%")
+                Text(ProgressCalculator.formatWholePercent(Double(Int((progress.displayProgress * 100).rounded()))))
                     .font(.system(size: 34, weight: .black, design: .rounded))
                     .monospacedDigit()
                     .foregroundColor(.white)

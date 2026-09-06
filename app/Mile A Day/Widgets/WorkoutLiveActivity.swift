@@ -490,7 +490,7 @@ struct WorkoutLiveActivityView: View {
                         .frame(width: 50, height: 50)
                         .rotationEffect(.degrees(-90))
 
-                    Text("\(Int(progress * 100))%")
+                    Text(progress.formatted(.percent.precision(.fractionLength(0))))
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.white)
                 }

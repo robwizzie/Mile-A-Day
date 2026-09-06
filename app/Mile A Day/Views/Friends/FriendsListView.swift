@@ -1230,8 +1230,8 @@ struct FriendsListView: View {
         if isCompleted {
             return String(format: "Goal complete · %.2f mi today", todayMiles)
         }
-        let percent = Int((min(todayMiles / goal, 1.0)) * 100)
-        return String(format: "%.2f / %.0f mi · %d%%", todayMiles, goal, percent)
+        let percent = ProgressCalculator.formatProgress(min(todayMiles / goal, 1.0))
+        return "\(String(format: "%.2f / %.0f mi", todayMiles, goal)) · \(percent)"
     }
 
     // MARK: Personal rank fetch

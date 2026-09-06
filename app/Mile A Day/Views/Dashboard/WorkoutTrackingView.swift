@@ -1338,7 +1338,7 @@ struct WorkoutTrackingView: View {
                 .animation(.easeOut(duration: 0.5), value: progress)
 
             VStack(spacing: 4) {
-                Text("\(Int(progress * 100))%")
+                Text(ProgressCalculator.formatProgress(progress))
                     .font(.system(size: 36, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
 

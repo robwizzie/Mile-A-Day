@@ -140,7 +140,7 @@ struct WeeklyChallengeHeroCard: View {
 
                 Spacer(minLength: 4)
 
-                Text("\(Int((response.progress.percent * 100).rounded()))%")
+                Text(ProgressCalculator.formatWholePercent(Double(Int((response.progress.percent * 100).rounded()))))
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundColor(gradientColors[0])
             }

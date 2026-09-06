@@ -169,7 +169,7 @@ struct SyncProgressView: View {
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
             } else {
-                Text("\(Int((progress.displayProgress * 100).rounded()))%")
+                Text(ProgressCalculator.formatProgress(progress.displayProgress))
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundColor(.white.opacity(0.55))

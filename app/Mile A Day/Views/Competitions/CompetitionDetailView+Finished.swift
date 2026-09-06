@@ -357,7 +357,7 @@ extension CompetitionDetailView {
                     recapStatCard(
                         icon: "percent",
                         title: "Goal Hit Rate",
-                        value: String(format: "%.0f%%", hitRate),
+                        value: ProgressCalculator.formatWholePercent(hitRate),
                         color: .green
                     )
                 }

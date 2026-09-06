@@ -339,7 +339,7 @@ struct BadgesPreviewCard: View {
                     Spacer()
 
                     // Progress pill
-                    Text("\(Int(progress * 100))%")
+                    Text(ProgressCalculator.formatProgress(progress))
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundColor(.orange)
                         .padding(.horizontal, 10)
@@ -428,7 +428,7 @@ struct BadgesPreviewCard: View {
                                 .frame(width: 80, height: 6)
 
                                 // Percentage
-                                Text("\(Int(item.progress * 100))%")
+                                Text(ProgressCalculator.formatProgress(item.progress))
                                     .font(.system(size: 11, weight: .bold, design: .rounded))
                                     .foregroundColor(hasTracked ? .cyan : .orange)
                                     .frame(width: 36, alignment: .trailing)
@@ -546,7 +546,7 @@ struct CalendarPreviewCard: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
 
-                    Text("\(Int(stepProgress * 100))% of 10k goal")
+                    Text("\(ProgressCalculator.formatProgress(stepProgress)) of 10k goal")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundColor(stepColor)
                 }
@@ -795,7 +795,7 @@ struct DailyChallengeCard: View {
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundColor(accentColor)
                 Spacer()
-                Text("\(Int(round(min(progress, 1.0) * 100)))%")
+                Text(ProgressCalculator.formatProgress(min(progress, 1.0)))
                     .font(.system(size: 12, weight: .heavy, design: .rounded))
                     .foregroundColor(.primary.opacity(0.7))
                     .contentTransition(.numericText())
@@ -2117,7 +2117,7 @@ struct WeeklyTrendCard: View {
                 .foregroundColor(value == 0 ? .secondary : (isPositive ? .green : .red))
 
             if isPercentage {
-                Text("\(value >= 0 ? "+" : "")\(Int(value))%")
+                Text(ProgressCalculator.formatSignedWholePercent(value))
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundColor(value == 0 ? .secondary : (isPositive ? .green : .red))
             } else {

@@ -286,11 +286,13 @@ struct TotalMilesDetailView: View {
 
     private var earthCircumferenceComparison: String {
         let earthCircumference = 24901.0
-        let percentage = (totalMiles / earthCircumference) * 100
-        if percentage >= 1 {
-            return String(format: "%.1f%% around the Earth", percentage)
+        let fraction = totalMiles / earthCircumference
+        if fraction >= 0.01 {
+            let percentage = fraction.formatted(.percent.precision(.fractionLength(1)))
+            return "\(percentage) around the Earth"
         }
-        return String(format: "%.2f%% around the Earth", percentage)
+        let percentage = fraction.formatted(.percent.precision(.fractionLength(2)))
+        return "\(percentage) around the Earth"
     }
 
     private var landmarkComparison: String {

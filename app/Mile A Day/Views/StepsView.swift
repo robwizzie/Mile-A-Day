@@ -130,7 +130,7 @@ struct TodaysStepsCard: View {
                     .animation(MADTheme.Animation.standard, value: steps)
 
                 HStack(spacing: MADTheme.Spacing.xs) {
-                    Text("\(Int(progress * 100))% of 10k goal")
+                    Text("\(ProgressCalculator.formatProgress(progress)) of 10k goal")
                         .font(MADTheme.Typography.caption)
                         .fontWeight(.medium)
                         .foregroundColor(color)
@@ -557,7 +557,7 @@ struct DateDetailView: View {
                                         .font(MADTheme.Typography.headline)
                                         .foregroundColor(.secondary)
 
-                                    Text("\(Int(progress * 100))% of goal")
+                                    Text("\(ProgressCalculator.formatProgress(progress)) of goal")
                                         .font(MADTheme.Typography.caption)
                                         .fontWeight(.medium)
                                         .foregroundColor(color)

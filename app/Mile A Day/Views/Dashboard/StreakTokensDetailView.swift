@@ -752,7 +752,7 @@ struct StreakTokensDetailView: View {
                         }
                     }
                     Text(natural
-                         ? "Your streak is 100% natural — every day earned on the day. The gold seal shows beside your name."
+                         ? "Your streak is \(ProgressCalculator.formatProgress(1)) natural — every day earned on the day. The gold seal shows beside your name."
                          : "A token kept this streak alive, so the badge is resting. It returns with your next untouched streak.")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundColor(.secondary)
@@ -922,7 +922,7 @@ struct PureFlameInfoSheet: View {
                         .font(.system(size: 26, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
 
-                    Text("A 100% natural streak — every single day earned the day it happened. No saves, no rescues.")
+                    Text("A \(ProgressCalculator.formatProgress(1)) natural streak — every single day earned the day it happened. No saves, no rescues.")
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.75))
                         .multilineTextAlignment(.center)

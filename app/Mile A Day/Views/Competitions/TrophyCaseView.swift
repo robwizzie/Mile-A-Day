@@ -190,7 +190,7 @@ struct TrophyCaseView: View {
                 Text("Win Rate")
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(.white.opacity(0.5))
-                Text(String(format: "%.0f%%", trophyService.winRate))
+                Text(ProgressCalculator.formatWholePercent(trophyService.winRate))
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
             }

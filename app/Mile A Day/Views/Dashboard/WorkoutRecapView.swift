@@ -373,6 +373,8 @@ struct WorkoutRecapView: View {
 }
 
 private struct TreadmillDistanceAdjustmentCard: View {
+    private static let manualEntryDistanceIncreaseThreshold = 0.25
+
     let workoutId: String
     let recordedDistance: Double
     let currentDistance: Double
@@ -395,7 +397,11 @@ private struct TreadmillDistanceAdjustmentCard: View {
 
     private var addsMoreThan25Percent: Bool {
         guard recordedDistance > 0, let enteredDistance else { return false }
-        return enteredDistance > recordedDistance * 1.25
+        return enteredDistance > recordedDistance * (1 + Self.manualEntryDistanceIncreaseThreshold)
+    }
+
+    private var manualEntryDistanceIncreaseText: String {
+        Self.manualEntryDistanceIncreaseThreshold.formatted(.percent.precision(.fractionLength(0)))
     }
 
     private var canSave: Bool {
@@ -489,7 +495,7 @@ private struct TreadmillDistanceAdjustmentCard: View {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 12, weight: .bold))
-                    Text("Adding more than 25% will mark this workout as manually entered.")
+                    Text("Adding more than \(manualEntryDistanceIncreaseText) will mark this workout as manually entered.")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                 }
                 .foregroundColor(.orange)
@@ -521,7 +527,7 @@ private struct TreadmillDistanceAdjustmentCard: View {
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This treadmill distance adds more than 25% to the recorded workout, so it will be visible as a manual entry.")
+            Text("This treadmill distance adds more than \(manualEntryDistanceIncreaseText) to the recorded workout, so it will be visible as a manual entry.")
         }
         .sheet(isPresented: $showEditSheet) {
             EditWorkoutView(

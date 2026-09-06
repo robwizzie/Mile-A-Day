@@ -460,7 +460,7 @@ struct RecordHeroCard: View {
             }
             .font(.system(size: 46, weight: .heavy, design: .rounded))
 
-            Text(total == 0 ? "No finished competitions yet" : "\(winRate)% win rate · \(total) finished")
+            Text(total == 0 ? "No finished competitions yet" : "\(ProgressCalculator.formatWholePercent(Double(winRate))) win rate · \(total) finished")
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundColor(.white.opacity(0.6))
 

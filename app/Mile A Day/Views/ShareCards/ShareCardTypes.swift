@@ -298,7 +298,7 @@ struct TodaysProgressShareCard: View {
                                 .foregroundColor(.green)
                         }
                     } else {
-                        Text("\(Int(progress * 100))% complete")
+                        Text("\(ProgressCalculator.formatProgress(progress)) complete")
                             .font(.system(size: 18, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.8))
                     }
@@ -443,4 +443,3 @@ struct FastestPaceShareCard: View {
         .clipped()
     }
 }
-

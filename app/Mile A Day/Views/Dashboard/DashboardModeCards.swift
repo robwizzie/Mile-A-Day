@@ -822,7 +822,7 @@ private struct ModernStepsTile: View {
         NavigationLink {
             StepsView(healthManager: healthManager, userManager: userManager)
         } label: {
-            ModernTile(icon: "shoeprints.fill", title: "Steps", value: steps.formatted(), subtitle: "\(Int(progress * 100))% of 10k", tint: tint) {
+            ModernTile(icon: "shoeprints.fill", title: "Steps", value: steps.formatted(), subtitle: "\(ProgressCalculator.formatProgress(progress)) of 10k", tint: tint) {
                 Capsule()
                     .fill(Color.white.opacity(0.10))
                     .frame(height: 5)
@@ -891,7 +891,7 @@ private struct ModernBadgesTile: View {
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
-                    Text("\(Int(progress * 100))% unlocked")
+                    Text("\(ProgressCalculator.formatProgress(progress)) unlocked")
                         .font(.system(size: 11, weight: .heavy, design: .rounded))
                         .foregroundColor(.yellow)
                         .lineLimit(1)
@@ -1159,7 +1159,7 @@ struct ModernChallengeRow: View {
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundColor(accentColor)
                 Spacer()
-                Text("\(Int(round(progress * 100)))%")
+                Text(ProgressCalculator.formatProgress(progress))
                     .font(.system(size: 11, weight: .heavy, design: .rounded))
                     .monospacedDigit()
                     .foregroundColor(.white.opacity(0.58))

@@ -151,7 +151,7 @@ struct MatchupHistoryView: View {
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.5))
                 Spacer()
-                Text("\(Int((rate * 100).rounded()))%")
+                Text(ProgressCalculator.formatWholePercent(Double(Int((rate * 100).rounded()))))
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundColor(.green)
             }

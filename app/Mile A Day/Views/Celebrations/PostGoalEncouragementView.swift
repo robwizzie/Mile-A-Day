@@ -127,7 +127,7 @@ struct PostGoalEncouragementView: View {
                                         .fixedSize(horizontal: false, vertical: true)
 
                                     if stats.percentOver > 0 {
-                                        Text("+\(Int(stats.percentOver))% over goal")
+                                        Text("\(ProgressCalculator.formatSignedWholePercent(stats.percentOver)) over goal")
                                             .font(.system(size: 15, weight: .bold, design: .rounded))
                                             .foregroundColor(.green)
                                             .padding(.horizontal, 16)
