@@ -543,6 +543,8 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         cancelTrackingWatchdog()
         applyLocationPowerProfile()
         persistPauseState()
+        // Tell the room now, not on the next heartbeat.
+        reportBuddyProgress(force: true)
     }
 
     /// Resume from a manual pause.
@@ -573,6 +575,8 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         armTrackingWatchdog(force: true)
         applyLocationPowerProfile()
         persistPauseState()
+        // Same as pause: the room learns about the edge now.
+        reportBuddyProgress(force: true)
     }
 
     /// GPS precision follows the pause state: full accuracy while the workout
@@ -602,6 +606,14 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             guard let self else { return }
             self.pollMotionWitnesses()
             self.refreshAutoPauseState()
+            // The crew's only other news source is the location callback, and
+            // a manual pause drops the accuracy profile to 100m — so a walker
+            // standing still can go a long time without delivering a fix. With
+            // no report the roster ages them out at 90s, and "out of range" is
+            // the one thing a deliberate break must not look like. Self-
+            // throttled to 5s in the service, so this costs nothing while
+            // fixes are flowing.
+            self.reportBuddyProgress()
             // Live Activity freshness rides this heartbeat, NOT the tracker
             // view's timer — that one stops on lock and on dismiss, which is
             // exactly when the lock screen was flipping to TRACKING
@@ -758,13 +770,20 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// location/pedometer callbacks keep firing under the `location`
     /// background mode, so the report rides them (self-throttled to 5s in the
     /// service; a no-op outside a buddy walk).
-    private func reportBuddyProgress() {
+    /// - Parameter force: skip the service's 5s throttle. Only the pause and
+    ///   resume EDGES pass true — a state change that waits behind a heartbeat
+    ///   leaves the crew watching a number stop moving with nothing on screen
+    ///   to say why.
+    private func reportBuddyProgress(force: Bool = false) {
         let distance = liveDistance
         let paused = pausedSeconds
+        let pausedNow = isPaused
         Task { @MainActor in
             BuddySessionService.shared.reportProgressFromCallback(
                 distanceMiles: distance,
-                pausedSeconds: paused
+                pausedSeconds: paused,
+                isPaused: pausedNow,
+                force: force
             )
         }
     }

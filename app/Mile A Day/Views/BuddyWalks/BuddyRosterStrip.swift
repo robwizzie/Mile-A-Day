@@ -39,6 +39,13 @@ struct BuddyRosterStrip: View {
                     }
                 }
                 .padding(.horizontal, MADTheme.Spacing.xs)
+                // A ScrollView CLIPS its content, and these tiles deliberately
+                // draw outside their own bounds: the leader's crown is an
+                // `.offset` overlay above the ring, and a badge sits proud of
+                // the bottom-right. Without this the crown lost its points and
+                // the badge lost its edge, both cut flat along the scroll's
+                // own boundary.
+                .padding(.vertical, 4)
             }
         }
         .padding(MADTheme.Spacing.md)
@@ -157,13 +164,15 @@ private struct BuddyRosterAvatar: View {
                 progress: ringProgress,
                 size: 52,
                 ringWidth: isMe ? 4 : 3,
-                accent: session.accentColor,
+                // A paused walker's ring is drained of the session colour: it
+                // is not filling right now, and a bright arc says it is.
+                accent: isPaused ? MADTheme.Colors.madWhite.opacity(0.35) : session.accentColor,
                 // No `.live` dot for everyone else. It marked "workout in
                 // progress" on every face, during a workout — a red dot that is
                 // always present on every tile carries no information and read
                 // as a warning badge. The check still means something: they
                 // finished.
-                badge: participant.status == .finished ? .check : nil
+                badge: badge
             )
             // Stale = no report in 90s. Dimmed to a hairline, never removed:
             // a friend who vanishes mid-walk reads as a crash.
@@ -193,22 +202,62 @@ private struct BuddyRosterAvatar: View {
                     .lineLimit(1)
             }
 
-            Text(participant.isStale ? "—" : String(format: "%.2f mi", participant.distanceMiles))
+            // A paused walker KEEPS their number. Stale replaces it with "—"
+            // because a stale figure is a lie — they may have walked a mile
+            // since we last heard from them. A paused one is exactly true, so
+            // it stays and only changes colour; the badge on the circle is
+            // what explains why it has stopped moving.
+            Text(distanceLine)
                 .font(MADTheme.Typography.smallBold)
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-                .foregroundStyle(
-                    participant.isStale
-                        ? MADTheme.Colors.madWhite.opacity(0.4)
-                        : session.accentColor
-                )
+                .foregroundStyle(distanceTint)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityDescription)
         // 52pt ring + a 4pt stroke + the badge's 2pt overhang needs more than
         // 64 to sit in, and `.offset` draws OUTSIDE layout bounds — so at 64
         // the ring and the two-decimal distance were both being cropped.
         .frame(width: 78)
         .animation(MADTheme.Animation.standard, value: participant.distanceMiles)
+    }
+
+    /// MANUAL pause only, and only while they are still walking — the server
+    /// serves `is_paused` false for anyone finished, and the tracker's
+    /// auto-pause GUESS is never reported at all (it is lenient by design and
+    /// flaps, and a roster badge that flickers is worse than no badge).
+    private var isPaused: Bool { participant.isPaused == true }
+
+    /// Finished outranks paused: a walk that is over is over.
+    private var badge: AvatarWithRing.Badge? {
+        if participant.status == .finished { return .check }
+        if isPaused { return .paused }
+        return nil
+    }
+
+    /// Extracted rather than nested in the modifier: a three-way ternary of
+    /// `Color`s inside `.foregroundStyle` is exactly the shape that tips this
+    /// file's type-checker budget, and the error it produces names an
+    /// innocent line elsewhere.
+    private var distanceTint: Color {
+        if participant.isStale { return MADTheme.Colors.madWhite.opacity(0.4) }
+        if isPaused { return MADTheme.Colors.warning }
+        return session.accentColor
+    }
+
+    private var distanceLine: String {
+        if participant.isStale { return "—" }
+        return String(format: "%.2f mi", participant.distanceMiles)
+    }
+
+    private var accessibilityDescription: String {
+        let who = isMe ? "You" : participant.displayName
+        let miles = String(format: "%.2f miles", participant.distanceMiles)
+        if participant.isStale { return "\(who), out of range" }
+        if participant.status == .finished { return "\(who), finished, \(miles)" }
+        if isPaused { return "\(who), paused at \(miles)" }
+        return "\(who), \(miles)"
     }
 
     private var isLeader: Bool {

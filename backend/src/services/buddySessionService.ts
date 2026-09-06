@@ -158,6 +158,7 @@ async function loadParticipants(
     final_distance_miles: number | null;
     workout_id: string | null;
     location_type: BuddyLocationType | null;
+    is_paused: boolean;
   }>(
     // Staleness means "was reporting, then stopped" — NOT "hasn't reported
     // yet". A participant's first progress report is up to 5s out, so falling
@@ -169,7 +170,11 @@ async function loadParticipants(
             (p.status = 'active'
              AND COALESCE(p.last_progress_at, s.started_at, NOW())
                    < NOW() - ($2 || ' seconds')::interval
-            ) AS is_stale
+            ) AS is_stale,
+            -- Only a walker still ON the walk can be paused: a finished row
+            -- keeps whatever flag its last report carried, and rendering that
+            -- would put a pause badge on someone who is done.
+            (p.status = 'active' AND COALESCE(p.is_paused, false)) AS is_paused
        FROM buddy_session_participants p
        JOIN users u ON u.user_id = p.user_id
        JOIN buddy_sessions s ON s.id = p.session_id
@@ -188,6 +193,7 @@ async function loadParticipants(
     distance_miles: Number(r.distance_miles) || 0,
     duration_seconds: Number(r.duration_seconds) || 0,
     is_stale: r.is_stale === true,
+    is_paused: r.is_paused === true,
     is_host: r.user_id === hostUserId,
     place: r.place,
     final_distance_miles:
@@ -1309,6 +1315,12 @@ export async function recordProgress(
   userId: string,
   distanceMiles: number,
   durationSeconds: number,
+  /**
+   * The walker's MANUAL pause, additive. Undefined from a client that predates
+   * the flag, and written as NULL — which is that client's behaviour today, so
+   * it can neither set nor strand the state.
+   */
+  paused?: boolean,
 ): Promise<BuddySessionState> {
   if (!Number.isFinite(distanceMiles) || distanceMiles < 0) {
     throw new BadRequestError("invalid_distance");
@@ -1356,6 +1368,9 @@ export async function recordProgress(
               )
             ),
             duration_seconds = GREATEST(p.duration_seconds, $4::integer),
+            -- NOT clamped like the two above: a pause is a state, and the
+            -- newest report is always the truth about it.
+            is_paused = $6::boolean,
             last_progress_at = NOW()
        FROM buddy_sessions s
       WHERE p.session_id = $1 AND p.user_id = $2 AND p.status = 'active'
@@ -1366,6 +1381,7 @@ export async function recordProgress(
       distanceMiles,
       Math.floor(durationSeconds),
       maxMilesPerSecond,
+      paused === undefined ? null : paused,
     ],
   );
 

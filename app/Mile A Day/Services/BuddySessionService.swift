@@ -701,7 +701,12 @@ final class BuddySessionService: ObservableObject {
     /// Called from the tracker's existing 1 Hz tick; this collapses that to one
     /// network call every `progressInterval`. `force` bypasses the throttle for
     /// the final report before finishing, so the last few metres always land.
-    func reportProgress(distanceMiles: Double, durationSeconds: TimeInterval, force: Bool = false) async {
+    func reportProgress(
+        distanceMiles: Double,
+        durationSeconds: TimeInterval,
+        isPaused: Bool = false,
+        force: Bool = false
+    ) async {
         guard let id = activeSessionId else { return }
         if !force, let last = lastProgressReport,
             Date().timeIntervalSince(last) < progressInterval
@@ -719,6 +724,10 @@ final class BuddySessionService: ObservableObject {
                     json: [
                         "distanceMiles": distanceMiles,
                         "durationSeconds": Int(durationSeconds),
+                        // Additive. The server treats a missing key as "no
+                        // opinion" and writes NULL, so an older build behaves
+                        // exactly as it does today.
+                        "paused": isPaused,
                     ],
                     responseType: BuddySessionState.self
                 ))
@@ -829,16 +838,32 @@ final class BuddySessionService: ObservableObject {
     /// from the persisted workout's own start: the location manager's clock
     /// restarts on a recovery, and a report that said "3 minutes in" on a
     /// walk 40 minutes old would drag the crew's pace figures with it.
-    func reportProgressFromCallback(distanceMiles: Double, pausedSeconds: TimeInterval) {
+    func reportProgressFromCallback(
+        distanceMiles: Double,
+        pausedSeconds: TimeInterval,
+        isPaused: Bool = false,
+        force: Bool = false
+    ) {
         guard activeSessionId != nil else { return }
-        if let last = lastProgressReport,
+        // `force` is for the pause/resume EDGE. Everything else here is a
+        // heartbeat and can wait for the throttle, but a state change that
+        // waits reads as the roster being wrong: the crew watches a figure
+        // stop moving with nothing to say why.
+        if !force, let last = lastProgressReport,
             Date().timeIntervalSince(last) < progressInterval
         {
             return
         }
         guard let start = InProgressWorkoutStore.load()?.startTime else { return }
         let duration = max(0, Date().timeIntervalSince(start) - pausedSeconds)
-        Task { await reportProgress(distanceMiles: distanceMiles, durationSeconds: duration) }
+        Task {
+            await reportProgress(
+                distanceMiles: distanceMiles,
+                durationSeconds: duration,
+                isPaused: isPaused,
+                force: force
+            )
+        }
     }
 
     func recap(sessionId: String) async throws -> BuddyRecapResponse {
