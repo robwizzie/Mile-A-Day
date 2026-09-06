@@ -646,6 +646,19 @@ export const competitions = pgTable(
     // would silently erase teams. NULL = no teams for this competition.
     teams: jsonb(),
     ended: boolean().default(false),
+    // Which rule scores this competition's TEAMS. False (the default, and what
+    // every new competition gets) means the team is the competitor: it is
+    // scored over its members' COMBINED per-interval quantity. True means the
+    // superseded rule, where a team's score was the sum of its members' own
+    // scores — kept only for competitions that had already been DECIDED under
+    // it, because standings are recomputed live on every read while `winner`
+    // and `competition_users.placement` were stamped once.
+    //
+    // A stamp rather than a date comparison: a competition resolving just
+    // after the new rule shipped records an `end_date` of the last COMPLETED
+    // interval, which is before the deploy — so any `end_date < cutoff` test
+    // decides it under the new rule and then redraws it under the old one.
+    legacyTeamScoring: boolean("legacy_team_scoring").default(false).notNull(),
     winner: text(),
     owner: text(),
     createdAt: timestamp("created_at", {

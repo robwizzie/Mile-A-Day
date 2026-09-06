@@ -113,17 +113,24 @@ struct Competition: Codable, Identifiable {
         return teams?.teams.first(where: { $0.id == teamId })
     }
 
-    /// Teams ranked by score (sum of member scores, computed server-side),
-    /// stable on the configured order for ties/pre-start.
+    /// Teams ranked by their score as a competitor (computed server-side from
+    /// the members' combined miles), stable on the configured order for
+    /// ties/pre-start.
     var rankedTeams: [CompetitionTeam] {
         (teams?.teams ?? []).sorted { ($0.score ?? 0) > ($1.score ?? 0) }
     }
 
-    /// Accepted members of a team, best score first.
+    /// Accepted members of a team, biggest contributor first.
+    ///
+    /// Ordered by what each member put INTO the team, not by their own score:
+    /// once the team is what's being scored, a member's individual score is a
+    /// fact about the individual leaderboard and says nothing about who carried
+    /// the team. Falls back to score on older servers, which send no
+    /// contribution.
     func members(of teamId: String) -> [CompetitionUser] {
         users
             .filter { $0.invite_status == .accepted && $0.team_id == teamId }
-            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+            .sorted { ($0.teamRankValue ?? $0.score ?? 0) > ($1.teamRankValue ?? $1.score ?? 0) }
     }
 
     /// Accepted participants not on any (existing) team.
@@ -765,12 +772,22 @@ enum CompetitionInterval: String, Codable, CaseIterable {
 struct CompetitionTeam: Codable, Identifiable, Equatable {
     let id: String
     let name: String
+    /// The team's score as a COMPETITOR — derived server-side from its members'
+    /// combined per-interval miles, not from summing their individual scores.
+    /// So it does not add up from the member rows, and nothing here should try.
     let score: Double?
+    /// Streaks only: the team's shared pool of lives. Nil on older servers.
+    let remaining_lives: Int?
+    /// The team's combined miles (or steps) over the scored window. Nil on
+    /// older servers.
+    let quantity: Double?
 
-    init(id: String, name: String, score: Double? = nil) {
+    init(id: String, name: String, score: Double? = nil, remaining_lives: Int? = nil, quantity: Double? = nil) {
         self.id = id
         self.name = name
         self.score = score
+        self.remaining_lives = remaining_lives
+        self.quantity = quantity
     }
 }
 
@@ -813,6 +830,13 @@ struct CompetitionUser: Codable, Identifiable {
     let intervals: [String: Double]?
     let remaining_lives: Int?
     let has_manual_workouts: Bool?
+    /// What this member put into their team's combined total over the scored
+    /// window. Nil for competitions without teams, and on older servers — the
+    /// member row falls back to `score` there, which is what shipped builds
+    /// draw. Once the TEAM is the competitor, a member's own score no longer
+    /// explains their team's, so this is the only number on a member row that
+    /// adds up to anything.
+    let team_contribution: Double?
     /// Per-day activity-type breakdown, keyed by "YYYY-MM-DD" local date then
     /// by activity type ("running"/"walking"). Already filtered server-side to
     /// the comp's allowed types. Nil on older backends / pre-start / steps
@@ -837,6 +861,11 @@ struct CompetitionUser: Codable, Identifiable {
         intervals?.values.reduce(0, +) ?? 0
     }
 
+    /// What to rank and label this member by inside a team row: their
+    /// contribution when the server sends one, nil when it doesn't (older
+    /// servers, and competitions without teams) so callers fall back to `score`.
+    var teamRankValue: Double? { team_contribution }
+
     /// True when the backend sent the per-activity daily breakdown.
     var hasDailyActivity: Bool {
         !(daily_activity?.isEmpty ?? true)
@@ -854,7 +883,7 @@ struct CompetitionUser: Codable, Identifiable {
         return daily.values.reduce(0) { $0 + ($1[activity.dailyActivityKey]?.count ?? 0) }
     }
 
-    init(competition_id: String, user_id: String, invite_status: InviteStatus, team_id: String? = nil, username: String?, profile_image_url: String? = nil, score: Double?, intervals: [String: Double]?, remaining_lives: Int? = nil, has_manual_workouts: Bool? = nil, daily_activity: [String: [String: DailyActivityEntry]]? = nil) {
+    init(competition_id: String, user_id: String, invite_status: InviteStatus, team_id: String? = nil, username: String?, profile_image_url: String? = nil, score: Double?, intervals: [String: Double]?, remaining_lives: Int? = nil, has_manual_workouts: Bool? = nil, daily_activity: [String: [String: DailyActivityEntry]]? = nil, team_contribution: Double? = nil) {
         self.competition_id = competition_id
         self.user_id = user_id
         self.invite_status = invite_status
@@ -866,8 +895,13 @@ struct CompetitionUser: Codable, Identifiable {
         self.remaining_lives = remaining_lives
         self.has_manual_workouts = has_manual_workouts
         self.daily_activity = daily_activity
+        self.team_contribution = team_contribution
     }
 
+    // NOTE: this decoder is hand-written, so a new stored property added above
+    // is NOT picked up for free — it has to be decoded here too, or the type
+    // stops compiling (and, if it were given a default instead, would silently
+    // read nil for every response).
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         competition_id = try container.decodeIfPresent(String.self, forKey: .competition_id) ?? ""
@@ -881,6 +915,7 @@ struct CompetitionUser: Codable, Identifiable {
         remaining_lives = try container.decodeIfPresent(Int.self, forKey: .remaining_lives)
         has_manual_workouts = try container.decodeIfPresent(Bool.self, forKey: .has_manual_workouts)
         daily_activity = try container.decodeIfPresent([String: [String: DailyActivityEntry]].self, forKey: .daily_activity)
+        team_contribution = try container.decodeIfPresent(Double.self, forKey: .team_contribution)
     }
 }
 

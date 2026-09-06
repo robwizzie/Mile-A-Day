@@ -130,6 +130,13 @@ jobs:
       # were already over keep the numbers they ended with) is pinned too.
       - name: Competition device-measured scoring check
         run: node scripts/competition-scoring-check.mjs
+      # A team is scored as ONE competitor over its members' combined miles.
+      # Getting this wrong never 500s — it just reports a standing that answers
+      # a different question (Clash handing the day to whichever team owns the
+      # furthest single runner), so every seed here is built so the old rule
+      # and the new one give OPPOSITE answers.
+      - name: Competition team scoring check
+        run: node scripts/competition-team-scoring-check.mjs
 
   website:
     name: Website (lint + build)

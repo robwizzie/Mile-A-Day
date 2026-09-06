@@ -305,35 +305,172 @@ export async function getCompetition(
 }
 
 /**
- * Derive per-team scores (straight sum of accepted members' scores) onto
- * competition.teams.teams entries. Purely additive response enrichment —
- * nothing is stored, so team standings always track the live recompute.
+ * Is this competition scored with the TEAM as the competitor — its members'
+ * combined per-interval quantity — rather than as a sum of its members' own
+ * scores?
+ *
+ * Everything except a competition that had already been DECIDED under the old
+ * rule, which migration 0061 stamped `legacy_team_scoring` once. Summing member
+ * SCORES asks the wrong question for every per-interval type: Clash handed the
+ * day's point to whichever team owned the single furthest runner, so a team
+ * totalling 3.1 miles beat a team totalling 5.7; Targets and Streaks scored
+ * each member's own goal, which quietly made a bigger roster a better team.
+ *
+ * A stamped column rather than an `end_date < '<deploy date>'` cutoff (the
+ * shape `usesDeviceMeasuredScoring` uses): resolution records the last
+ * COMPLETED interval as `end_date`, which is always before today and a whole
+ * month before it on a monthly interval — so a date cutoff decides a
+ * competition under the new rule and then redraws it under the old one, which
+ * is worse than either rule alone.
+ */
+function usesTeamEntityScoring(competition: {
+  legacy_team_scoring?: boolean | null;
+}): boolean {
+  return !competition.legacy_team_scoring;
+}
+
+/**
+ * Per-team scoring entities: each team's members' per-interval quantities,
+ * summed. Returns null when the competition has no teams, no team has a member,
+ * or scores haven't been attached to the users yet.
+ *
+ * Also stamps each member's `team_contribution` — what they personally put
+ * into the combined total over the scored window. Once the team is the
+ * competitor, a member's own `score` stops explaining the team's, so the
+ * contribution is the only number on a member row that adds up to anything.
+ */
+function teamEntities(
+  competition: Competition,
+  excludeCurrentInterval = false,
+  /**
+   * Per-interval quantities to read, when the caller computed them itself.
+   * The resolution paths do: they call `getUserScores` directly and never
+   * attach the result to the competition object, so without this the team
+   * would be built from users carrying no intervals and score zero.
+   */
+  scores?: UserData,
+): {
+  entities: { [teamId: string]: ScoredEntity };
+  membersByTeam: Map<string, string[]>;
+  contribution: Map<string, number>;
+} | null {
+  const teams = competition.teams?.teams;
+  if (!teams?.length) return null;
+
+  const window = scoringWindow(competition, excludeCurrentInterval);
+  const scored = window.allIntervals.slice(0, window.scoringEndIdx + 1);
+
+  const entities: { [teamId: string]: ScoredEntity } = {};
+  const membersByTeam = new Map<string, string[]>();
+  const contribution = new Map<string, number>();
+
+  for (const team of teams) {
+    entities[team.id] = {
+      intervals: Object.fromEntries(scored.map((k) => [k, 0])),
+      score: 0,
+    };
+    membersByTeam.set(team.id, []);
+  }
+
+  let anyMember = false;
+  for (const user of competition.users) {
+    if (user.invite_status !== "accepted" || !user.team_id) continue;
+    const entity = entities[user.team_id];
+    if (!entity) continue; // orphaned team_id — treated as unassigned
+    membersByTeam.get(user.team_id)!.push(user.user_id);
+    anyMember = true;
+
+    const intervals = scores?.[user.user_id]?.intervals ?? user.intervals;
+    let own = 0;
+    for (const key of scored) {
+      const quantity = intervals?.[key] ?? 0;
+      entity.intervals[key] += quantity;
+      own += quantity;
+    }
+    contribution.set(user.user_id, own);
+  }
+  if (!anyMember) return null;
+
+  // A team nobody joined is not a competitor. Left in, it would be a Streaks
+  // entity that misses every day, so a 2-team comp with one empty team ends
+  // itself on the first cron tick as a "sole survivor".
+  for (const [teamId, members] of membersByTeam) {
+    if (members.length === 0) delete entities[teamId];
+  }
+
+  scoreEntities(competition, entities, window);
+  return { entities, membersByTeam, contribution };
+}
+
+/**
+ * Derive per-team scores onto competition.teams.teams entries. Purely additive
+ * response enrichment — nothing is stored, so team standings always track the
+ * live recompute.
+ *
+ * Requires `competition.users` to already carry their `intervals` (getUserScores
+ * spreads them on), because a team's score comes from its members' QUANTITIES,
+ * never from their scores. See `usesTeamEntityScoring`.
  */
 function attachTeamScores(competition: Competition): void {
   const teams = competition.teams?.teams;
   if (!teams?.length) return;
-  const totals = new Map<string, number>(teams.map((t) => [t.id, 0]));
-  for (const user of competition.users) {
-    if (user.invite_status !== "accepted" || !user.team_id) continue;
-    if (totals.has(user.team_id)) {
-      totals.set(user.team_id, totals.get(user.team_id)! + (user.score ?? 0));
+
+  if (!usesTeamEntityScoring(competition)) {
+    // Legacy: sum of member scores, preserved for competitions decided under it.
+    const totals = new Map<string, number>(teams.map((t) => [t.id, 0]));
+    for (const user of competition.users) {
+      if (user.invite_status !== "accepted" || !user.team_id) continue;
+      if (totals.has(user.team_id)) {
+        totals.set(user.team_id, totals.get(user.team_id)! + (user.score ?? 0));
+      }
     }
+    for (const team of teams) team.score = totals.get(team.id) ?? 0;
+    return;
   }
-  for (const team of teams) team.score = totals.get(team.id) ?? 0;
+
+  const derived = teamEntities(competition);
+  if (!derived) {
+    for (const team of teams) team.score = 0;
+    return;
+  }
+
+  for (const team of teams) {
+    const entity = derived.entities[team.id];
+    team.score = entity?.score ?? 0;
+    team.remaining_lives = entity?.remaining_lives;
+    team.quantity = entity
+      ? Object.values(entity.intervals).reduce((sum, q) => sum + q, 0)
+      : 0;
+  }
+  for (const user of competition.users) {
+    const own = derived.contribution.get(user.user_id);
+    if (own !== undefined) user.team_contribution = own;
+  }
 }
 
 /**
- * Team-aware final outcome for team competitions. Teams rank by summed member
- * scores and ONLY teams can win — a participant without a team places after
- * every team (the UI tells them they're competing without a team). The stored
- * winner stays a user id for API compatibility: the winning team's best-scoring
- * member. Every member of a team shares that team's placement, so trophies go
- * to the whole team. Returns null when the comp has no teams (or no team has
- * any member) — callers fall through to the individual logic.
+ * Team-aware final outcome for team competitions. ONLY teams can win — a
+ * participant without a team places after every team (the UI tells them
+ * they're competing without a team). The stored winner stays a user id for API
+ * compatibility: the winning team's biggest contributor. Every member of a
+ * team shares that team's placement, so trophies go to the whole team. Returns
+ * null when the comp has no teams (or no team has any member) — callers fall
+ * through to the individual logic.
+ *
+ * Teams rank by their own score as a competitor (`teamEntities`), NOT by summed
+ * member scores — resolution and the standings a user is looking at have to
+ * agree about who is winning, and `first_to` early resolution reads `topScore`
+ * to decide the competition is over at all.
+ *
+ * `scores` must be the same UserData the caller ranks individuals by, and the
+ * competition's users must carry their `intervals` — a resolution path that
+ * passes scores computed with `excludeCurrentInterval` has to say so, or the
+ * team is scored over one more interval than its members were.
  */
 function teamAwareOutcome(
   competition: Competition,
   scores: UserData,
+  { excludeCurrentInterval = false }: { excludeCurrentInterval?: boolean } = {},
 ): {
   winnerId: string;
   topScore: number;
@@ -342,24 +479,47 @@ function teamAwareOutcome(
   const teams = competition.teams?.teams;
   if (!teams?.length) return null;
 
-  const membersByTeam = new Map<string, string[]>(teams.map((t) => [t.id, []]));
+  const legacy = !usesTeamEntityScoring(competition);
+  const derived = legacy
+    ? null
+    : teamEntities(competition, excludeCurrentInterval, scores);
+
+  const membersByTeam =
+    derived?.membersByTeam ??
+    new Map<string, string[]>(teams.map((t) => [t.id, []]));
   const assigned = new Set<string>();
-  for (const user of competition.users) {
-    if (user.invite_status !== "accepted" || !user.team_id) continue;
-    const members = membersByTeam.get(user.team_id);
-    if (!members) continue; // orphaned team_id — treated as unassigned
-    members.push(user.user_id);
-    assigned.add(user.user_id);
+  if (derived) {
+    for (const members of derived.membersByTeam.values()) {
+      for (const member of members) assigned.add(member);
+    }
+  } else {
+    for (const user of competition.users) {
+      if (user.invite_status !== "accepted" || !user.team_id) continue;
+      const members = membersByTeam.get(user.team_id);
+      if (!members) continue; // orphaned team_id — treated as unassigned
+      members.push(user.user_id);
+      assigned.add(user.user_id);
+    }
   }
 
   const entities = teams
     .map((t) => {
-      const members = (membersByTeam.get(t.id) ?? []).sort(
-        (a, b) => (scores[b]?.score ?? 0) - (scores[a]?.score ?? 0),
-      );
+      // Ordered so entities[0].members[0] is the member the stored `winner`
+      // points at: the biggest contributor, which is the honest answer to "who
+      // won it for them" once the team is what's being scored.
+      const members = (membersByTeam.get(t.id) ?? [])
+        .slice()
+        .sort((a, b) =>
+          derived
+            ? (derived.contribution.get(b) ?? 0) -
+              (derived.contribution.get(a) ?? 0)
+            : (scores[b]?.score ?? 0) - (scores[a]?.score ?? 0),
+        );
       return {
         members,
-        score: members.reduce((sum, m) => sum + (scores[m]?.score ?? 0), 0),
+        score: derived
+          ? (derived.entities[t.id]?.score ?? 0)
+          : members.reduce((sum, m) => sum + (scores[m]?.score ?? 0), 0),
       };
     })
     .filter((e) => e.members.length > 0)
@@ -1172,6 +1332,35 @@ export async function getUserScores(
       (buckets[intervalKey] ?? 0) + Number(row.total_distance);
   }
 
+  const window = scoringWindow(competition, excludeCurrentInterval);
+
+  // Zero-fill userData.intervals for all intervals up to scoringEndIdx
+  for (let i = 0; i <= window.scoringEndIdx; i++) {
+    const interval = window.allIntervals[i];
+    Object.keys(userData).forEach((userId) => {
+      if (!userData[userId].intervals[interval]) {
+        userData[userId].intervals[interval] = 0;
+      }
+    });
+  }
+
+  scoreEntities(competition, userData, window);
+
+  return userData;
+}
+
+/**
+ * Which intervals count, and where scoring stops.
+ *
+ * Pulled out of `getUserScores` because team scoring has to run over the
+ * IDENTICAL window: a team is one competitor, and a team whose window differs
+ * from its members' by even one interval would post a score that no member's
+ * numbers can explain.
+ */
+function scoringWindow(
+  competition: Competition,
+  excludeCurrentInterval: boolean,
+): { allIntervals: string[]; todaysInterval: string; scoringEndIdx: number } {
   const allIntervals = getIntervalRange(competition);
   const todaysInterval = getCurrentInterval(
     getTodayET(),
@@ -1183,105 +1372,120 @@ export async function getUserScores(
   // - If excludeCurrentInterval=true, stop one interval before today.
   // - Otherwise, include today (or end_date if past today).
   const todayIdx = allIntervals.indexOf(todaysInterval);
-  let scoringEndIdx: number;
-  if (excludeCurrentInterval) {
-    scoringEndIdx = todayIdx >= 0 ? todayIdx - 1 : allIntervals.length - 1;
-  } else {
-    scoringEndIdx = todayIdx >= 0 ? todayIdx : allIntervals.length - 1;
-  }
+  const scoringEndIdx = excludeCurrentInterval
+    ? todayIdx >= 0
+      ? todayIdx - 1
+      : allIntervals.length - 1
+    : todayIdx >= 0
+      ? todayIdx
+      : allIntervals.length - 1;
 
-  // Zero-fill userData.intervals for all intervals up to scoringEndIdx
-  for (let i = 0; i <= scoringEndIdx; i++) {
-    const interval = allIntervals[i];
-    Object.keys(userData).forEach((userId) => {
-      if (!userData[userId].intervals[interval]) {
-        userData[userId].intervals[interval] = 0;
-      }
-    });
-  }
+  return { allIntervals, todaysInterval, scoringEndIdx };
+}
+
+/** What `scoreEntities` scores: anything with per-interval quantities. */
+interface ScoredEntity {
+  intervals: { [intervalKey: string]: number };
+  score: number;
+  remaining_lives?: number;
+}
+
+/**
+ * Turn per-interval quantities into a score, for ONE competitor.
+ *
+ * The competitor is a user OR a team — that is the whole point of it being a
+ * separate function. A team competes as a single entity over its members'
+ * COMBINED quantity, so "the team that went furthest today takes the point"
+ * and "the team's shared lives" are not new rules; they are these same rules
+ * with a team where a person used to be. Deriving team standings by summing
+ * member SCORES instead (which is what shipped) asks a different question
+ * entirely: it hands Clash's point to whichever team owns the single furthest
+ * runner, so a team of 3.1 combined miles beat a team of 5.7.
+ *
+ * Mutates `entities` in place.
+ */
+function scoreEntities(
+  competition: Competition,
+  entities: { [id: string]: ScoredEntity },
+  window: { allIntervals: string[]; todaysInterval: string; scoringEndIdx: number },
+): void {
+  const { allIntervals, todaysInterval, scoringEndIdx } = window;
+  const todayIdx = allIntervals.indexOf(todaysInterval);
 
   if (competition.type === "streaks") {
     // Prefer options.lives; fall back to options.first_to for legacy streak competitions.
     const totalLives =
       competition.options.lives ?? competition.options.first_to ?? 1;
 
-    // Initialize remaining_lives for each user
-    Object.keys(userData).forEach((userId) => {
-      userData[userId].remaining_lives = totalLives;
+    // Initialize remaining_lives for each entity
+    Object.keys(entities).forEach((id) => {
+      entities[id].remaining_lives = totalLives;
     });
 
     for (let i = 0; i <= scoringEndIdx; i++) {
       const interval = allIntervals[i];
       const isToday = interval === todaysInterval;
-      Object.keys(userData).forEach((userId) => {
+      Object.keys(entities).forEach((id) => {
         // Once eliminated, stay eliminated — score freezes.
-        if ((userData[userId].remaining_lives ?? 0) <= 0) return;
+        if ((entities[id].remaining_lives ?? 0) <= 0) return;
 
-        const userIntervals = userData[userId].intervals;
-        if ((userIntervals[interval] ?? 0) >= competition.options.goal) {
-          userData[userId].score++;
+        if ((entities[id].intervals[interval] ?? 0) >= competition.options.goal) {
+          entities[id].score++;
         } else if (!isToday) {
           // Don't penalize on today's partial-day data.
-          userData[userId].remaining_lives!--;
+          entities[id].remaining_lives!--;
         }
       });
     }
   } else if (competition.type === "apex") {
-    Object.keys(userData).forEach((userId) => {
+    Object.keys(entities).forEach((id) => {
       let score = 0;
       for (let i = 0; i <= scoringEndIdx; i++) {
-        score += userData[userId].intervals[allIntervals[i]] ?? 0;
+        score += entities[id].intervals[allIntervals[i]] ?? 0;
       }
-      userData[userId].score = score;
+      entities[id].score = score;
     });
   } else if (competition.type === "clash") {
     // Clash always excludes today's partial-day data (per-interval head-to-head).
     const clashEndIdx = todayIdx >= 0 ? todayIdx - 1 : scoringEndIdx;
     for (let i = 0; i <= clashEndIdx; i++) {
       const interval = allIntervals[i];
-      const userQuantities: { [quantities: number]: string[] } = {};
+      const quantities: { [quantity: number]: string[] } = {};
 
-      Object.keys(userData).forEach((userId) => {
-        const quantity = userData[userId].intervals[interval] ?? 0;
-        if (!Object.keys(userQuantities).includes(quantity.toString())) {
-          userQuantities[quantity] = [];
+      Object.keys(entities).forEach((id) => {
+        const quantity = entities[id].intervals[interval] ?? 0;
+        if (!Object.keys(quantities).includes(quantity.toString())) {
+          quantities[quantity] = [];
         }
-        userQuantities[quantity].push(userId);
+        quantities[quantity].push(id);
       });
 
       const maxQuantity = Math.max(
-        ...Object.keys(userQuantities).map((q) => parseFloat(q)),
+        ...Object.keys(quantities).map((q) => parseFloat(q)),
       );
 
       if (maxQuantity > 0) {
-        userQuantities[maxQuantity].forEach(
-          (userId) => userData[userId].score++,
-        );
+        quantities[maxQuantity].forEach((id) => entities[id].score++);
       }
     }
   } else if (competition.type === "targets") {
     for (let i = 0; i <= scoringEndIdx; i++) {
       const interval = allIntervals[i];
-      Object.keys(userData).forEach((userId) => {
-        if (
-          (userData[userId].intervals[interval] ?? 0) >=
-          competition.options.goal
-        ) {
-          userData[userId].score++;
+      Object.keys(entities).forEach((id) => {
+        if ((entities[id].intervals[interval] ?? 0) >= competition.options.goal) {
+          entities[id].score++;
         }
       });
     }
   } else if (competition.type === "race") {
-    Object.keys(userData).forEach((userId) => {
+    Object.keys(entities).forEach((id) => {
       let score = 0;
       for (let i = 0; i <= scoringEndIdx; i++) {
-        score += userData[userId].intervals[allIntervals[i]] ?? 0;
+        score += entities[id].intervals[allIntervals[i]] ?? 0;
       }
-      userData[userId].score = score;
+      entities[id].score = score;
     });
   }
-
-  return userData;
 }
 
 export function getCurrentInterval(
@@ -1562,8 +1766,12 @@ async function resolveIfComplete(
     const scoreValues = Object.values(scores);
     if (scoreValues.length > 0) {
       // Team comps race to first_to on TEAM totals — an individual can't
-      // trigger (or win) on their own.
-      const outcome = teamAwareOutcome(competition, scores);
+      // trigger (or win) on their own. Same excluded interval the scores were
+      // computed over, or the team races to the target one interval ahead of
+      // the members it's made of.
+      const outcome = teamAwareOutcome(competition, scores, {
+        excludeCurrentInterval: true,
+      });
       const maxScore = outcome
         ? outcome.topScore
         : Math.max(...scoreValues.map((s) => s.score));
@@ -1583,7 +1791,16 @@ async function resolveIfComplete(
     const scores = await getUserScores(competition, {
       excludeCurrentInterval: true,
     });
-    const scoreValues = Object.values(scores);
+    // A team holds ONE shared pool of lives, so the survivors being counted are
+    // teams. Counting members instead keeps a competition alive on the last
+    // person standing inside an already-eliminated team — and ends it early the
+    // moment one team is down to its final member.
+    const teamed = usesTeamEntityScoring(competition)
+      ? teamEntities(competition, true, scores)
+      : null;
+    const scoreValues = teamed
+      ? Object.values(teamed.entities)
+      : Object.values(scores);
     if (scoreValues.length > 0) {
       const survivors = scoreValues.filter((s) => (s.remaining_lives ?? 0) > 0);
       const allEliminated = survivors.length === 0;
@@ -1605,7 +1822,9 @@ async function resolveIfComplete(
     const scores = await getUserScores(competition, {
       excludeCurrentInterval: true,
     });
-    const outcome = teamAwareOutcome(competition, scores);
+    const outcome = teamAwareOutcome(competition, scores, {
+      excludeCurrentInterval: true,
+    });
     const raceScores = outcome
       ? [outcome.topScore]
       : Object.values(scores).map((s) => s.score);
@@ -1644,14 +1863,21 @@ async function resolveIfComplete(
   // Team comps: the winning TEAM decides the outcome — record its best member
   // as the (user-typed) winner so the stored result matches what the app
   // announces.
-  const outcome = teamAwareOutcome(competition, finalScores);
+  const outcome = teamAwareOutcome(competition, finalScores, {
+    excludeCurrentInterval: true,
+  });
   const winnerId = outcome?.winnerId ?? sortedUsers[0][0];
   await db.query(
     `UPDATE competitions SET winner = $1, ended = true WHERE id = $2 AND winner IS NULL`,
     [winnerId, competition.id],
   );
 
-  await resolveCompetitionPlacements(competition.id, finalScores, competition);
+  await resolveCompetitionPlacements(
+    competition.id,
+    finalScores,
+    competition,
+    true,
+  );
   evaluateSocialBadgesForUser(winnerId).catch(() => {});
 
   // Notify all accepted participants that the competition finished
@@ -1677,14 +1903,19 @@ async function resolveCompetitionPlacements(
   competitionId: string,
   precomputedScores?: UserData,
   precomputedCompetition?: Competition,
+  excludeCurrentInterval = false,
 ): Promise<void> {
   const competition =
     precomputedCompetition ?? (await getCompetition(competitionId));
   if (!competition) return;
   const scores = precomputedScores ?? (await getUserScores(competition));
 
-  // Team comps: members share their team's placement (whole team medals).
-  const outcome = teamAwareOutcome(competition, scores);
+  // Team comps: members share their team's placement (whole team medals). The
+  // team must be scored over the window its members were, so callers passing
+  // precomputed scores pass the flag they computed them with.
+  const outcome = teamAwareOutcome(competition, scores, {
+    excludeCurrentInterval,
+  });
   if (outcome) {
     for (const [userId, placement] of outcome.placements) {
       await db.query(

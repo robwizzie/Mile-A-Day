@@ -23,8 +23,17 @@ export type DailyActivityBreakdown = {
 export interface CompetitionTeam {
   id: string;
   name: string;
-  // Derived at read time for started competitions: sum of member scores.
+  /**
+   * Derived at read time for started competitions. A team is scored as ONE
+   * competitor over its members' COMBINED per-interval quantity — see
+   * `scoreEntities` — so this is not the sum of its members' scores and must
+   * never be recomputed as one.
+   */
   score?: number;
+  /** Streaks only: the team's shared pool of lives. */
+  remaining_lives?: number;
+  /** The team's combined quantity over the scored window, for display. */
+  quantity?: number;
 }
 
 // Stored in competitions.teams (jsonb). NULL column = no team play.
@@ -41,6 +50,12 @@ export interface CompetitionUser {
   intervals?: { [intervalKey: string]: number };
   score?: number;
   remaining_lives?: number;
+  /**
+   * Miles (or steps) this member put into their team's combined total over the
+   * scored window. Additive: absent for competitions without teams, and older
+   * clients that don't read it fall back to showing `score`.
+   */
+  team_contribution?: number;
   username?: string;
   placement?: number;
   daily_activity?: DailyActivityBreakdown;
@@ -57,6 +72,13 @@ export interface Competition {
   owner: string;
   winner: string | null;
   teams?: CompetitionTeams | null;
+  /**
+   * True only for team competitions that were already DECIDED under the old
+   * rule (a team's score = the sum of its members' scores). Stamped once by
+   * migration 0061; every competition since is scored with the team as the
+   * competitor. See `usesTeamEntityScoring`.
+   */
+  legacy_team_scoring?: boolean | null;
   users: CompetitionUser[];
 }
 
