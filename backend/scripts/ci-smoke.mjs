@@ -2439,6 +2439,67 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     (await searchUsers("ci_alice", BOB)).every((r) => r.email === ""),
     "email stays present-but-empty for the shipped decoder",
   );
+// --- Auto posts fly. The route card published for someone who skips the
+// photo prompt used to ship NO route (its media already IS a rendered route),
+// which meant the feed's most common card could never Flyover. The chip
+// needs the coordinates; the client hides the duplicate slide, not the chip.
+{
+  // Its own workout: uq_posts_workout_active allows one live post per
+  // workout, and ci-workout-bob already carries Bob's photo post.
+  const AUTO_W = "ci-workout-bob-auto";
+  await uploadWorkouts(BOB, [
+    {
+      workoutId: AUTO_W,
+      distance: 1.2,
+      localDate,
+      date: nowIso,
+      timezoneOffset: 0,
+      workoutType: "walking",
+      deviceEndDate: nowIso,
+      calories: 90,
+      totalDuration: 900,
+      source: "healthkit",
+      splits: [],
+      route: [
+        [40.1, -75.1],
+        [40.101, -75.101],
+        [40.102, -75.102],
+      ],
+    },
+  ]);
+  const [autoPost] = await db.query(
+    `INSERT INTO posts (user_id, media_url, workout_id, local_date, share_to_feed, share_to_story, is_auto, include_route)
+	   VALUES ($1, $2, $3, $4, TRUE, FALSE, TRUE, TRUE)
+	   RETURNING post_id`,
+    [BOB, "/uploads/posts/ci-bob-auto-fly.jpg", AUTO_W, localDate],
+  );
+  const asFriend = await getFeedEntryForPost(ALICE, autoPost.post_id);
+  assert.equal(
+    asFriend?.route?.length,
+    CI_ROUTE_LEN,
+    "an auto post ships the author's route on the post-shaped read",
+  );
+  const feedRow = (await getUnifiedFeed(ALICE, 50, null)).find(
+    (r) => r.kind === "post" && r.workout_id === AUTO_W,
+  );
+  assert.ok(feedRow, "the auto post is on the friend's unified feed");
+  assert.equal(
+    feedRow.route?.length,
+    CI_ROUTE_LEN,
+    "…and carries the route there too (feed == direct read)",
+  );
+  // Consent still rules: the author's include_route off withholds it.
+  await db.query(`UPDATE posts SET include_route = FALSE WHERE post_id = $1`, [
+    autoPost.post_id,
+  ]);
+  assert.equal(
+    (await getFeedEntryForPost(ALICE, autoPost.post_id))?.route ?? null,
+    null,
+    "include_route off still withholds an auto post's route",
+  );
+  await db.query(`DELETE FROM posts WHERE post_id = $1`, [autoPost.post_id]);
+  await db.query(`DELETE FROM workout_routes WHERE workout_id = $1`, [AUTO_W]);
+  await db.query(`DELETE FROM workouts WHERE workout_id = $1`, [AUTO_W]);
 }
 
 console.log("ci-smoke: all assertions passed");

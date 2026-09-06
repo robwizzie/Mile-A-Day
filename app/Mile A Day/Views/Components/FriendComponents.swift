@@ -564,6 +564,7 @@ struct BadgeView: View {
 
 // MARK: - Empty State View
 struct FriendEmptyStateView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let title: String
     let message: String
     let systemImage: String
@@ -636,6 +637,7 @@ struct FriendEmptyStateView: View {
                 .scaleEffect(iconScale)
             }
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
                     iconScale = 1.1
                     glowOpacity = 0.6

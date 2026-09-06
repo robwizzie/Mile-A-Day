@@ -3,6 +3,7 @@ import SwiftUI
 // MARK: - Post-Goal Workout Encouragement (Extra Mile)
 
 struct PostGoalEncouragementView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var manager = CelebrationManager.shared
     @Environment(\.scenePhase) private var scenePhase
     var stats: GoalCompletionStats
@@ -63,8 +64,9 @@ struct PostGoalEncouragementView: View {
                                             .scaleEffect(ringExpand ? 1.9 : 0.7)
                                             .opacity(ringExpand ? 0 : 0.7)
                                             .animation(
-                                                .easeOut(duration: 2.0).repeatForever(autoreverses: false)
-                                                    .delay(Double(i) * 0.66),
+                                                reduceMotion ? nil :
+                                                    .easeOut(duration: 2.0).repeatForever(autoreverses: false)
+                                                        .delay(Double(i) * 0.66),
                                                 value: ringExpand
                                             )
                                     }
@@ -85,8 +87,8 @@ struct PostGoalEncouragementView: View {
                                             )
                                         )
                                         .shadow(color: .yellow.opacity(0.5), radius: 25)
-                                        .scaleEffect(iconScale * (heroPulse ? 1.06 : 1.0))
-                                        .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: heroPulse)
+                                        .scaleEffect(iconScale * (heroPulse && !reduceMotion ? 1.06 : 1.0))
+                                        .animation(reduceMotion ? nil : .easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: heroPulse)
                                 }
                                 .transition(.scale(scale: 0.3).combined(with: .opacity))
                             }
