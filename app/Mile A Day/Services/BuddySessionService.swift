@@ -1028,6 +1028,10 @@ final class BuddySessionService: ObservableObject {
                 .rateLimited(let message),
                 .apiError(let message):
                 throw BuddyServiceError.api(message)
+            // Raised only by `POST /posts`, never by a buddy endpoint — but
+            // this switch carries no `default`, so it needs a home.
+            case .buddyWalkAlreadyPosted:
+                throw BuddyServiceError.api("buddy_walk_already_posted")
             case .notFound:
                 // The feature flag is off server-side, or the session is gone.
                 throw BuddyServiceError.api("session_not_found")

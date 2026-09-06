@@ -465,17 +465,32 @@ final class PostComposerViewModel: ObservableObject {
                 toSave.save()
             }
             return true
-        } catch let APIError.apiError(message)
-            where message == "workout_already_posted" && buddySessionId != nil
-        {
-            // Somebody on this walk got there first. The server now refuses the
-            // second card (it resolves the session from the WORKOUT, so it
-            // catches the doors that never sent a session id) — and because
-            // every door now stamps the session, their post is findable, which
-            // means the recap can offer the thing this user actually wants.
-            errorMessage =
-                "Someone already shared this walk. Open it from your buddy walk "
-                + "recap and add your photo to it — one post, everyone on it."
+        } catch let APIError.buddyWalkAlreadyPosted(postId) {
+            // Somebody on this walk got there first, and the walk's card is
+            // theirs. This user's photo still has a home — that card — so the
+            // composer BECOMES the add-your-photo composer rather than a dead
+            // end: same picture, same canvas, one more tap on the same button,
+            // and `publish()` takes the crew branch above.
+            //
+            // Two things were wrong with what this did before. It caught
+            // `.apiError`, but a 409 throws `.conflict`, so the branch was
+            // unreachable and every conflict fell through to "You've already
+            // shared a post for this workout. Delete it first" — advice to
+            // delete a post the user does not own. And it gated on the
+            // client's own `buddySessionId`, which is nil for anyone whose
+            // composer opened after the walk closed (`lastFinishedSession` is
+            // cleared by the recap's Done button); the SERVER resolves the
+            // walk from the workout, so its answer is the one to trust.
+            if let postId, !postId.isEmpty {
+                crewPhotoPostId = postId
+                errorMessage =
+                    "Someone already shared this walk — one post, everyone on it. "
+                    + "Tap Share again to add your photo to it."
+            } else {
+                errorMessage =
+                    "Someone already shared this walk. Open it from your buddy "
+                    + "walk recap and add your photo to it — one post, everyone on it."
+            }
             return false
         } catch let APIError.apiError(message) where message == "mile_not_completed" {
             // The server recomputes this gate from ITS workouts table, so this

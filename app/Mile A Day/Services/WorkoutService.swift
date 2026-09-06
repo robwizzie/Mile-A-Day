@@ -108,6 +108,11 @@ class WorkoutService: ObservableObject {
                 throw WorkoutServiceError.apiError(message)
             case .conflict(let message):
                 throw WorkoutServiceError.apiError(message)
+            // Never surfaced by these services — only `POST /posts` can
+            // raise it — but this switch has no `default`, so a new case
+            // has to land somewhere. It IS a conflict; treat it as one.
+            case .buddyWalkAlreadyPosted:
+                throw WorkoutServiceError.apiError("Someone already shared this walk.")
             case .gone(let message):
                 throw WorkoutServiceError.apiError(message)
             case .rateLimited(let message):
