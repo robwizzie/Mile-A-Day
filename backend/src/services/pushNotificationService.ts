@@ -183,6 +183,14 @@ export type NotificationType =
   // and the honest ask is for a photo already taken on the walk.
   | "crew_photo_nudge"
   | "daily_reminder"
+  // The streak LAST CALL (lastCallService): local 10 PM, live streak, no
+  // mile. HIGH_PRIORITY like daily_reminder so it is never queued to the
+  // morning flush (a "two hours to midnight" delivered at 9 AM is a lie);
+  // the service skips quiet hours itself. Cap-exempt for the same reason
+  // the reminder is: a busy day of hypes must not starve the one push that
+  // saves a streak. Unknown to shipped builds, which decode the inbox
+  // `type` as a plain string and open the app on tap.
+  | "streak_last_call"
   // The runner's OWN "mile complete" — sent from the same atomic once-per-day
   // claim that triggers friend_activity, so it fires no matter which device
   // synced the mile (Watch, locked phone, third-party app).
@@ -405,6 +413,7 @@ const DAILY_NOTIFICATION_CAP = 18;
  * else. That's the difference from HIGH_PRIORITY_TYPES, which skip both.
  */
 const CAP_EXEMPT_TYPES: NotificationType[] = [
+  "streak_last_call",
   "mention",
   // Being tagged into someone else's post puts your name on content you
   // didn't post. That has to reach you — a throttled tag is the one case
@@ -446,6 +455,7 @@ const HIGH_PRIORITY_TYPES: NotificationType[] = [
   // next morning without rechecking — reintroducing the exact stale-text race
   // the server-side path was built to eliminate.
   "daily_reminder",
+  "streak_last_call",
   // A buddy invite is an offer to walk RIGHT NOW — the session is starting
   // within seconds. Queueing it past quiet hours would deliver an invitation to
   // a walk that ended hours ago. Because this bypasses both quiet hours and the
@@ -485,7 +495,7 @@ async function logNotificationSent(
   );
 }
 
-async function isUserInQuietHours(userId: string): Promise<boolean> {
+export async function isUserInQuietHours(userId: string): Promise<boolean> {
   const prefs = await getNotificationPreferences(userId);
   if (prefs.quiet_hours_start === null || prefs.quiet_hours_end === null)
     return false;

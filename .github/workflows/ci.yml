@@ -136,6 +136,12 @@ jobs:
       # cooldown and the kill switch.
       - name: Cron runner check
         run: node scripts/cron-runner-check.mjs
+      # The streak last call: local 10 PM, live streak, no mile. An hour
+      # predicate off by one, a missed reminder-hour guard or a stale stored
+      # streak all fail silently, so the hour arithmetic is pinned against
+      # seeded timezone offsets at one fixed instant.
+      - name: Streak last-call check
+        run: node scripts/last-call-check.mjs
       # The win-back reminder: on days 7/14/30 of a quiet stretch the daily
       # reminder swaps its copy for the gap and the friends' week. A wrong
       # anchor (day 7 landing on day 8) or a friends query reading the wrong
