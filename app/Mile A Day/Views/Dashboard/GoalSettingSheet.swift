@@ -21,7 +21,7 @@ struct GoalSettingSheet: View {
         "v\(appVersion) (\(buildNumber))"
     }
 
-    private var unit: DistanceUnit { DistanceUnits.current }
+    private var unit: DisplayDistanceUnit { DistanceUnits.current }
 
     /// The stepper's number in the display unit, written back as miles.
     private var displayGoal: Binding<Double> {

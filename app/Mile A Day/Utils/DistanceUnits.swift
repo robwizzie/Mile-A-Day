@@ -4,7 +4,12 @@ import Foundation
 /// miles everywhere (the server, HealthKit rollups, streak tolerance) and
 /// stay miles: this is a display preference, resolved once at the formatter,
 /// never a second number anything computes with.
-enum DistanceUnit: String, CaseIterable, Identifiable {
+///
+/// "Display" in the name on purpose: `DistanceUnit` (WorkoutArchiveParser)
+/// is the unit a Strava/Garmin export's distance COLUMN was written in —
+/// an input-parsing question, with `meters` as a case — and the two must
+/// never be confused or merged.
+enum DisplayDistanceUnit: String, CaseIterable, Identifiable {
     case miles
     case kilometers
 
@@ -53,26 +58,26 @@ enum DistanceUnit: String, CaseIterable, Identifiable {
     /// Region), which is what a person who lives in kilometres has already
     /// told the phone once — so it's the default and never a guess from
     /// the region alone.
-    static var systemDefault: DistanceUnit {
+    static var systemDefault: DisplayDistanceUnit {
         Locale.current.measurementSystem == .us ? .miles : .kilometers
     }
 }
 
 /// The one place the preference is read and written.
 enum DistanceUnits {
-    /// Raw `DistanceUnit` value; absent = follow the device.
+    /// Raw `DisplayDistanceUnit` value; absent = follow the device.
     static let key = "distanceUnitV1"
     /// Posted after `current` changes so a screen already on screen can
     /// redraw; most surfaces re-read on their next update anyway.
     static let didChange = Notification.Name("MAD_DistanceUnitDidChange")
 
-    static var current: DistanceUnit {
+    static var current: DisplayDistanceUnit {
         get {
             if let raw = UserDefaults.standard.string(forKey: key),
-               let unit = DistanceUnit(rawValue: raw) {
+               let unit = DisplayDistanceUnit(rawValue: raw) {
                 return unit
             }
-            return DistanceUnit.systemDefault
+            return DisplayDistanceUnit.systemDefault
         }
         set {
             let previous = current

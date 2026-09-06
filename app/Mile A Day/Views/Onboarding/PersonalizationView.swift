@@ -18,7 +18,7 @@ struct PersonalizationView: View {
     @State private var selectedExperience: String?
     // Preselected from the device's measurement system, so a plain Continue
     // keeps following the device; only a CHANGE here pins a preference.
-    @State private var selectedUnit: String? = DistanceUnit.systemDefault.rawValue
+    @State private var selectedUnit: String? = DisplayDistanceUnit.systemDefault.rawValue
     @State private var isSubmitting = false
     @FocusState private var detailFieldFocused: Bool
 
@@ -222,8 +222,8 @@ struct PersonalizationView: View {
         // Local only — display units never reach the server (storage is
         // miles everywhere). Pin a preference only when it differs from the
         // device; otherwise keep following the device's setting.
-        if let raw = selectedUnit, let unit = DistanceUnit(rawValue: raw),
-           unit != DistanceUnit.systemDefault {
+        if let raw = selectedUnit, let unit = DisplayDistanceUnit(rawValue: raw),
+           unit != DisplayDistanceUnit.systemDefault {
             DistanceUnits.current = unit
         }
 
@@ -289,8 +289,8 @@ struct PersonalizationView: View {
     ]
 
     static let unitOptions: [PersonalizationOption] = [
-        PersonalizationOption(code: DistanceUnit.miles.rawValue, label: "Miles", icon: "road.lanes"),
-        PersonalizationOption(code: DistanceUnit.kilometers.rawValue, label: "Kilometers", icon: "globe.europe.africa.fill")
+        PersonalizationOption(code: DisplayDistanceUnit.miles.rawValue, label: "Miles", icon: "road.lanes"),
+        PersonalizationOption(code: DisplayDistanceUnit.kilometers.rawValue, label: "Kilometers", icon: "globe.europe.africa.fill")
     ]
 
     static let experienceOptions: [PersonalizationOption] = [

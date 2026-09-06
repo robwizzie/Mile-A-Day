@@ -30,7 +30,7 @@ struct MADSettingsView: View {
     @AppStorage(GhostCoach.enabledKey) private var coachEnabled = true
     // Absent = follow the device, so the picker shows the device's unit until
     // the user picks one; picking writes the key (see DistanceUnits).
-    @AppStorage(DistanceUnits.key) private var distanceUnitRaw = DistanceUnit.systemDefault.rawValue
+    @AppStorage(DistanceUnits.key) private var distanceUnitRaw = DisplayDistanceUnit.systemDefault.rawValue
 
     @State private var activeSheet: SettingsSheet?
     @State private var showWhatsNew = false
@@ -201,11 +201,11 @@ struct MADSettingsView: View {
                     title: "Units",
                     subtitle: DistanceUnits.isChosen
                         ? "Shown in \(DistanceUnits.current.plural)"
-                        : "Following your device (\(DistanceUnit.systemDefault.plural))",
+                        : "Following your device (\(DisplayDistanceUnit.systemDefault.plural))",
                     iconColor: .teal
                 )
                 Picker("Units", selection: $distanceUnitRaw) {
-                    ForEach(DistanceUnit.allCases) { unit in
+                    ForEach(DisplayDistanceUnit.allCases) { unit in
                         Text(unit.title).tag(unit.rawValue)
                     }
                 }
@@ -213,7 +213,7 @@ struct MADSettingsView: View {
                 .onChange(of: distanceUnitRaw) { _, newValue in
                     // Storage stays miles everywhere; this only moves the
                     // formatter. Widgets keep miles until their next data write.
-                    DistanceUnits.current = DistanceUnit(rawValue: newValue) ?? .systemDefault
+                    DistanceUnits.current = DisplayDistanceUnit(rawValue: newValue) ?? .systemDefault
                     MADHaptics.tap()
                 }
             }
