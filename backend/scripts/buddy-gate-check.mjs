@@ -18,6 +18,7 @@
  */
 import { PostgresService } from "../dist/services/DbService.js";
 import { buddySessionsEnabled } from "../dist/services/buddyFeatures.js";
+import { allowedRecipients } from "../dist/services/notificationSettingsService.js";
 import { registerDevice } from "../dist/controllers/deviceController.js";
 import {
   createRecurringWalk,
@@ -141,6 +142,10 @@ async function cleanup() {
     [ALL],
   );
   await db.query(
+    `DELETE FROM friend_notification_settings WHERE user_id = ANY($1::text[]) OR friend_id = ANY($1::text[])`,
+    [ALL],
+  );
+  await db.query(
     `DELETE FROM friendships WHERE user_id = ANY($1::text[]) OR friend_id = ANY($1::text[])`,
     [ALL],
   );
@@ -249,6 +254,55 @@ async function main() {
     "a posted invite is dropped for an opted-out friend",
     invitedIds.has(OPTED_OUT),
     false,
+  );
+
+  // The push behind the invite goes through allowedRecipients (two queries
+  // for the whole crew, not two per invitee) — it must still honour the
+  // recipient's switch, and the fan-out is fire-and-forget, so give it a
+  // beat before reading the inbox it writes even with no device token.
+  await new Promise((r) => setTimeout(r, 400));
+  const inbox = async (userId) =>
+    (
+      await db.query(
+        `SELECT COUNT(*)::int AS n FROM in_app_notifications
+          WHERE user_id = $1 AND type = 'buddy_invite'`,
+        [userId],
+      )
+    )[0].n;
+  check("the opted-in friend is pushed the invite", await inbox(PAL), 1);
+  check("the opted-out friend is not", await inbox(OPTED_OUT), 0);
+
+  // The batched filter itself: a per-friend mute blocks, a missing settings
+  // row allows, order is kept and duplicates collapse.
+  await db.query(
+    `INSERT INTO friend_notification_settings (user_id, friend_id, muted)
+     VALUES ($1, $2, TRUE)
+     ON CONFLICT (user_id, friend_id) DO UPDATE SET muted = TRUE`,
+    [PAL, HOST],
+  );
+  const filtered = await allowedRecipients(
+    [OPTED_OUT, PAL, NO_ROW, PAL, HOST],
+    HOST,
+    "buddy",
+  );
+  check(
+    "batched filter: opted-out dropped, muted-host dropped, no-row kept, order kept, dupes collapsed",
+    filtered.join(","),
+    [NO_ROW, HOST].join(","),
+  );
+  check(
+    "batched filter with no sender ignores per-friend mutes",
+    (await allowedRecipients([PAL], null, "buddy")).join(","),
+    PAL,
+  );
+  check(
+    "batched filter on an empty list is empty (and runs no query)",
+    (await allowedRecipients([], HOST, "buddy")).length,
+    0,
+  );
+  await db.query(
+    `DELETE FROM friend_notification_settings WHERE user_id = $1 AND friend_id = $2`,
+    [PAL, HOST],
   );
 
   // ── 4. The lobby PATCH ──────────────────────────────────────────────

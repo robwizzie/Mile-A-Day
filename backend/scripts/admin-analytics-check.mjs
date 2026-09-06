@@ -52,7 +52,12 @@ const CAROL = "adm-carol";
 const DAVE = "adm-dave";
 const ERIN = "adm-erin";
 const FRANK = "adm-frank";
-const ALL = [ALICE, BOB, CAROL, DAVE, ERIN, FRANK];
+// Joined 70 days ago and walked on days 1, 7 and 30 exactly — the one signup
+// that lands in all three retention brackets. Deliberately un-enrolled and
+// with every walk older than the 30-day trend window, so the token and trend
+// deltas below don't move; the whole-user-base counts do (seven, not six).
+const RET = "adm-ret";
+const ALL = [ALICE, BOB, CAROL, DAVE, ERIN, FRANK, RET];
 const COMPS = ["adm-c-live", "adm-c-soon", "adm-c-done", "adm-c-open"];
 const SESSION = "adm-b-1";
 
@@ -196,6 +201,15 @@ async function seed() {
   await addWorkout(BOB, 1, { exclusion: "vehicle_speed" });
   await addWorkout(BOB, 2, { ghost: ALICE });
   await addWorkout(CAROL, 40, { source: "manual" });
+  await db.query(
+    `INSERT INTO users (user_id, username, apple_sub, email, current_streak, created_at, goal_miles)
+     VALUES ($1, $2, $3, $4, 0, NOW() - INTERVAL '70 days', 1.0)`,
+    [RET, RET, RET, `${RET}@example.com`],
+  );
+  // Days since signup 1, 7 and 30 (signup was 70 days ago).
+  await addWorkout(RET, 69);
+  await addWorkout(RET, 63);
+  await addWorkout(RET, 40);
 
   // One competition in each lifecycle state: running with a calendar end, not
   // started yet, finished, and running with NO end date (a first-to/duration
@@ -373,6 +387,19 @@ async function main() {
       c.weeks.every((w) => w.pct >= 0 && w.pct <= 100),
     ),
   );
+  truthy(
+    "D1/D7/D30 marks are real percentages with their brackets",
+    ["d1", "d7", "d30"].every((k) => {
+      const m = before.retention.marks[k];
+      return (
+        m.pct >= 0 &&
+        m.pct <= 100 &&
+        m.retained <= m.eligible &&
+        Array.isArray(m.window) &&
+        m.window[0] <= m.window[1]
+      );
+    }),
+  );
 
   await seed();
   const after = await snapshot();
@@ -382,6 +409,21 @@ async function main() {
     const get = (o) => path.split(".").reduce((a, k) => a?.[k], o);
     return get(after) - get(before);
   };
+
+  console.log("\n--- retention marks ---");
+  // Every seeded account joined 40 days ago, so all seven are old enough for
+  // every bracket. Only RET walked on days 1 and 7; on day 30 Alice's
+  // ten-day run (days 31–40 since signup) also lands inside the 28–32
+  // bracket. Bob's excluded and ghost workouts, Alice's deleted one and
+  // Carol's day-0 walk must move nothing.
+  for (const [k, retained] of [
+    ["d1", 1],
+    ["d7", 1],
+    ["d30", 2],
+  ]) {
+    check(`${k} eligible`, d(`retention.marks.${k}.eligible`), 7);
+    check(`${k} retained`, d(`retention.marks.${k}.retained`), retained);
+  }
 
   console.log("\n--- competitions ---");
   check("total competitions", d("competitions.summary.total"), 4);
@@ -460,7 +502,7 @@ async function main() {
   const featDelta = (key, field) =>
     (after.adoption.features.find((f) => f.key === key)?.[field] ?? 0) -
     (before.adoption.features.find((f) => f.key === key)?.[field] ?? 0);
-  check("total users", d("adoption.total_users"), 6);
+  check("total users", d("adoption.total_users"), 7); // six + RET
   check("photo posters", featDelta("photo_post", "users_ever"), 2);
   check(
     "photo events exclude the auto card and the deleted one",
@@ -484,7 +526,7 @@ async function main() {
   );
   check("pending requests", d("community.friends.pending"), 1);
   check("connected users", d("community.friends.connected_users"), 3);
-  check("users with nobody", d("community.friends.solo_users"), 3);
+  check("users with nobody", d("community.friends.solo_users"), 4); // RET has no friends
   check("buddy sessions", d("community.buddy.sessions"), 1);
   check("buddy sessions live now", d("community.buddy.live_now"), 1);
   check(
@@ -540,7 +582,7 @@ async function main() {
     "streak histogram still totals every user",
     after.rhythms.streak_buckets.reduce((a, b) => a + b.users, 0) -
       before.rhythms.streak_buckets.reduce((a, b) => a + b.users, 0),
-    6,
+    7, // six + RET
   );
   truthy("the activity clock has buckets", after.rhythms.clock.length > 0);
   check("pulse: live competitions", d("pulse.competitions_live"), 2);
@@ -596,19 +638,19 @@ async function main() {
   const step = (k) => after.activation.steps.find((x) => x.key === k)?.users;
   const stepBefore = (k) =>
     before.activation.steps.find((x) => x.key === k)?.users ?? 0;
-  check("signed up", step("signed_up") - stepBefore("signed_up"), 6);
+  check("signed up", step("signed_up") - stepBefore("signed_up"), 7); // six + RET
   // ALICE (10 days), DAVE (3), CAROL (one hand-entered mile) and BOB, whose
   // ghost run counts — only his OTHER workout is vehicle-speed excluded.
-  // ERIN and FRANK never ran at all.
+  // ERIN and FRANK never ran at all. RET's three old walks add one to both.
   check(
     "logged a first mile",
     step("first_mile") - stepBefore("first_mile"),
-    4,
+    5,
   );
   check(
     "came back three days",
     step("three_days") - stepBefore("three_days"),
-    2,
+    3,
   );
   check("added a friend", step("friend") - stepBefore("friend"), 3);
   check("posted a photo", step("photo") - stepBefore("photo"), 2);

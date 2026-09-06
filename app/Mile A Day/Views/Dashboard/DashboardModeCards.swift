@@ -499,6 +499,7 @@ private struct ModernHeroCard: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "shield.lefthalf.filled")
+                    .accessibilityLabel("Streak savers")
                     .font(.system(size: 11, weight: .bold))
                 Text("\(readyTokens)")
                     .font(.system(size: 12, weight: .black, design: .rounded))
@@ -1503,6 +1504,7 @@ private struct FlameBuddyHeroCard: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "shield.lefthalf.filled")
+                    .accessibilityLabel("Streak savers")
                     .font(.system(size: 11, weight: .bold))
                 Text("\(readyTokens)")
                     .font(.system(size: 12, weight: .black, design: .rounded))

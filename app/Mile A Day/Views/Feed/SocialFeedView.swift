@@ -755,6 +755,7 @@ struct SocialFeedView: View {
         if !(mileDone && alreadySharedWorkout) {
             Button(action: handleCompose) {
                 Image(systemName: canPostNow ? "plus" : "lock.fill")
+                    .accessibilityLabel(canPostNow ? "New post" : "New post, locked until today's mile is done")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(.white)
                     .frame(width: 56, height: 56)

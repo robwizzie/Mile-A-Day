@@ -6,6 +6,7 @@
 import SwiftUI
 
 struct BadgeDetailView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let badge: Badge
     var userManager: UserManager?
     @AppStorage("trackedBadgeIds") private var trackedBadgeIdsRaw: String = ""
@@ -646,8 +647,8 @@ struct BadgeDetailView: View {
             showContent = true
         }
         
-        // Start shimmer animation
-        if !badge.isLocked {
+        // Start shimmer animation — a looping one, so not under Reduce Motion.
+        if !badge.isLocked && !reduceMotion {
             withAnimation(.linear(duration: 2.5).repeatForever(autoreverses: false).delay(0.5)) {
                 shimmerOffset = 300
             }
