@@ -567,6 +567,7 @@ struct CalendarPreviewCard: View {
 // MARK: - Daily Challenge Card
 
 struct DailyChallengeCard: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     @Environment(\.colorScheme) var colorScheme
@@ -741,9 +742,9 @@ struct DailyChallengeCard: View {
                     )
                 )
                 .frame(width: 58, height: 58)
-                .scaleEffect(iconPulse && !isCompleted ? 1.05 : 1.0)
+                .scaleEffect(iconPulse && !isCompleted && !reduceMotion ? 1.05 : 1.0)
                 .animation(
-                    isCompleted ? .default :
+                    (isCompleted || reduceMotion) ? .default :
                         .easeInOut(duration: 1.8).repeatForever(autoreverses: true),
                     value: iconPulse
                 )

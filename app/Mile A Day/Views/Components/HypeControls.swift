@@ -51,6 +51,7 @@ struct HypeButton: View {
             Group {
                 if style == .actionIcon {
                     Image(systemName: isHyped ? "hands.clap.fill" : "hands.clap")
+                        .accessibilityLabel(isHyped ? "Hyped" : "Hype")
                         .font(.system(size: 31, weight: .regular))
                         .scaleEffect(pop ? 1.16 : 1)
                         .opacity(isOutOfHypes && !isHyped ? 0.35 : 1)
@@ -58,6 +59,7 @@ struct HypeButton: View {
                         .contentShape(Rectangle())
                 } else if style == .compactIcon {
                     Image(systemName: isHyped ? "hands.clap.fill" : "hands.clap")
+                        .accessibilityLabel(isHyped ? "Hyped" : "Hype")
                         .font(.system(size: 22, weight: .medium))
                         .scaleEffect(pop ? 1.18 : 1)
                         .opacity(isOutOfHypes && !isHyped ? 0.35 : 1)
