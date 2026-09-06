@@ -429,6 +429,16 @@ struct BuddyLobbyView: View {
     ///
     /// Host-only, because the server is (`not_host`). A guest sees the roster,
     /// which is everything they can act on.
+    private func droppedInviteeText(_ names: [String]) -> String {
+        let who: String
+        switch names.count {
+        case 1: who = names[0]
+        case 2: who = "\(names[0]) and \(names[1])"
+        default: who = "\(names[0]) and \(names.count - 1) others"
+        }
+        return "Couldn't invite \(who) — they'll need the latest Mile A Day to join buddy walks."
+    }
+
     private func peopleCard(_ session: BuddySessionState) -> some View {
         let people = session.lobbyParticipants
         let here = people.filter {
@@ -458,6 +468,21 @@ struct BuddyLobbyView: View {
             ) {
                 ForEach(people) { participant in
                     rosterTile(participant, session: session)
+                }
+            }
+
+            // Someone tapped who never made the roster. The server drops an
+            // invitee it can't reach without an error, so without this the
+            // host counted faces and found one missing with no explanation.
+            if isHost, !buddy.droppedInviteeNames.isEmpty {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(MADTheme.Colors.warning)
+                    Text(droppedInviteeText(buddy.droppedInviteeNames))
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 

@@ -52,6 +52,13 @@ struct InProgressWorkoutState: Codable {
     /// mid-walk can't un-hide a walk that began in stealth. Optional for the
     /// persisted-Codable reason above.
     var stealth: Bool?
+    /// The buddy session this workout is part of, if any. Persisted because
+    /// the tracker's `adoptedBuddySessionId` is @State: a relaunch mid-walk
+    /// restored the workout and lost the room — no roster, no progress
+    /// reports, and at Finish nothing told the server this person was done,
+    /// so the walk sat `active` for everyone until the sweep. Optional for the
+    /// persisted-Codable reason above.
+    var buddySessionId: String?
 
     init(
         isActive: Bool = false,
@@ -74,7 +81,8 @@ struct InProgressWorkoutState: Codable {
         celebratedCompletion: Bool? = nil,
         alertedGoalComplete: Bool? = nil,
         pauseIntervals: [WorkoutPauseInterval]? = nil,
-        stealth: Bool? = nil
+        stealth: Bool? = nil,
+        buddySessionId: String? = nil
     ) {
         self.isActive = isActive
         self.isPaused = isPaused
@@ -97,6 +105,7 @@ struct InProgressWorkoutState: Codable {
         self.alertedGoalComplete = alertedGoalComplete
         self.pauseIntervals = pauseIntervals
         self.stealth = stealth
+        self.buddySessionId = buddySessionId
     }
 }
 
@@ -388,6 +397,16 @@ enum InProgressWorkoutStore {
         if catchUp { state.celebratedCatchUp = true }
         if completion { state.celebratedCompletion = true }
         if goalAlert { state.alertedGoalComplete = true }
+        save(state)
+    }
+
+    /// Stamp the buddy session a workout joined AFTER it started (the
+    /// mid-walk join strip). Write-through for the same reason the pause
+    /// state is: the room has to survive a relaunch, and nothing else
+    /// persists it.
+    static func setBuddySession(_ sessionId: String?) {
+        guard var state = load() else { return }
+        state.buddySessionId = sessionId
         save(state)
     }
 
