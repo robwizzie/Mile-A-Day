@@ -323,6 +323,7 @@ private struct TourAvatar: View {
 // MARK: - Visual: Welcome
 
 private struct TourWelcomeVisual: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var float = false
 
     var body: some View {
@@ -350,6 +351,7 @@ private struct TourWelcomeVisual: View {
         }
         .frame(height: 240)
         .onAppear {
+            guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
                 float = true
             }
@@ -468,6 +470,7 @@ private struct TourTrackVisual: View {
 // MARK: - Visual: Streak (flame + week dots)
 
 private struct TourStreakVisual: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var glow = false
     private let days = ["S", "M", "T", "W", "T", "F", "S"]
     private let done = [true, true, true, true, true, false, false] // today = index 4
@@ -527,6 +530,7 @@ private struct TourStreakVisual: View {
         .padding(.horizontal, 24)
         .tourPanel()
         .onAppear {
+            guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
                 glow = true
             }
@@ -725,6 +729,7 @@ private struct TourFriendsVisual: View {
 // MARK: - Visual: Feed (share a run)
 
 private struct TourFeedVisual: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
 
     var body: some View {
@@ -796,6 +801,7 @@ private struct TourFeedVisual: View {
         .tourPanel()
         .frame(maxWidth: 300)
         .onAppear {
+            guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                 pulse = true
             }

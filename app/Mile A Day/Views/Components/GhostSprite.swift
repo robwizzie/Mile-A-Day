@@ -11,6 +11,7 @@ import SwiftUI
 /// Used everywhere the race is: the pre-start option card, the options step,
 /// the live delta chip, the beaten celebration, and the feed chip.
 struct GhostSprite: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var size: CGFloat = 64
     /// Body fill. White reads on every surface the race appears on.
     var color: Color = .white
@@ -48,7 +49,7 @@ struct GhostSprite: View {
         .blur(radius: isVanishing ? 6 : 0)
         .animation(.easeOut(duration: 0.9), value: isVanishing)
         .onAppear {
-            guard floats else { return }
+            guard floats, !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
                 bob = -size * 0.06
             }

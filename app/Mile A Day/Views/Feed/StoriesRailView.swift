@@ -100,6 +100,9 @@ struct StoriesRailView: View {
                     // to post. Lock shows only before the mile is done.
                     if !hasSharedWorkout {
                         Image(systemName: canPost ? "plus.circle.fill" : "lock.circle.fill")
+                            // "Your story" below names the cell; the badge
+                            // only decorates it.
+                            .accessibilityHidden(true)
                             .font(.system(size: 22))
                             .foregroundStyle(.white, canPost ? MADTheme.Colors.madRed : Color.gray)
                             .background(Circle().fill(.black))

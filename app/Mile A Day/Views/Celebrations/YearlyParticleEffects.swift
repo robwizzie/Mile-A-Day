@@ -172,6 +172,7 @@ struct YearPalette {
 /// Slow rotating radial light beams emanating from screen center.
 /// Used in Phase 1 to build anticipation.
 struct GoldenRaysEffect: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let color: Color
     var rayCount: Int = 16
 
@@ -213,6 +214,7 @@ struct GoldenRaysEffect: View {
         .allowsHitTesting(false)
         .onAppear {
             withAnimation(.easeOut(duration: 1.2)) { opacity = 1.0 }
+            guard !reduceMotion else { return }
             withAnimation(.linear(duration: 28).repeatForever(autoreverses: false)) {
                 rotation = 360
             }
@@ -362,6 +364,7 @@ struct YearlyConfettiView: View {
 }
 
 private struct YearlyConfettiPieceView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let piece: YearlyConfettiPiece
     let screenHeight: CGFloat
     @State private var falling = false
@@ -381,6 +384,7 @@ private struct YearlyConfettiPieceView: View {
                     withAnimation(.easeIn(duration: piece.duration)) {
                         falling = true
                     }
+                    guard !reduceMotion else { return }
                     withAnimation(.linear(duration: piece.duration).repeatForever(autoreverses: false)) {
                         rotation = piece.rotationSpeed
                     }
@@ -417,6 +421,7 @@ private struct Triangle: Shape {
 
 /// A continuously sweeping highlight that gives the year numeral a "trophy" feel.
 struct YearNumberShimmer: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let active: Bool
     let color: Color
     @State private var phase: CGFloat = -1.0
@@ -439,7 +444,7 @@ struct YearNumberShimmer: ViewModifier {
                 .opacity(active ? 1 : 0)
             )
             .onChange(of: active) { _, newValue in
-                if newValue {
+                if newValue && !reduceMotion {
                     withAnimation(.linear(duration: 2.4).repeatForever(autoreverses: false)) {
                         phase = 1.5
                     }
