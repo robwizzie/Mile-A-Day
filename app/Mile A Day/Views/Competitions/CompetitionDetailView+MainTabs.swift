@@ -74,21 +74,83 @@ extension CompetitionDetailView {
         let todayKey = intervalKey(for: Date())
         let myToday = me?.intervals?[todayKey] ?? 0
 
-        switch competition.type {
-        case .clash, .apex:
-            let opponents = accepted.filter { $0.user_id != currentUserId }
-            if let leader = opponents.max(by: { ($0.intervals?[todayKey] ?? 0) < ($1.intervals?[todayKey] ?? 0) }) {
-                let leaderToday = leader.intervals?[todayKey] ?? 0
-                clashApexCallout(me: me, myToday: myToday, leader: leader, leaderToday: leaderToday)
-            } else {
-                soloCallout(myToday: myToday)
+        // In a team competition the contest is team vs team, so "you're 0.4 mi
+        // behind Dave" names the wrong opponent and can say you're behind
+        // while your team is ahead.
+        if competition.hasTeams, let myTeamId = me?.team_id {
+            teamCallout(myTeamId: myTeamId, todayKey: todayKey)
+        } else {
+            switch competition.type {
+            case .clash, .apex:
+                let opponents = accepted.filter { $0.user_id != currentUserId }
+                if let leader = opponents.max(by: { ($0.intervals?[todayKey] ?? 0) < ($1.intervals?[todayKey] ?? 0) }) {
+                    let leaderToday = leader.intervals?[todayKey] ?? 0
+                    clashApexCallout(me: me, myToday: myToday, leader: leader, leaderToday: leaderToday)
+                } else {
+                    soloCallout(myToday: myToday)
+                }
+            case .targets:
+                targetsCallout(myToday: myToday)
+            case .streaks:
+                streaksCallout(me: me, myToday: myToday)
+            case .race:
+                raceCallout(me: me)
             }
-        case .targets:
-            targetsCallout(myToday: myToday)
-        case .streaks:
-            streaksCallout(me: me, myToday: myToday)
-        case .race:
-            raceCallout(me: me)
+        }
+    }
+
+    /// "You vs the leader today", with teams as the competitors.
+    ///
+    /// Targets and Streaks read as a goal the TEAM clears together, which is
+    /// the whole point of the rule — telling someone they are short when their
+    /// team already cleared it is the individual scoring this replaced.
+    @ViewBuilder
+    private func teamCallout(myTeamId: String, todayKey: String) -> some View {
+        let unit = competition.options.unit.shortDisplayName
+        let myTeam = competition.teams?.teams.first { $0.id == myTeamId }
+        let mine = competition.teamIntervalTotal(myTeamId, key: todayKey)
+        let name = myTeam?.name ?? "Your team"
+
+        switch competition.type {
+        case .targets, .streaks:
+            let goal = competition.options.goal
+            if mine >= goal {
+                calloutBubble(icon: "checkmark.circle.fill", tint: .green,
+                              title: "\(name) cleared \(competition.options.goalFormatted) \(unit) together",
+                              subtitle: "Banked for the day — anything more is a cushion.")
+            } else {
+                calloutBubble(icon: "target", tint: .orange,
+                              title: "\(name) needs \(String(format: "%.2f", goal - mine)) \(unit) more today",
+                              subtitle: "Any member's miles count toward it.")
+            }
+        default:
+            // A `guard ... return` is not available here: this is a
+            // @ViewBuilder, so every branch has to BE a view.
+            let rivals = (competition.teams?.teams ?? [])
+                .filter { $0.id != myTeamId && !competition.members(of: $0.id).isEmpty }
+            let best = rivals.max(by: {
+                competition.teamIntervalTotal($0.id, key: todayKey) < competition.teamIntervalTotal($1.id, key: todayKey)
+            })
+            if let best {
+                let theirs = competition.teamIntervalTotal(best.id, key: todayKey)
+                let diff = mine - theirs
+                if mine == 0 && theirs == 0 {
+                    calloutBubble(icon: "figure.run", tint: .white.opacity(0.5),
+                                  title: "No activity yet today",
+                                  subtitle: "First team on the board takes it.")
+                } else if diff >= 0 && mine > 0 {
+                    calloutBubble(icon: "crown.fill", tint: .green,
+                                  title: "\(name) leads by \(String(format: "%.2f", diff)) \(unit) today",
+                                  subtitle: "Every teammate's miles keep the gap open.")
+                } else {
+                    calloutBubble(icon: "bolt.fill", tint: .orange,
+                                  title: "\(name) is \(String(format: "%.2f", abs(diff))) \(unit) behind \(best.name) today",
+                                  subtitle: "Between you, that's \(String(format: "%.2f", abs(diff))) \(unit) to make up.")
+                }
+            } else {
+                // The only team with anyone on it.
+                soloCallout(myToday: mine)
+            }
         }
     }
 
@@ -268,18 +330,53 @@ extension CompetitionDetailView {
             // on yesterday's results after the new interval starts).
             intervalNavigator
 
-            switch competition.type {
-            case .clash:
-                clashIntervalView(key: key, users: acceptedUsers, currentUserId: currentUserId)
-            case .apex:
-                apexIntervalView(key: key, users: acceptedUsers, currentUserId: currentUserId)
-            case .targets:
-                targetsIntervalView(key: key, users: acceptedUsers, currentUserId: currentUserId)
-            case .streaks:
-                streaksTodayView(key: key, users: acceptedUsers, currentUserId: currentUserId)
-            case .race:
-                raceProgressView
+            // A team competition is scored on each team's COMBINED quantity,
+            // so the Today tab has to draw that contest. Ranking the people
+            // against each other shows a race nobody is running, and can put a
+            // name on top whose team is losing the interval.
+            if competition.hasTeams {
+                teamIntervalView(key: key)
+            } else {
+                switch competition.type {
+                case .clash:
+                    clashIntervalView(key: key, users: acceptedUsers, currentUserId: currentUserId)
+                case .apex:
+                    apexIntervalView(key: key, users: acceptedUsers, currentUserId: currentUserId)
+                case .targets:
+                    targetsIntervalView(key: key, users: acceptedUsers, currentUserId: currentUserId)
+                case .streaks:
+                    streaksTodayView(key: key, users: acceptedUsers, currentUserId: currentUserId)
+                case .race:
+                    raceProgressView
+                }
             }
+        }
+    }
+
+    /// The Today tab for a team competition: the same five modes, with the
+    /// TEAM as the competitor.
+    ///
+    /// Targets and Streaks pass a goal because those modes ask whether the
+    /// number was cleared, and it is the TEAM's combined number that clears it
+    /// now — a per-member goal is exactly the rule this replaced. Race passes
+    /// the goal and reads whole-competition totals rather than one interval,
+    /// because a race has no intervals to page through.
+    @ViewBuilder
+    func teamIntervalView(key: String) -> some View {
+        let interval = competition.options.interval
+        let intervalLabel = interval == .week ? "Weekly" : (interval == .month ? "Monthly" : (Calendar.current.isDateInToday(selectedIntervalDate) ? "Today's" : "Daily"))
+
+        switch competition.type {
+        case .clash:
+            CompetitionTeamIntervalView(competition: competition, title: "Team Matchup", intervalKey: key)
+        case .apex:
+            CompetitionTeamIntervalView(competition: competition, title: "\(intervalLabel) Team Activity", intervalKey: key)
+        case .targets:
+            CompetitionTeamIntervalView(competition: competition, title: "\(intervalLabel) Team Targets", intervalKey: key, goal: competition.options.goal)
+        case .streaks:
+            CompetitionTeamIntervalView(competition: competition, title: "\(intervalLabel) Team Goal", intervalKey: key, goal: competition.options.goal)
+        case .race:
+            CompetitionTeamIntervalView(competition: competition, title: "Team Race Progress", intervalKey: key, goal: competition.options.goal, useTotalScore: true)
         }
     }
 

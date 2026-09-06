@@ -133,6 +133,25 @@ struct Competition: Codable, Identifiable {
             .sorted { ($0.teamRankValue ?? $0.score ?? 0) > ($1.teamRankValue ?? $1.score ?? 0) }
     }
 
+    /// A team's COMBINED quantity for one interval — the number the server
+    /// scores that interval on.
+    ///
+    /// Derived client-side from the members' own `intervals`, which is the same
+    /// arithmetic the server does; it has to be, because the server sends a
+    /// team's SCORE (days won, or miles) and never its per-interval totals.
+    func teamIntervalTotal(_ teamId: String, key: String) -> Double {
+        members(of: teamId).reduce(0) { $0 + ($1.intervals?[key] ?? 0) }
+    }
+
+    /// Teams ranked by what they covered in ONE interval — the Today tab's
+    /// order, which is not the standings order (that ranks on the whole
+    /// competition's score).
+    func rankedTeams(forIntervalKey key: String) -> [CompetitionTeam] {
+        (teams?.teams ?? []).sorted {
+            teamIntervalTotal($0.id, key: key) > teamIntervalTotal($1.id, key: key)
+        }
+    }
+
     /// Accepted participants not on any (existing) team.
     var unassignedUsers: [CompetitionUser] {
         let validIds = Set((teams?.teams ?? []).map { $0.id })
