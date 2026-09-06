@@ -579,6 +579,56 @@ async function main() {
     "buddy_walk_already_posted",
   );
 
+  // ── The AUTHOR's own second leg ──
+  //
+  // A mile walked in two goes leaves the person who posted the walk with an
+  // un-posted workout, and the feed FAB offers it. The guard used to exclude
+  // the caller's own posts outright (`p.user_id <> $1`), so their second leg
+  // sailed through and one walk got two cards — the exact outcome this rule
+  // exists to prevent, reached from the inside instead of by a friend.
+  //
+  // The exclusion is by WORKOUT now: only the post for the workout being
+  // posted right now is invisible here, because replacing that one is the
+  // upsert path rather than a second card.
+  await db.query(
+    `UPDATE buddy_session_participants SET workout_id = $3, status = 'finished'
+      WHERE session_id = $1 AND user_id = $2`,
+    [sessionId, PAL, `grp-w-${PAL}`],
+  );
+  await db.query(
+    `INSERT INTO workouts
+       (workout_id, user_id, workout_type, distance, total_duration,
+        device_end_date, date, local_date, timezone_offset, calories, steps,
+        feed_role)
+     VALUES ('grp-w-host-leg2', $1, 'walking', 0.55, 900,
+             NOW() - INTERVAL '5 minutes', CURRENT_DATE, CURRENT_DATE, 0,
+             45, 1100, 'extra')
+     ON CONFLICT (workout_id) DO NOTHING`,
+    [AUTHOR],
+  );
+  const ownSecondLeg = await tryPost(AUTHOR, "grp-w-host-leg2");
+  check(
+    "the walk's own author is refused a second card from another leg",
+    ownSecondLeg?.message,
+    "buddy_walk_already_posted",
+  );
+  // Which card it is decides what the app can offer: their own, so there is
+  // no coauthor row to hang a slide on and "add your photo" would 400.
+  check("...and it is named as THEIR card", ownSecondLeg?.mine, true);
+  check("...pointing at the post they already have", ownSecondLeg?.postId, postId);
+  // The SAME workout must never reach the buddy guard at all: that post is
+  // the upsert target (auto card → photo post), and the one-post-per-workout
+  // rule is what governs it. Asserted by the error's NAME — reaching the
+  // buddy guard would say `buddy_walk_already_posted` and send this user off
+  // to add a photo to their own card, which has no coauthor row for them.
+  const ownSameWorkout = await tryPost(AUTHOR, `grp-w-${AUTHOR}`);
+  check(
+    "...while the same workout is still judged by the per-workout rule",
+    ownSameWorkout?.message,
+    "workout_already_posted",
+  );
+  await db.query(`DELETE FROM workouts WHERE workout_id = 'grp-w-host-leg2'`);
+
   // A story-only share is not the walk's feed card and must stay allowed.
   const storyOnly = await tryPost(PAL, `grp-w-${PAL}`, {
     shareToFeed: false,

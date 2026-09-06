@@ -183,7 +183,13 @@ class APIClient {
             // and the `error` string it matches on is unchanged.
             if let detail = try? JSONDecoder().decode(ConflictEnvelope.self, from: data),
                detail.reason == "buddy_walk_already_posted" {
-                throw APIError.buddyWalkAlreadyPosted(postId: detail.post_id)
+                throw APIError.buddyWalkAlreadyPosted(
+                    postId: detail.post_id,
+                    // Absent on the deploy that shipped `reason` without it —
+                    // false is the older behaviour (somebody else's card),
+                    // which is also the far more common one.
+                    mine: detail.mine ?? false
+                )
             }
             throw APIError.conflict(extractErrorMessage(from: data) ?? "Conflict")
         case 410:
@@ -273,7 +279,7 @@ enum APIError: LocalizedError {
     /// is on a buddy walk that is already on the feed. Carries that post so
     /// the caller can offer to add a photo to it — the generic `.conflict`
     /// copy tells this user to delete a post they do not have.
-    case buddyWalkAlreadyPosted(postId: String?)
+    case buddyWalkAlreadyPosted(postId: String?, mine: Bool)
     case rateLimited(String)
     /// HTTP 410 — the resource existed but is permanently gone (e.g. an expired
     /// pending notification past its same-day window). Terminal; don't retry.
@@ -344,6 +350,11 @@ private struct ErrorEnvelope: Decodable {
 private struct ConflictEnvelope: Decodable {
     let reason: String?
     let post_id: String?
+    /// The existing card is the CALLER's own — a second leg of a walk they
+    /// already posted. They cannot add a crew slide to it, so the app must
+    /// say "already shared" rather than offer a handoff the server would
+    /// refuse.
+    let mine: Bool?
 }
 
 private func extractErrorMessage(from data: Data) -> String? {

@@ -436,6 +436,11 @@ export async function createPostController(
         reason: "buddy_walk_already_posted",
         post_id: error.postId ?? null,
         buddy_session_id: error.buddySessionId ?? null,
+        // True when the card is the caller's own (a second leg of a walk they
+        // already posted). They cannot add a crew slide to it — the author
+        // has no `post_coauthors` row — so the app must say "already shared"
+        // rather than offer a handoff that would 400.
+        mine: error.mine === true,
       });
     }
     // Coauthor must be an accepted friend with no blocks either way.
