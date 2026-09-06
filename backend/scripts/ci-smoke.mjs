@@ -2504,5 +2504,78 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
   await db.query(`DELETE FROM workouts WHERE workout_id = $1`, [AUTO_W]);
 }
 
+// ── moving_seconds only divides a pace when it COVERED the workout ──────────
+// `moving_seconds` is the display-pace divisor. A moving clock that witnessed
+// a fraction of the session (thin GPS, a locked phone's batched fixes, a
+// pre-fix build's flat per-segment cap) divides the WHOLE distance by that
+// fraction and prints a pace nobody walked: a 34:18 walk of 1.03 mi came back
+// carrying 523s of moving time, and every surface read "8:25 /mi" directly
+// above splits that said "33:05". Withheld server-side rather than in the app
+// so shipped builds are fixed by the deploy — falling back to elapsed is what
+// they already do for a null.
+{
+  // Two clean days of Bob's own, so each workout is its own day's anchor and
+  // the rollup can't blend the honest clock into the broken one.
+  const taken = new Set(
+    (
+      await db.query(
+        `SELECT DISTINCT local_date::text AS d FROM workouts WHERE user_id = $1`,
+        [BOB],
+      )
+    ).map((r) => r.d),
+  );
+  const freeDays = [];
+  for (let back = 1; freeDays.length < 2 && back < 60; back += 1) {
+    const d = new Date(Date.now() - back * 86400000).toISOString().slice(0, 10);
+    if (!taken.has(d)) freeDays.push(d);
+  }
+  assert.equal(freeDays.length, 2, "two unused days to seed the pace divisor on");
+
+  const at = (id, day, movingSeconds) => ({
+    workoutId: id,
+    distance: 1.0368,
+    localDate: day,
+    date: day,
+    timezoneOffset: 0,
+    workoutType: "walking",
+    deviceEndDate: `${day}T12:00:00Z`,
+    calories: 90,
+    totalDuration: 2058,
+    movingSeconds,
+    source: "healthkit",
+    splits: [],
+  });
+  await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-move-%'`);
+  await uploadWorkouts(BOB, [
+    at("ci-move-honest", freeDays[0], 1900), // a few waits at lights
+    at("ci-move-gap", freeDays[1], 523), // the witness gap that started this
+  ]);
+  // Bob's OWN feed: the camera window holds a fresh workout off other
+  // viewers' feeds, and the owner is exempt from it.
+  const rows = Object.fromEntries(
+    (await getUnifiedFeed(BOB, 200, null))
+      .filter(
+        (r) => r.kind === "workout" && String(r.workout_id).startsWith("ci-move-"),
+      )
+      .map((r) => [r.workout_id, r]),
+  );
+  assert.equal(
+    rows["ci-move-honest"]?.moving_seconds,
+    1900,
+    "a moving clock that covered the workout still divides the pace",
+  );
+  assert.equal(
+    rows["ci-move-gap"]?.moving_seconds,
+    2058,
+    "a moving clock covering a quarter of the workout is replaced by elapsed (523 here is the 8:25 /mi bug)",
+  );
+  assert.equal(
+    rows["ci-move-gap"]?.total_duration,
+    2058,
+    "…and elapsed time itself is untouched — only the divisor was ever in question",
+  );
+  await db.query(`DELETE FROM workouts WHERE workout_id LIKE 'ci-move-%'`);
+}
+
 console.log("ci-smoke: all assertions passed");
 process.exit(0);

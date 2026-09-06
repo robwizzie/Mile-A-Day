@@ -64,7 +64,11 @@ struct RunStatsCardView: View {
                     .shadow(color: accent.opacity(0.5), radius: 14)
                     .padding(.bottom, 8)
 
-                Text(String(format: "%.2f", stats.distance))
+                // Truncated, never rounded — the app's one distance rule
+                // (`milesFloor2`). `%.2f` printed a 1.0368-mile walk as
+                // "1.04" beside a header and a splits sheet that both said
+                // "1.03", so one card reported two distances.
+                Text(stats.distance.milesText)
                     .font(.system(size: 104, weight: .black, design: .rounded))
                     .foregroundColor(.white)
                     .monospacedDigit()
@@ -198,7 +202,9 @@ struct RouteStatsOverlayView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text(String(format: "%.2f", stats.distance))
+                    // Floor, like every other distance on the card — see the
+                    // stats card above.
+                    Text(stats.distance.milesText)
                         .font(.system(size: 48, weight: .black, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(.white)

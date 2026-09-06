@@ -101,6 +101,12 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// cap. A segment implying more is a multipath jump/GPS re-lock: accept
     /// the new position, never the jump.
     private static let maxPlausibleSpeed: Double = 12
+    /// Slowest speed a stretch of ground is assumed to have been covered at
+    /// when deciding how much TIME it was worth (m/s; 0.4 ~= 67 min/mile).
+    /// This is what bounds a witness GAP: an anchor held through a coffee
+    /// stop resumes with one segment whose `dt` is the whole stop, and only
+    /// the walking part of it may be credited.
+    private static let slowestOnFootSpeed: Double = 0.4
 
     /// OUTDOOR pedometer odometer: the phone's per-user-calibrated pedometer
     /// distance across this tracking session (miles) — the same estimator
@@ -130,9 +136,15 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     private var trackingStartedAt: Date?
     /// Seconds of witnessed movement this session — the DISPLAY-pace divisor
     /// (elapsed time stays the truth for records; a race clock doesn't
-    /// pause). Sum of accepted segments' dt, capped per segment so a red
-    /// light waited out at a held anchor doesn't ride in on the resume fix.
+    /// pause). Credited by `creditMovingTime`, which BOTH instruments feed:
+    /// the number it divides is `liveDistance`, and that is the max of the
+    /// GPS and pedometer spans, so a clock watching only one of them reports
+    /// a pace for ground the other one measured.
     private(set) var movingSeconds: TimeInterval = 0
+    /// The instant `movingSeconds` has already been credited through — the
+    /// one thing keeping two instruments from counting the same seconds
+    /// twice (they witness the same walk, a few seconds apart).
+    private var movingCreditedThrough: Date?
     /// When distance last accrued — one of the auto-pause evidence sources.
     private var lastAccrualAt: Date?
     /// Last fix whose VALID doppler cleared the stationary bar while not
@@ -428,6 +440,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         pedometerErrored = false
         trackingStartedAt = Date()
         movingSeconds = 0
+        movingCreditedThrough = nil
         effortCurve = [(0, initialDistance)]
         lastEffortSample = (0, initialDistance)
         lastAccrualAt = nil
@@ -773,8 +786,18 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // ≥ ~2 m of new step distance = the walker is actually
         // stepping right now. Feeds stepsCorroborateMovement.
         if miles - lastPedometerProgressMiles >= 0.0012 {
+            let stepped = miles - lastPedometerProgressMiles
+            let since = lastPedometerProgressAt ?? trackingStartedAt ?? Date()
             lastPedometerProgressMiles = miles
             lastPedometerProgressAt = Date()
+            // Steps are the other half of the moving clock. `liveDistance`
+            // is max(GPS span, pedometer span), so on the walks where the
+            // pedometer wins — thin GPS, tree cover, a pocketed phone — the
+            // distance was credited by an instrument the clock never
+            // watched, and the pace it printed was for a walk nobody timed.
+            // Deduped against the GPS side by the shared watermark, so the
+            // two witnessing the same stretch credit it once.
+            creditMovingTime(from: since, to: Date(), metres: stepped * 1609.344)
         }
         // Same rebase as indoors: the raw odometer keeps running through a
         // pause, so paused ground is measured and then subtracted rather than
@@ -1056,6 +1079,29 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         }
     }
 
+    /// Credit the moving clock for a stretch of ground, from whichever
+    /// instrument witnessed it.
+    ///
+    /// Two rules, and both are load-bearing:
+    ///  - Never twice. `movingCreditedThrough` is the watermark both callers
+    ///    share, so a fix and a step batch covering the same seconds credit
+    ///    them once — the clock is a union of movement evidence, not a sum.
+    ///  - Never more than the ground can account for. A witness gap (held
+    ///    anchor, batched delivery, a stop) arrives as one segment with a
+    ///    long `dt`, and only `metres / slowestOnFootSpeed` of it was walked.
+    ///
+    /// Paused time is not movement, and `pause()` already blocks accrual —
+    /// the guard is here too because the pedometer keeps reporting through a
+    /// pause by design.
+    private func creditMovingTime(from start: Date, to end: Date, metres: Double) {
+        guard !isPaused, metres > 0 else { return }
+        let from = max(start, movingCreditedThrough ?? start)
+        defer { movingCreditedThrough = max(movingCreditedThrough ?? end, end) }
+        let span = end.timeIntervalSince(from)
+        guard span > 0 else { return }
+        movingSeconds += min(span, metres / Self.slowestOnFootSpeed)
+    }
+
     /// Add a fix's contribution to `currentDistance` — with the noise floor
     /// raw delta-summing lacked. Distance is a sum of segment lengths, so GPS
     /// jitter only ever ADDS (it never averages out); un-floored accrual is
@@ -1110,11 +1156,16 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         let distanceInMiles = meters * 0.000621371
         // Backstop against anything the speed cap missed (e.g. huge dt gaps).
         if distanceInMiles < 0.1 {
-            // Per-segment dt cap: accepted segments arrive every ~6-21s while
-            // walking, so 20s covers them — but a resume fix after a held-
-            // anchor wait (red light) can't ride the whole wait in as
-            // "moving".
-            movingSeconds += min(max(dt, 0), 20)
+            // The segment's OWN ground decides how much of its dt was walked
+            // — the same rule the distance side already follows. A flat 20s
+            // cap lived here, and it was only ever right for the dense-fix
+            // case: fixes arrive in batches on a locked phone and thin out
+            // to nothing in an urban canyon, so one accepted segment can
+            // cover minutes and hundreds of metres. It credited every one of
+            // those metres and 20 seconds, which is how a 34-minute walk
+            // reported 8 minutes of moving time and printed an 8:25 /mi
+            // pace on a card whose own splits said 33:05.
+            creditMovingTime(from: anchor.timestamp, to: newLocation.timestamp, metres: meters)
             lastAccrualAt = Date()
             DispatchQueue.main.async {
                 self.currentDistance += distanceInMiles

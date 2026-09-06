@@ -164,13 +164,14 @@ enum RunPostService {
     }
 
     /// Display-pace divisor: the tracker's recorded moving time when this
-    /// workout carries it (in-app tracked; clamped to elapsed), else elapsed.
+    /// workout carries it AND that clock actually covered the workout, else
+    /// elapsed — `DisplayPace` owns the rule, since the wire-fed surfaces
+    /// (raw workout cards, the flyover) have to apply the identical one to
+    /// the same workout.
     private static func paceDuration(of workout: HKWorkout) -> TimeInterval {
-        if let moving = workout.metadata?[WorkoutLocationManager.movingSecondsMetadataKey] as? Double,
-           moving > 0, moving <= workout.duration {
-            return moving
-        }
-        return workout.duration
+        let moving = workout.metadata?[WorkoutLocationManager.movingSecondsMetadataKey] as? Double
+        return DisplayPace.divisor(movingSeconds: moving, elapsedSeconds: workout.duration)
+            ?? workout.duration
     }
 
     /// The ghost WIN stamped on this workout, if it beat its ghost.
@@ -187,11 +188,17 @@ enum RunPostService {
         return (margin, target)
     }
 
+    /// The divisor has already been chosen by `paceDuration`; this is only
+    /// the plausibility band, which lives in `DisplayPace` because it ends at
+    /// 60 min/mile now — it used to end at 30 and dropped the pace off every
+    /// card belonging to a walk slower than that, which is a great many of
+    /// them.
     private static func workoutPaceSecondsPerMile(distance: Double, duration: TimeInterval) -> TimeInterval? {
-        guard distance > 0, duration > 0 else { return nil }
-        let paceMinutes = (duration / 60.0) / distance
-        guard paceMinutes >= 2.0, paceMinutes <= 30.0 else { return nil }
-        return duration / distance
+        DisplayPace.secondsPerMile(
+            distanceMiles: distance,
+            movingSeconds: nil,
+            elapsedSeconds: duration
+        )
     }
 
     /// Internal (not private): CalorieLedger counts treats with the same

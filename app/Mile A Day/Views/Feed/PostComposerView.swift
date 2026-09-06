@@ -50,7 +50,7 @@ struct RunStatsInput: Equatable {
     func datum(for kind: RunStatKind) -> RunStatDatum? {
         switch kind {
         case .distance:
-            let miles = String(format: "%.2f", distance)
+            let miles = distance.milesText
             return RunStatDatum(kind: .distance, value: isExtra ? "+\(miles) mi" : "\(miles) mi")
         case .pace:
             guard let p = paceSecondsPerMile, p > 0 else { return nil }
