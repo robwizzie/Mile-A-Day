@@ -321,7 +321,9 @@ private struct ChipView: View {
             HStack(spacing: 7) {
                 Image(systemName: option.icon)
                     .font(.system(size: 13, weight: .bold))
-                Text(option.label)
+                // The label is data (a catalog entry), so it's looked up as a
+                // key explicitly — `Text(String)` never localizes.
+                Text(LocalizedStringKey(option.label))
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
             }
             .foregroundColor(isSelected ? .white : .white.opacity(0.8))
