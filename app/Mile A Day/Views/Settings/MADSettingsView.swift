@@ -423,6 +423,14 @@ struct MADSettingsView: View {
         }
     }
 
+    /// "Español · change in iOS Settings" — the language the app is
+    /// currently running in, named in that language.
+    private var languageSubtitle: String {
+        let code = Locale.current.language.languageCode?.identifier ?? "en"
+        let name = Locale.current.localizedString(forLanguageCode: code)?.capitalized ?? "English"
+        return "\(name) · \(String(localized: "change in iOS Settings"))"
+    }
+
     /// The row says what's wrong before you tap it, so a broken permission is
     /// visible from the settings list itself and not one screen deeper.
     private var healthAccessSubtitle: String {
@@ -469,6 +477,26 @@ struct MADSettingsView: View {
                     title: "App Tour",
                     subtitle: "Take a guided walkthrough of the app",
                     iconColor: MADTheme.Colors.madRed
+                )
+            }
+            .buttonStyle(.plain)
+
+            divider
+
+            // The app follows the device language; iOS lets a user pick a
+            // different one PER APP once the app ships more than one
+            // localization, and that switch lives on the app's own page in
+            // Settings — the one place we can send them.
+            Button {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                MADSettingsRow(
+                    icon: "globe",
+                    title: "Language",
+                    subtitle: languageSubtitle,
+                    iconColor: .blue
                 )
             }
             .buttonStyle(.plain)
@@ -545,7 +573,7 @@ struct MADSettingsView: View {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(iconColor)
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .font(.system(size: 11, weight: .heavy, design: .rounded))
                     .tracking(1.2)
                     .foregroundColor(.secondary)
