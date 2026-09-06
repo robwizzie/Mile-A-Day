@@ -12,8 +12,14 @@
 // offenders, and what each would become. Pass --apply to write, which is the
 // only mode that touches a row.
 //
-//   node scripts/backfill-post-pace.mjs            # count + sample, writes nothing
-//   node scripts/backfill-post-pace.mjs --apply    # perform the rewrite
+//   node scripts/backfill-post-pace.mjs                    # count + sample, writes nothing
+//   node scripts/backfill-post-pace.mjs --apply            # perform the rewrite
+//   node scripts/backfill-post-pace.mjs --rollback <file>  # put every one back
+//
+// `--apply` writes the pre-change value of every row it is about to touch to a
+// JSON file FIRST and prints the path. That file is the undo: these are user
+// records of their own walks, and a rewrite with no way back is not a rewrite
+// anyone should run against production.
 //
 // The predicate is deliberately narrow, because a stats_snapshot is a user's
 // own record of their walk and a wrong "fix" is worse than the bug:
@@ -36,6 +42,22 @@ const { PostgresService } = await import("../dist/services/DbService.js");
 const db = PostgresService.getInstance();
 
 const APPLY = process.argv.includes("--apply");
+const ROLLBACK_AT = process.argv.indexOf("--rollback");
+const ROLLBACK_FILE = ROLLBACK_AT === -1 ? null : process.argv[ROLLBACK_AT + 1];
+
+if (ROLLBACK_FILE) {
+  const { readFileSync } = await import("node:fs");
+  const saved = JSON.parse(readFileSync(ROLLBACK_FILE, "utf8"));
+  for (const row of saved) {
+    // Restores the exact prior snapshot, including one that had no pace key.
+    await db.query(
+      `UPDATE posts SET stats_snapshot = $2::jsonb WHERE post_id = $1::uuid`,
+      [row.postId, JSON.stringify(row.snapshot)],
+    );
+  }
+  console.log(`rolled back ${saved.length} post(s) from ${ROLLBACK_FILE}`);
+  process.exit(0);
+}
 
 // Mirrors DisplayPace.fastest/slowestPlausibleSecondsPerMile (iOS).
 const FASTEST = 120;
@@ -50,6 +72,7 @@ const CANDIDATES = `
     p.user_id,
     (p.stats_snapshot->>'pace')::double precision      AS pace,
     (p.stats_snapshot->>'distance')::double precision  AS snap_distance,
+    p.stats_snapshot                                   AS snapshot,
     w.total_duration,
     w.moving_seconds,
     w.distance                                         AS workout_distance
@@ -95,6 +118,8 @@ for (const r of rows) {
     was: pace,
     becomes: honest >= FASTEST && honest <= SLOWEST ? honest : null,
     coverage: moving / elapsed,
+    // The whole prior snapshot, so a rollback restores it byte for byte.
+    snapshot: r.snapshot,
   });
 }
 
@@ -128,6 +153,20 @@ if (affected.length === 0) {
   console.log(`\nnothing to do.`);
   process.exit(0);
 }
+
+// The undo file comes FIRST — before a single row is touched.
+const { writeFileSync } = await import("node:fs");
+const undoPath = `post-pace-backfill-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+writeFileSync(
+  undoPath,
+  JSON.stringify(
+    affected.map((a) => ({ postId: a.postId, snapshot: a.snapshot })),
+    null,
+    1,
+  ),
+);
+console.log(`\nundo file written: ${undoPath}`);
+console.log(`   (node scripts/backfill-post-pace.mjs --rollback ${undoPath})`);
 
 let rewritten = 0;
 let dropped = 0;
