@@ -18,7 +18,7 @@ struct WorkoutsView: View {
     /// the header would keep the old number until something else moved.
     @ObservedObject private var dedupOverrides = WorkoutDedupOverrides.shared
 
-    private enum Mode: Hashable { case calendar, list, trends }
+    private enum Mode: Hashable { case calendar, list, trends, routes }
     @State private var mode: Mode = .calendar
     @State private var month: Date = Date()
     @State private var selectedDay: Date?
@@ -44,10 +44,15 @@ struct WorkoutsView: View {
                 // more than a phone screen holds, and 24pt gutters between three
                 // cards were spending 48 of those points on air.
                 VStack(spacing: MADTheme.Spacing.md) {
+                    // Four segments fit: the longest label is "Calendar",
+                    // and a segmented control sizes to its widest, so the row
+                    // is 4 × "Calendar" wide at worst. Calendar / List /
+                    // Trends slice history by TIME; Routes slices it by PLACE.
                     Picker("View", selection: $mode) {
                         Text("Calendar").tag(Mode.calendar)
                         Text("List").tag(Mode.list)
                         Text("Trends").tag(Mode.trends)
+                        Text("Routes").tag(Mode.routes)
                     }
                     .pickerStyle(.segmented)
 
@@ -57,6 +62,8 @@ struct WorkoutsView: View {
                         selectedDaySection
                     case .list:
                         RecentWorkoutsView(workouts: healthManager.recentWorkouts)
+                    case .routes:
+                        WorkoutRoutesView(healthManager: healthManager)
                     case .trends:
                         // Moved here from the dashboard's old week-view
                         // picker: this week's chart + longer-range trends.
