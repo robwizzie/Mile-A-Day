@@ -69,30 +69,6 @@ struct IndoorCardScaffold<Hero: View>: View {
     private var verb: String { ActivityCardView.verb(workoutType, paceSecondsPerMile: stats.pace) }
     private var distance: Double { max(0, stats.distance ?? 0) }
 
-    /// Clear space kept across the top of the card for the controls its HOST
-    /// overlays ON it: the feed puts the FLYOVER/SPLITS chips in the top-left
-    /// corner and the PHOTO | STATS toggle in the top-right, on the media
-    /// container — which is this card. Without it the SPLITS pill sat directly
-    /// on the activity capsule and a run read "RAN" from underneath it.
-    ///
-    /// Part of the card rather than an inset the host passes, deliberately:
-    /// this same card is also BAKED into an auto post's image
-    /// (`RunPostService.renderStatsCard`), which the feed then draws those very
-    /// chips on top of — so a host-passed inset would be right on the live
-    /// slide and wrong on the baked one, the live-vs-baked drift the
-    /// one-construction rule exists to prevent. The card reserves it always,
-    /// and the few surfaces that draw the poster bare (a pinch-zoom lift, a
-    /// grid thumbnail) just carry a slightly deeper top margin.
-    ///
-    /// The number: the chips are overlaid with 10pt of padding and stand 32pt
-    /// tall (`FlyoverChipButton`'s 22pt play disc plus 5pt above and below —
-    /// the tallest of the three controls), so they end 42pt down. The card's
-    /// own 18pt padding plus this clears them with a 6pt gap.
-    ///
-    /// Computed, not a `static let`: this scaffold is generic over its hero,
-    /// and Swift has no static STORED properties in a generic type.
-    private static var hostControlStrip: CGFloat { 30 }
-
     var body: some View {
         ZStack {
             ArtCanvasBackground(accent: accent)
@@ -131,11 +107,6 @@ struct IndoorCardScaffold<Hero: View>: View {
                             .foregroundColor(.white.opacity(0.55))
                     }
                 }
-                // Below the host's chips, never behind them. On most screens
-                // the Spacers around the hero absorb this and nothing else
-                // moves; only on the smallest does the hero scene itself
-                // compress, which is the one row built with give in it.
-                .padding(.top, Self.hostControlStrip)
 
                 Spacer(minLength: 6)
 
@@ -172,6 +143,21 @@ struct IndoorCardScaffold<Hero: View>: View {
 
                 WorkoutStatTileGrid(stats: stats, accent: accent, maxTiles: 2)
 
+                // The brand row is also the HOST's control row: the feed
+                // overlays its FLYOVER/SPLITS chips leading and its
+                // PHOTO | STATS toggle trailing at this height
+                // (`MediaControlInset`), and a 28pt logo in the middle of a
+                // 4:5 card leaves both ends free — the tile row above clears
+                // their height too, so nothing is reserved for them anywhere
+                // in this layout. Reserving is the CARD's business rather than
+                // an inset the host passes: this same card is baked into an
+                // auto post's image (`RunPostService.renderStatsCard`) and the
+                // feed draws those very chips on the baked copy too, so a
+                // host-passed inset would be right on one and wrong on the
+                // other. They sat in the TOP corners for one build, on the
+                // header row, and clearing them there cost a 30pt strip that
+                // pushed this whole scene down for a pill the card had room
+                // for down here without moving anything.
                 MADLogoMark(size: 28, opacity: 0.9)
                     .padding(.top, 12)
             }

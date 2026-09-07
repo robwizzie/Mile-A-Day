@@ -222,13 +222,19 @@ struct ActivityCardView: View {
         // Overlaid on the container — AFTER the slide's `.instagramZoomable`
         // — or the zoom gesture host eats the chip's taps. SPLITS sits beside
         // FLYOVER on any workout that carries them, indoor or out.
-        .overlay(alignment: .topLeading) {
+        //
+        // The corner follows the face, same rule as the feed card's: the route
+        // slide's baked stats band owns its whole bottom, so its chips stay up
+        // top over bare canvas, while the indoor card wears its activity
+        // capsule and date across its top row and leaves the bottom margin
+        // clear either side of a centred logo.
+        .overlay(alignment: showsIndoorCard ? .bottomLeading : .topLeading) {
             if canPlayFlyover || hasSplits {
                 HStack(spacing: 6) {
                     if canPlayFlyover { flyoverChip }
                     if hasSplits { splitsChip }
                 }
-                .padding(10)
+                .modifier(MediaControlInset(onBottom: showsIndoorCard))
             }
         }
         // On the MEDIA node: the card root owns the flyover cover and the
@@ -243,6 +249,9 @@ struct ActivityCardView: View {
             )
         }
     }
+
+    /// Routeless — the media is the indoor card rather than the route slide.
+    private var showsIndoorCard: Bool { entry.routeCoordinates == nil }
 
     private var splitBars: [WorkoutSplitBar] {
         WorkoutSplitBar.bars(from: entry.splits)

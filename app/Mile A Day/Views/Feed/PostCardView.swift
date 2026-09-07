@@ -574,6 +574,30 @@ struct PostCardView: View {
 
     private var hasFaceToggle: Bool { !photoSlides.isEmpty && mapSlide != nil }
 
+    /// Which edge the host's controls ride: they go where the face on screen
+    /// is EMPTY, and only the route face is empty at the top.
+    ///
+    /// The route slide carries the baked stats band across its whole bottom —
+    /// the distance bottom-left, the brand mark bottom-right — so its controls
+    /// stay in the top corners, over bare canvas. Every other face is the
+    /// other way round: a photo slide badges itself top-left (a crew shot puts
+    /// the walker's NAME there, directly under where the FLYOVER pill used to
+    /// sit) and the indoor card draws its activity capsule and date across its
+    /// own top row, while both leave the bottom margin free either side of a
+    /// centred logo. So on those the controls drop to the bottom — which is
+    /// also the whole reason the indoor card no longer reserves a strip up top
+    /// and pushes its scene down for one.
+    private var controlsOnBottom: Bool { !showingRouteFace }
+
+    /// Whether the page on screen is the route. Clamped: `mediaPage` survives
+    /// a media change under the carousel, so it can point past the last page.
+    private var showingRouteFace: Bool {
+        let pages = mediaPages
+        guard !pages.isEmpty else { return false }
+        if case .route = pages[min(max(0, mediaPage), pages.count - 1)] { return true }
+        return false
+    }
+
     /// "MAP" when there's a route to draw, "STATS" for the indoor card —
     /// never "indoor": routeless can also mean maps switched off.
     private var mapFaceTitle: String {
@@ -606,9 +630,9 @@ struct PostCardView: View {
     }
 
     /// One 4:5 media box: a swipeable carousel of every page (photos first,
-    /// the map last) with the PHOTO | MAP toggle top-right jumping between the
-    /// two faces, and the Flyover chip top-left on every face. Both chips
-    /// are overlaid on this container — i.e. AFTER every slide's
+    /// the map last), the FLYOVER/SPLITS chips leading and the PHOTO | MAP
+    /// toggle trailing, jumping between the two faces. Every one of those is
+    /// overlaid on this container — i.e. AFTER every slide's
     /// `.instagramZoomable` — or the zoom gesture host eats their taps. The
     /// hype burst plays centered over whichever page is showing.
     @ViewBuilder
@@ -631,12 +655,12 @@ struct PostCardView: View {
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
-        .overlay(alignment: .topTrailing) {
+        .overlay(alignment: controlsOnBottom ? .bottomTrailing : .topTrailing) {
             if hasFaceToggle {
-                faceToggle.padding(10)
+                faceToggle.modifier(MediaControlInset(onBottom: controlsOnBottom))
             }
         }
-        .overlay(alignment: .topLeading) {
+        .overlay(alignment: controlsOnBottom ? .bottomLeading : .topLeading) {
             // On EVERY face, not just the map: the flight doesn't need the map
             // showing to launch, and the chip is how people learn it exists.
             // SPLITS sits beside it — the detail behind the numbers, on any
@@ -646,7 +670,7 @@ struct PostCardView: View {
                     if canPlayFlyover { flyoverChip }
                     if hasSplits { splitsChip }
                 }
-                .padding(10)
+                .modifier(MediaControlInset(onBottom: controlsOnBottom))
             }
         }
         .overlay(HypeBurstView(trigger: hypeBurst))
@@ -1205,6 +1229,24 @@ struct PostCardView: View {
         formatter.dateFormat = "MMM d, yyyy · h:mm a"
         return formatter
     }()
+}
+
+/// Where a host control sits in the 4:5 media box, top corner or bottom.
+///
+/// One modifier because two hosts overlay the same three controls (the feed
+/// card and the raw workout card) and the bottom number is not the top one: a
+/// control 10pt off the bottom edge lands under the brand mark and in the
+/// paging dots, while 32pt puts its centre on the logo's own line — the 18pt
+/// the indoor card pads with, plus the 16 it holds back for the dots, plus half
+/// of the 28pt logo, less half the control. The two read as one row.
+struct MediaControlInset: ViewModifier {
+    let onBottom: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .padding(10)
+            .padding(.bottom, onBottom ? 22 : 0)
+    }
 }
 
 /// One 4:5 media slide with cached loading and Instagram pinch-zoom. The
