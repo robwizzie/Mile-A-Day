@@ -18,7 +18,7 @@ struct WorkoutsView: View {
     /// the header would keep the old number until something else moved.
     @ObservedObject private var dedupOverrides = WorkoutDedupOverrides.shared
 
-    private enum Mode: Hashable { case calendar, list, trends }
+    private enum Mode: Hashable { case calendar, list, trends, routes }
     @State private var mode: Mode = .calendar
     @State private var month: Date = Date()
     @State private var selectedDay: Date?
@@ -44,10 +44,15 @@ struct WorkoutsView: View {
                 // more than a phone screen holds, and 24pt gutters between three
                 // cards were spending 48 of those points on air.
                 VStack(spacing: MADTheme.Spacing.md) {
+                    // Four segments fit: the longest label is "Calendar",
+                    // and a segmented control sizes to its widest, so the row
+                    // is 4 × "Calendar" wide at worst. Calendar / List /
+                    // Trends slice history by TIME; Routes slices it by PLACE.
                     Picker("View", selection: $mode) {
                         Text("Calendar").tag(Mode.calendar)
                         Text("List").tag(Mode.list)
                         Text("Trends").tag(Mode.trends)
+                        Text("Routes").tag(Mode.routes)
                     }
                     .pickerStyle(.segmented)
 
@@ -57,6 +62,8 @@ struct WorkoutsView: View {
                         selectedDaySection
                     case .list:
                         RecentWorkoutsView(workouts: healthManager.recentWorkouts)
+                    case .routes:
+                        WorkoutRoutesView(healthManager: healthManager)
                     case .trends:
                         // Moved here from the dashboard's old week-view
                         // picker: this week's chart + longer-range trends.
@@ -417,10 +424,17 @@ struct WorkoutsView: View {
             }
             .buttonStyle(ScaleButtonStyle())
 
-            if let coords = routesByWorkout[workout.uuid.uuidString] {
-                WorkoutRoutePreviewCard(
+            // A photo alone earns the card too — an indoor walk someone
+            // photographed had nothing to show here before.
+            let coords = routesByWorkout[workout.uuid.uuidString] ?? []
+            let photo = WorkoutMediaPreviewCard.photoURL(
+                for: postsByWorkout[workout.uuid.uuidString]
+            )
+            if coords.count >= 2 || photo != nil {
+                WorkoutMediaPreviewCard(
                     workout: workout,
                     coordinates: coords,
+                    photoURL: photo,
                     onOpen: open
                 )
             }
@@ -534,31 +548,19 @@ struct WorkoutsView: View {
         return ProgressCalculator.isGoalCompleted(current: m, goal: goal) ? .complete : .partial
     }
 
+    /// Same resolution the preview card uses, so a row badged "Photo" always
+    /// has a picture under it.
     private func hasRealPhoto(_ post: PostItem?) -> Bool {
-        guard let post else { return false }
-        if post.storyPhotoURL != nil { return true }
-        return post.is_auto != true && !post.media_url.isEmpty
+        WorkoutMediaPreviewCard.photoURL(for: post) != nil
     }
 
+    /// Three pages here (vs two on the List tab, one on the dashboard peek):
+    /// the calendar reaches further back than the recent list, so it covers a
+    /// bit more history.
     private func loadLinkedPosts() async {
         guard postsByWorkout.isEmpty,
               let uid = UserManager.shared.currentUser.backendUserId else { return }
-        var map: [String: PostItem] = [:]
-        var before: String? = nil
-        // Three pages here (vs two on the dashboard): the calendar reaches
-        // further back than the recent list, so cover a bit more history.
-        for _ in 0..<3 {
-            guard let page = try? await PostService.fetchUserPosts(
-                userId: uid, before: before, includeStories: true
-            ) else { break }
-            for post in page.items {
-                guard let wid = post.workout_id, map[wid] == nil else { continue }
-                map[wid] = post
-            }
-            guard let next = page.next_before else { break }
-            before = next
-        }
-        let resolved = map
+        let resolved = await PostService.fetchOwnPostsByWorkout(userId: uid, pages: 3)
         await MainActor.run { postsByWorkout = resolved }
     }
 

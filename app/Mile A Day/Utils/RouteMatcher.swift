@@ -61,6 +61,7 @@ enum RouteMatcher {
     /// counting a walk that no longer exists there.
     static func invalidateCache() {
         cache = nil
+        libraryCache = nil
         if let url = diskURL {
             try? FileManager.default.removeItem(at: url)
         }
@@ -187,5 +188,114 @@ enum RouteMatcher {
         var count = ids.count
         if !sawSelf { count += 1 }
         return (max(count, 1), ids)
+    }
+
+    // MARK: The library, with its traces
+
+    /// One of the user's stored routes, trace included.
+    struct LibraryRoute {
+        let workoutId: String
+        let coordinates: [CLLocationCoordinate2D]
+    }
+
+    /// Traces are held for the PROCESS only, never on disk.
+    ///
+    /// The signature file above exists because a banner line must not cost a
+    /// download; this is the opposite trade. The payload is the user's entire
+    /// route history (up to 1000 × 300 points) and the only screen that wants
+    /// it is one the user deliberately opened, so it is fetched once per
+    /// launch and kept in memory — writing it to disk would be caching tens of
+    /// megabytes of GPS to save a request nobody makes twice.
+    private static var libraryCache: [LibraryRoute]?
+
+    /// Every route the server holds for this user, traces and all.
+    ///
+    /// Populates the signature cache on the way past: this is the same fetch
+    /// `matchedRouteIds` makes, so a session that opened the Routes tab has
+    /// already paid for every "your Nth time" banner it will draw afterwards.
+    static func library() async -> [LibraryRoute]? {
+        if let libraryCache { return libraryCache }
+        guard let userId = UserDefaults.standard.string(forKey: "backendUserId"),
+              let fetched = try? await APIClient.fancyFetch(
+                  endpoint: "/workouts/\(userId)/routes",
+                  responseType: [OwnRoute].self
+              )
+        else { return nil }
+
+        let routes = fetched.compactMap { entry -> LibraryRoute? in
+            guard let coords = decodeRouteCoordinates(entry.route), coords.count >= 2
+            else { return nil }
+            return LibraryRoute(workoutId: entry.workout_id, coordinates: coords)
+        }
+        libraryCache = routes
+
+        let built = routes.map { ($0.workoutId, signature($0.coordinates)) }
+        cache = CachedSignatures(signatures: built, fetchedAt: Date())
+        saveDiskCache(built)
+        return routes
+    }
+
+    /// The library and its clustering in one call.
+    ///
+    /// `RouteMatcher` is a plain enum with no actor isolation, so an `await`
+    /// on this from the main actor runs BOTH the fetch and the clustering off
+    /// it — which matters, because the clustering is O(routes × distinct
+    /// routes) and a library of a thousand unique walks would otherwise spend
+    /// that on the thread drawing the list.
+    static func groupedLibrary() async -> (routes: [LibraryRoute], groups: [RouteGroup])? {
+        guard let routes = await library() else { return nil }
+        return (routes, groups(in: routes))
+    }
+
+    // MARK: Grouping the library into ROUTES
+
+    /// A set of the user's walks that all followed the same path.
+    struct RouteGroup: Identifiable {
+        /// The leader's workout id — stable across passes because the walk is
+        /// deterministic, so a row keeps its identity between refreshes.
+        let id: String
+        /// Every workout on this route, the leader included.
+        let workoutIds: [String]
+    }
+
+    /// Clusters the library into routes.
+    ///
+    /// Greedy leader assignment, NOT transitive closure: `isMatch` is a
+    /// threshold on overlap, so A~B and B~C does not make A~C, and chaining
+    /// them would let a chain of small detours swallow two genuinely different
+    /// loops into one. Each group is therefore "everything that matches this
+    /// one walk", which is the same question the repeats banner answers — the
+    /// tab and the banner would otherwise disagree about a number they both
+    /// print.
+    ///
+    /// Deterministic: the walk is ordered by workout id, so the leader of a
+    /// group — and hence its identity — is the same on every pass.
+    ///
+    /// Pure and synchronous so the caller decides which thread pays for it;
+    /// it is O(routes × groups), which for a real library is a few hundred set
+    /// intersections and for a pathological one (every walk unique) is the
+    /// square. Call it off the main actor.
+    static func groups(in library: [LibraryRoute]) -> [RouteGroup] {
+        let signed = library
+            .map { (id: $0.workoutId, cells: signature($0.coordinates)) }
+            .filter { !$0.cells.isEmpty }
+            .sorted { $0.id < $1.id }
+
+        var leaders: [(id: String, cells: Set<Int64>)] = []
+        var members: [String: [String]] = [:]
+
+        for route in signed {
+            if let leader = leaders.first(where: { isMatch(route.cells, $0.cells) }) {
+                members[leader.id, default: []].append(route.id)
+            } else {
+                leaders.append(route)
+                members[route.id] = [route.id]
+            }
+        }
+
+        return leaders.compactMap { leader in
+            guard let ids = members[leader.id] else { return nil }
+            return RouteGroup(id: leader.id, workoutIds: ids)
+        }
     }
 }

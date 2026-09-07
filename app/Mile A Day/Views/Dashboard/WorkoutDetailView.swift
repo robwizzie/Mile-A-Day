@@ -32,6 +32,9 @@ struct WorkoutDetailView: View {
     /// "Your 23rd time on this route — 2nd fastest" — RouteMatcher over the
     /// user's own stored routes, ranked by local WorkoutIndex durations.
     @State private var routeStats: RouteMatcher.RouteStats?
+    /// This route's full history, built on demand when the banner is tapped.
+    @State private var routeHistory: RouteSummary?
+    @State private var isLoadingRouteHistory = false
     /// The route card's laid-out size, captured so the art zoom composite can
     /// match its aspect exactly (the map path derives it from the snapshot).
     @State private var routeArtSize: CGSize = .zero
@@ -286,6 +289,12 @@ struct WorkoutDetailView: View {
             } message: {
                 Text(addToFeedError ?? "")
             }
+        }
+        // On the NavigationStack, not the ZStack inside it: that node already
+        // carries two sheets and two alerts, and two presentations raised from
+        // one node drop one (ios.md).
+        .sheet(item: $routeHistory) { summary in
+            RouteDetailView(summary: summary, healthManager: healthManager)
         }
     }
 
@@ -921,16 +930,7 @@ struct WorkoutDetailView: View {
                 // local index can time the repeats. A first time needs no
                 // banner; a fastest-yet earns the trophy.
                 if let stats = routeStats, stats.count >= 2 {
-                    HStack(spacing: 6) {
-                        let isPR = stats.rank == 1 && stats.ranked >= 2
-                        Image(systemName: isPR ? "trophy.fill" : "arrow.triangle.2.circlepath")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(isPR
-                                ? Color(red: 1.0, green: 0.84, blue: 0.35) : workoutColor)
-                        Text(routeStatsText(stats))
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.75))
-                    }
+                    routeRepeatsBanner(stats)
                 }
 
                 // Retroactive Stealth for this one walk. Disappears once hidden
@@ -995,6 +995,114 @@ struct WorkoutDetailView: View {
                 officialDistanceMiles: distanceMiles
             )
         }
+    }
+
+    /// The repeats banner — a BUTTON, and it has to look like one.
+    ///
+    /// "Your 6th time on this route" was a dead sentence: it raised exactly one
+    /// question ("so what were the other five?") and answered nothing. It opens
+    /// the route's own screen now, the same one the Routes tab's rows open, so
+    /// there is one place a route's history lives however you arrive at it.
+    ///
+    /// The chevron and the enclosing pill are the affordance. A tappable line
+    /// of plain text that looks like every other caption on the sheet is a
+    /// feature nobody finds.
+    private func routeRepeatsBanner(_ stats: RouteMatcher.RouteStats) -> some View {
+        let isPR = stats.rank == 1 && stats.ranked >= 2
+        return Button {
+            MADHaptics.tap()
+            Task { await openRouteHistory() }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: isPR ? "trophy.fill" : "arrow.triangle.2.circlepath")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(isPR
+                        ? Color(red: 1.0, green: 0.84, blue: 0.35) : workoutColor)
+                    .accessibilityHidden(true)
+                Text(routeStatsText(stats))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.75))
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 4)
+                if isLoadingRouteHistory {
+                    ProgressView().controlSize(.small).tint(.white)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white.opacity(0.5))
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small,
+                                           style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoadingRouteHistory)
+        .accessibilityHint("Shows every walk on this route")
+    }
+
+    /// Builds this route's summary the same way the Routes tab does, so the
+    /// two screens can't disagree about a number they both print.
+    ///
+    /// Resolved on TAP rather than up front: the library is the user's whole
+    /// route history, and a detail sheet must not pay for that download to
+    /// draw one line. Once the tab (or a previous tap) has fetched it the
+    /// session cache makes this instant.
+    private func openRouteHistory() async {
+        guard let coords = routeCoordinates, coords.count >= 2,
+              !isLoadingRouteHistory else { return }
+        isLoadingRouteHistory = true
+        defer { isLoadingRouteHistory = false }
+
+        guard let bundle = await RouteMatcher.groupedLibrary() else { return }
+        let target = RouteMatcher.signature(coords)
+        let tracesById = Dictionary(
+            bundle.routes.map { ($0.workoutId, $0.coordinates) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        // The group this walk belongs to: its own id when the server already
+        // has it, else the first group whose shape matches — a walk synced
+        // moments ago isn't in the library yet, and "no history" would be the
+        // wrong answer for the one route we KNOW has some.
+        let group = bundle.groups.first(where: { $0.workoutIds.contains(workoutId) })
+            ?? bundle.groups.first(where: { group in
+                guard let coords = tracesById[group.id] else { return false }
+                return RouteMatcher.isMatch(target, RouteMatcher.signature(coords))
+            })
+        guard let group else { return }
+
+        var outings: [RouteOuting] = []
+        var untimed = 0
+        for id in group.workoutIds {
+            guard let record = healthManager.workoutRecord(forUUID: id) else {
+                untimed += 1
+                continue
+            }
+            outings.append(RouteOuting(id: id, date: record.localEndTime,
+                                       distanceMiles: record.distance,
+                                       duration: record.duration))
+        }
+        outings.sort { $0.date > $1.date }
+
+        routeHistory = RouteSummary(
+            id: group.id,
+            // THIS walk's trace, not the group leader's: the sheet was opened
+            // from a specific workout and its map should be that workout's.
+            coordinates: coords,
+            workoutType: workout.workoutActivityType.madTypeKey,
+            outings: outings,
+            untimedCount: untimed
+        )
     }
 
     private func routeStatsText(_ stats: RouteMatcher.RouteStats) -> String {

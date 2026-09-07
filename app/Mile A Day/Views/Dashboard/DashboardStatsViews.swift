@@ -247,10 +247,15 @@ struct RecentWorkoutsView: View {
             }
             .buttonStyle(ScaleButtonStyle())
 
-            if let coords = routesByWorkout[id] {
-                WorkoutRoutePreviewCard(
+            // A photo alone earns the card too — an indoor walk someone
+            // photographed had nothing to show here before.
+            let coords = routesByWorkout[id] ?? []
+            let photo = WorkoutMediaPreviewCard.photoURL(for: postsByWorkout[id])
+            if coords.count >= 2 || photo != nil {
+                WorkoutMediaPreviewCard(
                     workout: workout,
                     coordinates: coords,
+                    photoURL: photo,
                     onOpen: open
                 )
             }
@@ -259,113 +264,172 @@ struct RecentWorkoutsView: View {
         .madLiquidGlass()
     }
 
-    /// A post has a real photo when it carries a story picture or a deliberate
-    /// (non-auto) photo — auto route/stats cards don't count.
+    /// Same resolution the preview card uses, so a row badged "Photo" always
+    /// has a picture under it.
     private func hasRealPhoto(_ post: PostItem?) -> Bool {
-        guard let post else { return false }
-        if post.storyPhotoURL != nil { return true }
-        return post.is_auto != true && !post.media_url.isEmpty
+        WorkoutMediaPreviewCard.photoURL(for: post) != nil
     }
 
     /// One batched pass over the user's own recent posts, keyed by workout, so
-    /// each row can badge a photo AND the detail can show it instantly. Best
-    /// effort — failure leaves badges off and the detail falls back to its own
-    /// fetch.
+    /// each row can badge a photo, preview it, AND hand the detail its picture
+    /// instantly. Two pages (~48 posts) comfortably covers this window.
     private func loadLinkedPosts() async {
         guard postsByWorkout.isEmpty,
               let uid = UserManager.shared.currentUser.backendUserId else { return }
-
-        var map: [String: PostItem] = [:]
-        var before: String? = nil
-        // Two pages (~48 posts) comfortably covers the recent-workouts window.
-        for _ in 0..<2 {
-            guard let page = try? await PostService.fetchUserPosts(
-                userId: uid, before: before, includeStories: true
-            ) else { break }
-            for post in page.items {
-                guard let wid = post.workout_id, map[wid] == nil else { continue }
-                map[wid] = post
-            }
-            guard let next = page.next_before else { break }
-            before = next
-        }
-
-        let resolved = map
+        let resolved = await PostService.fetchOwnPostsByWorkout(userId: uid, pages: 2)
         await MainActor.run { postsByWorkout = resolved }
     }
 }
 
 // MARK: - Recent Workouts Preview (dashboard)
 
-/// Compact dashboard card: a peek at the few most-recent workouts with a
-/// "See All" that PUSHES the full Workouts screen (calendar + history +
-/// swipeable detail) as its own page. Replaces the old buried collapsible list.
+/// Compact dashboard card: a peek at the few most-recent workouts — each with
+/// its map or its photo — and a "See All" that PUSHES the full Workouts screen
+/// (calendar + history + swipeable detail) as its own page.
 ///
 /// The flag is owned by DashboardView so its `navigationDestination` can sit on
 /// the stack root; this card only sets it.
+///
+/// NOT one big Button any more, and that is load-bearing rather than tidiness:
+/// the media card carries the FLYOVER chip, and a Button nested in another
+/// Button's label doesn't reliably get its taps (ios.md). The header and each
+/// row are their own buttons instead, so every part of the card still opens
+/// the Workouts screen exactly as it used to — and the chip on the map now
+/// launches the flight instead of being swallowed.
 struct RecentWorkoutsPreviewCard: View {
     @ObservedObject var healthManager: HealthKitManager
     @Binding var showWorkouts: Bool
 
+    /// workoutId → its GPS trace / its post, read by the HOST for the same
+    /// reason the other two lists do it: a card that draws nothing until its
+    /// own `.task` fills it in never gets one (the EmptyView-lifecycle trap).
+    @State private var routesByWorkout: [String: [CLLocationCoordinate2D]] = [:]
+    @State private var postsByWorkout: [String: PostItem] = [:]
+
     private var preview: [HKWorkout] { Array(healthManager.recentWorkouts.prefix(3)) }
 
+    /// Shorter than the full screen's 150: three maps stacked on a dashboard
+    /// that already carries the hero, the day's cards and the medals is a lot
+    /// of scroll, and this is a peek rather than the history.
+    private static let mapHeight: CGFloat = 120
+
     var body: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            header
+            content
+        }
+        .padding()
+        .cardStyle()
+        .task { await loadLinkedPosts() }
+        // Keyed on the previewed workouts themselves: a sync landing while the
+        // dashboard is open swaps one out, and a fixed key would leave the new
+        // walk mapless until the next launch. Already-read traces cost nothing
+        // (WorkoutRouteCache), so re-running is cheap.
+        .task(id: preview.map { $0.uuid.uuidString }.joined(separator: ",")) {
+            await WorkoutRouteCache.shared.loadTraces(
+                for: preview,
+                using: healthManager
+            ) { id, coords in
+                routesByWorkout[id] = coords
+            }
+        }
+    }
+
+    private var header: some View {
         Button {
             showWorkouts = true
         } label: {
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                HStack {
-                    HStack(spacing: 8) {
-                        Image(systemName: "figure.run")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(MADTheme.Colors.redGradient)
-                        Text("Recent Workouts")
-                            .font(.system(size: 16, weight: .heavy, design: .rounded))
-                            .foregroundColor(.primary)
-                    }
-                    Spacer()
-                    HStack(spacing: 3) {
-                        Text("See All")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .bold))
-                    }
-                    .foregroundColor(MADTheme.Colors.madRed)
+            HStack {
+                HStack(spacing: 8) {
+                    Image(systemName: "figure.run")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(MADTheme.Colors.redGradient)
+                        .accessibilityHidden(true)
+                    Text("Recent Workouts")
+                        .font(.system(size: 16, weight: .heavy, design: .rounded))
+                        .foregroundColor(.primary)
                 }
-
-                if preview.isEmpty {
-                    if healthManager.hasLoadedRecentWorkoutsOnce {
-                        // A successful query genuinely returned nothing.
-                        Text("No recent workouts yet — log a run to see it here.")
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                            .foregroundColor(.secondary)
-                            .padding(.vertical, MADTheme.Spacing.sm)
-                    } else {
-                        // Not loaded yet (or a locked-device query is still
-                        // retrying) — show loading, never the "no workouts" copy,
-                        // which read as "your workouts vanished" on a cold launch.
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
-                            Text("Loading recent workouts…")
-                                .font(.system(size: 13, weight: .medium, design: .rounded))
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, MADTheme.Spacing.sm)
-                    }
-                } else {
-                    VStack(spacing: MADTheme.Spacing.sm) {
-                        ForEach(preview, id: \.uuid) { workout in
-                            WorkoutRow(workout: workout, showDate: true)
-                                .padding(MADTheme.Spacing.sm)
-                                .background(Color.white.opacity(0.04))
-                                .cornerRadius(MADTheme.CornerRadius.medium)
-                        }
-                    }
+                Spacer()
+                HStack(spacing: 3) {
+                    Text("See All")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .accessibilityHidden(true)
                 }
+                .foregroundColor(MADTheme.Colors.madRed)
             }
-            .padding()
-            .cardStyle()
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Recent workouts, see all")
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if preview.isEmpty {
+            if healthManager.hasLoadedRecentWorkoutsOnce {
+                // A successful query genuinely returned nothing.
+                Text("No recent workouts yet — log a run to see it here.")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.secondary)
+                    .padding(.vertical, MADTheme.Spacing.sm)
+            } else {
+                // Not loaded yet (or a locked-device query is still retrying) —
+                // show loading, never the "no workouts" copy, which read as
+                // "your workouts vanished" on a cold launch.
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading recent workouts…")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, MADTheme.Spacing.sm)
+            }
+        } else {
+            VStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(preview, id: \.uuid) { workout in
+                    row(workout)
+                }
+            }
+        }
+    }
+
+    /// One peeked workout: the row, and its media when there is any. A
+    /// function, not inline in the `ForEach` — the same reason the other two
+    /// lists extract theirs, which is that the type-checker gives up otherwise.
+    private func row(_ workout: HKWorkout) -> some View {
+        let id = workout.uuid.uuidString
+        let coords = routesByWorkout[id] ?? []
+        let photo = WorkoutMediaPreviewCard.photoURL(for: postsByWorkout[id])
+        let open = { showWorkouts = true }
+        return VStack(spacing: 8) {
+            Button(action: open) {
+                WorkoutRow(workout: workout, showDate: true, hasPhoto: photo != nil)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if coords.count >= 2 || photo != nil {
+                WorkoutMediaPreviewCard(
+                    workout: workout,
+                    coordinates: coords,
+                    photoURL: photo,
+                    onOpen: open,
+                    height: Self.mapHeight
+                )
+            }
+        }
+        .padding(MADTheme.Spacing.sm)
+        .background(Color.white.opacity(0.04))
+        .cornerRadius(MADTheme.CornerRadius.medium)
+    }
+
+    /// One page is enough for a three-row peek.
+    private func loadLinkedPosts() async {
+        guard postsByWorkout.isEmpty,
+              let uid = UserManager.shared.currentUser.backendUserId else { return }
+        let resolved = await PostService.fetchOwnPostsByWorkout(userId: uid, pages: 1)
+        await MainActor.run { postsByWorkout = resolved }
     }
 }

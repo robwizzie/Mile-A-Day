@@ -41,16 +41,10 @@ struct IndoorTrackCard: View {
                            isIndoor: isIndoor, still: still, revealDuration: runDuration) {
             trackHero
                 // Compressible: on the smallest screens the 4:5 card hasn't
-                // 130pt to spare once the pace wave row AND the scaffold's
-                // host-control strip are present — the stadium scene derives
-                // everything from its geometry, so it shrinks instead of
-                // overflowing the card. The floor came down with the strip:
-                // at 100 a 4:5 box on a 375pt phone was ~7pt short of holding
-                // the column, and a floor that can't be met doesn't compress,
-                // it clips the brand row off the bottom. Roomier screens are
-                // unaffected — the scaffold's Spacers take the slack and the
-                // scene still lays out at its ideal 130.
-                .frame(minHeight: 88, idealHeight: 130, maxHeight: 130)
+                // 130pt to spare once the pace wave row is present — the
+                // stadium scene derives everything from its geometry, so it
+                // shrinks instead of overflowing the card.
+                .frame(minHeight: 100, idealHeight: 130, maxHeight: 130)
         }
         .task { await animateIn() }
         .task(id: avatar?.imageURL) {

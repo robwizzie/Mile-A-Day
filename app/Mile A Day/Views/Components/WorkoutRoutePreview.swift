@@ -1,6 +1,7 @@
 import SwiftUI
 import HealthKit
 import CoreLocation
+import UIKit
 
 /// Session cache of workouts' HealthKit GPS traces, keyed by workout UUID.
 ///
@@ -62,7 +63,8 @@ final class WorkoutRouteCache {
     }
 }
 
-/// A past workout's route, drawn where the workout is LISTED.
+/// A past workout's MEDIA, drawn where the workout is LISTED — its route, its
+/// photo, or both.
 ///
 /// The trace has been on the phone the whole time — HealthKit keeps one for
 /// every outdoor walk, ours or another app's — but the only doors to it were a
@@ -80,16 +82,29 @@ final class WorkoutRouteCache {
 /// Deliberately NOT pinch-zoomable and with no Map/Art toggle: those live one
 /// tap away in the detail sheet, and a zoom host here would eat the flyover
 /// chip's taps and the row's own.
-struct WorkoutRoutePreviewCard: View {
+struct WorkoutMediaPreviewCard: View {
     let workout: HKWorkout
-    let coordinates: [CLLocationCoordinate2D]
-    /// Tapping the map does what tapping the row does. The map is part of the
+    /// Empty (or a single point) when the walk left no trace — the card is
+    /// then photo-only, and draws nothing at all without one either.
+    var coordinates: [CLLocationCoordinate2D] = []
+    /// The photo on this workout's own post, resolved by the HOST through
+    /// `photoURL(for:)` — same one batched lookup that badges the row, so the
+    /// badge and the picture can never disagree.
+    var photoURL: URL? = nil
+    /// Tapping the media does what tapping the row does. The map is part of the
     /// row, and a dead map under a live row reads as a broken card.
     var onOpen: (() -> Void)? = nil
     var height: CGFloat = 150
 
     /// Item-based, per the fullScreenCover rule in ios.md.
     @State private var flyoverLaunch: FlyoverLaunch?
+    /// The map leads when there is one: this card exists because a walk's
+    /// route had nowhere to be seen, and the picture is one tap away behind a
+    /// thumbnail of itself rather than behind a word.
+    @State private var showingPhoto = false
+    /// Shared by the corner thumbnail and the full photo face, so flipping to
+    /// the photo shows the bitmap the thumbnail already loaded.
+    @State private var photo: UIImage?
     /// Splits cost a HealthKit round trip per workout and feed nothing but the
     /// flight's "MILE 2 · 9:41" toasts, so they're read when someone actually
     /// flies rather than for every row that happens to have a route.
@@ -119,23 +134,106 @@ struct WorkoutRoutePreviewCard: View {
         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
     }
 
+    /// A trace worth drawing. One point is a fix, not a route.
+    private var hasRoute: Bool { coordinates.count >= 2 }
+    private var hasPhoto: Bool { photoURL != nil }
+
+    /// Which face is up. The photo wins whenever there is no map to show, so a
+    /// treadmill walk with a picture still gets a card.
+    private var showsPhoto: Bool { hasPhoto && (showingPhoto || !hasRoute) }
+
     var body: some View {
-        mapFace
-            // Overlaid on the map AFTER its own tap target, the same rule the
-            // feed card follows with its zoom host: whatever is added last is
-            // what a tap on the chip actually reaches. The map is one
-            // VoiceOver element by then, so the chip stays its own.
-            .overlay(alignment: .topLeading) {
+        Group {
+            if showsPhoto {
+                photoFace
+            } else if hasRoute {
+                mapFace
+            }
+        }
+        // Overlaid AFTER the face's own tap target, the same rule the feed
+        // card follows with its zoom host: whatever is added last is what a
+        // tap on a chip actually reaches. The face is one VoiceOver element by
+        // then, so each control stays its own.
+        .overlay(alignment: .topLeading) {
+            if !showsPhoto, hasRoute {
                 flyoverChip.padding(10)
             }
-            .overlay(alignment: .topTrailing) {
-                if isStealth {
-                    stealthBadge.padding(10)
+        }
+        .overlay(alignment: .bottomLeading) {
+            // Moved off the top-right corner, which the face switch now owns.
+            if !showsPhoto, hasRoute, isStealth {
+                stealthBadge.padding(10)
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if hasPhoto, hasRoute {
+                faceSwitch.padding(10)
+            }
+        }
+        .fullScreenCover(item: $flyoverLaunch) { launch in
+            RouteFlyoverPlayerView(launch: launch)
+        }
+    }
+
+    /// The other face, in the same corner both ways round.
+    ///
+    /// On the map it is the PHOTO ITSELF at thumbnail size, not a word: the
+    /// picture is the reason to tap, and a card that says "PHOTO" hides the
+    /// very thing it is advertising. Coming back is a labelled pill instead —
+    /// a map thumbnail would mean rendering the route twice for a 52pt square
+    /// nobody is studying.
+    @ViewBuilder
+    private var faceSwitch: some View {
+        Button {
+            MADHaptics.tap()
+            withAnimation(.easeInOut(duration: 0.22)) { showingPhoto.toggle() }
+        } label: {
+            if showingPhoto {
+                HStack(spacing: 4) {
+                    Image(systemName: "map.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .accessibilityHidden(true)
+                    Text("MAP")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .tracking(0.8)
                 }
+                .foregroundColor(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(Color.black.opacity(0.55)))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+                .shadow(color: .black.opacity(0.35), radius: 6, y: 3)
+                .contentShape(Capsule())
+            } else {
+                FeedImageView(url: photoURL, loadedImage: $photo)
+                    .frame(width: 52, height: 52)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.55), lineWidth: 1.5)
+                    )
+                    .shadow(color: .black.opacity(0.45), radius: 6, y: 3)
+                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
-            .fullScreenCover(item: $flyoverLaunch) { launch in
-                RouteFlyoverPlayerView(launch: launch)
-            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(showingPhoto ? "Show route map" : "Show photo")
+    }
+
+    private var photoFace: some View {
+        FeedImageView(url: photoURL, loadedImage: $photo)
+            .frame(height: height)
+            .frame(maxWidth: .infinity)
+            .clipped()
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+            .contentShape(shape)
+            .onTapGesture { onOpen?() }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Workout photo")
+            .accessibilityAddTraits(onOpen == nil ? [] : .isButton)
+            .accessibilityHint(onOpen == nil ? "" : "Opens this workout")
     }
 
     private var mapFace: some View {
@@ -183,6 +281,21 @@ struct WorkoutRoutePreviewCard: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
         .background(Capsule().fill(Color.black.opacity(0.45)))
+    }
+
+    /// The picture to preview for a workout, from its own post.
+    ///
+    /// ONE definition, called by every host: the "Photo" badge on the row and
+    /// the thumbnail on the card were separately derived expressions in two
+    /// list screens each, and a row badged "Photo" over a card with no picture
+    /// (or the reverse) is the kind of disagreement nobody reports and
+    /// everybody notices. An `is_auto` post is excluded on purpose — its media
+    /// IS a rendered route card, so previewing it would draw the map twice.
+    static func photoURL(for post: PostItem?) -> URL? {
+        guard let post else { return nil }
+        if let story = post.storyPhotoURL { return story }
+        guard post.is_auto != true else { return nil }
+        return post.mediaURL
     }
 
     private func prepareAndLaunch() {

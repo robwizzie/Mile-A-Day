@@ -1127,6 +1127,31 @@ enum PostService {
         )
     }
 
+    /// The caller's own recent posts keyed by workout id — the ONE batched
+    /// lookup every past-workout list uses to badge a photo and preview it.
+    ///
+    /// Three screens had grown their own copy of this loop with different page
+    /// counts, which is how the same walk could badge a photo on one list and
+    /// not on another. Best effort by contract: a failed page stops the walk
+    /// and returns what landed, because a missing badge is a smaller wrong
+    /// than an error state on a list of workouts.
+    static func fetchOwnPostsByWorkout(userId: String, pages: Int) async -> [String: PostItem] {
+        var map: [String: PostItem] = [:]
+        var before: String? = nil
+        for _ in 0..<max(1, pages) {
+            guard let page = try? await fetchUserPosts(
+                userId: userId, before: before, includeStories: true
+            ) else { break }
+            for post in page.items {
+                guard let wid = post.workout_id, map[wid] == nil else { continue }
+                map[wid] = post
+            }
+            guard let next = page.next_before else { break }
+            before = next
+        }
+        return map
+    }
+
     /// The caller's own post (feed or story-only) linked to a workout, if any.
     /// Scans the first few pages of own posts — Recent Workouts surfaces
     /// recent runs, so the match is nearly always on page one.
