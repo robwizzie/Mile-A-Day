@@ -105,6 +105,7 @@ struct ActivityCardView: View {
             // hype by accident.
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 media
+                mediaControls
                 // Only when the mile took several goes — a normal single-workout
                 // day renders exactly as it did before.
                 if entry.isStitchedMile, let segments = entry.segments, segments.count > 1 {
@@ -219,24 +220,6 @@ struct ActivityCardView: View {
                 workoutCardSlide
             }
         }
-        // Overlaid on the container — AFTER the slide's `.instagramZoomable`
-        // — or the zoom gesture host eats the chip's taps. SPLITS sits beside
-        // FLYOVER on any workout that carries them, indoor or out.
-        //
-        // The corner follows the face, same rule as the feed card's: the route
-        // slide's baked stats band owns its whole bottom, so its chips stay up
-        // top over bare canvas, while the indoor card wears its activity
-        // capsule and date across its top row and leaves the bottom margin
-        // clear either side of a centred logo.
-        .overlay(alignment: showsIndoorCard ? .bottomLeading : .topLeading) {
-            if canPlayFlyover || hasSplits {
-                HStack(spacing: 6) {
-                    if canPlayFlyover { flyoverChip }
-                    if hasSplits { splitsChip }
-                }
-                .modifier(MediaControlInset(onBottom: showsIndoorCard))
-            }
-        }
         // On the MEDIA node: the card root owns the flyover cover and the
         // share sheet, and two presentations on one node drop one.
         .sheet(isPresented: $showSplits) {
@@ -250,8 +233,20 @@ struct ActivityCardView: View {
         }
     }
 
-    /// Routeless — the media is the indoor card rather than the route slide.
-    private var showsIndoorCard: Bool { entry.routeCoordinates == nil }
+    /// FLYOVER · SPLITS in a row UNDER the media, never on it — one position
+    /// on every card and every face. See `PostCardView.mediaControls`: there
+    /// is no corner of a 4:5 card that is reliably empty, and a chip placed
+    /// per-face both covers something and moves as you swipe.
+    @ViewBuilder
+    private var mediaControls: some View {
+        if canPlayFlyover || hasSplits {
+            HStack(spacing: 8) {
+                if canPlayFlyover { flyoverChip }
+                if hasSplits { splitsChip }
+                Spacer(minLength: 0)
+            }
+        }
+    }
 
     private var splitBars: [WorkoutSplitBar] {
         WorkoutSplitBar.bars(from: entry.splits)

@@ -49,16 +49,48 @@ enum SessionIdentity {
         return tokenUserId != cachedUserId
     }
 
-    /// Signs out if — and only if — the token and the cached id name different
-    /// accounts. Returns `true` when it signed the user out.
+    /// The local user record was LOST rather than never written: a stored blob
+    /// existed and could not be decoded, so `currentUser` is the "You"
+    /// placeholder while real tokens sit in the Keychain.
     ///
-    /// Safe to call often; it's a pure local comparison with no network cost.
+    /// This is a signed-in session wearing a stranger's record. Everything
+    /// read from `currentUser` is wrong in a way nothing surfaces — a streak
+    /// of 0, a 1-mile goal the user never chose, and an auto post whose baked
+    /// route card carries the initials "YO" over their own walk. The id
+    /// comparison above cannot catch it, because the separate `backendUserId`
+    /// key survives and still agrees with the token.
+    ///
+    /// Gated on tokens existing: without them the user is not signed in and
+    /// there is nothing to sign out of. That also makes the pre-first-unlock
+    /// background launch safe — `TokenStore` reads nil there
+    /// (`kSecAttrAccessibleAfterFirstUnlock`), so this fails OPEN, which is
+    /// the direction a false answer should err in.
+    static var hasLostLocalIdentity: Bool {
+        UserManager.shared.restoreFailed && TokenStore.hasTokens
+    }
+
+    /// Signs out when the session can no longer be trusted to name its own
+    /// user: the token and the cached id name different accounts, or the local
+    /// user record was lost. Returns `true` when it signed the user out.
+    ///
+    /// Safe to call often; both checks are local with no network cost.
+    ///
+    /// Signing out rather than re-fetching the profile is the deliberate
+    /// choice: a decode failure means we do not know this person's goal,
+    /// units, privacy settings or streak, and continuing to act as somebody is
+    /// how a wrong avatar got baked into a real post. Signing in again is one
+    /// tap of Sign in with Apple and restores all of it from the server.
     @discardableResult
     @MainActor
     static func enforce() -> Bool {
-        guard isMismatched else { return false }
+        let lostIdentity = hasLostLocalIdentity
+        guard isMismatched || lostIdentity else { return false }
 
-        print("[SessionIdentity] ⚠️ Token subject does not match the cached user id — signing out")
+        if lostIdentity {
+            print("[SessionIdentity] ⚠️ Stored user could not be decoded while tokens exist — signing out")
+        } else {
+            print("[SessionIdentity] ⚠️ Token subject does not match the cached user id — signing out")
+        }
         UserManager.shared.signOut()
         AppStateManager.shared.signOut()
         return true

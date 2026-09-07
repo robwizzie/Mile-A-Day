@@ -476,6 +476,27 @@ enum RunPostService {
 
     // MARK: - Rendering
 
+    /// The rider badge for a baked card, or nil when we cannot say who this
+    /// is.
+    ///
+    /// A placeholder `currentUser` is named "You", and `AvatarView.initials`
+    /// turns that into "YO" — which is how a real account's auto post shipped
+    /// with a stranger's initials riding its route line. `SessionIdentity`
+    /// signs that session out on the next enforce, but a bake can happen in
+    /// the window before it, and an image is permanent once uploaded: it is
+    /// the one artifact of this state that outlives the session.
+    ///
+    /// No badge is the honest render. The card is the walk, not the walker.
+    @MainActor
+    static func bakedAvatar() -> RouteArtAvatar? {
+        let user = UserManager.shared.currentUser
+        guard !UserManager.shared.restoreFailed,
+              let id = user.backendUserId, !id.isEmpty,
+              !user.name.isEmpty
+        else { return nil }
+        return RouteArtAvatar(name: user.name, imageURL: user.profileImageUrl)
+    }
+
     @MainActor
     static func renderStatsCard(stats: RunStatsInput, workoutType: String) -> UIImage? {
         // The routeless bake is the indoor card's still frame (track or
@@ -488,11 +509,10 @@ enum RunPostService {
         // The card lays itself out at design size (360×450) — scale up to the
         // 1080×1350 upload size. Rendering AT 1080 with scale 1 is the classic
         // bug: point sizes become raw pixels and the whole card reads tiny.
-        let user = UserManager.shared.currentUser
         let card = IndoorWorkoutCard(
             stats: stats.snapshot,
             workoutType: workoutType,
-            avatar: RouteArtAvatar(name: user.name, imageURL: user.profileImageUrl),
+            avatar: bakedAvatar(),
             still: true
         )
         .frame(width: RunStatsCardView.designSize.width,
@@ -521,10 +541,11 @@ enum RunPostService {
         // Await the avatar once — this runs at post time, not in a scroll. A
         // miss falls back to initials, so the render is deterministic either
         // way (RouteAvatarBadge never touches AsyncImage).
-        let user = UserManager.shared.currentUser
-        let avatar = RouteArtAvatar(name: user.name, imageURL: user.profileImageUrl)
+        let avatar = bakedAvatar()
         var avatarImages: [String: UIImage] = [:]
-        if let key = user.profileImageUrl,
+        // Flattened deliberately: `avatar?.imageURL` is `String??`, and a
+        // single `if let` would bind a `String?`.
+        if let key = avatar?.imageURL ?? nil,
            let image = await RouteAvatarImageLoader.loadImage(for: key) {
             avatarImages[key] = image
         }

@@ -13,13 +13,45 @@ class UserManager: ObservableObject {
     private let currentUserKey = "currentUser"
     private let friendsKey = "friends"
     
+    /// A stored user existed and could NOT be decoded — this install had an
+    /// account and we have just lost the local copy of it.
+    ///
+    /// Deliberately distinct from a genuine first launch, where there is no
+    /// blob at all and the placeholder below is the correct answer. The two
+    /// were the same `else` branch, so a decode failure was indistinguishable
+    /// from a new install and the app carried on as "You": a shell with no
+    /// `backendUserId`, `authProvider = .guest`, and zeros for the streak,
+    /// lifetime miles and goal.
+    ///
+    /// Nothing noticed, because the tokens live in the Keychain and are read
+    /// separately — so `isAuthenticated` stayed true and the session kept
+    /// working against the server, which identifies the author from the
+    /// token's `sub` rather than from anything the client sends. The visible
+    /// symptom was an auto post whose baked route card wore the initials "YO"
+    /// (`AvatarView.initials(for: "You")`), over a real account's walk.
+    ///
+    /// `SessionIdentity` could not see it either: it compares the token's
+    /// subject against `cachedUserId`, which falls back to the separate
+    /// `backendUserId` UserDefaults key — that key survives, still matches,
+    /// and the mismatch check passes while `currentUser` is a stranger.
+    private(set) var restoreFailed = false
+
     init() {
         // Load or create a new user
-        if let userData = userDefaults.data(forKey: currentUserKey),
-           let decodedUser = try? JSONDecoder().decode(User.self, from: userData) {
-            self.currentUser = decodedUser
+        if let userData = userDefaults.data(forKey: currentUserKey) {
+            if let decodedUser = try? JSONDecoder().decode(User.self, from: userData) {
+                self.currentUser = decodedUser
+            } else {
+                // A blob we wrote and can no longer read. Most likely a schema
+                // break — synthesized `Decodable` ignores property defaults, so
+                // a new NON-Optional stored field throws on every existing
+                // install (the reason every field added to `User` must be
+                // Optional). Whatever the cause, the local record is gone.
+                self.currentUser = User(name: "You")
+                self.restoreFailed = true
+            }
         } else {
-            // Default user
+            // No blob at all: a genuine first launch.
             self.currentUser = User(name: "You")
         }
         
