@@ -1,5 +1,6 @@
 import SwiftUI
 import HealthKit
+import CoreLocation
 import UIKit
 
 /// A dedicated home for a user's runs: a month calendar (completed days lit in
@@ -25,6 +26,12 @@ struct WorkoutsView: View {
     /// workoutId → linked post, batched once so tapping a run shows its photo
     /// instantly and the calendar rows can badge photos.
     @State private var postsByWorkout: [String: PostItem] = [:]
+    /// workoutId → its GPS trace, read from HealthKit for the selected day so
+    /// an outdoor walk shows its map right here — no post, no detour through
+    /// the detail sheet. Loaded by the HOST rather than by each card: a card
+    /// that draws nothing until its own `.task` fills it in never gets one
+    /// (ios.md's EmptyView-lifecycle trap).
+    @State private var routesByWorkout: [String: [CLLocationCoordinate2D]] = [:]
     @State private var didPickDefaultDay = false
 
     private let calendar = Calendar.current
@@ -346,33 +353,81 @@ struct WorkoutsView: View {
                 let covers = breakdown.coveredBy
                 let excluded = breakdown.reasons
                 ForEach(Array(dayWorkouts.enumerated()), id: \.element.uuid) { index, workout in
-                    Button {
-                        selectedWorkout = IdentifiableWorkout(workout: workout)
-                    } label: {
-                        WorkoutRow(
-                            workout: workout,
-                            showDate: false,
-                            hasPhoto: hasRealPhoto(postsByWorkout[workout.uuid.uuidString]),
-                            isCounted: excluded[index] == nil,
-                            // Only label the state on days where it varies —
-                            // "Counted" on every row of every normal day is noise.
-                            showsCountedState: !excluded.isEmpty,
-                            countedInstead: covers[index].map {
-                                WorkoutAttribution.sourceLabel(for: dayWorkouts[$0])
-                            },
-                            exclusionKind: excluded[index]
-                        )
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .madLiquidGlass()
-                    }
-                    .buttonStyle(ScaleButtonStyle())
+                    workoutCard(
+                        workout,
+                        isCounted: excluded[index] == nil,
+                        // Only label the state on days where it varies —
+                        // "Counted" on every row of every normal day is noise.
+                        showsCountedState: !excluded.isEmpty,
+                        countedInstead: covers[index].map {
+                            WorkoutAttribution.sourceLabel(for: dayWorkouts[$0])
+                        },
+                        exclusionKind: excluded[index]
+                    )
                 }
             }
         }
         .padding(.horizontal, MADTheme.Spacing.md)
         .padding(.vertical, 12)
         .cardStyle()
+        // Keyed off `selectedDay` itself, never the `day` fallback above —
+        // that one is `Date()` while nothing is selected, so the key would
+        // change on every body evaluation and cancel-restart the read. The
+        // COUNT rides along because a sync landing while this screen is open
+        // adds a workout to the day being looked at, and a date-only key would
+        // leave that one mapless until the next tap.
+        .task(id: "\(selectedDay?.timeIntervalSince1970 ?? 0)-\(dayWorkouts.count)") {
+            await WorkoutRouteCache.shared.loadTraces(
+                for: dayWorkouts,
+                using: healthManager
+            ) { id, coords in
+                routesByWorkout[id] = coords
+            }
+        }
+    }
+
+    /// One workout on the selected day: the row, and — when the walk left a GPS
+    /// trace — its map, with the flyover on it. Row and map are SIBLINGS inside
+    /// the card rather than one button, because the map carries the FLYOVER
+    /// chip and a button nested in another button's label doesn't reliably get
+    /// its taps.
+    ///
+    /// A function, not inline in the `ForEach`: the day section's body is
+    /// already long enough that the type-checker gives up on it.
+    private func workoutCard(
+        _ workout: HKWorkout,
+        isCounted: Bool,
+        showsCountedState: Bool,
+        countedInstead: String?,
+        exclusionKind: WorkoutDedup.ExclusionReason?
+    ) -> some View {
+        let open = { selectedWorkout = IdentifiableWorkout(workout: workout) }
+        return VStack(spacing: 10) {
+            Button(action: open) {
+                WorkoutRow(
+                    workout: workout,
+                    showDate: false,
+                    hasPhoto: hasRealPhoto(postsByWorkout[workout.uuid.uuidString]),
+                    isCounted: isCounted,
+                    showsCountedState: showsCountedState,
+                    countedInstead: countedInstead,
+                    exclusionKind: exclusionKind
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(ScaleButtonStyle())
+
+            if let coords = routesByWorkout[workout.uuid.uuidString] {
+                WorkoutRoutePreviewCard(
+                    workout: workout,
+                    coordinates: coords,
+                    onOpen: open
+                )
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .madLiquidGlass()
     }
 
     // MARK: - Data

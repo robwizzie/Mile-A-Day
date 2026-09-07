@@ -1,5 +1,6 @@
 import SwiftUI
 import HealthKit
+import CoreLocation
 
 // MARK: - Stats Grid Component with Toggle
 
@@ -106,6 +107,10 @@ struct RecentWorkoutsView: View {
     /// Re-renders the Counted / Not counted chips when the user overrules a
     /// duplicate from the detail sheet.
     @ObservedObject private var dedupOverrides = WorkoutDedupOverrides.shared
+    /// workoutId → its GPS trace, read here rather than by each card: a card
+    /// that renders nothing until its own `.task` fills it in never gets one
+    /// (ios.md's EmptyView-lifecycle trap). Only the visible prefix is read.
+    @State private var routesByWorkout: [String: [CLLocationCoordinate2D]] = [:]
 
     private static let pageSize: Int = 10
 
@@ -167,23 +172,7 @@ struct RecentWorkoutsView: View {
                 let counting = countState
                 LazyVStack(spacing: MADTheme.Spacing.md) {
                     ForEach(workouts.prefix(displayCount), id: \.uuid) { workout in
-                        let id = workout.uuid.uuidString
-                        Button {
-                            selectedWorkout = IdentifiableWorkout(workout: workout)
-                        } label: {
-                            WorkoutRow(
-                                workout: workout,
-                                showDate: true,
-                                hasPhoto: hasRealPhoto(postsByWorkout[id]),
-                                isCounted: counting.reasons[id] == nil,
-                                showsCountedState: counting.labeled.contains(id),
-                                countedInstead: counting.excludedBy[id],
-                                exclusionKind: counting.reasons[id]
-                            )
-                            .padding(MADTheme.Spacing.md)
-                            .madLiquidGlass()
-                        }
-                        .buttonStyle(ScaleButtonStyle())
+                        workoutCard(workout, counting: counting)
                     }
                 }
 
@@ -224,6 +213,50 @@ struct RecentWorkoutsView: View {
         .task {
             await loadLinkedPosts()
         }
+        // Only the rows on screen: "Load More" extends the prefix and re-keys
+        // this, and the cache means the rows already read cost nothing.
+        .task(id: "\(displayCount)-\(workouts.count)") {
+            await WorkoutRouteCache.shared.loadTraces(
+                for: Array(workouts.prefix(displayCount)),
+                using: healthManager
+            ) { id, coords in
+                routesByWorkout[id] = coords
+            }
+        }
+    }
+
+    /// One row of the list: the workout, and — when it left a GPS trace — its
+    /// map, with the flyover on it. Row and map are SIBLINGS inside the card
+    /// rather than one button, because the map carries the FLYOVER chip and a
+    /// button nested in another button's label doesn't reliably get its taps.
+    private func workoutCard(_ workout: HKWorkout, counting: CountState) -> some View {
+        let id = workout.uuid.uuidString
+        let open = { selectedWorkout = IdentifiableWorkout(workout: workout) }
+        return VStack(spacing: 10) {
+            Button(action: open) {
+                WorkoutRow(
+                    workout: workout,
+                    showDate: true,
+                    hasPhoto: hasRealPhoto(postsByWorkout[id]),
+                    isCounted: counting.reasons[id] == nil,
+                    showsCountedState: counting.labeled.contains(id),
+                    countedInstead: counting.excludedBy[id],
+                    exclusionKind: counting.reasons[id]
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(ScaleButtonStyle())
+
+            if let coords = routesByWorkout[id] {
+                WorkoutRoutePreviewCard(
+                    workout: workout,
+                    coordinates: coords,
+                    onOpen: open
+                )
+            }
+        }
+        .padding(MADTheme.Spacing.md)
+        .madLiquidGlass()
     }
 
     /// A post has a real photo when it carries a story picture or a deliberate
