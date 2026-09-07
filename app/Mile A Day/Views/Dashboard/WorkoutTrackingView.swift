@@ -907,6 +907,20 @@ struct WorkoutTrackingView: View {
                 workoutControls
             }
         }
+        // The keyboard must never resize this screen. `GeometryReader` above
+        // reports whatever height it is GIVEN, and SwiftUI hands a view the
+        // screen minus the keyboard's safe-area inset — so a keyboard raised
+        // anywhere before this cover opened (the Friends search, a caption
+        // field) takes ~340pt off `screen.size.height`. Everything here is
+        // derived from that number: the metrics column shrinks, the ring
+        // collapses to its 150pt floor, and `workoutControls` — pinned to the
+        // BOTTOM of a container that now ends halfway up the display — floats
+        // into the middle of the screen on top of the ring, with dead space
+        // beneath it. That is the user-reported shape exactly.
+        //
+        // Nothing on this screen takes text input, so there is no keyboard
+        // avoidance to preserve: the inset is pure loss here.
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .opacity(showCompletion || showPreviousProgress ? 0 : 1)
         .overlay(previousProgressOverlay)
         .overlay(goalCompletionOverlay)

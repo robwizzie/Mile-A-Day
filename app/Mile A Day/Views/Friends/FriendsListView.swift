@@ -860,16 +860,7 @@ struct FriendsListView: View {
                             .foregroundColor(heroHeadlineColor(isComplete: isComplete))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
-                        if streak > 0 {
-                            HStack(spacing: 2) {
-                                Image(systemName: "flame.fill")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(.orange)
-                                Text("\(streak)")
-                                    .font(.system(size: 13, weight: .heavy, design: .rounded))
-                                    .foregroundColor(.orange)
-                            }
-                        }
+                        StreakFlameChip(streak: streak, glyphSize: 11, numberSize: 13)
                     }
 
                     Text(heroSubtitle(isComplete: isComplete))
@@ -1149,6 +1140,14 @@ struct FriendsListView: View {
                             Task { await loadNudgeStatuses() }
                         }
                     )
+                    // Capped, or this pill starves the name beside it. Its
+                    // second line ("2.00 mi further today") is what makes its
+                    // ideal width large, and an HStack splits slack in
+                    // proportion to ideal widths — so the pill took ~40% of
+                    // the row and the name column was left rendering "Aar…".
+                    // The pill's own lines already truncate and scale down, so
+                    // a ceiling costs it nothing it wasn't already spending.
+                    .frame(maxWidth: 150)
                     if !isCompleted {
                         nudgeButton(
                             friend: friend,
@@ -1192,14 +1191,8 @@ struct FriendsListView: View {
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)
-                    if let streak = status?.current_streak, streak > 0 {
-                        HStack(spacing: 2) {
-                            Image(systemName: "flame.fill")
-                                .font(.system(size: 10, weight: .bold))
-                            Text("\(streak)")
-                                .font(.system(size: 11, weight: .heavy, design: .rounded))
-                        }
-                        .foregroundColor(.orange)
+                    if let streak = status?.current_streak {
+                        StreakFlameChip(streak: streak)
                     }
                 }
 
