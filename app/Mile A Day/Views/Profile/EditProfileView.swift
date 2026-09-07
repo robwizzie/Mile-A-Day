@@ -12,7 +12,6 @@ struct EditProfileView: View {
     @State private var pickedImage: UIImage?
     @State private var currentProfileImage: UIImage?
     @State private var showingImagePicker = false
-    @State private var showingCropper = false
     @State private var isSaving = false
     @State private var saveError: String?
 
@@ -130,30 +129,21 @@ struct EditProfileView: View {
                     }
                 }
             }
+            // The cropper is presented BY the picker, not by this view: a
+            // cover attached here can only open once the picker's sheet has
+            // closed, and a closed PHPicker cannot be reopened where it was.
+            // Cancelling the crop used to land back on this screen with the
+            // library's scroll position gone — so trying the next photo meant
+            // scrolling all the way back. `pickedImage` is the CROPPED result
+            // now; nothing arrives here until the user has chosen it.
             .sheet(isPresented: $showingImagePicker) {
-                ImagePicker(selectedImage: $pickedImage)
-            }
-            .fullScreenCover(isPresented: $showingCropper) {
-                if let image = pickedImage {
-                    ProfileImageCropper(
-                        image: image,
-                        onCrop: { cropped in
-                            selectedImage = cropped
-                            currentProfileImage = cropped
-                            showingCropper = false
-                            pickedImage = nil
-                        },
-                        onCancel: {
-                            showingCropper = false
-                            pickedImage = nil
-                        }
-                    )
-                }
+                ImagePicker(selectedImage: $pickedImage, confirmation: .circleCrop)
             }
             .onChange(of: pickedImage) { _, newImage in
-                if newImage != nil {
-                    showingCropper = true
-                }
+                guard let newImage else { return }
+                selectedImage = newImage
+                currentProfileImage = newImage
+                pickedImage = nil
             }
             .onAppear {
                 loadCurrentProfileImage()
@@ -274,7 +264,7 @@ struct EditProfileView: View {
         // Its own node: a second `.sheet` on the chain that already presents
         // the avatar picker would be the one that drops.
         .sheet(isPresented: $showingBannerPicker) {
-            ImagePicker(selectedImage: $pickedBannerImage)
+            ImagePicker(selectedImage: $pickedBannerImage, confirmation: .banner)
         }
         .onChange(of: pickedBannerImage) { _, newImage in
             guard let newImage else { return }

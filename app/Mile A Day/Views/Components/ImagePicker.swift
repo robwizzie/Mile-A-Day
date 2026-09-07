@@ -1,10 +1,31 @@
 import SwiftUI
 import PhotosUI
 import Photos
+import UIKit
 
 struct ImagePicker: UIViewControllerRepresentable {
+    /// What happens between tapping a photo and the picker going away.
+    ///
+    /// The reason this lives INSIDE the picker: a confirmation presented by
+    /// the caller can only appear once the picker has been dismissed, and a
+    /// dismissed `PHPickerViewController` is gone for good — it runs
+    /// out-of-process and there is no API to reopen one where it was. So
+    /// "that's not the one" cost the user their place in their own library
+    /// and dropped them back on the edit screen. Presented over the picker
+    /// instead, backing out dismisses only the confirmation: the library
+    /// underneath is the SAME instance, still scrolled exactly where they
+    /// left it, ready for the next photo.
+    enum Confirmation: Equatable {
+        /// Report the pick immediately and close. The picker is a one-shot.
+        case immediate
+        /// Circular crop editor, for an avatar.
+        case circleCrop
+        /// Preview at the shape the banner is actually stored in.
+        case banner
+    }
+
     @Binding var selectedImage: UIImage?
-    @Environment(\.presentationMode) var presentationMode
+    var confirmation: Confirmation = .immediate
 
     func makeUIViewController(context: Context) -> PHPickerViewController {
         var configuration = PHPickerConfiguration()
@@ -16,31 +37,114 @@ struct ImagePicker: UIViewControllerRepresentable {
         return picker
     }
 
-    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {
+        // The coordinator is built once and outlives every re-render, so it
+        // must be handed the current struct or it writes through a binding
+        // from the first one.
+        context.coordinator.parent = self
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
 
     class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        let parent: ImagePicker
+        var parent: ImagePicker
+        /// A pick is on screen being confirmed. `PHPickerViewController` stays
+        /// live underneath and keeps delivering taps, so without this a tap
+        /// landing behind the confirmation would stack a second one.
+        private var isConfirming = false
 
         init(_ parent: ImagePicker) {
             self.parent = parent
         }
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-            picker.dismiss(animated: true)
+            guard let provider = results.first?.itemProvider else {
+                // Empty results is the picker's own Cancel button. Nothing was
+                // chosen, so the whole thing goes.
+                dismissEverything(from: picker)
+                return
+            }
 
-            guard let provider = results.first?.itemProvider else { return }
-
-            if provider.canLoadObject(ofClass: UIImage.self) {
-                provider.loadObject(ofClass: UIImage.self) { image, _ in
-                    guard let image = image as? UIImage else { return }
-                    DispatchQueue.main.async {
-                        self.parent.selectedImage = image
+            guard parent.confirmation != .immediate else {
+                // Unconfirmed callers keep the original one-shot behaviour.
+                picker.dismiss(animated: true)
+                if provider.canLoadObject(ofClass: UIImage.self) {
+                    provider.loadObject(ofClass: UIImage.self) { image, _ in
+                        guard let image = image as? UIImage else { return }
+                        DispatchQueue.main.async {
+                            self.parent.selectedImage = image
+                        }
                     }
                 }
+                return
+            }
+
+            guard !isConfirming, provider.canLoadObject(ofClass: UIImage.self) else { return }
+            isConfirming = true
+            // Deliberately NOT dismissed — see `Confirmation`.
+            provider.loadObject(ofClass: UIImage.self) { [weak picker] image, _ in
+                DispatchQueue.main.async {
+                    guard let picker, let image = image as? UIImage else {
+                        self.isConfirming = false
+                        return
+                    }
+                    self.presentConfirmation(over: picker, image: image)
+                }
+            }
+        }
+
+        /// Puts the confirmation on top of the live picker.
+        private func presentConfirmation(over picker: PHPickerViewController, image: UIImage) {
+            let use: (UIImage) -> Void = { [weak picker] chosen in
+                self.isConfirming = false
+                self.parent.selectedImage = chosen
+                guard let picker else { return }
+                // Dismissing the picker carries the confirmation sitting on it
+                // away too, so the stack closes in one animation.
+                self.dismissEverything(from: picker)
+            }
+            let cancel: () -> Void = { [weak picker] in
+                self.isConfirming = false
+                // ONLY the confirmation. Everything below it is untouched.
+                picker?.presentedViewController?.dismiss(animated: true)
+            }
+
+            let host: UIViewController
+            switch parent.confirmation {
+            case .immediate:
+                return
+            case .circleCrop:
+                host = UIHostingController(
+                    rootView: ProfileImageCropper(image: image, onCrop: use, onCancel: cancel)
+                )
+            case .banner:
+                host = UIHostingController(
+                    rootView: BannerPhotoConfirmView(
+                        image: image,
+                        onUse: { use(image) },
+                        onCancel: cancel
+                    )
+                )
+            }
+            host.modalPresentationStyle = .fullScreen
+            picker.present(host, animated: true)
+        }
+
+        /// Closes the picker and anything presented over it.
+        ///
+        /// `picker.dismiss` would dismiss the CONFIRMATION when one is up
+        /// (a view controller's `dismiss` acts on what it presented), which is
+        /// the opposite of what this means. Going through the presenter is
+        /// unambiguous in both states.
+        private func dismissEverything(from picker: PHPickerViewController) {
+            // Falling back to the picker itself matters: a sheet that fails to
+            // close is the worst outcome this file can produce.
+            if let presenter = picker.presentingViewController {
+                presenter.dismiss(animated: true)
+            } else {
+                picker.dismiss(animated: true)
             }
         }
     }
@@ -264,6 +368,86 @@ struct ProfileImageCropper: View {
         }
 
         onCrop(resized)
+    }
+}
+
+// MARK: - Banner Photo Confirmation
+
+/// The banner's "is this the one?" step.
+///
+/// The banner has no crop editor because the server does the cropping —
+/// `POST /users/:id/banner/upload` runs a 1500x500 sharp COVER — so the one
+/// thing this has to do is show that shape honestly, at the same
+/// `scaledToFill` the profile draws it with. Its real job is being a step at
+/// all: without one, a picked photo committed itself the instant it was
+/// tapped, and changing your mind meant reopening the library from the top.
+struct BannerPhotoConfirmView: View {
+    let image: UIImage
+    let onUse: () -> Void
+    let onCancel: () -> Void
+
+    /// 1500x500 — the stored banner, so what is framed here is what is kept.
+    private let bannerAspect: CGFloat = 3
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                VStack(spacing: MADTheme.Spacing.lg) {
+                    Spacer(minLength: 0)
+
+                    Color.clear
+                        .overlay {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                        }
+                        .clipped()
+                        .aspectRatio(bannerAspect, contentMode: .fit)
+                        .clipShape(
+                            RoundedRectangle(
+                                cornerRadius: MADTheme.CornerRadius.medium,
+                                style: .continuous
+                            )
+                        )
+                        .padding(.horizontal, MADTheme.Spacing.md)
+                        // A label on its own would be dropped: the overlaid
+                        // Image is decorative by default and Color.clear is
+                        // not an element, so there is nothing for VoiceOver to
+                        // hang it on until this makes one.
+                        .accessibilityElement()
+                        .accessibilityLabel("Preview of your banner photo")
+
+                    Text("Banners are cropped to a wide strip. This is the part that shows.")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, MADTheme.Spacing.xl)
+
+                    Spacer(minLength: 0)
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                        .foregroundColor(.white)
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("Banner Photo")
+                        .foregroundColor(.white)
+                        .fontWeight(.semibold)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Choose") { onUse() }
+                        .fontWeight(.semibold)
+                        .foregroundColor(MADTheme.Colors.madRed)
+                }
+            }
+            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+        }
     }
 }
 
