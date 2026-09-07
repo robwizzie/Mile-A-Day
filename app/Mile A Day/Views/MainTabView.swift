@@ -360,6 +360,19 @@ struct MainTabView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 52)
+                // Anchored to the TAB BAR, never to the keyboard. This banner
+                // is bottom-aligned inside the root ZStack, so its position is
+                // the ZStack's bottom edge — and SwiftUI moves that edge up by
+                // the keyboard's safe-area inset. Raising the keyboard on a tab
+                // that has a field (the Friends search, a comment box) lifted
+                // the banner ~340pt into the middle of the list, on top of the
+                // rows, where it stayed until the inset was released.
+                //
+                // Applied to the banner and NOT to the ZStack: the TabView is
+                // the ZStack's other child, and the screens inside it DO have
+                // text fields that need the inset to scroll clear of the
+                // keyboard. Only this overlay opts out.
+                .ignoresSafeArea(.keyboard, edges: .bottom)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 

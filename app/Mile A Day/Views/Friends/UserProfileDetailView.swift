@@ -730,14 +730,8 @@ struct UserProfileDetailView: View {
                             .font(.system(size: 15, weight: .bold, design: .rounded))
                             .foregroundColor(isComplete ? .green : .white)
                             .lineLimit(1)
-                        if isComplete && streak > 0 {
-                            HStack(spacing: 2) {
-                                Image(systemName: "flame.fill")
-                                    .font(.system(size: 10, weight: .bold))
-                                Text("\(streak)")
-                                    .font(.system(size: 11, weight: .heavy, design: .rounded))
-                            }
-                            .foregroundColor(.orange)
+                        if isComplete {
+                            StreakFlameChip(streak: streak)
                         }
                     }
 
