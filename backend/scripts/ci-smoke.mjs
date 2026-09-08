@@ -8,8 +8,13 @@
 import assert from "node:assert/strict";
 
 const { PostgresService } = await import("../dist/services/DbService.js");
-const { uploadWorkouts, getUserRoutes, getRecentWorkouts, getWorkoutRoute } =
-  await import("../dist/services/workoutService.js");
+const {
+  uploadWorkouts,
+  getUserRoutes,
+  getRecentWorkouts,
+  getWorkoutRoute,
+  sanitizeRoute,
+} = await import("../dist/services/workoutService.js");
 const {
   createPost,
   getUnifiedFeed,
@@ -62,6 +67,10 @@ const CARL = "ci-carl"; // Bob's friend only  (reach via the COAUTHOR)
 const DANA = "ci-dana"; // Alice's friend only (reach via the AUTHOR)
 const localDate = new Date().toISOString().slice(0, 10);
 const nowIso = new Date().toISOString();
+// Bob's route clock: first fix ten minutes before the sync, one point every
+// two minutes. Replays put each rider where they were at a given second.
+const ROUTE_STARTED_AT = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+const ROUTE_TIMES = [0, 120.4, 240];
 
 async function cleanup() {
   // CI always runs on a fresh database; this makes local re-runs work too.
@@ -79,6 +88,9 @@ async function cleanup() {
   );
   await db.query(`DELETE FROM stealth_windows WHERE user_id LIKE 'ci-%'`);
   await db.query(`DELETE FROM workouts WHERE user_id LIKE 'ci-%'`);
+  // The competition flair seed — a comp Bob is in on the post's day.
+  await db.query(`DELETE FROM competition_users WHERE competition_id LIKE 'ci-comp-%'`);
+  await db.query(`DELETE FROM competitions WHERE id LIKE 'ci-comp-%'`);
   // The collab-permission assertions flip users to 'private' mid-run, and the
   // grid-vs-tagged ones flip tags off the grid; a failed run must not leave
   // either behind to poison the next one.
@@ -151,8 +163,37 @@ async function seed() {
         [40.001, -75.001],
         [40.002, -75.002],
       ],
+      routeTimes: ROUTE_TIMES,
+      routeStartedAt: ROUTE_STARTED_AT,
     },
   ]);
+
+  // Bob is mid-competition (a team one) on the post's day; Alice is not in it.
+  await db.query(
+    `INSERT INTO competitions
+       (id, competition_name, start_date, end_date, workouts, type, options, teams, owner)
+     VALUES ('ci-comp-1', 'CI Cup', $1::date - 1, $1::date + 1, '[]'::jsonb, 'race',
+             '{}'::jsonb, '{"member_pick": false, "teams": [{"id": "t-red", "name": "Red"}]}'::jsonb, $2)`,
+    [localDate, BOB],
+  );
+  // …and one that ENDED before the post's day, which must not be listed.
+  await db.query(
+    `INSERT INTO competitions
+       (id, competition_name, start_date, end_date, workouts, type, options, owner)
+     VALUES ('ci-comp-old', 'Last Month', $1::date - 40, $1::date - 10, '[]'::jsonb, 'race',
+             '{}'::jsonb, $2)`,
+    [localDate, BOB],
+  );
+  for (const [comp, team] of [
+    ["ci-comp-1", "t-red"],
+    ["ci-comp-old", null],
+  ]) {
+    await db.query(
+      `INSERT INTO competition_users (competition_id, user_id, invite_status, team_id)
+       VALUES ($1, $2, 'accepted', $3)`,
+      [comp, BOB, team],
+    );
+  }
 
   return createPost({
     userId: BOB,
@@ -178,6 +219,57 @@ assert.equal(
   "createPost returns the author's route on the created row",
 );
 
+// The replay clock rides every post-shaped read beside the route, under the
+// route's own gates: one time per point, and the first fix's instant as epoch
+// seconds (a number — a timestamptz string with fractional seconds has broken
+// a client decoder before).
+assert.deepEqual(
+  post.route_times,
+  ROUTE_TIMES,
+  "createPost returns the route's per-point times on the created row",
+);
+assert.ok(
+  Math.abs(post.route_started_at - Date.parse(ROUTE_STARTED_AT) / 1000) < 1,
+  "createPost returns the route's start as epoch seconds",
+);
+// The competition flair: the comp Bob is in on the post's day, with his team,
+// and NOT the one that ended last month.
+assert.deepEqual(
+  (post.competitions ?? []).map((c) => [c.id, c.name, c.team_name, c.viewer_in]),
+  [["ci-comp-1", "CI Cup", "Red", true]],
+  "createPost lists the author's competition on the post's day (author = viewer)",
+);
+
+// sanitizeRoute keeps the clock only when it lines up with the polyline, and
+// downsamples both TOGETHER — a time kept for a dropped point would put the
+// replay's rider on the wrong bend.
+{
+  const long = Array.from({ length: 1000 }, (_, i) => [40 + i * 0.0001, -75]);
+  const longTimes = long.map((_, i) => i * 3);
+  const sampled = sanitizeRoute(long, longTimes, ROUTE_STARTED_AT);
+  assert.equal(sampled.points.length, 300, "long routes downsample to 300 points");
+  assert.equal(sampled.times.length, 300, "…and their times with them");
+  assert.ok(
+    sampled.points.every(([lat], i) => Math.abs((lat - 40) / 0.0001 * 3 - sampled.times[i]) < 1e-6),
+    "each kept time belongs to the kept point",
+  );
+  assert.equal(
+    sanitizeRoute(long, longTimes.slice(1), ROUTE_STARTED_AT).times,
+    null,
+    "a time list that doesn't match the points is dropped whole",
+  );
+  assert.equal(
+    sanitizeRoute(long, longTimes.map((t) => -t), ROUTE_STARTED_AT).times,
+    null,
+    "a clock that runs backwards is dropped",
+  );
+  assert.equal(
+    sanitizeRoute(long, longTimes, "not a date").startedAt,
+    null,
+    "an unparsable start is dropped without losing the points",
+  );
+}
+
 // Unified feed as Alice: must include Bob's photo post AND his GPS route.
 const feed = await getUnifiedFeed(ALICE, 20, null);
 assert.ok(feed.length >= 1, `unified feed has rows (got ${feed.length})`);
@@ -186,6 +278,20 @@ assert.ok(feedPost, "Bob's post is visible in Alice's unified feed");
 assert.ok(
   feed.some((r) => r.route != null),
   "route data attached to a feed row (include_route + share_route_maps)",
+);
+assert.deepEqual(
+  feedPost.route_times,
+  ROUTE_TIMES,
+  "the feed carries the route's per-point times",
+);
+assert.ok(
+  Math.abs(feedPost.route_started_at - Date.parse(ROUTE_STARTED_AT) / 1000) < 1,
+  "the feed carries the route's start as epoch seconds",
+);
+assert.deepEqual(
+  (feedPost.competitions ?? []).map((c) => [c.id, c.team_name, c.viewer_in]),
+  [["ci-comp-1", "Red", false]],
+  "a friend sees the author's competition on the feed card (not in it themselves)",
 );
 // FRESH is server truth now, visible to OTHER viewers (it used to be a
 // client-local badge only the poster saw). Bob's post was created moments
@@ -261,6 +367,11 @@ assert.equal(
   posts.find((p) => p.post_id === post.post_id)?.route?.length,
   3,
   "a friend gets the author's route on the profile grid (same as the feed)",
+);
+assert.deepEqual(
+  posts.find((p) => p.post_id === post.post_id)?.route_times,
+  ROUTE_TIMES,
+  "the grid carries the same route clock the feed does",
 );
 assert.equal(
   (await getUserPosts(BOB, BOB, 20, null)).find(
@@ -1143,6 +1254,15 @@ assert.equal(
   true,
   "share_route_maps=false still reports the route to the owner",
 );
+// The clock is withheld WITH the route — it describes where someone was
+// when, which is the very thing they turned off.
+{
+  const hidden = (await getUserPosts(ALICE, BOB, 20, null)).find(
+    (p) => p.post_id === post.post_id,
+  );
+  assert.equal(hidden?.route_times, null, "share_route_maps=false hides the route clock");
+  assert.equal(hidden?.route_started_at, null, "…and its start instant");
+}
 // The profile grid honours the same consent as the feed: withheld from
 // friends, never from the owner.
 assert.equal(

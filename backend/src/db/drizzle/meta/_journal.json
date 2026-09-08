@@ -456,6 +456,13 @@
       "when": 1788835666614,
       "tag": "0064_warm_shockwave",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1788840075345,
+      "tag": "0065_true_silver_samurai",
+      "breakpoints": true
     }
   ]
 }

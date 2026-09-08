@@ -40,6 +40,14 @@ export type Workout = {
   // groundwork, stored so climb features have history the day they exist.
   // Every consumer reads [0]/[1] and tolerates the extra element.
   route?: RoutePoint[];
+  // Seconds since the FIRST route point, one entry per `route` point (newer
+  // clients). Lets a replay place the walker where they were at a moment,
+  // and stop them where they stopped. Dropped unless it lines up with
+  // `route` exactly.
+  routeTimes?: number[];
+  // ISO-8601 instant of the first route point — the absolute anchor that
+  // puts a crew's relative `routeTimes` on one clock.
+  routeStartedAt?: string;
 };
 
 export type RoutePoint = [number, number] | [number, number, number];

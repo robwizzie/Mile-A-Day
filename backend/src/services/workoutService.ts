@@ -213,11 +213,11 @@ export async function uploadWorkouts(
   // the trace of a walk recorded in stealth is refused right here, and every
   // route-serving read stays clean without a stealth predicate of its own.
   const routeQuery = `
-        INSERT INTO workout_routes (workout_id, route, point_count, updated_at)
+        INSERT INTO workout_routes (workout_id, route, point_count, times, started_at, updated_at)
         -- Explicit casts: in an INSERT … SELECT, an uncast select-list param
         -- resolves to text, which then conflicts with the varchar column the
         -- WHERE below compares $1 against ("inconsistent types deduced").
-        SELECT $1::varchar, $2::jsonb, $3::integer, NOW()
+        SELECT $1::varchar, $2::jsonb, $3::integer, $4::jsonb, $5::timestamptz, NOW()
         WHERE NOT COALESCE(
           (SELECT w.stealth FROM workouts w WHERE w.workout_id = $1),
           false
@@ -226,6 +226,21 @@ export async function uploadWorkouts(
         DO UPDATE SET
 			route = EXCLUDED.route,
 			point_count = EXCLUDED.point_count,
+			-- Times are only meaningful against the points they were sampled
+			-- with. A re-upload that carries none (an older client's fullSync,
+			-- a route backfill) keeps the stored ones ONLY if it re-sent the
+			-- identical polyline; otherwise a stale set would line up with
+			-- the wrong points and the replay would lie.
+			times = COALESCE(
+				EXCLUDED.times,
+				CASE WHEN workout_routes.route = EXCLUDED.route
+					THEN workout_routes.times END
+			),
+			started_at = COALESCE(
+				EXCLUDED.started_at,
+				CASE WHEN workout_routes.route = EXCLUDED.route
+					THEN workout_routes.started_at END
+			),
 			updated_at = NOW()
       `;
 
@@ -233,7 +248,11 @@ export async function uploadWorkouts(
 
   const upserts = workouts.flatMap((workout: Workout) => {
     const speed = classifyWorkoutSpeed(workout.distance, workout.totalDuration);
-    const route = sanitizeRoute(workout.route);
+    const route = sanitizeRoute(
+      workout.route,
+      workout.routeTimes,
+      workout.routeStartedAt,
+    );
     return [
       {
         query: workoutQuery,
@@ -288,7 +307,13 @@ export async function uploadWorkouts(
         ? [
             {
               query: routeQuery,
-              params: [workout.workoutId, JSON.stringify(route), route.length],
+              params: [
+                workout.workoutId,
+                JSON.stringify(route.points),
+                route.points.length,
+                route.times ? JSON.stringify(route.times) : null,
+                route.startedAt,
+              ],
             },
           ]
         : []),
@@ -325,12 +350,38 @@ export async function uploadWorkouts(
 // before upload and this is the server-side backstop.
 const MAX_ROUTE_POINTS = 300;
 
+/** A validated trace plus, when the client sent them, its per-point times. */
+export type SanitizedRoute = {
+  points: RoutePoint[];
+  /** Seconds since the first point, aligned 1:1 with `points`; null when
+   *  absent or when they didn't line up with the uploaded polyline. */
+  times: number[] | null;
+  /** ISO instant of the first point; null when absent or implausible. */
+  startedAt: string | null;
+};
+
+// Longest walk whose per-point clock we keep: two days. Anything beyond it is
+// a corrupt timestamp, not a workout.
+const MAX_ROUTE_SECONDS = 48 * 3600;
+
 /**
  * Validate + normalize an uploaded GPS trace. Returns null (skip storage) for
  * anything that isn't a plausible [[lat, lng], ...] polyline with >= 2 points.
  * Coordinates are rounded to 5 decimals (~1m) and long traces are downsampled.
+ *
+ * `rawTimes` (seconds from the first point, one per uploaded point) ride the
+ * SAME downsample — a time kept for a point that was dropped would put the
+ * replay's walker on the wrong bend — and are dropped as a whole, never
+ * partially, when they don't line up: mismatched length, a non-finite or
+ * negative entry, a clock that runs backwards, or a walk longer than two
+ * days. The points are still stored; the replay just falls back to its
+ * synthetic clock.
  */
-function sanitizeRoute(route: unknown): RoutePoint[] | null {
+export function sanitizeRoute(
+  route: unknown,
+  rawTimes?: unknown,
+  rawStartedAt?: unknown,
+): SanitizedRoute | null {
   if (!Array.isArray(route) || route.length < 2) return null;
   const points: RoutePoint[] = [];
   for (const p of route) {
@@ -362,13 +413,48 @@ function sanitizeRoute(route: unknown): RoutePoint[] | null {
       ]);
     }
   }
-  if (points.length <= MAX_ROUTE_POINTS) return points;
+
+  let times = sanitizeRouteTimes(rawTimes, points.length);
+  const startedAt = sanitizeRouteStart(rawStartedAt);
+
+  if (points.length <= MAX_ROUTE_POINTS) return { points, times, startedAt };
   const stride = (points.length - 1) / (MAX_ROUTE_POINTS - 1);
   const sampled: RoutePoint[] = [];
+  const sampledTimes: number[] = [];
   for (let i = 0; i < MAX_ROUTE_POINTS; i++) {
-    sampled.push(points[Math.round(i * stride)]);
+    const index = Math.round(i * stride);
+    sampled.push(points[index]);
+    if (times) sampledTimes.push(times[index]);
   }
-  return sampled;
+  if (times) times = sampledTimes;
+  return { points: sampled, times, startedAt };
+}
+
+function sanitizeRouteTimes(raw: unknown, pointCount: number): number[] | null {
+  if (!Array.isArray(raw) || raw.length !== pointCount) return null;
+  const out: number[] = [];
+  let previous = -Infinity;
+  for (const value of raw) {
+    const t = Number(value);
+    if (!Number.isFinite(t) || t < 0 || t < previous || t > MAX_ROUTE_SECONDS) {
+      return null;
+    }
+    out.push(Math.round(t * 10) / 10);
+    previous = t;
+  }
+  return out;
+}
+
+function sanitizeRouteStart(raw: unknown): string | null {
+  if (typeof raw !== "string" || raw.trim() === "") return null;
+  const ms = Date.parse(raw);
+  if (!Number.isFinite(ms)) return null;
+  // A date before GPS existed or more than a day in the future is a clock
+  // fault, not a walk.
+  if (ms < Date.UTC(2000, 0, 1) || ms > Date.now() + 24 * 3600 * 1000) {
+    return null;
+  }
+  return new Date(ms).toISOString();
 }
 
 /**

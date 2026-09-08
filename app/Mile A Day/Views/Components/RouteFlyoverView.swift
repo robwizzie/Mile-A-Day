@@ -22,6 +22,12 @@ struct FlyoverCompanion: Identifiable {
     let coordinates: [CLLocationCoordinate2D]
     let color: Color
     let avatar: RouteArtAvatar?
+    /// Their replay clock: seconds since THEIR first fix, one per coordinate,
+    /// and that fix's epoch seconds. Nil (or a count that doesn't match the
+    /// coordinates) means no clock — the engine falls back to its synthetic
+    /// constant-speed flight for the whole crew.
+    var pointTimes: [Double]? = nil
+    var startedAt: Double? = nil
 }
 
 struct FlyoverLaunch: Identifiable {
@@ -49,6 +55,13 @@ struct FlyoverLaunch: Identifiable {
     /// the app shows everywhere else ("walked 1.01, flyover says 0.98") —
     /// when this is present the odometer and mile marks are scaled to it.
     var officialDistanceMiles: Double? = nil
+    /// The author's replay clock (see `FlyoverCompanion.pointTimes`). With a
+    /// clock for everyone on the flight, the replay runs on the walk's REAL
+    /// time: each rider is where they actually were at that second and stops
+    /// where they stopped, so an early finisher stands at the line while the
+    /// rest come in.
+    var pointTimes: [Double]? = nil
+    var startedAt: Double? = nil
     /// Which day this leg is from, for a chained tour's HUD ("TUE · AUG 27").
     var legTitle: String? = nil
     /// Hype from the landing screen: you just WATCHED the run — the social
@@ -84,7 +97,9 @@ extension FlyoverLaunch {
             segmentCount: entry.segment_count,
             dayDistanceMiles: entry.distance,
             splitBars: WorkoutSplitBar.bars(from: entry.splits),
-            officialDistanceMiles: (entry.segment_count ?? 1) <= 1 ? entry.distance : nil
+            officialDistanceMiles: (entry.segment_count ?? 1) <= 1 ? entry.distance : nil,
+            pointTimes: entry.route_times,
+            startedAt: entry.route_started_at
         )
     }
 
@@ -108,7 +123,9 @@ extension FlyoverLaunch {
                     coordinates: route,
                     color: palette[pair.offset],
                     avatar: RouteArtAvatar(name: pair.element.displayName,
-                                           imageURL: pair.element.profile_image_url)
+                                           imageURL: pair.element.profile_image_url),
+                    pointTimes: pair.element.route_times,
+                    startedAt: pair.element.route_started_at
                 )
             }
         guard coords.count >= 2 || !companions.isEmpty else { return nil }
@@ -122,7 +139,9 @@ extension FlyoverLaunch {
             dayDistanceMiles: post.stats_snapshot?.distance,
             splitBars: WorkoutSplitBar.bars(from: post.splits),
             officialDistanceMiles: (post.segment_count ?? 1) <= 1
-                ? post.stats_snapshot?.distance : nil
+                ? post.stats_snapshot?.distance : nil,
+            pointTimes: post.route_times,
+            startedAt: post.route_started_at
         )
     }
 }
@@ -421,6 +440,18 @@ struct FlyoverTrack {
         mapPoint(atFraction: fraction).coordinate
     }
 
+    /// MAP-length fraction of the point at `index`, `t` of the way toward the
+    /// next one — how a per-point clock is turned into the same fraction
+    /// `Path.trim`/`strokeEnd` clip by, so a timed rider stays welded to the
+    /// drawn tip exactly like a synthetic one.
+    func fraction(atPointIndex index: Int, toward t: Double) -> Double {
+        guard totalMapLength > 0, !cumulativeMap.isEmpty else { return 0 }
+        let i = min(max(index, 0), cumulativeMap.count - 1)
+        let next = min(i + 1, cumulativeMap.count - 1)
+        let at = cumulativeMap[i] + (cumulativeMap[next] - cumulativeMap[i]) * min(max(t, 0), 1)
+        return min(max(at / totalMapLength, 0), 1)
+    }
+
     /// A smooth resampling of the [from, to] fraction window — the pace-tinted
     /// trail segments are built from these so neighbouring segments share
     /// exact endpoints.
@@ -451,8 +482,16 @@ struct FlyoverTrack {
     func bearing(atFraction fraction: Double, lookaheadMeters: Double) -> Double {
         guard totalMeters > 0 else { return 0 }
         let aheadFraction = min(1, fraction + lookaheadMeters / totalMeters)
-        let a = mapPoint(atFraction: fraction)
-        let b = mapPoint(atFraction: max(aheadFraction, fraction + 0.0005))
+        var a = mapPoint(atFraction: fraction)
+        var b = mapPoint(atFraction: max(aheadFraction, fraction + 0.0005))
+        if fraction >= 0.999 {
+            // AT the line there is nothing ahead to look at, and two equal
+            // points read as "north" — which swung the camera round the
+            // moment a followed rider finished early. Look back along the
+            // last stretch instead.
+            b = mapPoint(atFraction: 1)
+            a = mapPoint(atFraction: max(0, 1 - max(lookaheadMeters / totalMeters, 0.0005)))
+        }
         let dx = b.x - a.x
         let dy = b.y - a.y
         guard dx != 0 || dy != 0 else { return 0 }
@@ -489,6 +528,39 @@ struct FlyoverTrack {
     }
 }
 
+/// One walker's clock over their track: seconds since THEIR first fix, one
+/// per track coordinate, plus how long after the walk's earliest start they
+/// set off. Turns a walk-clock second into an arc fraction of their line —
+/// 0 before they started, 1 once they stopped, so a rider who finished first
+/// stands at the line while the rest come in.
+struct FlyoverPersonClock {
+    let times: [Double]
+    let offset: Double
+    var duration: Double { times.last ?? 0 }
+    var endsAt: Double { offset + duration }
+
+    /// Seconds into THEIR walk at walk-clock second `walkSeconds`, clamped
+    /// to [0, duration] — the HUD's elapsed readout for the followed rider.
+    func ownElapsed(at walkSeconds: Double) -> Double {
+        min(max(walkSeconds - offset, 0), duration)
+    }
+
+    func arcFraction(track: FlyoverTrack, at walkSeconds: Double) -> Double {
+        let local = walkSeconds - offset
+        guard local > 0, times.count >= 2, duration > 0 else { return 0 }
+        guard local < duration else { return 1 }
+        var lo = 0, hi = times.count - 1
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if times[mid] < local { lo = mid + 1 } else { hi = mid }
+        }
+        let i = max(lo, 1)
+        let span = times[i] - times[i - 1]
+        let t = span > 0 ? (local - times[i - 1]) / span : 1
+        return track.fraction(atPointIndex: i - 1, toward: t)
+    }
+}
+
 // MARK: - Player
 
 enum FlyoverPhase: Equatable {
@@ -501,8 +573,13 @@ enum FlyoverPhase: Equatable {
 
 struct FlyoverTick {
     let phase: FlyoverPhase
+    /// The shared CLOCK fraction (what the scrubber shows) — on a timed
+    /// flight the followed rider's arc fraction can lag or lead it.
     let fraction: Double
     let miles: Double
+    /// Timed flights only: seconds into the FOLLOWED rider's own walk,
+    /// frozen at their finish once they've stopped. Nil on synthetic flights.
+    var elapsedSeconds: Double? = nil
     /// Set only on the frame a mile marker drops AND a split time exists for
     /// it — the HUD flashes it as a toast.
     var milestone: FlyoverMilestone? = nil
@@ -536,6 +613,9 @@ struct RouteFlyoverPlayerView: View {
     @State private var phase: FlyoverPhase = .loading
     @State private var fraction: Double = 0
     @State private var miles: Double = 0
+    /// Timed flights: the followed rider's own running time (see
+    /// `FlyoverTick.elapsedSeconds`). Nil ⇒ the static time chip instead.
+    @State private var elapsedSeconds: Double? = nil
     @State private var replayTrigger = 0
     @State private var paused = false
     /// Playback rate — remembered across flights (someone who prefers ½×
@@ -597,6 +677,7 @@ struct RouteFlyoverPlayerView: View {
                 phase = tick.phase
                 fraction = tick.fraction
                 miles = tick.miles
+                elapsedSeconds = tick.elapsedSeconds
                 if let milestone = tick.milestone {
                     showToast(milestone)
                 }
@@ -981,15 +1062,22 @@ struct RouteFlyoverPlayerView: View {
     }
 
     private var statChips: [(String, String, String)]? {
-        guard let stats = launch.stats else { return nil }
         var out: [(String, String, String)] = []
-        if let p = stats.pace, p > 0 {
-            out.append(("pace", "speedometer", "\(RunStatsStickerView.paceText(p)) /mi"))
+        // A timed replay counts the followed rider's OWN clock up as they
+        // go and freezes it where they stopped — it replaces the static
+        // total, which would otherwise sit beside it saying something else.
+        if let e = elapsedSeconds {
+            out.append(("elapsed", "stopwatch.fill", RunStatsStickerView.durationText(e)))
         }
-        if let d = stats.duration, d > 0 {
-            out.append(("time", "clock.fill", RunStatsStickerView.durationText(d)))
+        if let stats = launch.stats {
+            if let p = stats.pace, p > 0 {
+                out.append(("pace", "speedometer", "\(RunStatsStickerView.paceText(p)) /mi"))
+            }
+            if elapsedSeconds == nil, let d = stats.duration, d > 0 {
+                out.append(("time", "clock.fill", RunStatsStickerView.durationText(d)))
+            }
         }
-        return out
+        return out.isEmpty ? nil : out
     }
 }
 
@@ -1081,6 +1169,8 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         let calibratedMiles: Double?
         let mileMarks: [(mile: Int, coordinate: CLLocationCoordinate2D, fraction: Double)]
         let annotation: FlyoverAnnotation
+        /// Their real clock, on timed flights only (nil ⇒ synthetic).
+        let clock: FlyoverPersonClock?
     }
 
     private enum OverlayRole {
@@ -1102,6 +1192,10 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     var inViewUpdate = false
     private var people: [Person] = []
     private let accent: UIColor
+    /// Timed flights: the walk's length in real seconds, from the earliest
+    /// start to the last finish across the crew. 0 on a synthetic flight.
+    private var walkDuration: Double = 0
+    private var isTimed: Bool { walkDuration > 0 }
 
     private weak var mapView: MKMapView?
     private var displayLink: CADisplayLink?
@@ -1186,22 +1280,70 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         // MUST mirror `FlyoverLaunch.flyablePeople` order exactly — the HUD
         // picker indexes into that list. Companions get side-by-side lanes
         // (±3m, ±6m …) so a crew that walked the SAME path stays readable.
-        var built: [Person] = []
+        struct Rider {
+            let coordinates: [CLLocationCoordinate2D]
+            let color: UIColor
+            let avatar: RouteArtAvatar?
+            let officialMiles: Double?
+            let times: [Double]?
+            let startedAt: Double?
+        }
+        var riders: [Rider] = []
         if FlyoverTrack(coordinates: launch.coordinates).isFlyable {
-            built.append(Self.person(
-                coordinates: launch.coordinates,
-                color: accent, avatar: launch.author, laneIndex: built.count,
-                officialMiles: launch.officialDistanceMiles))
+            riders.append(Rider(
+                coordinates: launch.coordinates, color: accent, avatar: launch.author,
+                officialMiles: launch.officialDistanceMiles,
+                times: launch.pointTimes, startedAt: launch.startedAt))
         }
         for companion in launch.companions {
             let raw = FlyoverTrack(coordinates: companion.coordinates)
             guard raw.isFlyable else { continue }
+            riders.append(Rider(
+                coordinates: companion.coordinates, color: UIColor(companion.color),
+                avatar: companion.avatar, officialMiles: nil,
+                times: companion.pointTimes, startedAt: companion.startedAt))
+        }
+
+        // Real time only when EVERYONE on the flight has a clock that lines
+        // up with their line — and, with more than one rider, an absolute
+        // start to line the clocks up on. One rider without is the whole
+        // flight synthetic: a crew half on real time and half on constant
+        // speed would show people passing each other who never did.
+        let clocks: [FlyoverPersonClock?]
+        let aligned = riders.allSatisfy { rider in
+            guard let times = rider.times, times.count == rider.coordinates.count,
+                  times.count >= 2, (times.last ?? 0) > 0 else { return false }
+            return riders.count == 1 || rider.startedAt != nil
+        }
+        if !riders.isEmpty, aligned {
+            let earliest = riders.compactMap(\.startedAt).min() ?? 0
+            clocks = riders.map { rider in
+                FlyoverPersonClock(
+                    times: rider.times ?? [],
+                    offset: riders.count == 1 ? 0 : max(0, (rider.startedAt ?? earliest) - earliest))
+            }
+            walkDuration = clocks.compactMap { $0?.endsAt }.max() ?? 0
+        } else {
+            clocks = riders.map { _ in nil }
+        }
+
+        var built: [Person] = []
+        for (index, rider) in riders.enumerated() {
             built.append(Self.person(
-                coordinates: companion.coordinates,
-                color: UIColor(companion.color), avatar: companion.avatar,
-                laneIndex: built.count, officialMiles: nil))
+                coordinates: rider.coordinates,
+                color: rider.color, avatar: rider.avatar, laneIndex: built.count,
+                officialMiles: rider.officialMiles, clock: clocks[index]))
         }
         people = built
+    }
+
+    /// Where rider `index` is on THEIR line at shared-clock fraction `clock`:
+    /// their real position on a timed flight, the clock itself otherwise.
+    private func arcFraction(of index: Int, clock: Double) -> Double {
+        guard isTimed, people.indices.contains(index), let personClock = people[index].clock
+        else { return clock }
+        return personClock.arcFraction(track: people[index].track,
+                                       at: min(max(clock, 0), 1) * walkDuration)
     }
 
     private static func person(
@@ -1209,7 +1351,8 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         color: UIColor,
         avatar: RouteArtAvatar?,
         laneIndex: Int,
-        officialMiles: Double?
+        officialMiles: Double?,
+        clock: FlyoverPersonClock?
     ) -> Person {
         // Lane 0 (author or first flyable) rides the true path; each later
         // lane alternates sides at 3m spacing.
@@ -1242,7 +1385,8 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             distanceScale: scale,
             calibratedMiles: calibratedMiles,
             mileMarks: track.mileMarks(distanceScale: scale),
-            annotation: annotation
+            annotation: annotation,
+            clock: clock
         )
     }
 
@@ -1440,18 +1584,19 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             let f = min(max(fraction, 0), 1)
             elapsed = introDuration + f * cruiseDuration
             currentFraction = f
+            let arc = arcFraction(of: followed, clock: f)
             // Jump-cut: the smoother would lag a fast drag around a bend.
-            smoothedHeading = track.bearing(atFraction: f, lookaheadMeters: lookaheadMeters)
-            mapView.camera = cruiseCamera(fraction: f, heading: smoothedHeading)
+            smoothedHeading = track.bearing(atFraction: arc, lookaheadMeters: lookaheadMeters)
+            mapView.camera = cruiseCamera(fraction: arc, heading: smoothedHeading)
             lastStrokeFraction = -1
-            setStroke(f)
+            setStroke(arc)
             moveRiders(to: f)
             report(.cruise, fraction: f)
         } else {
             scrubbing = false
             // Backward scrubs leave future mile marks standing — rebuild to
             // exactly the scrubbed point (silently).
-            rebuildMileMarks(upTo: currentFraction)
+            rebuildMileMarks(upTo: arcFraction(of: followed, clock: currentFraction))
             displayLink?.isPaused = userPaused
             lastTimestamp = nil
         }
@@ -1471,15 +1616,17 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             for renderer in authorSegmentRenderers.values { renderer.alpha = 0 }
         }
         followed = index
-        // New highlight catches up to the shared clock.
+        // New highlight catches up to the shared clock — at THIS rider's
+        // place on it.
+        let arc = arcFraction(of: followed, clock: currentFraction)
         lastStrokeFraction = -1
-        setStroke(currentFraction)
+        setStroke(arc)
         glowRenderers[followed]?.alpha = 1
         trailRenderers[followed]?.alpha = 1
         if followed == 0 {
             for renderer in authorSegmentRenderers.values { renderer.alpha = 1 }
         }
-        rebuildMileMarks(upTo: currentFraction)
+        rebuildMileMarks(upTo: arc)
         // A paused or finished flight still reflects the switch immediately.
         if let track = followedTrack {
             report(finishedNotified ? .finished : (flightStarted ? .cruise : .loading),
@@ -1487,8 +1634,8 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             if displayLink?.isPaused ?? true {
                 mapView?.camera = finishedNotified
                     ? overviewCamera(pitch: 28)
-                    : cruiseCamera(fraction: currentFraction,
-                                   heading: track.bearing(atFraction: currentFraction,
+                    : cruiseCamera(fraction: arc,
+                                   heading: track.bearing(atFraction: arc,
                                                           lookaheadMeters: lookaheadMeters))
             }
         }
@@ -1541,12 +1688,15 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         if cruiseT < cruiseDuration {
             let fraction = cruiseT / cruiseDuration
             currentFraction = fraction
-            let target = track.bearing(atFraction: fraction, lookaheadMeters: lookaheadMeters)
+            // The camera, trail and marks follow the FOLLOWED rider's own
+            // position; the shared clock only decides where that is.
+            let arc = arcFraction(of: followed, clock: fraction)
+            let target = track.bearing(atFraction: arc, lookaheadMeters: lookaheadMeters)
             smoothedHeading = approachAngle(smoothedHeading, toward: target, rate: 2.4, dt: dt)
-            mapView.camera = cruiseCamera(fraction: fraction, heading: smoothedHeading)
-            setStroke(fraction)
+            mapView.camera = cruiseCamera(fraction: arc, heading: smoothedHeading)
+            setStroke(arc)
             moveRiders(to: fraction)
-            dropMileMarks(upTo: fraction)
+            dropMileMarks(upTo: arc)
             report(.cruise, fraction: fraction)
             return
         }
@@ -1576,7 +1726,8 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
 
     private func report(_ phase: FlyoverPhase, fraction: Double) {
         let person = people.indices.contains(followed) ? people[followed] : nil
-        let meters = person?.track.metersTraveled(atFraction: fraction) ?? 0
+        let arc = arcFraction(of: followed, clock: fraction)
+        let meters = person?.track.metersTraveled(atFraction: arc) ?? 0
         let miles: Double
         if let official = person?.calibratedMiles,
            let total = person?.track.totalMeters, total > 0 {
@@ -1592,7 +1743,13 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         }
         let milestone = pendingMilestone
         pendingMilestone = nil
-        emit(FlyoverTick(phase: phase, fraction: fraction, miles: miles, milestone: milestone))
+        // The followed rider's OWN time, frozen at their finish — the number
+        // beside a rider standing at the line is how long THEY took.
+        let elapsedSeconds = isTimed
+            ? person?.clock?.ownElapsed(at: min(max(fraction, 0), 1) * walkDuration)
+            : nil
+        emit(FlyoverTick(phase: phase, fraction: fraction, miles: miles,
+                         milestone: milestone, elapsedSeconds: elapsedSeconds))
     }
 
     /// The ONE door every tick leaves through. Synchronous from the display
@@ -1661,9 +1818,12 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             dx: -visible.size.width * 0.35, dy: -visible.size.height * 0.35))
     }
 
+    /// `fraction` is the shared CLOCK: every rider goes to their own place on
+    /// it (real position on a timed flight, the clock itself otherwise).
     private func moveRiders(to fraction: Double) {
-        for person in people {
-            person.annotation.coordinate = person.track.coordinate(atFraction: fraction)
+        for (index, person) in people.enumerated() {
+            person.annotation.coordinate = person.track.coordinate(
+                atFraction: arcFraction(of: index, clock: fraction))
         }
     }
 

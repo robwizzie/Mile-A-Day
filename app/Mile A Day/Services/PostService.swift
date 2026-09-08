@@ -88,6 +88,14 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     /// one map. Nil for an indoor walk, for anyone who turned "Share route
     /// maps" off, and on older servers.
     let route: [[Double]]?
+    /// The replay clock for `route`: seconds since THEIR first fix, one per
+    /// point, and that fix's instant as epoch seconds. What lets the Flyover
+    /// put each rider where they actually were at a moment and stop them
+    /// where they stopped. Nil on older servers and on routes uploaded
+    /// before clients sent it; a count that doesn't match `route` means "no
+    /// clock" — never index one by the other without checking.
+    var route_times: [Double]? = nil
+    var route_started_at: Double? = nil
     /// MY two switches on this shared post, and non-nil ONLY on my own row —
     /// one person's curation isn't the crew's to read, so the server nulls
     /// them for everyone else (and every older server omits them entirely).
@@ -120,6 +128,27 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     var routeCoordinates: [CLLocationCoordinate2D]? { decodeRouteCoordinates(route) }
 }
 
+
+/// One competition the post's author was in on the post's day — the card's
+/// "COMPETING" flair, so friends can see who is mid-competition without
+/// opening the Compete tab. Server-bounded to the three ending soonest.
+struct PostCompetitionRef: Codable, Identifiable, Equatable {
+    let id: String
+    let name: String?
+    let type: String?
+    /// The competition has finished since (an old post keeps its flair, in
+    /// the past tense).
+    let ended: Bool?
+    /// The author's team, when the competition has teams.
+    let team_name: String?
+    /// The viewer is in the same competition — "you too".
+    let viewer_in: Bool?
+
+    var displayName: String {
+        if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }
+        return "a competition"
+    }
+}
 
 /// What a buddy walk added up to, across everyone who was on it.
 ///
@@ -163,6 +192,13 @@ struct PostItem: Codable, Identifiable {
     var workout_type: String?
     /// Simplified GPS trace [[lat, lng], ...] when synced + shared.
     var route: [[Double]]?
+    /// The route's replay clock (see `PostCoauthorItem.route_times`). Served
+    /// under exactly the route's gates; nil on older servers and older uploads.
+    var route_times: [Double]? = nil
+    var route_started_at: Double? = nil
+    /// The competitions the author was in on this post's day. Nil = none, or
+    /// an older server.
+    var competitions: [PostCompetitionRef]? = nil
     /// Per-mile splits for the linked workout — the indoor pace wave's data.
     /// Only the feed/single-post projections serve it; nil everywhere else and
     /// on older servers, which simply means no wave.
@@ -405,6 +441,13 @@ struct FeedEntry: Codable, Identifiable {
     let segments: [RunSegment]?
     /// Simplified GPS trace [[lat, lng], ...] for the entry's workout.
     let route: [[Double]]?
+    /// The route's replay clock, beside it under the same gates. Nil on older
+    /// servers and on routes uploaded before clients sent one. Listed in
+    /// CodingKeys below like everything else here.
+    let route_times: [Double]?
+    let route_started_at: Double?
+    /// The owner's competitions on the entry's day (both kinds). Nil = none.
+    let competitions: [PostCompetitionRef]?
     /// Per-mile splits for the entry's workout — the indoor pace wave. Nil on
     /// older servers, stitched rollups and auto posts. Same CodingKeys rule as
     /// everything here: listed below, or Codable synthesis dies.
@@ -471,6 +514,7 @@ struct FeedEntry: Codable, Identifiable {
         // synthesis for the whole struct (Xcode Cloud build 413).
         case workout_id, workout_type, feed_role, distance, total_duration
         case moving_seconds, calories, steps, route, splits, is_indoor, flyover_allowed
+        case route_times, route_started_at, competitions
         case stealth
         case segment_count, segments
         case is_self, is_hyped, hype_count, comment_count, photo_locked, is_fresh
@@ -515,7 +559,10 @@ struct FeedEntry: Codable, Identifiable {
             share_to_feed: true, share_to_story: nil, story_expires_at: nil,
             created_at: sort_ts, is_auto: is_auto, include_route: include_route,
             workout_type: workout_type,
-            route: route, splits: splits, is_indoor: is_indoor,
+            route: route,
+            route_times: route_times, route_started_at: route_started_at,
+            competitions: competitions,
+            splits: splits, is_indoor: is_indoor,
             flyover_allowed: flyover_allowed,
             stealth: stealth,
             story_photo_url: story_photo_url,

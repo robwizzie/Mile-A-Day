@@ -100,6 +100,21 @@ export function sanitizeGhostStats(
  */
 export const MAX_POST_COAUTHORS = 8;
 
+/**
+ * One competition the post's author was in on the post's day — the card's
+ * "COMPETING" flair. Bounded to the three ending soonest; `viewer_in` lets the
+ * card say "you too" when the viewer is in the same one.
+ */
+export interface PostCompetitionRef {
+  id: string;
+  name: string | null;
+  type: string;
+  ended: boolean;
+  /** The author's team name when the competition has teams, else null. */
+  team_name: string | null;
+  viewer_in: boolean;
+}
+
 export interface PostCoauthor {
   user_id: string;
   username: string | null;
@@ -120,6 +135,13 @@ export interface PostCoauthor {
   // own "Share route maps" consent, so this is null for anyone who opted out
   // and for an indoor walk with nothing to draw.
   route?: unknown;
+  // Seconds since THEIR first route point, one per point of `route`, plus
+  // that first point's absolute time as epoch seconds. What lets the Flyover
+  // replay a crew on ONE clock — each rider where they actually were, and
+  // stopped where they stopped. Null on routes uploaded before clients sent
+  // them; a length mismatch with `route` means "no times".
+  route_times?: number[] | null;
+  route_started_at?: number | null;
   // THIS participant's own two switches on the shared post, and null for
   // everybody except the participant themselves — one person's curation is not
   // another's to read. `on_feed` = does the post reach MY friends' feeds
@@ -155,6 +177,14 @@ export interface PostRow {
   // Additive: the author's simplified route (AUTHOR_ROUTE_SQL), null when
   // withheld/absent. Every post-shaped read ships it now, not just the feed.
   route?: number[][] | null;
+  // Additive, beside `route`: seconds per point since the first fix and the
+  // first fix's epoch seconds (see PostCoauthor.route_times). Null when the
+  // uploading client sent none.
+  route_times?: number[] | null;
+  route_started_at?: number | null;
+  // Additive: the competitions the AUTHOR was in on the post's day, so a
+  // card can say "competing in …" (see COMPETITIONS_JSON). Null when none.
+  competitions?: PostCompetitionRef[] | null;
   workout_type: string | null;
   is_self: boolean;
   is_hyped: boolean;
@@ -530,8 +560,8 @@ const BLOCKED_VS_MULTI_COAUTHOR = `EXISTS (
  * A crew member's Stealth Mode walk has no workout_routes row (enforced at
  * write), so it resolves to NULL here with no predicate — do not add one.
  */
-const CREW_ROUTE_SQL = `(
-	SELECT wr.route FROM workout_routes wr
+const crewRouteSelect = (expr: string) => `(
+	SELECT ${expr} FROM workout_routes wr
 	WHERE p.include_route
 		AND (
 			COALESCE(
@@ -569,6 +599,12 @@ const CREW_ROUTE_SQL = `(
 			  LIMIT 1)
 		)
 )`;
+const CREW_ROUTE_SQL = crewRouteSelect("wr.route");
+// The first fix's instant as epoch seconds: a plain number survives every
+// client's date decoder, where a timestamptz string with fractional seconds
+// has already broken a payload once.
+const ROUTE_STARTED_AT_EXPR =
+  "EXTRACT(EPOCH FROM wr.started_at)::double precision";
 
 /**
  * SQL: the WALK's combined figures for a buddy post — "3.2 mi between us".
@@ -622,6 +658,9 @@ const MULTI_COAUTHORS_JSON = `(
 		-- Their own words under their own slide (additive; NULL until set).
 		'caption', pca.caption,
 		'route', ${CREW_ROUTE_SQL},
+		-- The replay clock, same gates as the route it describes.
+		'route_times', ${crewRouteSelect("wr.times")},
+		'route_started_at', ${crewRouteSelect(ROUTE_STARTED_AT_EXPR)},
 		-- A participant's own curation, readable only BY that participant.
 		-- Returning it to the whole crew would publish "bob kept this out of
 		-- his friends' feeds" to bob's friends, which is the opposite of what
@@ -715,8 +754,8 @@ const COAUTHOR_COLUMNS = `
  * on auto posts (PostCardView.routeSlideCoordinates); it is the chip that
  * needs the coordinates.
  */
-const AUTHOR_ROUTE_SQL = `(
-	SELECT wr.route FROM workout_routes wr
+const authorRouteSelect = (expr: string) => `(
+	SELECT ${expr} FROM workout_routes wr
 	WHERE p.include_route
 		AND (
 			COALESCE(
@@ -728,6 +767,57 @@ const AUTHOR_ROUTE_SQL = `(
 		)
 		AND wr.workout_id = p.workout_id
 )`;
+const AUTHOR_ROUTE_SQL = authorRouteSelect("wr.route");
+// The author's replay clock, under exactly the route's gates (it describes
+// the route, so it is withheld with it).
+const AUTHOR_ROUTE_TIMING_SQL = `
+	${authorRouteSelect("wr.times")} AS route_times,
+	${authorRouteSelect(ROUTE_STARTED_AT_EXPR)} AS route_started_at`;
+
+/**
+ * SQL: the competitions `userExpr` was in on `dateExpr` — the card's
+ * "COMPETING" flair, so friends can see who is mid-competition without
+ * opening the Compete tab.
+ *
+ * Accepted membership only, the competition's own date window against the
+ * POST's day (an old post from a comp's third day says so; a post from after
+ * it ended says nothing), bounded to the three ending soonest. Names are
+ * user-typed and shown to anyone who can already see the post — the same
+ * circle that can be invited to it. `$1` = viewer, for `viewer_in`.
+ */
+const competitionsJson = (userExpr: string, dateExpr: string) => `(
+	SELECT jsonb_agg(jsonb_build_object(
+		'id', pc.id,
+		'name', pc.competition_name,
+		'type', pc.type,
+		'ended', COALESCE(pc.ended, false),
+		'team_name', (
+			SELECT t->>'name'
+			FROM jsonb_array_elements(COALESCE(pc.teams->'teams', '[]'::jsonb)) t
+			WHERE pc.team_id IS NOT NULL AND t->>'id' = pc.team_id
+			LIMIT 1
+		),
+		'viewer_in', EXISTS (
+			SELECT 1 FROM competition_users vcu
+			WHERE vcu.competition_id = pc.id
+				AND vcu.user_id = $1
+				AND vcu.invite_status = 'accepted'
+		)
+	) ORDER BY pc.end_date, pc.id)
+	FROM (
+		SELECT c.id, c.competition_name, c.type, c.ended, c.teams, c.end_date,
+			cu.team_id
+		FROM competition_users cu
+		JOIN competitions c ON c.id = cu.competition_id
+		WHERE cu.user_id = ${userExpr}
+			AND cu.invite_status = 'accepted'
+			AND c.start_date IS NOT NULL
+			AND c.start_date <= ${dateExpr}
+			AND COALESCE(c.end_date, ${dateExpr}) >= ${dateExpr}
+		ORDER BY c.end_date, c.id
+		LIMIT 3
+	) pc
+)`;
 
 // SELECT list shared by feed + story-detail reads so both shapes match PostRow.
 // `$1` must be the viewer id (drives is_self / is_hyped / the author's route).
@@ -735,6 +825,8 @@ const AUTHOR_ROUTE_SQL = `(
 // the button; hype_count still uses the broader run tally for social proof.
 const POST_SELECT = `${POST_COLUMNS},
 	${AUTHOR_ROUTE_SQL} AS route,
+	${AUTHOR_ROUTE_TIMING_SQL},
+	${competitionsJson("p.user_id", "p.local_date")} AS competitions,
 	(p.user_id = $1) AS is_self,
 	EXISTS (
 		SELECT 1 FROM hype_log h
@@ -795,6 +887,8 @@ export interface CreatePostInput {
 const CREATED_POST_SELECT = `
 	SELECT ${POST_COLUMNS},
 		${AUTHOR_ROUTE_SQL} AS route,
+		${AUTHOR_ROUTE_TIMING_SQL},
+		${competitionsJson("p.user_id", "p.local_date")} AS competitions,
 		true AS is_self, false AS is_hyped, 0 AS hype_count, 0 AS comment_count,
 		${COAUTHOR_COLUMNS}`;
 
@@ -2170,6 +2264,12 @@ export interface FeedEntryRow {
   // Simplified GPS trace for the entry's workout, when synced (and, for
   // posts, when the author chose to include it).
   route: number[][] | null;
+  // Additive, beside `route`: per-point seconds since the first fix and that
+  // fix's epoch seconds, when the uploading client sent them.
+  route_times: number[] | null;
+  route_started_at: number | null;
+  // Additive: the owner's competitions on the entry's day (both kinds).
+  competitions: PostCompetitionRef[] | null;
   // Additive: the entry's per-mile splits, so indoor cards can draw a pace
   // wave. Pace/time only — no location — hence no share_route_maps gate (the
   // same figures are already public via stats_snapshot). Null when absent, on
@@ -2218,6 +2318,30 @@ export interface FeedEntryRow {
  * rollup restatement, hype/comment counts, FRESH chip and route gating all
  * included. `$1` must be the viewer id; the projection uses no other param.
  */
+/**
+ * The unified feed's route column, per arm: a post's under its own
+ * `include_route` + the author's consent; a raw workout's only on a
+ * single-segment day (the anchor's trace is only the LAST leg of a stitched
+ * mile, and drawing it under the combined stat line labels a 0.40-mile loop as
+ * the whole mile — clients fall back to the branded stats face). The owner
+ * always sees their own. Parameterised by the selected expression so the
+ * timing columns are gated IDENTICALLY to the polyline they describe.
+ */
+const unifiedFeedRouteSql = (expr: string) => `CASE
+				WHEN page.kind = 'post' THEN (
+					SELECT ${expr} FROM workout_routes wr
+					WHERE p.include_route
+						AND (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
+						AND wr.workout_id = p.workout_id
+				)
+				ELSE (
+					SELECT ${expr} FROM workout_routes wr
+					WHERE COALESCE(roll.segment_count, 1) <= 1
+						AND (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
+						AND wr.workout_id = wt.workout_id
+				)
+			END`;
+
 const FEED_ENTRY_PROJECTION = `
 		SELECT
 			page.kind,
@@ -2317,25 +2441,12 @@ const FEED_ENTRY_PROJECTION = `
 			-- posts additionally honor the per-post include_route choice. Raw
 			-- workout routes respect the same setting (the owner always sees
 			-- their own).
-			CASE
-				WHEN page.kind = 'post' THEN (
-					SELECT wr.route FROM workout_routes wr
-					WHERE p.include_route
-						AND (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
-						AND wr.workout_id = p.workout_id
-				)
-				ELSE (
-					SELECT wr.route FROM workout_routes wr
-					-- Withheld on a multi-segment rollup: the anchor's trace is only
-					-- the LAST leg, so drawing it under a combined "1.06 mi" stat
-					-- line labels a 0.40-mile loop as the whole mile. Clients fall
-					-- back to the branded stats face, which shipped builds already
-					-- handle.
-					WHERE COALESCE(roll.segment_count, 1) <= 1
-						AND (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
-						AND wr.workout_id = wt.workout_id
-				)
-			END AS route,
+			${unifiedFeedRouteSql("wr.route")} AS route,
+			-- The replay clock beside the route, under the same gates.
+			${unifiedFeedRouteSql("wr.times")} AS route_times,
+			${unifiedFeedRouteSql(ROUTE_STARTED_AT_EXPR)} AS route_started_at,
+			-- The owner's competitions on the entry's day, both kinds.
+			${competitionsJson("page.owner_id", "COALESCE(p.local_date, wt.local_date)")} AS competitions,
 			-- Additive: per-mile splits for the entry's workout, so indoor cards
 			-- can draw a pace wave. Same arm structure as \`route\` above, but NO
 			-- share_route_maps gate — splits are pace/time, not location, and the

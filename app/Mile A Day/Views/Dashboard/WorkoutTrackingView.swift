@@ -2885,6 +2885,14 @@ struct WorkoutTrackingView: View {
         // pace divisor and the race result travel. Best-effort: a metadata
         // failure still saves the workout.
         var metadata: [String: Any] = [:]
+        // Say OUTDOOR/INDOOR explicitly, the way Apple's own Workout app
+        // does. The builder's `locationType` is not written into the workout's
+        // metadata for us, and Apple Fitness decides whether a workout gets a
+        // map from what the WORKOUT says about itself — an outdoor walk with a
+        // perfectly good route attached and no `HKMetadataKeyIndoorWorkout`
+        // key is exactly the shape that draws the route in our feed (we read
+        // the route directly) and no map in Fitness.
+        metadata[HKMetadataKeyIndoorWorkout] = (self.selectedLocationType == .indoor)
         let movingSeconds = locationManager.movingSeconds
         if movingSeconds > 0 {
             metadata[WorkoutLocationManager.movingSecondsMetadataKey] = movingSeconds

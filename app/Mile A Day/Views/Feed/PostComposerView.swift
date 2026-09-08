@@ -27,6 +27,10 @@ struct RunStatsInput: Equatable {
     /// #Preview when `GhostRaceWin.friendUserId` was added).
     var ghostMarginSeconds: Double? = nil
     var ghostTargetSeconds: Double? = nil
+    /// The competition sticker's text ("Summer Sprint · 2nd of 6"), resolved
+    /// by `RunPostService` from the competitions the poster is in TODAY. Nil
+    /// on a day with none, which is what keeps the toggle out of the tray.
+    var competition: String? = nil
 
     var snapshot: PostStats {
         PostStats(
@@ -70,6 +74,9 @@ struct RunStatsInput: Equatable {
         case .date:
             guard let d = dateText, !d.isEmpty else { return nil }
             return RunStatDatum(kind: .date, value: d)
+        case .competition:
+            guard let c = competition, !c.isEmpty else { return nil }
+            return RunStatDatum(kind: .competition, value: c)
         }
     }
 

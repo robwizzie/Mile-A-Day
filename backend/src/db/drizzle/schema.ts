@@ -440,6 +440,16 @@ export const workoutRoutes = pgTable(
     workoutId: varchar("workout_id", { length: 255 }).primaryKey().notNull(),
     route: jsonb().notNull(),
     pointCount: integer("point_count").notNull(),
+    // Seconds since the route's first fix, ONE per point of `route` (same
+    // downsample), so a replay can put each walker where they actually were
+    // at a given moment. NULL on routes uploaded before clients sent it and
+    // on any upload whose times didn't line up with its points — consumers
+    // must treat a length mismatch as "no times".
+    times: jsonb(),
+    // Absolute time of the route's first fix. Lines up crews: two people's
+    // `times` are each relative to their OWN start, and this is what puts
+    // them on one clock.
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),

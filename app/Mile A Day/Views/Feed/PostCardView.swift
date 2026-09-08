@@ -117,6 +117,12 @@ struct PostCardView: View {
                 media
                 mediaControls
                 crewGroupLine
+                // Who this walk was raced FOR: the author's competitions on
+                // the post's day (server-listed, so an older server simply
+                // shows no row).
+                if let competitions = post.competitions, !competitions.isEmpty {
+                    CompetitionFlairRow(competitions: competitions)
+                }
                 // The names-to-colours key belongs to the map, so it shows only
                 // while the map face is up — under it rather than on it, since
                 // the stats band owns the bottom of that face.
