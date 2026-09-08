@@ -17,6 +17,13 @@ import SwiftUI
 /// Each ring is tappable; tapping opens the day-detail sheet (same one used
 /// by the scoreboard grid below). Visually anchors the active view so the
 /// user's own week-long arc is the first thing they see.
+///
+/// On a TEAM competition the rings are the TEAM's: the team is the competitor
+/// (scored on its members' combined quantity, never on any one member), so a
+/// day's crown means "my team took the point", the arc is the team's total
+/// against the leading team's, and the number under it is the team's miles.
+/// Drawn per individual, the strip crowned whoever walked furthest on a day
+/// their team had lost — the opposite of the point the standings gave.
 struct CompetitionMyDailyRings: View {
     let competition: Competition
 
@@ -33,6 +40,20 @@ struct CompetitionMyDailyRings: View {
 
     private var accepted: [CompetitionUser] {
         competition.users.filter { $0.invite_status == .accepted }
+    }
+
+    /// The viewer's team on a team competition — nil on individual ones and
+    /// for an unassigned member, who is scored as themselves.
+    private var myTeam: CompetitionTeam? {
+        guard competition.hasTeams, let id = currentUserId else { return nil }
+        return competition.team(for: id)
+    }
+
+    /// The quantity the rings are about for one interval: my team's combined
+    /// figure on a team competition, my own otherwise.
+    private func myQuantity(_ key: String) -> Double {
+        if let team = myTeam { return competition.teamIntervalTotal(team.id, key: key) }
+        return me?.intervals?[key] ?? 0
     }
 
     private var interval: CompetitionInterval {
@@ -96,13 +117,32 @@ struct CompetitionMyDailyRings: View {
         }
     }
 
+    /// The interval's leading figure — the best TEAM total on a team
+    /// competition, the best individual otherwise.
     private func dailyMax(_ key: String) -> Double {
-        accepted.map { $0.intervals?[key] ?? 0 }.max() ?? 0
+        if myTeam != nil {
+            return (competition.teams?.teams ?? [])
+                .map { competition.teamIntervalTotal($0.id, key: key) }.max() ?? 0
+        }
+        return accepted.map { $0.intervals?[key] ?? 0 }.max() ?? 0
     }
 
     private func winnerId(for key: String) -> String? {
         let active = accepted.filter { ($0.intervals?[key] ?? 0) > 0 }
         return active.max(by: { ($0.intervals?[key] ?? 0) < ($1.intervals?[key] ?? 0) })?.user_id
+    }
+
+    /// Did the point go to me — my TEAM on a team competition (its combined
+    /// total led every other team's), me on an individual one.
+    private func tookThePoint(_ key: String) -> Bool {
+        if let team = myTeam {
+            let mine = competition.teamIntervalTotal(team.id, key: key)
+            guard mine > 0 else { return false }
+            return (competition.teams?.teams ?? []).allSatisfy {
+                $0.id == team.id || competition.teamIntervalTotal($0.id, key: key) <= mine
+            }
+        }
+        return winnerId(for: key) == currentUserId && myQuantity(key) > 0
     }
 
     var body: some View {
@@ -165,7 +205,7 @@ struct CompetitionMyDailyRings: View {
             Image(systemName: "circle.hexagongrid.fill")
                 .font(.system(size: 12, weight: .heavy))
                 .foregroundStyle(LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .bottom))
-            Text("YOUR LAST 7 \(interval == .day ? "DAYS" : interval == .week ? "WEEKS" : "MONTHS")")
+            Text("\(myTeam == nil ? "YOUR" : "YOUR TEAM'S") LAST 7 \(interval == .day ? "DAYS" : interval == .week ? "WEEKS" : "MONTHS")")
                 .font(.system(size: 11, weight: .black, design: .rounded))
                 .tracking(1.4)
                 .foregroundColor(.white.opacity(0.55))
@@ -179,11 +219,11 @@ struct CompetitionMyDailyRings: View {
     // MARK: - Day Cell
     private func dayCell(for date: Date) -> some View {
         let key = intervalKey(for: date)
-        let myMiles = me?.intervals?[key] ?? 0
+        let myMiles = myQuantity(key)
         let leaderMiles = dailyMax(key)
         let goal = competition.options.goal
         let isToday = Calendar.current.isDateInToday(date)
-        let isWinner = winnerId(for: key) == currentUserId && myMiles > 0
+        let isWinner = tookThePoint(key)
 
         return VStack(spacing: 6) {
             ZStack {
