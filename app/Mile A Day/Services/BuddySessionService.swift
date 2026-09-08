@@ -31,6 +31,14 @@ enum BuddyServiceError: LocalizedError {
         case "goal_required": return "Pick a goal to continue."
         case "goal_too_large": return "That goal is a little too ambitious."
         case "too_many_participants": return "That's too many people for one walk."
+        case "request_pending": return "You've asked to join — waiting on them."
+        case "request_declined": return "They're keeping this walk small."
+        case "request_not_found": return "That request isn't waiting any more."
+        case "no_friends_in_walk": return "You need a friend in that walk to ask to join."
+        case "already_invited": return "You're already invited — check your invites."
+        case "already_in": return "You're already in this walk."
+        case "join_directly": return "You can join this walk straight away."
+        case "not_allowed": return "Only the host, or a friend of theirs, can let them in."
         default: return "Something went wrong. Try again."
         }
     }
@@ -556,6 +564,65 @@ final class BuddySessionService: ObservableObject {
         )
         apply(state)
         startPolling()
+    }
+
+    // MARK: - Inviting from inside, and the door for everyone else
+
+    /// Pull more people into the walk you're in — lobby or mid-walk, host or
+    /// not.
+    ///
+    /// The lobby PATCH (`updateSession`) is host-only and lobby-only on the
+    /// server, which made the commonest moment impossible: two friends half a
+    /// mile in, one says "get Sam", and neither phone had a button for it.
+    /// Eligibility is judged against YOU (your friend, unblocked, opted in),
+    /// and they land through the ordinary invite flow — a running walk puts
+    /// them straight on the roster when they accept.
+    func invite(userIds: [String], sessionId: String? = nil) async throws
+        -> BuddySessionState
+    {
+        guard let id = sessionId ?? session?.id else {
+            throw BuddyServiceError.api("session_not_found")
+        }
+        let state = try await request(
+            "/buddy/sessions/\(id)/invite",
+            method: .POST,
+            json: ["userIds": userIds],
+            responseType: BuddySessionState.self
+        )
+        apply(state)
+        return state
+    }
+
+    /// Ask to be let into a walk you weren't invited to — a friend of someone
+    /// IN it, not of its host. The host or that friend answers; a yes arrives
+    /// as an ordinary invite (push + pill), so the rest is the flow you know.
+    func requestToJoin(sessionId: String) async throws {
+        _ = try await request(
+            "/buddy/sessions/\(sessionId)/request",
+            method: .POST,
+            responseType: BuddyJoinRequestResponse.self
+        )
+        // The row now says "Requested" — redraw from the server rather than
+        // from local bookkeeping so every surface agrees.
+        await refreshFriendsOutNow()
+    }
+
+    /// Let someone in, or not. The response carries the new roster/queue.
+    func respondToJoinRequest(
+        userId: String,
+        accept: Bool,
+        sessionId: String? = nil
+    ) async throws {
+        guard let id = sessionId ?? session?.id else {
+            throw BuddyServiceError.api("session_not_found")
+        }
+        let state = try await request(
+            "/buddy/sessions/\(id)/requests/\(userId)/respond",
+            method: .POST,
+            json: ["accept": accept],
+            responseType: BuddySessionState.self
+        )
+        apply(state)
     }
 
     // MARK: - My own settings in this walk

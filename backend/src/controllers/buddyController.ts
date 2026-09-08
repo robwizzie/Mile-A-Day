@@ -25,8 +25,11 @@ import {
   getMySessions,
   getRecap,
   getSessionState,
+  inviteToSession,
   joinSession,
   leaveSession,
+  requestToJoin,
+  respondToJoinRequest,
   recordProgress,
   setBuddyWalkHidden,
   setParticipantLocationType,
@@ -357,6 +360,70 @@ export async function joinByCodeController(
     res.json(await joinSession(req.userId!, { code, locationType }));
   } catch (error) {
     handleError(res, error, "joining buddy session by code");
+  }
+}
+
+/**
+ * POST /buddy/sessions/:sessionId/invite — pull more people in, from ANY
+ * phase and by ANY member.
+ *
+ * The lobby PATCH beside it is host-only and lobby-only, and that made the
+ * commonest case impossible: two friends half a mile in, one says "text Sam",
+ * and neither phone had a button for it. Membership and friendship are the
+ * service's to check; this only shapes the body.
+ */
+export async function inviteToSessionController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const { userIds } = req.body ?? {};
+    if (!Array.isArray(userIds) || userIds.some((id) => typeof id !== "string")) {
+      return res.status(400).json({ error: "invalid_invite_list" });
+    }
+    res.json(
+      await inviteToSession(req.params.sessionId, req.userId!, userIds as string[]),
+    );
+  } catch (error) {
+    handleError(res, error, "inviting to buddy session");
+  }
+}
+
+/** POST /buddy/sessions/:sessionId/request — ask to be let in. */
+export async function requestJoinController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    res.json(await requestToJoin(req.params.sessionId, req.userId!));
+  } catch (error) {
+    handleError(res, error, "requesting to join buddy session");
+  }
+}
+
+/** POST /buddy/sessions/:sessionId/requests/:userId/respond — let them in, or not. */
+export async function respondJoinRequestController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const accept = req.body?.accept;
+    if (typeof accept !== "boolean") {
+      return res.status(400).json({ error: "accept_required" });
+    }
+    res.json(
+      await respondToJoinRequest(
+        req.params.sessionId,
+        req.userId!,
+        req.params.userId,
+        accept,
+      ),
+    );
+  } catch (error) {
+    handleError(res, error, "answering buddy join request");
   }
 }
 

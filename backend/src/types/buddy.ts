@@ -43,7 +43,16 @@ export type BuddyParticipantStatus =
   | "active"
   | "finished"
   | "left"
-  | "declined";
+  | "declined"
+  /**
+   * Asked to join without an invite — a friend of somebody IN the walk, but
+   * not of its host. Not a member: every roster read, count and pooled total
+   * keys on the explicit member sets and never sees this row, and it is
+   * withheld from `participants` on the wire (shipped clients decode that
+   * status as a closed enum, so an unknown value there fails the WHOLE
+   * snapshot). Approval turns it into 'invited'; refusal into 'declined'.
+   */
+  | "requested";
 
 export const BUDDY_MODES: BuddyMode[] = [
   "together",
@@ -177,6 +186,23 @@ export interface BuddyParticipantView {
   location_type: BuddyLocationType | null;
 }
 
+/**
+ * Someone waiting at the door.
+ *
+ * `friend_user_ids` names the people ALREADY in the walk that this person is
+ * friends with — the client draws "friends with Sam" from it, and it is also
+ * who may answer: the host always can, and so can any of these.
+ */
+export interface BuddyJoinRequestView {
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+  requested_at: string | null;
+  friend_user_ids: string[];
+}
+
 /** The full snapshot returned by GET /state and by POST /progress. */
 export interface BuddySessionState {
   id: string;
@@ -196,6 +222,12 @@ export interface BuddySessionState {
   participants: BuddyParticipantView[];
   /** Pooled distance across all participants. Only meaningful for coop_goal. */
   group_distance_miles: number;
+  /**
+   * People asking to be let in. ADDITIVE and separate from `participants` on
+   * purpose: a shipped client decodes participant status as a closed enum,
+   * and one 'requested' row inside that array would fail its whole snapshot.
+   */
+  join_requests: BuddyJoinRequestView[];
 }
 
 // ─── History ────────────────────────────────────────────────────────────
@@ -295,4 +327,10 @@ export type BuddyEventKind =
   | "finished"
   | "completed"
   /** Host called the whole thing off before anybody was moving. */
-  | "cancelled";
+  | "cancelled"
+  /** Someone in the walk pulled more people in (lobby or mid-walk). */
+  | "invited"
+  /** A friend-of-a-participant asked to be let in. */
+  | "join_requested"
+  | "join_approved"
+  | "join_declined";

@@ -1,5 +1,7 @@
 import { PostgresService } from "./DbService.js";
 import { areFriends } from "./friendshipService.js";
+import { JOINABLE_WINDOW_SQL, OCCUPYING_STATUSES_SQL } from "./buddyFeatures.js";
+import type { BuddyJoinRequestView } from "../types/buddy.js";
 import { sendPush } from "./pushNotificationService.js";
 import {
   allowedRecipients,
@@ -179,6 +181,11 @@ async function loadParticipants(
        JOIN users u ON u.user_id = p.user_id
        JOIN buddy_sessions s ON s.id = p.session_id
       WHERE p.session_id = $1
+        -- Someone waiting at the door is not on the roster. Load-bearing for
+        -- shipped clients: they decode this array's status as a closed enum,
+        -- and one unknown value fails the WHOLE snapshot. Requests ride the
+        -- additive join_requests field instead (loadJoinRequests).
+        AND p.status <> 'requested'
       ORDER BY p.distance_miles DESC, p.joined_at ASC NULLS LAST`,
     [sessionId, String(BUDDY_STALE_PROGRESS_SECONDS)],
   );
@@ -203,9 +210,55 @@ async function loadParticipants(
   }));
 }
 
+/**
+ * People asking to be let in, with the members each of them is friends with.
+ *
+ * `friend_user_ids` is what makes the request answerable by more than the
+ * host: any member on that list vouches for them. It's the requester's OWN
+ * friendship rows, either direction, against the people who are actually in
+ * the walk — never against invitees who haven't answered.
+ */
+async function loadJoinRequests(
+  sessionId: string,
+): Promise<BuddyJoinRequestView[]> {
+  return db.query<BuddyJoinRequestView>(
+    `SELECT r.user_id, u.username, u.first_name, u.last_name,
+            u.profile_image_url,
+            to_char(r.requested_at AT TIME ZONE 'UTC',
+                    'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS requested_at,
+            ARRAY(
+              SELECT m.user_id
+                FROM buddy_session_participants m
+               WHERE m.session_id = r.session_id
+                 AND m.status IN ('joined', 'ready', 'active', 'finished')
+                 AND EXISTS (
+                   SELECT 1 FROM friendships f
+                    WHERE f.status = 'accepted'
+                      AND ((f.user_id = r.user_id AND f.friend_id = m.user_id)
+                        OR (f.user_id = m.user_id AND f.friend_id = r.user_id)))
+               ORDER BY m.joined_at ASC NULLS LAST
+            )::text[] AS friend_user_ids
+       FROM buddy_session_participants r
+       JOIN users u ON u.user_id = r.user_id
+      WHERE r.session_id = $1 AND r.status = 'requested'
+      ORDER BY r.requested_at ASC NULLS LAST`,
+    [sessionId],
+  );
+}
+
+/** The snapshot every mutation returns: row + roster + the queue at the door. */
+async function buildState(session: BuddySessionRow): Promise<BuddySessionState> {
+  const [participants, joinRequests] = await Promise.all([
+    loadParticipants(session.id, session.host_user_id),
+    loadJoinRequests(session.id),
+  ]);
+  return toState(session, participants, joinRequests);
+}
+
 function toState(
   session: BuddySessionRow,
   participants: BuddyParticipantView[],
+  joinRequests: BuddyJoinRequestView[] = [],
 ): BuddySessionState {
   // Only participants who actually got moving count toward the pooled total —
   // an invitee who never joined must not dilute a co-op goal.
@@ -229,6 +282,7 @@ function toState(
     state_version: session.state_version,
     participants,
     group_distance_miles: Math.round(groupDistance * 1000) / 1000,
+    join_requests: joinRequests,
   };
 }
 
@@ -266,8 +320,7 @@ export async function getSessionState(
     return null;
   }
 
-  const participants = await loadParticipants(sessionId, session.host_user_id);
-  return toState(session, participants);
+  return buildState(session);
 }
 
 // ─── Create ─────────────────────────────────────────────────────────────
@@ -417,7 +470,7 @@ export async function createSession(
 
   const session = await getSessionRow(sessionId);
   if (!session) throw new BadRequestError("session_not_found");
-  return toState(session, await loadParticipants(sessionId, hostUserId));
+  return buildState(session);
 }
 
 /**
@@ -437,41 +490,62 @@ export function inviteWhenText(scheduledStartAt: string | null): string {
   return `in ${days} ${days === 1 ? "day" : "days"}`;
 }
 
+async function displayName(userId: string): Promise<string> {
+  const rows = await db.query<{
+    first_name: string | null;
+    username: string | null;
+  }>(`SELECT first_name, username FROM users WHERE user_id = $1`, [userId]);
+  return rows[0]?.first_name || rows[0]?.username || "A friend";
+}
+
+/**
+ * "Sam wants to walk with you" — to each new invitee.
+ *
+ * `inviterId` is whoever tapped, which is no longer always the host: a member
+ * can pull people in mid-walk. The push still carries `host_user_id` (the
+ * session's), because that is the key shipped builds already read, and adds
+ * the inviter beside it. The copy knows the phase — an invite to a walk that
+ * is already underway says so, or "starting now" over a crew half a mile in
+ * reads as a room that will wait for you.
+ */
 async function notifyInvitees(
   sessionId: string,
   hostUserId: string,
   inviteeIds: string[],
   scheduledStartAt: string | null = null,
+  inviterId: string = hostUserId,
+  sessionStatus: string = "lobby",
 ): Promise<void> {
   if (inviteeIds.length === 0) return;
   try {
-    const hostRows = await db.query<{
-      first_name: string | null;
-      username: string | null;
-    }>(`SELECT first_name, username FROM users WHERE user_id = $1`, [
-      hostUserId,
-    ]);
-    const hostName =
-      hostRows[0]?.first_name || hostRows[0]?.username || "A friend";
+    const inviterName = await displayName(inviterId);
+    const body =
+      sessionStatus === "active"
+        ? `${inviterName} is out now and wants you on the walk — join in`
+        : `${inviterName} wants to walk with you — ${inviteWhenText(scheduledStartAt)}`;
 
     // Two queries for the whole crew, then the pushes in parallel: an invite
     // is "starting now", and a room of eight used to wait on sixteen
     // sequential preference reads before the first one went out.
-    const recipients = await allowedRecipients(inviteeIds, hostUserId, "buddy");
+    const recipients = await allowedRecipients(inviteeIds, inviterId, "buddy");
     await Promise.all(
       recipients.map((inviteeId) =>
         sendPush(inviteeId, {
           title: "Buddy Walk",
-          body: `${hostName} wants to walk with you — ${inviteWhenText(scheduledStartAt)}`,
+          body,
           type: "buddy_invite",
           category: "BUDDY_INVITE",
-          data: { session_id: sessionId, host_user_id: hostUserId },
+          data: {
+            session_id: sessionId,
+            host_user_id: hostUserId,
+            inviter_user_id: inviterId,
+          },
         }),
       ),
     );
   } catch (err) {
     void logError("buddy", "failed to notify buddy invitees", {
-      userId: hostUserId,
+      userId: inviterId,
       context: { sessionId, error: String(err) },
     });
   }
@@ -522,10 +596,30 @@ export async function joinSession(
   // Joining by code still requires friendship with the host — the code is a
   // convenience, never an authorization bypass.
   if (session.host_user_id && session.host_user_id !== userId) {
-    const invited = await participantStatus(sessionId, userId);
-    if (invited === null) {
+    const existingRows = await db.query<{
+      status: string;
+      requested_at: string | null;
+    }>(
+      `SELECT status, requested_at FROM buddy_session_participants
+        WHERE session_id = $1 AND user_id = $2`,
+      [sessionId, userId],
+    );
+    const existing = existingRows[0] ?? null;
+    // A row that came in through the request door carries no authorization
+    // of its own: 'requested' is still waiting for an answer, and a
+    // 'declined' with `requested_at` set IS the answer. Only an invite (or a
+    // row that once held membership) lets a non-friend of the host in.
+    const cameByRequest =
+      existing !== null &&
+      existing.requested_at !== null &&
+      (existing.status === "requested" || existing.status === "declined");
+    if (existing === null || cameByRequest) {
       if (!(await areFriends(session.host_user_id, userId))) {
-        throw new BadRequestError("not_friends_with_host");
+        throw new BadRequestError(
+          existing?.status === "requested"
+            ? "request_pending"
+            : "not_friends_with_host",
+        );
       }
     }
     if (await isBlockedEitherWay(session.host_user_id, userId)) {
@@ -570,12 +664,19 @@ export async function joinSession(
     );
     previous = already.rows[0]?.status ?? null;
 
-    // Only count people occupying a slot. 'left'/'declined' free theirs.
-    if (previous === null || previous === "left" || previous === "declined") {
+    // Only count people occupying a slot. 'left'/'declined' freed theirs and
+    // a 'requested' row never held one — until this join, which is the moment
+    // a requester who became the host's friend takes a seat.
+    if (
+      previous === null ||
+      previous === "left" ||
+      previous === "declined" ||
+      previous === "requested"
+    ) {
       const countRows = await client.query<{ n: string }>(
         `SELECT COUNT(*)::text AS n FROM buddy_session_participants
           WHERE session_id = $1
-            AND status NOT IN ('left', 'declined')`,
+            AND status IN ${OCCUPYING_STATUSES_SQL}`,
         [sessionId],
       );
       if (Number(countRows.rows[0]?.n ?? 0) >= BUDDY_MAX_PARTICIPANTS) {
@@ -601,7 +702,7 @@ export async function joinSession(
              location_type = COALESCE(
                $4::text, buddy_session_participants.location_type)
          WHERE buddy_session_participants.status
-                 IN ('invited', 'left', 'declined', 'joined', 'ready')`,
+                 IN ('invited', 'left', 'declined', 'joined', 'ready', 'requested')`,
       [sessionId, userId, arrivalStatus, opts.locationType ?? null],
     );
 
@@ -643,7 +744,7 @@ export async function joinSession(
 
   const fresh = await getSessionRow(sessionId);
   if (!fresh) throw new BadRequestError("session_not_found");
-  return toState(fresh, await loadParticipants(sessionId, fresh.host_user_id));
+  return buildState(fresh);
 }
 
 /**
@@ -742,10 +843,7 @@ export async function setReady(
 
   const session = await getSessionRow(sessionId);
   if (!session) throw new BadRequestError("session_not_found");
-  return toState(
-    session,
-    await loadParticipants(sessionId, session.host_user_id),
-  );
+  return buildState(session);
 }
 
 /**
@@ -777,10 +875,7 @@ export async function setParticipantLocationType(
 
   const session = await getSessionRow(sessionId);
   if (!session) throw new BadRequestError("session_not_found");
-  return toState(
-    session,
-    await loadParticipants(sessionId, session.host_user_id),
-  );
+  return buildState(session);
 }
 
 // ─── Start ──────────────────────────────────────────────────────────────
@@ -805,7 +900,7 @@ export async function startSession(
 
   const fresh = await getSessionRow(sessionId);
   if (!fresh) throw new BadRequestError("session_not_found");
-  return toState(fresh, await loadParticipants(sessionId, fresh.host_user_id));
+  return buildState(fresh);
 }
 
 export interface UpdateSessionInput {
@@ -898,14 +993,14 @@ export async function updateSession(
   if (changed.length === 0) throw new BadRequestError("session_not_editable");
 
   if (patch.inviteUserIds?.length) {
-    await addInvitees(sessionId, userId, patch.inviteUserIds);
+    await addInvitees(session, userId, patch.inviteUserIds);
   }
 
   await recordEvent(sessionId, userId, "updated", { mode, goalValue });
 
   const fresh = await getSessionRow(sessionId);
   if (!fresh) throw new BadRequestError("session_not_found");
-  return toState(fresh, await loadParticipants(sessionId, fresh.host_user_id));
+  return buildState(fresh);
 }
 
 /**
@@ -917,25 +1012,37 @@ export async function updateSession(
  * joined, declined or left is a no-op and never resurrects them or re-pushes.
  */
 async function addInvitees(
-  sessionId: string,
-  hostUserId: string,
+  session: BuddySessionRow,
+  inviterId: string,
   requested: string[],
 ): Promise<void> {
-  const existing = await db.query<{ user_id: string }>(
-    `SELECT user_id FROM buddy_session_participants WHERE session_id = $1`,
+  const sessionId = session.id;
+  const existing = await db.query<{ user_id: string; status: string }>(
+    `SELECT user_id, status FROM buddy_session_participants WHERE session_id = $1`,
     [sessionId],
   );
-  const already = new Set(existing.map((row) => row.user_id));
+  const already = new Map(existing.map((row) => [row.user_id, row.status]));
+  const asked = Array.from(new Set(requested));
 
-  const wanted = Array.from(new Set(requested)).filter(
-    (id) => !already.has(id),
-  );
+  // Inviting somebody who is standing at the door IS letting them in — the
+  // inviter is, by the eligibility rule below, their friend, which is exactly
+  // who may answer a request. Without this the tap was a silent no-op (the
+  // insert conflicts) and the person stayed waiting.
+  const waiting = asked.filter((id) => already.get(id) === "requested");
+  for (const requesterId of waiting) {
+    await respondToJoinRequest(sessionId, inviterId, requesterId, true);
+  }
+
+  const wanted = asked.filter((id) => !already.has(id));
   if (wanted.length === 0) return;
-  if (already.size + wanted.length > BUDDY_MAX_PARTICIPANTS) {
+  const occupied = existing.filter((row) =>
+    ["invited", "joined", "ready", "active", "finished"].includes(row.status),
+  ).length;
+  if (occupied + waiting.length + wanted.length > BUDDY_MAX_PARTICIPANTS) {
     throw new BadRequestError("too_many_participants");
   }
 
-  const eligible = await eligibleInvitees(hostUserId, wanted);
+  const eligible = await eligibleInvitees(inviterId, wanted);
   if (eligible.length === 0) return;
 
   await db.query(
@@ -943,10 +1050,320 @@ async function addInvitees(
        (session_id, user_id, status, invited_by)
      SELECT $1, invitee, 'invited', $2 FROM unnest($3::text[]) AS invitee
      ON CONFLICT (session_id, user_id) DO NOTHING`,
-    [sessionId, hostUserId, eligible],
+    [sessionId, inviterId, eligible],
   );
-  void notifyInvitees(sessionId, hostUserId, eligible);
+  await recordEvent(sessionId, inviterId, "invited", { invitees: eligible });
+  void notifyInvitees(
+    sessionId,
+    session.host_user_id ?? inviterId,
+    eligible,
+    session.scheduled_start_at,
+    inviterId,
+    session.status,
+  );
 }
+
+/** Is this person IN the walk — a member, not an invitee or a requester? */
+async function isMember(sessionId: string, userId: string): Promise<boolean> {
+  const status = await participantStatus(sessionId, userId);
+  return (
+    status === "joined" ||
+    status === "ready" ||
+    status === "active" ||
+    status === "finished"
+  );
+}
+
+/**
+ * Pull more people in — from the lobby OR mid-walk, by ANY member.
+ *
+ * The lobby PATCH is host-only and lobby-only, which made the commonest
+ * moment impossible: two friends half a mile in, one says "get Sam", and
+ * neither phone had a button. Eligibility is judged against the INVITER
+ * (their friend, unblocked, opted in, on a build with the screens), and the
+ * invitee then joins through the ordinary door — `joinSession` lets anyone
+ * holding an 'invited' row in regardless of who the host is. A running walk
+ * lands them 'active' the moment they accept.
+ */
+export async function inviteToSession(
+  sessionId: string,
+  inviterId: string,
+  userIds: string[],
+): Promise<BuddySessionState> {
+  const session = await getSessionRow(sessionId);
+  if (!session) throw new BadRequestError("session_not_found");
+  if (session.status !== "lobby" && session.status !== "active") {
+    throw new BadRequestError("session_closed");
+  }
+  if (!(await isMember(sessionId, inviterId))) {
+    throw new BadRequestError("not_a_participant");
+  }
+  await addInvitees(session, inviterId, userIds);
+  await bumpVersion(sessionId);
+  const fresh = await getSessionRow(sessionId);
+  if (!fresh) throw new BadRequestError("session_not_found");
+  return buildState(fresh);
+}
+
+/** Members who are friends with `userId` — the people who can vouch for them. */
+async function memberFriendsOf(
+  sessionId: string,
+  userId: string,
+): Promise<string[]> {
+  const rows = await db.query<{ user_id: string }>(
+    `SELECT m.user_id
+       FROM buddy_session_participants m
+      WHERE m.session_id = $1
+        AND m.user_id <> $2
+        AND m.status IN ('joined', 'ready', 'active', 'finished')
+        AND EXISTS (
+          SELECT 1 FROM friendships f
+           WHERE f.status = 'accepted'
+             AND ((f.user_id = $2 AND f.friend_id = m.user_id)
+               OR (f.user_id = m.user_id AND f.friend_id = $2)))
+        AND NOT EXISTS (
+          SELECT 1 FROM user_blocks b
+           WHERE (b.blocker_id = $2 AND b.blocked_id = m.user_id)
+              OR (b.blocker_id = m.user_id AND b.blocked_id = $2))`,
+    [sessionId, userId],
+  );
+  return rows.map((r) => r.user_id);
+}
+
+/**
+ * Ask to be let into a walk you weren't invited to.
+ *
+ * The rule is "a friend of somebody IN it": joinSession's door is friendship
+ * with the HOST, and that made every mixed group a dead end — you see your
+ * friend is out with people you don't know, and the only move was to text
+ * them and hope they find the invite button. This parks the asker as
+ * 'requested' — not a member, holding no slot, invisible to every roster
+ * read — and tells the host and the members who know them. Any of those can
+ * answer; approval turns the row into an ordinary 'invited' one, so the rest
+ * of the flow (the invite pill, the push type every build routes, the join)
+ * is exactly what already ships.
+ *
+ * Deliberately NOT a bypass for the host-friend case: someone the host is
+ * friends with is told to walk straight in (`join_directly`), or the door
+ * would put a wait in front of people who never had one.
+ */
+export async function requestToJoin(
+  sessionId: string,
+  userId: string,
+): Promise<{ status: "requested" }> {
+  const session = await getSessionRow(sessionId);
+  if (!session) throw new BadRequestError("session_not_found");
+  if (session.status !== "lobby" && session.status !== "active") {
+    throw new BadRequestError("session_closed");
+  }
+  if (session.host_user_id === userId) throw new BadRequestError("already_in");
+  if (
+    session.host_user_id &&
+    (await isBlockedEitherWay(session.host_user_id, userId))
+  ) {
+    throw new BadRequestError("blocked");
+  }
+
+  const existingRows = await db.query<{
+    status: string;
+    requested_at: string | null;
+  }>(
+    `SELECT status, requested_at FROM buddy_session_participants
+      WHERE session_id = $1 AND user_id = $2`,
+    [sessionId, userId],
+  );
+  const existing = existingRows[0] ?? null;
+  if (existing?.status === "requested") return { status: "requested" };
+  if (existing?.status === "invited") throw new BadRequestError("already_invited");
+  if (
+    existing &&
+    ["joined", "ready", "active", "finished"].includes(existing.status)
+  ) {
+    throw new BadRequestError("already_in");
+  }
+  // Refused once is refused: the row keeps `requested_at`, so this is the
+  // answer to THEIR ask and not an invite they turned down.
+  if (existing?.status === "declined" && existing.requested_at !== null) {
+    throw new BadRequestError("request_declined");
+  }
+
+  if (session.host_user_id && (await areFriends(session.host_user_id, userId))) {
+    throw new BadRequestError("join_directly");
+  }
+  const vouchers = await memberFriendsOf(sessionId, userId);
+  if (vouchers.length === 0) throw new BadRequestError("no_friends_in_walk");
+
+  const open = await db.query<{ ok: boolean }>(
+    `SELECT ${JOINABLE_WINDOW_SQL("s")} AS ok FROM buddy_sessions s WHERE s.id = $1`,
+    [sessionId],
+  );
+  if (open[0]?.ok !== true) throw new BadRequestError("session_closed");
+
+  const countRows = await db.query<{ n: string }>(
+    `SELECT COUNT(*)::text AS n FROM buddy_session_participants
+      WHERE session_id = $1 AND status IN ${OCCUPYING_STATUSES_SQL}`,
+    [sessionId],
+  );
+  if (Number(countRows[0]?.n ?? 0) >= BUDDY_MAX_PARTICIPANTS) {
+    throw new BadRequestError("session_full");
+  }
+
+  await db.query(
+    `INSERT INTO buddy_session_participants
+       (session_id, user_id, status, requested_at)
+     VALUES ($1, $2, 'requested', NOW())
+     ON CONFLICT (session_id, user_id) DO UPDATE
+       SET status = 'requested', requested_at = NOW()
+       WHERE buddy_session_participants.status IN ('left', 'declined')`,
+    [sessionId, userId],
+  );
+  await bumpVersion(sessionId);
+  await recordEvent(sessionId, userId, "join_requested");
+  void notifyJoinRequest(session, userId, vouchers);
+  return { status: "requested" };
+}
+
+/**
+ * "Sam wants to join your walk" — to the host and to the members who know
+ * them, i.e. exactly the people who can answer. Gated PER DEVICE on
+ * `buddy_join_request_v1`: the type is new, and a build that doesn't route
+ * it would show a banner that opens nothing. Those people still see the
+ * request the next time their lobby or tracker polls.
+ */
+async function notifyJoinRequest(
+  session: BuddySessionRow,
+  requesterId: string,
+  vouchers: string[],
+): Promise<void> {
+  try {
+    const name = await displayName(requesterId);
+    const targets = Array.from(
+      new Set(
+        [session.host_user_id, ...vouchers].filter(
+          (id): id is string => !!id && id !== requesterId,
+        ),
+      ),
+    );
+    const recipients = await allowedRecipients(targets, requesterId, "buddy");
+    await Promise.all(
+      recipients.map(async (recipientId) => {
+        if (
+          !(await userSupports(recipientId, CLIENT_FEATURES.buddyJoinRequestV1))
+        ) {
+          return;
+        }
+        await sendPush(recipientId, {
+          title: "Buddy Walk",
+          body:
+            recipientId === session.host_user_id
+              ? `${name} wants to join your walk — tap to let them in`
+              : `${name} wants to join the walk — you can let them in`,
+          type: "buddy_join_request",
+          data: { session_id: session.id, requester_user_id: requesterId },
+        });
+      }),
+    );
+  } catch (err) {
+    void logError("buddy", "failed to notify buddy join request", {
+      userId: requesterId,
+      context: { sessionId: session.id, error: String(err) },
+    });
+  }
+}
+
+/**
+ * Answer someone at the door. The host always may; so may any member who is
+ * the requester's friend — the same people who were told.
+ *
+ * Yes becomes an ordinary 'invited' row (stamped with who let them in), and
+ * the requester gets `buddy_invite`, the push every build already routes, so
+ * their tap lands in the same join flow an invite does. No is silent, Instagram
+ * style — being told "no" by name is worse than a request that just lapses —
+ * and the row keeps `requested_at`, which is what stops a re-ask and what
+ * keeps a refused requester from walking in through the invitee door.
+ */
+export async function respondToJoinRequest(
+  sessionId: string,
+  approverId: string,
+  requesterId: string,
+  accept: boolean,
+): Promise<BuddySessionState> {
+  const session = await getSessionRow(sessionId);
+  if (!session) throw new BadRequestError("session_not_found");
+  if (session.status !== "lobby" && session.status !== "active") {
+    throw new BadRequestError("session_closed");
+  }
+  const isHost = session.host_user_id === approverId;
+  if (!isHost) {
+    if (!(await isMember(sessionId, approverId))) {
+      throw new BadRequestError("not_a_participant");
+    }
+    if (!(await areFriends(approverId, requesterId))) {
+      throw new BadRequestError("not_allowed");
+    }
+  }
+
+  const changed = await db.query<{ user_id: string }>(
+    accept
+      ? `UPDATE buddy_session_participants
+            SET status = 'invited', invited_by = $3
+          WHERE session_id = $1 AND user_id = $2 AND status = 'requested'
+          RETURNING user_id`
+      : `UPDATE buddy_session_participants
+            SET status = 'declined'
+          WHERE session_id = $1 AND user_id = $2 AND status = 'requested'
+            AND $3::text IS NOT NULL
+          RETURNING user_id`,
+    [sessionId, requesterId, approverId],
+  );
+  if (changed.length === 0) throw new BadRequestError("request_not_found");
+
+  await bumpVersion(sessionId);
+  await recordEvent(
+    sessionId,
+    approverId,
+    accept ? "join_approved" : "join_declined",
+    { requester: requesterId },
+  );
+  if (accept) void notifyRequestApproved(session, approverId, requesterId);
+
+  const fresh = await getSessionRow(sessionId);
+  if (!fresh) throw new BadRequestError("session_not_found");
+  return buildState(fresh);
+}
+
+/** "Sam let you in — tap to join" — `buddy_invite`, which every build routes. */
+async function notifyRequestApproved(
+  session: BuddySessionRow,
+  approverId: string,
+  requesterId: string,
+): Promise<void> {
+  try {
+    const recipients = await allowedRecipients([requesterId], approverId, "buddy");
+    if (recipients.length === 0) return;
+    const name = await displayName(approverId);
+    await sendPush(requesterId, {
+      title: "Buddy Walk",
+      body:
+        session.status === "active"
+          ? `${name} let you in — tap to join the walk`
+          : `${name} let you in — tap to join the lobby`,
+      type: "buddy_invite",
+      category: "BUDDY_INVITE",
+      data: {
+        session_id: session.id,
+        host_user_id: session.host_user_id ?? approverId,
+        inviter_user_id: approverId,
+      },
+    });
+  } catch (err) {
+    void logError("buddy", "failed to notify approved buddy request", {
+      userId: requesterId,
+      context: { sessionId: session.id, error: String(err) },
+    });
+  }
+}
+
 
 /**
  * Flip a lobby to active. The single place a session ever starts — a manual
@@ -1048,7 +1465,7 @@ export async function cancelSession(
 
   const fresh = await getSessionRow(sessionId);
   if (!fresh) throw new BadRequestError("session_not_found");
-  return toState(fresh, await loadParticipants(sessionId, fresh.host_user_id));
+  return buildState(fresh);
 }
 
 /**
@@ -1084,7 +1501,7 @@ async function cancelInternal(
     `UPDATE buddy_session_participants
         SET status = 'left'
       WHERE session_id = $1
-        AND status IN ('invited', 'joined', 'ready', 'active')`,
+        AND status IN ('invited', 'joined', 'ready', 'active', 'requested')`,
     [sessionId],
   );
 
@@ -1390,10 +1807,7 @@ export async function recordProgress(
 
   const session = await getSessionRow(sessionId);
   if (!session) throw new BadRequestError("session_not_found");
-  return toState(
-    session,
-    await loadParticipants(sessionId, session.host_user_id),
-  );
+  return buildState(session);
 }
 
 // ─── Finish & finalize ──────────────────────────────────────────────────
@@ -1408,16 +1822,21 @@ export async function finishParticipation(
       WHERE session_id = $1 AND user_id = $2 AND status = 'active'`,
     [sessionId, userId],
   );
+  // Link NOW, not at close. The usual order on a phone is HealthKit save →
+  // observer sync (reconcileBuddySessions: participant still 'active', no
+  // stamp) → this Finish — so the workout was on the server, route and all,
+  // and stayed unlinked until the LAST person closed the walk. On a four-
+  // person walk that is however long the slowest walker takes, and the whole
+  // time this person's route was missing from the card and their post had
+  // no workout to take its colour from.
+  await linkSyncedWorkouts(sessionId);
   await bumpVersion(sessionId);
   await recordEvent(sessionId, userId, "finished");
   await finalizeIfDue(sessionId, userId);
 
   const session = await getSessionRow(sessionId);
   if (!session) throw new BadRequestError("session_not_found");
-  return toState(
-    session,
-    await loadParticipants(sessionId, session.host_user_id),
-  );
+  return buildState(session);
 }
 
 /**
@@ -1641,6 +2060,8 @@ export async function reconcileBuddySessions(
       [userId, uploadedWorkoutIds],
     );
 
+    await linkSessionPosts(userId);
+
     // Re-rank any session this just touched, now using reconciled numbers where
     // they exist and live numbers where they don't yet.
     await db.query(
@@ -1705,6 +2126,7 @@ export async function linkSyncedWorkouts(sessionId: string): Promise<void> {
           AND p.workout_id IS NULL`,
       [sessionId],
     );
+    await linkSessionPosts(null, sessionId);
     await db.query(
       `UPDATE buddy_session_participants p
           SET place = ranked.rn
@@ -1724,6 +2146,73 @@ export async function linkSyncedWorkouts(sessionId: string): Promise<void> {
       context: { sessionId, error: String(err) },
     });
   }
+}
+
+/**
+ * Give a walk's posts the workout they were made without.
+ *
+ * A post made from the recap in the seconds before HealthKit publishes the
+ * walk carries no `workout_id` — and everything on the card keys on it: the
+ * activity colour (a NULL type draws red), the author's route, the day-rollup
+ * restatement. The participant row gets its workout a minute later; this
+ * hands it on to the post, guarded so it never claims a workout another feed
+ * post of theirs already stands for.
+ */
+async function linkSessionPosts(
+  userId: string | null,
+  sessionId: string | null = null,
+): Promise<void> {
+  await db.query(
+    `UPDATE posts p
+        SET workout_id = bsp.workout_id
+       FROM buddy_session_participants bsp
+      WHERE p.buddy_session_id = bsp.session_id
+        AND p.user_id = bsp.user_id
+        AND p.workout_id IS NULL
+        AND p.deleted_at IS NULL
+        AND bsp.workout_id IS NOT NULL
+        AND ($1::text IS NULL OR p.user_id = $1::text)
+        AND ($2::text IS NULL OR bsp.session_id = $2::text)
+        AND NOT EXISTS (
+          SELECT 1 FROM posts q
+           WHERE q.workout_id = bsp.workout_id AND q.user_id = p.user_id
+             AND q.deleted_at IS NULL AND q.post_id <> p.post_id
+             AND q.share_to_feed = p.share_to_feed)`,
+    [userId, sessionId],
+  );
+}
+
+/**
+ * Does a buddy walk this user FINISHED today cover their goal?
+ *
+ * The posting gate reads the day's synced miles, and a walk that has just
+ * ended is exactly the one that hasn't synced yet — so the person who walked
+ * two miles with friends was told to "finish today's mile before you post".
+ * The live participant row knows they did. Posting-gate only: nothing that
+ * scores a streak reads this.
+ */
+export async function buddyWalkCreditsGoal(
+  userId: string,
+  localDate: string,
+  goalMiles: number,
+): Promise<boolean> {
+  const rows = await db.query<{ ok: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM buddy_session_participants bsp
+         JOIN buddy_sessions s ON s.id = bsp.session_id
+        WHERE bsp.user_id = $1
+          AND bsp.status = 'finished'
+          AND s.status IN ('active', 'completed')
+          -- The host's day vs. the caller's: loose on the calendar, tight on
+          -- the clock (same rule the posting window uses).
+          AND s.local_date BETWEEN ($2::date - 1) AND ($2::date + 1)
+          AND bsp.finished_at > NOW() - INTERVAL '30 hours'
+          AND COALESCE(bsp.final_distance_miles, bsp.distance_miles, 0) + 1e-9
+              >= $3::float * 0.95
+     ) AS ok`,
+    [userId, localDate, goalMiles],
+  );
+  return rows[0]?.ok === true;
 }
 
 // ─── Discovery helpers ──────────────────────────────────────────────────
@@ -1867,8 +2356,20 @@ export async function getJoinableFriendSessions(userId: string): Promise<
     host_first_name: string | null;
     host_profile_image_url: string | null;
     participant_count: number;
+    /** Walk straight in (host is a friend) vs. ask (a member is). */
+    host_is_friend: boolean;
+    /** 'requested' while an ask is pending, 'declined' once refused. */
+    my_request_status: string | null;
+    /** First names of the members the caller is friends with, up to three. */
+    friend_first_names: string[];
   }>
 > {
+  // Rooms reachable only by ASKING are shown only to a build that can ask —
+  // an older one draws a plain Join for every row and gets refused.
+  const canRequest = await userSupports(
+    userId,
+    CLIENT_FEATURES.buddyJoinRequestV1,
+  );
   return db.query(
     `SELECT s.id AS session_id, s.join_code, s.mode, s.activity_type, s.status,
             s.host_user_id, u.username AS host_username,
@@ -1876,35 +2377,54 @@ export async function getJoinableFriendSessions(userId: string): Promise<
             u.profile_image_url AS host_profile_image_url,
             (SELECT COUNT(*)::int FROM buddy_session_participants c
               WHERE c.session_id = s.id
-                AND c.status NOT IN ('left', 'declined')) AS participant_count
+                AND c.status IN ${OCCUPYING_STATUSES_SQL}) AS participant_count,
+            EXISTS (
+              SELECT 1 FROM friendships hf
+               WHERE hf.user_id = $1 AND hf.friend_id = s.host_user_id
+                 AND hf.status = 'accepted') AS host_is_friend,
+            (SELECT CASE WHEN mine.status = 'requested' THEN 'requested'
+                         WHEN mine.status = 'declined'
+                              AND mine.requested_at IS NOT NULL THEN 'declined'
+                    END
+               FROM buddy_session_participants mine
+              WHERE mine.session_id = s.id AND mine.user_id = $1) AS my_request_status,
+            ARRAY(
+              SELECT COALESCE(fu.first_name, fu.username, 'A friend')
+                FROM buddy_session_participants fp
+                JOIN users fu ON fu.user_id = fp.user_id
+                JOIN friendships ff
+                  ON ff.user_id = $1 AND ff.friend_id = fp.user_id
+                 AND ff.status = 'accepted'
+               WHERE fp.session_id = s.id
+                 AND fp.status IN ('joined', 'ready', 'active', 'finished')
+               ORDER BY fp.joined_at ASC NULLS LAST
+               LIMIT 3
+            )::text[] AS friend_first_names
        FROM buddy_sessions s
        JOIN users u ON u.user_id = s.host_user_id
-       JOIN friendships f
-         ON f.user_id = $1 AND f.friend_id = s.host_user_id
-        AND f.status = 'accepted'
       WHERE s.status IN ('lobby', 'active')
+        -- Friends with the host (walk straight in), or — for a build that can
+        -- ask — friends with somebody who is IN it.
         AND (
-          -- Running: joinable while at least one person is actually in it.
-          -- Everyone finished or left = a walk that is over in every sense the
-          -- user can see, even though the row is closed lazily on next read.
-          (s.status = 'active' AND EXISTS (
-             SELECT 1 FROM buddy_session_participants live
-              WHERE live.session_id = s.id AND live.status = 'active'
-           ))
-          -- Waiting: an unscheduled lobby for the 3h the abandoned-lobby
-          -- sweep allows it; a scheduled one only around its start (a room
-          -- for Thursday is not an offer to walk now).
-          OR (s.status = 'lobby' AND (
-                (s.scheduled_start_at IS NULL
-                 AND s.created_at > NOW() - INTERVAL '3 hours')
-             OR (s.scheduled_start_at IS NOT NULL
-                 AND s.scheduled_start_at BETWEEN NOW() - INTERVAL '30 minutes'
-                                              AND NOW() + INTERVAL '30 minutes')))
+          EXISTS (
+            SELECT 1 FROM friendships hf
+             WHERE hf.user_id = $1 AND hf.friend_id = s.host_user_id
+               AND hf.status = 'accepted')
+          OR ($3::boolean AND EXISTS (
+            SELECT 1 FROM buddy_session_participants fp
+             JOIN friendships ff
+               ON ff.user_id = $1 AND ff.friend_id = fp.user_id
+              AND ff.status = 'accepted'
+            WHERE fp.session_id = s.id
+              AND fp.status IN ('joined', 'ready', 'active', 'finished')))
         )
+        AND ${JOINABLE_WINDOW_SQL("s")}
+        -- Already in it? Then it isn't an offer. A pending request is not
+        -- "in" — the row stays so the client can say "Requested".
         AND NOT EXISTS (
           SELECT 1 FROM buddy_session_participants mine
            WHERE mine.session_id = s.id AND mine.user_id = $1
-             AND mine.status NOT IN ('left', 'declined')
+             AND mine.status NOT IN ('left', 'declined', 'requested')
         )
         AND NOT EXISTS (
           SELECT 1 FROM user_blocks b
@@ -1913,10 +2433,10 @@ export async function getJoinableFriendSessions(userId: string): Promise<
         )
         AND (SELECT COUNT(*) FROM buddy_session_participants c
               WHERE c.session_id = s.id
-                AND c.status NOT IN ('left', 'declined')) < $2
+                AND c.status IN ${OCCUPYING_STATUSES_SQL}) < $2
       ORDER BY COALESCE(s.started_at, s.created_at) DESC
       LIMIT 5`,
-    [userId, BUDDY_MAX_PARTICIPANTS],
+    [userId, BUDDY_MAX_PARTICIPANTS, canRequest],
   );
 }
 
@@ -1999,10 +2519,7 @@ export async function getRecap(
   );
 
   return {
-    session: toState(
-      session,
-      await loadParticipants(sessionId, session.host_user_id),
-    ),
+    session: await buildState(session),
     events,
     post: await buddySessionPost(sessionId, userId),
   };

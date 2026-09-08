@@ -84,90 +84,277 @@ struct BuddyStartSheet: View {
             )
     }
 
-    // MARK: - Body
+    // MARK: - Steps
 
-    var body: some View {
-        NavigationStack {
-            ZStack(alignment: .bottom) {
-                MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
+    /// The setup as the SAME wizard the solo flow uses.
+    ///
+    /// This was one long sheet — summary hero, segmented toggles, a 2x2 mode
+    /// grid, chips, a schedule row, a friend list, partners, routines — under a
+    /// navigation title, with a sticky "Create lobby" at the bottom. Tapping
+    /// "With a Buddy" on the Start Mile wizard therefore changed the app's
+    /// language mid-flow: three big question-and-cards screens, then a form.
+    /// It is steps now, in the wizard's own chrome, in the order the questions
+    /// actually get asked: who, then walk or run, then what kind of walk.
+    ///
+    /// Who is FIRST and is the one step with a Next button, because it is the
+    /// one multi-select question; the other two advance on a tap exactly like
+    /// the solo steps. `goal` is a sub-step of the plan (it shares the third
+    /// progress segment, the way the ghost options share the solo flow's), and
+    /// only appears for a mode that needs a target.
+    private enum SetupStep: Equatable {
+        case who, activity, plan, goal
 
-                ScrollView {
-                    VStack(spacing: MADTheme.Spacing.lg) {
-                        startLane
-                        // Clears the sticky footer (button + the line under it).
-                        Color.clear.frame(height: 140)
-                    }
-                    .padding(.horizontal, MADTheme.Spacing.md)
-                    .padding(.top, MADTheme.Spacing.sm)
-                }
-
-                footer
-            }
-            .navigationTitle(isRun ? "Buddy Run" : "Buddy Walk")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-            .task {
-                // This screen is several taps in a row; warm the Taptic Engine
-                // so the FIRST one lands as fast as the rest.
-                MADHaptics.warmUp()
-                restoreLastSetup()
-                // Both already prefetched on the dashboard, so the sheet opens
-                // populated and these are a refresh, not a blocking load. Run
-                // concurrently — they have nothing to do with each other.
-                async let candidates: Void = buddy.loadCandidates()
-                async let routines: Void = buddy.loadRoutines()
-                async let partners: Void = buddy.loadPartners()
-                async let sessions: Void = buddy.refreshMySessions()
-                _ = await (candidates, routines, partners, sessions)
-                // Re-run once the list has landed: a cold launch can open this
-                // sheet before the prefetch finishes, and a remembered friend
-                // can only be re-selected once they're actually in the list.
-                restoreInvitees()
-            }
-            .onChange(of: buddy.errorMessage) { _, newValue in
-                guard let newValue else { return }
-                errorText = newValue
-                buddy.errorMessage = nil
-            }
-            .alert(
-                "Couldn't create lobby",
-                isPresented: Binding(
-                    get: { errorText != nil },
-                    set: { if !$0 { errorText = nil } }
-                )
-            ) {
-                Button("OK", role: .cancel) { errorText = nil }
-            } message: {
-                Text(errorText ?? "")
-            }
-            .sheet(isPresented: $showHistory) {
-                // "Walk with Sam again" from inside the setup form means
-                // exactly "tick Sam", not "open another setup form".
-                BuddyWalksHistoryView(onWalkAgain: { userId in
-                    guard let userId,
-                        buddy.candidates.contains(where: { $0.userId == userId })
-                    else { return }
-                    selected.insert(userId)
-                })
+        var indicator: Int {
+            switch self {
+            case .who: return 1
+            case .activity: return 2
+            case .plan, .goal: return 3
             }
         }
     }
 
+    @State private var step: SetupStep = .who
+    /// Set OUTSIDE the animated state change, or the enclosing transaction
+    /// picks the edge before this has flipped (ios.md).
+    @State private var goingBack = false
+
+    private var hasFooter: Bool { step == .who || step == .goal }
+
+    // MARK: - Body
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            // The tracker's gradient, so this reads as the wizard's next step
+            // rather than a sheet from somewhere else.
+            WizardBackground()
+
+            VStack(spacing: 0) {
+                // Persistent. The dots and the back action change, the bar
+                // doesn't — the same shape as the solo wizard, so only the
+                // question and the options ever move.
+                WizardTopBar(step: step.indicator) { back() }
+
+                GeometryReader { geo in
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 28) {
+                            Spacer(minLength: 8)
+
+                            ZStack {
+                                WizardHeader(
+                                    glyph: stepGlyph,
+                                    title: stepTitle,
+                                    subtitle: stepSubtitle
+                                )
+                                .id(step)
+                                .transition(.opacity)
+                            }
+
+                            ZStack {
+                                VStack(spacing: 16) { stepContent }
+                                    .id(step)
+                                    .transition(WizardMotion.transition(goingBack: goingBack))
+                            }
+                            .padding(.horizontal, 20)
+
+                            Spacer(minLength: 8)
+
+                            // Clears the sticky footer on the steps that have one.
+                            if hasFooter {
+                                Color.clear.frame(height: 116)
+                            }
+                        }
+                        .frame(minHeight: geo.size.height)
+                    }
+                }
+            }
+
+            if hasFooter { footer }
+        }
+        .task {
+            // This screen is several taps in a row; warm the Taptic Engine
+            // so the FIRST one lands as fast as the rest.
+            MADHaptics.warmUp()
+            restoreLastSetup()
+            // Both already prefetched on the dashboard, so the sheet opens
+            // populated and these are a refresh, not a blocking load. Run
+            // concurrently — they have nothing to do with each other.
+            async let candidates: Void = buddy.loadCandidates()
+            async let routines: Void = buddy.loadRoutines()
+            async let partners: Void = buddy.loadPartners()
+            async let sessions: Void = buddy.refreshMySessions()
+            _ = await (candidates, routines, partners, sessions)
+            // Re-run once the list has landed: a cold launch can open this
+            // sheet before the prefetch finishes, and a remembered friend
+            // can only be re-selected once they're actually in the list.
+            restoreInvitees()
+        }
+        .onChange(of: buddy.errorMessage) { _, newValue in
+            guard let newValue else { return }
+            errorText = newValue
+            buddy.errorMessage = nil
+        }
+        .alert(
+            "Couldn't create lobby",
+            isPresented: Binding(
+                get: { errorText != nil },
+                set: { if !$0 { errorText = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { errorText = nil }
+        } message: {
+            Text(errorText ?? "")
+        }
+        .sheet(isPresented: $showHistory) {
+            // "Walk with Sam again" from inside the setup form means
+            // exactly "tick Sam", not "open another setup form".
+            BuddyWalksHistoryView(onWalkAgain: { userId in
+                guard let userId,
+                    buddy.candidates.contains(where: { $0.userId == userId })
+                else { return }
+                selected.insert(userId)
+            })
+        }
+    }
+
+    // MARK: - Per-step content
+
+    private var stepGlyph: WizardGlyph {
+        switch step {
+        case .who: return .symbol("person.2.fill")
+        case .activity: return .symbol("figure.walk")
+        // The plan step's glyph is the two figures, not a mode's icon: every
+        // mode is one of the answers, and putting one above the question
+        // pre-announces it.
+        case .plan: return .symbol("figure.2")
+        case .goal: return .symbol(mode.icon)
+        }
+    }
+
+    private var stepTitle: String {
+        switch step {
+        case .who: return "Who's Coming?"
+        case .activity: return "Choose Activity Type"
+        case .plan: return "Choose Your Mode"
+        case .goal: return mode == .raceTime ? "For How Long?" : "How Far?"
+        }
+    }
+
+    private var stepSubtitle: String {
+        switch step {
+        case .who:
+            return "Pick who's in, or make the lobby and invite from there."
+        // Word for word the solo wizard's line, on purpose.
+        case .activity: return "Select how you'll complete your mile"
+        case .plan: return "Just move together, or make it a race."
+        case .goal: return "One target for everyone."
+        }
+    }
+
     @ViewBuilder
-    private var startLane: some View {
-        invitesSection
-        summaryHeader
-        activityToggle
-        modeSection
-        if mode.needsGoal { goalSection }
-        scheduleSection
-        friendSection
-        partnersSection
-        routinesSection
+    private var stepContent: some View {
+        switch step {
+        case .who:
+            invitesSection
+            partnersSection
+            friendSection
+            routinesSection
+
+        case .activity:
+            WizardOptionCard(
+                leading: { WizardOptionGlyph(icon: "figure.walk") },
+                title: "Walk",
+                subtitle: "Track as a walking workout",
+                accessory: { choiceAccessory(remembered: !isRun) }
+            ) { choose(run: false) }
+            WizardOptionCard(
+                leading: { WizardOptionGlyph(icon: "figure.run") },
+                title: "Run",
+                subtitle: "Track as a running workout",
+                accessory: { choiceAccessory(remembered: isRun) }
+            ) { choose(run: true) }
+
+        case .plan:
+            ForEach(BuddyMode.allCases) { option in
+                WizardOptionCard(
+                    leading: { WizardOptionGlyph(icon: option.icon) },
+                    title: option.title,
+                    subtitle: option.subtitle,
+                    accessory: { choiceAccessory(remembered: mode == option) }
+                ) { choose(mode: option) }
+            }
+            // Starting later is a setting on the plan, not a step of its own:
+            // set it, then tap the mode that commits. Collapsed to one row
+            // until it's wanted, same as before.
+            scheduleSection
+                .padding(.top, 4)
+            // The single most important sentence on this screen. A mode card
+            // CREATES the lobby, and every earlier label said "start" —
+            // people backed out rather than find out.
+            Text("Tapping a mode makes the lobby. Nobody moves until you start it.")
+                .font(MADTheme.Typography.caption)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+
+        case .goal:
+            goalSection
+        }
+    }
+
+    /// Last time's answer wears a check instead of a chevron. The card still
+    /// advances on a tap — this is a hint, not a selection, because restoring
+    /// the previous setup can't skip a question in a wizard the way it could
+    /// pre-fill a form.
+    @ViewBuilder
+    private func choiceAccessory(remembered: Bool) -> some View {
+        if remembered {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title2)
+                .foregroundColor(.white.opacity(0.9))
+        } else {
+            WizardOptionChevron()
+        }
+    }
+
+    private func choose(run: Bool) {
+        isRun = run
+        advance(to: .plan)
+    }
+
+    private func choose(mode option: BuddyMode) {
+        MADHaptics.tap()
+        mode = option
+        goal = option.defaultGoal
+        if option.needsGoal {
+            advance(to: .goal)
+        } else {
+            Task { await create() }
+        }
+    }
+
+    private func advance(to next: SetupStep) {
+        MADHaptics.tap()
+        goingBack = false
+        withAnimation(MADTheme.Animation.standard) { step = next }
+    }
+
+    private func back() {
+        switch step {
+        case .who:
+            dismiss()
+        case .activity:
+            retreat(to: .who)
+        case .plan:
+            retreat(to: .activity)
+        case .goal:
+            retreat(to: .plan)
+        }
+    }
+
+    private func retreat(to previous: SetupStep) {
+        MADHaptics.tap()
+        goingBack = true
+        withAnimation(MADTheme.Animation.standard) { step = previous }
     }
 
     // MARK: - Invitations
@@ -380,190 +567,8 @@ struct BuddyStartSheet: View {
         .disabled(!canPick)
     }
 
-    // MARK: - Summary header
-
-    /// The whole setup, restated as one sentence. This is the piece that makes
-    /// the screen self-explanatory: every control below visibly changes it, so
-    /// nobody has to hold four separate choices in their head.
-    private var summaryHeader: some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            ZStack {
-                Circle()
-                    .fill(accent.opacity(0.18))
-                    .frame(width: 72, height: 72)
-                Circle()
-                    .strokeBorder(accent.opacity(0.5), lineWidth: 1.5)
-                    .frame(width: 72, height: 72)
-                Image(systemName: mode.icon)
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(accent)
-            }
-            .animation(MADTheme.Animation.quick, value: mode)
-
-            Text(summaryTitle)
-                .font(MADTheme.Typography.title2)
-                .foregroundStyle(MADTheme.Colors.madWhite)
-                .multilineTextAlignment(.center)
-
-            Text(summarySubtitle)
-                .font(MADTheme.Typography.subheadline)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.65))
-                .multilineTextAlignment(.center)
-
-            if !selectedCandidates.isEmpty { selectedAvatars }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, MADTheme.Spacing.md)
-        .padding(.horizontal, MADTheme.Spacing.md)
-        .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.extraLarge)
-    }
-
-    private var summaryTitle: String {
-        let verb = isRun ? "Run" : "Walk"
-        switch mode {
-        case .together: return "\(verb) together"
-        case .coopGoal: return "\(goalLabel(goal)) together"
-        case .raceGoal: return "Race to \(goalLabel(goal))"
-        case .raceTime: return "Furthest in \(goalLabel(goal))"
-        }
-    }
-
     private var selectedCandidates: [BuddyCandidate] {
         buddy.candidates.filter { selected.contains($0.userId) }
-    }
-
-    /// Faces, not just a count — the header should feel like the walk is
-    /// already half real. Overlap is built with negative HStack spacing rather
-    /// than `.offset`, which draws outside layout bounds and would measure the
-    /// stack wrong (ios.md).
-    private var selectedAvatars: some View {
-        HStack(spacing: -10) {
-            ForEach(selectedCandidates.prefix(5)) { candidate in
-                AvatarView(
-                    name: candidate.displayName,
-                    imageURL: candidate.profileImageUrl,
-                    size: 30
-                )
-                .overlay(
-                    Circle().strokeBorder(MADTheme.Colors.madBlack.opacity(0.85), lineWidth: 2)
-                )
-            }
-            if selectedCandidates.count > 5 {
-                Text("+\(selectedCandidates.count - 5)")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.8))
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(MADTheme.Colors.madWhite.opacity(0.15)))
-                    .padding(.leading, 10)
-            }
-        }
-        .padding(.top, 2)
-    }
-
-    private var summarySubtitle: String {
-        guard !selected.isEmpty else {
-            return "Nobody invited yet — you'll get a code to share"
-        }
-        let names = selectedCandidates.map(\.displayName)
-        switch names.count {
-        case 0: return "with \(selected.count) friends"
-        case 1: return "with \(names[0])"
-        case 2: return "with \(names[0]) and \(names[1])"
-        default: return "with \(names[0]) and \(names.count - 1) others"
-        }
-    }
-
-    // MARK: - Activity
-
-    private var activityToggle: some View {
-        HStack(spacing: 4) {
-            activityChip(run: false, icon: "figure.walk", label: "Walk")
-            activityChip(run: true, icon: "figure.run", label: "Run")
-        }
-        .padding(4)
-        .background(Capsule().fill(MADTheme.Colors.madWhite.opacity(0.10)))
-    }
-
-    private func activityChip(run: Bool, icon: String, label: String) -> some View {
-        let isOn = isRun == run
-        return Button {
-            MADHaptics.tap()
-            withAnimation(MADTheme.Animation.quick) { isRun = run }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: icon).font(.system(size: 14, weight: .semibold))
-                Text(label).font(MADTheme.Typography.bodyBold)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: Self.chipHeight)
-            .background(
-                Capsule().fill(
-                    isOn ? MADTheme.workoutColor(run ? "running" : "walking") : .clear)
-            )
-            .foregroundStyle(
-                isOn ? MADTheme.Colors.madWhite : MADTheme.Colors.madWhite.opacity(0.6))
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: - Mode
-
-    private var modeSection: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            sectionTitle("How are we doing this?")
-            LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: MADTheme.Spacing.sm),
-                          GridItem(.flexible(), spacing: MADTheme.Spacing.sm)],
-                spacing: MADTheme.Spacing.sm
-            ) {
-                ForEach(BuddyMode.allCases) { option in
-                    modeTile(option)
-                }
-            }
-        }
-    }
-
-    private func modeTile(_ option: BuddyMode) -> some View {
-        let isOn = mode == option
-        return Button {
-            MADHaptics.tap()
-            withAnimation(MADTheme.Animation.quick) {
-                mode = option
-                goal = option.defaultGoal
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 0) {
-                    Image(systemName: option.icon)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(isOn ? accent : MADTheme.Colors.madWhite.opacity(0.55))
-                    Spacer(minLength: 0)
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(accent)
-                        .opacity(isOn ? 1 : 0)
-                }
-                Text(option.title)
-                    .font(MADTheme.Typography.smallBold)
-                    .foregroundStyle(MADTheme.Colors.madWhite)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                Text(option.subtitle)
-                    .font(MADTheme.Typography.caption)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .padding(12)
-            .frame(height: Self.modeTileHeight, alignment: .topLeading)
-            .background(plainCard())
-            .overlay(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .stroke(isOn ? accent : Color.clear, lineWidth: 2)
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Goal
@@ -897,12 +902,14 @@ struct BuddyStartSheet: View {
 
     // MARK: - Footer
 
-    /// ONE action, whichever lane you're in. The scrim is opaque enough that
-    /// the list underneath reads as "behind" rather than as clipped content.
+    /// ONE action, on the two steps that need one: Next on Who (multi-select
+    /// can't advance on a tap) and Create on the goal sub-step. The scrim
+    /// fades to the wizard's own bottom colour, so the list underneath reads
+    /// as "behind" rather than as clipped content.
     private var footer: some View {
         VStack(spacing: 0) {
             LinearGradient(
-                colors: [MADTheme.Colors.madBlack.opacity(0), MADTheme.Colors.madBlack],
+                colors: [WizardBackground.bottom.opacity(0), WizardBackground.bottom],
                 startPoint: .top, endPoint: .bottom
             )
             .frame(height: 28)
@@ -910,28 +917,40 @@ struct BuddyStartSheet: View {
 
             VStack(spacing: 6) {
                 primaryButton
-                // The single most important sentence on this screen. Every
-                // earlier label said "start", so tapping it felt like committing
-                // to walking RIGHT NOW — people backed out rather than find out.
-                // Nothing about the flow changed; it always opened a lobby.
-                Text("Nobody moves until you start it.")
+                Text(footerCaption)
                     .font(MADTheme.Typography.caption)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
             }
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.bottom, MADTheme.Spacing.sm)
-            .background(MADTheme.Colors.madBlack)
+            .background(WizardBackground.bottom)
         }
     }
 
+    private var footerCaption: String {
+        switch step {
+        case .who: return "You can invite more people from the lobby too."
+        default: return "Nobody moves until you start it."
+        }
+    }
+
+    /// White on the wizard's red, like the solo flow's own primary buttons —
+    /// the walk colour would vanish into this gradient.
     private var primaryButton: some View {
         Button {
             MADHaptics.action()
-            Task { await create() }
+            if step == .who {
+                advance(to: .activity)
+            } else {
+                Task { await create() }
+            }
         } label: {
             HStack(spacing: 8) {
                 if isCreating {
-                    ProgressView().tint(MADTheme.Colors.madWhite)
+                    ProgressView().tint(WizardBackground.bottom)
+                } else if step == .who {
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 16, weight: .semibold))
                 } else {
                     Image(systemName: "figure.2")
                         .font(.system(size: 16, weight: .semibold))
@@ -941,8 +960,8 @@ struct BuddyStartSheet: View {
             .font(MADTheme.Typography.bodyBold)
             .frame(maxWidth: .infinity)
             .frame(height: Self.controlHeight)
-            .background(Capsule().fill(accent))
-            .foregroundStyle(MADTheme.Colors.madWhite)
+            .background(Capsule().fill(Color.white))
+            .foregroundStyle(WizardBackground.bottom)
         }
         .buttonStyle(.plain)
         .disabled(primaryDisabled)
@@ -959,6 +978,10 @@ struct BuddyStartSheet: View {
     /// actual outcome, and the caption under the button closes the gap.
     private var primaryTitle: String {
         if isCreating { return "Creating…" }
+        if step == .who {
+            if selected.isEmpty { return "Next" }
+            return selected.count == 1 ? "Next with 1" : "Next with \(selected.count)"
+        }
         if selected.isEmpty { return "Create lobby" }
         return selected.count == 1 ? "Create & invite 1" : "Create & invite \(selected.count)"
     }

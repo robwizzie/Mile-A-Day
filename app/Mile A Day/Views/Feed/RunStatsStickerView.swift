@@ -5,6 +5,12 @@ import SwiftUI
 /// A single run statistic the user can choose to show on their post.
 enum RunStatKind: String, CaseIterable, Identifiable, Codable {
     case distance, pace, duration, streak, calories, steps, date
+    /// "Summer Sprint · 2nd of 6" — offered only while the poster is in a
+    /// competition on the day (`RunStatsInput.competition`), so a run posted
+    /// mid-race can wear the race. Additive: a config saved with it on decodes
+    /// fine on this build and is simply ignored by the datum on a day with
+    /// nothing to show.
+    case competition
     var id: String { rawValue }
 
     var label: String {
@@ -16,6 +22,7 @@ enum RunStatKind: String, CaseIterable, Identifiable, Codable {
         case .calories: return "Calories"
         case .steps: return "Steps"
         case .date: return "Date"
+        case .competition: return "Competition"
         }
     }
 
@@ -28,6 +35,7 @@ enum RunStatKind: String, CaseIterable, Identifiable, Codable {
         case .calories: return "bolt.fill"
         case .steps: return "shoeprints.fill"
         case .date: return "calendar"
+        case .competition: return "trophy.fill"
         }
     }
 }

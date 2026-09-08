@@ -1223,12 +1223,36 @@ class WorkoutSyncService: ObservableObject {
     /// `maxRoutePoints` (corner-preserving Douglas-Peucker, never a uniform
     /// stride — see WorkoutRouteCleanup) and rounded to ~1m precision. Nil
     /// when the workout has no route (indoor/manual).
-    private func simplifiedRoute(for workout: HKWorkout) async -> [[Double]]? {
+    /// The upload's GPS trace: the downsampled points, plus — from the SAME
+    /// samples — each point's seconds since the first fix and that fix's
+    /// instant. The clock is what lets a replay put every walker where they
+    /// actually were at a moment (and stop them where they stopped) instead
+    /// of sliding everyone along at one synthetic speed; it has to be sampled
+    /// with the points or a time would describe a point that was dropped.
+    struct SimplifiedRoute {
+        let points: [[Double]]
+        let times: [Double]
+        let startedAt: Date
+    }
+
+    private func simplifiedRoute(for workout: HKWorkout) async -> SimplifiedRoute? {
         let locations = await HealthKitManager.shared.fetchAllRouteLocations(for: workout)
         guard locations.count >= 2 else { return nil }
 
         let sampled = WorkoutRouteCleanup.simplified(locations, toMaxPoints: Self.maxRoutePoints)
-        return sampled.map { location in
+        guard let first = sampled.first else { return nil }
+        // Monotonic by construction: the cleanup keeps sample order, but a
+        // clock that so much as ties would be dropped whole server-side, and
+        // the whole walk's replay with it.
+        var times: [Double] = []
+        times.reserveCapacity(sampled.count)
+        var previous = 0.0
+        for location in sampled {
+            let t = max(previous, (location.timestamp.timeIntervalSince(first.timestamp) * 10).rounded() / 10)
+            times.append(t)
+            previous = t
+        }
+        let points: [[Double]] = sampled.map { location in
             var point = [
                 (location.coordinate.latitude * 100_000).rounded() / 100_000,
                 (location.coordinate.longitude * 100_000).rounded() / 100_000,
@@ -1244,6 +1268,7 @@ class WorkoutSyncService: ObservableObject {
             }
             return point
         }
+        return SimplifiedRoute(points: points, times: times, startedAt: first.timestamp)
     }
 
     /// The HealthKit reads a single workout needs, gathered in one place so
@@ -1421,7 +1446,12 @@ class WorkoutSyncService: ObservableObject {
             // Attach the simplified GPS path when the workout has one, so the
             // backend can store it and feed cards can draw the mile's route.
             if fetchRoutes, !isStealth, let route = await simplifiedRoute(for: workout) {
-                workoutDict["route"] = route
+                workoutDict["route"] = route.points
+                // Additive: the replay clock (older servers ignore unknown
+                // keys). ISO without fractional seconds — the server parses
+                // it with Date.parse, which takes either.
+                workoutDict["routeTimes"] = route.times
+                workoutDict["routeStartedAt"] = ISO8601DateFormatter().string(from: route.startedAt)
             }
 
             workoutData.append(workoutDict)

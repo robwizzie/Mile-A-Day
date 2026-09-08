@@ -6,7 +6,14 @@ import SwiftUI
 class CompetitionService: ObservableObject {
 
     // MARK: - Published Properties
-    @Published var competitions: [Competition] = []
+    @Published var competitions: [Competition] = [] {
+        didSet { Self.latestCompetitions = competitions }
+    }
+    /// The last list any instance loaded, for callers with no environment to
+    /// read the service from (`RunPostService`'s static sticker builders). A
+    /// mirror, never a second source: it only ever holds what `competitions`
+    /// holds.
+    static private(set) var latestCompetitions: [Competition] = []
     @Published var invites: [Competition] = []
     @Published var isLoading = false
     /// True once at least one refresh has completed (success or failure, but not

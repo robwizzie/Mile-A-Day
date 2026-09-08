@@ -271,6 +271,46 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     }
 }
 
+// MARK: - Join requests
+
+/// Somebody at the door: a friend of a member, not of the host, asking in.
+///
+/// Rides `join_requests`, never `participants` — the participant status is a
+/// closed enum on every shipped build, and one unknown value there fails the
+/// whole snapshot. `friendUserIds` are the members they're friends with: it's
+/// who the card names ("friends with Sam") and who may answer besides the host.
+struct BuddyJoinRequest: Codable, Identifiable, Equatable {
+    let userId: String
+    let username: String?
+    let firstName: String?
+    let lastName: String?
+    let profileImageUrl: String?
+    let requestedAtRaw: String?
+    let friendUserIds: [String]
+
+    var id: String { userId }
+
+    var displayName: String {
+        if let firstName, !firstName.isEmpty { return firstName }
+        if let username, !username.isEmpty { return username }
+        return "Someone"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case username
+        case firstName = "first_name"
+        case lastName = "last_name"
+        case profileImageUrl = "profile_image_url"
+        case requestedAtRaw = "requested_at"
+        case friendUserIds = "friend_user_ids"
+    }
+}
+
+struct BuddyJoinRequestResponse: Codable {
+    let status: String
+}
+
 // MARK: - Session
 
 struct BuddySessionState: Codable, Identifiable, Equatable {
@@ -291,6 +331,9 @@ struct BuddySessionState: Codable, Identifiable, Equatable {
     let stateVersion: Int
     let participants: [BuddyParticipant]
     let groupDistanceMiles: Double
+    /// People asking to be let in. Optional: absent from a server that
+    /// predates the request door, and nil reads as nobody waiting.
+    let joinRequests: [BuddyJoinRequest]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -308,6 +351,16 @@ struct BuddySessionState: Codable, Identifiable, Equatable {
         case stateVersion = "state_version"
         case participants
         case groupDistanceMiles = "group_distance_miles"
+        case joinRequests = "join_requests"
+    }
+
+    var pendingJoinRequests: [BuddyJoinRequest] { joinRequests ?? [] }
+
+    /// The host always may; so may any member the requester is friends with —
+    /// the same people the server told.
+    func canAnswerJoinRequest(_ request: BuddyJoinRequest, as userId: String?) -> Bool {
+        guard let userId else { return false }
+        return isHost(userId) || request.friendUserIds.contains(userId)
     }
 
     // MARK: Derived
@@ -496,6 +549,10 @@ struct JoinableFriendSession: Codable, Identifiable, Equatable {
     let hostFirstName: String?
     let hostProfileImageUrl: String?
     let participantCount: Int
+    /// Walk in (host is a friend) vs. ask (a member is). Nil = older server = in.
+    let hostIsFriend: Bool?
+    let myRequestStatus: String?
+    let friendFirstNames: [String]?
 
     var id: String { sessionId }
 
@@ -521,6 +578,9 @@ struct JoinableFriendSession: Codable, Identifiable, Equatable {
         case hostFirstName = "host_first_name"
         case hostProfileImageUrl = "host_profile_image_url"
         case participantCount = "participant_count"
+        case hostIsFriend = "host_is_friend"
+        case myRequestStatus = "my_request_status"
+        case friendFirstNames = "friend_first_names"
     }
 }
 
@@ -558,6 +618,13 @@ struct FriendOutNow: Codable, Identifiable, Equatable {
     let buddyJoinCode: String?
     let buddyMode: BuddyMode?
     let buddyParticipantCount: Int?
+    /// Can this user walk straight in (the room's host is their friend)?
+    /// False means the room is offered because THIS friend is in it, and the
+    /// door is "ask". Nil from an older server — which only ever offered
+    /// host-friend rooms, so nil reads as true.
+    let buddyHostIsFriend: Bool?
+    /// "requested" while an ask is waiting, "declined" once refused.
+    let buddyMyRequestStatus: String?
 
     var id: String { userId }
 
@@ -575,6 +642,11 @@ struct FriendOutNow: Codable, Identifiable, Equatable {
     /// True when there's a room to join. False means they're out on their own —
     /// which is an invitation opportunity, not a dead end.
     var hasJoinableRoom: Bool { buddySessionId != nil }
+
+    /// Join now, no asking: the host is a friend.
+    var canJoinRoomDirectly: Bool { hasJoinableRoom && (buddyHostIsFriend ?? true) }
+    var hasAskedToJoinRoom: Bool { buddyMyRequestStatus == "requested" }
+    var roomRefusedMe: Bool { buddyMyRequestStatus == "declined" }
 
     /// Their goal, defaulting to the app's premise when the server didn't say.
     var goal: Double { (goalMiles ?? 0) > 0 ? (goalMiles ?? 1) : 1 }
@@ -594,6 +666,8 @@ struct FriendOutNow: Codable, Identifiable, Equatable {
         case buddyJoinCode = "buddy_join_code"
         case buddyMode = "buddy_mode"
         case buddyParticipantCount = "buddy_participant_count"
+        case buddyHostIsFriend = "buddy_host_is_friend"
+        case buddyMyRequestStatus = "buddy_my_request_status"
     }
 }
 

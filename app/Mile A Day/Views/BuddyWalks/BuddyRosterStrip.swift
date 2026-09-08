@@ -12,6 +12,10 @@ struct BuddyRosterStrip: View {
     let currentUserId: String?
 
     @State private var confirmLeave = false
+    /// The invite picker. A sheet from INSIDE the tracker's cover, so it
+    /// presents over the workout rather than under it.
+    @State private var showInvite = false
+    @State private var answeringIds: Set<String> = []
 
     var body: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
@@ -37,6 +41,12 @@ struct BuddyRosterStrip: View {
                             isMe: participant.userId == currentUserId
                         )
                     }
+
+                    // The way to pull someone in from HERE — the screen a
+                    // walker is actually looking at. It used to exist only in
+                    // the lobby, which is gone the moment the walk starts, so
+                    // "text Sam to join" was the whole feature mid-walk.
+                    inviteTile
                 }
                 .padding(.horizontal, MADTheme.Spacing.xs)
                 // A ScrollView CLIPS its content, and these tiles deliberately
@@ -47,9 +57,128 @@ struct BuddyRosterStrip: View {
                 // own boundary.
                 .padding(.vertical, 4)
             }
+
+            // Somebody at the door. A friend of one of us asked in; the host
+            // or that friend answers, right here, without leaving the walk.
+            ForEach(session.pendingJoinRequests) { request in
+                joinRequestRow(request)
+            }
         }
         .padding(MADTheme.Spacing.md)
         .madLiquidGlassCard()
+        .sheet(isPresented: $showInvite) {
+            BuddyInviteSheet(session: session)
+        }
+    }
+
+    private var inviteTile: some View {
+        Button {
+            MADHaptics.tap()
+            showInvite = true
+        } label: {
+            VStack(spacing: MADTheme.Spacing.xs) {
+                ZStack {
+                    Circle()
+                        .strokeBorder(
+                            MADTheme.Colors.madWhite.opacity(0.35),
+                            style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                        .frame(width: 52, height: 52)
+                    Image(systemName: "plus")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.85))
+                }
+                Text("Invite")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.75))
+                Text(" ")
+                    .font(MADTheme.Typography.smallBold)
+            }
+            .frame(width: 78)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Invite friends to this walk")
+    }
+
+    private func joinRequestRow(_ request: BuddyJoinRequest) -> some View {
+        let canAnswer = session.canAnswerJoinRequest(request, as: currentUserId)
+        let busy = answeringIds.contains(request.userId)
+        let via = request.friendUserIds.compactMap { id -> String? in
+            if id == currentUserId { return "you" }
+            return session.participants.first { $0.userId == id }?.displayName
+        }.first
+        return HStack(spacing: MADTheme.Spacing.sm) {
+            AvatarView(name: request.displayName, imageURL: request.profileImageUrl, size: 32)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(request.displayName) wants to join")
+                    .font(MADTheme.Typography.smallBold)
+                    .foregroundStyle(MADTheme.Colors.madWhite)
+                    .lineLimit(1)
+                Text(via.map { "Friends with \($0)" } ?? "A friend of the group")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: MADTheme.Spacing.xs)
+            if canAnswer {
+                HStack(spacing: 6) {
+                    rosterAnswerButton("Not now", filled: false, busy: busy) {
+                        answer(request, accept: false)
+                    }
+                    rosterAnswerButton("Let in", filled: true, busy: busy) {
+                        answer(request, accept: true)
+                    }
+                }
+                .fixedSize()
+            } else {
+                Text("Waiting on the host")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+            }
+        }
+        .padding(.horizontal, MADTheme.Spacing.sm)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                .fill(MADTheme.Colors.warning.opacity(0.14))
+        )
+    }
+
+    private func rosterAnswerButton(
+        _ title: String, filled: Bool, busy: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            guard !busy else { return }
+            MADHaptics.action()
+            action()
+        } label: {
+            Text(title)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(filled ? MADTheme.Colors.madBlack : MADTheme.Colors.madWhite)
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(
+                    Capsule().fill(
+                        filled ? MADTheme.Colors.warning : MADTheme.Colors.madWhite.opacity(0.14)))
+        }
+        .buttonStyle(.plain)
+        .disabled(busy)
+        .opacity(busy ? 0.5 : 1)
+    }
+
+    private func answer(_ request: BuddyJoinRequest, accept: Bool) {
+        answeringIds.insert(request.userId)
+        Task {
+            do {
+                try await BuddySessionService.shared.respondToJoinRequest(
+                    userId: request.userId, accept: accept, sessionId: session.id)
+                if accept { MADHaptics.success() }
+            } catch {
+                BuddySessionService.shared.errorMessage =
+                    (error as? LocalizedError)?.errorDescription ?? "Couldn't answer that."
+            }
+            answeringIds.remove(request.userId)
+        }
     }
 
     /// Own card first, then by distance. Seeing yourself in a stable position

@@ -222,6 +222,10 @@ export type NotificationType =
   // Only buddy_invite is high-priority — the rest are follow-ups about a
   // session the user is already in, so quiet hours and the daily cap apply.
   | "buddy_invite"
+  // "Sam wants to join your walk" — as time-critical as the invite it mirrors
+  // (the walk is happening NOW), so it shares its priority. Gated per device
+  // on buddy_join_request_v1: a build without the route shows a dead banner.
+  | "buddy_join_request"
   | "buddy_joined"
   | "buddy_started"
   | "buddy_finished"
@@ -463,6 +467,9 @@ const HIGH_PRIORITY_TYPES: NotificationType[] = [
   // only thing that can stop it, which is why that toggle ships WITH the
   // feature rather than after it (Guideline 4.5.4).
   "buddy_invite",
+  // Same clock as the invite: somebody is at the door of a walk that is
+  // underway, and an answer delivered at the morning flush is no answer.
+  "buddy_join_request",
   // The user's own goal celebration: they JUST finished a mile, so they're
   // awake and active by definition — quiet-hours queueing a late-night
   // mile's "you did it" to tomorrow's flush is exactly the flakiness this

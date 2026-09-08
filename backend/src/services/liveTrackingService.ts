@@ -1,7 +1,8 @@
 import { PostgresService } from "./DbService.js";
 import { mileHypeKeyMatchSql } from "./hypeService.js";
 import { getUserLocalToday } from "./workoutService.js";
-import { buddySessionsEnabled } from "./buddyFeatures.js";
+import { buddySessionsEnabled, JOINABLE_WINDOW_SQL } from "./buddyFeatures.js";
+import { CLIENT_FEATURES, userSupports } from "./clientFeatures.js";
 import { BUDDY_MAX_PARTICIPANTS } from "../types/buddy.js";
 
 const db = PostgresService.getInstance();
@@ -69,6 +70,16 @@ export interface FriendOutNow {
   buddy_join_code: string | null;
   buddy_mode: string | null;
   buddy_participant_count: number | null;
+  /**
+   * Can the viewer walk straight in? True when the room's host is their
+   * friend (the door `joinSession` opens without an invite). False means the
+   * room is offered because THIS friend is in it — the viewer may ASK to
+   * join, and someone inside lets them in. Null from a build predating the
+   * field; the client reads null as true, which is what shipped.
+   */
+  buddy_host_is_friend: boolean | null;
+  /** 'requested' while the viewer's ask is waiting, 'declined' once refused. */
+  buddy_my_request_status: string | null;
 }
 
 export interface LiveHype {
@@ -231,7 +242,20 @@ export async function friendsOutNow(userId: string): Promise<FriendOutNow[]> {
          SELECT bs.id, bs.join_code, bs.mode,
                 (SELECT COUNT(*)::int FROM buddy_session_participants c
                    WHERE c.session_id = bs.id
-                     AND c.status NOT IN ('left', 'declined')) AS participant_count
+                     AND c.status NOT IN ('left', 'declined', 'requested')) AS participant_count,
+                (bs.host_user_id = $1 OR EXISTS (
+                  SELECT 1 FROM friendships hf
+                   WHERE hf.user_id = $1 AND hf.friend_id = bs.host_user_id
+                     AND hf.status = 'accepted')) AS host_is_friend,
+                -- Only a row that came in through the door counts here: a
+                -- 'declined' from an invite the viewer turned down is not a
+                -- refused request, and must not read as one.
+                (SELECT CASE WHEN mine.status = 'requested' THEN 'requested'
+                             WHEN mine.status = 'declined'
+                                  AND mine.requested_at IS NOT NULL THEN 'declined'
+                        END
+                   FROM buddy_session_participants mine
+                  WHERE mine.session_id = bs.id AND mine.user_id = $1) AS my_request_status
            FROM buddy_sessions bs
            JOIN buddy_session_participants theirs
              ON theirs.session_id = bs.id
@@ -240,9 +264,12 @@ export async function friendsOutNow(userId: string): Promise<FriendOutNow[]> {
             -- never answered someone else's invite carried that room.
             AND theirs.status IN ('joined', 'ready', 'active')
           WHERE bs.status IN ('lobby', 'active')
-            -- The viewer must be able to JOIN it: friends with the host and
-            -- not blocked either way — the same test joinSession applies.
-            AND (bs.host_user_id = $1 OR EXISTS (
+            -- The viewer must be able to get IN: friends with the host (the
+            -- door joinSession opens on its own), or — on a build that can
+            -- ASK — friends with this participant, which they are by
+            -- construction of this query. An older build draws a plain Join
+            -- for every room it is shown, so it keeps the host-only rule.
+            AND ($2::boolean OR bs.host_user_id = $1 OR EXISTS (
               SELECT 1 FROM friendships hf
                WHERE hf.user_id = $1 AND hf.friend_id = bs.host_user_id
                  AND hf.status = 'accepted'))
@@ -250,39 +277,34 @@ export async function friendsOutNow(userId: string): Promise<FriendOutNow[]> {
               SELECT 1 FROM user_blocks b
                WHERE (b.blocker_id = $1 AND b.blocked_id = bs.host_user_id)
                   OR (b.blocker_id = bs.host_user_id AND b.blocked_id = $1))
-            -- Same window getJoinableFriendSessions uses, and it must stay the
-            -- same one: this row's Join button posts to that endpoint, so a
-            -- narrower bound here just hides an offer the server would accept
-            -- and a wider one draws a button that 400s. A running walk is
-            -- joinable while anyone is still in it; a lobby until the
-            -- abandoned-lobby sweep would have cancelled it.
-            AND (
-              (bs.status = 'active' AND EXISTS (
-                 SELECT 1 FROM buddy_session_participants live
-                  WHERE live.session_id = bs.id AND live.status = 'active'
-               ))
-              OR (bs.status = 'lobby' AND (
-                    (bs.scheduled_start_at IS NULL
-                     AND bs.created_at > NOW() - INTERVAL '3 hours')
-                 OR (bs.scheduled_start_at IS NOT NULL
-                     AND bs.scheduled_start_at BETWEEN NOW() - INTERVAL '30 minutes'
-                                                   AND NOW() + INTERVAL '30 minutes')))
-            )
-            -- Already in it? Then it isn't an offer.
+            -- The SAME window the joinable list and the request door use —
+            -- one shared fragment, because this row's button posts to those
+            -- endpoints and a bound that differs draws a button that 400s.
+            AND ${JOINABLE_WINDOW_SQL("bs")}
+            -- Already in it? Then it isn't an offer. A pending request is
+            -- NOT "in": the row stays so the button can say "Requested".
             AND NOT EXISTS (
               SELECT 1 FROM buddy_session_participants mine
                WHERE mine.session_id = bs.id AND mine.user_id = $1
-                 AND mine.status NOT IN ('left', 'declined')
+                 AND mine.status NOT IN ('left', 'declined', 'requested')
             )
             AND (SELECT COUNT(*) FROM buddy_session_participants c
                   WHERE c.session_id = bs.id
-                    AND c.status NOT IN ('left', 'declined')) < ${BUDDY_MAX_PARTICIPANTS}
+                    AND c.status NOT IN ('left', 'declined', 'requested')) < ${BUDDY_MAX_PARTICIPANTS}
           ORDER BY COALESCE(bs.started_at, bs.created_at) DESC
           LIMIT 1
        ) room ON TRUE`
     : `LEFT JOIN LATERAL (SELECT NULL::varchar AS id, NULL::varchar AS join_code,
-                                 NULL::text AS mode, NULL::int AS participant_count
+                                 NULL::text AS mode, NULL::int AS participant_count,
+                                 NULL::boolean AS host_is_friend,
+                                 NULL::text AS my_request_status
        ) room ON TRUE`;
+
+  // The request door is per DEVICE: a build that can't ask must not be shown
+  // a room it can only be refused from. Read once, not per row.
+  const canRequest = buddySessionsEnabled()
+    ? await userSupports(userId, CLIENT_FEATURES.buddyJoinRequestV1)
+    : false;
 
   return db.query<FriendOutNow>(
     `SELECT u.user_id, u.username, u.first_name, u.last_name,
@@ -304,7 +326,9 @@ export async function friendsOutNow(userId: string): Promise<FriendOutNow[]> {
             room.id AS buddy_session_id,
             room.join_code AS buddy_join_code,
             room.mode AS buddy_mode,
-            room.participant_count AS buddy_participant_count
+            room.participant_count AS buddy_participant_count,
+            room.host_is_friend AS buddy_host_is_friend,
+            room.my_request_status AS buddy_my_request_status
        FROM friendships f
        JOIN live_tracking_sessions s
          ON s.user_id = f.friend_id
@@ -323,7 +347,9 @@ export async function friendsOutNow(userId: string): Promise<FriendOutNow[]> {
         )
       ORDER BY s.started_at DESC
       LIMIT 10`,
-    [userId],
+    // $2 only exists inside the decoration; a bind with more values than the
+    // statement references is a Postgres error, not an ignored extra.
+    buddySessionsEnabled() ? [userId, canRequest] : [userId],
   );
 }
 

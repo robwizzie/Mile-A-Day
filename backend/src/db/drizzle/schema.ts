@@ -440,6 +440,16 @@ export const workoutRoutes = pgTable(
     workoutId: varchar("workout_id", { length: 255 }).primaryKey().notNull(),
     route: jsonb().notNull(),
     pointCount: integer("point_count").notNull(),
+    // Seconds since the route's first fix, ONE per point of `route` (same
+    // downsample), so a replay can put each walker where they actually were
+    // at a given moment. NULL on routes uploaded before clients sent it and
+    // on any upload whose times didn't line up with its points — consumers
+    // must treat a length mismatch as "no times".
+    times: jsonb(),
+    // Absolute time of the route's first fix. Lines up crews: two people's
+    // `times` are each relative to their OWN start, and this is what puts
+    // them on one clock.
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
@@ -2348,6 +2358,15 @@ export const buddySessionParticipants = pgTable(
     // happened, and the other people on it keep it. Nothing is deleted, so an
     // accidental hide costs nothing and a shared total can't silently drift.
     hiddenAt: timestamp("hidden_at", { withTimezone: true, mode: "string" }),
+    // When this person ASKED to join (status 'requested') rather than being
+    // invited. Stays set once they're answered, which is how a 'declined'
+    // row from a refused request is told apart from a declined invite —
+    // the two are the same status and must not be the same authorization.
+    // Nullable, no default: an invited row never had one.
+    requestedAt: timestamp("requested_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
   (table) => [
     index("idx_buddy_participants_user_status").using(
@@ -2376,7 +2395,7 @@ export const buddySessionParticipants = pgTable(
     }),
     check(
       "buddy_session_participants_status_check",
-      sql`status = ANY (ARRAY['invited'::text, 'joined'::text, 'ready'::text, 'active'::text, 'finished'::text, 'left'::text, 'declined'::text])`,
+      sql`status = ANY (ARRAY['invited'::text, 'joined'::text, 'ready'::text, 'active'::text, 'finished'::text, 'left'::text, 'declined'::text, 'requested'::text])`,
     ),
     check(
       "buddy_session_participants_location_type_check",
@@ -2454,6 +2473,12 @@ export const postCoauthors = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // THIS participant's caption for THEIR slide. A buddy post is one card
+    // with everyone's picture on it, and a caption that belongs to the
+    // author sits wrong under a friend's photo — so each slide carries its
+    // own, Instagram-style, and the card shows whichever slide is showing.
+    // Nullable: every pre-existing slide, and every slide added silently.
+    caption: text("caption"),
     // THIS participant's reach consent, the multi-person mirror of
     // posts.coauthor_on_feed. NULL = TRUE (every pre-existing row), so the
     // column can only ever withhold reach that was previously granted, never

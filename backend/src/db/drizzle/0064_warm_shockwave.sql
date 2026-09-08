@@ -1,0 +1,1 @@
+ALTER TABLE "post_coauthors" ADD COLUMN "caption" text;

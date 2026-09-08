@@ -68,6 +68,7 @@ enum RunPostService {
             paceSecondsPerMile: workoutPaceSecondsPerMile(distance: distance, duration: paceDivisor),
             durationSeconds: duration > 0 ? duration : nil,
             streak: postableStreak(),
+            competition: competitionStickerText(),
             calories: calories > 0 ? calories : nil,
             steps: nil,
             workoutId: anchorId,
@@ -77,6 +78,28 @@ enum RunPostService {
             ghostMarginSeconds: ghostWin(of: anchor)?.margin,
             ghostTargetSeconds: ghostWin(of: anchor)?.target
         )
+    }
+
+    /// The competition sticker's text for a post made TODAY: the soonest-ending
+    /// competition the user is an accepted member of whose window covers
+    /// today, with their standing in it. Read off `CompetitionService`'s
+    /// mirror because these builders are static — nil when nothing is on,
+    /// or before the Compete tab has ever loaded, which just means no sticker
+    /// is offered (never a wrong one).
+    @MainActor
+    private static func competitionStickerText() -> String? {
+        guard let me = UserManager.shared.currentUser.backendUserId else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        let today = formatter.string(from: Date())
+        let live = CompetitionService.latestCompetitions
+            .filter { $0.isRunning(on: today) }
+            .sorted { ($0.end_date ?? "9999") < ($1.end_date ?? "9999") }
+        for competition in live {
+            if let text = competition.stickerText(for: me) { return text }
+        }
+        return nil
     }
 
     /// The streak to BAKE into a post. `currentUser.streak` is the live display
@@ -102,6 +125,7 @@ enum RunPostService {
                 paceSecondsPerMile: pace,
                 durationSeconds: workout.duration > 0 ? workout.duration : nil,
                 streak: postableStreak(),
+            competition: competitionStickerText(),
                 calories: calories > 0 ? calories : nil,
                 steps: nil,
                 workoutId: workoutId,
@@ -119,6 +143,7 @@ enum RunPostService {
                 paceSecondsPerMile: pace,
                 durationSeconds: record.duration > 0 ? record.duration : nil,
                 streak: postableStreak(),
+            competition: competitionStickerText(),
                 calories: nil,
                 steps: nil,
                 workoutId: workoutId,
@@ -139,6 +164,7 @@ enum RunPostService {
             paceSecondsPerMile: (paceSecPerMile ?? 0) > 0 ? paceSecPerMile : nil,
             durationSeconds: hk.todaysTotalDuration > 0 ? hk.todaysTotalDuration : nil,
             streak: postableStreak(),
+            competition: competitionStickerText(),
             calories: hk.todaysTotalCalories > 0 ? hk.todaysTotalCalories : nil,
             steps: hk.todaysSteps > 0 ? hk.todaysSteps : nil,
             workoutId: workoutId,
@@ -463,14 +489,25 @@ enum RunPostService {
 
     @MainActor
     private static func createAutoPost(mediaUrl: String, workoutId: String?, stats: RunStatsInput) async throws -> PostItem {
-        try await PostService.createPost(
+        // A buddy walk's auto card is the WALK's card, not a solo one. The
+        // server resolves the session from the workout regardless (older
+        // builds), but saying it here also credits the crew in roster order
+        // — and a card that knows its walk is the one the next person's
+        // photo replaces instead of standing beside.
+        let session = workoutId.flatMap { buddySessionForWorkout($0) }
+        let crew = session?.activeParticipants
+            .filter { $0.userId != BuddySessionService.shared.currentUserId }
+            .map(\.userId) ?? []
+        return try await PostService.createPost(
             mediaUrl: mediaUrl,
             caption: nil,
             workoutId: workoutId,
             shareToFeed: true,
             shareToStory: false,
             stats: stats.snapshot,
-            isAuto: true
+            isAuto: true,
+            coauthorUserIds: crew.isEmpty ? nil : crew,
+            buddySessionId: session?.id
         )
     }
 

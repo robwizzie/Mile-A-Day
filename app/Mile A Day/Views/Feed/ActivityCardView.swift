@@ -106,6 +106,11 @@ struct ActivityCardView: View {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 media
                 mediaControls
+                // Same trophy row as PostCardView — a walk is "in" a
+                // competition whether or not it has a photo yet.
+                if let competitions = entry.competitions, !competitions.isEmpty {
+                    CompetitionFlairRow(competitions: competitions)
+                }
                 // Only when the mile took several goes — a normal single-workout
                 // day renders exactly as it did before.
                 if entry.isStitchedMile, let segments = entry.segments, segments.count > 1 {

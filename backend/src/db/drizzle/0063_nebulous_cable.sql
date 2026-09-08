@@ -1,0 +1,3 @@
+ALTER TABLE "buddy_session_participants" DROP CONSTRAINT "buddy_session_participants_status_check";--> statement-breakpoint
+ALTER TABLE "buddy_session_participants" ADD COLUMN "requested_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "buddy_session_participants" ADD CONSTRAINT "buddy_session_participants_status_check" CHECK (status = ANY (ARRAY['invited'::text, 'joined'::text, 'ready'::text, 'active'::text, 'finished'::text, 'left'::text, 'declined'::text, 'requested'::text]));

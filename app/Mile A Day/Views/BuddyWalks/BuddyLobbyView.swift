@@ -21,6 +21,8 @@ struct BuddyLobbyView: View {
     @State private var showSettings = false
     /// Friends with an invite request in flight, so their tile can show it.
     @State private var invitingIds: Set<String> = []
+    /// Join requests being answered, so a double tap can't answer twice.
+    @State private var answeringIds: Set<String> = []
     @State private var confirmCancel = false
     @State private var errorText: String?
 
@@ -44,6 +46,21 @@ struct BuddyLobbyView: View {
     /// long enough to read as a dead control. Never overwritten by a poll —
     /// it's this user's own answer, and nothing else can contradict it.
     @State private var pendingLocation: BuddyLocationType?
+
+    /// Who was already in when this screen last looked, so an arrival is a
+    /// DIFF rather than a state. Nil until the first snapshot has been seen —
+    /// the people already standing in the room when you open the door are
+    /// not arriving, and announcing them would greet the host with a cascade
+    /// of "joined" for a walk they set up.
+    @State private var seenInIds: Set<String>?
+    /// "Sam joined" — the banner at the top, cleared on a timer.
+    @State private var arrivalToast: String?
+    /// Tiles mid-bounce. An arrival is the one thing in this lobby that
+    /// happens on somebody ELSE's phone, and the poll used to surface it as an
+    /// avatar going from dim to lit — a change you notice only if you happen
+    /// to be looking at that tile at that moment.
+    @State private var pulsingIds: Set<String> = []
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Ghost race arming for THIS buddy walk.
     ///
@@ -91,9 +108,22 @@ struct BuddyLobbyView: View {
         }
         .onReceive(tick) { value in
             now = value
-            if let session { seedJoinGate(session) }
+            if let session {
+                seedJoinGate(session)
+                seedArrivals(session)
+            }
             handOffIfStarted()
         }
+        // Keyed on the SET of people who are in, not on the participant count:
+        // an invite that went out and a friend who arrived both change the
+        // count, and only one of them is news.
+        .onChange(of: currentInIds) { _, newIds in
+            announceArrivals(newIds)
+        }
+        // Rendered HERE: this lobby is a fullScreenCover, which sits above
+        // MainTabView's global banner overlay — a toast anywhere else is
+        // invisible from in here.
+        .overlay(alignment: .top) { arrivalToastView }
         .onAppear { buddy.startPolling() }
         .alert(
             "Buddy Walk",
@@ -118,6 +148,107 @@ struct BuddyLobbyView: View {
         needsJoinConfirm =
             session.status == .active
             && (session.startedAtDate.map { $0 <= Date() } ?? true)
+    }
+
+    // MARK: - Arrivals
+
+    /// Everyone in the room right now, except you — you can't join your own
+    /// lobby. Sorted so the array compares by CONTENT for `onChange`.
+    private var currentInIds: [String] {
+        guard let session else { return [] }
+        return inIds(session).sorted()
+    }
+
+    private func inIds(_ session: BuddySessionState) -> Set<String> {
+        Set(
+            session.lobbyParticipants
+                .filter {
+                    $0.status == .joined || $0.status == .ready || $0.status == .active
+                }
+                .map(\.userId)
+                .filter { $0 != buddy.currentUserId }
+        )
+    }
+
+    /// The tick seeds because `onChange` cannot: a host who opens the lobby
+    /// alone starts at `[]`, the first snapshot is also `[]`, so nothing
+    /// changes and nothing seeds — and the first friend to arrive would then
+    /// be swallowed as the baseline instead of announced.
+    private func seedArrivals(_ session: BuddySessionState) {
+        guard seenInIds == nil else { return }
+        seenInIds = inIds(session)
+    }
+
+    private func announceArrivals(_ newIds: [String]) {
+        let now = Set(newIds)
+        // A guest opening a room the host is already in gets the roster as a
+        // baseline on this same change — the snapshot arrives before the tick.
+        guard let seen = seenInIds else {
+            seenInIds = now
+            return
+        }
+        seenInIds = now
+        let arrived = now.subtracting(seen)
+        guard !arrived.isEmpty, let session else { return }
+
+        let names = arrived.compactMap { id in
+            session.participants.first(where: { $0.userId == id })?.displayName
+        }
+        guard !names.isEmpty else { return }
+
+        // The haptic is the part that works while the phone is in a pocket.
+        MADHaptics.success()
+
+        let line: String
+        switch names.count {
+        case 1: line = "\(names[0]) joined"
+        case 2: line = "\(names[0]) and \(names[1]) joined"
+        default: line = "\(names[0]) and \(names.count - 1) others joined"
+        }
+        withAnimation(.spring(response: 0.35)) { arrivalToast = line }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
+            // Only clear our own line — a second arrival may have replaced it.
+            if arrivalToast == line {
+                withAnimation(.easeOut(duration: 0.25)) { arrivalToast = nil }
+            }
+        }
+
+        pulsingIds.formUnion(arrived)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            pulsingIds.subtract(arrived)
+        }
+    }
+
+    /// "Sam joined", over the top of whatever the lobby is showing. Same quiet
+    /// shape as the tracker's mid-walk hype toast.
+    @ViewBuilder
+    private var arrivalToastView: some View {
+        if let text = arrivalToast {
+            HStack(spacing: 8) {
+                Image(systemName: "person.crop.circle.badge.checkmark")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(session?.accentColor ?? MADTheme.Colors.madRed)
+                    .accessibilityHidden(true)
+                Text(text)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(MADTheme.Colors.madWhite)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.75))
+                    .overlay(
+                        Capsule().strokeBorder(
+                            (session?.accentColor ?? MADTheme.Colors.madRed).opacity(0.45),
+                            lineWidth: 1))
+            )
+            .padding(.top, 60)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .allowsHitTesting(false)
+        }
     }
 
     // MARK: - Cancelled
@@ -447,6 +578,13 @@ struct BuddyLobbyView: View {
         let present = Set(people.map(\.userId))
         let invitable = buddy.candidates.filter { !present.contains($0.userId) }
         let isHost = session.isHost(buddy.currentUserId)
+        // Inviting is for everyone who is IN, not only the host: the server's
+        // invite endpoint judges eligibility against whoever taps, so a guest
+        // pulling their own friend in is exactly as valid as the host doing it.
+        let amIn = people.contains {
+            $0.userId == buddy.currentUserId
+                && ($0.status == .joined || $0.status == .ready || $0.status == .active)
+        }
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack {
@@ -486,7 +624,12 @@ struct BuddyLobbyView: View {
                 }
             }
 
-            if isHost, !invitable.isEmpty {
+            if !session.pendingJoinRequests.isEmpty {
+                Divider().background(MADTheme.Colors.madWhite.opacity(0.10))
+                joinRequestsSection(session)
+            }
+
+            if amIn, !invitable.isEmpty {
                 Divider().background(MADTheme.Colors.madWhite.opacity(0.10))
 
                 Text("Tap to invite")
@@ -503,7 +646,7 @@ struct BuddyLobbyView: View {
                 }
             }
 
-            if isHost, invitable.isEmpty, people.count <= 1 {
+            if amIn, invitable.isEmpty, people.count <= 1 {
                 // Host, alone, with nobody left to ask. Say so plainly instead
                 // of leaving a card that looks like it's still loading.
                 Text("No friends available to invite right now.")
@@ -542,6 +685,7 @@ struct BuddyLobbyView: View {
             || participant.status == .active
         let name =
             participant.userId == buddy.currentUserId ? "You" : participant.displayName
+        let justArrived = pulsingIds.contains(participant.userId)
 
         return VStack(spacing: 6) {
             AvatarView(
@@ -551,9 +695,19 @@ struct BuddyLobbyView: View {
             )
             .overlay(
                 Circle()
-                    .strokeBorder(isIn ? session.accentColor : Color.clear, lineWidth: 2.5)
+                    .strokeBorder(
+                        isIn ? session.accentColor : Color.clear,
+                        // A thicker ring for the moment of arrival, then the
+                        // ordinary one — so the tile itself says "new" even
+                        // if the toast was missed.
+                        lineWidth: justArrived ? 4 : 2.5)
             )
             .opacity(isIn ? 1 : 0.4)
+            // One bounce, not a loop, so it needs no Reduce Motion guard on
+            // the animation itself — but the scale is skipped under it all
+            // the same, and the ring + toast + haptic carry the news.
+            .scaleEffect(justArrived && !reduceMotion ? 1.14 : 1)
+            .animation(.spring(response: 0.35, dampingFraction: 0.55), value: justArrived)
             .overlay(alignment: .bottomTrailing) {
                 if participant.isHost {
                     Image(systemName: "star.fill")
@@ -569,7 +723,9 @@ struct BuddyLobbyView: View {
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(isIn ? 1 : 0.5))
                 .lineLimit(1)
 
-            Text(isIn ? "In" : statusWord(participant.status))
+            // "Joined", not "In": the word under a face is the one place the
+            // arrival is spelled out, and "In" reads as a fragment.
+            Text(isIn ? "Joined" : statusWord(participant.status))
                 .font(.system(size: 10, weight: .medium, design: .rounded))
                 .foregroundStyle(
                     isIn ? session.accentColor : MADTheme.Colors.madWhite.opacity(0.4))
@@ -631,9 +787,127 @@ struct BuddyLobbyView: View {
         Task {
             // The response carries the new roster, so the tile moves from the
             // invite row to the roster on its own — no local bookkeeping, and
-            // no chance of the two rows disagreeing.
-            _ = try? await buddy.updateSession(inviteUserIds: [candidate.userId])
+            // no chance of the two rows disagreeing. The invite endpoint
+            // rather than the lobby PATCH: that one is host-only.
+            do {
+                _ = try await buddy.invite(userIds: [candidate.userId])
+            } catch {
+                buddy.errorMessage =
+                    (error as? LocalizedError)?.errorDescription ?? "Couldn't invite them."
+            }
             invitingIds.remove(candidate.userId)
+        }
+    }
+
+    // MARK: - At the door
+
+    /// People asking to be let in — friends of somebody here, not of the host.
+    ///
+    /// Answerable by the host and by whichever member they're friends with;
+    /// everyone else sees who is waiting and on whom. The card says WHO
+    /// vouches for them, because "someone you don't know wants in" is a
+    /// question the host can't answer and "Sam's friend wants in" is one they
+    /// can.
+    private func joinRequestsSection(_ session: BuddySessionState) -> some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            Text(session.pendingJoinRequests.count == 1 ? "Wants to join" : "Want to join")
+                .font(MADTheme.Typography.smallBold)
+                .foregroundStyle(MADTheme.Colors.warning)
+
+            ForEach(session.pendingJoinRequests) { request in
+                joinRequestRow(request, session: session)
+            }
+        }
+    }
+
+    private func joinRequestRow(_ request: BuddyJoinRequest, session: BuddySessionState)
+        -> some View
+    {
+        let canAnswer = session.canAnswerJoinRequest(request, as: buddy.currentUserId)
+        let busy = answeringIds.contains(request.userId)
+        return HStack(spacing: MADTheme.Spacing.sm) {
+            AvatarView(
+                name: request.displayName,
+                imageURL: request.profileImageUrl,
+                size: 40
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(request.displayName)
+                    .font(MADTheme.Typography.smallBold)
+                    .foregroundStyle(MADTheme.Colors.madWhite)
+                    .lineLimit(1)
+                Text(vouchText(request, session: session, canAnswer: canAnswer))
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                    .lineLimit(2)
+            }
+            Spacer(minLength: MADTheme.Spacing.xs)
+            if canAnswer {
+                HStack(spacing: 6) {
+                    answerButton("Not now", filled: false, busy: busy) {
+                        answer(request, accept: false)
+                    }
+                    answerButton("Let in", filled: true, busy: busy) {
+                        answer(request, accept: true)
+                    }
+                }
+                .fixedSize()
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// "Friends with Sam" — or, for the person who can't answer, who can.
+    private func vouchText(
+        _ request: BuddyJoinRequest, session: BuddySessionState, canAnswer: Bool
+    ) -> String {
+        let names = request.friendUserIds.compactMap { id -> String? in
+            if id == buddy.currentUserId { return "you" }
+            return session.participants.first { $0.userId == id }?.displayName
+        }
+        let with: String
+        switch names.count {
+        case 0: with = "A friend of the group"
+        case 1: with = "Friends with \(names[0])"
+        case 2: with = "Friends with \(names[0]) and \(names[1])"
+        default: with = "Friends with \(names[0]) and \(names.count - 1) others"
+        }
+        return canAnswer ? with : "\(with) — the host or they can let them in"
+    }
+
+    private func answerButton(
+        _ title: String, filled: Bool, busy: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            guard !busy else { return }
+            MADHaptics.action()
+            action()
+        } label: {
+            Text(title)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(filled ? MADTheme.Colors.madBlack : MADTheme.Colors.madWhite)
+                .padding(.horizontal, 12)
+                .frame(height: 32)
+                .background(
+                    Capsule().fill(
+                        filled ? MADTheme.Colors.warning : MADTheme.Colors.madWhite.opacity(0.12)))
+        }
+        .buttonStyle(.plain)
+        .disabled(busy)
+        .opacity(busy ? 0.5 : 1)
+    }
+
+    private func answer(_ request: BuddyJoinRequest, accept: Bool) {
+        answeringIds.insert(request.userId)
+        Task {
+            do {
+                try await buddy.respondToJoinRequest(userId: request.userId, accept: accept)
+                if accept { MADHaptics.success() }
+            } catch {
+                buddy.errorMessage =
+                    (error as? LocalizedError)?.errorDescription ?? "Couldn't answer that."
+            }
+            answeringIds.remove(request.userId)
         }
     }
 

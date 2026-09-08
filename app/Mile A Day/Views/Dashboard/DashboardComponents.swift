@@ -1582,6 +1582,48 @@ struct TodayFocus {
 
         switch competition.type {
         case .clash, .apex:
+            // A TEAM competition is team against team, and the line has to
+            // say so. It used to rank INDIVIDUALS here, so a Clash between
+            // two teams read "BEHIND 3.84 MI — You: 3.16 · dave: 7.00" —
+            // your own teammate's total against your own, on a card whose
+            // whole premise is that the two of you are on the same side.
+            // The day's figure per team is the SUM of its members' interval
+            // (the same combined quantity the server scores a team by).
+            if competition.hasTeams, let currentUserId,
+               let myTeam = competition.team(for: currentUserId) {
+                let todayFor: (CompetitionTeam) -> Double = { team in
+                    competition.teamIntervalTotal(team.id, key: todayKey)
+                }
+                let ours = todayFor(myTeam)
+                let rivals = competition.teams?.teams.filter { $0.id != myTeam.id } ?? []
+                let rival = rivals.max(by: { todayFor($0) < todayFor($1) })
+                let theirs = rival.map(todayFor) ?? 0
+                if rival == nil || (ours == 0 && theirs == 0) {
+                    return TodayFocus(
+                        level: .neutral,
+                        pill: "NO ACTIVITY YET",
+                        pillIcon: "figure.run",
+                        detail: "Be the first team to put miles on the board today."
+                    )
+                }
+                let diff = ours - theirs
+                if diff >= 0 && ours > 0 {
+                    return TodayFocus(
+                        level: .winning,
+                        pill: "TEAM LEADING TODAY",
+                        pillIcon: "crown.fill",
+                        detail: "\(myTeam.name): \(fmt(ours)) \(unit) · ahead by \(fmt(diff)) \(unit)"
+                    )
+                }
+                let gap = abs(diff)
+                return TodayFocus(
+                    level: gap <= 0.5 ? .urgent : .behind,
+                    pill: "TEAM BEHIND \(fmt(gap)) \(unit.uppercased())",
+                    pillIcon: "bolt.fill",
+                    detail: "\(myTeam.name): \(fmt(ours)) \(unit) · \(rival?.name ?? "Them"): \(fmt(theirs)) \(unit)"
+                )
+            }
+
             let opponents = competition.users.filter { $0.invite_status == .accepted && $0.user_id != currentUserId }
             let leader = opponents.max(by: { ($0.intervals?[todayKey] ?? 0) < ($1.intervals?[todayKey] ?? 0) })
             let leaderToday = leader?.intervals?[todayKey] ?? 0

@@ -99,6 +99,41 @@ struct Competition: Codable, Identifiable {
         users.filter { $0.invite_status == .accepted }.count
     }
 
+    // MARK: Post sticker
+
+    /// Is `localDate` ("yyyy-MM-dd") inside this competition's window? Date
+    /// strings compare lexically in that format, which is exactly how the
+    /// server lists a post's competitions.
+    func isRunning(on localDate: String) -> Bool {
+        guard let start = start_date, !start.isEmpty, start <= localDate else { return false }
+        if let end = end_date, !end.isEmpty { return end >= localDate }
+        return true
+    }
+
+    /// "Summer Sprint · 2nd of 6", or for a team competition
+    /// "Summer Sprint · Team Red · 1st of 3" — the composer's competition
+    /// sticker. Nil when the user isn't an accepted member.
+    func stickerText(for userId: String) -> String? {
+        let accepted = users.filter { $0.invite_status == .accepted }
+        guard accepted.contains(where: { $0.user_id == userId }) else { return nil }
+        // A long, user-typed name still has to leave room for the standing.
+        var name = competition_name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.count > 22 { name = String(name.prefix(21)).trimmingCharacters(in: .whitespaces) + "…" }
+        if name.isEmpty { name = "Competition" }
+        if hasTeams, let team = team(for: userId) {
+            let ranked = rankedTeams
+            if let index = ranked.firstIndex(where: { $0.id == team.id }), ranked.count > 1 {
+                return "\(name) · Team \(team.name) · \(ActiveCompetitionRow.ordinal(index + 1)) of \(ranked.count)"
+            }
+            return "\(name) · Team \(team.name)"
+        }
+        let ranked = accepted.sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        if let index = ranked.firstIndex(where: { $0.user_id == userId }), ranked.count > 1 {
+            return "\(name) · \(ActiveCompetitionRow.ordinal(index + 1)) of \(ranked.count)"
+        }
+        return name
+    }
+
     // MARK: Teams
 
     /// True when team play is configured (at least one team exists).

@@ -71,6 +71,7 @@ import {
   getActiveStreak,
   getDailyGoalStatus,
 } from "../services/workoutService.js";
+import { buddyWalkCreditsGoal } from "../services/buddySessionService.js";
 import { CLIENT_FEATURES, userSupports } from "../services/clientFeatures.js";
 import { hasUnlimitedActions } from "../services/privilegedUsers.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
@@ -209,7 +210,7 @@ export async function createPostController(
     }
 
     // Authoritative mile-completion gate — recomputed from DB, never trusts client.
-    const goal = await getDailyGoalStatus(userId);
+    const goal = await postingGoalStatus(userId);
     if (!goal.completed) {
       return res.status(403).json({
         error: "mile_not_completed",
@@ -977,13 +978,38 @@ export async function updatePostController(
  * the on-disk check, and the day/camera tiers. A photo reaching the feed
  * through a side door must not buy a looser rule than the front one.
  */
+/**
+ * The mile gate for POSTING. Synced miles first; failing that, a buddy walk
+ * this user finished today whose live figure covers the goal — the walk that
+ * has just ended is the one that hasn't synced yet, and its recap is the
+ * composer's busiest door. Posting only: streaks never read this.
+ */
+async function postingGoalStatus(userId: string) {
+  const goal = await getDailyGoalStatus(userId);
+  if (goal.completed) return goal;
+  const viaWalk = await buddyWalkCreditsGoal(
+    userId,
+    goal.localDate,
+    goal.goalMiles,
+  );
+  return viaWalk ? { ...goal, completed: true } : goal;
+}
+
 export async function addCrewPhotoController(
   req: AuthenticatedRequest,
   res: Response,
 ) {
   const userId = req.userId!;
   const postId = req.params.postId;
-  const { media_url, photo_source } = req.body ?? {};
+  const { media_url, photo_source, caption } = req.body ?? {};
+  if (
+    caption != null &&
+    (typeof caption !== "string" || caption.length > MAX_CAPTION)
+  ) {
+    return res.status(400).json({
+      error: `caption must be a string of at most ${MAX_CAPTION} characters`,
+    });
+  }
   try {
     if (!isUuid(postId)) {
       return res.status(404).json({ error: "Post not found" });
@@ -1020,7 +1046,7 @@ export async function addCrewPhotoController(
     // pick is bounded by when it was SHOT and only needs a qualifying walk
     // today.
     if (await userSupports(userId, CLIENT_FEATURES.postWindowV1)) {
-      const goal = await getDailyGoalStatus(userId);
+      const goal = await postingGoalStatus(userId);
       const postWindow = goal.completed
         ? await getPostWindowStatus(userId, goal.localDate)
         : null;
@@ -1041,7 +1067,12 @@ export async function addCrewPhotoController(
     // Membership IS the authorization — you may add a photo to a post you are
     // accepted on and to nothing else. A miss is 404 rather than 403 so the
     // existence of someone else's post is never confirmed.
-    const ok = await addCrewPhoto(postId, userId, mediaUrl);
+    const ok = await addCrewPhoto(
+      postId,
+      userId,
+      mediaUrl,
+      typeof caption === "string" ? caption.trim() || null : null,
+    );
     if (!ok) return res.status(404).json({ error: "Post not found" });
     // Fire-and-forget: everyone else on the walk hears about it, and a push
     // that fails must never fail the photo that already landed.

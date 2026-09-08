@@ -344,83 +344,12 @@ struct WorkoutTrackingView: View {
     /// gradient. `step` is 1-based; the ghost-options screen passes 3 as well,
     /// because it's a sub-step of the race choice, not a fourth question.
     private func wizardTopBar(step: Int, onBack: @escaping () -> Void) -> some View {
-        ZStack {
-            HStack {
-                Button(action: onBack) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "chevron.left")
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                        Text("Back")
-                            .font(.body)
-                            .fontWeight(.medium)
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    // contentShape expands the hit target to the full padded
-                    // bounds so the first tap registers even on the gaps
-                    // between the icon glyph and the text.
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                Spacer()
-            }
-
-            HStack(spacing: 6) {
-                ForEach(1...3, id: \.self) { index in
-                    Capsule()
-                        .fill(Color.white.opacity(index <= step ? 0.9 : 0.25))
-                        .frame(width: 22, height: 4)
-                }
-            }
-            .allowsHitTesting(false)
-        }
-        .padding(.top, 16)
-    }
-
-    /// What a step puts above its question. The ghost is drawn, not a symbol —
-    /// SF Symbols has none that exists on the iOS 17 deployment target.
-    enum WizardGlyph {
-        case symbol(String)
-        case ghost
+        WizardTopBar(step: step, onBack: onBack)
     }
 
     /// Glyph + question, identical on every step.
     private func wizardHeader(glyph: WizardGlyph, title: String, subtitle: String) -> some View {
-        VStack(spacing: 16) {
-            Group {
-                switch glyph {
-                case .symbol(let name):
-                    Image(systemName: name)
-                        .font(.system(size: 52))
-                case .ghost:
-                    GhostSprite(size: 56, glancesBack: true)
-                }
-            }
-            .foregroundColor(.white)
-            .frame(height: 62)
-
-            Text(title)
-                .font(.system(size: 30, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
-
-            Text(subtitle)
-                .font(.title3)
-                .foregroundColor(.white.opacity(0.8))
-                .multilineTextAlignment(.center)
-                // Wraps rather than clips at large Dynamic Type sizes, where
-                // `.title3` grows well past the width these questions assume.
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        // 24, matching the option cards' 20pt gutter closely enough to read as
-        // one column — the header used to be inset a further 12pt on each side,
-        // which is what pushed "Select how you'll complete your mile" onto
-        // three lines on a small phone.
-        .padding(.horizontal, 24)
+        WizardHeader(glyph: glyph, title: title, subtitle: subtitle)
     }
 
     /// Which pre-start step is on screen, derived from the flags so the
@@ -514,12 +443,7 @@ struct WorkoutTrackingView: View {
     /// Forward slides in from the trailing edge, Back from the leading edge —
     /// so the wizard reads as depth rather than as unrelated crossfades.
     private var wizardTransition: AnyTransition {
-        .asymmetric(
-            insertion: .move(edge: wizardGoingBack ? .leading : .trailing)
-                .combined(with: .opacity),
-            removal: .move(edge: wizardGoingBack ? .trailing : .leading)
-                .combined(with: .opacity)
-        )
+        WizardMotion.transition(goingBack: wizardGoingBack)
     }
 
     // MARK: - Per-step content
@@ -1826,9 +1750,7 @@ struct WorkoutTrackingView: View {
     static let optionGlyphWidth: CGFloat = 46
 
     private func optionGlyph(_ icon: String) -> some View {
-        Image(systemName: icon)
-            .font(.system(size: 30))
-            .frame(width: Self.optionGlyphWidth)
+        WizardOptionGlyph(icon: icon, width: Self.optionGlyphWidth)
     }
 
     /// The wizard's option card.
@@ -1853,74 +1775,17 @@ struct WorkoutTrackingView: View {
         @ViewBuilder accessory: () -> Accessory,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                leading()
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        // The title is the one thing here that CANNOT wrap or
-                        // clip: at 28pt "Just Track It" wants ~190pt and a
-                        // 375pt phone leaves the text column ~189pt, so it was
-                        // breaking to two lines (or truncating once the badge
-                        // took its share). Scaling is the right trade — a
-                        // title a few percent smaller reads fine, a title
-                        // reading "Just Track…" does not.
-                        Text(title)
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                            .allowsTightening(true)
-                        if let badge {
-                            Text(badge)
-                                .font(.system(size: 9, weight: .black, design: .rounded))
-                                .tracking(0.8)
-                                .foregroundColor(.black.opacity(0.8))
-                                .lineLimit(1)
-                                // Safe here where `.fixedSize` normally isn't:
-                                // every badge is a short literal ("NEW",
-                                // "2 INVITES"), never open-ended data, so it
-                                // can't publish a minimum width that starves
-                                // the row.
-                                .fixedSize()
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(Capsule().fill(Color.yellow))
-                        }
-                    }
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .opacity(0.9)
-                        .multilineTextAlignment(.leading)
-                        // Wraps to as many lines as it needs instead of
-                        // truncating — which is why the subtitles were never
-                        // the ones getting cut off.
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 6)
-
-                accessory()
-            }
-            .foregroundColor(.white)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 20)
-            .background(
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(Color.white.opacity(featured ? 0.24 : 0.15))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .stroke(Color.white.opacity(featured ? 0.6 : 0.3), lineWidth: 2)
-                    )
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
+        // The drawing lives in WorkoutWizardChrome.swift now, shared with the
+        // buddy setup; this stays so none of the call sites in this
+        // type-check-fragile file have to move.
+        WizardOptionCard(
+            leading: leading, title: title, subtitle: subtitle,
+            featured: featured, badge: badge,
+            accessory: accessory, action: action)
     }
 
     private var optionChevron: some View {
-        Image(systemName: "chevron.right")
-            .font(.title2)
-            .fontWeight(.semibold)
+        WizardOptionChevron()
     }
 
     /// The third card on the activity step: do this mile WITH someone.
@@ -3020,6 +2885,14 @@ struct WorkoutTrackingView: View {
         // pace divisor and the race result travel. Best-effort: a metadata
         // failure still saves the workout.
         var metadata: [String: Any] = [:]
+        // Say OUTDOOR/INDOOR explicitly, the way Apple's own Workout app
+        // does. The builder's `locationType` is not written into the workout's
+        // metadata for us, and Apple Fitness decides whether a workout gets a
+        // map from what the WORKOUT says about itself — an outdoor walk with a
+        // perfectly good route attached and no `HKMetadataKeyIndoorWorkout`
+        // key is exactly the shape that draws the route in our feed (we read
+        // the route directly) and no map in Fitness.
+        metadata[HKMetadataKeyIndoorWorkout] = (self.selectedLocationType == .indoor)
         let movingSeconds = locationManager.movingSeconds
         if movingSeconds > 0 {
             metadata[WorkoutLocationManager.movingSecondsMetadataKey] = movingSeconds

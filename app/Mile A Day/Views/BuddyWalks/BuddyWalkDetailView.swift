@@ -211,6 +211,12 @@ struct BuddyWalkDetailView: View {
                              first: post.coauthor_first_name, last: post.coauthor_last_name,
                              image: post.coauthor_profile_image_url) }
                     : nil,
+                onTapCrewMember: { member in
+                    guard member.user_id != currentUserId else { return }
+                    open(userId: member.user_id, username: member.username,
+                         first: member.first_name, last: member.last_name,
+                         image: member.profile_image_url)
+                },
                 onTapMention: { username in openMention(username) },
                 onTapHypeCount: {
                     hypersContext = HypersListContext(

@@ -122,6 +122,19 @@ export const CLIENT_FEATURES = {
    * today's behaviour until they update.
    */
   buddyGroupPostV1: "buddy_group_post_v1",
+
+  /**
+   * The build can ASK to join a buddy walk it wasn't invited to (a friend of
+   * somebody in it, not of the host), renders the "wants to join" card in
+   * the lobby and on the tracker, and routes the `buddy_join_request` push.
+   *
+   * Gates two things a shipped build can't handle: the push type (a banner
+   * that opens nothing), and the WIDER joinable list — an older build draws
+   * a plain "Join" for every room it is shown, and a room whose host isn't a
+   * friend answers that tap with `not_friends_with_host`. So an undeclared
+   * device keeps the host-friend-only list it shipped with.
+   */
+  buddyJoinRequestV1: "buddy_join_request_v1",
 } as const;
 
 export type ClientFeature =

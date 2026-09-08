@@ -10,6 +10,13 @@ struct RunStatsInput: Equatable {
     var paceSecondsPerMile: Double?
     var durationSeconds: Double?
     var streak: Int?
+    /// The competition sticker's text ("Summer Sprint · 2nd of 6"), resolved
+    /// by `RunPostService` from the competitions the poster is in TODAY. Nil
+    /// on a day with none, which is what keeps the toggle out of the tray.
+    /// Declared HERE, between streak and calories, because the memberwise
+    /// initialiser takes arguments in declaration order and the builders
+    /// pass it right after `streak:`.
+    var competition: String? = nil
     var calories: Double?
     var steps: Int?
     var workoutId: String?
@@ -70,6 +77,9 @@ struct RunStatsInput: Equatable {
         case .date:
             guard let d = dateText, !d.isEmpty else { return nil }
             return RunStatDatum(kind: .date, value: d)
+        case .competition:
+            guard let c = competition, !c.isEmpty else { return nil }
+            return RunStatDatum(kind: .competition, value: c)
         }
     }
 
@@ -237,7 +247,7 @@ final class PostComposerViewModel: ObservableObject {
     /// byte-for-byte what it has always been.
     @Published var previewComposite: UIImage?
 
-    let stats: RunStatsInput
+    var stats: RunStatsInput
     /// Captured on-screen canvas size (points), reused to render the composite.
     var canvasSize: CGSize = .zero
 
@@ -392,6 +402,29 @@ final class PostComposerViewModel: ObservableObject {
         errorMessage = nil
         defer { isPublishing = false }
 
+        // A buddy post made from the recap can open before HealthKit has
+        // published the walk, so `stats.workoutId` is nil at init — and an
+        // unlinked post is the one that used to slip past the server's
+        // one-post-per-walk guard and land as a red, routeless second card.
+        // Resolve it again at the moment of posting: by now the walk has
+        // usually landed. (The server also guards on the declared session and
+        // hands the post its workout once the walk links, so this is the
+        // fast path, not the only one.)
+        if stats.workoutId == nil, let sessionId = buddySessionId {
+            let buddy = BuddySessionService.shared
+            if let session = [buddy.session, buddy.lastFinishedSession]
+                .compactMap({ $0 })
+                .first(where: { $0.id == sessionId }),
+               let resolved = RunPostService.buddyWorkoutId(
+                    reconciled: session.me(buddy.currentUserId)?.workoutId,
+                    startedAt: session.startedAtDate,
+                    endedAt: session.endedAtDate
+               )
+            {
+                stats.workoutId = resolved
+            }
+        }
+
         do {
             let mediaUrl = try await PostService.uploadMedia(flat)
             if let crewPhotoPostId {
@@ -403,6 +436,8 @@ final class PostComposerViewModel: ObservableObject {
                 try await PostService.addCrewPhoto(
                     postId: crewPhotoPostId,
                     mediaUrl: mediaUrl,
+                    caption: caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? nil : caption,
                     photoSource: photoSource
                 )
                 // The run's photo moment is spent either way — the picture is
