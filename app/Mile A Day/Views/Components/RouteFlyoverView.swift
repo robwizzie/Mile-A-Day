@@ -1749,7 +1749,7 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             ? person?.clock?.ownElapsed(at: min(max(fraction, 0), 1) * walkDuration)
             : nil
         emit(FlyoverTick(phase: phase, fraction: fraction, miles: miles,
-                         milestone: milestone, elapsedSeconds: elapsedSeconds))
+                         elapsedSeconds: elapsedSeconds, milestone: milestone))
     }
 
     /// The ONE door every tick leaves through. Synchronous from the display
