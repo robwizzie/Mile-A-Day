@@ -323,7 +323,7 @@ export async function getCompetition(
  * competition under the new rule and then redraws it under the old one, which
  * is worse than either rule alone.
  */
-function usesTeamEntityScoring(competition: {
+export function usesTeamEntityScoring(competition: {
   legacy_team_scoring?: boolean | null;
 }): boolean {
   return !competition.legacy_team_scoring;

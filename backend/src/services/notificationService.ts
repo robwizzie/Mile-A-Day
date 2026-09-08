@@ -11,6 +11,7 @@ import {
   getCompetition,
   getCurrentInterval,
   getUserScores,
+  usesTeamEntityScoring,
 } from "./competitionService.js";
 import { Competition, CompetitionUser } from "../types/competitions.js";
 import {
@@ -1154,27 +1155,79 @@ export async function checkLeadChanges(
         }
 
         // Compute current scores + ranks.
+        //
+        // On a TEAM competition the team is the competitor: the standings are
+        // team against team, so "took the lead" and "passed you" are about
+        // TEAMS and every member holds their team's rank. A member's own
+        // score decides nothing here — it used to, and the strongest walker
+        // on the losing team was told they had "taken the lead".
         const scores = await getUserScores(fullComp);
-        const ranked = [...acceptedUsers]
-          .map((u) => ({
-            user_id: u.user_id,
-            displayName: (u as any).username || u.user_id,
+        type Entity = {
+          id: string;
+          label: string;
+          score: number;
+          memberIds: string[];
+          isTeam: boolean;
+        };
+        const teamed =
+          usesTeamEntityScoring(fullComp) &&
+          (fullComp.teams?.teams?.length ?? 0) > 0;
+        let entities: Entity[];
+        if (teamed) {
+          const teams = fullComp.teams?.teams ?? [];
+          entities = teams
+            .map((t) => ({
+              id: `team:${t.id}`,
+              label: `Team ${t.name}`,
+              score: t.score ?? 0,
+              memberIds: acceptedUsers
+                .filter((u) => u.team_id === t.id)
+                .map((u) => u.user_id),
+              isTeam: true,
+            }))
+            .filter((e) => e.memberIds.length > 0);
+          // Members on no (existing) team compete as themselves.
+          for (const u of acceptedUsers) {
+            if (teams.some((t) => t.id === u.team_id)) continue;
+            entities.push({
+              id: u.user_id,
+              label: (u as any).username || "Someone",
+              score: scores[u.user_id]?.score ?? 0,
+              memberIds: [u.user_id],
+              isTeam: false,
+            });
+          }
+        } else {
+          entities = acceptedUsers.map((u) => ({
+            id: u.user_id,
+            label: (u as any).username || u.user_id,
             score: scores[u.user_id]?.score ?? 0,
-          }))
-          .sort((a, b) => b.score - a.score);
+            memberIds: [u.user_id],
+            isTeam: false,
+          }));
+        }
+        const ranked = [...entities].sort((a, b) => b.score - a.score);
+        if (ranked.length < 2) continue;
 
         const newRankByUser = new Map<string, number>();
         const newScoreByUser = new Map<string, number>();
-        ranked.forEach((r, idx) => {
-          newRankByUser.set(r.user_id, idx + 1);
-          newScoreByUser.set(r.user_id, r.score);
+        const entityByUser = new Map<string, Entity>();
+        ranked.forEach((e, idx) => {
+          for (const uid of e.memberIds) {
+            newRankByUser.set(uid, idx + 1);
+            newScoreByUser.set(uid, e.score);
+            entityByUser.set(uid, e);
+          }
         });
 
         const newLeader = ranked[0];
         const isTied =
           ranked.length >= 2 && ranked[0].score === ranked[1].score;
-        const leaderId = isTied ? null : (newLeader?.user_id ?? null);
+        const leader = isTied ? null : newLeader;
         const maxScore = newLeader?.score ?? 0;
+        const uploaderEntity = entityByUser.get(userId);
+        // Who the push names: the team, or the person.
+        const leadName = uploaderEntity?.isTeam ? uploaderEntity.label : username;
 
         // Per-interval dedup key. For race/apex (no interval option),
         // getCurrentInterval falls through to a daily key — fine, since
@@ -1186,7 +1239,7 @@ export async function checkLeadChanges(
           fullComp.start_date,
         );
 
-        // ── Path 1: uploader just took the lead.
+        // ── Path 1: the uploader (or their team) just took the lead.
         // Only fire if they weren't already the leader going into this
         // upload — otherwise "you just took the lead" is a lie. NULL
         // prior (never indexed) counts as "not previously leader" so
@@ -1194,12 +1247,13 @@ export async function checkLeadChanges(
         const uploaderPrevRank = previousRank.get(userId);
         const uploaderWasAlreadyLeader = uploaderPrevRank === 1;
         if (
-          leaderId === userId &&
-          !isTied &&
+          leader &&
+          uploaderEntity &&
+          leader.id === uploaderEntity.id &&
           maxScore > 0 &&
           !uploaderWasAlreadyLeader
         ) {
-          const milestoneKey = `lead_change_${comp.id}_${userId}_${intervalKey}`;
+          const milestoneKey = `lead_change_${comp.id}_${leader.id}_${intervalKey}`;
           const claimed = await db.query(
             `INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)
 						ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
@@ -1207,7 +1261,10 @@ export async function checkLeadChanges(
           );
           if (claimed.length > 0) {
             for (const u of acceptedUsers) {
-              if (u.user_id === userId) continue;
+              if (leader.memberIds.includes(u.user_id)) continue;
+              // The dethroned leader gets the specific "passed you" push
+              // from Path 2 below — not a generic "lead change" on top of it.
+              if (previousRank.get(u.user_id) === 1) continue;
               const shouldSend = await shouldSendNotification(
                 u.user_id,
                 null,
@@ -1219,7 +1276,7 @@ export async function checkLeadChanges(
 
               sendPush(u.user_id, {
                 title: "Lead change!",
-                body: `${username} just took the lead in ${fullComp.competition_name}!`,
+                body: `${leadName} just took the lead in ${fullComp.competition_name}!`,
                 type: "competition_milestone",
                 data: { competition_id: fullComp.id },
               }).catch((err) =>
@@ -1228,19 +1285,42 @@ export async function checkLeadChanges(
             }
 
             sendPush(userId, {
-              title: "You're in first!",
-              body: `You just took the lead in ${fullComp.competition_name}! Keep it up!`,
+              title: leader.isTeam ? "Your team's in first!" : "You're in first!",
+              body: leader.isTeam
+                ? `You just put ${leader.label} in first in ${fullComp.competition_name}! Keep it up!`
+                : `You just took the lead in ${fullComp.competition_name}! Keep it up!`,
               type: "competition_milestone",
               data: { competition_id: fullComp.id },
             }).catch((err) =>
               console.error("[Push] lead self error:", err.message),
             );
+
+            // Teammates hear it too — the lead is theirs as much as the
+            // uploader's.
+            for (const uid of leader.memberIds) {
+              if (uid === userId) continue;
+              const shouldSend = await shouldSendNotification(
+                uid,
+                null,
+                "competition_milestone",
+              );
+              if (!shouldSend) continue;
+              if (!tryReserveRecipientSlot(notifiedRecipients, uid)) continue;
+              sendPush(uid, {
+                title: "Your team's in first!",
+                body: `${username} just put ${leader.label} in first in ${fullComp.competition_name}!`,
+                type: "competition_milestone",
+                data: { competition_id: fullComp.id },
+              }).catch((err) =>
+                console.error("[Push] lead teammate error:", err.message),
+              );
+            }
           }
         }
 
-        // ── Path 2: someone WAS the leader and isn't anymore.
+        // ── Path 2: someone (or some team) WAS the leader and isn't anymore.
         // Find users whose cached rank was 1 and whose new rank > 1.
-        // In most cases this is exactly one user; we still loop to be
+        // In most cases this is exactly one entity; we still loop to be
         // safe against odd cached state from a prior tie.
         for (const u of acceptedUsers) {
           const prior = previousRank.get(u.user_id);
@@ -1265,14 +1345,17 @@ export async function checkLeadChanges(
           if (!shouldSend) continue;
           if (!tryReserveRecipientSlot(notifiedRecipients, u.user_id)) continue;
 
-          const newLeaderScore = newScoreByUser.get(leaderId ?? "") ?? 0;
+          const newLeaderScore = leader?.score ?? maxScore;
           const myScore = newScoreByUser.get(u.user_id) ?? 0;
           const gap = newLeaderScore - myScore;
           const unitText = formatGapForType(fullComp.type, gap);
+          const mine = entityByUser.get(u.user_id);
 
           sendPush(u.user_id, {
-            title: "You lost 1st!",
-            body: `${username} passed you in ${fullComp.competition_name}. They're ${unitText} ahead — go take it back!`,
+            title: mine?.isTeam ? "Your team lost 1st!" : "You lost 1st!",
+            body: mine?.isTeam
+              ? `${leadName} passed ${mine.label} in ${fullComp.competition_name}. They're ${unitText} ahead — go take it back!`
+              : `${leadName} passed you in ${fullComp.competition_name}. They're ${unitText} ahead — go take it back!`,
             type: "competition_milestone",
             data: { competition_id: fullComp.id, kind: "lead_lost" },
           }).catch((err) =>

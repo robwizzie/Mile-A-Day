@@ -226,6 +226,9 @@ export type NotificationType =
   // (the walk is happening NOW), so it shares its priority. Gated per device
   // on buddy_join_request_v1: a build without the route shows a dead banner.
   | "buddy_join_request"
+  // The answer to an ask-to-join was no. Gated per device on
+  // buddy_join_request_v1 — only a device that can ASK ever receives it.
+  | "buddy_join_refused"
   | "buddy_joined"
   | "buddy_started"
   | "buddy_finished"
