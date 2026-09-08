@@ -20,7 +20,10 @@ import {
   createRoutineController,
   deleteRoutineController,
   historyController,
+  inviteToSessionController,
   listRoutinesController,
+  requestJoinController,
+  respondJoinRequestController,
   partnersController,
   updateParticipantController,
   updateRoutineController,
@@ -65,6 +68,17 @@ router.patch("/sessions/:sessionId", updateSessionController);
 // about where they are, not the host's about what the group is doing — so no
 // `not_host` and no lobby-only guard, unlike the PATCH above it.
 router.patch("/sessions/:sessionId/me", updateParticipantController);
+// Any MEMBER, any phase: the mid-walk "text Sam" moment. The lobby PATCH
+// above stays host-only for settings; adding people is everybody's.
+router.post("/sessions/:sessionId/invite", inviteToSessionController);
+// The door for a friend-of-a-participant. joinSession refuses anyone who
+// isn't the host's friend; this parks them as 'requested' and someone
+// inside (host, or a friend of theirs) answers.
+router.post("/sessions/:sessionId/request", requestJoinController);
+router.post(
+  "/sessions/:sessionId/requests/:userId/respond",
+  respondJoinRequestController,
+);
 router.post("/sessions/:sessionId/progress", progressController);
 router.post("/sessions/:sessionId/finish", finishController);
 

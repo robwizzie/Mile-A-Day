@@ -32,6 +32,9 @@ struct BuddyJoinFriendCard: View {
     /// out and that's still true, but the button must not read as though
     /// nothing happened.
     @State private var askedUserIds: Set<String> = []
+    /// Rooms we've asked into this session — optimistic, so the button flips
+    /// before the next presence refresh confirms it from the server.
+    @State private var requestedUserIds: Set<String> = []
     @State private var hypedUserIds: Set<String> = []
     @State private var sendingHypeUserIds: Set<String> = []
     @State private var expanded = false
@@ -92,8 +95,9 @@ struct BuddyJoinFriendCard: View {
             distanceMiles: friend.distanceMiles,
             goalMiles: friend.goal,
             subtitle: subtitle(friend),
-            canJoin: !hasActiveWorkout && !askedUserIds.contains(friend.userId),
-            joinTitle: friend.hasJoinableRoom ? "Join" : "Ask to walk",
+            canJoin: !hasActiveWorkout && !askedUserIds.contains(friend.userId)
+                && !hasRequested(friend) && !friend.roomRefusedMe,
+            joinTitle: joinTitle(friend),
             onJoin: { Task { await act(friend) } },
             onHype: { Task { await hype(friend) } },
             hyped: hypedUserIds.contains(friend.userId),
@@ -102,8 +106,21 @@ struct BuddyJoinFriendCard: View {
         )
     }
 
+    private func hasRequested(_ friend: FriendOutNow) -> Bool {
+        friend.hasAskedToJoinRoom || requestedUserIds.contains(friend.userId)
+    }
+
+    /// "Join" when the host is a friend, "Ask to join" when only THIS friend
+    /// is — the host (or they) lets you in. "Ask to walk" when they're solo.
+    private func joinTitle(_ friend: FriendOutNow) -> String {
+        guard friend.hasJoinableRoom else { return "Ask to walk" }
+        return friend.canJoinRoomDirectly ? "Join" : "Ask to join"
+    }
+
     private func subtitle(_ friend: FriendOutNow) -> String {
         if askedUserIds.contains(friend.userId) { return "Invited — waiting on them" }
+        if hasRequested(friend) { return "Asked to join — waiting to be let in" }
+        if friend.roomRefusedMe { return "They're keeping this walk small" }
         let elapsed = FriendOutTime.elapsed(since: friend.startedAt)
         guard friend.hasJoinableRoom else {
             return elapsed ?? "On their own"
@@ -164,7 +181,22 @@ struct BuddyJoinFriendCard: View {
         defer { busyUserId = nil }
 
         do {
-            if let sessionId = friend.buddySessionId {
+            if let sessionId = friend.buddySessionId, !friend.canJoinRoomDirectly {
+                // Not the host's friend: knock. The host or this friend lets
+                // us in, and the yes arrives as an ordinary invite.
+                do {
+                    try await buddy.requestToJoin(sessionId: sessionId)
+                    MADHaptics.success()
+                    requestedUserIds.insert(friend.userId)
+                } catch BuddyServiceError.api("join_directly") {
+                    // The server says the door is open after all (friended
+                    // the host since the list loaded) — walk in.
+                    try await buddy.join(sessionId: sessionId)
+                    MADHaptics.success()
+                    await buddy.refreshFriendsOutNow()
+                    onJoined()
+                }
+            } else if let sessionId = friend.buddySessionId {
                 try await buddy.join(sessionId: sessionId)
                 MADHaptics.success()
                 // The offer is consumed either way — leaving it on screen reads

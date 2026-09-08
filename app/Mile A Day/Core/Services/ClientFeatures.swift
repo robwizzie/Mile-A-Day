@@ -83,8 +83,17 @@ enum ClientFeatures {
 
     /// Declared on registration. Add a string here only in the same build that
     /// actually implements the behavior.
+    /// This build can ASK to join a buddy walk it wasn't invited to (a friend
+    /// of somebody in it, not of the host), draws the "wants to join" card in
+    /// the lobby and on the tracker's roster, and routes `buddy_join_request`.
+    ///
+    /// Declaring it is what makes the server show this device rooms it can
+    /// only ask into. An older build is shown host-friend rooms only, because
+    /// it draws a plain "Join" for every row and would be refused.
+    static let buddyJoinRequestV1 = "buddy_join_request_v1"
+
     static let supported: [String] = [
         friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
-        weeklyChallengeV1, buddyGroupPostV1,
+        weeklyChallengeV1, buddyGroupPostV1, buddyJoinRequestV1,
     ]
 }

@@ -24,3 +24,40 @@
 export function buddySessionsEnabled(): boolean {
   return process.env.BUDDY_SESSIONS !== "false";
 }
+
+/**
+ * When a walk is open to somebody who isn't in it yet.
+ *
+ * ONE rule, referenced from every place that answers "can they come in":
+ * the Friends-tab offers (`friendsOutNow`), the joinable list, and the
+ * request-to-join door. They used to be three hand-copied blocks, and the
+ * documented failure of that arrangement is a Join button drawn for an offer
+ * its own endpoint rejects. A running walk stays open while anyone is still
+ * in it — "late" is not "too late" for three of the four modes — and a lobby
+ * for as long as the abandoned-lobby sweep would leave it standing
+ * (unscheduled: 3h from creation; scheduled: ±30 min of its start).
+ *
+ * `alias` is the `buddy_sessions` row in the caller's query.
+ */
+export function JOINABLE_WINDOW_SQL(alias: string): string {
+  return `(
+    (${alias}.status = 'active' AND EXISTS (
+       SELECT 1 FROM buddy_session_participants live
+        WHERE live.session_id = ${alias}.id AND live.status = 'active'
+     ))
+    OR (${alias}.status = 'lobby' AND (
+          (${alias}.scheduled_start_at IS NULL
+           AND ${alias}.created_at > NOW() - INTERVAL '3 hours')
+       OR (${alias}.scheduled_start_at IS NOT NULL
+           AND ${alias}.scheduled_start_at BETWEEN NOW() - INTERVAL '30 minutes'
+                                                AND NOW() + INTERVAL '30 minutes')))
+  )`;
+}
+
+/**
+ * Participant rows that OCCUPY a slot. 'left'/'declined' freed theirs, and a
+ * 'requested' row never held one — somebody waiting at the door must not make
+ * the room read as full, or the host is refused the very invite that would
+ * let them in.
+ */
+export const OCCUPYING_STATUSES_SQL = `('invited', 'joined', 'ready', 'active', 'finished')`;

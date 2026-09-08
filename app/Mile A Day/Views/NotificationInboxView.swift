@@ -718,7 +718,8 @@ struct NotificationInboxView: View {
         case "streak_assist_accepted":
             // Your donated mile landed on their streak — go look at them.
             openActorProfileOrFriends(notification)
-        case "buddy_invite", "buddy_joined", "buddy_started", "buddy_finished":
+        case "buddy_invite", "buddy_joined", "buddy_started", "buddy_finished",
+             "buddy_join_request":
             // The walk itself, via the same parked intent the push tap uses —
             // `consumePendingBuddyLink` joins the session and then picks the
             // right destination (lobby while it's live, recap for one this
@@ -1001,6 +1002,7 @@ struct NotificationInboxView: View {
         case "clash_tie": return "CLASH TIE"
         case "buddy_invite": return "WALK INVITE"
         case "buddy_joined": return "WALK JOINED"
+        case "buddy_join_request": return "WANTS TO JOIN"
         case "buddy_started": return "WALK STARTED"
         case "buddy_finished": return "WALK DONE"
         default: return "UPDATE"
@@ -1050,6 +1052,9 @@ struct NotificationInboxView: View {
         // A walk that has finished is a result, not an invitation.
         case "buddy_invite", "buddy_joined", "buddy_started":
             return ("figure.2", MADTheme.Colors.walkBlue)
+        // Someone at the door of your walk — a question, so it wears the
+        // attention colour rather than the feature's blue.
+        case "buddy_join_request": return ("person.crop.circle.badge.plus", MADTheme.Colors.warning)
         case "buddy_finished": return ("flag.checkered", MADTheme.Colors.walkBlue)
         default: return ("bell.fill", .white.opacity(0.5))
         }

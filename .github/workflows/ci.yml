@@ -113,6 +113,14 @@ jobs:
       # a completed walk. None of it throws; this file asserts each by behaviour.
       - name: Buddy lifecycle check
         run: node scripts/buddy-lifecycle-check.mjs
+      # Two doors into a walk that already exists: a MEMBER (not only the
+      # host) inviting from inside a running walk, and a friend-of-a-member
+      # asking to be let in. Every failure is silent — a requester landing in
+      # `participants` would fail every shipped client's decode, a refused ask
+      # could walk in on its 'declined' row, an older build could be shown a
+      # room its Join button is refused from.
+      - name: Buddy invite-from-inside + request-to-join check
+        run: node scripts/buddy-join-request-check.mjs
       # Profile-grid controls, the collab reach/route switches and Story
       # Highlights. The reach switch lives inside collabReachSql — the fragment
       # getFeed, the unified feed and direct post access all ask — so too

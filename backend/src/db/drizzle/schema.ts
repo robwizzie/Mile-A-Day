@@ -2348,6 +2348,15 @@ export const buddySessionParticipants = pgTable(
     // happened, and the other people on it keep it. Nothing is deleted, so an
     // accidental hide costs nothing and a shared total can't silently drift.
     hiddenAt: timestamp("hidden_at", { withTimezone: true, mode: "string" }),
+    // When this person ASKED to join (status 'requested') rather than being
+    // invited. Stays set once they're answered, which is how a 'declined'
+    // row from a refused request is told apart from a declined invite —
+    // the two are the same status and must not be the same authorization.
+    // Nullable, no default: an invited row never had one.
+    requestedAt: timestamp("requested_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
   (table) => [
     index("idx_buddy_participants_user_status").using(
@@ -2376,7 +2385,7 @@ export const buddySessionParticipants = pgTable(
     }),
     check(
       "buddy_session_participants_status_check",
-      sql`status = ANY (ARRAY['invited'::text, 'joined'::text, 'ready'::text, 'active'::text, 'finished'::text, 'left'::text, 'declined'::text])`,
+      sql`status = ANY (ARRAY['invited'::text, 'joined'::text, 'ready'::text, 'active'::text, 'finished'::text, 'left'::text, 'declined'::text, 'requested'::text])`,
     ),
     check(
       "buddy_session_participants_location_type_check",

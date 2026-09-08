@@ -21,6 +21,8 @@ struct BuddyLobbyView: View {
     @State private var showSettings = false
     /// Friends with an invite request in flight, so their tile can show it.
     @State private var invitingIds: Set<String> = []
+    /// Join requests being answered, so a double tap can't answer twice.
+    @State private var answeringIds: Set<String> = []
     @State private var confirmCancel = false
     @State private var errorText: String?
 
@@ -576,6 +578,13 @@ struct BuddyLobbyView: View {
         let present = Set(people.map(\.userId))
         let invitable = buddy.candidates.filter { !present.contains($0.userId) }
         let isHost = session.isHost(buddy.currentUserId)
+        // Inviting is for everyone who is IN, not only the host: the server's
+        // invite endpoint judges eligibility against whoever taps, so a guest
+        // pulling their own friend in is exactly as valid as the host doing it.
+        let amIn = people.contains {
+            $0.userId == buddy.currentUserId
+                && ($0.status == .joined || $0.status == .ready || $0.status == .active)
+        }
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack {
@@ -615,7 +624,12 @@ struct BuddyLobbyView: View {
                 }
             }
 
-            if isHost, !invitable.isEmpty {
+            if !session.pendingJoinRequests.isEmpty {
+                Divider().background(MADTheme.Colors.madWhite.opacity(0.10))
+                joinRequestsSection(session)
+            }
+
+            if amIn, !invitable.isEmpty {
                 Divider().background(MADTheme.Colors.madWhite.opacity(0.10))
 
                 Text("Tap to invite")
@@ -632,7 +646,7 @@ struct BuddyLobbyView: View {
                 }
             }
 
-            if isHost, invitable.isEmpty, people.count <= 1 {
+            if amIn, invitable.isEmpty, people.count <= 1 {
                 // Host, alone, with nobody left to ask. Say so plainly instead
                 // of leaving a card that looks like it's still loading.
                 Text("No friends available to invite right now.")
@@ -773,9 +787,127 @@ struct BuddyLobbyView: View {
         Task {
             // The response carries the new roster, so the tile moves from the
             // invite row to the roster on its own — no local bookkeeping, and
-            // no chance of the two rows disagreeing.
-            _ = try? await buddy.updateSession(inviteUserIds: [candidate.userId])
+            // no chance of the two rows disagreeing. The invite endpoint
+            // rather than the lobby PATCH: that one is host-only.
+            do {
+                _ = try await buddy.invite(userIds: [candidate.userId])
+            } catch {
+                buddy.errorMessage =
+                    (error as? LocalizedError)?.errorDescription ?? "Couldn't invite them."
+            }
             invitingIds.remove(candidate.userId)
+        }
+    }
+
+    // MARK: - At the door
+
+    /// People asking to be let in — friends of somebody here, not of the host.
+    ///
+    /// Answerable by the host and by whichever member they're friends with;
+    /// everyone else sees who is waiting and on whom. The card says WHO
+    /// vouches for them, because "someone you don't know wants in" is a
+    /// question the host can't answer and "Sam's friend wants in" is one they
+    /// can.
+    private func joinRequestsSection(_ session: BuddySessionState) -> some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            Text(session.pendingJoinRequests.count == 1 ? "Wants to join" : "Want to join")
+                .font(MADTheme.Typography.smallBold)
+                .foregroundStyle(MADTheme.Colors.warning)
+
+            ForEach(session.pendingJoinRequests) { request in
+                joinRequestRow(request, session: session)
+            }
+        }
+    }
+
+    private func joinRequestRow(_ request: BuddyJoinRequest, session: BuddySessionState)
+        -> some View
+    {
+        let canAnswer = session.canAnswerJoinRequest(request, as: buddy.currentUserId)
+        let busy = answeringIds.contains(request.userId)
+        return HStack(spacing: MADTheme.Spacing.sm) {
+            AvatarView(
+                name: request.displayName,
+                imageURL: request.profileImageUrl,
+                size: 40
+            )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(request.displayName)
+                    .font(MADTheme.Typography.smallBold)
+                    .foregroundStyle(MADTheme.Colors.madWhite)
+                    .lineLimit(1)
+                Text(vouchText(request, session: session, canAnswer: canAnswer))
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                    .lineLimit(2)
+            }
+            Spacer(minLength: MADTheme.Spacing.xs)
+            if canAnswer {
+                HStack(spacing: 6) {
+                    answerButton("Not now", filled: false, busy: busy) {
+                        answer(request, accept: false)
+                    }
+                    answerButton("Let in", filled: true, busy: busy) {
+                        answer(request, accept: true)
+                    }
+                }
+                .fixedSize()
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// "Friends with Sam" — or, for the person who can't answer, who can.
+    private func vouchText(
+        _ request: BuddyJoinRequest, session: BuddySessionState, canAnswer: Bool
+    ) -> String {
+        let names = request.friendUserIds.compactMap { id -> String? in
+            if id == buddy.currentUserId { return "you" }
+            return session.participants.first { $0.userId == id }?.displayName
+        }
+        let with: String
+        switch names.count {
+        case 0: with = "A friend of the group"
+        case 1: with = "Friends with \(names[0])"
+        case 2: with = "Friends with \(names[0]) and \(names[1])"
+        default: with = "Friends with \(names[0]) and \(names.count - 1) others"
+        }
+        return canAnswer ? with : "\(with) — the host or they can let them in"
+    }
+
+    private func answerButton(
+        _ title: String, filled: Bool, busy: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            guard !busy else { return }
+            MADHaptics.action()
+            action()
+        } label: {
+            Text(title)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(filled ? MADTheme.Colors.madBlack : MADTheme.Colors.madWhite)
+                .padding(.horizontal, 12)
+                .frame(height: 32)
+                .background(
+                    Capsule().fill(
+                        filled ? MADTheme.Colors.warning : MADTheme.Colors.madWhite.opacity(0.12)))
+        }
+        .buttonStyle(.plain)
+        .disabled(busy)
+        .opacity(busy ? 0.5 : 1)
+    }
+
+    private func answer(_ request: BuddyJoinRequest, accept: Bool) {
+        answeringIds.insert(request.userId)
+        Task {
+            do {
+                try await buddy.respondToJoinRequest(userId: request.userId, accept: accept)
+                if accept { MADHaptics.success() }
+            } catch {
+                buddy.errorMessage =
+                    (error as? LocalizedError)?.errorDescription ?? "Couldn't answer that."
+            }
+            answeringIds.remove(request.userId)
         }
     }
 

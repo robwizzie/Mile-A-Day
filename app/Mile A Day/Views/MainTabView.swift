@@ -224,7 +224,7 @@ struct MainTabView: View {
                     // they land on.
                     await WeeklyChallengeService.shared.refresh()
                     selectedTab = 1
-                case "buddy_invite", "buddy_joined", "buddy_started":
+                case "buddy_invite", "buddy_joined", "buddy_started", "buddy_join_request":
                     // Park the session id so the Dashboard opens the lobby even
                     // on a cold launch, where DashboardView doesn't exist yet.
                     let data = notification.userInfo?["data"] as? [String: String]
@@ -542,7 +542,7 @@ struct MainTabView: View {
                  "weekly_challenge_complete":
                 await WeeklyChallengeService.shared.refresh()
                 selectedTab = 1
-            case "buddy_invite", "buddy_joined", "buddy_started":
+            case "buddy_invite", "buddy_joined", "buddy_started", "buddy_join_request":
                 // The payload DOES survive a cold launch
                 // (`pendingNotificationData`, same store the post deep link
                 // above reads), so park the session id and open the walk —
