@@ -768,10 +768,20 @@ final class BuddySessionService: ObservableObject {
     /// Called from the tracker's existing 1 Hz tick; this collapses that to one
     /// network call every `progressInterval`. `force` bypasses the throttle for
     /// the final report before finishing, so the last few metres always land.
+    ///
+    /// `isPaused` has NO default, and that is the fix for a badge that came up
+    /// on the pause and then vanished. The server takes the newest report as
+    /// the truth about the pause state (a pause is a state, not a quantity, so
+    /// it is deliberately not clamped like distance) — and the tracker's own
+    /// tick called this without the argument, so every five seconds a
+    /// `paused: false` landed on top of the paused one the edge had just sent.
+    /// The walker was paused, their phone knew it, their own tile said
+    /// otherwise. A defaulted parameter let a caller assert "not paused"
+    /// without ever mentioning pause; now every call site has to state it.
     func reportProgress(
         distanceMiles: Double,
         durationSeconds: TimeInterval,
-        isPaused: Bool = false,
+        isPaused: Bool,
         force: Bool = false
     ) async {
         guard let id = activeSessionId else { return }
@@ -821,6 +831,10 @@ final class BuddySessionService: ObservableObject {
         await reportProgress(
             distanceMiles: finalDistanceMiles,
             durationSeconds: durationSeconds,
+            // Finishing, not paused — and the server serves `is_paused` only
+            // for rows still `active`, so a finished tile could not draw the
+            // badge regardless.
+            isPaused: false,
             force: true
         )
         do {
@@ -887,6 +901,7 @@ final class BuddySessionService: ObservableObject {
         await reportProgress(
             distanceMiles: pending.distanceMiles,
             durationSeconds: pending.durationSeconds,
+            isPaused: false,
             force: true
         )
         do {
@@ -908,7 +923,7 @@ final class BuddySessionService: ObservableObject {
     func reportProgressFromCallback(
         distanceMiles: Double,
         pausedSeconds: TimeInterval,
-        isPaused: Bool = false,
+        isPaused: Bool,
         force: Bool = false
     ) {
         guard activeSessionId != nil else { return }

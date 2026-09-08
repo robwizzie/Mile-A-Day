@@ -786,7 +786,13 @@ struct WorkoutTrackingView: View {
                         if effectiveBuddySessionId != nil, let session = buddyService.session {
                             BuddyRosterStrip(
                                 session: session,
-                                currentUserId: buddyService.currentUserId
+                                currentUserId: buddyService.currentUserId,
+                                // My own tile draws from the device, not from a
+                                // round trip: I am the authority on whether I
+                                // am paused, and waiting to be told costs a
+                                // request, a response, and everything that can
+                                // go wrong with either.
+                                myPause: locationManager.isPausedForCrew
                             )
                             .padding(.horizontal, 20)
                         } else if isTracking {
@@ -2582,10 +2588,17 @@ struct WorkoutTrackingView: View {
             if effectiveBuddySessionId != nil {
                 let distance = currentDistance
                 let elapsed = elapsedTime
+                // The pause travels with EVERY report, not just the edge. This
+                // tick used to omit it, so the default said "not paused" and
+                // overwrote the paused state five seconds after the user hit
+                // pause — with the tracking screen open, which is exactly when
+                // someone is watching their own tile.
+                let paused = locationManager.isPausedForCrew
                 Task { @MainActor in
                     await BuddySessionService.shared.reportProgress(
                         distanceMiles: distance,
-                        durationSeconds: elapsed
+                        durationSeconds: elapsed,
+                        isPaused: paused
                     )
                 }
             }

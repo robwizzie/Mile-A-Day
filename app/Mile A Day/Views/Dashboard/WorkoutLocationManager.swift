@@ -218,6 +218,22 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// True while the user has explicitly paused. Published so the tracker,
     /// the banner and the Live Activity all read one flag.
     @Published private(set) var isPaused = false
+
+    /// The pause the CREW is shown: a manual pause, or the movement gate
+    /// having gone quiet for a full evidence window.
+    ///
+    /// Auto-pause used to be withheld from the wire on the grounds that it is
+    /// a lenient guess — but the guess only ever RAISES after
+    /// `movementEvidenceWindow` of no movement evidence at all, and clears on
+    /// the first witness, so what reaches the roster is "they have been
+    /// standing still for two minutes", which is exactly the fact a crew
+    /// wants. Withholding it meant a walker who stopped at a bench looked
+    /// identical to one still walking, right up until they aged out at 90s
+    /// and read as "out of range" instead.
+    ///
+    /// ONE property so the two reporters — the tracker's 1 Hz tick and the
+    /// callback/heartbeat path — can never disagree about it.
+    var isPausedForCrew: Bool { isPaused || isAutoPaused }
     /// Every pause this session has taken, open interval last. Mirrored to
     /// `InProgressWorkoutStore` on each edge so a relaunch resumes PAUSED and
     /// the finish can build HealthKit pause/resume events from real timestamps.
@@ -777,7 +793,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     private func reportBuddyProgress(force: Bool = false) {
         let distance = liveDistance
         let paused = pausedSeconds
-        let pausedNow = isPaused
+        let pausedNow = isPausedForCrew
         Task { @MainActor in
             BuddySessionService.shared.reportProgressFromCallback(
                 distanceMiles: distance,
@@ -1094,7 +1110,16 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         } ?? true
         let paused = quiet && !blind
         if paused != isAutoPaused {
-            DispatchQueue.main.async { self.isAutoPaused = paused }
+            DispatchQueue.main.async {
+                self.isAutoPaused = paused
+                // The crew is told about the auto gate too, so a walker who
+                // has genuinely stopped stops reading as "still going, just
+                // slowly". NOT forced: raising this already took a full
+                // evidence window of silence, so five more seconds behind the
+                // throttle costs nothing — and forcing it would put every
+                // edge of a lenient gate straight onto the network.
+                self.reportBuddyProgress()
+            }
         }
     }
 
