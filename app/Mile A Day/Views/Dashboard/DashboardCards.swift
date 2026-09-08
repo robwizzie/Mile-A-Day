@@ -28,7 +28,6 @@ struct DashboardHeroCard: View {
     let distanceIsFresh: Bool
     let fastestPace: TimeInterval
     let mostMiles: Double
-    let totalMiles: Double
     @ObservedObject var healthManager: HealthKitManager
     @Binding var showWorkoutView: Bool
 
@@ -113,8 +112,7 @@ struct DashboardHeroCard: View {
                 progress: progress,
                 isGoalCompleted: isGoalCompleted,
                 fastestPace: bestFastestPace,
-                mostMiles: mostMiles,
-                totalMiles: totalMiles
+                mostMiles: mostMiles
             )
         }
         .onAppear {

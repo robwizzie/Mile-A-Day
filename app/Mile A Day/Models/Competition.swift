@@ -3,6 +3,62 @@ import SwiftUI
 
 // MARK: - Competition Models
 
+/// A competition as it rides on a post's photo: the name, the poster's
+/// standing, and the podium they're on.
+///
+/// Opt-in by construction — nothing puts this on a card. A competition is a
+/// closed group with a user-typed name, and a post that announces one on the
+/// poster's behalf tells their whole circle about a room they aren't in. The
+/// poster adds it from the sticker tray or it isn't there.
+struct CompetitionStickerData: Equatable, Hashable {
+    struct Row: Equatable, Hashable, Identifiable {
+        /// Filled in by `Competition.podium` — the row's place on the real
+        /// leaderboard, which is not its index once the viewer is spliced in.
+        var place: Int = 0
+        let name: String
+        let score: String
+        let isMe: Bool
+        /// True on the viewer's own row when it was lifted from outside the
+        /// top three, so the sticker can draw the gap it jumped.
+        var truncated: Bool = false
+        var id: String { "\(place)-\(name)" }
+    }
+
+    let competitionId: String
+    let name: String
+    /// "Team Red" on a team competition, nil otherwise.
+    let subtitle: String?
+    /// Nil before anyone has scored, which is a real state on day one.
+    let place: Int?
+    let fieldSize: Int
+    let rows: [Row]
+
+    /// "2nd of 6" — nil until there's a placing worth claiming (a field of one
+    /// is not a standing).
+    var standingText: String? {
+        guard let place, fieldSize > 1 else { return nil }
+        return "\(ActiveCompetitionRow.ordinal(place)) of \(fieldSize)"
+    }
+
+    /// Every name on the sticker is capped HERE, not by a `lineLimit`: the
+    /// sticker renders `.fixedSize()`, so a line limit still publishes the
+    /// full intrinsic width and one long user-typed competition name would
+    /// make the overlay wider than the photo under it.
+    static func capped(_ text: String, max: Int = 22) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > max else { return trimmed }
+        return String(trimmed.prefix(max - 1)).trimmingCharacters(in: .whitespaces) + "…"
+    }
+
+    /// The one-line form, for the Minimal sticker style and accessibility.
+    var inlineText: String {
+        var parts = [name]
+        if let subtitle { parts.append(subtitle) }
+        if let standingText { parts.append(standingText) }
+        return parts.joined(separator: " · ")
+    }
+}
+
 /// Represents a competition from the backend API
 struct Competition: Codable, Identifiable {
     let competition_id: String
@@ -110,28 +166,115 @@ struct Competition: Codable, Identifiable {
         return true
     }
 
-    /// "Summer Sprint · 2nd of 6", or for a team competition
-    /// "Summer Sprint · Team Red · 1st of 3" — the composer's competition
-    /// sticker. Nil when the user isn't an accepted member.
-    func stickerText(for userId: String) -> String? {
-        let accepted = users.filter { $0.invite_status == .accepted }
-        guard accepted.contains(where: { $0.user_id == userId }) else { return nil }
-        // A long, user-typed name still has to leave room for the standing.
-        var name = competition_name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if name.count > 22 { name = String(name.prefix(21)).trimmingCharacters(in: .whitespaces) + "…" }
+    /// The competition as it goes ON a photo: the name, this user's standing,
+    /// and the handful of people they're racing. Nil when the user isn't an
+    /// accepted member.
+    ///
+    /// One summary for both the sticker and the widget's mini-leaderboard —
+    /// they were separate arithmetic that happened to agree, which is how a
+    /// post ends up claiming a place the widget beside it doesn't.
+    func stickerSummary(for userId: String) -> CompetitionStickerData? {
+        // Membership gates the STICKER, not the arithmetic: a competition the
+        // poster isn't in is not theirs to put on a photo.
+        guard users.contains(where: {
+            $0.invite_status == .accepted && $0.user_id == userId
+        }) else { return nil }
+
+        var name = CompetitionStickerData.capped(competition_name)
         if name.isEmpty { name = "Competition" }
-        if hasTeams, let team = team(for: userId) {
-            let ranked = rankedTeams
-            if let index = ranked.firstIndex(where: { $0.id == team.id }), ranked.count > 1 {
-                return "\(name) · Team \(team.name) · \(ActiveCompetitionRow.ordinal(index + 1)) of \(ranked.count)"
+
+        // A team competition is scored on TEAMS, so the standing and the rows
+        // are both about teams — a member's rank among people is a fact about
+        // a leaderboard this competition isn't scored on.
+        let myTeam = hasTeams ? team(for: userId) : nil
+        return CompetitionStickerData(
+            competitionId: competition_id,
+            name: name,
+            subtitle: myTeam.map { CompetitionStickerData.capped("Team \($0.name)") },
+            place: place(for: userId),
+            fieldSize: myTeam == nil ? acceptedRanked.count : rankedTeams.count,
+            rows: standingsPodium(for: userId)
+        )
+    }
+
+    /// The mini-leaderboard both the sticker and the widget draw: the top
+    /// three, with this user always on it. Teams when the competition is
+    /// scored on teams, people otherwise.
+    ///
+    /// Takes an OPTIONAL user and asks nothing of them — the widget renders
+    /// for whoever's phone it is, and losing a whole leaderboard because a
+    /// membership row read something unexpected is a silent way to break it.
+    func standingsPodium(for userId: String?) -> [CompetitionStickerData.Row] {
+        let myTeam = hasTeams ? userId.flatMap({ team(for: $0) }) : nil
+        if hasTeams {
+            return Self.podium(
+                rankedTeams.map {
+                    CompetitionStickerData.Row(
+                        name: CompetitionStickerData.capped("Team \($0.name)"),
+                        score: scoreLabel($0.score ?? 0),
+                        isMe: $0.id == myTeam?.id
+                    )
+                }
+            )
+        }
+        return Self.podium(
+            acceptedRanked.map {
+                CompetitionStickerData.Row(
+                    name: CompetitionStickerData.capped($0.displayName),
+                    score: scoreLabel($0.score ?? 0),
+                    isMe: $0.user_id == userId
+                )
             }
-            return "\(name) · Team \(team.name)"
+        )
+    }
+
+    /// This user's place on whichever leaderboard the competition is scored
+    /// on. Nil when they aren't on it yet.
+    private func place(for userId: String) -> Int? {
+        if hasTeams, let myTeam = team(for: userId) {
+            return rankedTeams.firstIndex(where: { $0.id == myTeam.id }).map { $0 + 1 }
         }
-        let ranked = accepted.sorted { ($0.score ?? 0) > ($1.score ?? 0) }
-        if let index = ranked.firstIndex(where: { $0.user_id == userId }), ranked.count > 1 {
-            return "\(name) · \(ActiveCompetitionRow.ordinal(index + 1)) of \(ranked.count)"
+        return acceptedRanked.firstIndex(where: { $0.user_id == userId }).map { $0 + 1 }
+    }
+
+    /// Accepted members, best score first — the individual leaderboard.
+    private var acceptedRanked: [CompetitionUser] {
+        users
+            .filter { $0.invite_status == .accepted }
+            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+    }
+
+    /// The leaderboard's top three with the viewer always on it: outside the
+    /// top three their row replaces the third, so the sticker can never show a
+    /// podium the poster isn't on. `truncated` is what draws the gap.
+    private static func podium(_ ranked: [CompetitionStickerData.Row]) -> [CompetitionStickerData.Row] {
+        var rows = Array(ranked.prefix(3).enumerated().map { index, row in
+            var placed = row
+            placed.place = index + 1
+            return placed
+        })
+        guard !rows.contains(where: { $0.isMe }),
+              let meIndex = ranked.firstIndex(where: { $0.isMe }),
+              !rows.isEmpty else { return rows }
+        var me = ranked[meIndex]
+        me.place = meIndex + 1
+        me.truncated = true
+        rows[rows.count - 1] = me
+        return rows
+    }
+
+    /// A score in this competition's own grammar — days for streaks, distance
+    /// for apex/race, points for targets/clash. The one place that decides how
+    /// a number in this competition reads.
+    func scoreLabel(_ score: Double) -> String {
+        switch type {
+        case .streaks:
+            return "\(Int(score))d"
+        case .apex, .race:
+            return String(format: "%.1f %@", score, options.unit.shortDisplayName)
+        case .targets, .clash:
+            return "\(Int(score)) pt\(Int(score) == 1 ? "" : "s")"
         }
-        return name
     }
 
     // MARK: Teams

@@ -2374,6 +2374,14 @@ export const buddySessionParticipants = pgTable(
       table.userId.asc().nullsLast(),
       table.status.asc().nullsLast(),
     ),
+    // "Is this workout part of a walk that has already been posted?" — asked
+    // once per candidate workout by the unified feed, which is the hottest
+    // query in the product. Partial because a linked workout is a small slice
+    // of the table and every lookup states `IS NOT NULL` (a partial index is
+    // only usable when the planner can prove the query implies its predicate).
+    index("idx_buddy_participants_workout")
+      .using("btree", table.workoutId.asc().nullsLast())
+      .where(sql`(workout_id IS NOT NULL)`),
     foreignKey({
       columns: [table.sessionId],
       foreignColumns: [buddySessions.id],

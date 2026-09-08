@@ -15,6 +15,11 @@ struct StickerTrayView: View {
     /// placement — gates the Reset control so it isn't permanent chrome.
     let isTransformed: Bool
     let onReset: () -> Void
+    /// Every competition this post could wear. One or none and there's nothing
+    /// to choose — the RACE row only appears when the poster is in several and
+    /// the default (soonest-ending) may not be the one they walked for.
+    var competitions: [CompetitionStickerData] = []
+    var onSelectCompetition: ((CompetitionStickerData) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
@@ -62,6 +67,25 @@ struct StickerTrayView: View {
                         }
                     }
                     .padding(.vertical, 2)
+                }
+
+                if config.isOn(.competition), competitions.count > 1 {
+                    trayLabel("RACE")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: MADTheme.Spacing.sm) {
+                            ForEach(competitions, id: \.competitionId) { competition in
+                                trayChip(
+                                    title: competition.name,
+                                    icon: "trophy.fill",
+                                    selected: input.competition?.competitionId == competition.competitionId
+                                ) {
+                                    MADHaptics.tap()
+                                    onSelectCompetition?(competition)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
                 }
 
                 trayLabel("COLOR")

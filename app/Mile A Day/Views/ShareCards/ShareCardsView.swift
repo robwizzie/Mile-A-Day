@@ -194,7 +194,12 @@ struct EnhancedShareView: View {
     let isGoalCompleted: Bool
     let fastestPace: TimeInterval
     let mostMiles: Double
-    let totalMiles: Double
+    /// Lifetime miles come off `user`, never a separate argument. They used to
+    /// be passed in alongside it from `healthManager.totalLifetimeMiles` — a
+    /// DIFFERENT number, since the phone drops cross-app duplicates the server
+    /// grandfathers — so the shared card could publish a total the profile
+    /// behind it disagreed with. One `user`, one total.
+    private var totalMiles: Double { user.totalMiles }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var systemColorScheme

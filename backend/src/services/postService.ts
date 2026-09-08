@@ -151,6 +151,28 @@ export interface PostCoauthor {
   // means "follow my setting", which is what every pre-existing row does.
   on_feed?: boolean | null;
   include_route?: boolean | null;
+  // HOW FAR this person went and HOW LONG it took, so a card about several
+  // people walking together can say what each of them did. Distance comes
+  // from the participant row — the same figure `buddy_group.distance_miles`
+  // SUMS, so the parts add up to the total on the same card. Null on a collab
+  // with no buddy session and no linked workout.
+  distance_miles?: number | null;
+  duration_seconds?: number | null;
+  // Their display-pace divisor, under the same >=50%-of-elapsed rule the
+  // author's is served under (`displayMovingSecondsSql`). Null means "use
+  // elapsed", which is what every client already falls back to.
+  moving_seconds?: number | null;
+  // Their own per-mile splits, shaped exactly like the entry's `splits`.
+  // Null when their leg has none (indoor, unlinked, or an older upload).
+  splits?: unknown;
+}
+
+/** One comment in a card's inline preview. */
+export interface CommentPreview {
+  comment_id: string;
+  user_id: string;
+  username: string | null;
+  content: string;
 }
 
 export interface PostRow {
@@ -190,6 +212,11 @@ export interface PostRow {
   is_hyped: boolean;
   hype_count: number;
   comment_count: number;
+  // The last two comments, oldest-first, for the feed's inline preview —
+  // Instagram's rule, so a conversation is visible on the card instead of
+  // behind a tap. Blocked users' comments are already filtered out. Null when
+  // there are none.
+  comment_preview?: CommentPreview[] | null;
   // Collab post fields — null unless a coauthor exists AND (accepted, or the
   // viewer is one of the two authors; pending invites are private to them).
   coauthor_user_id?: string | null;
@@ -560,19 +587,21 @@ const BLOCKED_VS_MULTI_COAUTHOR = `EXISTS (
  * A crew member's Stealth Mode walk has no workout_routes row (enforced at
  * write), so it resolves to NULL here with no predicate — do not add one.
  */
-const crewRouteSelect = (expr: string) => `(
-	SELECT ${expr} FROM workout_routes wr
-	WHERE p.include_route
-		AND (
-			COALESCE(
-				pca.include_route,
-				(SELECT ns.share_route_maps FROM notification_settings ns
-				  WHERE ns.user_id = pca.user_id),
-				true
-			)
-			OR pca.user_id = $1
-		)
-		AND wr.workout_id = COALESCE(
+/**
+ * SQL: WHICH workout is this crew member's leg of the walk.
+ *
+ * Three fallbacks, in the order they become true, because the link is stamped
+ * LATE: post_coauthors.workout_id if the poster knew it, else the participant
+ * row the reconciler fills in a minute or two after the walk, else the
+ * person's own counted workout that overlaps the session.
+ *
+ * Its own fragment because the route is no longer the only thing that needs
+ * it — the crew's distances and splits resolve the same leg, and must resolve
+ * it the SAME way or one card reports two different walks for one person.
+ * Deliberately carries NO consent gate: that belongs to the route (a trace is
+ * where you were), not to how far someone went on a walk they are credited on.
+ */
+const CREW_WORKOUT_ID_SQL = `COALESCE(
 			pca.workout_id,
 			(SELECT bsp.workout_id FROM buddy_session_participants bsp
 			  WHERE bsp.session_id = pca.buddy_session_id
@@ -597,7 +626,21 @@ const crewRouteSelect = (expr: string) => `(
 			  WHERE bs.id = pca.buddy_session_id AND bs.started_at IS NOT NULL
 			  ORDER BY w.device_end_date DESC
 			  LIMIT 1)
+		)`;
+
+const crewRouteSelect = (expr: string) => `(
+	SELECT ${expr} FROM workout_routes wr
+	WHERE p.include_route
+		AND (
+			COALESCE(
+				pca.include_route,
+				(SELECT ns.share_route_maps FROM notification_settings ns
+				  WHERE ns.user_id = pca.user_id),
+				true
+			)
+			OR pca.user_id = $1
 		)
+		AND wr.workout_id = ${CREW_WORKOUT_ID_SQL}
 )`;
 const CREW_ROUTE_SQL = crewRouteSelect("wr.route");
 // The first fix's instant as epoch seconds: a plain number survives every
@@ -639,6 +682,43 @@ const BUDDY_GROUP_JSON = `(
 	HAVING COUNT(*) > 1
 )`;
 
+/** SQL: a column off the crew member's own leg of the walk. */
+const crewWorkoutSelect = (expr: string) => `(
+	SELECT ${expr} FROM workouts w
+	WHERE w.workout_id = ${CREW_WORKOUT_ID_SQL}
+)`;
+
+/**
+ * SQL: how far this crew member went.
+ *
+ * The participant row FIRST, because that is the figure BUDDY_GROUP_JSON sums
+ * into "3.2 mi between us" — a per-person number read from anywhere else
+ * wouldn't add up to the total sitting right above it on the same card.
+ */
+const CREW_DISTANCE_SQL = `COALESCE(
+	(SELECT COALESCE(bsp.final_distance_miles, bsp.distance_miles)
+	   FROM buddy_session_participants bsp
+	  WHERE bsp.session_id = pca.buddy_session_id
+		AND bsp.user_id = pca.user_id),
+	${crewWorkoutSelect("w.distance")}
+)`;
+
+/** SQL: this crew member's per-mile splits, shaped like the author's. */
+const CREW_SPLITS_SQL = `(
+	SELECT jsonb_agg(jsonb_build_object(
+		'split_number', s.split_number,
+		'split_duration', s.split_duration,
+		'split_distance', s.split_distance,
+		'split_pace', s.split_pace
+	) ORDER BY s.split_number)
+	FROM (
+		SELECT ws.* FROM workout_splits ws
+		WHERE ws.workout_id = ${CREW_WORKOUT_ID_SQL}
+		ORDER BY ws.split_number
+		LIMIT 30
+	) s
+)`;
+
 // Credited participants, as a JSON array for the client. NULL when the post has
 // none, which is every pre-existing post — so the payload shape is unchanged
 // for the entire legacy corpus and old clients keep reading the scalar columns.
@@ -668,7 +748,23 @@ const MULTI_COAUTHORS_JSON = `(
 		'on_feed', CASE WHEN pca.user_id = $1
 			THEN COALESCE(pca.on_feed, TRUE) END,
 		'include_route', CASE WHEN pca.user_id = $1
-			THEN pca.include_route END
+			THEN pca.include_route END,
+		-- HOW FAR this person went and HOW LONG it took them. A card whose
+		-- whole subject is that several people went out together showed one
+		-- combined number and one person's stat strip, so "how did we each
+		-- do" — the question the card exists to answer — could not be
+		-- answered from it at all.
+		--
+		-- Distance prefers the participant row, which is what BUDDY_GROUP_JSON
+		-- SUMS: read from the workout instead and the parts would not add up
+		-- to the total printed two lines above them. Falls back to the
+		-- workout for a non-buddy collab, which has no participant row.
+		'distance_miles', ${CREW_DISTANCE_SQL},
+		'duration_seconds', ${crewWorkoutSelect("w.total_duration")},
+		'moving_seconds', ${crewWorkoutSelect(displayMovingSecondsSql("w"))},
+		-- Their own per-mile splits. NO share_route_maps gate, exactly like
+		-- the author's own splits: these are pace and time, not location.
+		'splits', ${CREW_SPLITS_SQL}
 	) ORDER BY pca.created_at)
 	FROM post_coauthors pca
 	JOIN users mcu ON mcu.user_id = pca.user_id
@@ -819,6 +915,94 @@ const competitionsJson = (userExpr: string, dateExpr: string) => `(
 	) pc
 )`;
 
+/**
+ * The comments that belong to ONE post's thread, as a predicate on a
+ * `post_comments` alias.
+ *
+ * Three ways a comment lands on a post, and all three are the same
+ * conversation:
+ *   - it was left on the post;
+ *   - it was left on the raw workout card the post later stood in for (the
+ *     thread follows the run when the author promotes it into a post);
+ *   - it was left on ANY leg of the buddy walk this post is the card for.
+ *
+ * That last arm is the one a buddy walk needs. One walk is ONE post carrying
+ * N people's workouts, but each of those workouts can still have its own feed
+ * card and its own comments — so a crew of three could hold three separate
+ * threads about a walk that has a single card. The walk's post is where they
+ * converge.
+ *
+ * Keyed on `posts.buddy_session_id`, which is the column that answers "is this
+ * walk already posted" for every participant (`post_coauthors` has no row for
+ * the author). Guarded on IS NOT NULL so the whole legacy corpus — every
+ * non-buddy post there has ever been — never pays for the probe.
+ *
+ * Used by BOTH the thread (`listComments`) and every `comment_count`: a count
+ * that disagrees with the thread under it reads as comments going missing.
+ */
+export function postCommentMatchSql(
+  comments: string,
+  postAlias: string,
+  workoutExpr: string = `${postAlias}.workout_id`,
+): string {
+  return `(
+		${comments}.post_id = ${postAlias}.post_id
+		OR (${workoutExpr} IS NOT NULL AND ${comments}.workout_id = ${workoutExpr})
+		OR (${postAlias}.buddy_session_id IS NOT NULL AND EXISTS (
+			SELECT 1 FROM buddy_session_participants bspc
+			WHERE bspc.session_id = ${postAlias}.buddy_session_id
+				AND bspc.workout_id = ${comments}.workout_id
+		))
+	)`;
+}
+
+/**
+ * SQL: the last two comments on a card, for the feed's inline preview.
+ *
+ * Instagram's rule, and the reason for it: a comment nobody sees until they
+ * tap through is a conversation happening in a room off the side of the feed.
+ * Two, oldest-first, under the caption — enough to show that people are
+ * talking without turning a card into a thread.
+ *
+ * Blocks are filtered HERE and not by the count beside it, deliberately: the
+ * count is "how big is this conversation" (the same number for everyone,
+ * matching what the thread shows), while the preview is text this viewer is
+ * about to read.
+ *
+ * `matchSql` is `postCommentMatchSql` or a raw-workout predicate, so a buddy
+ * walk's preview covers the same three arms its thread does.
+ *
+ * The block test is spelled out against user_blocks rather than borrowing the
+ * `blocked` CTE: this rides POST_SELECT, and several of its call sites (the
+ * profile grid, memories, pinned posts) have no CIRCLE_CTE above them. `$1` is
+ * the viewer everywhere POST_SELECT is used — the same invariant is_self and
+ * the author's route already depend on.
+ */
+function commentPreviewSql(matchSql: string): string {
+  return `(
+		SELECT jsonb_agg(jsonb_build_object(
+			'comment_id', recent.comment_id,
+			'user_id', recent.user_id,
+			'username', recent.username,
+			'content', recent.content
+		) ORDER BY recent.created_at ASC)
+		FROM (
+			SELECT cp.comment_id, cp.user_id, cu2.username, cp.content, cp.created_at
+			FROM post_comments cp
+			JOIN users cu2 ON cu2.user_id = cp.user_id
+			WHERE cp.deleted_at IS NULL
+				AND ${matchSql}
+				AND NOT EXISTS (
+					SELECT 1 FROM user_blocks ub
+					WHERE (ub.blocker_id = $1 AND ub.blocked_id = cp.user_id)
+						OR (ub.blocker_id = cp.user_id AND ub.blocked_id = $1)
+				)
+			ORDER BY cp.created_at DESC
+			LIMIT 2
+		) recent
+	)`;
+}
+
 // SELECT list shared by feed + story-detail reads so both shapes match PostRow.
 // `$1` must be the viewer id (drives is_self / is_hyped / the author's route).
 // is_hyped is exact-card state so a different same-day mile doesn't disable
@@ -842,11 +1026,9 @@ const POST_SELECT = `${POST_COLUMNS},
 	(
 		SELECT COUNT(*)::int FROM post_comments pc
 		WHERE pc.deleted_at IS NULL
-			AND (
-				pc.post_id = p.post_id
-				OR (p.workout_id IS NOT NULL AND pc.workout_id = p.workout_id)
-			)
+			AND ${postCommentMatchSql("pc", "p")}
 	) AS comment_count,
+	${commentPreviewSql(postCommentMatchSql("cp", "p"))} AS comment_preview,
 	${COAUTHOR_COLUMNS}`;
 
 export interface CreatePostInput {
@@ -2294,8 +2476,12 @@ export interface FeedEntryRow {
   is_self: boolean;
   is_hyped: boolean;
   hype_count: number;
-  // Comments only exist on posts; always 0 for workout entries.
+  // The conversation's size. Raw workout cards can be commented on too, and
+  // on a buddy walk this counts every leg (`postCommentMatchSql`) — one walk
+  // is one conversation.
   comment_count: number;
+  // The last two comments, oldest-first (see PostRow.comment_preview).
+  comment_preview?: CommentPreview[] | null;
   // Collab post fields (post entries only, same visibility rule as PostRow).
   coauthor_user_id: string | null;
   coauthor_status: "pending" | "accepted" | null;
@@ -2531,16 +2717,18 @@ const FEED_ENTRY_PROJECTION = `
 				WHEN page.kind = 'post' THEN (
 					SELECT COUNT(*)::int FROM post_comments pc
 					WHERE pc.deleted_at IS NULL
-						AND (
-							pc.post_id = p.post_id
-							OR (page.workout_id IS NOT NULL AND pc.workout_id = page.workout_id)
-						)
+						AND ${postCommentMatchSql("pc", "p", "page.workout_id")}
 				)
 				ELSE (
 					SELECT COUNT(*)::int FROM post_comments pc
 					WHERE pc.workout_id = wt.workout_id AND pc.deleted_at IS NULL
 				)
 			END AS comment_count,
+			CASE
+				WHEN page.kind = 'post'
+					THEN ${commentPreviewSql(postCommentMatchSql("cp", "p", "page.workout_id"))}
+				ELSE ${commentPreviewSql("cp.workout_id = wt.workout_id")}
+			END AS comment_preview,
 			-- FRESH chip, for every viewer. Truth order: the client's own claim
 			-- (posted_fresh, stamped at create when the author's 10-min window
 			-- was open) wins; legacy builds that never sent it fall back to a
@@ -2803,6 +2991,45 @@ export const UNIFIED_FEED_SQL = `
 						AND ${collabActiveSql("p2")}
 						AND p2.user_id NOT IN (SELECT uid FROM blocked)
 						AND (p2.user_id = $1 OR p2.coauthor_user_id = $1
+							OR ${OWNER_NOT_PRIVATE_SQL("p2.user_id")})
+					)
+				-- ...and the same for the OTHER legs of a buddy walk, resolved
+				-- at READ through the participant row.
+				--
+				-- The two arms above are keyed on columns frozen at POST time,
+				-- and for a buddy walk both are routinely empty:
+				-- coauthor_workout_id is stamped by picking the coauthor's
+				-- biggest workout on the post's local_date, but the common
+				-- order is finish → recap → post → the friend's phone syncs,
+				-- so at post time there is no workout to find and the column
+				-- stays NULL forever. It also only ever holds ONE person, so a
+				-- crew of three was never covered at all. The walk then shows
+				-- up twice: the shared card, and the friend's own route card
+				-- for the same hour of the same walk — which is exactly what
+				-- one-post-per-walk exists to prevent, arriving through the
+				-- feed instead of through a second post.
+				--
+				-- Resolved rather than stored for the same reason the crew's
+				-- ROUTES are (see crewRouteSelect): the link lands minutes
+				-- after the post, so any column read here is read too early.
+				AND NOT EXISTS (
+					SELECT 1
+					FROM buddy_session_participants bspw
+					JOIN posts p2 ON p2.buddy_session_id = bspw.session_id
+					WHERE bspw.workout_id = w.workout_id
+						AND p2.deleted_at IS NULL AND p2.share_to_feed
+						AND p2.buddy_session_id IS NOT NULL
+						-- A card only stands in for the walk when the viewer
+						-- can actually SEE it — otherwise they'd get neither.
+						-- Mirrors the coauthor arm above, plus the multi-crew
+						-- case that arm's scalar columns can't express.
+						AND p2.user_id NOT IN (SELECT uid FROM blocked)
+						AND (p2.user_id = $1 OR p2.coauthor_user_id = $1
+							OR EXISTS (
+								SELECT 1 FROM post_coauthors pcw
+								WHERE pcw.post_id = p2.post_id AND pcw.user_id = $1
+									AND pcw.status = 'accepted'
+							)
 							OR ${OWNER_NOT_PRIVATE_SQL("p2.user_id")})
 					)
 				ORDER BY w.device_end_date DESC

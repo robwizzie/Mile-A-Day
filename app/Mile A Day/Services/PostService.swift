@@ -62,6 +62,24 @@ struct FeedSplit: Codable, Equatable {
     let split_pace: Double?         // seconds per mile
 }
 
+/// One comment in a card's inline preview — Instagram's rule, so the
+/// conversation on a post is visible without a tap.
+///
+/// Nil/absent on older servers, which simply draws no preview.
+struct PostCommentPreview: Codable, Identifiable, Equatable {
+    let comment_id: String
+    let user_id: String
+    let username: String?
+    let content: String
+
+    var id: String { comment_id }
+
+    var displayName: String {
+        if let username, !username.isEmpty { return username }
+        return "someone"
+    }
+}
+
 /// One credited participant on a multi-person collab post (Buddy Walks).
 ///
 /// snake_case to decode the backend's jsonb aggregate directly, like the rest
@@ -105,6 +123,21 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     /// maps setting" rather than "off".
     var on_feed: Bool?
     var include_route: Bool?
+    /// How far THIS person went and how long it took them — the numbers that
+    /// let a card about several people walking together say what each of them
+    /// did. Nil on older servers and on a collab with no linked walk.
+    ///
+    /// The distance is the participant row's, i.e. the same figure
+    /// `buddy_group.distance_miles` sums, so the people on a card add up to
+    /// the total printed above them.
+    var distance_miles: Double?
+    var duration_seconds: Double?
+    /// Their display-pace divisor, under the same >=50%-of-elapsed rule as
+    /// everyone else's (`DisplayPace`). Nil means "use elapsed".
+    var moving_seconds: Double?
+    /// Their own per-mile splits. Nil when their leg has none — indoor, not
+    /// linked yet, or an upload that predates splits.
+    var splits: [FeedSplit]?
 
     var id: String { user_id }
 
@@ -129,9 +162,19 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
 }
 
 
-/// One competition the post's author was in on the post's day — the card's
-/// "COMPETING" flair, so friends can see who is mid-competition without
-/// opening the Compete tab. Server-bounded to the three ending soonest.
+/// One competition the post's author was in on the post's day. Server-bounded
+/// to the three ending soonest.
+///
+/// NOTHING DRAWS THIS ANY MORE, deliberately. It fed a "COMPETING" row under
+/// every card, which announced a closed group's user-typed name to the
+/// poster's whole circle on a walk that may have had nothing to do with it.
+/// A competition reaches a post only when the poster puts it there — the
+/// composer's competition sticker (`CompetitionStickerData`), built from the
+/// Compete tab's own data rather than from this.
+///
+/// Kept because the field is still on the wire (removing a response field
+/// breaks shipped builds, which still draw the row) and because `FeedEntry`
+/// has explicit CodingKeys. Do not re-add a card row from it.
 struct PostCompetitionRef: Codable, Identifiable, Equatable {
     let id: String
     let name: String?
@@ -219,6 +262,10 @@ struct PostItem: Codable, Identifiable {
     var is_hyped: Bool
     var hype_count: Int?
     var comment_count: Int?
+    /// The last two comments, oldest-first, drawn under the caption so a
+    /// conversation is visible on the card instead of behind a tap. Nil on
+    /// older servers and on a post nobody has commented on.
+    var comment_preview: [PostCommentPreview]? = nil
     var is_viewed: Bool?
     /// Story rows only: does this run already have a live feed post? Hides the
     /// story viewer's "Add to feed" when the workout is already on the feed.
@@ -475,6 +522,10 @@ struct FeedEntry: Codable, Identifiable {
     /// draw the chip from it.
     var is_fresh: Bool?
     var comment_count: Int?
+    /// The last two comments (see `PostItem.comment_preview`). Needs a
+    /// CodingKeys case AND a line in `asPostItem()` — a field missing from
+    /// either is silently absent on the card while the model looks correct.
+    var comment_preview: [PostCommentPreview]? = nil
     // Collab post fields (post entries only; nil while pending unless viewer
     // is one of the two authors).
     var coauthor_user_id: String?
@@ -517,7 +568,8 @@ struct FeedEntry: Codable, Identifiable {
         case route_times, route_started_at, competitions
         case stealth
         case segment_count, segments
-        case is_self, is_hyped, hype_count, comment_count, photo_locked, is_fresh
+        case is_self, is_hyped, hype_count, comment_count, comment_preview
+        case photo_locked, is_fresh
         case coauthor_user_id, coauthor_status, coauthor_username
         case coauthor_first_name, coauthor_last_name, coauthor_profile_image_url
         case coauthor_on_profile, coauthor_on_feed
@@ -568,6 +620,7 @@ struct FeedEntry: Codable, Identifiable {
             story_photo_url: story_photo_url,
             is_self: is_self, is_hyped: is_hyped,
             hype_count: hype_count, comment_count: comment_count,
+            comment_preview: comment_preview,
             is_viewed: nil, workout_on_feed: nil,
             photo_locked: photo_locked,
             coauthor_user_id: coauthor_user_id, coauthor_status: coauthor_status,

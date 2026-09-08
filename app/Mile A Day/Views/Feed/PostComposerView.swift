@@ -10,13 +10,16 @@ struct RunStatsInput: Equatable {
     var paceSecondsPerMile: Double?
     var durationSeconds: Double?
     var streak: Int?
-    /// The competition sticker's text ("Summer Sprint · 2nd of 6"), resolved
-    /// by `RunPostService` from the competitions the poster is in TODAY. Nil
-    /// on a day with none, which is what keeps the toggle out of the tray.
+    /// The competition the poster can put on the photo — name, standing and
+    /// podium — resolved by `RunPostService` from the competitions they're in
+    /// TODAY. Nil on a day with none, which is what keeps the toggle out of
+    /// the tray. Never shown unless the poster switches it on: a competition
+    /// is a closed group, so announcing one is the poster's call, not the
+    /// card's.
     /// Declared HERE, between streak and calories, because the memberwise
     /// initialiser takes arguments in declaration order and the builders
     /// pass it right after `streak:`.
-    var competition: String? = nil
+    var competition: CompetitionStickerData? = nil
     var calories: Double?
     var steps: Int?
     var workoutId: String?
@@ -78,8 +81,10 @@ struct RunStatsInput: Equatable {
             guard let d = dateText, !d.isEmpty else { return nil }
             return RunStatDatum(kind: .date, value: d)
         case .competition:
-            guard let c = competition, !c.isEmpty else { return nil }
-            return RunStatDatum(kind: .competition, value: c)
+            // The value is the tray's label — the sticker itself draws the
+            // podium rather than this string (`competitionBlock`).
+            guard let c = competition else { return nil }
+            return RunStatDatum(kind: .competition, value: c.inlineText)
         }
     }
 
@@ -262,12 +267,28 @@ final class PostComposerViewModel: ObservableObject {
     func refreshCompetitionSticker() async {
         let service = CompetitionService()
         guard (try? await service.loadCompetitions()) != nil else { return }
-        let fresh = RunPostService.competitionStickerText()
+        liveCompetitions = RunPostService.competitionStickers()
+        let fresh = liveCompetitions.first { $0.competitionId == stats.competition?.competitionId }
+            ?? liveCompetitions.first
         guard fresh != stats.competition else { return }
         stats.competition = fresh
         if fresh == nil {
             config.enabled.removeAll { $0 == .competition }
         }
+    }
+
+    /// Every competition the poster could put on this photo, soonest-ending
+    /// first. More than one and the tray offers a choice — otherwise the
+    /// sticker would silently pick for them, and the one it picks is rarely
+    /// the one the walk was for.
+    @Published var liveCompetitions: [CompetitionStickerData] = []
+
+    /// Switch the sticker to a different competition (tray tap). Turns the
+    /// sticker on, since choosing one is asking for it.
+    @MainActor
+    func selectCompetition(_ competition: CompetitionStickerData) {
+        stats.competition = competition
+        if !config.isOn(.competition) { config.enabled.append(.competition) }
     }
 
     init(stats: RunStatsInput, initialImage: UIImage? = nil) {
@@ -1062,12 +1083,15 @@ struct PostComposerView: View {
                                 input: vm.stats,
                                 config: $vm.config,
                                 isEnabled: $vm.stickerEnabled,
-                                isTransformed: vm.isStickerTransformed
-                            ) {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                    vm.resetStickerPlacement()
-                                }
-                            }
+                                isTransformed: vm.isStickerTransformed,
+                                onReset: {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                        vm.resetStickerPlacement()
+                                    }
+                                },
+                                competitions: vm.liveCompetitions,
+                                onSelectCompetition: { vm.selectCompetition($0) }
+                            )
                         }
                         if let notice = vm.crewHandoffNotice {
                             ComposerNoticeBanner(text: notice)

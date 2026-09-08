@@ -135,6 +135,20 @@ export const CLIENT_FEATURES = {
    * device keeps the host-friend-only list it shipped with.
    */
   buddyJoinRequestV1: "buddy_join_request_v1",
+  /**
+   * The build routes `activity_digest` — the catch-up push for notifications
+   * that were queued past quiet hours or the daily cap — to the notification
+   * inbox, which is the only screen that can show what was missed.
+   *
+   * Gated because the digest used to be typed `competition_updates` purely so
+   * it would route somewhere, and it landed on the Compete tab: a summary of
+   * comments, hypes and friend activity that opened a competitions list. An
+   * older build has no case for the new string and falls through to "just open
+   * the app", which is worse than nothing only if you think the Compete tab
+   * was an answer. Those builds keep the old type until they update.
+   */
+  activityDigestV1: "activity_digest_v1",
+
 } as const;
 
 export type ClientFeature =

@@ -1392,8 +1392,7 @@ private struct FlameBuddyHeroCard: View {
                 fastestPace: bestFastestPace,
                 mostMiles: healthManager.cachedCurrentStreakStats.mostMiles > 0
                     ? healthManager.cachedCurrentStreakStats.mostMiles
-                    : healthManager.mostMilesInOneDay,
-                totalMiles: healthManager.totalLifetimeMiles
+                    : healthManager.mostMilesInOneDay
             )
         }
         .sheet(isPresented: $showTokens) {

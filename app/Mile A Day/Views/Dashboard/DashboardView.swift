@@ -166,7 +166,7 @@ struct DashboardView: View {
             todaysDistance: healthManager.todaysDistance,
             goalDistance: userManager.currentUser.goalMiles,
             currentStreak: userManager.currentUser.streak,
-            totalLifetimeMiles: healthManager.totalLifetimeMiles,
+            totalLifetimeMiles: userManager.currentUser.totalMiles,
             bestDayMiles: healthManager.cachedMostMilesInOneDay,
             todaysAveragePace: healthManager.todaysAveragePace,
             todaysFastestPace: healthManager.todaysFastestPace,
@@ -190,7 +190,10 @@ struct DashboardView: View {
             let startDate = Calendar.current.date(byAdding: .day, value: -streak, to: Date())
             let info = YearlyMilestoneInfo(
                 years: years,
-                totalMiles: healthManager.totalLifetimeMiles,
+                // Matches UserManager's own yearMilestone construction, which
+                // reads currentUser — a replay must not restate the milestone
+                // with a different lifetime total than the one that fired it.
+                totalMiles: userManager.currentUser.totalMiles,
                 totalStreakDays: streak,
                 streakStartDate: startDate
             )
@@ -1686,7 +1689,6 @@ struct DashboardView: View {
             mostMiles: healthManager.cachedCurrentStreakStats.mostMiles > 0
                 ? healthManager.cachedCurrentStreakStats.mostMiles
                 : healthManager.mostMilesInOneDay,
-            totalMiles: healthManager.totalLifetimeMiles,
             healthManager: healthManager,
             showWorkoutView: $showWorkoutView
         )
@@ -1922,7 +1924,7 @@ struct DashboardView: View {
                 icon: "figure.run",
                 title: "Do your first mile",
                 subtitle: "Run or walk it — Apple Watch & treadmill runs count too",
-                isDone: healthManager.totalLifetimeMiles >= 0.95
+                isDone: userManager.currentUser.totalMiles >= 0.95
                     || userManager.currentUser.streak > 0
                     || currentState.isCompleted,
                 action: { showWorkoutView = true }

@@ -280,6 +280,12 @@ struct MainTabView: View {
                      "friend_post", "story_reaction",
                      "coauthor_invite", "coauthor_accepted", "mention", "post_comment",
                      "crew_photo", "crew_photo_nudge",
+                     // The catch-up digest summarizes rows that are ALREADY in
+                     // the inbox — a throttled push still writes its in-app
+                     // row — so the inbox is the only screen that can show
+                     // what it's about. It used to ride `competition_updates`
+                     // purely to route at all, and opened the Compete tab.
+                     "activity_digest",
                      "friend_challenge_completed", "friend_personal_best":
                     selectedTab = 0
                     showNotificationInbox = true
@@ -592,7 +598,7 @@ struct MainTabView: View {
                  "lead_change", "clash_tie",
                  "friend_post", "story_reaction",
                  "coauthor_invite", "coauthor_accepted", "mention", "post_comment",
-                 "crew_photo", "crew_photo_nudge":
+                 "crew_photo", "crew_photo_nudge", "activity_digest":
                 // Mirrors the live handler: a competition push that names its
                 // competition opens it; everything else lands in the inbox.
                 let cold = notificationService.pendingNotificationData
@@ -718,48 +724,11 @@ struct MainTabView: View {
         }
 
         // Top players (me always included) as a mini-leaderboard for the
-        // widget — same score grammar as the in-app competition rows.
-        func scoreText(_ user: CompetitionUser) -> String { scoreLabel(user.score ?? 0) }
-        func scoreLabel(_ score: Double) -> String {
-            switch top.type {
-            case .streaks:
-                return "\(Int(score))d"
-            case .apex, .race:
-                return String(format: "%.1f %@", score, top.options.unit.shortDisplayName)
-            case .targets, .clash:
-                return "\(Int(score)) pt\(Int(score) == 1 ? "" : "s")"
-            }
-        }
-        var standings: [WidgetDataStore.StandingRow]
-        if let myTeam {
-            standings = rankedTeams.prefix(3).map { team in
-                WidgetDataStore.StandingRow(
-                    name: "Team \(team.name)",
-                    valueText: scoreLabel(team.score ?? 0),
-                    isMe: team.id == myTeam.id
-                )
-            }
-            if !standings.contains(where: { $0.isMe }), !standings.isEmpty {
-                standings[standings.count - 1] = WidgetDataStore.StandingRow(
-                    name: "Team \(myTeam.name)", valueText: scoreLabel(myTeam.score ?? 0), isMe: true
-                )
-            }
-        } else {
-            standings = ranked.prefix(3).map { user in
-                WidgetDataStore.StandingRow(
-                    name: user.displayName,
-                    valueText: scoreText(user),
-                    isMe: user.user_id == userId
-                )
-            }
-            if let uid = userId,
-               !standings.contains(where: { $0.isMe }),
-               let me = ranked.first(where: { $0.user_id == uid }) {
-                standings[standings.count - 1] = WidgetDataStore.StandingRow(
-                    name: me.displayName, valueText: scoreText(me), isMe: true
-                )
-            }
-        }
+        // widget. Same summary the post sticker draws (`stickerSummary`), so
+        // the place a photo claims and the place the widget shows can't drift
+        // apart — they were separate arithmetic that happened to agree.
+        let standings: [WidgetDataStore.StandingRow] = top.standingsPodium(for: userId)
+            .map { WidgetDataStore.StandingRow(name: $0.name, valueText: $0.score, isMe: $0.isMe) }
 
         WidgetDataStore.save(
             competitionId: top.competition_id,

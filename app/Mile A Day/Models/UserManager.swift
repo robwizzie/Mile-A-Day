@@ -508,6 +508,31 @@ class UserManager: ObservableObject {
         saveUserData()
     }
 
+    // Lifetime miles from the backend — the one authority for this number.
+    // It is what awards the `miles_*` medals and what a friend sees on this
+    // profile, so a locally-computed total beside it produced the reported bug:
+    // a 500 Mile Club medal over a hero chip reading "500 mi · 27 to go".
+    //
+    // A plain assignment, deliberately NOT raise-only like the streak: the
+    // streak lags a break on purpose, whereas this number legitimately goes
+    // DOWN when a user cleans up their history
+    // (POST /workouts/:userId/duplicates/resolve moves their grandfather line
+    // back and re-runs the exclusion pass). Recording it also stops
+    // `updateFromHealthKit` overwriting the displayed total from then on.
+    //
+    // Zero is read as "the server has nothing yet", NOT as "you have run
+    // nothing": the first-run Health import takes minutes, during which the
+    // phone knows the whole history and the server knows none of it. Adopting a
+    // 0 there would blank the profile AND latch `backendTotalMiles`, so
+    // HealthKit could never seed it again. A user who genuinely has zero has a
+    // local zero too, so nothing is lost by holding the local value.
+    func updateTotalMilesFromBackend(_ miles: Double) {
+        guard miles > 0 else { return }
+        currentUser.backendTotalMiles = miles
+        currentUser.totalMiles = miles
+        saveUserData()
+    }
+
     // Legacy method for backward compatibility
     func completeRun(miles: Double) {
         currentUser.updateStreak(miles: miles)

@@ -5,11 +5,14 @@ import SwiftUI
 /// A single run statistic the user can choose to show on their post.
 enum RunStatKind: String, CaseIterable, Identifiable, Codable {
     case distance, pace, duration, streak, calories, steps, date
-    /// "Summer Sprint · 2nd of 6" — offered only while the poster is in a
-    /// competition on the day (`RunStatsInput.competition`), so a run posted
-    /// mid-race can wear the race. Additive: a config saved with it on decodes
-    /// fine on this build and is simply ignored by the datum on a day with
-    /// nothing to show.
+    /// The competition the poster CHOSE to show: name, their place, and the
+    /// podium they're on (`RunStatsInput.competition`). Offered only while
+    /// they're in a live competition, and never on by default — nothing puts a
+    /// competition on a post unless the poster puts it there.
+    ///
+    /// Unlike every other kind this one doesn't render as a chip: it's a block
+    /// of its own under the stats (`competitionBlock`), so it never lands in
+    /// the hero slot and never gets squeezed into a chip row.
     case competition
     var id: String { rawValue }
 
@@ -169,10 +172,19 @@ struct RunStatsStickerView: View, Equatable {
     let input: RunStatsInput
     let config: StickerConfig
 
+    /// The chip/hero stats. `.competition` is deliberately absent — it draws
+    /// as its own block below, so a poster who turns it on doesn't lose their
+    /// distance to the hero slot.
     private var data: [RunStatDatum] {
-        config.enabled.compactMap { input.datum(for: $0) }
+        config.enabled.filter { $0 != .competition }.compactMap { input.datum(for: $0) }
     }
     private var accent: Color { config.accent.color }
+
+    /// The competition block's data, or nil when the poster hasn't asked for
+    /// one (or is in none today).
+    private var competition: CompetitionStickerData? {
+        config.isOn(.competition) ? input.competition : nil
+    }
 
     var body: some View {
         Group {
@@ -202,6 +214,7 @@ struct RunStatsStickerView: View, Equatable {
                     ForEach(row) { chip($0) }
                 }
             }
+            competitionBlock
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -230,6 +243,23 @@ struct RunStatsStickerView: View, Equatable {
                         .font(.system(size: 14, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
                         .monospacedDigit()
+                }
+            }
+            // No room for a podium in a one-line pill, so Minimal states the
+            // race instead of drawing it — the same fact, at pill scale.
+            if let competition {
+                if !data.isEmpty {
+                    Circle().fill(Color.white.opacity(0.4)).frame(width: 3, height: 3)
+                }
+                HStack(spacing: 4) {
+                    Image(systemName: "trophy.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(trophyGold)
+                        .accessibilityHidden(true)
+                    Text(competition.standingText ?? competition.name)
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
                 }
             }
         }
@@ -261,6 +291,7 @@ struct RunStatsStickerView: View, Equatable {
                         .foregroundColor(.white.opacity(0.5))
                 }
             }
+            competitionBlock
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -303,6 +334,7 @@ struct RunStatsStickerView: View, Equatable {
                 }
                 .padding(.top, 2)
             }
+            competitionBlock
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 18)
@@ -310,6 +342,93 @@ struct RunStatsStickerView: View, Equatable {
     }
 
     // MARK: Shared pieces
+
+    /// The app's trophy gold — the same amber every medal and streak-milestone
+    /// surface uses for "achievement", so a race on a photo reads like one.
+    private var trophyGold: Color { MADTheme.Colors.warning }
+
+    /// The race, drawn: the competition's name, the poster's standing, and the
+    /// podium they're on with their own row lit. Three rows, because a sticker
+    /// sits on a photo — the poster is always one of them, spliced over the
+    /// third when they're further down (`Competition.podium`), so this can
+    /// never show a leaderboard the poster isn't on.
+    @ViewBuilder
+    private var competitionBlock: some View {
+        if let competition {
+            VStack(alignment: .leading, spacing: 6) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.14))
+                    .frame(height: 1)
+                    .padding(.bottom, 1)
+                HStack(spacing: 6) {
+                    Image(systemName: "trophy.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(trophyGold)
+                        .accessibilityHidden(true)
+                    Text(competition.name.uppercased())
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .tracking(0.8)
+                        .foregroundColor(.white.opacity(0.9))
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    if let standing = competition.standingText {
+                        Text(standing.uppercased())
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                            .tracking(0.6)
+                            .foregroundColor(trophyGold)
+                            .layoutPriority(1)
+                    }
+                }
+                if let subtitle = competition.subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                        .lineLimit(1)
+                }
+                ForEach(competition.rows) { row in
+                    standingRow(row)
+                }
+            }
+            .padding(.top, 2)
+            // The block carries the sticker's width when it's shown: its rows
+            // spread a name against a score, which needs a definite one, and
+            // `streakStyle` centres its children with no minWidth of its own.
+            .frame(minWidth: 190, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(competition.inlineText)
+        }
+    }
+
+    private func standingRow(_ row: CompetitionStickerData.Row) -> some View {
+        HStack(spacing: 8) {
+            Text("\(row.place)")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .foregroundColor(row.isMe ? trophyGold : .white.opacity(0.45))
+                .monospacedDigit()
+                .frame(width: 14, alignment: .leading)
+            Text(row.name)
+                .font(.system(size: 13, weight: row.isMe ? .heavy : .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(row.isMe ? 1 : 0.72))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 10)
+            Text(row.score)
+                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                .foregroundColor(.white.opacity(row.isMe ? 1 : 0.72))
+                .monospacedDigit()
+                .layoutPriority(1)
+        }
+        // The poster's own row, when it jumped a gap to get here, is drawn as
+        // a lit pill: without it "1, 2, 9" reads as a broken leaderboard
+        // rather than as the poster's real place.
+        .padding(.horizontal, row.isMe ? 6 : 0)
+        .padding(.vertical, row.isMe ? 3 : 0)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(trophyGold.opacity(row.isMe ? 0.18 : 0))
+        )
+        .padding(.leading, row.isMe ? -6 : 0)
+    }
 
     private var brandLine: some View {
         MADLogoMark(size: 26, opacity: 0.9, shadow: false)

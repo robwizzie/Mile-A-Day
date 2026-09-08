@@ -151,12 +151,47 @@ for (const type of [
   );
 }
 
+/* The other exempt half: addressed to you, or about your own account.
+ *
+ * Bounded by construction — each needs another person to act, or happens once
+ * — so the cap was never rationing anything here, it was only hiding things.
+ * A throttled push still writes the inbox row, so capping these meant the app
+ * quietly stopped saying a post had been commented on or a streak had ended,
+ * and then swept the lot into one "you have 40 notifications" digest. */
+for (const type of [
+  "post_comment",
+  "story_reaction",
+  "friend_request_accepted",
+  "coauthor_accepted",
+  "streak_lost",
+  "streak_assist_offer",
+  "streak_assist_request",
+  "streak_saved",
+  "challenge_won",
+  "crew_photo",
+  "buddy_finished",
+]) {
+  assert.equal(
+    isCapExempt(type),
+    true,
+    `${type} is addressed to this user — the daily cap must not swallow it`,
+  );
+}
+
 // The chatter the cap exists for. If these ever go exempt, there is no cap.
 for (const type of [
   "friend_activity",
   "friend_post",
   "daily_reminder",
+  // badge_earned and personal_best look like "about you" and belong here
+  // anyway: both are evaluated automatically per workout, so a first-run
+  // history import earns a dozen at once — a burst of automated pushes is
+  // precisely what the cap is for.
   "badge_earned",
+  "personal_best",
+  // The FRIEND-facing streak break (it ships as `friend_activity`; the
+  // owner's own is `streak_lost`, which is exempt above).
+  "streak_broken",
   "friend_badge_earned",
   "friend_personal_best",
   "friend_challenge_completed",

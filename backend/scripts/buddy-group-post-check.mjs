@@ -27,6 +27,12 @@
  *   6. the poster's per-post "no map" choice suppresses the WHOLE crew's routes
  *   7. lockUnearnedPhotos blanks the crew's photos for a viewer who hasn't run,
  *      keeps their own, and leaves the card unlocked once they have
+ *   8. ONE walk is ONE conversation: a comment left on any participant's raw
+ *      workout card lands in the walk's post thread, in its comment_count, and
+ *      in the card's inline comment preview
+ *   9. ONE walk is ONE CARD: no participant's raw workout card survives beside
+ *      the walk's post, however late their workout linked
+ *  10. the card carries each person's own distance and splits
  *
  * Usage (same env as ci-smoke):
  *   DATABASE_URL=... node scripts/buddy-group-post-check.mjs
@@ -44,6 +50,11 @@ import {
   joinSession,
   leaveSession,
 } from "../dist/services/buddySessionService.js";
+import {
+  addComment,
+  addWorkoutComment,
+  listComments,
+} from "../dist/services/commentService.js";
 
 const db = PostgresService.getInstance();
 
@@ -105,6 +116,12 @@ async function cleanup() {
     [ALL],
   );
   await db.query(`DELETE FROM workout_routes WHERE workout_id LIKE 'grp-w-%'`);
+  await db.query(`DELETE FROM workout_splits WHERE workout_id LIKE 'grp-w-%'`);
+  // Before posts/workouts: a comment references both, and one left on a raw
+  // workout card is keyed to the workout rather than to any post.
+  await db.query(`DELETE FROM post_comments WHERE user_id = ANY($1::text[])`, [
+    ALL,
+  ]);
   await db.query(`DELETE FROM post_coauthors WHERE user_id = ANY($1::text[])`, [
     ALL,
   ]);
@@ -167,6 +184,25 @@ async function seedWalk() {
         ]),
       ],
     );
+    // Age `created_at` past the 10-minute camera-window hold, which keeps a
+    // just-synced workout off other viewers' feeds. Without this the walk's
+    // legs are suppressed for a reason that has nothing to do with the walk
+    // having been posted, and assertion 9 below passes vacuously.
+    await db.query(
+      `UPDATE workouts SET created_at = NOW() - INTERVAL '2 hours'
+        WHERE workout_id = $1`,
+      [workoutId],
+    );
+    // Per-mile splits, so the card can answer "who had what split times".
+    for (const n of [1, 2]) {
+      await db.query(
+        `INSERT INTO workout_splits
+           (workout_id, split_number, split_duration, split_distance, split_pace)
+         VALUES ($1, $2, $3, 1.0, $3)
+         ON CONFLICT DO NOTHING`,
+        [workoutId, n, id === PAL ? 700 + n : 800 + n],
+      );
+    }
     // The reconciler stamps workout_id on the participant row once that
     // person's HKWorkout syncs. Crew routes resolve THROUGH this rather than
     // through a column frozen at post time, which is the only reason a friend
@@ -670,6 +706,96 @@ async function main() {
       WHERE session_id = $1 AND user_id = $2`,
     [sessionId, SHY, `grp-w-${SHY}`],
   );
+  // ── 8. One walk, one conversation ───────────────────────────────────
+  //
+  // A buddy walk is ONE post carrying N people's workouts, but each of those
+  // workouts can still have a feed card of its own — so before this, a crew of
+  // three could hold three separate comment threads about a walk with a single
+  // card, and nobody could see all of them from anywhere. The post is where
+  // they converge.
+  //
+  // SHY's workout is neither the post's `workout_id` nor its
+  // `coauthor_workout_id`, so it is exactly the leg the old two-arm predicate
+  // could not reach.
+  await addWorkoutComment(SHY, `grp-w-${SHY}`, "my legs are done");
+  await addComment(AUTHOR, postId, "same");
+  const thread = (await listComments(OUT, postId)) ?? [];
+  check(
+    "a comment on a crew member's own workout card is in the walk's thread",
+    thread.some((c) => c.content === "my legs are done"),
+    true,
+  );
+  check(
+    "the post's own comments are still there",
+    thread.some((c) => c.content === "same"),
+    true,
+  );
+  const countCard = await crewCard(OUT, postId);
+  check(
+    "comment_count counts the whole walk, not just the post",
+    countCard?.comment_count,
+    thread.length,
+  );
+  // Instagram's inline preview: the last two, oldest-first, so a conversation
+  // is visible on the card instead of behind a tap.
+  check(
+    "the card previews the last two comments, oldest first",
+    (countCard?.comment_preview ?? []).map((c) => c.content).join(" | "),
+    "my legs are done | same",
+  );
+  await db.query(`DELETE FROM post_comments WHERE user_id = ANY($1::text[])`, [
+    ALL,
+  ]);
+
+  // ── 9. One walk, one CARD ───────────────────────────────────────────
+  //
+  // The walk's post stands in for every leg of it. This used to be keyed on
+  // columns frozen at POST time — `posts.coauthor_workout_id`, stamped by
+  // looking for the coauthor's workout on the post's local_date — and the
+  // common order is finish → recap → post → the friend's phone syncs, so at
+  // post time there was nothing to find and the column stayed NULL forever.
+  // The walk then appeared twice in everyone's feed: the shared card, and the
+  // friend's own route card for the same hour of the same walk.
+  //
+  // Neither PAL nor SHY has a `coauthor_workout_id` here (SHY could never
+  // have one — that column holds exactly one person, and a crew of three
+  // doesn't fit in it), which is precisely the shipped shape.
+  const outFeed = await getUnifiedFeed(OUT, 30, null);
+  const strayWorkouts = outFeed
+    .filter((e) => e.kind === "workout")
+    .map((e) => e.id)
+    .filter((id) => [`grp-w-${PAL}`, `grp-w-${SHY}`, `grp-w-${AUTHOR}`].includes(id));
+  check(
+    "no participant's own workout card survives beside the walk's post",
+    strayWorkouts.join(",") || "none",
+    "none",
+  );
+  check(
+    "...and the walk's post is still there",
+    outFeed.some((e) => e.kind === "post" && e.id === postId),
+    true,
+  );
+
+  // ── 10. What each person did ────────────────────────────────────────
+  //
+  // A card whose subject is that several people went out together showed one
+  // combined number and the AUTHOR's stat strip, so "how far did each of us
+  // go, and who had what splits" could not be answered from it at all.
+  const walkCard = outFeed.find((e) => e.kind === "post" && e.id === postId);
+  const palRow = (walkCard?.coauthors ?? []).find((c) => c.user_id === PAL);
+  check("the card carries each person's own distance", palRow?.distance_miles, 1.4);
+  check(
+    "...and their own splits",
+    (palRow?.splits ?? []).map((s) => s.split_duration).join(","),
+    "701,702",
+  );
+  check(
+    "...which are THEIRS, not the author's",
+    (palRow?.splits ?? [])[0]?.split_duration !==
+      ((walkCard?.splits ?? [])[0]?.split_duration ?? null),
+    true,
+  );
+
   await db.query(
     `UPDATE post_coauthors SET photo_nudge_sent_at = NULL, media_url = NULL
       WHERE post_id = $1 AND user_id = $2`,

@@ -17,7 +17,11 @@ import Foundation
 enum SelfStatsRefresher {
     /// Fetch `/workouts/:id/stats` for the signed-in user and apply every
     /// authoritative value on it: streak (raise-only), the gated streak-features
-    /// payload, fastest mile pace, longest streak.
+    /// payload, fastest mile pace, longest streak, lifetime miles.
+    ///
+    /// Called WITHOUT `currentStreakOnly`, which matters for the miles: with it
+    /// the server scopes `total_miles` to the current streak, and that is not
+    /// the lifetime figure the medals are measured against.
     ///
     /// Returns the decoded response so a caller can layer its own follow-up on
     /// top — the Dashboard repairs a stale WorkoutIndex from the streak it gets
@@ -41,6 +45,11 @@ enum SelfStatsRefresher {
             if let longest = stats.longestStreak {
                 userManager.updateLongestStreakFromBackend(longest)
             }
+            // Lifetime miles — the figure that awards the mile medals and that
+            // friends see on this profile. Without this the own-profile total
+            // was HealthKit's, which excludes cross-app duplicates the server
+            // grandfathers, so the profile contradicted its own medal shelf.
+            userManager.updateTotalMilesFromBackend(stats.totalMiles)
             return stats
         } catch {
             print("[SelfStats] ⚠️ Failed to fetch stats from backend: \(error)")

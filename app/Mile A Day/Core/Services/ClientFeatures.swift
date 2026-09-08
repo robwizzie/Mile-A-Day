@@ -92,8 +92,18 @@ enum ClientFeatures {
     /// it draws a plain "Join" for every row and would be refused.
     static let buddyJoinRequestV1 = "buddy_join_request_v1"
 
+    /// This build routes `activity_digest` — the "here's what you missed"
+    /// catch-up — to the notification inbox, the one screen that can actually
+    /// show what it's summarizing.
+    ///
+    /// Declaring it is what stops the server sending this device the digest
+    /// typed `competition_updates`, which is how it used to route at all: a
+    /// summary of comments, hypes and friend activity that opened the
+    /// competitions list.
+    static let activityDigestV1 = "activity_digest_v1"
+
     static let supported: [String] = [
         friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
-        weeklyChallengeV1, buddyGroupPostV1, buddyJoinRequestV1,
+        weeklyChallengeV1, buddyGroupPostV1, buddyJoinRequestV1, activityDigestV1,
     ]
 }

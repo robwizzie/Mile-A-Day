@@ -36,7 +36,11 @@ struct ActiveCompetitionRow: View {
         return "\(Self.ordinal(index + 1)) of \(ranked.count)"
     }
 
-    static func ordinal(_ rank: Int) -> String {
+    /// `nonisolated` because it is pure arithmetic called from plain models
+    /// (`CompetitionStickerData.standingText`): every member of a View struct
+    /// — statics included — inherits @MainActor, which makes a call from a
+    /// nonisolated context a Swift 6 error the CLI type-check never shows.
+    nonisolated static func ordinal(_ rank: Int) -> String {
         switch rank {
         case 1: return "1st"
         case 2: return "2nd"

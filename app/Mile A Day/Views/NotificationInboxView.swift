@@ -750,6 +750,12 @@ struct NotificationInboxView: View {
                 // on the Dashboard still lists the invite.
                 switchTab(0)
             }
+        case "activity_digest":
+            // Already here. This row IS the summary of the rows under it, so
+            // the tap stays put — sending it to the Dashboard (the default)
+            // would walk the user away from the exact thing they tapped to
+            // see.
+            break
         default:
             // Streak token outcomes, reminders, recaps, and any future type:
             // land on the Dashboard rather than dead-ending the tap.
@@ -1014,6 +1020,7 @@ struct NotificationInboxView: View {
         case "buddy_join_refused": return "NOT THIS TIME"
         case "buddy_started": return "WALK STARTED"
         case "buddy_finished": return "WALK DONE"
+        case "activity_digest": return "CATCH UP"
         default: return "UPDATE"
         }
     }
@@ -1066,6 +1073,9 @@ struct NotificationInboxView: View {
         case "buddy_join_request": return ("person.crop.circle.badge.plus", MADTheme.Colors.warning)
         case "buddy_join_refused": return ("hand.raised.fill", .white.opacity(0.5))
         case "buddy_finished": return ("flag.checkered", MADTheme.Colors.walkBlue)
+        // The catch-up. Its own row IS the summary, so it points at the tray
+        // it's a summary of — the rows below it are the thing.
+        case "activity_digest": return ("tray.full.fill", .white.opacity(0.6))
         default: return ("bell.fill", .white.opacity(0.5))
         }
     }

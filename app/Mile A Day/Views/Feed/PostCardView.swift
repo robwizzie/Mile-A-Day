@@ -117,12 +117,6 @@ struct PostCardView: View {
                 media
                 mediaControls
                 crewGroupLine
-                // Who this walk was raced FOR: the author's competitions on
-                // the post's day (server-listed, so an older server simply
-                // shows no row).
-                if let competitions = post.competitions, !competitions.isEmpty {
-                    CompetitionFlairRow(competitions: competitions)
-                }
                 // The names-to-colours key belongs to the map, so it shows only
                 // while the map face is up — under it rather than on it, since
                 // the stats band owns the bottom of that face.
@@ -566,7 +560,38 @@ struct PostCardView: View {
         // The crew's photos ride BEHIND the author's: a buddy walk reads "their
         // shot → everyone else's shots". Empty on every ordinary post.
         slides.append(contentsOf: crewPhotoSlides)
-        return slides
+        return myPhotoFirst(slides)
+    }
+
+    /// On a walk I was on and added a photo to, MY slide leads.
+    ///
+    /// A buddy walk is ONE post, so there is no "my post" to open — my
+    /// picture of it is a slide on somebody else's card, three swipes in,
+    /// and the card I see is led by a photo I didn't take. Everyone on the
+    /// walk sees their own first, which is as close as one shared card gets
+    /// to each person having posted it.
+    ///
+    /// Order-only, and only for a slide that is mine: the author's own view is
+    /// unchanged (their photo already leads), a viewer who wasn't on the walk
+    /// sees the author-first order, and nothing is added or removed. The lock
+    /// stays first when it's there — it stands in for a photo this viewer
+    /// hasn't earned, and moving it behind one would read as the gate being
+    /// off.
+    private func myPhotoFirst(_ slides: [MediaSlide]) -> [MediaSlide] {
+        guard let me = UserDefaults.standard.string(forKey: "backendUserId"),
+              me != post.user_id,
+              let mine = post.acceptedCoauthors.first(where: { $0.user_id == me }),
+              let myURL = mine.mediaURL,
+              let index = slides.firstIndex(where: {
+                  if case .crewPhoto(let url, _, _) = $0 { return url == myURL }
+                  return false
+              })
+        else { return slides }
+        var reordered = slides
+        let slide = reordered.remove(at: index)
+        // Behind the lock, never in front of it.
+        reordered.insert(slide, at: post.isPhotoLocked ? 1 : 0)
+        return reordered
     }
 
     /// What the MAP face shows: the route — the crew's lines too, or only
@@ -664,12 +689,15 @@ struct PostCardView: View {
         // On the MEDIA node: the card root already owns the flyover cover
         // and the share sheet, and two presentations on one node drop one.
         .sheet(isPresented: $showSplits) {
+            // On a walk together the sheet opens on ME when I was there —
+            // the first question anyone asks of a shared card is their own
+            // number, and everyone else is one tap away in the picker.
             WorkoutSplitsSheet(
-                bars: splitBars,
-                stats: post.stats_snapshot,
+                walkers: crewWalkers,
                 workoutType: post.workout_type,
                 isIndoor: post.is_indoor,
-                ownerName: post.is_self ? "You" : post.displayName
+                groupDistance: post.buddy_group?.distance_miles,
+                initialWalkerId: crewWalkers.first(where: { $0.id == currentUserId })?.id
             )
         }
     }
@@ -708,7 +736,13 @@ struct PostCardView: View {
         WorkoutSplitBar.bars(from: post.splits)
     }
 
-    private var hasSplits: Bool { !splitBars.isEmpty }
+    /// The chip draws when ANYONE on the walk has splits. On a buddy card the
+    /// author is often the person whose phone didn't record any, and gating on
+    /// theirs alone hid the whole crew's.
+    private var hasSplits: Bool {
+        !splitBars.isEmpty
+            || post.acceptedCoauthors.contains { !($0.splits ?? []).isEmpty }
+    }
 
     private var splitsChip: some View {
         SplitsChipButton(accent: ActivityCardView.color(post.workout_type)) {
@@ -827,25 +861,84 @@ struct PostCardView: View {
     /// Everyone else's trace, in the order the server credited them so the
     /// colours are stable between reads. Empty for an ordinary post, and for
     /// any crew member who walked indoors or shares no maps.
-    private var companionRoutes: [CompanionRoute] {
-        // Colours are assigned across the WHOLE credited crew and then filtered,
-        // never assigned to the filtered list: a coauthor who walked indoors
-        // must not shift everybody behind them onto a different colour, or the
-        // same walk keys differently depending on whose route happened to load.
-        // `avoiding:` is what keeps the first companion off the author's own
-        // accent — a walking crew card drew blue beside blue without it.
+    /// Every credited person's colour, keyed by user id — the ONE assignment.
+    ///
+    /// Colours are assigned across the WHOLE credited crew and then filtered,
+    /// never assigned to the filtered list: a coauthor who walked indoors must
+    /// not shift everybody behind them onto a different colour, or the same
+    /// walk keys differently depending on whose route happened to load. It's a
+    /// map rather than an array for the same reason the route legend and the
+    /// splits picker both read it: the person you tap in one has to be the
+    /// person whose line you were looking at in the other.
+    ///
+    /// `avoiding:` is what keeps the first companion off the author's own
+    /// accent — a walking crew card drew blue beside blue without it.
+    private var crewColors: [String: Color] {
         let palette = CrewRoutePalette.companionColors(
             count: post.acceptedCoauthors.count,
             avoiding: ActivityCardView.color(post.workout_type)
         )
-        return post.acceptedCoauthors.enumerated().compactMap { pair -> CompanionRoute? in
-            guard let coords = pair.element.routeCoordinates else { return nil }
+        var out: [String: Color] = [:]
+        for (index, coauthor) in post.acceptedCoauthors.enumerated() {
+            out[coauthor.user_id] = palette[index]
+        }
+        return out
+    }
+
+    private var companionRoutes: [CompanionRoute] {
+        let colors = crewColors
+        return post.acceptedCoauthors.compactMap { coauthor -> CompanionRoute? in
+            guard let coords = coauthor.routeCoordinates,
+                  let color = colors[coauthor.user_id] else { return nil }
             return CompanionRoute(
-                id: pair.element.user_id,
+                id: coauthor.user_id,
                 coordinates: coords,
-                color: palette[pair.offset]
+                color: color
             )
         }
+    }
+
+    /// Everyone who walked, for the splits sheet: the author first (it's their
+    /// card), then the crew in credited order — the same order the route
+    /// colours and the photo slides use.
+    ///
+    /// Includes people with no splits on purpose. A crew member whose phone
+    /// hasn't handed us any is still someone who was on the walk, and a picker
+    /// that silently omits them reads as the app having lost them; the sheet
+    /// says so in words instead.
+    private var crewWalkers: [WorkoutSplitsSheet.Walker] {
+        let colors = crewColors
+        var walkers: [WorkoutSplitsSheet.Walker] = [
+            WorkoutSplitsSheet.Walker(
+                id: post.user_id,
+                name: post.is_self ? "You" : post.displayName,
+                color: ActivityCardView.color(post.workout_type),
+                distance: post.stats_snapshot?.distance,
+                durationSeconds: post.stats_snapshot?.duration,
+                movingSeconds: nil,
+                bars: splitBars,
+                servedPace: post.stats_snapshot?.pace
+            )
+        ]
+        for coauthor in post.acceptedCoauthors {
+            walkers.append(
+                WorkoutSplitsSheet.Walker(
+                    id: coauthor.user_id,
+                    name: coauthor.user_id == currentUserId ? "You" : coauthor.displayName,
+                    color: colors[coauthor.user_id] ?? .white,
+                    distance: coauthor.distance_miles,
+                    durationSeconds: coauthor.duration_seconds,
+                    movingSeconds: coauthor.moving_seconds,
+                    bars: WorkoutSplitBar.bars(from: coauthor.splits)
+                )
+            )
+        }
+        return walkers
+    }
+
+    /// The signed-in user, for "You" and for whose slide leads.
+    private var currentUserId: String? {
+        UserDefaults.standard.string(forKey: "backendUserId")
     }
 
     /// "3.2 mi between the 3 of you" — the walk, not the walker.
@@ -887,6 +980,14 @@ struct PostCardView: View {
                 post.acceptedCoauthors.map { ($0.user_id, $0.displayName) },
                 uniquingKeysWith: { first, _ in first }
             )
+            // Each line's own distance, on its own chip: the map already says
+            // who is who, and this is the other half of the same question.
+            let milesById: [String: Double] = Dictionary(
+                post.acceptedCoauthors.compactMap { c in
+                    c.distance_miles.map { (c.user_id, $0) }
+                },
+                uniquingKeysWith: { first, _ in first }
+            )
             // Wraps rather than truncates: five names on one line would clip
             // whoever came last, which on a card about being together is the
             // one thing it must not do.
@@ -894,13 +995,15 @@ struct PostCardView: View {
                 legendChip(
                     id: Self.authorRouteId,
                     name: post.displayName,
-                    color: ActivityCardView.color(post.workout_type)
+                    color: ActivityCardView.color(post.workout_type),
+                    miles: post.stats_snapshot?.distance
                 )
                 ForEach(companions) { companion in
                     legendChip(
                         id: companion.id,
                         name: byId[companion.id] ?? "a friend",
-                        color: companion.color
+                        color: companion.color,
+                        miles: milesById[companion.id]
                     )
                 }
             }
@@ -911,7 +1014,12 @@ struct PostCardView: View {
     /// Sentinel the art view uses for the poster's own line.
     private static let authorRouteId = "author"
 
-    private func legendChip(id: String, name: String, color: Color) -> some View {
+    private func legendChip(
+        id: String,
+        name: String,
+        color: Color,
+        miles: Double? = nil
+    ) -> some View {
         let selected = highlightedRouteId == id
         let dimmed = highlightedRouteId != nil && !selected
         return Button {
@@ -931,6 +1039,12 @@ struct PostCardView: View {
                     .font(.system(size: 12, weight: selected ? .heavy : .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(dimmed ? 0.4 : (selected ? 0.95 : 0.75)))
                     .lineLimit(1)
+                if let miles, miles > 0 {
+                    Text(miles.distanceFormatted)
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(.white.opacity(dimmed ? 0.3 : 0.55))
+                }
                 if selected {
                     Image(systemName: "checkmark")
                         .font(.system(size: 9, weight: .black))
@@ -1102,6 +1216,7 @@ struct PostCardView: View {
                 }
             }
             captionLine
+            commentPreview
             if let timestamp = absoluteTimestamp {
                 Text(timestamp)
                     .font(.system(size: 11, weight: .medium, design: .rounded))
@@ -1193,28 +1308,99 @@ struct PostCardView: View {
         return (post.displayName, caption)
     }
 
+    /// Everyone's words, for the MAP face.
+    ///
+    /// A photo slide belongs to one person, so it carries one caption — theirs.
+    /// The map belongs to the whole walk, and it is the one face where the
+    /// author's caption alone reads as the only thing anybody said about it.
+    /// So the map shows every caption on the post, author first, each under
+    /// its own name — the same rows the photo faces show one at a time.
+    private var allCaptions: [(id: String, name: String, text: String)] {
+        var out: [(id: String, name: String, text: String)] = []
+        if let caption = post.caption, !caption.isEmpty {
+            out.append((post.user_id, post.displayName, caption))
+        }
+        for coauthor in post.acceptedCoauthors {
+            guard let caption = coauthor.caption, !caption.isEmpty else { continue }
+            out.append((coauthor.user_id, coauthor.displayName, caption))
+        }
+        return out
+    }
+
     @ViewBuilder
     private var captionLine: some View {
-        if let current = currentCaption {
-            let caption = current.text
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(current.name)
-                    .font(.system(size: 14, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                Text(MentionText.attributed(caption))
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.9))
-                    .fixedSize(horizontal: false, vertical: true)
-                    // @mention links route to the mentioned user's profile
-                    // instead of leaving the app — the scheme is ours alone.
-                    .environment(\.openURL, OpenURLAction { url in
-                        if let username = MentionText.username(from: url) {
-                            onTapMention?(username)
-                            return .handled
-                        }
-                        return .systemAction
-                    })
+        // The map is the whole walk's face, so it carries the whole walk's
+        // words; a photo carries the words of whoever took it.
+        let rows: [(id: String, name: String, text: String)] = currentFace == .map
+            ? allCaptions
+            : currentCaption.map { [(post.user_id, $0.name, $0.text)] } ?? []
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(rows, id: \.id) { row in
+                    captionRow(name: row.name, text: row.text)
+                }
+            }
+            .padding(.top, 1)
+        }
+    }
+
+    private func captionRow(name: String, text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(name)
+                .font(.system(size: 14, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+                .lineLimit(1)
+            Text(MentionText.attributed(text))
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.9))
+                .fixedSize(horizontal: false, vertical: true)
+                // @mention links route to the mentioned user's profile
+                // instead of leaving the app — the scheme is ours alone.
+                .environment(\.openURL, OpenURLAction { url in
+                    if let username = MentionText.username(from: url) {
+                        onTapMention?(username)
+                        return .handled
+                    }
+                    return .systemAction
+                })
+        }
+    }
+
+    /// The last two comments, under the caption — Instagram's rule.
+    ///
+    /// A conversation nobody sees until they tap through is happening in a
+    /// room off the side of the feed. Two lines is enough to show that people
+    /// are talking without turning a card into a thread, and the "View all N"
+    /// link above them (only once there are more than two) is the way in.
+    ///
+    /// The whole block opens comments, including the comment lines themselves:
+    /// a name in a preview is not a profile link here — tapping a comment
+    /// wants the comment.
+    @ViewBuilder
+    private var commentPreview: some View {
+        let preview = post.comment_preview ?? []
+        if !preview.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                if let count = post.comment_count, count > preview.count {
+                    Button {
+                        onOpenComments?()
+                    } label: {
+                        Text("View all \(count) comments")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(onOpenComments == nil)
+                }
+                ForEach(preview) { comment in
+                    Button {
+                        onOpenComments?()
+                    } label: {
+                        captionRow(name: comment.displayName, text: comment.content)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(onOpenComments == nil)
+                }
             }
             .padding(.top, 1)
         }

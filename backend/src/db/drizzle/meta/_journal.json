@@ -463,6 +463,13 @@
       "when": 1788840075345,
       "tag": "0065_true_silver_samurai",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1788875479530,
+      "tag": "0066_nebulous_meteorite",
+      "breakpoints": true
     }
   ]
 }

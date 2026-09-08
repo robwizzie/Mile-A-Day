@@ -5,6 +5,7 @@ import {
   visiblePostAuthor,
   visibleWorkoutAuthor,
   acceptedCoauthor,
+  postCommentMatchSql,
 } from "./postService.js";
 import {
   resolveMentions,
@@ -40,6 +41,12 @@ const COMMENT_SELECT = `
  * All live comments on a post, oldest first (client groups replies under
  * their parent_comment_id). Comments from users blocked either way vs the
  * viewer are hidden. Returns null when the post isn't visible to the viewer.
+ *
+ * "On a post" is `postCommentMatchSql`: the post's own comments, the linked
+ * workout's (the thread follows a run promoted into a post) AND every leg of
+ * a buddy walk this post is the card for. One walk is one post, so it is one
+ * conversation — otherwise a crew of three holds three threads about a card
+ * that only exists once.
  */
 export async function listComments(
   viewerId: string,
@@ -51,17 +58,14 @@ export async function listComments(
   // thousands. Add a `before` cursor when posts approach the cap.
   return db.query<CommentRow>(
     `WITH target AS (
-			 SELECT post_id, workout_id FROM posts WHERE post_id = $2
+			 SELECT post_id, workout_id, buddy_session_id FROM posts WHERE post_id = $2
 		 )
 		 SELECT ${COMMENT_SELECT}
 		 FROM post_comments c
 		 CROSS JOIN target t
 		 JOIN users u ON u.user_id = c.user_id
 		 WHERE c.deleted_at IS NULL
-			 AND (
-				 c.post_id = t.post_id
-				 OR (t.workout_id IS NOT NULL AND c.workout_id = t.workout_id)
-			 )
+			 AND ${postCommentMatchSql("c", "t")}
 			 AND NOT EXISTS (
 				 SELECT 1 FROM user_blocks b
 				 WHERE (b.blocker_id = $1 AND b.blocked_id = c.user_id)
@@ -125,16 +129,13 @@ export async function addComment(
       user_id: string;
     }>(
       `WITH target AS (
-				 SELECT post_id, workout_id FROM posts WHERE post_id = $2
+				 SELECT post_id, workout_id, buddy_session_id FROM posts WHERE post_id = $2
 			 )
 			 SELECT c.comment_id, c.parent_comment_id, c.user_id
 			 FROM post_comments c
 			 CROSS JOIN target t
 			 WHERE c.comment_id = $1 AND c.deleted_at IS NULL
-				 AND (
-					 c.post_id = t.post_id
-					 OR (t.workout_id IS NOT NULL AND c.workout_id = t.workout_id)
-				 )`,
+				 AND ${postCommentMatchSql("c", "t")}`,
       [parentCommentId, postId],
     );
     if (parents.length === 0) return "parent_not_found";

@@ -220,6 +220,15 @@ struct ProfileView: View {
         .task {
             await userManager.refreshBadgesFromServer()
         }
+        .task {
+            // The medal shelf above refreshes from the server; the lifetime
+            // total those medals are MEASURED against has to land with it or
+            // this screen contradicts itself — a 500 Mile Club medal over a
+            // hero chip still counting "27 to go". The Dashboard and Friends
+            // tabs already call this; the profile is the screen that actually
+            // prints the number.
+            await SelfStatsRefresher.refreshBackendStats(userManager: userManager)
+        }
         // Sign Out / Delete Account / Recalibrate confirmations live on
         // ProfileSettingsView — every one of their buttons is over there, and a
         // modal attached to this view can't present while that page is pushed.

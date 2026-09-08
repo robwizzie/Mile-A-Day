@@ -1,0 +1,1 @@
+CREATE INDEX "idx_buddy_participants_workout" ON "buddy_session_participants" USING btree ("workout_id") WHERE (workout_id IS NOT NULL);

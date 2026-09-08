@@ -68,7 +68,7 @@ enum RunPostService {
             paceSecondsPerMile: workoutPaceSecondsPerMile(distance: distance, duration: paceDivisor),
             durationSeconds: duration > 0 ? duration : nil,
             streak: postableStreak(),
-            competition: competitionStickerText(),
+            competition: defaultCompetitionSticker(),
             calories: calories > 0 ? calories : nil,
             steps: nil,
             workoutId: anchorId,
@@ -80,26 +80,30 @@ enum RunPostService {
         )
     }
 
-    /// The competition sticker's text for a post made TODAY: the soonest-ending
-    /// competition the user is an accepted member of whose window covers
-    /// today, with their standing in it. Read off `CompetitionService`'s
-    /// mirror because these builders are static — nil when nothing is on,
+    /// Every competition a post made TODAY could wear, soonest-ending first:
+    /// the ones the user is an accepted member of whose window covers today,
+    /// each with their standing and podium. Read off `CompetitionService`'s
+    /// mirror because these builders are static — empty when nothing is on,
     /// or before the Compete tab has ever loaded, which just means no sticker
     /// is offered (never a wrong one).
     @MainActor
-    static func competitionStickerText() -> String? {
-        guard let me = UserManager.shared.currentUser.backendUserId else { return nil }
+    static func competitionStickers() -> [CompetitionStickerData] {
+        guard let me = UserManager.shared.currentUser.backendUserId else { return [] }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         let today = formatter.string(from: Date())
-        let live = CompetitionService.latestCompetitions
+        return CompetitionService.latestCompetitions
             .filter { $0.isRunning(on: today) }
             .sorted { ($0.end_date ?? "9999") < ($1.end_date ?? "9999") }
-        for competition in live {
-            if let text = competition.stickerText(for: me) { return text }
-        }
-        return nil
+            .compactMap { $0.stickerSummary(for: me) }
+    }
+
+    /// The one offered by default — soonest-ending, i.e. the race with the
+    /// most at stake today.
+    @MainActor
+    static func defaultCompetitionSticker() -> CompetitionStickerData? {
+        competitionStickers().first
     }
 
     /// The streak to BAKE into a post. `currentUser.streak` is the live display
@@ -125,7 +129,7 @@ enum RunPostService {
                 paceSecondsPerMile: pace,
                 durationSeconds: workout.duration > 0 ? workout.duration : nil,
                 streak: postableStreak(),
-            competition: competitionStickerText(),
+            competition: defaultCompetitionSticker(),
                 calories: calories > 0 ? calories : nil,
                 steps: nil,
                 workoutId: workoutId,
@@ -143,7 +147,7 @@ enum RunPostService {
                 paceSecondsPerMile: pace,
                 durationSeconds: record.duration > 0 ? record.duration : nil,
                 streak: postableStreak(),
-            competition: competitionStickerText(),
+            competition: defaultCompetitionSticker(),
                 calories: nil,
                 steps: nil,
                 workoutId: workoutId,
@@ -164,7 +168,7 @@ enum RunPostService {
             paceSecondsPerMile: (paceSecPerMile ?? 0) > 0 ? paceSecPerMile : nil,
             durationSeconds: hk.todaysTotalDuration > 0 ? hk.todaysTotalDuration : nil,
             streak: postableStreak(),
-            competition: competitionStickerText(),
+            competition: defaultCompetitionSticker(),
             calories: hk.todaysTotalCalories > 0 ? hk.todaysTotalCalories : nil,
             steps: hk.todaysSteps > 0 ? hk.todaysSteps : nil,
             workoutId: workoutId,

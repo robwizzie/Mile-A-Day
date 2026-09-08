@@ -22,6 +22,12 @@ struct User: Identifiable, Codable {
     // sign-out). Same trap class as the FeedEntry CodingKeys bug (build 413).
     var longestStreak: Int? = nil
     var totalMiles: Double = 0.0
+    // The backend's lifetime total, once a stats fetch has answered — the
+    // record of "the server has spoken", so HealthKit stops overwriting the
+    // displayed total. MUST stay Optional: same persisted-blob rule as
+    // `longestStreak` (synthesized Decodable ignores property defaults, so a
+    // non-optional addition throws on every existing install).
+    var backendTotalMiles: Double? = nil
     var fastestMilePace: TimeInterval = 0.0  // Minutes per mile (fastest pace)
     var mostMilesInOneDay: Double = 0.0      // Most miles run in a single day
     var lastCompletionDate: Date?
@@ -112,8 +118,18 @@ struct User: Identifiable, Codable {
         // Update streak (use retroactive streak from HealthKit)
         self.streak = streak
         
-        // Update total miles from HealthKit
-        self.totalMiles = totalMiles
+        // Lifetime miles are owned by the BACKEND, for exactly the reason
+        // fastestMilePace below is: the server's total is what awards the mile
+        // medals and what friends see on this profile. The two totals really do
+        // differ — `WorkoutDedup` drops cross-app duplicates over ALL history,
+        // while the server only excludes ones synced after `users.dedupe_since`
+        // and grandfathers the rest — so a HealthKit total ran ~5% under the
+        // server's and the profile read "500 mi · 27 to go" beside a 500 Mile
+        // Club medal the server had already awarded. Seed from HealthKit only
+        // until the first stats fetch answers.
+        if backendTotalMiles == nil {
+            self.totalMiles = totalMiles
+        }
         
         // Fastest mile pace is owned by the backend (workout_splits). Only seed it
         // from HealthKit if we have nothing yet — otherwise wait for the backend

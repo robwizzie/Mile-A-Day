@@ -150,8 +150,7 @@ struct WeeklyMileChartView: View {
                 fastestPace: bestFastestPace,
                 mostMiles: healthManager.cachedMostMilesInOneDay > 0
                     ? healthManager.cachedMostMilesInOneDay
-                    : healthManager.mostMilesInOneDay,
-                totalMiles: healthManager.totalLifetimeMiles
+                    : healthManager.mostMilesInOneDay
             )
         }
     }

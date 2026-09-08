@@ -274,7 +274,11 @@ struct BadgesPreviewCard: View {
                 badgeProgress = target > 0 ? min(Double(user.streak) / target, 0.99) : 0
             } else if badge.id.starts(with: "miles_") {
                 let target = Double(badge.numericValue)
-                badgeProgress = target > 0 ? min(healthManager.totalLifetimeMiles / target, 0.99) : 0
+                // The SERVER awards `miles_*`, so progress toward one has to be
+                // measured on the server's total (`user.totalMiles`) — measuring
+                // it on the phone's stricter count is what put "27 to go" under
+                // an already-earned 500 Mile Club medal.
+                badgeProgress = target > 0 ? min(user.totalMiles / target, 0.99) : 0
             } else if badge.id.starts(with: "pace_") {
                 // Pace badges: lower is better, progress = target / current
                 let target = Double(badge.numericValue)

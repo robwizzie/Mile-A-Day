@@ -11,7 +11,11 @@ import {
   AudienceEventType,
 } from "./audienceSettingsService.js";
 import { hasUnlimitedActions } from "./privilegedUsers.js";
-import { normalizeClientFeatures } from "./clientFeatures.js";
+import {
+  normalizeClientFeatures,
+  CLIENT_FEATURES,
+  userSupports,
+} from "./clientFeatures.js";
 import { logError } from "./errorLogService.js";
 import { START_OF_TODAY_ET_SQL } from "./dailyResetTime.js";
 import fs from "fs";
@@ -243,7 +247,13 @@ export type NotificationType =
   // are high-priority, so quiet hours and the daily cap both apply.
   | "weekly_challenge_new"
   | "weekly_challenge_nudge"
-  | "weekly_challenge_complete";
+  | "weekly_challenge_complete"
+  // The catch-up: what was queued past quiet hours or the daily cap, named
+  // rather than counted, and pointed at the ONE screen that can show it (the
+  // notification inbox). Gated per device on `activityDigestV1` — this used
+  // to be typed `competition_updates` so it would route at all, which landed
+  // a summary of comments and hypes on the Compete tab.
+  | "activity_digest";
 
 interface PushPayload {
   title: string;
@@ -408,6 +418,10 @@ const DAILY_NOTIFICATION_CAP = 18;
 /**
  * Types that skip the DAILY CAP but still respect quiet hours.
  *
+ * The list has two halves, marked below: pushes one person deliberately sends
+ * another, and pushes that are addressed to you or are about your own account.
+ * Neither is what the cap is for.
+ *
  * The cap exists to stop automated chatter (activity, challenges, reminders)
  * burying the user. An @mention is not chatter — it's one person addressing
  * another by name, and it's the single push where "arrived silently" is worst:
@@ -440,6 +454,68 @@ const CAP_EXEMPT_TYPES: NotificationType[] = [
   // toggle, per-friend muting, blocking and quiet hours.
   "hype_received",
   "friend_nudge",
+
+  // ─── Addressed to you, or about you ────────────────────────────────
+  //
+  // The cap exists to ration CHATTER — the automated stream about other
+  // people's days (friend_activity, friend_post, friend_badge_earned,
+  // ghost_beaten, competition_milestone, the weekly nudges). Below that line
+  // sits a different kind of push entirely: somebody acting on YOUR content,
+  // or your own account changing under you. Those are bounded by definition —
+  // they need another person to do something, or a thing that happens once —
+  // and rationing them was never the point.
+  //
+  // It was also invisible in the worst way. A throttled push still writes the
+  // inbox row, so on a busy day the app quietly stopped telling people their
+  // post had been commented on, their streak had ended, or their walk had a
+  // crew photo waiting — and then swept the lot into one "you have 40
+  // notifications" digest the next morning. Forty rows is not a notification;
+  // it is a receipt for the ones we didn't send.
+  //
+  // Quiet hours still apply to every one of these (that is what separates
+  // cap-exempt from HIGH_PRIORITY), so the night stays quiet.
+
+  // Someone engaged with YOUR content. Same argument as `hype_received`
+  // directly above, which is already unlimited as a product.
+  "post_comment",
+  "story_reaction",
+  // Your own account: a request you sent was answered, a tag you sent was
+  // accepted. One event, one push, and nothing else announces them.
+  "friend_request_accepted",
+  "coauthor_accepted",
+  // Your own streak ending — the single most important thing this app ever
+  // says, and it was capped alongside "your friend earned a badge". NOT
+  // `streak_broken`, which is the friend-facing one (and is sent as
+  // `friend_activity` anyway): that is chatter and the cap is for it.
+  "streak_lost",
+  // The token exchange. Every one of these is a two-sided offer that is only
+  // alive for the day it is about (streakAssistService re-derives the target
+  // day on every read), so a capped one isn't delayed, it's cancelled.
+  "streak_double_down",
+  "streak_saved",
+  "streak_assist_available",
+  "streak_assist_offer",
+  "streak_assist_request",
+  "streak_assist_accepted",
+  "streak_assisted",
+  // The overnight Head-to-Head verdict: at most one a day, by construction.
+  //
+  // Deliberately WITHOUT badge_earned / personal_best, which look like the
+  // same thing and are not: both are evaluated automatically per workout, so
+  // a first-run history import can earn a dozen at once. A burst of automated
+  // pushes is exactly what the cap is for — see push-config-check, which pins
+  // them capped.
+  "challenge_won",
+  // A walk you are IN. All four are about a session in progress or minutes
+  // finished; the digest delivers them the next morning, pointing at a walk
+  // that ended yesterday. (buddy_invite and buddy_join_request skip the cap
+  // already, via HIGH_PRIORITY.)
+  "buddy_joined",
+  "buddy_started",
+  "buddy_finished",
+  "buddy_join_refused",
+  "crew_photo",
+  "crew_photo_nudge",
 ];
 
 /** Single source of truth for "the daily cap does not apply to this type". */
@@ -892,6 +968,82 @@ interface PendingNotification {
  */
 const FLUSH_OPTS = { bypassDailyCap: true } as const;
 
+/**
+ * What a queued notification is called when it's summarized rather than sent.
+ *
+ * Plural nouns because a digest counts them: "3 comments, 2 hypes and 4 more".
+ * A type with no entry here falls back to "updates", which is honest and
+ * uninteresting — exactly the right treatment for a type nobody bothered to
+ * name, and never a crash.
+ */
+const DIGEST_LABELS: Partial<Record<NotificationType, [string, string]>> = {
+  post_comment: ["comment", "comments"],
+  mention: ["mention", "mentions"],
+  hype_received: ["hype", "hypes"],
+  story_reaction: ["story reaction", "story reactions"],
+  friend_request: ["friend request", "friend requests"],
+  friend_request_reminder: ["friend request", "friend requests"],
+  friend_request_accepted: ["new friend", "new friends"],
+  friend_nudge: ["nudge", "nudges"],
+  friend_activity: ["friend's mile", "friends' miles"],
+  friend_post: ["friend post", "friend posts"],
+  friend_badge_earned: ["friend badge", "friend badges"],
+  friend_personal_best: ["friend PR", "friend PRs"],
+  friend_challenge_completed: ["friend challenge", "friend challenges"],
+  badge_earned: ["badge", "badges"],
+  personal_best: ["personal best", "personal bests"],
+  challenge_won: ["challenge win", "challenge wins"],
+  lead_change: ["lead change", "lead changes"],
+  clash_tie: ["tie", "ties"],
+  competition_milestone: ["competition milestone", "competition milestones"],
+  competition_nudge: ["competition nudge", "competition nudges"],
+  coauthor_invite: ["tag", "tags"],
+  coauthor_accepted: ["tag accepted", "tags accepted"],
+  crew_photo: ["crew photo", "crew photos"],
+  crew_photo_nudge: ["crew photo nudge", "crew photo nudges"],
+  ghost_beaten: ["ghost race", "ghost races"],
+  streak_lost: ["streak update", "streak updates"],
+  streak_broken: ["streak update", "streak updates"],
+  weekly_recap: ["weekly recap", "weekly recaps"],
+};
+
+/**
+ * "3 comments, 2 hypes and 4 more" — the digest's body, under the title
+ * "While you were away".
+ *
+ * Names the two biggest kinds and counts the rest. Two, because a push body
+ * gets ~2 lines on a lock screen and a list of six categories is the same
+ * unreadable wall the bare count was, with more words. Ordered by volume so
+ * the named half is the half most likely to be why the user opens the app.
+ */
+function digestBody(pending: PendingNotification[]): string {
+  const counts = new Map<string, { labels: [string, string]; count: number }>();
+  for (const n of pending) {
+    const labels = DIGEST_LABELS[n.type as NotificationType] ?? [
+      "update",
+      "updates",
+    ];
+    // Keyed on the PLURAL, so two types that read the same to a user
+    // (streak_lost and streak_broken are both "streak updates") count as one
+    // kind instead of two lines saying the same word.
+    const entry = counts.get(labels[1]);
+    if (entry) entry.count += 1;
+    else counts.set(labels[1], { labels, count: 1 });
+  }
+  // Ties keep insertion order (the query is ordered by created_at and Array
+  // sort is stable), so the same backlog always renders the same sentence.
+  const ranked = [...counts.values()].sort((a, b) => b.count - a.count);
+  const named = ranked.slice(0, 2);
+  const rest = pending.length - named.reduce((sum, e) => sum + e.count, 0);
+
+  const parts = named.map(({ labels, count }) =>
+    count === 1 ? `1 ${labels[0]}` : `${count} ${labels[1]}`,
+  );
+  if (rest > 0) parts.push(`${rest} more`);
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
 export async function flushBatchedNotifications(): Promise<void> {
   const pending = await db.query<PendingNotification>(
     `SELECT id, user_id, type, competition_id, competition_name
@@ -976,13 +1128,26 @@ export async function flushBatchedNotifications(): Promise<void> {
           FLUSH_OPTS,
         );
       } else {
-        // Multiple: send digest
+        // Multiple: send a digest that SAYS what it holds. "You have 40
+        // notifications" is a number, not news — it tells the user nothing
+        // about whether opening the app is worth it, and the one thing in
+        // there they'd have wanted is indistinguishable from the other 39.
+        //
+        // The type decides where the tap lands, and only the inbox can show a
+        // digest's contents: `activity_digest` for devices that route it,
+        // `competition_updates` (the Compete tab) for the shipped builds that
+        // don't.
+        const routesDigest = await userSupports(
+          userId,
+          CLIENT_FEATURES.activityDigestV1,
+        ).catch(() => false);
         await sendPush(
           userId,
           {
-            title: "Catch up on activity",
-            body: `You have ${otherNotifs.length} notifications from while you were away`,
-            type: "competition_updates",
+            title: "While you were away",
+            body: digestBody(otherNotifs),
+            type: routesDigest ? "activity_digest" : "competition_updates",
+            data: { missed_count: String(otherNotifs.length) },
           },
           FLUSH_OPTS,
         );
