@@ -87,7 +87,7 @@ enum RunPostService {
     /// or before the Compete tab has ever loaded, which just means no sticker
     /// is offered (never a wrong one).
     @MainActor
-    private static func competitionStickerText() -> String? {
+    static func competitionStickerText() -> String? {
         guard let me = UserManager.shared.currentUser.backendUserId else { return nil }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

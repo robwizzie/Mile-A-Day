@@ -247,9 +247,28 @@ final class PostComposerViewModel: ObservableObject {
     /// byte-for-byte what it has always been.
     @Published var previewComposite: UIImage?
 
-    var stats: RunStatsInput
+    /// Published: the competition sticker text is re-resolved after a fresh
+    /// competitions fetch (see `refreshCompetitionSticker`), and the tray
+    /// has to re-read what's available when it lands.
+    @Published var stats: RunStatsInput
     /// Captured on-screen canvas size (points), reused to render the composite.
     var canvasSize: CGSize = .zero
+
+    /// The competition sticker's standing is a snapshot of whatever the
+    /// Compete tab last loaded — "2nd of 6" from Tuesday on a Friday post,
+    /// or nothing at all on a day the tab was never opened. Fetch fresh on
+    /// open and re-resolve; a failed fetch leaves the snapshot alone.
+    @MainActor
+    func refreshCompetitionSticker() async {
+        let service = CompetitionService()
+        guard (try? await service.loadCompetitions()) != nil else { return }
+        let fresh = RunPostService.competitionStickerText()
+        guard fresh != stats.competition else { return }
+        stats.competition = fresh
+        if fresh == nil {
+            config.enabled.removeAll { $0 == .competition }
+        }
+    }
 
     init(stats: RunStatsInput, initialImage: UIImage? = nil) {
         self.stats = stats
@@ -1151,6 +1170,7 @@ struct PostComposerView: View {
                 hasWalkSnaps = MidRunPhotoStash.hasEntriesToday()
             }
             .task { await resolveTermsIfNeeded() }
+            .task { await vm.refreshCompetitionSticker() }
             .task { await vm.checkRouteAvailability() }
             .task { try? await friendService.loadFriends() }
             // Re-probe once a photo lands — todaysWorkouts may not have been

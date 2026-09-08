@@ -3699,6 +3699,10 @@ export async function buddySessionPostIds(
 export interface BuddySessionPost {
   post_id: string;
   author_user_id: string;
+  /** Crew members with a photo on the card (the author's counts unless it's
+   *  an auto card) and how many were on the walk — "2 of 4 photos added". */
+  photo_count: number;
+  crew_size: number;
   author_name: string | null;
   /** Has the CALLER already put their own photo on it? */
   my_photo_added: boolean;
@@ -3730,7 +3734,16 @@ export async function buddySessionPost(
 						SELECT 1 FROM post_coauthors mine2
 						WHERE mine2.post_id = p.post_id AND mine2.user_id = $2
 							AND mine2.status = 'accepted'
-					)) AS am_i_credited
+					)) AS am_i_credited,
+					-- The card's photo tally: the author's own picture (an auto card
+					-- is a rendered route, not a photo) plus every crew slide.
+					((CASE WHEN COALESCE(p.is_auto, false) THEN 0 ELSE 1 END) + (
+						SELECT COUNT(*)::int FROM post_coauthors pcp
+						WHERE pcp.post_id = p.post_id AND pcp.status = 'accepted'
+							AND pcp.media_url IS NOT NULL AND pcp.media_url <> ''
+					)) AS photo_count,
+					(SELECT COUNT(*)::int FROM buddy_session_participants bsp
+					  WHERE bsp.session_id = $1 AND bsp.status IN ('active', 'finished')) AS crew_size
 			 FROM posts p
 			 JOIN users u ON u.user_id = p.user_id
 			WHERE p.deleted_at IS NULL AND p.share_to_feed

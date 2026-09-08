@@ -694,8 +694,16 @@ struct NotificationInboxView: View {
                        ?? competitionService.invites.first(where: { $0.competition_id == compId }) {
                 selectedCompetition = comp
             } else {
+                // Not loaded here — let the Compete tab fetch and open it.
+                if let compId = notification.data?["competition_id"], !compId.isEmpty {
+                    DeepLinkRouter.shared.requestOpenCompetition(id: compId)
+                }
                 switchTab(1)
             }
+        case "buddy_join_refused":
+            // The answer was no; the push says "start your own" — that's the
+            // Dashboard's Start button.
+            switchTab(0)
         case "challenge_won":
             // The overnight Head-to-Head verdict — the duel card lives on the
             // Dashboard.
@@ -1003,6 +1011,7 @@ struct NotificationInboxView: View {
         case "buddy_invite": return "WALK INVITE"
         case "buddy_joined": return "WALK JOINED"
         case "buddy_join_request": return "WANTS TO JOIN"
+        case "buddy_join_refused": return "NOT THIS TIME"
         case "buddy_started": return "WALK STARTED"
         case "buddy_finished": return "WALK DONE"
         default: return "UPDATE"
@@ -1055,6 +1064,7 @@ struct NotificationInboxView: View {
         // Someone at the door of your walk — a question, so it wears the
         // attention colour rather than the feature's blue.
         case "buddy_join_request": return ("person.crop.circle.badge.plus", MADTheme.Colors.warning)
+        case "buddy_join_refused": return ("hand.raised.fill", .white.opacity(0.5))
         case "buddy_finished": return ("flag.checkered", MADTheme.Colors.walkBlue)
         default: return ("bell.fill", .white.opacity(0.5))
         }

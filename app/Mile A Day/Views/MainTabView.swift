@@ -195,6 +195,15 @@ struct MainTabView: View {
                 Task { await refreshUnreadCount() }
                 return
             }
+            // A lead change / milestone / flex about a competition opens THAT
+            // competition — the standings it's about — rather than the inbox.
+            if ["competition_milestone", "competition_flex", "lead_change", "clash_tie"].contains(type),
+               let compId = data["competition_id"], !compId.isEmpty {
+                DeepLinkRouter.shared.requestOpenCompetition(id: compId)
+                selectedTab = 1
+                Task { await refreshUnreadCount() }
+                return
+            }
             // Your own "mile complete" / "streak ended" — both land on the
             // Dashboard itself (celebration home, streak flame), not the inbox.
             if type == "goal_reached" || type == "streak_lost" {
@@ -216,6 +225,13 @@ struct MainTabView: View {
                 case "competition_invite", "competition_accepted", "competition_started",
                      "competition_finished", "competition_updates", "competition_nudge":
                     await competitionService.refreshAllData()
+                    // Straight to the competition the push is about, when it
+                    // names one — the list is only the right place for the
+                    // ones that don't.
+                    if let compId = data["competition_id"], !compId.isEmpty,
+                       type != "competition_invite" {
+                        DeepLinkRouter.shared.requestOpenCompetition(id: compId)
+                    }
                     selectedTab = 1
                 case "weekly_challenge_new", "weekly_challenge_nudge",
                      "weekly_challenge_complete":
@@ -246,7 +262,7 @@ struct MainTabView: View {
                     } else {
                         showNotificationInbox = true
                     }
-                case "competition_flex", "competition_milestone", "friend_nudge",
+                case "buddy_join_refused", "competition_flex", "competition_milestone", "friend_nudge",
                      "friend_activity", "streak_broken", "personal_best",
                      "lead_change", "clash_tie",
                      // badge_earned was previously unrouted — pushes landed
@@ -535,6 +551,10 @@ struct MainTabView: View {
             case "competition_invite", "competition_accepted", "competition_started",
                  "competition_finished", "competition_updates", "competition_nudge":
                 await competitionService.refreshAllData()
+                if let compId = notificationService.pendingNotificationData["competition_id"],
+                   !compId.isEmpty, type != "competition_invite" {
+                    DeepLinkRouter.shared.requestOpenCompetition(id: compId)
+                }
                 selectedTab = 1
             // Mirrors the live handler above — cold launch is a separate code
             // path and dropping it would break the push for a killed app.
@@ -567,14 +587,24 @@ struct MainTabView: View {
                 } else {
                     showNotificationInbox = true
                 }
-            case "competition_flex", "competition_milestone", "friend_nudge",
+            case "buddy_join_refused", "competition_flex", "competition_milestone", "friend_nudge",
                  "friend_activity", "streak_broken", "personal_best",
                  "lead_change", "clash_tie",
                  "friend_post", "story_reaction",
                  "coauthor_invite", "coauthor_accepted", "mention", "post_comment",
                  "crew_photo", "crew_photo_nudge":
-                selectedTab = 0
-                showNotificationInbox = true
+                // Mirrors the live handler: a competition push that names its
+                // competition opens it; everything else lands in the inbox.
+                let cold = notificationService.pendingNotificationData
+                if ["competition_milestone", "competition_flex", "lead_change", "clash_tie"].contains(type),
+                   let compId = cold["competition_id"], !compId.isEmpty,
+                   cold["challenge_key"] != "head_to_head" {
+                    DeepLinkRouter.shared.requestOpenCompetition(id: compId)
+                    selectedTab = 1
+                } else {
+                    selectedTab = 0
+                    showNotificationInbox = true
+                }
                 notificationService.pendingNotificationType = nil
             case "goal_reached", "streak_lost":
                 // Straight to the Dashboard — celebration home / streak flame
@@ -667,17 +697,16 @@ struct MainTabView: View {
         let ranked = top.users
             .filter { $0.invite_status == .accepted }
             .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        // On a team competition the TEAM is the competitor, so the widget
+        // ranks teams and names mine — a member's own rank among people is a
+        // fact about a leaderboard the competition isn't scored on.
+        let myTeam: CompetitionTeam? = userId.flatMap { top.hasTeams ? top.team(for: $0) : nil }
+        let rankedTeams = top.rankedTeams
         var rankText = ""
-        if let uid = userId, let index = ranked.firstIndex(where: { $0.user_id == uid }) {
-            let rank = index + 1
-            let ordinal: String
-            switch rank {
-            case 1: ordinal = "1st"
-            case 2: ordinal = "2nd"
-            case 3: ordinal = "3rd"
-            default: ordinal = "\(rank)th"
-            }
-            rankText = "\(ordinal) of \(ranked.count)"
+        if let myTeam, let index = rankedTeams.firstIndex(where: { $0.id == myTeam.id }) {
+            rankText = "Team \(myTeam.name) · \(ActiveCompetitionRow.ordinal(index + 1)) of \(rankedTeams.count)"
+        } else if let uid = userId, let index = ranked.firstIndex(where: { $0.user_id == uid }) {
+            rankText = "\(ActiveCompetitionRow.ordinal(index + 1)) of \(ranked.count)"
         }
 
         let urgency: String
@@ -690,8 +719,8 @@ struct MainTabView: View {
 
         // Top players (me always included) as a mini-leaderboard for the
         // widget — same score grammar as the in-app competition rows.
-        func scoreText(_ user: CompetitionUser) -> String {
-            let score = user.score ?? 0
+        func scoreText(_ user: CompetitionUser) -> String { scoreLabel(user.score ?? 0) }
+        func scoreLabel(_ score: Double) -> String {
             switch top.type {
             case .streaks:
                 return "\(Int(score))d"
@@ -701,19 +730,35 @@ struct MainTabView: View {
                 return "\(Int(score)) pt\(Int(score) == 1 ? "" : "s")"
             }
         }
-        var standings: [WidgetDataStore.StandingRow] = ranked.prefix(3).map { user in
-            WidgetDataStore.StandingRow(
-                name: user.displayName,
-                valueText: scoreText(user),
-                isMe: user.user_id == userId
-            )
-        }
-        if let uid = userId,
-           !standings.contains(where: { $0.isMe }),
-           let me = ranked.first(where: { $0.user_id == uid }) {
-            standings[standings.count - 1] = WidgetDataStore.StandingRow(
-                name: me.displayName, valueText: scoreText(me), isMe: true
-            )
+        var standings: [WidgetDataStore.StandingRow]
+        if let myTeam {
+            standings = rankedTeams.prefix(3).map { team in
+                WidgetDataStore.StandingRow(
+                    name: "Team \(team.name)",
+                    valueText: scoreLabel(team.score ?? 0),
+                    isMe: team.id == myTeam.id
+                )
+            }
+            if !standings.contains(where: { $0.isMe }), !standings.isEmpty {
+                standings[standings.count - 1] = WidgetDataStore.StandingRow(
+                    name: "Team \(myTeam.name)", valueText: scoreLabel(myTeam.score ?? 0), isMe: true
+                )
+            }
+        } else {
+            standings = ranked.prefix(3).map { user in
+                WidgetDataStore.StandingRow(
+                    name: user.displayName,
+                    valueText: scoreText(user),
+                    isMe: user.user_id == userId
+                )
+            }
+            if let uid = userId,
+               !standings.contains(where: { $0.isMe }),
+               let me = ranked.first(where: { $0.user_id == uid }) {
+                standings[standings.count - 1] = WidgetDataStore.StandingRow(
+                    name: me.displayName, valueText: scoreText(me), isMe: true
+                )
+            }
         }
 
         WidgetDataStore.save(

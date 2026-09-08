@@ -32,6 +32,7 @@ import {
   getUserScores,
   resolveExpiredCompetitions,
 } from "../dist/services/competitionService.js";
+import { checkLeadChanges } from "../dist/services/notificationService.js";
 
 const db = PostgresService.getInstance();
 
@@ -77,6 +78,10 @@ async function cleanup() {
   );
   await db.query(`DELETE FROM competitions WHERE id = ANY($1::text[])`, [COMPS]);
   await db.query(`DELETE FROM workouts WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(
+    `DELETE FROM milestone_notifications WHERE competition_id = ANY($1::text[])`,
+    [COMPS],
+  );
   // Resolution pushes a "competition finished" row per participant, which FKs
   // to users — so the teardown has to outlive the feature it exercises.
   await db.query(
@@ -296,6 +301,95 @@ async function run() {
   const apex = await getCompetition(APEX);
   check("apex: the team's miles are still just its miles", teamScore(apex, RED), 9.3);
   check("apex: ...for both teams", teamScore(apex, BLUE), 17.1);
+
+  // --- Lead-change pushes name TEAMS on a team competition -----------------
+  // Alice is the furthest individual every day and her team is LOSING. The
+  // old push ranked people, so her upload told everyone "Alice just took the
+  // lead". Now the leader is Team Blue: an upload from Alice announces
+  // nothing, an upload from Carl (Blue) tells Red that Team Blue leads and
+  // tells Blue their team is first.
+  await db.query(
+    `DELETE FROM in_app_notifications WHERE user_id = ANY($1::text[])`,
+    [ALL],
+  );
+  await checkLeadChanges(ALICE);
+  const afterAlice = await db.query(
+    `SELECT user_id, body FROM in_app_notifications
+      WHERE user_id = ANY($1::text[]) AND type = 'competition_milestone'
+        AND data->>'competition_id' = $2`,
+    [ALL, APEX],
+  );
+  check(
+    "lead push: the furthest INDIVIDUAL on the losing team announces no lead",
+    afterAlice.length,
+    0,
+  );
+  // Alice's run indexed everyone's rank (Blue = 1), and "took the lead" only
+  // fires for a NEW leader — so un-index before the Blue upload.
+  await db.query(
+    `UPDATE competition_users SET last_known_rank = NULL WHERE competition_id = $1`,
+    [APEX],
+  );
+  await checkLeadChanges(CARL);
+  const afterCarl = await db.query(
+    `SELECT user_id, title, body FROM in_app_notifications
+      WHERE user_id = ANY($1::text[]) AND type = 'competition_milestone'
+        AND data->>'competition_id' = $2
+      ORDER BY user_id`,
+    [ALL, APEX],
+  );
+  const bodyFor = (uid) => afterCarl.find((r) => r.user_id === uid)?.body ?? "";
+  check(
+    "lead push: the losing team is told which TEAM leads",
+    bodyFor(ALICE).startsWith("Team Blue just took the lead"),
+    true,
+  );
+  check("lead push: ...every member of it", bodyFor(BOB).startsWith("Team Blue"), true);
+  check(
+    "lead push: the uploader hears it as their team's lead",
+    afterCarl.find((r) => r.user_id === CARL)?.title,
+    "Your team's in first!",
+  );
+  check(
+    "lead push: ...and so does their teammate",
+    afterCarl.find((r) => r.user_id === DANA)?.title,
+    "Your team's in first!",
+  );
+  // Red overtakes: the dethroned TEAM is told which team passed it.
+  await db.query(
+    `DELETE FROM in_app_notifications WHERE user_id = ANY($1::text[])`,
+    [ALL],
+  );
+  await addWorkout(ALICE, 0, 20);
+  await checkLeadChanges(ALICE);
+  const afterOvertake = await db.query(
+    `SELECT user_id, title, body FROM in_app_notifications
+      WHERE user_id = ANY($1::text[]) AND type = 'competition_milestone'
+        AND data->>'competition_id' = $2`,
+    [ALL, APEX],
+  );
+  const overtakeRow = (uid) => afterOvertake.find((r) => r.user_id === uid);
+  check(
+    "lead push: the dethroned team hears it as a TEAM loss",
+    overtakeRow(CARL)?.title,
+    "Your team lost 1st!",
+  );
+  check(
+    "lead push: ...naming both teams",
+    overtakeRow(DANA)?.body?.startsWith("Team Red passed Team Blue"),
+    true,
+  );
+  check(
+    "lead push: ...and ONLY that — not a generic lead change on top of it",
+    afterOvertake.filter((r) => r.user_id === CARL).length,
+    1,
+  );
+  check(
+    "lead push: the uploader's teammate hears their team is first",
+    overtakeRow(BOB)?.title,
+    "Your team's in first!",
+  );
+  await db.query(`DELETE FROM workouts WHERE workout_id = $1`, [`ts-w-${w}`]);
 
   // --- A team nobody joined is not a competitor ---------------------------
   // Streaks is where this bites: an empty team misses the goal every day, so

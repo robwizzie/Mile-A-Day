@@ -23,6 +23,8 @@ import {
   type RaceDistanceKey,
   getUserLocalToday,
   getUserRoutes,
+  getWorkoutRouteDetail,
+  getUntimedRouteWorkoutIds,
   getWorkoutRoute as getWorkoutRouteDb,
   getStreakErasForUser,
   getDuplicateSummary,
@@ -692,15 +694,40 @@ export async function getWorkoutRouteController(
   if (!hasRequiredKeys(["userId", "workoutId"], req, res)) return;
 
   try {
-    const route = await getWorkoutRouteDb(
+    // `route` is the field shipped builds read; the clock beside it is
+    // additive (nulls on routes uploaded before clients sent one).
+    const detail = await getWorkoutRouteDetail(
       req.params.userId,
       req.params.workoutId,
       req.userId!,
     );
-    return res.status(200).json({ route });
+    return res.status(200).json({
+      route: detail?.route ?? null,
+      route_times: detail?.route_times ?? null,
+      route_started_at: detail?.route_started_at ?? null,
+    });
   } catch (error: any) {
     console.error("Error getting workout route:", error.message);
     res.status(500).json({ error: "Error getting workout route" });
+  }
+}
+
+/**
+ * GET /workouts/:userId/routes/untimed — the caller's own routes with no
+ * replay clock, for the app's clock backfill (self-only).
+ */
+export async function getUntimedRoutesController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!hasRequiredKeys(["userId"], req, res)) return;
+
+  try {
+    const workoutIds = await getUntimedRouteWorkoutIds(req.params.userId);
+    return res.status(200).json({ workout_ids: workoutIds });
+  } catch (error: any) {
+    console.error("Error listing untimed routes:", error.message);
+    res.status(500).json({ error: "Error listing untimed routes" });
   }
 }
 

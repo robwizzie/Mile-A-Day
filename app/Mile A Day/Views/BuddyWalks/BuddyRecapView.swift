@@ -559,8 +559,10 @@ struct BuddyRecapView: View {
                     Text("Add your photo")
                         .font(MADTheme.Typography.bodyBold)
                     Text(
-                        post.authorName.map { "\($0) posted this walk — put your shot on it" }
-                            ?? "This walk is on the feed — put your shot on it"
+                        (post.authorName.map { "\($0) posted this walk" }
+                            ?? "This walk is on the feed")
+                        + (post.photoProgressText.map { " — \($0)" } ?? "")
+                        + " — put your shot on it"
                     )
                     .font(MADTheme.Typography.caption)
                     .opacity(0.85)
@@ -622,12 +624,13 @@ struct BuddyRecapView: View {
         _ session: BuddySessionState,
         post: BuddySessionPostRef
     ) -> String {
+        let progress = post.photoProgressText.map { " · \($0)" } ?? ""
         if isAuthor(post) {
-            return crewNames(session).isEmpty
-                ? "One post for this walk."
-                : "One post — you and \(crewNames(session))."
+            return (crewNames(session).isEmpty
+                ? "One post for this walk"
+                : "One post — you and \(crewNames(session))") + progress + "."
         }
-        if post.myPhotoAdded { return "One post for this walk, with everyone on it." }
+        if post.myPhotoAdded { return "One post for this walk, with everyone on it\(progress)." }
         // Credited, no photo of your own, and the day window has closed — the
         // only way left to reach this branch.
         let whose = post.authorName.map { "\($0)'s post" } ?? "The post"

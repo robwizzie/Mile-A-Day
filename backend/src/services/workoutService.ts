@@ -1438,6 +1438,68 @@ export async function getWorkoutRoute(
   return rows[0]?.route ?? null;
 }
 
+/** A single workout's trace with its replay clock, under the same gates. */
+export interface WorkoutRouteDetail {
+  route: RoutePoint[];
+  /** Seconds since the first fix, one per point; null when never uploaded. */
+  route_times: number[] | null;
+  /** The first fix's instant as epoch seconds; null when unknown. */
+  route_started_at: number | null;
+}
+
+/**
+ * `getWorkoutRoute` plus the clock beside it — what the walk detail (a buddy
+ * walk with no post) needs to fly its crew on real time, exactly as the feed
+ * card does. Same visibility + share_route_maps gates; a times array whose
+ * length doesn't match the route means "no clock", never index one by the
+ * other.
+ */
+export async function getWorkoutRouteDetail(
+  userId: string,
+  workoutId: string,
+  viewerId: string,
+): Promise<WorkoutRouteDetail | null> {
+  const rows = await db.query<WorkoutRouteDetail>(
+    `SELECT wr.route, wr.times AS route_times,
+		        EXTRACT(EPOCH FROM wr.started_at)::double precision AS route_started_at
+		 FROM workouts w
+		 LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
+		 JOIN workout_routes wr ON wr.workout_id = w.workout_id
+		 WHERE w.workout_id = $2
+			 AND w.user_id = $1
+			 AND w.deleted_at IS NULL
+			 AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("w.user_id", "$3")}
+			 AND (COALESCE(ns.share_route_maps, true) OR w.user_id = $3)`,
+    [userId, workoutId, viewerId],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * The caller's own stored routes that carry NO replay clock — uploaded before
+ * clients sent one. The app re-uploads these from HealthKit (the trace is
+ * still on the phone) so old posts replay on real time too. Self-only,
+ * bounded, newest first; the client works through it a batch per session.
+ */
+export async function getUntimedRouteWorkoutIds(
+  userId: string,
+  limit: number = 200,
+): Promise<string[]> {
+  const rows = await db.query<{ workout_id: string }>(
+    `SELECT w.workout_id
+		 FROM workout_routes wr
+		 JOIN workouts w ON w.workout_id = wr.workout_id
+		 WHERE w.user_id = $1
+			 AND w.deleted_at IS NULL
+			 AND wr.times IS NULL
+			 AND w.device_end_date >= NOW() - INTERVAL '730 days'
+		 ORDER BY w.device_end_date DESC
+		 LIMIT $2`,
+    [userId, limit],
+  );
+  return rows.map((r) => r.workout_id);
+}
+
 /**
  * Every stored GPS route for a user's live workouts, newest first — powers the
  * personal route heatmap (all paths overlaid on one map). Self-access only:

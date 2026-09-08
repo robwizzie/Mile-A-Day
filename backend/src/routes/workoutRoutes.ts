@@ -10,6 +10,7 @@ import {
   deleteWorkout,
   getUserRoutesController,
   getWorkoutRouteController,
+  getUntimedRoutesController,
   getRaceRecords,
   getRaceHistoryController,
   getStreakEras,
@@ -71,6 +72,13 @@ router.get(
   "/:userId/routes",
   requireSelfAccess("userId"),
   getUserRoutesController,
+);
+// Self-only: which of my routes still lack a replay clock, so the app can
+// re-upload them from HealthKit and old posts replay on real time.
+router.get(
+  "/:userId/routes/untimed",
+  requireSelfAccess("userId"),
+  getUntimedRoutesController,
 );
 // ONE workout's trace, readable by any authenticated user so a friend's workout
 // detail can draw its map — the same share_route_maps consent the feed applies

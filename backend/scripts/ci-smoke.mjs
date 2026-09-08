@@ -13,6 +13,8 @@ const {
   getUserRoutes,
   getRecentWorkouts,
   getWorkoutRoute,
+  getWorkoutRouteDetail,
+  getUntimedRouteWorkoutIds,
   sanitizeRoute,
 } = await import("../dist/services/workoutService.js");
 const {
@@ -267,6 +269,63 @@ assert.deepEqual(
     sanitizeRoute(long, longTimes, "not a date").startedAt,
     null,
     "an unparsable start is dropped without losing the points",
+  );
+}
+
+// The per-workout route read (a buddy walk's detail with no post) carries the
+// same clock the feed does, under the same gates.
+{
+  const detail = await getWorkoutRouteDetail(BOB, "ci-workout-bob", ALICE);
+  assert.equal(detail?.route?.length, 3, "route detail carries the polyline");
+  assert.deepEqual(detail?.route_times, ROUTE_TIMES, "route detail carries the clock");
+  assert.ok(
+    Math.abs(detail.route_started_at - Date.parse(ROUTE_STARTED_AT) / 1000) < 1,
+    "route detail carries the start as epoch seconds",
+  );
+  // The clock backfill list: a timed route is not on it; strip the clock and
+  // it is; a stranger's routes never are (self-scoped by the route anyway).
+  assert.ok(
+    !(await getUntimedRouteWorkoutIds(BOB)).includes("ci-workout-bob"),
+    "a route with a clock is not offered for clock backfill",
+  );
+  await db.query(
+    `UPDATE workout_routes SET times = NULL, started_at = NULL WHERE workout_id = 'ci-workout-bob'`,
+  );
+  assert.ok(
+    (await getUntimedRouteWorkoutIds(BOB)).includes("ci-workout-bob"),
+    "a route without a clock is offered for clock backfill",
+  );
+  assert.ok(
+    !(await getUntimedRouteWorkoutIds(ALICE)).includes("ci-workout-bob"),
+    "the backfill list is the caller's own routes only",
+  );
+  // A re-upload WITH the clock restores it (the backfill's whole mechanism).
+  await uploadWorkouts(BOB, [
+    {
+      workoutId: "ci-workout-bob",
+      distance: 1.5,
+      localDate,
+      date: nowIso,
+      timezoneOffset: 0,
+      workoutType: "running",
+      deviceEndDate: nowIso,
+      calories: 100,
+      totalDuration: 600,
+      source: "healthkit",
+      splits: [],
+      route: [
+        [40.0, -75.0],
+        [40.001, -75.001],
+        [40.002, -75.002],
+      ],
+      routeTimes: ROUTE_TIMES,
+      routeStartedAt: ROUTE_STARTED_AT,
+    },
+  ]);
+  assert.deepEqual(
+    (await getWorkoutRouteDetail(BOB, "ci-workout-bob", BOB))?.route_times,
+    ROUTE_TIMES,
+    "re-uploading the same route with a clock stores the clock",
   );
 }
 

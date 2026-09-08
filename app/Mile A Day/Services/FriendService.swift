@@ -605,11 +605,19 @@ class FriendService: ObservableObject {
         let encodedId = workoutId.addingPercentEncoding(
             withAllowedCharacters: .urlPathAllowed
         ) ?? workoutId
-        let response: WorkoutRouteResponse = try await makeRequest(
+        try await fetchWorkoutRouteDetail(for: friendId, workoutId: workoutId).route
+    }
+
+    /// The route WITH its replay clock — what a buddy walk's detail needs to
+    /// fly the crew on real time.
+    func fetchWorkoutRouteDetail(for friendId: String, workoutId: String) async throws -> WorkoutRouteResponse {
+        let encodedId = workoutId.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed
+        ) ?? workoutId
+        return try await makeRequest(
             endpoint: "/workouts/\(friendId)/workout/\(encodedId)/route",
             responseType: WorkoutRouteResponse.self
         )
-        return response.route
     }
 
     /// Fetch stats for a friend
@@ -811,6 +819,10 @@ struct FeedWorkoutItem: Codable, Identifiable {
 /// response.
 struct WorkoutRouteResponse: Codable {
     let route: [[Double]]?
+    /// The route's replay clock (seconds per point since the first fix, and
+    /// that fix's epoch seconds). Nil on older servers and older uploads.
+    var route_times: [Double]? = nil
+    var route_started_at: Double? = nil
 }
 
 struct FriendWorkout: Codable, Identifiable {

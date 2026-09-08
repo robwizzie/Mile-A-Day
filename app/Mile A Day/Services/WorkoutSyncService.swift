@@ -396,6 +396,7 @@ class WorkoutSyncService: ObservableObject {
                 // Still inside the isSyncing guard, so no other trigger can
                 // overlap the sweep.
                 await backfillMissingRoutes()
+                await backfillRouteClocks()
                 return
             }
 
@@ -412,6 +413,7 @@ class WorkoutSyncService: ObservableObject {
             print("[WorkoutSyncService] ✅ Sync complete")
 
             await backfillMissingRoutes()
+            await backfillRouteClocks()
 
         } catch {
             errorMessage = error.localizedDescription
@@ -460,6 +462,11 @@ class WorkoutSyncService: ObservableObject {
     /// One batch per app session — healing history is a background courtesy,
     /// not a race.
     private var hasRunRouteBackfillThisSession = false
+    /// Route CLOCK backfill: routes the server has without their per-point
+    /// times (uploaded before this build sent them). Separate registry from
+    /// the route backfill — a route can be healed and still be clockless.
+    private let routeClockBackfilledIdsKey = "routeClockBackfilledIdsV1"
+    private var hasRunRouteClockBackfillThisSession = false
 
     /// Heals route-less history. The FIRST-RUN import uploads with
     /// `includeRoutes: false`, incremental batches over `maxRouteFetchBatch`
@@ -675,6 +682,58 @@ class WorkoutSyncService: ObservableObject {
         if !completed.isEmpty {
             let merged = done.union(completed)
             UserDefaults.standard.set(Array(merged), forKey: routeBackfilledIdsKey)
+        }
+    }
+
+    private struct UntimedRoutesResponse: Codable {
+        let workout_ids: [String]
+    }
+
+    /// Re-upload routes the server holds WITHOUT a replay clock, so posts
+    /// made before this build replay on real time too. The server lists them
+    /// (self-only, newest first); the trace is still in HealthKit, and the
+    /// ordinary upload path re-sends the identical polyline with its times —
+    /// the upsert replaces the clock, and the route bytes don't move. One
+    /// route-capped batch per session; ids the phone can't answer for (the
+    /// workout is gone from HealthKit, or it's a Stealth walk) are settled
+    /// so they're never asked about again.
+    private func backfillRouteClocks() async {
+        guard !hasRunRouteClockBackfillThisSession, let userId = currentUserId else { return }
+        hasRunRouteClockBackfillThisSession = true
+        let done = Set(UserDefaults.standard.array(forKey: routeClockBackfilledIdsKey) as? [String] ?? [])
+        guard let response: UntimedRoutesResponse = try? await APIClient.fancyFetch(
+            endpoint: "/workouts/\(userId)/routes/untimed",
+            responseType: UntimedRoutesResponse.self
+        ) else { return }
+        let ids = Array(response.workout_ids.filter { !done.contains($0) }.prefix(Self.maxRouteFetchBatch))
+        guard !ids.isEmpty else { return }
+
+        var settled: [String] = []
+        var workouts: [HKWorkout] = []
+        for id in ids {
+            guard let uuid = UUID(uuidString: id),
+                  let workout = try? await fetchWorkout(byUUID: uuid) else {
+                settled.append(id)
+                continue
+            }
+            if StealthModeStore.shared.isStealth(workout) {
+                settled.append(id)
+                continue
+            }
+            workouts.append(workout)
+        }
+        if !workouts.isEmpty {
+            do {
+                // fullSync: false ⇒ routes (and their clocks) are fetched.
+                try await uploadBatchWithRetry(workouts)
+                settled.append(contentsOf: workouts.map { $0.uuid.uuidString })
+                print("[WorkoutSyncService] ✅ Route clock backfill pushed \(workouts.count) workout(s)")
+            } catch {
+                print("[WorkoutSyncService] ⚠️ Route clock backfill failed: \(error)")
+            }
+        }
+        if !settled.isEmpty {
+            UserDefaults.standard.set(Array(done.union(settled)), forKey: routeClockBackfilledIdsKey)
         }
     }
 

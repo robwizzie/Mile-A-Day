@@ -1326,10 +1326,45 @@ export async function respondToJoinRequest(
     { requester: requesterId },
   );
   if (accept) void notifyRequestApproved(session, approverId, requesterId);
+  else void notifyRequestRefused(session, approverId, requesterId);
 
   const fresh = await getSessionRow(sessionId);
   if (!fresh) throw new BadRequestError("session_not_found");
   return buildState(fresh);
+}
+
+/**
+ * "Not this time" — the asker was otherwise left with a pill that quietly
+ * changed. Its own type, gated on the same feature string the ask itself
+ * needs (a device that could send the request can route the answer), so a
+ * shipped build that never asked is never handed a type it can't open.
+ */
+async function notifyRequestRefused(
+  session: BuddySessionRow,
+  approverId: string,
+  requesterId: string,
+): Promise<void> {
+  try {
+    if (!(await userSupports(requesterId, CLIENT_FEATURES.buddyJoinRequestV1))) return;
+    const recipients = await allowedRecipients([requesterId], approverId, "buddy");
+    if (recipients.length === 0) return;
+    const name = await displayName(approverId);
+    await sendPush(requesterId, {
+      title: "Buddy Walk",
+      body: `Not this time — ${name} kept the walk as it is. Start your own and they can join you.`,
+      type: "buddy_join_refused",
+      data: {
+        session_id: session.id,
+        host_user_id: session.host_user_id ?? approverId,
+        responder_user_id: approverId,
+      },
+    });
+  } catch (err) {
+    void logError("buddy", "failed to notify refused buddy request", {
+      userId: requesterId,
+      context: { sessionId: session.id, error: String(err) },
+    });
+  }
 }
 
 /** "Sam let you in — tap to join" — `buddy_invite`, which every build routes. */

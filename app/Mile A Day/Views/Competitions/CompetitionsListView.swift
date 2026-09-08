@@ -181,6 +181,14 @@ struct CompetitionsListView: View {
                 MADNotificationService.shared.pendingNotificationType = nil
             }
         }
+        // A competition asked for by id (feed chip, competition push) — in
+        // BOTH lifecycles, since whichever of the tab and the request came
+        // first decides which one fires.
+        .task { await consumePendingCompetition() }
+        .onReceive(DeepLinkRouter.shared.$pendingCompetitionId) { id in
+            guard id != nil else { return }
+            Task { await consumePendingCompetition() }
+        }
         .onAppear {
             Task {
                 await competitionService.refreshAllData()
@@ -205,6 +213,26 @@ struct CompetitionsListView: View {
             guard createRequest == nil else { return }
             Task { await competitionService.refreshAllData() }
         }
+    }
+
+    /// Open the competition parked on `DeepLinkRouter`, refreshing first when
+    /// the list doesn't have it yet (a cold launch, or a comp joined on
+    /// another device). An id nothing matches after that is dropped silently
+    /// — the tab is already the right place.
+    private func consumePendingCompetition() async {
+        let router = DeepLinkRouter.shared
+        guard let id = router.pendingCompetitionId else { return }
+        router.pendingCompetitionId = nil
+        func find() -> Competition? {
+            competitionService.competitions.first(where: { $0.competition_id == id })
+                ?? competitionService.invites.first(where: { $0.competition_id == id })
+        }
+        if let found = find() {
+            selectedCompetition = found
+            return
+        }
+        await competitionService.refreshAllData()
+        if let found = find() { selectedCompetition = found }
     }
 
     /// Put the invites section on screen. The Invites segment no longer
