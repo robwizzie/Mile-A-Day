@@ -602,10 +602,7 @@ class FriendService: ObservableObject {
     /// the server answers `{ "route": null }` either way, so the map simply
     /// isn't drawn rather than erroring.
     func fetchWorkoutRoute(for friendId: String, workoutId: String) async throws -> [[Double]]? {
-        let encodedId = workoutId.addingPercentEncoding(
-            withAllowedCharacters: .urlPathAllowed
-        ) ?? workoutId
-        try await fetchWorkoutRouteDetail(for: friendId, workoutId: workoutId).route
+        return try await fetchWorkoutRouteDetail(for: friendId, workoutId: workoutId).route
     }
 
     /// The route WITH its replay clock — what a buddy walk's detail needs to
