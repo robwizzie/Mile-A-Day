@@ -37,6 +37,15 @@ struct BuddyWalkDetailView: View {
 
     // Routes fetched per participant when there is no post to carry them.
     @State private var routes: [String: [CLLocationCoordinate2D]] = [:]
+    /// Each fetched route's replay clock, when the server had one and it
+    /// lines up with the decoded points — what puts this crew's flyover on
+    /// real time like the feed card's.
+    @State private var routeClocks: [String: RouteClock] = [:]
+
+    private struct RouteClock {
+        let times: [Double]
+        let startedAt: Double?
+    }
     @State private var isLoadingRoutes = false
     @State private var routeArtSnapshot: RouteMapSnapshot?
     @State private var flyoverLaunch: FlyoverLaunch?
@@ -395,7 +404,9 @@ struct BuddyWalkDetailView: View {
                 id: pair.element.userId,
                 coordinates: coords,
                 color: companionColors[pair.offset],
-                avatar: RouteArtAvatar(name: pair.element.displayName, imageURL: pair.element.profileImageUrl)
+                avatar: RouteArtAvatar(name: pair.element.displayName, imageURL: pair.element.profileImageUrl),
+                pointTimes: routeClocks[pair.element.userId]?.times,
+                startedAt: routeClocks[pair.element.userId]?.startedAt
             )
         }
         let coords = leadCoordinates
@@ -413,7 +424,9 @@ struct BuddyWalkDetailView: View {
             ),
             author: RouteArtAvatar(name: lead.displayName, imageURL: lead.profileImageUrl),
             companions: companions,
-            officialDistanceMiles: lead.distanceMiles > 0 ? lead.distanceMiles : nil
+            officialDistanceMiles: lead.distanceMiles > 0 ? lead.distanceMiles : nil,
+            pointTimes: routeClocks[lead.userId]?.times,
+            startedAt: routeClocks[lead.userId]?.startedAt
         )
     }
 
@@ -680,26 +693,34 @@ struct BuddyWalkDetailView: View {
         isLoadingRoutes = true
         defer { isLoadingRoutes = false }
         let service = friendService
-        let loaded: [(String, [CLLocationCoordinate2D])] = await withTaskGroup(
-            of: (String, [CLLocationCoordinate2D])?.self
+        let loaded: [(String, [CLLocationCoordinate2D], RouteClock?)] = await withTaskGroup(
+            of: (String, [CLLocationCoordinate2D], RouteClock?)?.self
         ) { group in
             for person in targets {
                 guard let workoutId = person.workoutId else { continue }
                 let userId = person.userId
                 group.addTask {
-                    let raw = try? await service.fetchWorkoutRoute(for: userId, workoutId: workoutId)
-                    guard let coords = decodeRouteCoordinates(raw), coords.count >= 2 else { return nil }
-                    return (userId, coords)
+                    let detail = try? await service.fetchWorkoutRouteDetail(for: userId, workoutId: workoutId)
+                    guard let coords = decodeRouteCoordinates(detail?.route), coords.count >= 2 else { return nil }
+                    // A clock only counts when it lines up with the points
+                    // that were decoded — the engine checks again, but a
+                    // mismatched one is not worth carrying.
+                    var clock: RouteClock? = nil
+                    if let times = detail?.route_times, times.count == coords.count {
+                        clock = RouteClock(times: times, startedAt: detail?.route_started_at)
+                    }
+                    return (userId, coords, clock)
                 }
             }
-            var out: [(String, [CLLocationCoordinate2D])] = []
+            var out: [(String, [CLLocationCoordinate2D], RouteClock?)] = []
             for await result in group {
                 if let result { out.append(result) }
             }
             return out
         }
-        for (userId, coords) in loaded {
+        for (userId, coords, clock) in loaded {
             routes[userId] = coords
+            if let clock { routeClocks[userId] = clock }
         }
     }
 

@@ -580,6 +580,10 @@ struct FlyoverTick {
     /// Timed flights only: seconds into the FOLLOWED rider's own walk,
     /// frozen at their finish once they've stopped. Nil on synthetic flights.
     var elapsedSeconds: Double? = nil
+    /// Set on the frame a rider crosses their own finish (timed flights) —
+    /// the HUD flashes it: "MegsMiles finished first · 31:04 · 2:10 ahead
+    /// of Aaron". The badge on the map gets its check the same frame.
+    var notice: FlyoverNotice? = nil
     /// Set only on the frame a mile marker drops AND a split time exists for
     /// it — the HUD flashes it as a toast.
     var milestone: FlyoverMilestone? = nil
@@ -587,6 +591,11 @@ struct FlyoverTick {
 
 struct FlyoverMilestone: Equatable {
     let mile: Int
+    let text: String
+}
+
+struct FlyoverNotice: Equatable {
+    let icon: String
     let text: String
 }
 
@@ -630,6 +639,10 @@ struct RouteFlyoverPlayerView: View {
     /// The mile-split toast, cleared by its own task after a beat.
     @State private var mileToast: FlyoverMilestone?
     @State private var toastSeq = 0
+    /// A rider crossing their line (timed flights) — same lifetime as the
+    /// mile toast, its own slot so the two never fight over one capsule.
+    @State private var noticeToast: FlyoverNotice?
+    @State private var noticeSeq = 0
     /// One adoption ping per player open, fired at first takeoff.
     @State private var hasLoggedPlay = false
     @State private var didNotifyFinish = false
@@ -680,6 +693,9 @@ struct RouteFlyoverPlayerView: View {
                 elapsedSeconds = tick.elapsedSeconds
                 if let milestone = tick.milestone {
                     showToast(milestone)
+                }
+                if let notice = tick.notice {
+                    showNotice(notice)
                 }
                 if wasLoading, tick.phase == .intro, !hasLoggedPlay {
                     hasLoggedPlay = true
@@ -746,6 +762,21 @@ struct RouteFlyoverPlayerView: View {
             try? await Task.sleep(for: .milliseconds(2400))
             if toastSeq == seq {
                 withAnimation(.easeOut(duration: 0.4)) { mileToast = nil }
+            }
+        }
+    }
+
+    private func showNotice(_ notice: FlyoverNotice) {
+        noticeSeq += 1
+        let seq = noticeSeq
+        MADHaptics.success()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+            noticeToast = notice
+        }
+        Task {
+            try? await Task.sleep(for: .milliseconds(3200))
+            if noticeSeq == seq {
+                withAnimation(.easeOut(duration: 0.4)) { noticeToast = nil }
             }
         }
     }
@@ -837,6 +868,25 @@ struct RouteFlyoverPlayerView: View {
                 .padding(.vertical, 7)
                 .background(Capsule().fill(accent.opacity(0.85)))
                 .shadow(color: accent.opacity(0.6), radius: 6)
+                .transition(.scale(scale: 0.7).combined(with: .opacity))
+            }
+
+            if let notice = noticeToast {
+                HStack(spacing: 6) {
+                    Image(systemName: notice.icon)
+                        .font(.system(size: 11, weight: .bold))
+                        .accessibilityHidden(true)
+                    Text(notice.text)
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(MADTheme.Colors.success.opacity(0.85)))
+                .shadow(color: MADTheme.Colors.success.opacity(0.6), radius: 6)
                 .transition(.scale(scale: 0.7).combined(with: .opacity))
             }
 
@@ -1196,6 +1246,11 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     /// start to the last finish across the crew. 0 on a synthetic flight.
     private var walkDuration: Double = 0
     private var isTimed: Bool { walkDuration > 0 }
+    /// Per rider: has their clock run out at the current position? Flipping
+    /// it swaps their badge for the checked one and raises the finish
+    /// notice; a backward scrub or a replay flips it back (silently).
+    private var finishedFlags: [Bool] = []
+    private var pendingNotice: FlyoverNotice?
 
     private weak var mapView: MKMapView?
     private var displayLink: CADisplayLink?
@@ -1335,6 +1390,32 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
                 officialMiles: rider.officialMiles, clock: clocks[index]))
         }
         people = built
+        finishedFlags = Array(repeating: false, count: built.count)
+    }
+
+    /// The finish line story for rider `index`, from the clocks everyone
+    /// carries: first home says how far ahead of the next; everyone else
+    /// how far behind the first.
+    private func finishNotice(for index: Int) -> FlyoverNotice? {
+        guard people.indices.contains(index), let clock = people[index].clock else { return nil }
+        let name = people[index].avatar?.name ?? "Rider"
+        let own = RunStatsStickerView.durationText(clock.duration)
+        let others = people.enumerated().compactMap { pair -> (String, Double)? in
+            guard pair.offset != index, let c = pair.element.clock else { return nil }
+            return (pair.element.avatar?.name ?? "a friend", c.endsAt)
+        }
+        let earlier = others.filter { $0.1 < clock.endsAt }
+        if earlier.isEmpty {
+            var text = others.isEmpty ? "\(name) finished · \(own)" : "\(name) finished first · \(own)"
+            if let next = others.min(by: { $0.1 < $1.1 }), next.1 > clock.endsAt {
+                text += " · \(RunStatsStickerView.durationText(next.1 - clock.endsAt)) ahead of \(next.0)"
+            }
+            return FlyoverNotice(icon: "flag.checkered", text: text)
+        }
+        let first = earlier.min(by: { $0.1 < $1.1 })!
+        return FlyoverNotice(
+            icon: "flag.checkered",
+            text: "\(name) finished · \(own) · \(RunStatsStickerView.durationText(clock.endsAt - first.1)) behind \(first.0)")
     }
 
     /// Where rider `index` is on THEIR line at shared-clock fraction `clock`:
@@ -1493,7 +1574,7 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
                 ring: Color(person.color),
                 size: index == 0 ? 34 : 28)
             map.addAnnotation(person.annotation)
-            loadAvatarLater(person.avatar, into: person.annotation,
+            loadAvatarLater(person.avatar, into: person.annotation, personIndex: index,
                             ring: Color(person.color), size: index == 0 ? 34 : 28)
         }
 
@@ -1748,8 +1829,11 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         let elapsedSeconds = isTimed
             ? person?.clock?.ownElapsed(at: min(max(fraction, 0), 1) * walkDuration)
             : nil
+        let notice = pendingNotice
+        pendingNotice = nil
         emit(FlyoverTick(phase: phase, fraction: fraction, miles: miles,
-                         elapsedSeconds: elapsedSeconds, milestone: milestone))
+                         elapsedSeconds: elapsedSeconds, milestone: milestone,
+                         notice: notice))
     }
 
     /// The ONE door every tick leaves through. Synchronous from the display
@@ -1821,9 +1905,23 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     /// `fraction` is the shared CLOCK: every rider goes to their own place on
     /// it (real position on a timed flight, the clock itself otherwise).
     private func moveRiders(to fraction: Double) {
+        let walkSeconds = min(max(fraction, 0), 1) * walkDuration
         for (index, person) in people.enumerated() {
             person.annotation.coordinate = person.track.coordinate(
                 atFraction: arcFraction(of: index, clock: fraction))
+            // Crossing their own line: the badge gets its check and the HUD
+            // says who finished and by how much. Scrubbing back un-checks
+            // it silently — the notice is for a flight, not a drag.
+            guard isTimed, let clock = person.clock, finishedFlags.indices.contains(index) else { continue }
+            let done = walkSeconds >= clock.endsAt && clock.endsAt > 0
+            guard done != finishedFlags[index] else { continue }
+            finishedFlags[index] = done
+            let image = Self.badgeImage(
+                avatar: person.avatar, ring: Color(person.color),
+                size: index == 0 ? 34 : 28, finished: done)
+            person.annotation.preparedImage = image
+            (mapView?.view(for: person.annotation))?.image = image
+            if done, !scrubbing, fraction < 1 { pendingNotice = finishNotice(for: index) }
         }
     }
 
@@ -1963,15 +2061,33 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     // MARK: Badge/mark images
 
     @MainActor
-    private static func badgeImage(avatar: RouteArtAvatar?, ring: Color, size: CGFloat) -> UIImage? {
+    private static func badgeImage(avatar: RouteArtAvatar?, ring: Color, size: CGFloat,
+                                   finished: Bool = false) -> UIImage? {
         let badge = RouteAvatarBadge(
             name: avatar?.name ?? "?",
             image: RouteAvatarImageLoader.cachedImage(for: avatar?.imageURL),
             size: size,
             ring: ring
         )
+        // A finished rider wears a check — the same green as "goal done"
+        // everywhere else — so a badge standing still reads as "done", not
+        // "stuck".
+        let checked = ZStack(alignment: .bottomTrailing) {
+            badge
+            if finished {
+                ZStack {
+                    Circle().fill(MADTheme.Colors.success)
+                    Circle().stroke(.white, lineWidth: 1.5)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: size * 0.24, weight: .black))
+                        .foregroundColor(.white)
+                }
+                .frame(width: size * 0.44, height: size * 0.44)
+                .offset(x: 2, y: 2)
+            }
+        }
         // Padding so the glow shadow isn't clipped off the bitmap.
-        let renderer = ImageRenderer(content: badge.padding(6))
+        let renderer = ImageRenderer(content: checked.padding(6))
         renderer.scale = 3
         return renderer.uiImage
     }
@@ -1995,13 +2111,15 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     /// Cache-miss avatars download after takeoff and swap in mid-flight.
     @MainActor
     private func loadAvatarLater(_ avatar: RouteArtAvatar?, into annotation: FlyoverAnnotation,
-                                 ring: Color, size: CGFloat) {
+                                 personIndex: Int, ring: Color, size: CGFloat) {
         guard let avatar, let key = avatar.imageURL, !key.isEmpty,
               RouteAvatarImageLoader.cachedImage(for: key) == nil else { return }
         Task { @MainActor [weak self, weak annotation] in
             guard await RouteAvatarImageLoader.loadImage(for: key) != nil,
                   let self, let annotation else { return }
-            let image = Self.badgeImage(avatar: avatar, ring: ring, size: size)
+            // Keep the check if they finished while the picture was loading.
+            let finished = self.finishedFlags.indices.contains(personIndex) && self.finishedFlags[personIndex]
+            let image = Self.badgeImage(avatar: avatar, ring: ring, size: size, finished: finished)
             annotation.preparedImage = image
             (self.mapView?.view(for: annotation))?.image = image
         }

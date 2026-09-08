@@ -237,6 +237,10 @@ async function main() {
   check("a PARTICIPANT sees the same post", forPal?.post_id, postId);
   check("...is credited", forPal?.am_i_credited, true);
   check("...and has no photo on it yet", forPal?.my_photo_added, false);
+  // The card's photo tally, the recap's "1 of N photos added": the author's
+  // own picture counts, PAL's slide isn't there yet.
+  check("the tally starts at the author's photo", forPal?.photo_count, 1);
+  check("...over everyone who was on the walk", forPal?.crew_size > 1, true);
 
   check(
     "an unknown session has no post",
@@ -254,6 +258,11 @@ async function main() {
     "...which the session lookup now reports",
     (await buddySessionPost(sessionId, PAL))?.my_photo_added,
     true,
+  );
+  check(
+    "...and the tally counts it",
+    (await buddySessionPost(sessionId, AUTHOR))?.photo_count,
+    2,
   );
   check(
     "someone who wasn't on the walk may not",

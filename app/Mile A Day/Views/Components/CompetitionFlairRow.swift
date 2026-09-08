@@ -15,6 +15,13 @@ import SwiftUI
 struct CompetitionFlairRow: View {
     let competitions: [PostCompetitionRef]
 
+    /// Who gets to read the competition's NAME: only people in it. A friend
+    /// outside it still sees the trophy and "COMPETING" — that the poster is
+    /// mid-competition is the point of the row — but a competition is a
+    /// closed group and its user-typed name and team names stay inside it.
+    /// Flip to false to show names to the poster's whole circle.
+    static let namesForMembersOnly = true
+
     /// The app's trophy gold — MADTheme's warning amber, which is what every
     /// medal and streak-milestone surface already uses for "achievement".
     private let gold = MADTheme.Colors.warning
@@ -54,11 +61,11 @@ struct CompetitionFlairRow: View {
                 .font(.system(size: 10, weight: .heavy, design: .rounded))
                 .tracking(0.8)
                 .foregroundColor(gold)
-            Text(competition.displayName)
+            Text(showsName(competition) ? competition.displayName : "in a competition")
                 .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(.white.opacity(showsName(competition) ? 0.9 : 0.6))
                 .lineLimit(1)
-            if let team = competition.team_name, !team.isEmpty {
+            if showsName(competition), let team = competition.team_name, !team.isEmpty {
                 Text("·")
                     .foregroundColor(.white.opacity(0.35))
                 Text("Team \(team)")
@@ -86,9 +93,16 @@ struct CompetitionFlairRow: View {
         return live ? "COMPETING" : "COMPETED"
     }
 
+    private func showsName(_ competition: PostCompetitionRef) -> Bool {
+        !Self.namesForMembersOnly || competition.viewer_in == true
+    }
+
     private func accessibilityText(_ competition: PostCompetitionRef) -> String {
-        var parts = [headline(competition).capitalized, "in", competition.displayName]
-        if let team = competition.team_name, !team.isEmpty { parts.append("for team \(team)") }
+        var parts = [headline(competition).capitalized, "in",
+                     showsName(competition) ? competition.displayName : "a competition"]
+        if showsName(competition), let team = competition.team_name, !team.isEmpty {
+            parts.append("for team \(team)")
+        }
         return parts.joined(separator: " ") + ". Opens the Compete tab."
     }
 }

@@ -518,6 +518,11 @@ struct BuddySessionPostRef: Codable {
     /// crediting you (they finished before you joined, say) is still that
     /// walk's post — you just have no slide to add to.
     let amICredited: Bool
+    /// How many of the crew have a photo on the card (the author's counts
+    /// unless it's an auto card) and how many were on the walk — "2 of 4
+    /// photos added". Both nil on older servers.
+    var photoCount: Int? = nil
+    var crewSize: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case postId = "post_id"
@@ -525,6 +530,16 @@ struct BuddySessionPostRef: Codable {
         case authorName = "author_name"
         case myPhotoAdded = "my_photo_added"
         case amICredited = "am_i_credited"
+        case photoCount = "photo_count"
+        case crewSize = "crew_size"
+    }
+
+    /// "2 of 4 photos added" — the one-post-per-walk rule as a feature: the
+    /// card is a place the crew's photos collect, and this says how far along
+    /// it is. Nil when the server didn't say.
+    var photoProgressText: String? {
+        guard let photoCount, let crewSize, crewSize > 1 else { return nil }
+        return "\(min(photoCount, crewSize)) of \(crewSize) photos added"
     }
 }
 

@@ -32,7 +32,20 @@ final class DeepLinkRouter: ObservableObject {
     @Published var pendingBuddyCode: String?
     @Published var pendingBuddySessionId: String?
 
+    /// A competition to open on the Compete tab — from a feed card's
+    /// COMPETING chip or a competition push. Parked for the same reason as
+    /// everything above: `CompetitionsListView` exists only once the tab has
+    /// been visited, and consumes this in both `.task` and `.onReceive`.
+    @Published var pendingCompetitionId: String?
+
     private init() {}
+
+    /// Asks the Compete tab to open one competition. Callers should also
+    /// switch to it (`MAD_SwitchTab`, tab 1).
+    func requestOpenCompetition(id: String) {
+        guard !id.isEmpty else { return }
+        pendingCompetitionId = id
+    }
 
     /// Asks the Dashboard to open a Buddy Walk once it's alive. Callers should
     /// also switch to the Dashboard tab (`MAD_SwitchTab`, tab 0).
