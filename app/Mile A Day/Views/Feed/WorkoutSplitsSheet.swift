@@ -24,9 +24,12 @@ struct SplitsChipButton: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Capsule().fill(Color.black.opacity(0.55)))
+            // Lifted off the card's ground, not the black glass it wore when
+            // it sat ON a photo: both call sites moved into the control row
+            // under the media, and a 55%-black capsule on a dark card reads as
+            // a hole punched in it rather than a button.
+            .background(Capsule().fill(Color.white.opacity(0.10)))
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
-            .shadow(color: .black.opacity(0.35), radius: 6, y: 3)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

@@ -143,21 +143,12 @@ struct IndoorCardScaffold<Hero: View>: View {
 
                 WorkoutStatTileGrid(stats: stats, accent: accent, maxTiles: 2)
 
-                // The brand row is also the HOST's control row: the feed
-                // overlays its FLYOVER/SPLITS chips leading and its
-                // PHOTO | STATS toggle trailing at this height
-                // (`MediaControlInset`), and a 28pt logo in the middle of a
-                // 4:5 card leaves both ends free — the tile row above clears
-                // their height too, so nothing is reserved for them anywhere
-                // in this layout. Reserving is the CARD's business rather than
-                // an inset the host passes: this same card is baked into an
-                // auto post's image (`RunPostService.renderStatsCard`) and the
-                // feed draws those very chips on the baked copy too, so a
-                // host-passed inset would be right on one and wrong on the
-                // other. They sat in the TOP corners for one build, on the
-                // header row, and clearing them there cost a 30pt strip that
-                // pushed this whole scene down for a pill the card had room
-                // for down here without moving anything.
+                // Nothing is reserved anywhere in this layout for the host's
+                // controls, and nothing needs to be: the feed's FLYOVER/SPLITS
+                // chips and its PHOTO | STATS toggle sit in a row UNDER the
+                // media now, not on it. They were overlaid once and the corner
+                // they picked was always somebody's — the top row here, which
+                // cost a 30pt strip that pushed this whole scene down.
                 MADLogoMark(size: 28, opacity: 0.9)
                     .padding(.top, 12)
             }

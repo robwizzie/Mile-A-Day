@@ -120,10 +120,22 @@ struct ImagePicker: UIViewControllerRepresentable {
                     rootView: ProfileImageCropper(image: image, onCrop: use, onCancel: cancel)
                 )
             case .banner:
+                // The same editor as the avatar, in the banner's shape. It
+                // used to be a PREVIEW — the server's 1500x500 cover picked
+                // the crop and the user only got to accept or reject it, which
+                // is no help when the part they want is not the middle.
                 host = UIHostingController(
-                    rootView: BannerPhotoConfirmView(
+                    rootView: ProfileImageCropper(
                         image: image,
-                        onUse: { use(image) },
+                        aspect: 3,
+                        isCircular: false,
+                        // Exactly what the server stores, so its COVER is a
+                        // no-op and this framing is the one that survives.
+                        outputSize: CGSize(width: 1500, height: 500),
+                        // A 3:1 strip capped at 300pt would be 100pt tall.
+                        maxCropWidth: nil,
+                        hint: "Drag and pinch to choose the strip that shows.",
+                        onCrop: use,
                         onCancel: cancel
                     )
                 )
@@ -198,8 +210,32 @@ enum PhotoRollSaver {
 
 // MARK: - Profile Image Cropper
 
+/// Move-and-scale, for any crop shape.
+///
+/// Generalised from the avatar's square/circle rather than copied for the
+/// banner: the pixel maths here (cover-fit at scale 1, clamp, display→pixel
+/// conversion) is the part that is easy to get subtly wrong, and two copies of
+/// it would drift the moment either shape changed.
+///
+/// NOTE for callers: the memberwise init is declaration-ordered, so the shape
+/// parameters sit between `image` and the two closures — every existing call
+/// site names its arguments in that order and keeps working.
 struct ProfileImageCropper: View {
     let image: UIImage
+    /// Crop window aspect, width / height. 1 = the avatar, 3 = the banner.
+    var aspect: CGFloat = 1
+    /// A circular mask for a face, a rounded rectangle for a strip.
+    var isCircular: Bool = true
+    /// What the caller gets back. The banner's is the 1500x500 the server
+    /// stores, so its own COVER becomes a no-op and the framing survives
+    /// exactly as it was set here.
+    var outputSize: CGSize = CGSize(width: 512, height: 512)
+    /// Cap on the crop window's width; nil fills whatever it is given. The
+    /// avatar's has always been 300pt, but a 3:1 strip at 300pt is 100pt tall
+    /// and you cannot frame a photograph in it.
+    var maxCropWidth: CGFloat? = 300
+    /// One line under the window, when the shape needs explaining.
+    var hint: String? = nil
     let onCrop: (UIImage) -> Void
     let onCancel: () -> Void
 
@@ -207,9 +243,10 @@ struct ProfileImageCropper: View {
     @State private var lastScale: CGFloat = 1.0
     @State private var offset: CGSize = .zero
     @State private var lastOffset: CGSize = .zero
-
-    private let cropSize: CGFloat = 300
-    private let outputSize: CGFloat = 512
+    /// The crop window as actually laid out. `cropAndReturn` runs from a
+    /// toolbar button, outside the GeometryReader, and the whole display→pixel
+    /// conversion is expressed in this window's points.
+    @State private var measuredWindow: CGSize = .zero
 
     var body: some View {
         NavigationView {
@@ -252,13 +289,34 @@ struct ProfileImageCropper: View {
                                 )
                             )
 
-                        // Dark overlay with circular cutout
-                        CropOverlay(cropSize: cropSize)
+                        // Dark overlay with the crop window cut out of it
+                        CropOverlay(
+                            cropSize: cropWindow(in: geometry),
+                            isCircular: isCircular
+                        )
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .allowsHitTesting(false)
+
+                        if let hint {
+                            VStack {
+                                Spacer()
+                                Text(hint)
+                                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, MADTheme.Spacing.xl)
+                                    .padding(.bottom, MADTheme.Spacing.xl)
+                            }
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .allowsHitTesting(false)
+                        }
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .clipped()
+                    .onAppear { measuredWindow = cropWindow(in: geometry) }
+                    .onChange(of: geometry.size) { _, _ in
+                        measuredWindow = cropWindow(in: geometry)
+                    }
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -283,31 +341,30 @@ struct ProfileImageCropper: View {
         }
     }
 
-    private func imageDisplaySize(in geometry: GeometryProxy) -> CGSize {
-        let imageAspect = image.size.width / image.size.height
+    /// The window the photo is framed in, in points.
+    private func cropWindow(in geometry: GeometryProxy) -> CGSize {
+        let availableWidth = max(80, geometry.size.width - 32)
+        let availableHeight = max(80, geometry.size.height - 32)
+        // Fit the aspect inside what there is, then apply the caller's cap.
+        var width = min(availableWidth, availableHeight * aspect)
+        if let maxCropWidth { width = min(width, maxCropWidth) }
+        return CGSize(width: width, height: width / aspect)
+    }
 
-        // Size the image so its shorter dimension matches the crop circle.
-        // This means at scale 1.0 the image just barely covers the circle,
-        // and the user can zoom in from there.
-        if imageAspect > 1 {
-            // Landscape: height is the short side, match it to cropSize
-            let height = cropSize
-            let width = height * imageAspect
-            return CGSize(width: width, height: height)
-        } else {
-            // Portrait or square: width is the short side, match it to cropSize
-            let width = cropSize
-            let height = width / imageAspect
-            return CGSize(width: width, height: height)
-        }
+    /// The photo at scale 1: the smallest size that COVERS the window, so
+    /// there is never a gap at the edge and zooming only ever goes inward.
+    private func imageDisplaySize(in geometry: GeometryProxy) -> CGSize {
+        let window = cropWindow(in: geometry)
+        guard image.size.width > 0, image.size.height > 0 else { return window }
+        let cover = max(window.width / image.size.width, window.height / image.size.height)
+        return CGSize(width: image.size.width * cover, height: image.size.height * cover)
     }
 
     private func clampOffset(in geometry: GeometryProxy) {
+        let window = cropWindow(in: geometry)
         let imgSize = imageDisplaySize(in: geometry)
-        let scaledWidth = imgSize.width * scale
-        let scaledHeight = imgSize.height * scale
-        let maxX = max(0, (scaledWidth - cropSize) / 2)
-        let maxY = max(0, (scaledHeight - cropSize) / 2)
+        let maxX = max(0, (imgSize.width * scale - window.width) / 2)
+        let maxY = max(0, (imgSize.height * scale - window.height) / 2)
 
         withAnimation(.easeOut(duration: 0.2)) {
             offset.width = min(maxX, max(-maxX, offset.width))
@@ -317,144 +374,79 @@ struct ProfileImageCropper: View {
     }
 
     private func cropAndReturn() {
-        // Calculate the crop region in image pixel coordinates
-        let imgWidth = image.size.width
-        let imgHeight = image.size.height
-        let imageAspect = imgWidth / imgHeight
-
-        // Determine the display size at scale=1 (short side matches cropSize)
-        let baseDisplaySize: CGSize
-        if imageAspect > 1 {
-            let height = cropSize
-            baseDisplaySize = CGSize(width: height * imageAspect, height: height)
-        } else {
-            let width = cropSize
-            baseDisplaySize = CGSize(width: width, height: width / imageAspect)
-        }
-
-        let scaledDisplayWidth = baseDisplaySize.width * scale
-        let scaledDisplayHeight = baseDisplaySize.height * scale
-
-        // Pixels per display point
-        let pxPerPtX = imgWidth / scaledDisplayWidth
-        let pxPerPtY = imgHeight / scaledDisplayHeight
-
-        // The crop circle center in display coordinates is at center - offset
-        let cropCenterX = scaledDisplayWidth / 2 - offset.width
-        let cropCenterY = scaledDisplayHeight / 2 - offset.height
-
-        // Convert to pixel coordinates
-        let pixelCenterX = cropCenterX * pxPerPtX
-        let pixelCenterY = cropCenterY * pxPerPtY
-        let pixelCropSize = cropSize * pxPerPtX
-
-        let cropRect = CGRect(
-            x: pixelCenterX - pixelCropSize / 2,
-            y: pixelCenterY - pixelCropSize / 2,
-            width: pixelCropSize,
-            height: pixelCropSize
-        ).intersection(CGRect(origin: .zero, size: image.size))
-
-        guard let cgImage = image.cgImage?.cropping(to: cropRect) else {
+        let window = measuredWindow
+        // The source is normalised FIRST: `cgImage.cropping` works in raw
+        // pixels and ignores `imageOrientation`, so a photo shot in portrait
+        // (orientation `.right`, as the camera hands them over) would have had
+        // its crop rectangle applied to a sideways bitmap — the framing the
+        // user set and the region taken would be ninety degrees apart.
+        let source = normalizedImage()
+        guard window.width > 0, window.height > 0,
+              source.size.width > 0, source.size.height > 0,
+              let cgImage = source.cgImage
+        else {
             onCrop(image)
             return
         }
 
-        // Resize to output size
-        let croppedImage = UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: outputSize, height: outputSize))
-        let resized = renderer.image { _ in
-            croppedImage.draw(in: CGRect(origin: .zero, size: CGSize(width: outputSize, height: outputSize)))
+        // Display size at scale 1 is the cover fit; multiply by the live zoom.
+        let cover = max(window.width / source.size.width,
+                        window.height / source.size.height)
+        let displayWidth = source.size.width * cover * scale
+        let displayHeight = source.size.height * cover * scale
+        guard displayWidth > 0, displayHeight > 0 else {
+            onCrop(image)
+            return
         }
 
-        onCrop(resized)
+        // Source pixels per display point — uniform, because a cover fit
+        // preserves the aspect.
+        let pxPerPt = source.size.width / displayWidth
+
+        // Where the window's centre falls on the image, in display points.
+        let centerX = displayWidth / 2 - offset.width
+        let centerY = displayHeight / 2 - offset.height
+
+        let cropWidth = window.width * pxPerPt
+        let cropHeight = window.height * pxPerPt
+        let cropRect = CGRect(
+            x: centerX * pxPerPt - cropWidth / 2,
+            y: centerY * pxPerPt - cropHeight / 2,
+            width: cropWidth,
+            height: cropHeight
+        ).intersection(CGRect(origin: .zero, size: source.size))
+
+        guard !cropRect.isNull, cropRect.width >= 1, cropRect.height >= 1,
+              let cropped = cgImage.cropping(to: cropRect)
+        else {
+            onCrop(source)
+            return
+        }
+
+        // Normalised, so scale 1 / `.up` are the right thing to rebuild with.
+        let croppedImage = UIImage(cgImage: cropped)
+        let renderer = UIGraphicsImageRenderer(size: outputSize)
+        onCrop(renderer.image { _ in
+            croppedImage.draw(in: CGRect(origin: .zero, size: outputSize))
+        })
     }
-}
 
-// MARK: - Banner Photo Confirmation
-
-/// The banner's "is this the one?" step.
-///
-/// The banner has no crop editor because the server does the cropping —
-/// `POST /users/:id/banner/upload` runs a 1500x500 sharp COVER — so the one
-/// thing this has to do is show that shape honestly, at the same
-/// `scaledToFill` the profile draws it with. Its real job is being a step at
-/// all: without one, a picked photo committed itself the instant it was
-/// tapped, and changing your mind meant reopening the library from the top.
-struct BannerPhotoConfirmView: View {
-    let image: UIImage
-    let onUse: () -> Void
-    let onCancel: () -> Void
-
-    /// 1500x500 — the stored banner, so what is framed here is what is kept.
-    private let bannerAspect: CGFloat = 3
-
-    var body: some View {
-        NavigationView {
-            ZStack {
-                Color.black.ignoresSafeArea()
-
-                VStack(spacing: MADTheme.Spacing.lg) {
-                    Spacer(minLength: 0)
-
-                    Color.clear
-                        .overlay {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                        }
-                        .clipped()
-                        .aspectRatio(bannerAspect, contentMode: .fit)
-                        .clipShape(
-                            RoundedRectangle(
-                                cornerRadius: MADTheme.CornerRadius.medium,
-                                style: .continuous
-                            )
-                        )
-                        .padding(.horizontal, MADTheme.Spacing.md)
-                        // A label on its own would be dropped: the overlaid
-                        // Image is decorative by default and Color.clear is
-                        // not an element, so there is nothing for VoiceOver to
-                        // hang it on until this makes one.
-                        .accessibilityElement()
-                        .accessibilityLabel("Preview of your banner photo")
-
-                    Text("Banners are cropped to a wide strip. This is the part that shows.")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.7))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, MADTheme.Spacing.xl)
-
-                    Spacer(minLength: 0)
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { onCancel() }
-                        .foregroundColor(.white)
-                }
-                ToolbarItem(placement: .principal) {
-                    Text("Banner Photo")
-                        .foregroundColor(.white)
-                        .fontWeight(.semibold)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Choose") { onUse() }
-                        .fontWeight(.semibold)
-                        .foregroundColor(MADTheme.Colors.madRed)
-                }
-            }
-            .toolbarBackground(.black, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+    /// A `.up`, scale-1 copy, so the image's points and its `cgImage`'s pixels
+    /// are the same numbers and the crop rectangle means what it says.
+    private func normalizedImage() -> UIImage {
+        guard image.imageOrientation != .up || image.scale != 1 else { return image }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
         }
     }
 }
-
-// MARK: - Crop Overlay
 
 private struct CropOverlay: View {
-    let cropSize: CGFloat
+    let cropSize: CGSize
+    var isCircular: Bool = true
 
     var body: some View {
         Canvas { context, size in
@@ -462,19 +454,27 @@ private struct CropOverlay: View {
             let fullRect = CGRect(origin: .zero, size: size)
             context.fill(Path(fullRect), with: .color(.black.opacity(0.6)))
 
-            // Cut out the circle
-            let circleRect = CGRect(
-                x: (size.width - cropSize) / 2,
-                y: (size.height - cropSize) / 2,
-                width: cropSize,
-                height: cropSize
+            let windowRect = CGRect(
+                x: (size.width - cropSize.width) / 2,
+                y: (size.height - cropSize.height) / 2,
+                width: cropSize.width,
+                height: cropSize.height
             )
-            context.blendMode = .destinationOut
-            context.fill(Path(ellipseIn: circleRect), with: .color(.white))
+            // A circle for a face; the banner's own corner radius for a strip,
+            // so the window is the shape the profile actually draws.
+            let window: Path = isCircular
+                ? Path(ellipseIn: windowRect)
+                : Path(roundedRect: windowRect,
+                       cornerRadius: MADTheme.CornerRadius.medium,
+                       style: .continuous)
 
-            // Draw circle border
+            // Cut it out
+            context.blendMode = .destinationOut
+            context.fill(window, with: .color(.white))
+
+            // Draw its border
             context.blendMode = .normal
-            context.stroke(Path(ellipseIn: circleRect), with: .color(.white.opacity(0.8)), lineWidth: 1.5)
+            context.stroke(window, with: .color(.white.opacity(0.8)), lineWidth: 1.5)
         }
     }
 }

@@ -111,6 +111,7 @@ struct PostCardView: View {
             // out so double-tapping a button can't hype by accident.
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 media
+                mediaControls
                 crewGroupLine
                 // The names-to-colours key belongs to the map, so it shows only
                 // while the map face is up — under it rather than on it, since
@@ -574,30 +575,6 @@ struct PostCardView: View {
 
     private var hasFaceToggle: Bool { !photoSlides.isEmpty && mapSlide != nil }
 
-    /// Which edge the host's controls ride: they go where the face on screen
-    /// is EMPTY, and only the route face is empty at the top.
-    ///
-    /// The route slide carries the baked stats band across its whole bottom —
-    /// the distance bottom-left, the brand mark bottom-right — so its controls
-    /// stay in the top corners, over bare canvas. Every other face is the
-    /// other way round: a photo slide badges itself top-left (a crew shot puts
-    /// the walker's NAME there, directly under where the FLYOVER pill used to
-    /// sit) and the indoor card draws its activity capsule and date across its
-    /// own top row, while both leave the bottom margin free either side of a
-    /// centred logo. So on those the controls drop to the bottom — which is
-    /// also the whole reason the indoor card no longer reserves a strip up top
-    /// and pushes its scene down for one.
-    private var controlsOnBottom: Bool { !showingRouteFace }
-
-    /// Whether the page on screen is the route. Clamped: `mediaPage` survives
-    /// a media change under the carousel, so it can point past the last page.
-    private var showingRouteFace: Bool {
-        let pages = mediaPages
-        guard !pages.isEmpty else { return false }
-        if case .route = pages[min(max(0, mediaPage), pages.count - 1)] { return true }
-        return false
-    }
-
     /// "MAP" when there's a route to draw, "STATS" for the indoor card —
     /// never "indoor": routeless can also mean maps switched off.
     private var mapFaceTitle: String {
@@ -655,24 +632,6 @@ struct PostCardView: View {
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
-        .overlay(alignment: controlsOnBottom ? .bottomTrailing : .topTrailing) {
-            if hasFaceToggle {
-                faceToggle.modifier(MediaControlInset(onBottom: controlsOnBottom))
-            }
-        }
-        .overlay(alignment: controlsOnBottom ? .bottomLeading : .topLeading) {
-            // On EVERY face, not just the map: the flight doesn't need the map
-            // showing to launch, and the chip is how people learn it exists.
-            // SPLITS sits beside it — the detail behind the numbers, on any
-            // workout that has them, indoor or out.
-            if canPlayFlyover || hasSplits {
-                HStack(spacing: 6) {
-                    if canPlayFlyover { flyoverChip }
-                    if hasSplits { splitsChip }
-                }
-                .modifier(MediaControlInset(onBottom: controlsOnBottom))
-            }
-        }
         .overlay(HypeBurstView(trigger: hypeBurst))
         // On the MEDIA node: the card root already owns the flyover cover
         // and the share sheet, and two presentations on one node drop one.
@@ -684,6 +643,34 @@ struct PostCardView: View {
                 isIndoor: post.is_indoor,
                 ownerName: post.is_self ? "You" : post.displayName
             )
+        }
+    }
+
+    /// FLYOVER · SPLITS · PHOTO | MAP — the host's controls, in a row UNDER
+    /// the media rather than on it.
+    ///
+    /// They were overlaid, and there is no corner of a 4:5 card that is
+    /// reliably empty. The route face bakes its stats across the bottom
+    /// (distance bottom-left, brand mark bottom-right); the indoor card draws
+    /// its activity capsule and date across the top; a photo badges itself
+    /// top-left with the crew member's name; and an AUTO post is a baked route
+    /// card served as a PHOTO, so it wears the bottom band while counting as
+    /// the photo face. Placing the chips per-face dodged each of those in turn
+    /// and produced the two things actually worth avoiding: a FLYOVER pill
+    /// sitting on somebody's "1.53 MI", and controls that move as you swipe.
+    ///
+    /// Under the media there is no collision to dodge, so the position is the
+    /// same on every card and every face — and the chips stop competing with
+    /// the photograph, which is the thing the card is for.
+    @ViewBuilder
+    private var mediaControls: some View {
+        if canPlayFlyover || hasSplits || hasFaceToggle {
+            HStack(spacing: 8) {
+                if canPlayFlyover { flyoverChip }
+                if hasSplits { splitsChip }
+                Spacer(minLength: 8)
+                if hasFaceToggle { faceToggle }
+            }
         }
     }
 
@@ -710,15 +697,16 @@ struct PostCardView: View {
         )
     }
 
-    /// PHOTO | MAP in the media's top-right corner. Photo leads. Dark glass
-    /// with the live face lifted to white, so it sits on any photo or map.
+    /// PHOTO | MAP, trailing end of the control row. Photo leads. Lifted off
+    /// the card's ground rather than the black glass it wore on a photo —
+    /// a 55%-black capsule on a dark card reads as a hole in it.
     private var faceToggle: some View {
         HStack(spacing: 2) {
             faceSegment("PHOTO", .photo)
             faceSegment(mapFaceTitle, .map)
         }
         .padding(3)
-        .background(Capsule().fill(Color.black.opacity(0.55)))
+        .background(Capsule().fill(Color.white.opacity(0.08)))
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
     }
 
@@ -1229,24 +1217,6 @@ struct PostCardView: View {
         formatter.dateFormat = "MMM d, yyyy · h:mm a"
         return formatter
     }()
-}
-
-/// Where a host control sits in the 4:5 media box, top corner or bottom.
-///
-/// One modifier because two hosts overlay the same three controls (the feed
-/// card and the raw workout card) and the bottom number is not the top one: a
-/// control 10pt off the bottom edge lands under the brand mark and in the
-/// paging dots, while 32pt puts its centre on the logo's own line — the 18pt
-/// the indoor card pads with, plus the 16 it holds back for the dots, plus half
-/// of the 28pt logo, less half the control. The two read as one row.
-struct MediaControlInset: ViewModifier {
-    let onBottom: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .padding(10)
-            .padding(.bottom, onBottom ? 22 : 0)
-    }
 }
 
 /// One 4:5 media slide with cached loading and Instagram pinch-zoom. The
