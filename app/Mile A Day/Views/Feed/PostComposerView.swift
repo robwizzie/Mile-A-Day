@@ -10,6 +10,13 @@ struct RunStatsInput: Equatable {
     var paceSecondsPerMile: Double?
     var durationSeconds: Double?
     var streak: Int?
+    /// The competition sticker's text ("Summer Sprint · 2nd of 6"), resolved
+    /// by `RunPostService` from the competitions the poster is in TODAY. Nil
+    /// on a day with none, which is what keeps the toggle out of the tray.
+    /// Declared HERE, between streak and calories, because the memberwise
+    /// initialiser takes arguments in declaration order and the builders
+    /// pass it right after `streak:`.
+    var competition: String? = nil
     var calories: Double?
     var steps: Int?
     var workoutId: String?
@@ -27,10 +34,6 @@ struct RunStatsInput: Equatable {
     /// #Preview when `GhostRaceWin.friendUserId` was added).
     var ghostMarginSeconds: Double? = nil
     var ghostTargetSeconds: Double? = nil
-    /// The competition sticker's text ("Summer Sprint · 2nd of 6"), resolved
-    /// by `RunPostService` from the competitions the poster is in TODAY. Nil
-    /// on a day with none, which is what keeps the toggle out of the tray.
-    var competition: String? = nil
 
     var snapshot: PostStats {
         PostStats(
