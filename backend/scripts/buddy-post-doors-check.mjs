@@ -102,6 +102,11 @@ async function seed() {
 }
 
 async function cleanup() {
+  // Pushes are fire-and-forget (`void sendPush(...)`) and each writes an
+  // inbox row that holds a FK on users. Let the ones this run kicked off
+  // land, then clear them — deleting users under a push still in flight
+  // 23503s the teardown after every assertion has passed (it did, in CI).
+  await new Promise((resolve) => setTimeout(resolve, 1500));
   await db.query(`DELETE FROM in_app_notifications WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(
     `DELETE FROM post_coauthors WHERE user_id = ANY($1::text[])
