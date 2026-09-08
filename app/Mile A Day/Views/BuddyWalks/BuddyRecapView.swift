@@ -123,6 +123,14 @@ struct BuddyRecapView: View {
                 }
         )
         .task {
+            // This sheet opens the instant the walk ends — before HealthKit
+            // has published the workout to `todaysWorkouts` — and the Post
+            // button used to resolve "my workout" once, from that stale list,
+            // and post UNLINKED when it found nothing. Ask HealthKit again
+            // now so the walk is there by the time anyone taps Post; the
+            // composer re-resolves at publish as the second net.
+            HealthKitManager.shared.invalidateWorkoutCacheFreshness()
+            HealthKitManager.shared.fetchTodaysDistance()
             await load()
             // A friend can still be out when YOUR recap opens (it opens on
             // your own Finish). Keep re-reading while the session is active

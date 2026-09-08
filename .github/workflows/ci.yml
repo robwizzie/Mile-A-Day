@@ -121,6 +121,12 @@ jobs:
       # room its Join button is refused from.
       - name: Buddy invite-from-inside + request-to-join check
         run: node scripts/buddy-join-request-check.mjs
+      # The walk's post through every door: an auto card that carries the
+      # walk and yields to a real photo, a recap post made before HealthKit
+      # published the workout, the window measured from the LAST finisher,
+      # routes that draw before the link lands, and per-slide captions.
+      - name: Buddy post doors check
+        run: node scripts/buddy-post-doors-check.mjs
       # Profile-grid controls, the collab reach/route switches and Story
       # Highlights. The reach switch lives inside collabReachSql — the fragment
       # getFeed, the unified feed and direct post access all ask — so too

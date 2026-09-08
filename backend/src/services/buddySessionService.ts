@@ -1822,6 +1822,14 @@ export async function finishParticipation(
       WHERE session_id = $1 AND user_id = $2 AND status = 'active'`,
     [sessionId, userId],
   );
+  // Link NOW, not at close. The usual order on a phone is HealthKit save →
+  // observer sync (reconcileBuddySessions: participant still 'active', no
+  // stamp) → this Finish — so the workout was on the server, route and all,
+  // and stayed unlinked until the LAST person closed the walk. On a four-
+  // person walk that is however long the slowest walker takes, and the whole
+  // time this person's route was missing from the card and their post had
+  // no workout to take its colour from.
+  await linkSyncedWorkouts(sessionId);
   await bumpVersion(sessionId);
   await recordEvent(sessionId, userId, "finished");
   await finalizeIfDue(sessionId, userId);
@@ -2052,6 +2060,8 @@ export async function reconcileBuddySessions(
       [userId, uploadedWorkoutIds],
     );
 
+    await linkSessionPosts(userId);
+
     // Re-rank any session this just touched, now using reconciled numbers where
     // they exist and live numbers where they don't yet.
     await db.query(
@@ -2116,6 +2126,7 @@ export async function linkSyncedWorkouts(sessionId: string): Promise<void> {
           AND p.workout_id IS NULL`,
       [sessionId],
     );
+    await linkSessionPosts(null, sessionId);
     await db.query(
       `UPDATE buddy_session_participants p
           SET place = ranked.rn
@@ -2135,6 +2146,73 @@ export async function linkSyncedWorkouts(sessionId: string): Promise<void> {
       context: { sessionId, error: String(err) },
     });
   }
+}
+
+/**
+ * Give a walk's posts the workout they were made without.
+ *
+ * A post made from the recap in the seconds before HealthKit publishes the
+ * walk carries no `workout_id` — and everything on the card keys on it: the
+ * activity colour (a NULL type draws red), the author's route, the day-rollup
+ * restatement. The participant row gets its workout a minute later; this
+ * hands it on to the post, guarded so it never claims a workout another feed
+ * post of theirs already stands for.
+ */
+async function linkSessionPosts(
+  userId: string | null,
+  sessionId: string | null = null,
+): Promise<void> {
+  await db.query(
+    `UPDATE posts p
+        SET workout_id = bsp.workout_id
+       FROM buddy_session_participants bsp
+      WHERE p.buddy_session_id = bsp.session_id
+        AND p.user_id = bsp.user_id
+        AND p.workout_id IS NULL
+        AND p.deleted_at IS NULL
+        AND bsp.workout_id IS NOT NULL
+        AND ($1::text IS NULL OR p.user_id = $1::text)
+        AND ($2::text IS NULL OR bsp.session_id = $2::text)
+        AND NOT EXISTS (
+          SELECT 1 FROM posts q
+           WHERE q.workout_id = bsp.workout_id AND q.user_id = p.user_id
+             AND q.deleted_at IS NULL AND q.post_id <> p.post_id
+             AND q.share_to_feed = p.share_to_feed)`,
+    [userId, sessionId],
+  );
+}
+
+/**
+ * Does a buddy walk this user FINISHED today cover their goal?
+ *
+ * The posting gate reads the day's synced miles, and a walk that has just
+ * ended is exactly the one that hasn't synced yet — so the person who walked
+ * two miles with friends was told to "finish today's mile before you post".
+ * The live participant row knows they did. Posting-gate only: nothing that
+ * scores a streak reads this.
+ */
+export async function buddyWalkCreditsGoal(
+  userId: string,
+  localDate: string,
+  goalMiles: number,
+): Promise<boolean> {
+  const rows = await db.query<{ ok: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM buddy_session_participants bsp
+         JOIN buddy_sessions s ON s.id = bsp.session_id
+        WHERE bsp.user_id = $1
+          AND bsp.status = 'finished'
+          AND s.status IN ('active', 'completed')
+          -- The host's day vs. the caller's: loose on the calendar, tight on
+          -- the clock (same rule the posting window uses).
+          AND s.local_date BETWEEN ($2::date - 1) AND ($2::date + 1)
+          AND bsp.finished_at > NOW() - INTERVAL '30 hours'
+          AND COALESCE(bsp.final_distance_miles, bsp.distance_miles, 0) + 1e-9
+              >= $3::float * 0.95
+     ) AS ok`,
+    [userId, localDate, goalMiles],
+  );
+  return rows[0]?.ok === true;
 }
 
 // ─── Discovery helpers ──────────────────────────────────────────────────

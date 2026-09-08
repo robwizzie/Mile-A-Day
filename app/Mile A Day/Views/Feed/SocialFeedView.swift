@@ -699,6 +699,15 @@ struct SocialFeedView: View {
                 onEditCaption: post.is_self ? { editingPost = post } : nil,
                 onTapAuthor: openProfile,
                 onTapCoauthor: openCoauthorProfile,
+                onTapCrewMember: { member in
+                    guard member.user_id != currentUserId else { return }
+                    profileUser = BackendUser(
+                        user_id: member.user_id, username: member.username, email: nil,
+                        first_name: member.first_name, last_name: member.last_name,
+                        bio: nil, profile_image_url: member.profile_image_url,
+                        apple_id: nil, auth_provider: nil, role: nil
+                    )
+                },
                 onTapMention: { username in openMentionProfile(username) },
                 onTapHypeCount: openHypers,
                 onOpenComments: { commentsPost = post },

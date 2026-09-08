@@ -2463,6 +2463,12 @@ export const postCoauthors = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // THIS participant's caption for THEIR slide. A buddy post is one card
+    // with everyone's picture on it, and a caption that belongs to the
+    // author sits wrong under a friend's photo — so each slide carries its
+    // own, Instagram-style, and the card shows whichever slide is showing.
+    // Nullable: every pre-existing slide, and every slide added silently.
+    caption: text("caption"),
     // THIS participant's reach consent, the multi-person mirror of
     // posts.coauthor_on_feed. NULL = TRUE (every pre-existing row), so the
     // column can only ever withhold reach that was previously granted, never

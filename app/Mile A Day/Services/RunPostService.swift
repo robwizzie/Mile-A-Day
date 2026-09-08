@@ -463,14 +463,25 @@ enum RunPostService {
 
     @MainActor
     private static func createAutoPost(mediaUrl: String, workoutId: String?, stats: RunStatsInput) async throws -> PostItem {
-        try await PostService.createPost(
+        // A buddy walk's auto card is the WALK's card, not a solo one. The
+        // server resolves the session from the workout regardless (older
+        // builds), but saying it here also credits the crew in roster order
+        // — and a card that knows its walk is the one the next person's
+        // photo replaces instead of standing beside.
+        let session = workoutId.flatMap { buddySessionForWorkout($0) }
+        let crew = session?.activeParticipants
+            .filter { $0.userId != BuddySessionService.shared.currentUserId }
+            .map(\.userId) ?? []
+        return try await PostService.createPost(
             mediaUrl: mediaUrl,
             caption: nil,
             workoutId: workoutId,
             shareToFeed: true,
             shareToStory: false,
             stats: stats.snapshot,
-            isAuto: true
+            isAuto: true,
+            coauthorUserIds: crew.isEmpty ? nil : crew,
+            buddySessionId: session?.id
         )
     }
 

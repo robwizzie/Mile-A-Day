@@ -80,6 +80,10 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     /// for anyone who hasn't added one. Blanked to "" when the earn-to-view
     /// gate withheld it, exactly like the author's `media_url`.
     let media_url: String?
+    /// Their own words under their own slide. Nil until they write one, and
+    /// on older servers — the card falls back to showing nothing under a
+    /// crew slide rather than the author's caption, which isn't theirs.
+    let caption: String?
     /// Their GPS trace for the walk, so the card can draw the whole group on
     /// one map. Nil for an indoor walk, for anyone who turned "Share route
     /// maps" off, and on older servers.
@@ -809,14 +813,16 @@ enum PostService {
     static func addCrewPhoto(
         postId: String,
         mediaUrl: String,
+        caption: String? = nil,
         photoSource: PostPhotoSource?
     ) async throws {
         struct Body: Encodable {
             let media_url: String
+            let caption: String?
             let photo_source: String?
         }
         let bodyData = try JSONEncoder().encode(
-            Body(media_url: mediaUrl, photo_source: photoSource?.rawValue)
+            Body(media_url: mediaUrl, caption: caption, photo_source: photoSource?.rawValue)
         )
         _ = try await APIClient.fancyFetch(
             endpoint: "/posts/\(postId)/crew-photo",

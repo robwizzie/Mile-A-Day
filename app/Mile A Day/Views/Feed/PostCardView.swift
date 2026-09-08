@@ -32,6 +32,9 @@ struct PostCardView: View {
     /// Instagram behavior: each tagged name on a collab post routes to its own
     /// person, not the primary author.
     var onTapCoauthor: (() -> Void)? = nil
+    /// A credited crew member on a buddy walk, tapped from the crew list that
+    /// the multi-person byline opens. Nil leaves the list read-only.
+    var onTapCrewMember: ((PostCoauthorItem) -> Void)? = nil
     /// Tap an @mention inside the caption — called with the mentioned
     /// username (lowercased, without the '@') to open that user's profile.
     var onTapMention: ((String) -> Void)? = nil
@@ -80,6 +83,7 @@ struct PostCardView: View {
     /// The media page on screen: the photo face's slides come first, the map
     /// face is the last page. Both the PHOTO | MAP toggle and a swipe move it.
     @State private var mediaPage = 0
+    @State private var showCrew = false
     @State private var showSplits = false
     /// The art card's ghost-map snapshot, kept for the pinch-zoom composite
     /// (same contract the map view had).
@@ -255,16 +259,34 @@ struct PostCardView: View {
             .padding(.trailing, CGFloat(min(others.count, 2)) * 16)
 
             VStack(alignment: .leading, spacing: 1) {
-                // One tap target, unlike the two-person header: with up to
-                // eight names there is no room to make each one its own
-                // button, so the whole byline routes to the author.
-                Button { onTapAuthor?() } label: {
+                // One tap target, and it opens EVERYONE: "rob, Megs & 2
+                // others" used to route to the author alone, so the two
+                // people folded into "others" were unreachable from the card
+                // that credits them. The list names each person and opens
+                // their profile.
+                Button {
+                    MADHaptics.tap()
+                    showCrew = true
+                } label: {
                     nameText(post.multiCollabByline)
                 }
                 .buttonStyle(.plain)
-                .allowsHitTesting(onTapAuthor != nil)
 
                 subtitleLine
+            }
+        }
+        // On the HEADER node: the card root already owns the flyover cover
+        // and the share sheet, the media node owns splits — a fourth
+        // presentation on any of those drops one.
+        .sheet(isPresented: $showCrew) {
+            PostCrewSheet(post: post) { member in
+                // Dismiss first, then open — a profile raised in the sheet's
+                // own dismissal transaction is dropped (the HypersListSheet
+                // rule). `member` nil means the author.
+                showCrew = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    if let member { onTapCrewMember?(member) } else { onTapAuthor?() }
+                }
             }
         }
     }
@@ -505,7 +527,7 @@ struct PostCardView: View {
         /// A crew member's own photo on a buddy walk's shared post — captioned
         /// with their name, because on a card with four pictures on it "whose
         /// is this" is the question every slide raises.
-        case crewPhoto(url: URL, name: String)
+        case crewPhoto(url: URL, name: String, caption: String?)
         case route(coords: [CLLocationCoordinate2D])
         case statsCard(stats: PostStats)
     }
@@ -516,7 +538,7 @@ struct PostCardView: View {
     private var crewPhotoSlides: [MediaSlide] {
         post.acceptedCoauthors.compactMap { coauthor -> MediaSlide? in
             guard let url = coauthor.mediaURL else { return nil }
-            return .crewPhoto(url: url, name: coauthor.displayName)
+            return .crewPhoto(url: url, name: coauthor.displayName, caption: coauthor.caption)
         }
     }
 
@@ -593,7 +615,7 @@ struct PostCardView: View {
                 badge: badged ? ("Stats", "chart.bar.fill") : nil,
                 onDoubleTap: doubleTapHype
             )
-        case .crewPhoto(let url, let name):
+        case .crewPhoto(let url, let name, _):
             ZoomablePhotoSlide(
                 url: url,
                 badge: (name, "person.fill"),
@@ -1150,11 +1172,27 @@ struct PostCardView: View {
         onShare?()
     }
 
+    /// Whose words sit under the card: the author's on the author's slides and
+    /// the map, and a crew member's own under THEIR slide — Instagram's rule
+    /// for a shared carousel. A buddy post is one card with everyone's
+    /// picture on it, and the author's caption under a friend's photo reads
+    /// as the friend saying it.
+    private var currentCaption: (name: String, text: String)? {
+        let pages = mediaPages
+        if mediaPage < pages.count, case .crewPhoto(_, let name, let caption) = pages[mediaPage] {
+            guard let caption, !caption.isEmpty else { return nil }
+            return (name, caption)
+        }
+        guard let caption = post.caption, !caption.isEmpty else { return nil }
+        return (post.displayName, caption)
+    }
+
     @ViewBuilder
     private var captionLine: some View {
-        if let caption = post.caption, !caption.isEmpty {
+        if let current = currentCaption {
+            let caption = current.text
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(post.displayName)
+                Text(current.name)
                     .font(.system(size: 14, weight: .heavy, design: .rounded))
                     .foregroundColor(.white)
                     .lineLimit(1)
@@ -1252,5 +1290,98 @@ struct ZoomablePhotoSlide: View {
                     .allowsHitTesting(false)
                 }
             }
+    }
+}
+
+/// Everyone on a buddy walk's post, as a list — the author first, then the
+/// crew in the order they were credited (the same order the route colours
+/// and the photo slides use). Tapping a row hands that person back to the
+/// host, which owns profile navigation; the sheet never presents one itself.
+struct PostCrewSheet: View {
+    let post: PostItem
+    /// Called with the tapped crew member, or nil for the author.
+    let onSelect: (PostCoauthorItem?) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: MADTheme.Spacing.sm) {
+                        row(
+                            name: post.displayName,
+                            imageURL: post.profile_image_url,
+                            role: "Posted this",
+                            hasPhoto: true
+                        ) { onSelect(nil) }
+                        ForEach(post.acceptedCoauthors) { member in
+                            row(
+                                name: member.displayName,
+                                imageURL: member.profile_image_url,
+                                role: member.mediaURL != nil ? "Added a photo" : "On the walk",
+                                hasPhoto: member.mediaURL != nil
+                            ) { onSelect(member) }
+                        }
+                    }
+                    .padding(MADTheme.Spacing.md)
+                }
+            }
+            .navigationTitle("\(post.acceptedCoauthors.count + 1) on this walk")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func row(
+        name: String,
+        imageURL: String?,
+        role: String,
+        hasPhoto: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            MADHaptics.tap()
+            action()
+        } label: {
+            HStack(spacing: MADTheme.Spacing.md) {
+                AvatarView(name: name, imageURL: imageURL, size: 44)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(MADTheme.Typography.smallBold)
+                        .foregroundStyle(MADTheme.Colors.madWhite)
+                        .lineLimit(1)
+                    Text(role)
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.55))
+                }
+                Spacer(minLength: MADTheme.Spacing.xs)
+                if hasPhoto {
+                    Image(systemName: "photo.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.45))
+                        .accessibilityHidden(true)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.35))
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                    .fill(MADTheme.Colors.madWhite.opacity(0.08))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

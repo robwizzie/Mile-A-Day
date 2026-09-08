@@ -47,12 +47,14 @@ struct PostShareStepView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-                    // Adding your slide to the crew's post: there is no caption
-                    // to write (the post has one, and it isn't yours), nowhere
-                    // else to send it, and no route toggle — the card's map
-                    // already draws everyone who shared one. All that's left is
-                    // saying where the photo is going.
+                    // Adding your slide to the crew's post: your own caption
+                    // rides under your own slide (the card shows whichever
+                    // slide is showing, Instagram-style), but there is nowhere
+                    // else to send it and no route toggle — the card's map
+                    // already draws everyone who shared one.
                     if vm.isCrewPhoto {
+                        captionRow
+                        if !captionMentionCandidates.isEmpty { mentionRail }
                         crewPhotoDestinationNote
                     } else {
                         captionRow

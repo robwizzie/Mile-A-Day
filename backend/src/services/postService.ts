@@ -546,7 +546,27 @@ const CREW_ROUTE_SQL = `(
 			pca.workout_id,
 			(SELECT bsp.workout_id FROM buddy_session_participants bsp
 			  WHERE bsp.session_id = pca.buddy_session_id
-				AND bsp.user_id = pca.user_id)
+				AND bsp.user_id = pca.user_id),
+			-- Not linked yet. The link is stamped by reconcileBuddySessions
+			-- only when the workout syncs AFTER the Finish tap, and by
+			-- linkSyncedWorkouts at finish/close — but the common order is
+			-- HealthKit save → observer sync → THEN the buddy finish, so a
+			-- walk could sit unlinked until the whole session closed, with the
+			-- route on the server the entire time. Resolve it the way the link
+			-- itself does: their counted workout that overlaps the walk.
+			(SELECT w.workout_id
+			   FROM buddy_sessions bs
+			   JOIN workouts w
+			     ON w.user_id = pca.user_id
+			    AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+			    AND w.device_end_date >= bs.started_at
+			    AND (w.device_end_date
+			         - (COALESCE(w.total_duration, 0) || ' seconds')::interval)
+			        <= COALESCE(bs.ended_at, bs.started_at + INTERVAL '6 hours')
+			           + INTERVAL '10 minutes'
+			  WHERE bs.id = pca.buddy_session_id AND bs.started_at IS NOT NULL
+			  ORDER BY w.device_end_date DESC
+			  LIMIT 1)
 		)
 )`;
 
@@ -599,6 +619,8 @@ const MULTI_COAUTHORS_JSON = `(
 		'profile_image_url', mcu.profile_image_url,
 		'status', pca.status,
 		'media_url', pca.media_url,
+		-- Their own words under their own slide (additive; NULL until set).
+		'caption', pca.caption,
 		'route', ${CREW_ROUTE_SQL},
 		-- A participant's own curation, readable only BY that participant.
 		-- Returning it to the whole crew would publish "bob kept this out of
@@ -811,46 +833,83 @@ const CREATED_POST_SELECT = `
  * Posts by the CALLER are excluded: replacing your own auto card with your own
  * photo is the upsert path above, not a duplicate.
  */
+/**
+ * SQL CTE: the buddy walk a (user, workout, declared session) belongs to.
+ *
+ * Three arms, in order of trust: the session the client declared, the
+ * participant row already stamped with this workout, and the time overlap
+ * between the walk and the workout. The workout join is a LEFT JOIN so a post
+ * that carries NO workout id (the recap opens before HealthKit has published
+ * the walk, and used to post unlinked) still resolves through the declared
+ * session — which is exactly the post that slipped past this guard and made a
+ * second card. `$1` = user, `$2` = workout id or NULL, `$3` = session or NULL.
+ */
+const WALK_SESSION_CTE = `
+		SELECT bsp.session_id AS id
+		  FROM buddy_session_participants bsp
+		  JOIN buddy_sessions s ON s.id = bsp.session_id
+		  LEFT JOIN workouts w
+		    ON w.workout_id = $2::varchar AND w.user_id = $1::varchar
+		 WHERE bsp.user_id = $1::varchar
+		   AND bsp.status IN ('active', 'finished')
+		   AND s.started_at IS NOT NULL
+		   AND (
+		         bsp.session_id = $3::text
+		      OR bsp.workout_id = $2::varchar
+		      OR (
+		           -- The walk's window overlaps the workout's window.
+		           w.workout_id IS NOT NULL
+		           AND s.started_at <= w.device_end_date
+		           AND COALESCE(s.ended_at, s.started_at + INTERVAL '6 hours')
+		               >= (w.device_end_date
+		                   - (COALESCE(w.total_duration, 0) || ' seconds')::interval)
+		         )
+		       )
+		 ORDER BY (bsp.session_id = $3::text) DESC,
+		          (bsp.workout_id = $2::varchar) DESC,
+		          s.started_at DESC
+		 LIMIT 1`;
+
+/**
+ * The buddy walk this workout is a leg of, resolved from the WORKOUT (or the
+ * client's declared session), for anything that must stamp it — most of all
+ * the auto route card, which the client never sends a session for. An auto
+ * card that doesn't know its walk is a solo card: the guard below can't find
+ * it, so the next person's photo opens a second card beside it (the exact
+ * two-cards-for-one-walk outcome the guard exists to prevent), and its crew's
+ * routes never draw because it credits nobody.
+ */
+export async function buddySessionIdForWorkout(
+  userId: string,
+  workoutId: string | null,
+  declaredSessionId: string | null,
+): Promise<string | null> {
+  if (!workoutId && !declaredSessionId) return null;
+  const rows = await db.query<{ id: string }>(
+    `WITH session AS (${WALK_SESSION_CTE}) SELECT id FROM session`,
+    [userId, workoutId, declaredSessionId],
+  );
+  return rows[0]?.id ?? null;
+}
+
 async function buddyWalkPostForWorkout(
   userId: string,
-  workoutId: string,
+  workoutId: string | null,
   declaredSessionId: string | null,
 ): Promise<{
   post_id: string;
   user_id: string;
   buddy_session_id: string;
+  is_auto: boolean;
 } | null> {
   const rows = await db.query<{
     post_id: string;
     user_id: string;
     buddy_session_id: string;
+    is_auto: boolean;
   }>(
-    `WITH session AS (
-			SELECT bsp.session_id AS id
-			  FROM buddy_session_participants bsp
-			  JOIN buddy_sessions s ON s.id = bsp.session_id
-			  JOIN workouts w
-			    ON w.workout_id = $2::varchar AND w.user_id = $1::varchar
-			 WHERE bsp.user_id = $1::varchar
-			   AND bsp.status IN ('active', 'finished')
-			   AND s.started_at IS NOT NULL
-			   AND (
-			         bsp.session_id = $3::text
-			      OR bsp.workout_id = $2::varchar
-			      OR (
-			           -- The walk's window overlaps the workout's window.
-			           s.started_at <= w.device_end_date
-			           AND COALESCE(s.ended_at, s.started_at + INTERVAL '6 hours')
-			               >= (w.device_end_date
-			                   - (COALESCE(w.total_duration, 0) || ' seconds')::interval)
-			         )
-			       )
-			 ORDER BY (bsp.session_id = $3::text) DESC,
-			          (bsp.workout_id = $2::varchar) DESC,
-			          s.started_at DESC
-			 LIMIT 1
-		)
-		SELECT p.post_id, p.user_id, session.id AS buddy_session_id
+    `WITH session AS (${WALK_SESSION_CTE})
+		SELECT p.post_id, p.user_id, session.id AS buddy_session_id, p.is_auto
 		  FROM session
 		  JOIN posts p
 		    ON p.deleted_at IS NULL
@@ -863,7 +922,7 @@ async function buddyWalkPostForWorkout(
 		   -- reached from the inside. The only post that must be invisible
 		   -- here is the one for THIS workout, because replacing that one is
 		   -- the upsert path (ON CONFLICT on workout_id), not a second card.
-		   AND p.workout_id IS DISTINCT FROM $2::varchar
+		   AND ($2::varchar IS NULL OR p.workout_id IS DISTINCT FROM $2::varchar)
 		   AND (
 		         p.buddy_session_id = session.id
 		      OR EXISTS (
@@ -929,6 +988,29 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
     }
   }
 
+  // The walk this post is a leg of, resolved from the workout when the client
+  // didn't say (older builds, and every auto card). Stamped on the post so
+  // the next person's guard finds it, and — for an auto card — used to credit
+  // the crew so their routes draw on it.
+  const resolvedSessionId = input.shareToFeed
+    ? await buddySessionIdForWorkout(
+        input.userId,
+        input.workoutId ?? null,
+        input.buddySessionId ?? null,
+      )
+    : null;
+  const autoCrewIds: string[] = [];
+  if (isAutoValue && resolvedSessionId) {
+    const crew = await db.query<{ user_id: string }>(
+      `SELECT bsp.user_id FROM buddy_session_participants bsp
+			  WHERE bsp.session_id = $1 AND bsp.user_id <> $2
+			    AND bsp.status IN ('active', 'finished')
+			  ORDER BY bsp.joined_at ASC NULLS LAST`,
+      [resolvedSessionId, input.userId],
+    );
+    autoCrewIds.push(...crew.map((r) => r.user_id));
+  }
+
   // The legacy scalar mirrors the FIRST multi-coauthor when one wasn't named
   // explicitly. That mirror is what keeps a shipped client — which has no idea
   // post_coauthors exists — rendering the post as a normal 2-person collab
@@ -989,13 +1071,29 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
   // Resolving the session from the WORKOUT rather than trusting the client is
   // the whole point: the doors that cause this are exactly the ones that send
   // no `buddy_session_id`, and every shipped build predates the field.
-  if (input.shareToFeed && input.workoutId) {
+  //
+  // Runs on a DECLARED session even when the post carries no workout id: the
+  // recap opens the instant a walk ends, before HealthKit has published it,
+  // and a post made in that gap used to skip this guard entirely — the second
+  // card, red (no workout type), routeless, and never restated.
+  if (input.shareToFeed && (input.workoutId || input.buddySessionId)) {
     const existingWalkPost = await buddyWalkPostForWorkout(
       input.userId,
-      input.workoutId,
+      input.workoutId ?? null,
       input.buddySessionId ?? null,
     );
-    if (existingWalkPost) {
+    if (existingWalkPost && existingWalkPost.is_auto && !isAutoValue) {
+      // The walk's only card is a generated route card — the first finisher
+      // skipped their photo prompt while everyone else was still out. A real
+      // photo of the walk outranks it, the same rule that lets your own photo
+      // replace your own auto card: retire it and let this post be the walk's.
+      // (Its author is credited on the new card; their photo can join it.)
+      await db.query(
+        `UPDATE posts SET deleted_at = NOW()
+				  WHERE post_id = $1 AND is_auto AND deleted_at IS NULL`,
+        [existingWalkPost.post_id],
+      );
+    } else if (existingWalkPost) {
       const err: any = new Error("buddy_walk_already_posted");
       // The client is meant to add a crew photo to THIS post instead.
       err.postId = existingWalkPost.post_id;
@@ -1075,8 +1173,10 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 					-- ever overwrites an AUTO post, and an auto card is never a
 					-- buddy post, so EXCLUDED wholesale is safe. Taking it also
 					-- means the deliberate post that REPLACES the auto card
-					-- inherits the session link rather than losing it.
-					buddy_session_id = EXCLUDED.buddy_session_id${flagUpdates}
+					-- inherits the session link rather than losing it. COALESCE
+					-- because an auto card resolves its own session now, and a
+					-- shipped build's photo replacing it sends none.
+					buddy_session_id = COALESCE(EXCLUDED.buddy_session_id, posts.buddy_session_id)${flagUpdates}
 				${updateGuard}
 			RETURNING *
 		)
@@ -1099,18 +1199,23 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       !isAutoValue && input.postedLive === true,
       // Feed-only, same as the collab it describes: a story is not "the walk's
       // post", so linking one would make the recap report a walk as shared
-      // when nothing reached the feed.
-      !isAutoValue && input.shareToFeed ? (input.buddySessionId ?? null) : null,
+      // when nothing reached the feed. Auto cards carry it too now — an auto
+      // card that doesn't know its walk is a second card waiting to happen.
+      resolvedSessionId,
     ],
   );
   if (rows[0]) {
-    if (multiCoauthorIds.length > 0) {
+    const crewToAttach = isAutoValue ? autoCrewIds : multiCoauthorIds;
+    if (crewToAttach.length > 0) {
       await attachMultiCoauthors(
         rows[0].post_id,
         input.userId,
-        multiCoauthorIds,
+        crewToAttach,
         coauthorId,
-        input.buddySessionId ?? null,
+        resolvedSessionId,
+        // Nobody is "tagged" by a generated card; the push is for a person's
+        // photo, and the crew nudge already covers the card itself.
+        !isAutoValue,
       );
       // Re-read so the caller's payload carries the coauthors array it just
       // created, rather than the pre-attachment snapshot.
@@ -1168,6 +1273,7 @@ async function attachMultiCoauthors(
   coauthorIds: string[],
   mirroredCoauthorId: string | null,
   buddySessionId: string | null,
+  notify: boolean = true,
 ): Promise<void> {
   for (const coauthorId of coauthorIds) {
     await db.query(
@@ -1180,7 +1286,9 @@ async function attachMultiCoauthors(
 
   // The mirrored participant already gets notifyCoauthorInvite from the legacy
   // path — notifying them again here would double-push for one invite.
-  const toNotify = coauthorIds.filter((id) => id !== mirroredCoauthorId);
+  const toNotify = notify
+    ? coauthorIds.filter((id) => id !== mirroredCoauthorId)
+    : [];
   for (const coauthorId of toNotify) {
     void notifyCoauthorInvite(authorId, coauthorId, postId).catch(() => {
       /* a failed invite push must never fail the post */
@@ -1616,20 +1724,79 @@ export async function getPostWindowStatus(
     [userId, localDate],
   );
   const row = rows[0];
-  if (!row?.opened_at) return CLOSED_WINDOW;
-  // Raw-SQL timestamptz comes back as a Date; be tolerant of either shape.
-  const openedAt = new Date(row.opened_at);
-  if (Number.isNaN(openedAt.getTime())) return CLOSED_WINDOW;
 
-  const closesAt = openedAt.getTime() + POST_WINDOW_MS;
+  // A buddy walk's window is the WALK's, not one leg's. The camera used to
+  // close ten minutes after this user's own workout landed — so on a group
+  // walk the early finisher's shutter was shut by the time the crew photo
+  // was taken at the end, and someone whose walk hadn't synced yet had no
+  // window at all ("past 10 minutes", about a walk they had just finished).
+  // The walk counts as the day's qualifying workout the moment they finish
+  // it, and its window runs from the LAST person's finish: open while the
+  // session is still live, ten minutes after it closes.
+  const walk = await db.query<{
+    workout_id: string | null;
+    opened_at: Date | string | null;
+  }>(
+    `SELECT bsp.workout_id,
+			CASE WHEN s.status = 'active' THEN NOW()
+			     ELSE GREATEST(
+			       COALESCE(s.ended_at, bsp.finished_at),
+			       (SELECT MAX(o.finished_at) FROM buddy_session_participants o
+			         WHERE o.session_id = s.id AND o.status = 'finished'))
+			END AS opened_at
+		 FROM buddy_session_participants bsp
+		 JOIN buddy_sessions s ON s.id = bsp.session_id
+		 WHERE bsp.user_id = $1
+			 AND bsp.status IN ('active', 'finished')
+			 AND s.status IN ('active', 'completed')
+			 AND s.started_at IS NOT NULL
+			 -- The session's local_date is the HOST's day; the caller's day is
+			 -- their own. A walk taken with a friend two zones over must still
+			 -- count, so match loosely on the calendar and tightly on the clock.
+			 AND s.local_date BETWEEN ($2::date - 1) AND ($2::date + 1)
+			 AND s.started_at > NOW() - INTERVAL '30 hours'
+			 -- Only a walk they actually took: a live report puts them on it,
+			 -- and a sub-floor leg isn't a mile any more than a solo one is.
+			 AND COALESCE(bsp.final_distance_miles, bsp.distance_miles, 0) >= 0.2
+		 ORDER BY opened_at DESC
+		 LIMIT 1`,
+    [userId, localDate],
+  );
+  const walkRow = walk[0];
+
+  const candidates: Array<{ workoutId: string | null; openedAt: Date }> = [];
+  if (row?.opened_at) {
+    // Raw-SQL timestamptz comes back as a Date; be tolerant of either shape.
+    const openedAt = new Date(row.opened_at);
+    if (!Number.isNaN(openedAt.getTime())) {
+      candidates.push({ workoutId: row.workout_id, openedAt });
+    }
+  }
+  if (walkRow?.opened_at) {
+    const openedAt = new Date(walkRow.opened_at);
+    if (!Number.isNaN(openedAt.getTime())) {
+      // The synced workout is the better id when both exist; the walk's
+      // participant row may not be linked yet.
+      candidates.push({
+        workoutId: walkRow.workout_id ?? row?.workout_id ?? null,
+        openedAt,
+      });
+    }
+  }
+  if (candidates.length === 0) return CLOSED_WINDOW;
+  const latest = candidates.reduce((a, b) =>
+    b.openedAt.getTime() > a.openedAt.getTime() ? b : a,
+  );
+
+  const closesAt = latest.openedAt.getTime() + POST_WINDOW_MS;
   return {
     cameraOpen: now < closesAt + POST_WINDOW_GRACE_MS,
-    // A qualifying workout exists for this local day, which is the entire
-    // condition — the row we just found IS it. It stops being true when the
-    // day rolls over, since `localDate` is what scopes the query.
+    // A qualifying workout (or a finished buddy walk) exists for this local
+    // day, which is the entire condition. It stops being true when the day
+    // rolls over, since `localDate` is what scopes both queries.
     photoOpen: true,
-    workoutId: row.workout_id,
-    openedAt: openedAt.toISOString(),
+    workoutId: latest.workoutId,
+    openedAt: latest.openedAt.toISOString(),
     closesAt: new Date(closesAt).toISOString(),
     secondsRemaining: Math.max(0, Math.round((closesAt - now) / 1000)),
   };
@@ -3496,17 +3663,18 @@ export async function addCrewPhoto(
   postId: string,
   userId: string,
   mediaUrl: string,
+  caption: string | null = null,
 ): Promise<boolean> {
   const rows = await db.query<{ post_id: string }>(
     `UPDATE post_coauthors
-				SET media_url = $3, photo_added_at = NOW()
+				SET media_url = $3, photo_added_at = NOW(), caption = $4
 			WHERE post_id = $1 AND user_id = $2 AND status = 'accepted'
 				AND EXISTS (
 					SELECT 1 FROM posts p
 					WHERE p.post_id = $1 AND p.deleted_at IS NULL AND p.share_to_feed
 				)
 			RETURNING post_id`,
-    [postId, userId, stripMediaQuery(mediaUrl)],
+    [postId, userId, stripMediaQuery(mediaUrl), caption],
   );
   return rows.length > 0;
 }
