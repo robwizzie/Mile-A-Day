@@ -1832,8 +1832,8 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         let notice = pendingNotice
         pendingNotice = nil
         emit(FlyoverTick(phase: phase, fraction: fraction, miles: miles,
-                         elapsedSeconds: elapsedSeconds, milestone: milestone,
-                         notice: notice))
+                         elapsedSeconds: elapsedSeconds, notice: notice,
+                         milestone: milestone))
     }
 
     /// The ONE door every tick leaves through. Synchronous from the display
