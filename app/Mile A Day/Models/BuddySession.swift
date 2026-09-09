@@ -221,10 +221,15 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     /// outline — never removed from the roster, because a friend who vanishes
     /// mid-walk reads as a crash.
     let isStale: Bool
-    /// They MANUALLY paused and are still on the walk. Optional twice over:
-    /// nil from a server that predates the flag, and nil is what an older
-    /// client's own reports leave behind — both read as not paused. Never the
-    /// tracker's auto-pause GUESS, which is lenient by design and flaps.
+    /// They are paused and still on the walk — manually, or by the tracker's
+    /// movement gate having gone quiet for a full evidence window
+    /// (`WorkoutLocationManager.isPausedForCrew`). Optional twice over: nil
+    /// from a server that predates the flag, and nil is what an older client's
+    /// own reports leave behind — both read as not paused.
+    ///
+    /// For MY OWN row this is the slow answer: the roster prefers the device's
+    /// live state (`BuddyRosterStrip.myPause`), because a fact this phone
+    /// decided should not need a round trip to be drawn.
     let isPaused: Bool?
     let isHost: Bool
     let place: Int?

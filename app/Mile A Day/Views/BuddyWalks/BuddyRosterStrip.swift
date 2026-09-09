@@ -10,6 +10,13 @@ import SwiftUI
 struct BuddyRosterStrip: View {
     let session: BuddySessionState
     let currentUserId: String?
+    /// MY pause, straight from the tracker — manual or the movement gate.
+    ///
+    /// Deliberately not optional and not defaulted: every host has to hand it
+    /// over. My own tile is the one that must never wait for the server to
+    /// agree with a fact this device decided, and a default would let the next
+    /// host quietly reintroduce the round trip.
+    let myPause: Bool
 
     @State private var confirmLeave = false
     /// The invite picker. A sheet from INSIDE the tracker's cover, so it
@@ -38,7 +45,8 @@ struct BuddyRosterStrip: View {
                         BuddyRosterAvatar(
                             participant: participant,
                             session: session,
-                            isMe: participant.userId == currentUserId
+                            isMe: participant.userId == currentUserId,
+                            localPause: participant.userId == currentUserId ? myPause : nil
                         )
                     }
 
@@ -258,7 +266,9 @@ struct BuddyRosterStrip: View {
     private var ringLegend: String {
         if session.mode == .raceTime { return "Rings fill toward a mile" }
         if let goal = session.goalValue, goal > 0 {
-            return String(format: "Rings fill toward %.1f mi", goal)
+            // The card's own tiles are in the reader's unit now; a header
+            // still printing miles would leave one card speaking two units.
+            return "Rings fill toward \(goal.distanceFormatted1)"
         }
         return "Rings fill toward a mile"
     }
@@ -270,9 +280,9 @@ struct BuddyRosterStrip: View {
             return n == 2 ? "Walking together" : "\(n) walking together"
         case .coopGoal:
             let goal = session.goalValue ?? 0
-            return String(format: "%.2f of %.1f mi together", session.groupDistanceMiles, goal)
+            return "\(session.groupDistanceMiles.distanceText) of \(goal.distanceFormatted1) together"
         case .raceGoal:
-            return String(format: "Race to %.1f mi", session.goalValue ?? 0)
+            return "Race to \((session.goalValue ?? 0).distanceFormatted1)"
         case .raceTime:
             return "Furthest wins"
         }
@@ -284,6 +294,9 @@ private struct BuddyRosterAvatar: View {
     let participant: BuddyParticipant
     let session: BuddySessionState
     let isMe: Bool
+    /// Non-nil for ME only: the device's own answer, which outranks the
+    /// server's copy of it.
+    let localPause: Bool?
 
     var body: some View {
         VStack(spacing: MADTheme.Spacing.xs) {
@@ -304,8 +317,10 @@ private struct BuddyRosterAvatar: View {
                 badge: badge
             )
             // Stale = no report in 90s. Dimmed to a hairline, never removed:
-            // a friend who vanishes mid-walk reads as a crash.
-            .opacity(participant.isStale ? 0.4 : 1)
+            // a friend who vanishes mid-walk reads as a crash. Never ME: a
+            // report of mine can fail to land, but I am plainly here, and
+            // dimming my own face over a dropped request says otherwise.
+            .opacity(isStale ? 0.4 : 1)
             .overlay(alignment: .topTrailing) {
                 if isLeader && !session.mode.isCooperative {
                     Image(systemName: "crown.fill")
@@ -352,11 +367,19 @@ private struct BuddyRosterAvatar: View {
         .animation(MADTheme.Animation.standard, value: participant.distanceMiles)
     }
 
-    /// MANUAL pause only, and only while they are still walking — the server
-    /// serves `is_paused` false for anyone finished, and the tracker's
-    /// auto-pause GUESS is never reported at all (it is lenient by design and
-    /// flaps, and a roster badge that flickers is worse than no badge).
-    private var isPaused: Bool { participant.isPaused == true }
+    /// Paused: manual, or the movement gate quiet for a full evidence window
+    /// (`WorkoutLocationManager.isPausedForCrew`). Still only while they are
+    /// walking — the server serves `is_paused` false for anyone finished.
+    ///
+    /// MY tile answers from this device and everyone else's from their last
+    /// report. Reading my own pause off the server made the badge a round
+    /// trip: it appeared on the edge, then any report that forgot to mention
+    /// the pause took it away again, on the one tile whose truth was sitting
+    /// in memory the whole time.
+    private var isPaused: Bool {
+        if let localPause { return localPause }
+        return participant.isPaused == true
+    }
 
     /// Finished outranks paused: a walk that is over is over.
     private var badge: AvatarWithRing.Badge? {
@@ -365,25 +388,35 @@ private struct BuddyRosterAvatar: View {
         return nil
     }
 
+    /// Nobody is ever out of range from their own phone.
+    private var isStale: Bool { !isMe && participant.isStale }
+
     /// Extracted rather than nested in the modifier: a three-way ternary of
     /// `Color`s inside `.foregroundStyle` is exactly the shape that tips this
     /// file's type-checker budget, and the error it produces names an
     /// innocent line elsewhere.
     private var distanceTint: Color {
-        if participant.isStale { return MADTheme.Colors.madWhite.opacity(0.4) }
+        if isStale { return MADTheme.Colors.madWhite.opacity(0.4) }
         if isPaused { return MADTheme.Colors.warning }
         return session.accentColor
     }
 
+    /// The app's own formatter: truncated to two decimals, in the reader's
+    /// unit. `%.2f` ROUNDS, so a walk sitting on 0.825 put "0.83" on my tile
+    /// over a tracker reading "0.82" — one screen, one number, two answers —
+    /// and the hardcoded "mi" printed miles to someone whose every other
+    /// screen is in kilometres.
     private var distanceLine: String {
-        if participant.isStale { return "—" }
-        return String(format: "%.2f mi", participant.distanceMiles)
+        if isStale { return "—" }
+        return participant.distanceMiles.distanceFormatted
     }
 
     private var accessibilityDescription: String {
         let who = isMe ? "You" : participant.displayName
-        let miles = String(format: "%.2f miles", participant.distanceMiles)
-        if participant.isStale { return "\(who), out of range" }
+        // Spoken, not abbreviated: VoiceOver reads "mi" as a word, not as
+        // "miles". Still the reader's own unit.
+        let miles = "\(participant.distanceMiles.distanceText) \(DistanceUnits.current.plural)"
+        if isStale { return "\(who), out of range" }
         if participant.status == .finished { return "\(who), finished, \(miles)" }
         if isPaused { return "\(who), paused at \(miles)" }
         return "\(who), \(miles)"
