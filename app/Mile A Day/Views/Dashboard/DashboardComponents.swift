@@ -2245,29 +2245,35 @@ extension View {
 /// covers the top-left corner the glyph was pinned to. Tapping share poked the
 /// flame, and the glyph at 0.35 opacity behind him was barely visible besides.
 ///
-/// A real `Button`, a 44pt hit area around a 38pt glass disc (Apple's minimum
-/// target; the bare glyph offered none of its own), and it lives in the top
-/// RIGHT beside the savers chip, which is the one corner of that card nothing
-/// else reaches into.
+/// A real `Button`, and a LABELLED one: the word is what makes it findable,
+/// where a lone glyph is a thing you have to already know. It lives in the top
+/// RIGHT beside the savers chip and deliberately wears that chip's capsule —
+/// same row, same language, so it reads as a control rather than an ornament.
+///
+/// A capsule and not a 44pt disc, which is what this first became: the Fun
+/// hero's stat column fills a fixed 258pt frame under this corner, so a 44pt
+/// tall control left it 2pt of clearance (it had 16), and pushing the column
+/// down to buy that back risks clipping its bottom row. The capsule is ~34pt
+/// tall and ~75 wide — a bigger target than the glyph ever was, in an area
+/// nothing else claims.
 struct HeroShareButton: View {
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "square.and.arrow.up")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundColor(.white.opacity(0.92))
-                .frame(width: 38, height: 38)
-                .background(
-                    Circle()
-                        .fill(Color.white.opacity(0.13))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-                )
-                // The hit area is larger than the disc, and the shape goes on
-                // the OUTER frame — putting it on the disc would shrink the
-                // target back to what is drawn.
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+            HStack(spacing: 5) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 12, weight: .bold))
+                    .accessibilityHidden(true)
+                Text("Share")
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+            }
+            .foregroundColor(.white.opacity(0.92))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(Capsule().fill(Color.white.opacity(0.13)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.20), lineWidth: 1))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Share")

@@ -85,10 +85,6 @@ struct DashboardHeroCard: View {
                     MADHaptics.action()
                     showingShareSheet = true
                 }
-                // The disc's own 44pt hit area sits inside the header row; the
-                // trailing inset pulls its edge back level with the card's
-                // padding, since the target is wider than what's drawn.
-                .padding(.trailing, -3)
             }
 
             // The two halves: today's ring + the streak.
