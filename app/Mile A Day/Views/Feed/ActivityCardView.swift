@@ -37,7 +37,7 @@ struct ActivityCardView: View {
     /// The art card's ghost-map snapshot, kept for the zoom composite.
     @State private var routeArtSnapshot: RouteMapSnapshot?
     /// Same route-image share as the old floating route share chip.
-    @State private var routeShare: RouteSharePayload?
+    @State private var storyShare: MADStoryContent?
 
     private var distance: Double { entry.distance ?? 0 }
     private var accent: Color { Self.color(entry.workout_type) }
@@ -128,8 +128,8 @@ struct ActivityCardView: View {
         .fullScreenCover(item: $flyoverLaunch) { launch in
             RouteFlyoverPlayerView(launch: launch)
         }
-        .sheet(item: $routeShare) { payload in
-            ShareSheet(items: [payload.image])
+        .sheet(item: $storyShare) { content in
+            ShareStudioView(content: content)
         }
     }
 
@@ -294,9 +294,11 @@ struct ActivityCardView: View {
         (entry.routeCoordinates?.count ?? 0) >= 2 && (entry.is_self || entry.flyover_allowed != false)
     }
 
-    private var canShareRouteImage: Bool {
-        entry.is_self && (entry.routeCoordinates?.count ?? 0) >= 2
-    }
+    /// Own runs only — sharing a friend's card would export their walk (and,
+    /// with a route, where they were). No `>= 2 coordinates` gate any more:
+    /// the studio always has a face for a walk (Sticker at worst), and a
+    /// treadmill mile was previously the one run you couldn't share at all.
+    private var canShareRouteImage: Bool { entry.is_self }
 
     /// ▶ FLYOVER, top-left of the route slide — the shared chip.
     private var flyoverChip: some View {
@@ -425,9 +427,21 @@ struct ActivityCardView: View {
     }
 
     private func shareRoute() {
-        guard let coords = entry.routeCoordinates,
-              let image = routeZoomComposite(coords) else { return }
-        routeShare = RouteSharePayload(image: image)
+        TelemetryService.record(ShareTelemetry.opened)
+        storyShare = MADStoryContent(
+            distanceMiles: distance > 0 ? distance : nil,
+            paceSecondsPerMile: pace,
+            durationSeconds: entry.total_duration,
+            // A raw workout card carries no streak (`stats` sets it nil) —
+            // pass none rather than a number this card never showed.
+            streak: nil,
+            date: RelativeTime.date(from: entry.sort_ts),
+            dateText: dateText,
+            coordinates: entry.routeCoordinates ?? [],
+            routeColor: accent,
+            avatar: RouteArtAvatar(name: entry.displayName,
+                                   imageURL: entry.profile_image_url)
+        )
     }
 
     private func footerIconButton(

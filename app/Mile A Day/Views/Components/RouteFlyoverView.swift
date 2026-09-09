@@ -200,34 +200,6 @@ private func flyoverMarginText(_ seconds: Double) -> String {
     return String(format: "%d:%02d", s / 60, s % 60)
 }
 
-/// The payload behind a route slide's Share button — the finished art frame
-/// as an image, handed to the system share sheet.
-struct RouteSharePayload: Identifiable {
-    let id = UUID()
-    let image: UIImage
-}
-
-/// Share chip, styled as FlyoverChipButton's sibling.
-struct RouteShareChipButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 10, weight: .bold))
-                Text("Share")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-            }
-            .foregroundColor(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(Color.black.opacity(0.55)))
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 /// One chained leg per route: plays each flight in order with a cumulative
 /// odometer and a "ROUTE n OF m" chip — the "fly my week" tour.
 struct WeeklyFlyoverPlayerView: View {
