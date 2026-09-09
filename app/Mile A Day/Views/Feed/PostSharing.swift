@@ -85,10 +85,7 @@ struct PostDetailLoaderView: View {
                     title: "Post",
                     posts: $posts,
                     initialPostId: postId,
-                    onNeedMore: {},
-                    // Always someone else's post as far as this entry point is
-                    // concerned — names and @mentions should open profiles.
-                    showsAuthorProfiles: true
+                    onNeedMore: {}
                 )
             } else {
                 NavigationStack {

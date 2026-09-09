@@ -527,7 +527,7 @@ struct PostCardView: View {
         /// A crew member's own photo on a buddy walk's shared post — captioned
         /// with their name, because on a card with four pictures on it "whose
         /// is this" is the question every slide raises.
-        case crewPhoto(url: URL, name: String, caption: String?)
+        case crewPhoto(url: URL, name: String, username: String?, caption: String?)
         case route(coords: [CLLocationCoordinate2D])
         case statsCard(stats: PostStats)
     }
@@ -538,7 +538,8 @@ struct PostCardView: View {
     private var crewPhotoSlides: [MediaSlide] {
         post.acceptedCoauthors.compactMap { coauthor -> MediaSlide? in
             guard let url = coauthor.mediaURL else { return nil }
-            return .crewPhoto(url: url, name: coauthor.displayName, caption: coauthor.caption)
+            return .crewPhoto(url: url, name: coauthor.displayName,
+                              username: coauthor.username, caption: coauthor.caption)
         }
     }
 
@@ -583,7 +584,7 @@ struct PostCardView: View {
               let mine = post.acceptedCoauthors.first(where: { $0.user_id == me }),
               let myURL = mine.mediaURL,
               let index = slides.firstIndex(where: {
-                  if case .crewPhoto(let url, _, _) = $0 { return url == myURL }
+                  if case .crewPhoto(let url, _, _, _) = $0 { return url == myURL }
                   return false
               })
         else { return slides }
@@ -646,7 +647,7 @@ struct PostCardView: View {
                 badge: badged ? ("Stats", "chart.bar.fill") : nil,
                 onDoubleTap: doubleTapHype
             )
-        case .crewPhoto(let url, let name, _):
+        case .crewPhoto(let url, let name, _, _):
             ZoomablePhotoSlide(
                 url: url,
                 badge: (name, "person.fill"),
@@ -1298,14 +1299,15 @@ struct PostCardView: View {
     /// for a shared carousel. A buddy post is one card with everyone's
     /// picture on it, and the author's caption under a friend's photo reads
     /// as the friend saying it.
-    private var currentCaption: (name: String, text: String)? {
+    private var currentCaption: (name: String, username: String?, text: String)? {
         let pages = mediaPages
-        if mediaPage < pages.count, case .crewPhoto(_, let name, let caption) = pages[mediaPage] {
+        if mediaPage < pages.count,
+           case .crewPhoto(_, let name, let username, let caption) = pages[mediaPage] {
             guard let caption, !caption.isEmpty else { return nil }
-            return (name, caption)
+            return (name, username, caption)
         }
         guard let caption = post.caption, !caption.isEmpty else { return nil }
-        return (post.displayName, caption)
+        return (post.displayName, post.username, caption)
     }
 
     /// Everyone's words, for the MAP face.
@@ -1315,14 +1317,14 @@ struct PostCardView: View {
     /// author's caption alone reads as the only thing anybody said about it.
     /// So the map shows every caption on the post, author first, each under
     /// its own name — the same rows the photo faces show one at a time.
-    private var allCaptions: [(id: String, name: String, text: String)] {
-        var out: [(id: String, name: String, text: String)] = []
+    private var allCaptions: [(id: String, name: String, username: String?, text: String)] {
+        var out: [(id: String, name: String, username: String?, text: String)] = []
         if let caption = post.caption, !caption.isEmpty {
-            out.append((post.user_id, post.displayName, caption))
+            out.append((post.user_id, post.displayName, post.username, caption))
         }
         for coauthor in post.acceptedCoauthors {
             guard let caption = coauthor.caption, !caption.isEmpty else { continue }
-            out.append((coauthor.user_id, coauthor.displayName, caption))
+            out.append((coauthor.user_id, coauthor.displayName, coauthor.username, caption))
         }
         return out
     }
@@ -1331,39 +1333,47 @@ struct PostCardView: View {
     private var captionLine: some View {
         // The map is the whole walk's face, so it carries the whole walk's
         // words; a photo carries the words of whoever took it.
-        let rows: [(id: String, name: String, text: String)] = currentFace == .map
-            ? allCaptions
-            : currentCaption.map { [(post.user_id, $0.name, $0.text)] } ?? []
+        let rows: [(id: String, name: String, username: String?, text: String)] =
+            currentFace == .map
+                ? allCaptions
+                : currentCaption.map { [(post.user_id, $0.name, $0.username, $0.text)] } ?? []
         if !rows.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(rows, id: \.id) { row in
-                    captionRow(name: row.name, text: row.text)
+                    captionRow(name: row.name, username: row.username, text: row.text)
                 }
             }
             .padding(.top, 1)
         }
     }
 
-    private func captionRow(name: String, text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text(name)
-                .font(.system(size: 14, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
-                .lineLimit(1)
-            Text(MentionText.attributed(text))
-                .font(.system(size: 14, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
-                .fixedSize(horizontal: false, vertical: true)
-                // @mention links route to the mentioned user's profile
-                // instead of leaving the app — the scheme is ours alone.
-                .environment(\.openURL, OpenURLAction { url in
-                    if let username = MentionText.username(from: url) {
-                        onTapMention?(username)
-                        return .handled
-                    }
-                    return .systemAction
-                })
-        }
+    /// A name and the words after it, as ONE flowing line — the name a link to
+    /// that person's profile, the @mentions inside the words links to theirs.
+    ///
+    /// The name used to be a plain `Text` beside the caption, so the most
+    /// prominent name on the card was the one thing on it that didn't open
+    /// anybody. Both are links in a single `Text` rather than Buttons, which is
+    /// what lets a comment-preview row stay one tap target for the thread while
+    /// the name inside it still reaches the profile.
+    private func captionRow(name: String, username: String?, text: String) -> some View {
+        var line = MentionText.nameLink(name, username: username)
+        line += AttributedString(" ")
+        line += MentionText.attributed(text)
+        return Text(line)
+            .font(.system(size: 14, weight: .medium, design: .rounded))
+            .foregroundColor(.white.opacity(0.9))
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Profile links route in-app — the scheme is ours alone, so a tap
+            // is consumed here whether or not this surface routes profiles;
+            // handing `mad-mention://` to the system would open nothing.
+            .environment(\.openURL, OpenURLAction { url in
+                if let username = MentionText.username(from: url) {
+                    onTapMention?(username)
+                    return .handled
+                }
+                return .systemAction
+            })
     }
 
     /// The last two comments, under the caption — Instagram's rule.
@@ -1373,9 +1383,11 @@ struct PostCardView: View {
     /// are talking without turning a card into a thread, and the "View all N"
     /// link above them (only once there are more than two) is the way in.
     ///
-    /// The whole block opens comments, including the comment lines themselves:
-    /// a name in a preview is not a profile link here — tapping a comment
-    /// wants the comment.
+    /// The block opens comments, including the comment lines themselves —
+    /// tapping a comment wants the comment. The commenter's NAME is the one
+    /// exception, and it is a link rather than a nested Button precisely so it
+    /// can be: it reaches their profile while the rest of the row still opens
+    /// the thread, which is Instagram's split.
     @ViewBuilder
     private var commentPreview: some View {
         let preview = post.comment_preview ?? []
@@ -1396,7 +1408,9 @@ struct PostCardView: View {
                     Button {
                         onOpenComments?()
                     } label: {
-                        captionRow(name: comment.displayName, text: comment.content)
+                        captionRow(name: comment.displayName,
+                                   username: comment.username,
+                                   text: comment.content)
                     }
                     .buttonStyle(.plain)
                     .disabled(onOpenComments == nil)

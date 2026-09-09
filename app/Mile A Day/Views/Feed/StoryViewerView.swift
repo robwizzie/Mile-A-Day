@@ -314,6 +314,11 @@ private struct StoryGroupPlayerView: View {
     /// Own-story extras: seen-by counts per post + the viewers sheet.
     @State private var viewerCounts: [String: Int] = [:]
     @State private var viewersSheetFor: PostItem?
+    /// Whose story this is, opened from the header. One long-lived
+    /// `FriendService` per player page rather than one per presentation —
+    /// recreating it wipes the loaded friends the profile needs.
+    @State private var profileUser: BackendUser?
+    @StateObject private var profileFriendService = FriendService()
     /// Stories promoted to the feed this session ("Add to feed").
     @State private var promotedIds: Set<String> = []
     /// Observed so the "Add to feed" pill disappears the moment the walk's
@@ -383,6 +388,14 @@ private struct StoryGroupPlayerView: View {
         }
         .sheet(item: $viewersSheetFor, onDismiss: { paused = false }) { post in
             StoryViewersSheet(postId: post.post_id)
+        }
+        // Same pause-and-restore contract as every other sheet here: without
+        // the onDismiss the story would advance behind the profile and be gone
+        // when it closes.
+        .sheet(item: $profileUser, onDismiss: { paused = false }) { user in
+            NavigationStack {
+                UserProfileDetailView(user: user, friendService: profileFriendService)
+            }
         }
         .task(id: current?.post_id) {
             // Own story: load who's seen it so the "Seen by" pill has a count.
@@ -510,13 +523,43 @@ private struct StoryGroupPlayerView: View {
         .padding(.horizontal, 10)
     }
 
+    /// Open whoever's story this is. Pauses playback first — the profile is a
+    /// sheet over a running timer, and a story that advanced underneath it
+    /// would be finished by the time the sheet closed.
+    private func openStoryAuthor() {
+        guard group.user_id != currentUserId else { return }
+        paused = true
+        profileUser = BackendUser(
+            user_id: group.user_id,
+            username: group.username,
+            email: nil,
+            first_name: group.first_name,
+            last_name: group.last_name,
+            bio: nil,
+            profile_image_url: group.profile_image_url,
+            apple_id: nil,
+            auth_provider: nil,
+            role: nil
+        )
+    }
+
     private func header(_ post: PostItem) -> some View {
         HStack(spacing: 10) {
-            AvatarView(name: group.displayName, imageURL: group.profile_image_url, size: 36)
+            // Whose story this is — the tap Instagram taught everyone to make.
+            Button { openStoryAuthor() } label: {
+                AvatarView(name: group.displayName, imageURL: group.profile_image_url, size: 36)
+            }
+            .buttonStyle(.plain)
+            .disabled(group.user_id == currentUserId)
+            .accessibilityLabel("\(group.displayName)'s profile")
             VStack(alignment: .leading, spacing: 1) {
-                Text(group.displayName)
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
+                Button { openStoryAuthor() } label: {
+                    Text(group.displayName)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+                .disabled(group.user_id == currentUserId)
                 HStack(spacing: 4) {
                     Text(post.relativeTime)
                         .font(.system(size: 11, weight: .medium, design: .rounded))

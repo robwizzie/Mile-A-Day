@@ -221,6 +221,29 @@ struct CommentsSheet: View {
     /// A tapped @mention: resolve the username (exact, case-insensitive) via
     /// the search endpoint and open that profile. No-ops for unknown names and
     /// for the viewer themself.
+    /// The person who wrote this comment.
+    ///
+    /// Built straight from the comment row rather than routed through
+    /// `openMentionProfile`, which has to hit the network to turn a username
+    /// back into a user — everything the profile needs is already on the
+    /// comment. Never the viewer themselves.
+    private func openCommenter(_ comment: PostComment) {
+        guard comment.user_id != UserDefaults.standard.string(forKey: "backendUserId")
+        else { return }
+        profileUser = BackendUser(
+            user_id: comment.user_id,
+            username: comment.username,
+            email: nil,
+            first_name: comment.first_name,
+            last_name: comment.last_name,
+            bio: nil,
+            profile_image_url: comment.profile_image_url,
+            apple_id: nil,
+            auth_provider: nil,
+            role: nil
+        )
+    }
+
     private func openMentionProfile(_ username: String) {
         let lowered = username.lowercased()
         Task {
@@ -235,14 +258,24 @@ struct CommentsSheet: View {
 
     private func row(_ comment: PostComment, isReply: Bool) -> some View {
         HStack(alignment: .top, spacing: 11) {
-            AvatarView(name: comment.displayName,
-                       imageURL: comment.profile_image_url,
-                       size: isReply ? 28 : 34)
+            // Avatar and name both open the commenter, the way a comment
+            // thread anywhere else does — they were the only people on this
+            // screen you couldn't reach.
+            Button { openCommenter(comment) } label: {
+                AvatarView(name: comment.displayName,
+                           imageURL: comment.profile_image_url,
+                           size: isReply ? 28 : 34)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(comment.displayName)'s profile")
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(comment.displayName)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
+                    Button { openCommenter(comment) } label: {
+                        Text(comment.displayName)
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                    }
+                    .buttonStyle(.plain)
                     Text(comment.relativeTime)
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.4))
