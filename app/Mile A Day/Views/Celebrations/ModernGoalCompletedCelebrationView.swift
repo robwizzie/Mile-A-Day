@@ -14,7 +14,8 @@ struct ModernGoalCompletedCelebrationView: View {
     @State private var showDetails = false
     @State private var showButtons = false
     @State private var streakCountValue = 0
-    @State private var shareItem: ShareableImage?
+    /// The story studio — this day's card, in the shape a story wants.
+    @State private var storyShare: MADStoryContent?
     @State private var notifyInFlight = false
     @State private var recapGains: [String: String] = [:]
 
@@ -309,9 +310,8 @@ struct ModernGoalCompletedCelebrationView: View {
         VStack(spacing: 12) {
             Button {
                 MADHaptics.action()
-                if let image = generateShareCardImage() {
-                    shareItem = ShareableImage(image: image)
-                }
+                TelemetryService.record(ShareTelemetry.opened)
+                storyShare = stats.storyContent
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "square.and.arrow.up")
@@ -324,8 +324,8 @@ struct ModernGoalCompletedCelebrationView: View {
                 .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(MADTheme.Colors.madRed))
             }
             .buttonStyle(.plain)
-            .sheet(item: $shareItem) { item in
-                ShareSheet(items: [item.image])
+            .sheet(item: $storyShare) { content in
+                ShareStudioView(content: content)
             }
 
             Button {
@@ -451,13 +451,5 @@ struct ModernGoalCompletedCelebrationView: View {
             }
             await MainActor.run { notifyInFlight = false }
         }
-    }
-
-    private func generateShareCardImage() -> UIImage? {
-        let card = CelebrationShareCardView(stats: stats)
-        let renderer = ImageRenderer(content: card)
-        renderer.scale = 3.0
-        renderer.isOpaque = false
-        return renderer.uiImage
     }
 }

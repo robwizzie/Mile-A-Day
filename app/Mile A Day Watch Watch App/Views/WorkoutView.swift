@@ -52,9 +52,13 @@ struct WorkoutView: View {
                     activityName: activityName,
                     activityIcon: activityIcon,
                     goalReached: isCompleted,
+                    saved: !workoutManager.saveFailed,
                     onDismiss: { dismiss() }
                 )
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else if let failure = workoutManager.startupFailure {
+                startupFailureView(failure)
+                    .transition(.opacity)
             } else if showCountdown {
                 countdownView
                     .transition(.opacity)
@@ -76,6 +80,55 @@ struct WorkoutView: View {
                 goalReached = true
                 WKInterfaceDevice.current().play(.success)
             }
+        }
+        .onChange(of: workoutManager.endedWithoutRequest) { _, ended in
+            // The session ended without Stop being tapped — the paired iPhone
+            // ended it, or it failed. Follow it to the recap rather than
+            // leaving a tracking screen whose numbers have quietly stopped.
+            if ended && !showRecap {
+                showRecap = true
+                WKInterfaceDevice.current().play(.stop)
+            }
+        }
+    }
+
+    // MARK: - Startup Failure
+
+    private func startupFailureView(_ message: String) -> some View {
+        ScrollView {
+            VStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 26, weight: .heavy))
+                    .foregroundColor(WatchTheme.warning)
+                    .accessibilityHidden(true)
+                    .padding(.top, 8)
+
+                Text("Can't track this \(activityName.lowercased())")
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .foregroundColor(WatchTheme.textPrimary)
+                    .multilineTextAlignment(.center)
+
+                Text(message)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(WatchTheme.textSecondary)
+                    .multilineTextAlignment(.center)
+
+                Button(action: { dismiss() }) {
+                    Text("Close")
+                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(WatchTheme.primaryButton)
+                        )
+                }
+                .buttonStyle(WatchPressStyle())
+                .padding(.top, 4)
+                .padding(.bottom, 6)
+            }
+            .padding(.horizontal, 8)
         }
     }
 
@@ -329,24 +382,32 @@ struct WorkoutView: View {
                     )
                 }
                 .buttonStyle(WatchPressStyle())
+                .disabled(workoutManager.isEnding)
+                .accessibilityLabel(workoutManager.isPaused ? "Resume workout" : "Pause workout")
 
-                // End workout
+                // End workout. Saving takes a beat — the button says so, so a
+                // slow save can never look like a tap that did nothing.
                 Button {
                     showEndConfirmation = true
                 } label: {
                     controlCircle(
                         icon: "stop.fill",
                         background: WatchTheme.madRed,
-                        foreground: .white
+                        foreground: .white,
+                        busy: workoutManager.isEnding
                     )
                 }
                 .buttonStyle(WatchPressStyle())
+                .disabled(workoutManager.isEnding)
+                .accessibilityLabel("End workout")
             }
             .padding(.top, 2)
+            .opacity(workoutManager.isEnding ? 0.75 : 1)
 
-            Text(workoutManager.isPaused ? "Tap play to resume" : "Tap pause anytime")
+            Text(controlsHint)
                 .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundColor(WatchTheme.textTertiary)
+                .foregroundColor(workoutManager.isEnding ? WatchTheme.madRedBright : WatchTheme.textTertiary)
+                .multilineTextAlignment(.center)
 
             pageDots
                 .padding(.top, 2)
@@ -354,7 +415,12 @@ struct WorkoutView: View {
         .padding(.horizontal, 10)
     }
 
-    private func controlCircle(icon: String, background: Color, foreground: Color) -> some View {
+    private var controlsHint: String {
+        if workoutManager.isEnding { return "Saving your workout…" }
+        return workoutManager.isPaused ? "Tap play to resume" : "Tap pause anytime"
+    }
+
+    private func controlCircle(icon: String, background: Color, foreground: Color, busy: Bool = false) -> some View {
         ZStack {
             Circle()
                 .fill(background.opacity(0.22))
@@ -362,9 +428,14 @@ struct WorkoutView: View {
             Circle()
                 .fill(background)
                 .frame(width: 50, height: 50)
-            Image(systemName: icon)
-                .font(.system(size: 18, weight: .heavy))
-                .foregroundColor(foreground)
+            if busy {
+                ProgressView()
+                    .tint(foreground)
+            } else {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .heavy))
+                    .foregroundColor(foreground)
+            }
         }
         .shadow(color: background.opacity(0.5), radius: 5, x: 0, y: 2)
     }
@@ -401,13 +472,13 @@ struct WorkoutView: View {
 
     private func endWorkout() {
         WKInterfaceDevice.current().play(.stop)
-        workoutManager.endWorkout { success in
-            if success {
-                showRecap = true
-            } else {
-                // Even on failure, show the recap so the user sees their effort.
-                showRecap = true
-            }
+        // The recap is shown either way — the effort happened whether or not
+        // HealthKit accepted it — but it is told which, so a failed save is
+        // never presented as a banked mile. The completion is guaranteed to
+        // run (WatchWorkoutManager holds a deadline), which is the whole reason
+        // Stop can no longer end in a frozen screen.
+        workoutManager.endWorkout { _ in
+            showRecap = true
         }
     }
 }
@@ -422,6 +493,10 @@ struct WorkoutRecapView: View {
     let activityName: String
     let activityIcon: String
     let goalReached: Bool
+    /// Did HealthKit actually accept the workout? A recap that looks identical
+    /// whether or not the walk was saved is how a lost mile goes unnoticed
+    /// until the streak breaks.
+    let saved: Bool
     let onDismiss: () -> Void
 
     @State private var celebrate = false
@@ -501,6 +576,26 @@ struct WorkoutRecapView: View {
                                 .stroke(WatchTheme.hairline, lineWidth: 0.5)
                         )
                 )
+
+                if !saved {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .accessibilityHidden(true)
+                        Text("Couldn't save to Health — this one may not count.")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundColor(WatchTheme.warning)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(WatchTheme.warning.opacity(0.15))
+                    )
+                }
 
                 // Done button
                 Button(action: onDismiss) {

@@ -3,12 +3,15 @@ import SwiftUI
 /// Branded, shareable achievement cards (badge unlock + personal record),
 /// rendered to a crisp image for the system share sheet. Deliberately share the
 /// same dark-gradient / radial-glow / MADLogoMark language as
-/// `CelebrationShareCardView` and `RunStatsCardView` so every card the app
-/// produces reads as one family. Fixed 600×900 (4:5-ish portrait) at @3x.
+/// `RunStatsCardView` so every card the app produces reads as one family.
+/// Fixed 600×900 (4:5-ish portrait) at @3x.
+///
+/// These stay 4:5 on purpose: a badge or a PR is not a walk, so they have no
+/// face in `MADStoryCard` (which is the 9:16 story canvas the walk shares
+/// through). If they ever get one, they should move to `ShareStudioView` too.
 
 /// Render a fixed-size share card to a crisp @3x image (a 600×900 card → an
-/// 1800×2700 export), matching the existing celebration share pipeline
-/// (`GoalCompletedCelebrationView.generateShareCardImage`).
+/// 1800×2700 export).
 @MainActor
 func renderAchievementShareImage<Card: View>(_ card: Card) -> UIImage? {
     let renderer = ImageRenderer(content: card)

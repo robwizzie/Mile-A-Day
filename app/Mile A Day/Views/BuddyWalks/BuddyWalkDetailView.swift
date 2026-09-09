@@ -406,7 +406,10 @@ struct BuddyWalkDetailView: View {
                 color: companionColors[pair.offset],
                 avatar: RouteArtAvatar(name: pair.element.displayName, imageURL: pair.element.profileImageUrl),
                 pointTimes: routeClocks[pair.element.userId]?.times,
-                startedAt: routeClocks[pair.element.userId]?.startedAt
+                startedAt: routeClocks[pair.element.userId]?.startedAt,
+                // Their recorded figure, so the flyover's closing standings
+                // report the same distance their own row on this screen does.
+                distanceMiles: pair.element.distanceMiles > 0 ? pair.element.distanceMiles : nil
             )
         }
         let coords = leadCoordinates

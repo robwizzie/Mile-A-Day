@@ -38,6 +38,10 @@ struct WorkoutDetailView: View {
     /// The route card's laid-out size, captured so the art zoom composite can
     /// match its aspect exactly (the map path derives it from the snapshot).
     @State private var routeArtSize: CGSize = .zero
+    /// The share studio, opened from the toolbar. A past walk was the one
+    /// place in the app you could look straight at a run and have no way to
+    /// share it.
+    @State private var storyShare: MADStoryContent?
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
     @State private var deleteError: String?
@@ -171,6 +175,16 @@ struct WorkoutDetailView: View {
             ZStack {
                 MADTheme.Colors.appBackgroundGradient
                     .ignoresSafeArea()
+                    // The share studio hangs off the background because it is
+                    // the one always-present node in this sheet that owns no
+                    // other presentation. The content chain below already
+                    // carries two sheets and three alerts, and `routeHistory`
+                    // was moved out to the NavigationStack for exactly that
+                    // reason (ios.md: two presentations raised from one node
+                    // and one drops).
+                    .sheet(item: $storyShare) { content in
+                        ShareStudioView(content: content)
+                    }
 
                 // No entrance animation here on purpose. The sheet's own
                 // presentation IS the animation; fading + sliding the content in
@@ -238,6 +252,16 @@ struct WorkoutDetailView: View {
                         Image(systemName: "pencil.circle")
                             .foregroundColor(.orange)
                     }
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        TelemetryService.record(ShareTelemetry.opened)
+                        storyShare = storyContent()
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .foregroundColor(MADTheme.Colors.madRed)
+                    }
+                    .accessibilityLabel("Share this workout")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
@@ -728,6 +752,38 @@ struct WorkoutDetailView: View {
     /// offer it onward.
     private var isStealthWorkout: Bool {
         StealthModeStore.shared.isStealth(workout)
+    }
+
+    /// This walk as a story card.
+    ///
+    /// The route is withheld for a stealth workout: the owner keeps their own
+    /// map on their own phone, and a share is the clearest case of the trace
+    /// leaving it. Without a route the studio still offers Streak and Sticker,
+    /// so the button never opens onto nothing.
+    private func storyContent() -> MADStoryContent {
+        MADStoryContent(
+            distanceMiles: distanceMiles > 0 ? distanceMiles : nil,
+            paceSecondsPerMile: DisplayPace.secondsPerMile(
+                distanceMiles: distanceMiles,
+                movingSeconds: movingSeconds,
+                elapsedSeconds: workout.duration
+            ),
+            durationSeconds: workout.duration > 0 ? workout.duration : nil,
+            streak: UserManager.shared.currentUser.streak,
+            totalMiles: UserManager.shared.currentUser.totalMiles,
+            date: workout.startDate,
+            coordinates: isStealthWorkout ? [] : (routeCoordinates ?? []),
+            routeColor: MADTheme.workoutColor(
+                workoutTypeString == "Walk" ? "walking" : "running"
+            ),
+            avatar: ownerAvatar
+        )
+    }
+
+    /// The tracker's own moving clock when it recorded one, so a shared card's
+    /// pace matches the card the feed prints for the same walk.
+    private var movingSeconds: Double? {
+        workout.metadata?[WorkoutLocationManager.movingSecondsMetadataKey] as? Double
     }
 
     /// Does this run have a drawable GPS trace (drives the hero "Route" tag).

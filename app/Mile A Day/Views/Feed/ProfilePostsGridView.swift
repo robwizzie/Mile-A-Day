@@ -636,14 +636,11 @@ struct ProfilePostsGridView: View {
                 onNeedMore: {}
             )
         case .tagged:
-            // Tagged posts belong to OTHER authors — let taps on their names
-            // (and @mentions) open profiles from inside the full-screen reader.
             PostDetailView(
                 title: "Tagged",
                 posts: $taggedPosts,
                 initialPostId: reader.postId,
-                onNeedMore: { Task { await loadMoreTagged() } },
-                showsAuthorProfiles: true
+                onNeedMore: { Task { await loadMoreTagged() } }
             )
         }
     }

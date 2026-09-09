@@ -17,9 +17,16 @@ struct PostDetailView: View {
     @Binding var posts: [PostItem]
     let initialPostId: String
     let onNeedMore: () -> Void
-    /// True for surfaces showing OTHER people's posts (the Tagged tab):
-    /// author/coauthor names and caption @mentions open profiles.
-    var showsAuthorProfiles: Bool = false
+    // `showsAuthorProfiles` is gone. It defaulted to FALSE and only the Tagged
+    // tab ever passed true, so on "Your Posts" — and on any other person's
+    // grid — every name on a card was dead: a buddy walk's co-walker, the crew
+    // sheet, and the @mentions in your own caption all tapped to nothing. The
+    // premise ("only surfaces showing other people's posts") was wrong on its
+    // face: YOUR post is exactly where other people appear, as the person you
+    // walked with and the friends you thanked. Nothing needed the flag either,
+    // because each closure below already refuses to open the VIEWER's own
+    // profile on its own terms — which is the check that was actually doing
+    // the work.
     /// True only when `posts` IS the viewer's own profile GRID. Removing a
     /// collab from your grid then has to drop it from this list too, or the
     /// user taps "Remove from my grid" and watches the post sit exactly where
@@ -193,8 +200,9 @@ struct PostDetailView: View {
     }
 
     private func card(_ post: PostItem) -> some View {
-        // Profile taps only on surfaces that show other people's posts.
-        let openAuthor: (() -> Void)? = (showsAuthorProfiles && !post.is_self)
+        // Never the viewer's own profile — from inside their own grid that
+        // is a door back to the room they're standing in.
+        let openAuthor: (() -> Void)? = !post.is_self
             ? {
                 profileUser = BackendUser(
                     user_id: post.user_id, username: post.username, email: nil,
@@ -205,7 +213,7 @@ struct PostDetailView: View {
             }
             : nil
         let openCoauthor: (() -> Void)? =
-            (showsAuthorProfiles && post.hasAcceptedCoauthor && post.coauthor_user_id != currentUserId)
+            (post.hasAcceptedCoauthor && post.coauthor_user_id != currentUserId)
             ? {
                 profileUser = BackendUser(
                     user_id: post.coauthor_user_id ?? "", username: post.coauthor_username,
@@ -227,8 +235,7 @@ struct PostDetailView: View {
             onEditCaption: post.is_self ? { editingPost = post } : nil,
             onTapAuthor: openAuthor,
             onTapCoauthor: openCoauthor,
-            onTapCrewMember: showsAuthorProfiles
-                ? { member in
+            onTapCrewMember: { member in
                     guard member.user_id != currentUserId else { return }
                     profileUser = BackendUser(
                         user_id: member.user_id, username: member.username, email: nil,
@@ -236,9 +243,8 @@ struct PostDetailView: View {
                         bio: nil, profile_image_url: member.profile_image_url,
                         apple_id: nil, auth_provider: nil, role: nil
                     )
-                }
-                : nil,
-            onTapMention: showsAuthorProfiles ? { username in openMentionProfile(username) } : nil,
+                },
+            onTapMention: { username in openMentionProfile(username) },
             onTapHypeCount: {
                 hypersContext = HypersListContext(
                     contextType: "post",

@@ -25,15 +25,15 @@ struct ActiveCompetitionRow: View {
         competition.type.gradient.map { Color(hex: $0) }
     }
 
-    /// "2nd of 5". Nil when the standings don't include us yet (pre-start, or
-    /// a payload that hasn't resolved scores).
+    /// "2nd of 5", or "2nd of 3 teams" when the competition is scored on teams
+    /// — ranking the person there names a standing the competition isn't
+    /// played on. Nil when the standings don't include us yet (pre-start, or a
+    /// payload that hasn't resolved scores).
     private var standingText: String? {
-        let ranked = competition.users
-            .filter { $0.invite_status == .accepted }
-            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
         guard let uid = currentUserId,
-              let index = ranked.firstIndex(where: { $0.user_id == uid }) else { return nil }
-        return "\(Self.ordinal(index + 1)) of \(ranked.count)"
+              let standing = competition.standing(for: uid) else { return nil }
+        let place = Self.ordinal(standing.place)
+        return standing.isTeam ? "\(place) of \(standing.of) teams" : "\(place) of \(standing.of)"
     }
 
     /// `nonisolated` because it is pure arithmetic called from plain models

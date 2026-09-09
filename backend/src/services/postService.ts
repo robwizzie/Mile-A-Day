@@ -390,7 +390,7 @@ const POST_COLUMNS = `
 				COUNT(*) FILTER (WHERE m.feed_role <> 'hidden')::int AS segment_count,
 				SUM(m.distance)::double precision AS distance,
 				SUM(m.total_duration)::double precision AS duration,
-				SUM(COALESCE(${displayMovingSecondsSql('m')}, m.total_duration))::double precision AS moving_duration
+				SUM(COALESCE(${displayMovingSecondsSql("m")}, m.total_duration))::double precision AS moving_duration
 			FROM workouts m
 			WHERE m.user_id = w_.user_id AND m.local_date = w_.local_date
 				AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
@@ -2609,7 +2609,7 @@ const FEED_ENTRY_PROJECTION = `
 			-- (rollup-aware on anchors). Null on old rows/Watch syncs — clients
 			-- fall back to total_duration.
 			CASE WHEN page.kind = 'workout'
-				THEN COALESCE(roll.moving_duration, ${displayMovingSecondsSql('wt')})::double precision END AS moving_seconds,
+				THEN COALESCE(roll.moving_duration, ${displayMovingSecondsSql("wt")})::double precision END AS moving_seconds,
 			CASE WHEN page.kind = 'workout'
 				THEN COALESCE(roll.calories, wt.calories)::double precision END AS calories,
 			CASE WHEN page.kind = 'workout'
@@ -2774,7 +2774,7 @@ const FEED_ENTRY_PROJECTION = `
 				SUM(m.total_duration)::double precision AS total_duration,
 				-- Per-row fallback to elapsed: a day mixing in-app legs (which
 				-- carry moving time) with Watch legs (which don't) still sums.
-				SUM(COALESCE(${displayMovingSecondsSql('m')}, m.total_duration))::double precision AS moving_duration,
+				SUM(COALESCE(${displayMovingSecondsSql("m")}, m.total_duration))::double precision AS moving_duration,
 				SUM(m.calories)::double precision AS calories,
 				SUM(m.steps)::int AS steps,
 				jsonb_agg(
@@ -3114,6 +3114,17 @@ export interface PublicPostPreview {
   post_id: string;
   username: string | null;
   first_name: string | null;
+  /**
+   * The author's avatar and streak. Additive, and NOT a widening of what this
+   * endpoint exposes: both are already world-readable for any username at
+   * `/public/users/:username`, and profile images are deliberately the one
+   * media path left unsigned precisely because they back share pages
+   * (mediaSigningService). They are here so the unfurl can be resolved in ONE
+   * request — a second round trip per link preview, from a crawler that may
+   * give up before it finishes, is how the card ends up half-built.
+   */
+  profile_image_url: string | null;
+  current_streak: number | null;
 }
 
 /**
@@ -3132,7 +3143,8 @@ export async function getPublicPostPreview(
   postId: string,
 ): Promise<PublicPostPreview | null> {
   const rows = await db.query<PublicPostPreview>(
-    `SELECT p.post_id::text AS post_id, u.username, u.first_name
+    `SELECT p.post_id::text AS post_id, u.username, u.first_name,
+		        u.profile_image_url, u.current_streak
 		 FROM posts p
 		 JOIN users u ON u.user_id = p.user_id
 		 WHERE p.post_id = $1::uuid AND p.deleted_at IS NULL AND p.share_to_feed`,

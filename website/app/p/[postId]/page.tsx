@@ -5,7 +5,14 @@ import { notFound } from "next/navigation";
 import { Apple } from "lucide-react";
 import { Footer } from "@/components/footer";
 
-import { getPublicPost, publicAuthorName, type PublicPost } from "./publicPost";
+import {
+  getPublicPost,
+  publicAuthorInitials,
+  publicAuthorName,
+  publicAvatarURL,
+  publicStreak,
+  type PublicPost,
+} from "./publicPost";
 
 const APP_STORE_URL = "https://apps.apple.com/us/app/mile-a-day/id6746970905";
 
@@ -40,7 +47,10 @@ export async function generateMetadata({
     title,
     description,
     openGraph: { title, description, type: "article", siteName: "Mile A Day" },
-    twitter: { card: "summary", title, description },
+    // The co-located opengraph-image is 1200x630 and Next emits it for Twitter
+    // too. `summary` rendered that as a small square thumbnail with most of the
+    // card cropped away — the one shape it is not.
+    twitter: { card: "summary_large_image", title, description },
     // Smart App Banner: iOS Safari offers "Open in app", which is the fallback
     // when the universal link opens in the browser instead. app-argument
     // hands this exact post to the app, so the banner's OPEN lands on the
@@ -65,9 +75,9 @@ export default async function PostPage({
   }
 
   const name = authorName(post);
-  const initials = (post.username ?? post.first_name ?? "M")
-    .slice(0, 2)
-    .toUpperCase();
+  const initials = publicAuthorInitials(post);
+  const avatar = publicAvatarURL(post);
+  const streak = publicStreak(post);
 
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a]">
@@ -96,11 +106,31 @@ export default async function PostPage({
 
       <section className="relative flex items-center justify-center px-6 py-20">
         <div className="glass-card w-full max-w-md rounded-3xl p-10 text-center">
-          <div className="mx-auto flex h-28 w-28 items-center justify-center rounded-full border-2 border-[#c72554]/50 bg-[#252525] font-heading text-4xl tracking-[1px] text-[#f5f5f5]">
-            {initials}
+          {/* The real avatar, server-rendered: this page already knows it, so
+              there is no initials-then-photo flash. Profile images are the one
+              media path the backend leaves unsigned, precisely so world-readable
+              share pages can show them. */}
+          <div className="mx-auto flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-2 border-[#c72554]/50 bg-[#252525] font-heading text-4xl tracking-[1px] text-[#f5f5f5]">
+            {avatar ? (
+              <Image
+                src={avatar}
+                alt={name}
+                width={112}
+                height={112}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              initials
+            )}
           </div>
 
-          <h1 className="mt-6 font-heading text-[32px] leading-tight tracking-[0.5px] text-[#f5f5f5]">
+          {streak !== null && (
+            <div className="mt-4 inline-flex items-center rounded-full border border-[#c72554]/60 bg-[#c72554]/20 px-4 py-1.5 text-[13px] font-semibold tracking-wide text-[#f5f5f5]">
+              {streak} day streak
+            </div>
+          )}
+
+          <h1 className="mt-4 font-heading text-[32px] leading-tight tracking-[0.5px] text-[#f5f5f5]">
             {name} shared a post
           </h1>
           <p className="mt-3 text-[15px] leading-relaxed text-[#a0a0a0]">

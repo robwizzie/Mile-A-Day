@@ -142,8 +142,23 @@ class APIClient {
             request.httpBody = body
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        
+        // Every API call in the app funnels through here, which makes this the
+        // one honest place to decide whether the service is reachable — no
+        // feature has to opt in, and whatever the user was doing when the
+        // server went away is what raises the banner.
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            await ServiceHealthMonitor.shared.recordFailure(error)
+            throw error
+        }
+        // ANY response counts as reachable, a 500 included: the server erroring
+        // is a different problem from the server being gone, and only the
+        // second one is what this banner is about.
+        await ServiceHealthMonitor.shared.recordSuccess()
+
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
         }

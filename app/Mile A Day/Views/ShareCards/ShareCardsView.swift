@@ -209,6 +209,7 @@ struct EnhancedShareView: View {
     @State private var showingShareSheet = false
     @State private var generatedImage: UIImage?
     @State private var showingCopiedFeedback = false
+    @State private var instagramFailed = false
 
     var body: some View {
         NavigationStack {
@@ -277,6 +278,38 @@ struct EnhancedShareView: View {
 
                     // Action buttons with glass effect
                     VStack(spacing: 12) {
+                        // These cards render with `isOpaque = false` — they ARE
+                        // stickers, a rounded card on transparency — so the
+                        // story handoff sends them as one, over a gradient in
+                        // the card's own accent. This is the thing the feature
+                        // was built for and never had: until now the only way
+                        // onto a story was the system sheet, which drops the
+                        // image into the composer as a flat photo.
+                        if InstagramStoryShare.isAvailable {
+                            Button(action: shareToInstagram) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "camera.fill")
+                                        .accessibilityHidden(true)
+                                    Text("Instagram Stories")
+                                }
+                                .font(MADTheme.Typography.headline)
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [Color(red: 0.76, green: 0.23, blue: 0.55),
+                                                         Color(red: 0.96, green: 0.42, blue: 0.20)],
+                                                startPoint: .leading, endPoint: .trailing
+                                            )
+                                        )
+                                )
+                            }
+                            .disabled(generatedImage == nil)
+                        }
+
                         HStack(spacing: 12) {
                             Button {
                                 if let image = generatedImage {
@@ -305,6 +338,7 @@ struct EnhancedShareView: View {
 
                             Button {
                                 guard generatedImage != nil else { return }
+                                TelemetryService.record(ShareTelemetry.sheet)
                                 showingShareSheet = true
                             } label: {
                                 HStack {
@@ -344,8 +378,14 @@ struct EnhancedShareView: View {
                     ActivityViewController(activityItems: [image])
                 }
             }
+            .alert("Couldn't open Instagram", isPresented: $instagramFailed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Try \"Share\" and pick Instagram from the share sheet instead.")
+            }
             .onAppear {
                 selectedTheme = systemColorScheme
+                TelemetryService.record(ShareTelemetry.opened)
                 generateImage()
             }
             .onChange(of: selectedTheme) { _, _ in
@@ -358,6 +398,19 @@ struct EnhancedShareView: View {
                     }
                 }
             }
+        }
+    }
+
+    private func shareToInstagram() {
+        guard let image = generatedImage else { return }
+        let accent = UIColor(selectedCard.color)
+        if InstagramStoryShare.share(
+            .sticker(image, top: accent, bottom: UIColor(MADTheme.Colors.madRed))
+        ) {
+            MADHaptics.action()
+            TelemetryService.record(ShareTelemetry.instagram)
+        } else {
+            instagramFailed = true
         }
     }
 

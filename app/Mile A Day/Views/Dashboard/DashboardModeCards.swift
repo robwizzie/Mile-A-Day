@@ -1378,6 +1378,18 @@ private struct FlameBuddyHeroCard: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 14)
         }
+        // The Modern hero carries this glyph and the Fun one didn't, so on Fun
+        // the whole share feature was an invisible tap on a card that gives no
+        // sign it is tappable. Quiet, but present — it is the only thing
+        // telling anyone the sticker builder exists.
+        .overlay(alignment: .topLeading) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.white.opacity(0.35))
+                .padding(.horizontal, 18)
+                .padding(.top, 14)
+                .accessibilityLabel("Share your streak")
+        }
         .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .onTapGesture {
             MADHaptics.action()

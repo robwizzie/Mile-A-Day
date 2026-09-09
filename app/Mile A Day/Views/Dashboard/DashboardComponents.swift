@@ -1390,17 +1390,6 @@ struct ActiveCompetitionBannerCard: View {
         UserDefaults.standard.string(forKey: "backendUserId")
     }
 
-    private var rankedUsers: [CompetitionUser] {
-        competition.users
-            .filter { $0.invite_status == .accepted }
-            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
-    }
-
-    private var currentUserRank: Int? {
-        guard let userId = currentUserId else { return nil }
-        return rankedUsers.firstIndex(where: { $0.user_id == userId }).map { $0 + 1 }
-    }
-
     private var me: CompetitionUser? {
         guard let userId = currentUserId else { return nil }
         return competition.users.first(where: { $0.user_id == userId })
@@ -1495,12 +1484,17 @@ struct ActiveCompetitionBannerCard: View {
                             .foregroundColor(.secondary)
                     }
 
-                    if let rank = currentUserRank {
+                    // Ranks whatever the competition is SCORED on — the team
+                    // among teams when there are teams. Ranking the person
+                    // there told someone on the leading team they were 4th.
+                    if let standing = currentUserId.flatMap({ competition.standing(for: $0) }) {
                         Text("·")
                             .foregroundColor(.secondary.opacity(0.5))
-                        Text("\(rankOrdinal(rank)) of \(rankedUsers.count)")
+                        Text(standing.isTeam
+                             ? "\(rankOrdinal(standing.place)) of \(standing.of) teams"
+                             : "\(rankOrdinal(standing.place)) of \(standing.of)")
                             .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundColor(rank == 1 ? .yellow : .secondary)
+                            .foregroundColor(standing.place == 1 ? .yellow : .secondary)
                     }
                 }
             }

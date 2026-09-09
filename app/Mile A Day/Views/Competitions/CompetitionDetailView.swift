@@ -36,6 +36,16 @@ struct CompetitionDetailView: View {
     /// Which leaderboard row is currently expanded to show daily activity. `nil` = none.
     @State var expandedLeaderboardUserId: String?
 
+    /// Team competitions only: is the leaderboard showing teams or people?
+    /// Teams is the default and stays the default — an individual ranking is
+    /// not what a team competition is scored on.
+    @State var standingsShowsTeams = true
+
+    /// Teams whose roster the user has folded away. Collapsed rather than
+    /// expanded state, so every roster is open on arrival: seeing who is on
+    /// which team is the point of the view.
+    @State var collapsedTeamIds: Set<String> = []
+
     // Hero count-up animation
     @State var heroAnimated = false
 

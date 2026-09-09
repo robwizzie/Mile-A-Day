@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import CoreLocation
 
 // MARK: - Workout Recap View
 
@@ -26,6 +27,11 @@ struct WorkoutRecapView: View {
     let onDismiss: () -> Void
 
     @State private var treadmillBaselineDistance: Double?
+    /// The story studio, opened from the recap's Share button.
+    @State private var storyShare: MADStoryContent?
+    /// This walk's trace, loaded once so the Route face can be offered. Empty
+    /// (indoor, no GPS, still writing) simply drops that face.
+    @State private var routeCoordinates: [CLLocationCoordinate2D] = []
 
     // Staggered entrance
     @State private var showHero = false
@@ -170,7 +176,13 @@ struct WorkoutRecapView: View {
             }
             .scrollBounceBehavior(.basedOnSize)
 
-            doneButton
+            recapActions
+        }
+        .sheet(item: $storyShare) { content in
+            ShareStudioView(content: content)
+        }
+        .task {
+            await loadRouteForSharing()
         }
         .onAppear {
             if treadmillBaselineDistance == nil {
@@ -340,7 +352,73 @@ struct WorkoutRecapView: View {
         .offset(y: showGoal ? 0 : 12)
     }
 
-    // MARK: - Done Button
+    // MARK: - Actions
+
+    /// Share sits BESIDE Done, at the one moment somebody actually wants to
+    /// post: they just finished. This screen had no path to sharing at all —
+    /// the card builder was only reachable from the Dashboard, which is not
+    /// where anyone is standing thirty seconds after a walk.
+    private var recapActions: some View {
+        VStack(spacing: 10) {
+            Button {
+                MADHaptics.tap()
+                TelemetryService.record(ShareTelemetry.opened)
+                storyShare = shareContent()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 16, weight: .bold))
+                        .accessibilityHidden(true)
+                    Text("Share")
+                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.white.opacity(0.13))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            .padding(.horizontal, 32)
+
+            doneButton
+        }
+    }
+
+    private func shareContent() -> MADStoryContent {
+        MADStoryContent(
+            distanceMiles: distance,
+            paceSecondsPerMile: distance > 0 ? duration / distance : nil,
+            durationSeconds: duration,
+            streak: streak,
+            date: Date(),
+            coordinates: routeCoordinates,
+            // `workoutColor` keys on "walking"/"running", NOT the recap's
+            // "Walk"/"Run" — passing those falls to the default and paints a
+            // walk red, against the app-wide walks-are-blue rule.
+            routeColor: ActivityCardView.color(activityName == "Walk" ? "walking" : "running"),
+            avatar: nil
+        )
+    }
+
+    /// The trace for the walk that just ended, so the Route face can be
+    /// offered. Best effort and silent: the studio still has the streak and
+    /// the sticker, and a recap that blocked on HealthKit would be a recap
+    /// nobody sees.
+    private func loadRouteForSharing() async {
+        guard routeCoordinates.isEmpty, let workoutId else { return }
+        let pool = healthManager.cachedWorkouts + healthManager.recentWorkouts
+        guard let workout = pool.first(where: { $0.uuid.uuidString == workoutId }) else { return }
+        let locations = await healthManager.fetchAllRouteLocations(for: workout)
+        guard !locations.isEmpty else { return }
+        routeCoordinates = locations.map(\.coordinate)
+    }
 
     private var doneButton: some View {
         Button(action: onDismiss) {
@@ -366,7 +444,7 @@ struct WorkoutRecapView: View {
                 .shadow(color: Color(red: 217/255, green: 64/255, blue: 63/255).opacity(0.4), radius: 12, x: 0, y: 6)
         }
         .padding(.horizontal, 32)
-        .padding(.top, 8)
+        .padding(.top, 4)
         .padding(.bottom, 40)
         .buttonStyle(PlainButtonStyle())
     }

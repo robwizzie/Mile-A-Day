@@ -45,7 +45,8 @@ struct GoalCompletedCelebrationView: View {
     @State private var hasStartedAnimation: Bool = false
 
     // Share - use Identifiable wrapper so .sheet(item:) works on first tap
-    @State private var shareItem: ShareableImage? = nil
+    /// The story studio — this day's card, in the shape a story wants.
+    @State private var storyShare: MADStoryContent? = nil
 
     // Streak tokens — the recap strip's data. Gains are captured once on
     // appear: the dashboard's live chips auto-clear after a few seconds, and
@@ -767,9 +768,8 @@ struct GoalCompletedCelebrationView: View {
         VStack(spacing: 12) {
             Button {
                 impactMedium.impactOccurred()
-                if let image = generateShareCardImage() {
-                    shareItem = ShareableImage(image: image)
-                }
+                TelemetryService.record(ShareTelemetry.opened)
+                storyShare = stats.storyContent
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "square.and.arrow.up")
@@ -786,8 +786,8 @@ struct GoalCompletedCelebrationView: View {
                         .shadow(color: MADTheme.Colors.madRed.opacity(0.4), radius: 15, x: 0, y: 8)
                 )
             }
-            .sheet(item: $shareItem) { item in
-                ShareSheet(items: [item.image])
+            .sheet(item: $storyShare) { content in
+                ShareStudioView(content: content)
             }
 
             Button {
@@ -808,15 +808,6 @@ struct GoalCompletedCelebrationView: View {
                 .liquidGlassCard()
             }
         }
-    }
-
-    /// Generate a shareable image card from the celebration stats
-    private func generateShareCardImage() -> UIImage? {
-        let card = CelebrationShareCardView(stats: stats)
-        let renderer = ImageRenderer(content: card)
-        renderer.scale = 3.0
-        renderer.isOpaque = false
-        return renderer.uiImage
     }
 
     // MARK: - Helpers
@@ -927,281 +918,4 @@ struct GoalCompletedCelebrationView: View {
 struct ShareableImage: Identifiable {
     let id = UUID()
     let image: UIImage
-}
-
-// MARK: - Celebration Share Card (rendered to image for sharing)
-
-struct CelebrationShareCardView: View {
-    let stats: GoalCompletionStats
-
-    private let cardWidth: CGFloat = 600
-    private let cardHeight: CGFloat = 900
-
-    private var completionSubtitle: String {
-        if stats.percentOver > 50 {
-            return "Absolutely crushed it today!"
-        } else if stats.percentOver > 20 {
-            return "Went above and beyond!"
-        } else if stats.percentOver > 0 {
-            return "Goal smashed!"
-        } else {
-            return "Daily goal complete!"
-        }
-    }
-
-    var body: some View {
-        ZStack {
-            // Full background gradient matching celebration screen
-            LinearGradient(
-                colors: [
-                    Color(red: 0.15, green: 0.08, blue: 0.1),
-                    Color(red: 0.12, green: 0.06, blue: 0.08),
-                    Color(red: 0.05, green: 0.02, blue: 0.04)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            // Red glow behind flame
-            RadialGradient(
-                colors: [
-                    MADTheme.Colors.madRed.opacity(0.45),
-                    MADTheme.Colors.madRed.opacity(0.12),
-                    Color.clear
-                ],
-                center: UnitPoint(x: 0.5, y: 0.18),
-                startRadius: 10,
-                endRadius: 250
-            )
-
-            VStack(spacing: 0) {
-                Spacer()
-
-                // Centered content block: flame + calendar + streak + stats
-                VStack(spacing: 16) {
-                    // Flame icon
-                    ZStack {
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 80, weight: .medium))
-                            .foregroundStyle(MADTheme.Colors.madRed.opacity(0.5))
-                            .blur(radius: 12)
-
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 80, weight: .medium))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    stops: [
-                                        .init(color: Color(red: 1.0, green: 0.95, blue: 0.85), location: 0.0),
-                                        .init(color: Color(red: 1.0, green: 0.65, blue: 0.55), location: 0.25),
-                                        .init(color: MADTheme.Colors.madRed, location: 0.55),
-                                        .init(color: Color(red: 0.7, green: 0.15, blue: 0.25), location: 1.0)
-                                    ],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .shadow(color: MADTheme.Colors.madRed.opacity(0.6), radius: 14)
-                    }
-
-                    // Weekday calendar row
-                    shareWeekCalendar
-
-                    // Streak count
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text("\(stats.currentStreak)")
-                            .font(.system(size: 64, weight: .black, design: .rounded))
-                            .foregroundColor(.white)
-                        Text("day streak!")
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.9))
-                    }
-                    .shadow(color: MADTheme.Colors.madRed.opacity(0.4), radius: 6)
-
-                    // Title / subtitle
-                    VStack(spacing: 4) {
-                        if stats.isNewPersonalBest {
-                            Text("NEW PERSONAL BEST!")
-                                .font(.system(size: 14, weight: .black, design: .rounded))
-                                .tracking(2)
-                                .foregroundColor(Color(red: 1.0, green: 0.65, blue: 0.55))
-                        }
-
-                        Text(completionSubtitle)
-                            .font(.system(size: 18, weight: .medium, design: .rounded))
-                            .foregroundColor(.white.opacity(0.9))
-                    }
-
-                    // Stats row
-                    HStack(spacing: 0) {
-                        shareStatColumn(
-                            icon: "figure.run",
-                            iconColor: MADTheme.Colors.madRed,
-                            value: String(format: "%.2f", stats.todaysDistance),
-                            unit: "mi",
-                            extra: stats.percentOver > 0 ? ProgressCalculator.formatSignedWholePercent(stats.percentOver) : nil
-                        )
-
-                        if stats.todaysTotalDuration > 0 {
-                            shareDivider
-                            shareStatColumn(
-                                icon: "timer",
-                                iconColor: .white.opacity(0.8),
-                                value: stats.formattedDuration,
-                                unit: "min",
-                                extra: nil
-                            )
-                        }
-
-                        if let pace = stats.todaysAveragePace {
-                            shareDivider
-                            let minutes = Int(pace)
-                            let seconds = Int((pace - Double(minutes)) * 60)
-                            shareStatColumn(
-                                icon: "speedometer",
-                                iconColor: stats.isPacePB ? MADTheme.Colors.madRed : .white.opacity(0.7),
-                                value: String(format: "%d:%02d", minutes, seconds),
-                                unit: "/mi",
-                                extra: stats.isPacePB ? "PB!" : nil
-                            )
-                        }
-                    }
-                    .padding(.horizontal, 24)
-
-                    // Milestone badge if applicable
-                    if let milestone = stats.streakMilestone {
-                        HStack(spacing: 8) {
-                            Text(milestone.emoji)
-                                .font(.system(size: 20))
-                            Text(milestone.title)
-                                .font(.system(size: 18, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                        }
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 10)
-                        .background(
-                            Capsule()
-                                .fill(MADTheme.Colors.madRed.opacity(0.25))
-                                .overlay(
-                                    Capsule()
-                                        .stroke(MADTheme.Colors.madRed.opacity(0.4), lineWidth: 1)
-                                )
-                        )
-                    }
-                }
-
-                Spacer()
-
-                // Branding footer pinned at bottom
-                HStack(spacing: 10) {
-                    MADLogoMark(size: 30, opacity: 0.8, shadow: false)
-                    Spacer()
-                    Text("mileaday.run")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.4))
-                }
-                .padding(.horizontal, 28)
-                .padding(.bottom, 24)
-            }
-        }
-        .frame(width: cardWidth, height: cardHeight)
-        .clipShape(RoundedRectangle(cornerRadius: 28))
-        .overlay(
-            RoundedRectangle(cornerRadius: 28)
-                .stroke(MADTheme.Colors.madRed.opacity(0.3), lineWidth: 2)
-        )
-    }
-
-    // MARK: - Weekday Calendar for Share Card
-
-    private var shareWeekCalendar: some View {
-        let calendar = Calendar.current
-        let today = Date()
-        let weekday = calendar.component(.weekday, from: today)
-        let daysFromSunday = weekday - 1
-        let dayLabels = ["S", "M", "T", "W", "T", "F", "S"]
-
-        return HStack(spacing: 14) {
-            ForEach(0..<7, id: \.self) { index in
-                let isPast = index < daysFromSunday
-                let isToday = index == daysFromSunday
-                let isFuture = index > daysFromSunday
-
-                VStack(spacing: 6) {
-                    Text(dayLabels[index])
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundColor(isToday ? MADTheme.Colors.madRed : .white.opacity(0.5))
-
-                    ZStack {
-                        if isFuture {
-                            Circle()
-                                .stroke(Color.white.opacity(0.15), lineWidth: 1.5)
-                                .frame(width: 40, height: 40)
-                        } else if isToday {
-                            Circle()
-                                .fill(MADTheme.Colors.madRed)
-                                .frame(width: 40, height: 40)
-                                .shadow(color: MADTheme.Colors.madRed.opacity(0.6), radius: 6)
-
-                            Image(systemName: "flame.fill")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.white)
-                        } else if isPast {
-                            let daysMet = stats.currentStreak >= daysFromSunday
-                                ? true
-                                : index >= (daysFromSunday - stats.currentStreak)
-
-                            if daysMet {
-                                Circle()
-                                    .fill(MADTheme.Colors.madRed)
-                                    .frame(width: 40, height: 40)
-
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 15, weight: .bold))
-                                    .foregroundColor(.white)
-                            } else {
-                                Circle()
-                                    .fill(Color.white.opacity(0.08))
-                                    .frame(width: 40, height: 40)
-
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 15, weight: .bold))
-                                    .foregroundColor(.white.opacity(0.3))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 24)
-    }
-
-    // MARK: - Stat Column
-
-    private func shareStatColumn(icon: String, iconColor: Color, value: String, unit: String, extra: String?) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(iconColor)
-
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                Text(unit)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-            }
-
-            Text(extra ?? " ")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundColor(extra != nil ? MADTheme.Colors.madRed : .clear)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var shareDivider: some View {
-        Rectangle()
-            .fill(Color.white.opacity(0.15))
-            .frame(width: 1, height: 50)
-    }
 }
