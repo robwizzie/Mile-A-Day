@@ -309,12 +309,6 @@ struct MADStoryCard: View {
         VStack(spacing: 0) {
             heroFlame
                 .frame(width: flameSize, height: flameSize)
-                // A rendered card is a STILL, and both flames branch on Reduce
-                // Motion to their own finished frame — the same rule route art
-                // follows. Forcing it also avoids asking an `ImageRenderer`,
-                // which drives no view lifecycle, what a `TimelineView` flicker
-                // should look like at the instant it snapshots.
-                .environment(\.accessibilityReduceMotion, true)
                 .accessibilityHidden(true)
 
             Text("\(content.streak ?? 0)")
@@ -344,6 +338,13 @@ struct MADStoryCard: View {
     ///
     /// It was an SF Symbol `flame.fill` under a hand-mixed orange gradient —
     /// which is neither of the app's two flames and belongs to neither style.
+    ///
+    /// Both get `still: true`. A card is baked by `ImageRenderer`, which drives
+    /// no view lifecycle, so the flame's 12 fps flicker/blink would be
+    /// snapshotted wherever it happened to land — Flamey mid-blink, baked into
+    /// a picture somebody posts. It has to be a parameter: Reduce Motion, which
+    /// the flames already branch on, is a READ-ONLY environment value and
+    /// cannot be forced from a caller.
     @ViewBuilder
     private var heroFlame: some View {
         switch DashboardStylePreference.current {
@@ -351,13 +352,14 @@ struct MADStoryCard: View {
             // Flamey himself, face and all. No `mood`: the hero's props and
             // speech bubble are dressing for a live dashboard, and a bubble
             // baked into a shared picture reads as a caption nobody wrote.
-            FlameBuddyView(health: .blazing, size: flameSize, phase: .blazing, coalWarmth: 1)
+            FlameBuddyView(health: .blazing, size: flameSize,
+                           phase: .blazing, coalWarmth: 1, still: true)
         case .modern:
             // The Modern dashboard's own flame: the same figure with no face,
             // ungrounded so it stays framed. `.blazing` also means no countdown
             // ring — a still has no countdown to draw.
             ProfessionalFlameView(phase: .blazing, health: .blazing,
-                                  size: flameSize, coalWarmth: 1)
+                                  size: flameSize, coalWarmth: 1, still: true)
         }
     }
 
