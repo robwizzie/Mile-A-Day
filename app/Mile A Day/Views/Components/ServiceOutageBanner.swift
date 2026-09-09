@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// "Mile A Day is down" — shown when the app can't reach the server.

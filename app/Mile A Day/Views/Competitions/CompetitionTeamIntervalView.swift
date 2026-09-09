@@ -129,7 +129,7 @@ struct CompetitionTeamIntervalView: View {
 
                 Spacer(minLength: 0)
 
-                if let goal {
+                if goal != nil {
                     Text("\(competition.options.formatQuantity(value))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundColor(hitGoal ? .green : .white.opacity(0.8))
