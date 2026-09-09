@@ -1,12 +1,15 @@
 import SwiftUI
 
 // MARK: - Team Standings
-// Card shown above the individual leaderboard when a competition has teams.
+// The FINISHED screen's team results card (`CompetitionDetailView+Finished`).
 // A team is scored SERVER-SIDE as one competitor over its members' combined
 // miles — never as a sum of their individual scores — so member rows show what
 // each person CONTRIBUTED rather than points that wouldn't add up. Tap a team
-// to expand them. Individual standings stay untouched below: team play is a
-// layer on top, not a replacement.
+// to expand them.
+//
+// The LIVE standings tab uses `teamLeaderboard` instead, which folds this and
+// the individual leaderboard into one card: shown together they were two
+// leaderboards on one screen disagreeing about who was winning.
 
 struct CompetitionTeamStandings: View {
     let competition: Competition
@@ -114,7 +117,7 @@ struct CompetitionTeamStandings: View {
                         // a team that has spent one is the only thing on this
                         // row that says the standing is fragile.
                         if competition.type == .streaks, let lives = team.remaining_lives {
-                            teamLives(lives)
+                            TeamLivesChip(lives: lives)
                         }
 
                         Text(competition.teamScoreLabel(team))
@@ -165,33 +168,6 @@ struct CompetitionTeamStandings: View {
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                 .fill(Color.white.opacity(isExpanded ? 0.05 : 0))
         )
-    }
-
-    /// The team's shared lives, as hearts. Zero reads as "out" in words — an
-    /// empty row of outlines is easy to skim straight past.
-    @ViewBuilder
-    private func teamLives(_ lives: Int) -> some View {
-        if lives <= 0 {
-            Text("OUT")
-                .font(.system(size: 9, weight: .bold, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(Capsule().fill(Color.white.opacity(0.08)))
-        } else {
-            HStack(spacing: 2) {
-                ForEach(0..<min(lives, 3), id: \.self) { _ in
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: 9))
-                        .foregroundColor(MADTheme.Colors.madRed.opacity(0.9))
-                }
-                if lives > 3 {
-                    Text("×\(lives)")
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .foregroundColor(MADTheme.Colors.madRed.opacity(0.9))
-                }
-            }
-        }
     }
 
     private func memberRow(_ member: CompetitionUser) -> some View {

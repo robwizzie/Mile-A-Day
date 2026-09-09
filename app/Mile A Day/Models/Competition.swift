@@ -231,10 +231,27 @@ struct Competition: Codable, Identifiable {
     /// This user's place on whichever leaderboard the competition is scored
     /// on. Nil when they aren't on it yet.
     private func place(for userId: String) -> Int? {
+        standing(for: userId)?.place
+    }
+
+    /// This user's place AND the size of the field they're placed in — their
+    /// team's among teams when the competition has teams, their own among
+    /// people otherwise.
+    ///
+    /// Every surface that prints "2nd of 6" reads this, because a surface that
+    /// ranks the PERSON while the standings rank their TEAM contradicts itself
+    /// on the same screen: the dashboard banner said "4th of 6" to someone
+    /// whose team was winning. Nil when they aren't on the board yet, which is
+    /// a real state on day one.
+    func standing(for userId: String) -> (place: Int, of: Int, isTeam: Bool)? {
         if hasTeams, let myTeam = team(for: userId) {
-            return rankedTeams.firstIndex(where: { $0.id == myTeam.id }).map { $0 + 1 }
+            let teams = rankedTeams
+            guard let index = teams.firstIndex(where: { $0.id == myTeam.id }) else { return nil }
+            return (index + 1, teams.count, true)
         }
-        return acceptedRanked.firstIndex(where: { $0.user_id == userId }).map { $0 + 1 }
+        let ranked = acceptedRanked
+        guard let index = ranked.firstIndex(where: { $0.user_id == userId }) else { return nil }
+        return (index + 1, ranked.count, false)
     }
 
     /// Accepted members, best score first — the individual leaderboard.

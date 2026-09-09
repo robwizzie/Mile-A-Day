@@ -480,11 +480,18 @@ extension CompetitionDetailView {
     }
 
     // MARK: - Standings Tab Content
+    /// In a team competition the leaderboard IS the team list — one card,
+    /// rosters nested under their team, with the individual ranking behind the
+    /// Teams/Players toggle. It used to be a team card stacked ON TOP of an
+    /// untouched individual leaderboard, which meant the screen showed two
+    /// leaderboards that disagreed about who was winning, and the one you
+    /// scrolled to was the one the competition isn't scored on.
     @ViewBuilder
     var standingsTabContent: some View {
         if competition.hasTeams {
-            CompetitionTeamStandings(competition: competition)
+            teamLeaderboard
+        } else {
+            enhancedLeaderboard
         }
-        enhancedLeaderboard
     }
 }
