@@ -90,7 +90,8 @@ struct PostCardView: View {
     @State private var routeArtSnapshot: RouteMapSnapshot?
     /// Paper-plane route share payload: same rendered route image the old map
     /// chip shared, just moved into the Instagram-style action row.
-    @State private var routeShare: RouteSharePayload?
+    /// Own post tapped Share — the story studio, built from this card.
+    @State private var storyShare: MADStoryContent?
     /// True if the current user is the post author.
     private var isMine: Bool {
         post.is_self
@@ -150,8 +151,10 @@ struct PostCardView: View {
         .fullScreenCover(item: $flyoverLaunch) { launch in
             RouteFlyoverPlayerView(launch: launch)
         }
-        .sheet(item: $routeShare) { payload in
-            ShareSheet(items: [payload.image])
+        .sheet(item: $storyShare) { content in
+            ShareStudioView(content: content,
+                            link: post.share_to_feed == false
+                                ? nil : PostShareLink.url(for: post.post_id))
         }
     }
 
@@ -1133,10 +1136,6 @@ struct PostCardView: View {
         return hasRoute && (isMine || post.flyover_allowed != false)
     }
 
-    private var canShareRouteImage: Bool {
-        isMine && ((routeSlideCoordinates?.count ?? 0) >= 2 || !companionRoutes.isEmpty)
-    }
-
     /// The route slide's floating zoom copy, on demand. 720×900 keeps the
     /// photo slides' 4:5 so the lift is pixel-identical.
     private func routeZoomComposite(_ coords: [CLLocationCoordinate2D]) -> UIImage? {
@@ -1203,11 +1202,11 @@ struct PostCardView: View {
                     action: { onOpenComments?() }
                 )
                 .disabled(onOpenComments == nil)
-                if canShareRouteImage || (onShare != nil && post.share_to_feed != false) {
+                if isMine || (onShare != nil && post.share_to_feed != false) {
                     footerIconButton(
                         icon: "paperplane",
                         label: nil,
-                        accessibilityLabel: canShareRouteImage ? "Share route" : "Share post",
+                        accessibilityLabel: "Share",
                         action: sharePostOrRoute
                     )
                 }
@@ -1286,12 +1285,44 @@ struct PostCardView: View {
         return "\(count)"
     }
 
+    /// One Share button with one meaning.
+    ///
+    /// It used to fork: a route IMAGE on your own post, a LINK on anybody
+    /// else's, from the same unlabelled paperplane — a control that does two
+    /// different things is one nobody learns. Your own walk now opens the story
+    /// studio (every face, Instagram included); somebody else's still shares
+    /// the link, because exporting a friend's route hands their loop to the
+    /// open web and route art is own-content only.
     private func sharePostOrRoute() {
-        if canShareRouteImage, let image = routeZoomComposite(routeSlideCoordinates ?? []) {
-            routeShare = RouteSharePayload(image: image)
+        guard isMine else {
+            onShare?()
             return
         }
-        onShare?()
+        MADHaptics.tap()
+        TelemetryService.record(ShareTelemetry.opened)
+        storyShare = storyContent()
+    }
+
+    /// This card, as a story. The photo is taken from the feed's own cache —
+    /// it is the picture already on screen, so it is there — and its absence
+    /// simply drops the Photo face rather than blocking the share.
+    private func storyContent() -> MADStoryContent {
+        let stats = post.stats_snapshot
+        let cachedPhoto = (post.storyPhotoURL ?? post.mediaURL)
+            .flatMap { FeedImageCache.image(for: $0) }
+        return MADStoryContent(
+            distanceMiles: stats?.distance,
+            paceSecondsPerMile: stats?.pace,
+            durationSeconds: stats?.duration,
+            streak: stats?.streak,
+            date: nil,
+            dateText: stats?.date,
+            coordinates: post.routeCoordinates ?? [],
+            routeColor: ActivityCardView.color(post.workout_type),
+            photo: cachedPhoto,
+            avatar: RouteArtAvatar(name: post.displayName,
+                                   imageURL: post.profile_image_url)
+        )
     }
 
     /// Whose words sit under the card: the author's on the author's slides and

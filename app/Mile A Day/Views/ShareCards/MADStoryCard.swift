@@ -57,13 +57,18 @@ enum MADStoryFace: String, CaseIterable, Identifiable {
 /// Everything a story face can draw. Built by the caller from whatever it has —
 /// every field is optional, and a face simply omits what it wasn't given rather
 /// than printing a zero.
-struct MADStoryContent {
+struct MADStoryContent: Identifiable {
+    let id = UUID()
     var distanceMiles: Double?
     var paceSecondsPerMile: Double?
     var durationSeconds: Double?
     var streak: Int?
     var totalMiles: Double?
+    /// When the walk happened — drives `RouteArtView`'s time-of-day cast.
     var date: Date?
+    /// Already-formatted date, for callers holding the server's string rather
+    /// than a Date (`PostStats.date`). Preferred over formatting `date`.
+    var dateText: String?
     var coordinates: [CLLocationCoordinate2D] = []
     var routeColor: Color = MADTheme.Colors.madRed
     var photo: UIImage?
@@ -381,8 +386,8 @@ struct MADStoryCard: View {
         if let duration = content.durationSeconds, duration > 0 {
             out.append(("TIME", RunStatsStickerView.durationText(duration)))
         }
-        if let date = content.date {
-            out.append(("DATE", Self.dateFormatter.string(from: date)))
+        if let text = displayDate {
+            out.append(("DATE", text))
         }
         return out
     }
@@ -410,6 +415,12 @@ struct MADStoryCard: View {
             out.append(("TOTAL", "\(Int(total)) mi"))
         }
         return out
+    }
+
+    private var displayDate: String? {
+        if let text = content.dateText, !text.isEmpty { return text }
+        if let date = content.date { return Self.dateFormatter.string(from: date) }
+        return nil
     }
 
     private static let dateFormatter: DateFormatter = {
