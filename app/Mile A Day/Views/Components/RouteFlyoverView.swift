@@ -2302,16 +2302,36 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     /// pitch, or the HUD sitting over the bottom third, so a route wider than
     /// it was tall landed with both ends off the sides of the screen. A
     /// diagonal is also the wrong measure for an L-shaped walk, which is most
-    /// of them. `cameraThatFits` asks MapKit the question directly; it answers
-    /// north-up and level, which is also why the pull-out settles rather than
-    /// staying banked at the followed rider's last heading.
+    /// of them.
+    ///
+    /// MapKit will fit a rect to this view's bounds, but only by APPLYING it —
+    /// there is no `cameraThatFits`. So fit, read back the camera that produced,
+    /// and put the previous one straight back. Nothing is ever drawn from the
+    /// intermediate state: both callers assign a camera on the very next line,
+    /// and the engine implements no region-change delegate that could re-enter
+    /// on the way through. The fit is north-up and level, which is also why the
+    /// pull-out settles rather than staying banked at the rider's last heading.
     private func fittedOverviewCamera() -> MKMapCamera {
         guard let mapView, mapView.bounds.width > 1, mapView.bounds.height > 1 else {
             return overviewCamera(pitch: 28)
         }
         let rect = routeMapRect
         guard !rect.isNull else { return overviewCamera(pitch: 28) }
-        return mapView.cameraThatFits(rect, edgePadding: overviewInsets)
+
+        // Snapshotted by VALUE — `camera` hands back the live object, so
+        // holding it and restoring it later would restore the fitted one.
+        let restore = Self.cameraCopy(mapView.camera)
+        mapView.setVisibleMapRect(rect, edgePadding: overviewInsets, animated: false)
+        let fitted = Self.cameraCopy(mapView.camera)
+        mapView.camera = restore
+        return fitted
+    }
+
+    private static func cameraCopy(_ camera: MKMapCamera) -> MKMapCamera {
+        MKMapCamera(lookingAtCenter: camera.centerCoordinate,
+                    fromDistance: camera.centerCoordinateDistance,
+                    pitch: camera.pitch,
+                    heading: camera.heading)
     }
 
     /// The closing standings: who finished when, how far they went, and the gap
