@@ -28,6 +28,13 @@ struct FlyoverCompanion: Identifiable {
     /// constant-speed flight for the whole crew.
     var pointTimes: [Double]? = nil
     var startedAt: Double? = nil
+    /// This walker's RECORDED distance (`coauthors[].distance_miles`, the
+    /// participant row's figure). Their polyline is despiked and simplified
+    /// like everyone else's, so its raw arc length reads 1–3% short of the
+    /// number their own card shows — the closing standings must not be the one
+    /// place a friend's walk is quietly a hundredth shorter. Calibration is
+    /// sanity-banded, so an out-of-band figure falls back to raw geo.
+    var distanceMiles: Double? = nil
 }
 
 struct FlyoverLaunch: Identifiable {
@@ -125,7 +132,8 @@ extension FlyoverLaunch {
                     avatar: RouteArtAvatar(name: pair.element.displayName,
                                            imageURL: pair.element.profile_image_url),
                     pointTimes: pair.element.route_times,
-                    startedAt: pair.element.route_started_at
+                    startedAt: pair.element.route_started_at,
+                    distanceMiles: pair.element.distance_miles
                 )
             }
         guard coords.count >= 2 || !companions.isEmpty else { return nil }
@@ -587,6 +595,39 @@ struct FlyoverTick {
     /// Set only on the frame a mile marker drops AND a split time exists for
     /// it — the HUD flashes it as a toast.
     var milestone: FlyoverMilestone? = nil
+    /// Everyone on the walk, in the order they finished — carried on the outro
+    /// and finished ticks so the closing card is already on screen as the
+    /// camera pulls out. Empty on a solo flight, where the HUD's own odometer
+    /// and chips already say all of this.
+    var standings: [FlyoverStanding] = []
+}
+
+/// One walker in the closing standings: how far they went, how long they took,
+/// and how far behind the first one home they were.
+///
+/// The finish notices that flash mid-flight are one rider at a time and gone in
+/// three seconds — by the landing there was nothing left on screen saying who
+/// actually won the walk or by how much.
+struct FlyoverStanding: Identifiable, Equatable {
+    let id: String
+    /// Position in whatever the standings are ordered by — finishing time on a
+    /// timed flight, distance otherwise.
+    let place: Int
+    let name: String
+    let imageURL: String?
+    let color: Color
+    let distanceMiles: Double?
+    /// How long THIS walker took. Nil on a synthetic (clockless) flight, which
+    /// is what `isTimed` below is read from.
+    let seconds: Double?
+    /// Seconds behind the first finisher. Nil for the winner, for anyone tied
+    /// with them, and on an untimed flight.
+    let behindSeconds: Double?
+    let isFollowed: Bool
+
+    static func isTimed(_ standings: [FlyoverStanding]) -> Bool {
+        standings.contains { $0.seconds != nil }
+    }
 }
 
 struct FlyoverMilestone: Equatable {
@@ -643,6 +684,9 @@ struct RouteFlyoverPlayerView: View {
     /// mile toast, its own slot so the two never fight over one capsule.
     @State private var noticeToast: FlyoverNotice?
     @State private var noticeSeq = 0
+    /// The closing standings — everyone on the walk, in the order they
+    /// finished. Empty until the outro, and empty for a solo flight.
+    @State private var standings: [FlyoverStanding] = []
     /// One adoption ping per player open, fired at first takeoff.
     @State private var hasLoggedPlay = false
     @State private var didNotifyFinish = false
@@ -697,6 +741,11 @@ struct RouteFlyoverPlayerView: View {
                 if let notice = tick.notice {
                     showNotice(notice)
                 }
+                // Carried on the outro tick too, so the card is already up as
+                // the camera pulls out rather than popping in after it lands.
+                if !tick.standings.isEmpty || tick.phase == .cruise || tick.phase == .intro {
+                    standings = tick.standings
+                }
                 if wasLoading, tick.phase == .intro, !hasLoggedPlay {
                     hasLoggedPlay = true
                     TelemetryService.record("flyover_play")
@@ -749,6 +798,166 @@ struct RouteFlyoverPlayerView: View {
         .preferredColorScheme(.dark)
         .onChange(of: speed) { _, newValue in
             UserDefaults.standard.set(newValue, forKey: "flyoverSpeedV1")
+        }
+    }
+
+    // MARK: - Closing standings
+
+    private var showsStandings: Bool {
+        !standings.isEmpty && (phase == .outro || phase == .finished)
+    }
+
+    /// Who finished when, how far they went, and by how much. The mid-flight
+    /// finish notices are one rider at a time and gone in three seconds, so by
+    /// the landing nothing on screen said who won the walk or by how much —
+    /// which is the whole thing a crew watches a replay to find out.
+    ///
+    /// Distances read in miles to match the odometer directly below it; the
+    /// flyover is a mile-only screen throughout.
+    @ViewBuilder
+    private var finishStandingsCard: some View {
+        if showsStandings {
+            let timed = FlyoverStanding.isTimed(standings)
+            VStack(spacing: 8) {
+                HStack(spacing: 5) {
+                    Image(systemName: timed ? "flag.checkered" : "figure.walk")
+                        .font(.system(size: 9, weight: .black))
+                        .accessibilityHidden(true)
+                    Text(timed ? "FINISH ORDER" : "ON THIS WALK")
+                        .font(.system(size: 9, weight: .black, design: .rounded))
+                        .tracking(1.4)
+                }
+                .foregroundColor(.white.opacity(0.55))
+
+                VStack(spacing: 6) {
+                    ForEach(standings) { standing in
+                        standingRow(standing, timed: timed)
+                    }
+                }
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.black.opacity(0.52))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+            )
+            .padding(.horizontal, 20)
+            .transition(.scale(scale: 0.92).combined(with: .opacity))
+        }
+    }
+
+    private func standingRow(_ standing: FlyoverStanding, timed: Bool) -> some View {
+        HStack(spacing: 9) {
+            standingLeading(standing, timed: timed)
+
+            AvatarView(name: standing.name, imageURL: standing.imageURL, size: 26)
+                .overlay(Circle().stroke(standing.color, lineWidth: 1.5))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(standing.name)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Text(standingDetail(standing))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.white.opacity(0.6))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 6)
+
+            standingGap(standing, timed: timed)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        // Whoever the camera was following is marked, so a crew of four can
+        // find their own line in the card without counting avatars.
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(standing.isFollowed ? standing.color.opacity(0.2) : Color.clear)
+        )
+    }
+
+    /// A rank badge only when the order is a real RESULT. An untimed flight is
+    /// synthetic — everyone drawn at a constant share of one clock — so a "1st"
+    /// there would be the order the tracks were built in wearing a medal.
+    @ViewBuilder
+    private func standingLeading(_ standing: FlyoverStanding, timed: Bool) -> some View {
+        if timed {
+            let medal: Color = standing.place == 1
+                ? .yellow
+                : (standing.place == 2 ? Color(white: 0.8) : (standing.place == 3 ? .orange : .white.opacity(0.22)))
+            Text("\(standing.place)")
+                .font(.system(size: 11, weight: .black, design: .rounded))
+                .foregroundColor(standing.place <= 3 ? .black : .white.opacity(0.8))
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(medal))
+                .fixedSize()
+        } else {
+            Circle()
+                .fill(standing.color)
+                .frame(width: 8, height: 8)
+                .frame(width: 20)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func standingDetail(_ standing: FlyoverStanding) -> String {
+        var parts: [String] = []
+        if let miles = standing.distanceMiles, miles > 0 {
+            parts.append("\(miles.milesText) mi")
+        }
+        if let seconds = standing.seconds, seconds > 0 {
+            parts.append(RunStatsStickerView.durationText(seconds))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// How far off this walker finished. The winner gets the flag; everyone
+    /// else gets the gap, which is the number a crew actually argues about.
+    @ViewBuilder
+    private func standingGap(_ standing: FlyoverStanding, timed: Bool) -> some View {
+        if timed, let behind = standing.behindSeconds, behind >= 1 {
+            Text("+\(flyoverMarginText(behind))")
+                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundColor(.white.opacity(0.7))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Color.white.opacity(0.1)))
+                .fixedSize()
+                .accessibilityLabel("\(flyoverMarginText(behind)) behind")
+        } else if timed, standing.place == 1 {
+            HStack(spacing: 4) {
+                Image(systemName: "flag.checkered")
+                    .font(.system(size: 9, weight: .black))
+                    .accessibilityHidden(true)
+                Text("FIRST")
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .tracking(0.8)
+            }
+            .foregroundColor(.black)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Color.yellow))
+            .fixedSize()
+        } else if timed {
+            // Tied with the leader to the second — say so rather than showing
+            // an empty slot that reads as missing data.
+            Text("TIED")
+                .font(.system(size: 10, weight: .black, design: .rounded))
+                .tracking(0.8)
+                .foregroundColor(.white.opacity(0.6))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Color.white.opacity(0.1)))
+                .fixedSize()
         }
     }
 
@@ -926,6 +1135,8 @@ struct RouteFlyoverPlayerView: View {
 
             // The odometer — the FOLLOWED track's own geographic miles (plus
             // any earlier legs of a chained tour).
+            finishStandingsCard
+
             HStack(alignment: .firstTextBaseline, spacing: 7) {
                 // The stats band's own formatter — which is the app's floor
                 // (`milesText`) now that the band no longer rounds: this
@@ -958,7 +1169,11 @@ struct RouteFlyoverPlayerView: View {
                     .background(Capsule().fill(Color.black.opacity(0.45)))
             }
 
-            if let chips = statChips, !chips.isEmpty {
+            // The standings card already carries every walker's distance and
+            // time, the followed one included — showing the chips underneath it
+            // is the same numbers twice, and on a small screen it is what
+            // pushes the controls off the bottom.
+            if let chips = statChips, !chips.isEmpty, !showsStandings {
                 HStack(spacing: 8) {
                     ForEach(chips, id: \.0) { chip in
                         HStack(spacing: 5) {
@@ -1109,6 +1324,7 @@ struct RouteFlyoverPlayerView: View {
             }
         }
         .padding(.bottom, 26)
+        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: showsStandings)
     }
 
     private var statChips: [(String, String, String)]? {
@@ -1285,6 +1501,15 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     private var pendingMilestone: FlyoverMilestone?
 
     private var smoothedHeading: Double = 0
+    /// The fitted closing camera, resolved once when the outro starts so the
+    /// blend walks toward a fixed target instead of a slightly different one
+    /// every frame. Cleared on replay.
+    private var outroTarget: MKMapCamera?
+    /// Built once alongside `outroTarget` rather than per frame: the outro
+    /// reports ~60 times and the standings don't move once everyone is home.
+    /// Rebuilt when the followed rider changes, which is the only thing that
+    /// alters them (`isFollowed`).
+    private var cachedStandings: [FlyoverStanding] = []
     /// Throttle: overlay invalidation only at visible increments (~0.3% of
     /// the line) AND at most ~20 times a second (10 at 2×) — the rider badge
     /// still moves every frame. `MKPolylineRenderer` re-rasterises tiles on
@@ -1355,7 +1580,7 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             guard raw.isFlyable else { continue }
             riders.append(Rider(
                 coordinates: companion.coordinates, color: UIColor(companion.color),
-                avatar: companion.avatar, officialMiles: nil,
+                avatar: companion.avatar, officialMiles: companion.distanceMiles,
                 times: companion.pointTimes, startedAt: companion.startedAt))
         }
 
@@ -1710,11 +1935,15 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         rebuildMileMarks(upTo: arc)
         // A paused or finished flight still reflects the switch immediately.
         if let track = followedTrack {
+            // The card marks whoever the camera is on, so switching rider after
+            // landing has to rebuild it.
+            if finishedNotified { cachedStandings = finalStandings() }
             report(finishedNotified ? .finished : (flightStarted ? .cruise : .loading),
-                   fraction: currentFraction)
+                   fraction: currentFraction,
+                   standings: finishedNotified ? cachedStandings : [])
             if displayLink?.isPaused ?? true {
                 mapView?.camera = finishedNotified
-                    ? overviewCamera(pitch: 28)
+                    ? fittedOverviewCamera()
                     : cruiseCamera(fraction: arc,
                                    heading: track.bearing(atFraction: arc,
                                                           lookaheadMeters: lookaheadMeters))
@@ -1733,6 +1962,8 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         droppedMiles = 0
         currentFraction = 0
         lastStrokeFraction = -1
+        outroTarget = nil
+        cachedStandings = []
         mapView.removeAnnotations(mileAnnotations)
         mileAnnotations = []
         smoothedHeading = followedTrack?.bearing(atFraction: 0, lookaheadMeters: lookaheadMeters) ?? 0
@@ -1787,25 +2018,41 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             currentFraction = 1
             let s = smoothstep(outroT / outroDuration)
             let end = cruiseCamera(fraction: 1, heading: smoothedHeading)
-            // The closing overhead frames EVERYONE's path, not just the
-            // followed line.
-            mapView.camera = blend(from: end, to: overviewCamera(pitch: 28), amount: s)
+            // The closing overhead FITS everyone's path — resolved once, on the
+            // first outro frame, so the blend has a fixed target to walk to.
+            if outroTarget == nil {
+                outroTarget = fittedOverviewCamera()
+                cachedStandings = finalStandings()
+            }
+            mapView.camera = blend(from: end,
+                                   to: outroTarget ?? overviewCamera(pitch: 28),
+                                   amount: s)
             setStroke(1)
             moveRiders(to: 1)
             dropMileMarks(upTo: 1)
-            report(.outro, fraction: 1)
+            report(.outro, fraction: 1, standings: cachedStandings)
             return
         }
 
         displayLink?.isPaused = true
         if !finishedNotified {
             finishedNotified = true
+            // Land exactly on the fit rather than wherever the blend arrived:
+            // the view can be resized mid-flight (rotation, the standings card
+            // appearing), and "the whole route is visible" is the one thing the
+            // last frame has to be right about.
+            let rect = routeMapRect
+            if !rect.isNull {
+                mapView.setVisibleMapRect(rect, edgePadding: overviewInsets, animated: true)
+            }
+            if cachedStandings.isEmpty { cachedStandings = finalStandings() }
             MADHaptics.success()
-            report(.finished, fraction: 1)
+            report(.finished, fraction: 1, standings: cachedStandings)
         }
     }
 
-    private func report(_ phase: FlyoverPhase, fraction: Double) {
+    private func report(_ phase: FlyoverPhase, fraction: Double,
+                        standings: [FlyoverStanding] = []) {
         let person = people.indices.contains(followed) ? people[followed] : nil
         let arc = arcFraction(of: followed, clock: fraction)
         let meters = person?.track.metersTraveled(atFraction: arc) ?? 0
@@ -1833,7 +2080,7 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         pendingNotice = nil
         emit(FlyoverTick(phase: phase, fraction: fraction, miles: miles,
                          elapsedSeconds: elapsedSeconds, notice: notice,
-                         milestone: milestone))
+                         milestone: milestone, standings: standings))
     }
 
     /// The ONE door every tick leaves through. Synchronous from the display
@@ -1997,6 +2244,106 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
                     fromDistance: overviewAltitude,
                     pitch: pitch,
                     heading: smoothedHeading)
+    }
+
+    /// The whole crew's path as a map rect — the thing the closing overhead has
+    /// to FIT, not merely be centred on.
+    private var routeMapRect: MKMapRect {
+        var rect = MKMapRect.null
+        for coordinate in allCoordinates {
+            rect = rect.union(MKMapRect(origin: MKMapPoint(coordinate),
+                                        size: MKMapSize(width: 0.1, height: 0.1)))
+        }
+        return rect
+    }
+
+    /// What the closing frame must leave clear. The HUD owns the bottom of the
+    /// screen (odometer, leg chip, stat chips, scrubber, speed row, and now the
+    /// standings card) and the crew picker the top, so a route fitted to the
+    /// raw viewport lands underneath them. Proportional and capped, because the
+    /// insets have to leave something to fit INTO on a small screen.
+    private var overviewInsets: UIEdgeInsets {
+        guard let mapView, mapView.bounds.height > 1 else {
+            return UIEdgeInsets(top: 80, left: 36, bottom: 220, right: 36)
+        }
+        let height = mapView.bounds.height
+        return UIEdgeInsets(
+            top: min(max(height * 0.11, 60), height * 0.2),
+            left: 36,
+            bottom: min(max(height * 0.34, 180), height * 0.45),
+            right: 36
+        )
+    }
+
+    /// A camera that provably SHOWS the whole crew's route in this map view's
+    /// actual bounds.
+    ///
+    /// The heuristic this replaces — centre on the bounding box at 2.1× its
+    /// diagonal — knew nothing about the view's aspect ratio, the camera's
+    /// pitch, or the HUD sitting over the bottom third, so a route wider than
+    /// it was tall landed with both ends off the sides of the screen. A
+    /// diagonal is also the wrong measure for an L-shaped walk, which is most
+    /// of them. `cameraThatFits` asks MapKit the question directly; it answers
+    /// north-up and level, which is also why the pull-out settles rather than
+    /// staying banked at the followed rider's last heading.
+    private func fittedOverviewCamera() -> MKMapCamera {
+        guard let mapView, mapView.bounds.width > 1, mapView.bounds.height > 1 else {
+            return overviewCamera(pitch: 28)
+        }
+        let rect = routeMapRect
+        guard !rect.isNull else { return overviewCamera(pitch: 28) }
+        return mapView.cameraThatFits(rect, edgePadding: overviewInsets)
+    }
+
+    /// The closing standings: who finished when, how far they went, and the gap
+    /// to the first one home. Empty for a solo flight — the HUD's odometer and
+    /// chips already say all of it for one person.
+    ///
+    /// Ordered by finishing time when the flight is timed, and by distance when
+    /// it isn't: a clockless flight is synthetic (everyone drawn at a constant
+    /// share of one shared clock), so a "finish order" read off it would be the
+    /// order the tracks were built in, dressed up as a result.
+    private func finalStandings() -> [FlyoverStanding] {
+        guard people.count > 1 else { return [] }
+
+        func distance(_ index: Int) -> Double {
+            people[index].calibratedMiles ?? people[index].track.totalMiles
+        }
+
+        let order: [Int]
+        if isTimed {
+            order = people.indices.sorted { lhs, rhs in
+                let l = people[lhs].clock?.endsAt ?? .greatestFiniteMagnitude
+                let r = people[rhs].clock?.endsAt ?? .greatestFiniteMagnitude
+                return l == r ? lhs < rhs : l < r
+            }
+        } else {
+            order = people.indices.sorted { lhs, rhs in
+                let l = distance(lhs), r = distance(rhs)
+                return l == r ? lhs < rhs : l > r
+            }
+        }
+
+        let winnerEndsAt = order.first.flatMap { people[$0].clock?.endsAt }
+        return order.enumerated().map { place, index in
+            let person = people[index]
+            let endsAt = person.clock?.endsAt
+            var behind: Double?
+            if let endsAt, let winnerEndsAt, endsAt > winnerEndsAt {
+                behind = endsAt - winnerEndsAt
+            }
+            return FlyoverStanding(
+                id: "\(index)",
+                place: place + 1,
+                name: person.avatar?.name ?? (index == 0 ? "Author" : "A friend"),
+                imageURL: person.avatar?.imageURL,
+                color: Color(person.color),
+                distanceMiles: distance(index),
+                seconds: person.clock?.duration,
+                behindSeconds: behind,
+                isFollowed: index == followed
+            )
+        }
     }
 
     /// Camera slightly AHEAD of the rider so the badge flies in the lower
