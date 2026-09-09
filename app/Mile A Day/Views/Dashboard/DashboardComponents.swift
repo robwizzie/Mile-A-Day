@@ -2231,3 +2231,45 @@ extension View {
         modifier(LiquidGlassCardModifier(accentColor: accentColor))
     }
 }
+
+// MARK: - Hero share button
+
+/// The share affordance on BOTH dashboard heroes — one construction, because
+/// the two heroes have forked a shared detail before (their stat line) and this
+/// one has to stay identical.
+///
+/// It replaces a bare `Image` sitting in an overlay, which was decoration and
+/// not a control: it had no gesture of its own, so a tap on it fell through to
+/// whatever was underneath. On the Fun hero that is Flamey's `poke()` — his
+/// frame is 1.5× his size and overflows the left column, offset 28pt UP, so it
+/// covers the top-left corner the glyph was pinned to. Tapping share poked the
+/// flame, and the glyph at 0.35 opacity behind him was barely visible besides.
+///
+/// A real `Button`, a 44pt hit area around a 38pt glass disc (Apple's minimum
+/// target; the bare glyph offered none of its own), and it lives in the top
+/// RIGHT beside the savers chip, which is the one corner of that card nothing
+/// else reaches into.
+struct HeroShareButton: View {
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(.white.opacity(0.92))
+                .frame(width: 38, height: 38)
+                .background(
+                    Circle()
+                        .fill(Color.white.opacity(0.13))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+                )
+                // The hit area is larger than the disc, and the shape goes on
+                // the OUTER frame — putting it on the disc would shrink the
+                // target back to what is drawn.
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Share")
+    }
+}
