@@ -30,6 +30,12 @@ import CoreLocation
 //   * Distances go through `DistanceUnits`, never a hardcoded "MI". A card is a
 //     surface the user reads, and it was the one place still printing miles at
 //     someone who set the app to kilometres.
+//   * Colours come from `MADTheme` tokens and the flame is the app's OWN — the
+//     Modern dashboard's `ProfessionalFlameView` or Fun's `FlameBuddyView`,
+//     picked by `DashboardStylePreference`, so the card looks like the app the
+//     user actually opens. Hand-mixed near-copies of either drift, and this
+//     file had already drifted: a bespoke orange `flame.fill` belonging to
+//     neither style, over a ground a shade darker than the real token.
 
 /// What the card shows.
 enum MADStoryDesign: String, CaseIterable, Identifiable {
@@ -166,17 +172,11 @@ struct MADStoryCard: View {
 
     private var backdrop: some View {
         ZStack {
-            // The app's own ground, so a story reads as Mile A Day before a
-            // single word is read.
-            LinearGradient(
-                colors: [
-                    Color(red: 0.15, green: 0.08, blue: 0.10),
-                    Color(red: 0.11, green: 0.06, blue: 0.08),
-                    Color(red: 0.07, green: 0.03, blue: 0.05),
-                    Color(red: 0.04, green: 0.02, blue: 0.03),
-                ],
-                startPoint: .top, endPoint: .bottom
-            )
+            // The app's OWN ground, straight from the token — not a copy of its
+            // stops. This was hand-written here and had already drifted a shade
+            // darker at the bottom, which is exactly how a share card stops
+            // looking like the app it came from.
+            MADTheme.Colors.appBackgroundGradient
             RadialGradient(
                 colors: [glowColor.opacity(0.36), glowColor.opacity(0.08), .clear],
                 center: UnitPoint(x: 0.82, y: 0.08),
@@ -307,16 +307,14 @@ struct MADStoryCard: View {
 
     private var streakBlock: some View {
         VStack(spacing: 0) {
-            Image(systemName: "flame.fill")
-                .font(.system(size: format == .story ? 86 : 62))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Color(red: 1, green: 0.80, blue: 0.36), MADTheme.Colors.warning],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                )
-                .shadow(color: MADTheme.Colors.warning.opacity(0.55),
-                        radius: format == .story ? 26 : 18)
+            heroFlame
+                .frame(width: flameSize, height: flameSize)
+                // A rendered card is a STILL, and both flames branch on Reduce
+                // Motion to their own finished frame — the same rule route art
+                // follows. Forcing it also avoids asking an `ImageRenderer`,
+                // which drives no view lifecycle, what a `TimelineView` flicker
+                // should look like at the instant it snapshots.
+                .environment(\.accessibilityReduceMotion, true)
                 .accessibilityHidden(true)
 
             Text("\(content.streak ?? 0)")
@@ -332,11 +330,35 @@ struct MADStoryCard: View {
                 .font(.system(size: format == .story ? 13 : 11,
                               weight: .black, design: .rounded))
                 .tracking(format == .story ? 4.5 : 3.6)
-                .foregroundColor(Color(red: 1, green: 0.78, blue: 0.44))
+                .foregroundColor(MADTheme.Colors.warning)
                 .padding(.top, 10)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, format.margin)
+    }
+
+    private var flameSize: CGFloat { format == .story ? 150 : 106 }
+
+    /// The SAME flame the user's own dashboard draws, so the card they share
+    /// looks like the app they opened.
+    ///
+    /// It was an SF Symbol `flame.fill` under a hand-mixed orange gradient —
+    /// which is neither of the app's two flames and belongs to neither style.
+    @ViewBuilder
+    private var heroFlame: some View {
+        switch DashboardStylePreference.current {
+        case .fun:
+            // Flamey himself, face and all. No `mood`: the hero's props and
+            // speech bubble are dressing for a live dashboard, and a bubble
+            // baked into a shared picture reads as a caption nobody wrote.
+            FlameBuddyView(health: .blazing, size: flameSize, phase: .blazing, coalWarmth: 1)
+        case .modern:
+            // The Modern dashboard's own flame: the same figure with no face,
+            // ungrounded so it stays framed. `.blazing` also means no countdown
+            // ring — a still has no countdown to draw.
+            ProfessionalFlameView(phase: .blazing, health: .blazing,
+                                  size: flameSize, coalWarmth: 1)
+        }
     }
 
     /// Equal columns under one hairline, split by hairlines. An `HStack` with
@@ -430,7 +452,7 @@ struct MADStoryCard: View {
             }
             if let streak = content.streak, streak > 0 {
                 out.append(MADStoryStat(value: "\(streak)", label: "STREAK",
-                                        tint: Color(red: 1, green: 0.72, blue: 0.34)))
+                                        tint: MADTheme.Colors.warning))
             }
         case .streak:
             if let distance = content.distanceMiles, distance > 0 {
