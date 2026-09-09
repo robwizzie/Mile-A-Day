@@ -210,6 +210,7 @@ struct EnhancedShareView: View {
     @State private var generatedImage: UIImage?
     @State private var showingCopiedFeedback = false
     @State private var instagramFailed = false
+    @State private var savedForInstagram = false
 
     var body: some View {
         NavigationStack {
@@ -285,30 +286,33 @@ struct EnhancedShareView: View {
                         // was built for and never had: until now the only way
                         // onto a story was the system sheet, which drops the
                         // image into the composer as a flat photo.
-                        if InstagramStoryShare.isAvailable {
-                            Button(action: shareToInstagram) {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "camera.fill")
-                                        .accessibilityHidden(true)
-                                    Text("Instagram Stories")
-                                }
-                                .font(MADTheme.Typography.headline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(
-                                            LinearGradient(
-                                                colors: [Color(red: 0.76, green: 0.23, blue: 0.55),
-                                                         Color(red: 0.96, green: 0.42, blue: 0.20)],
-                                                startPoint: .leading, endPoint: .trailing
-                                            )
-                                        )
-                                )
+                        // Always offered. Gating this on
+                        // `InstagramStoryShare.isAvailable` meant it rendered
+                        // for nobody, because that needs a Meta App ID which has
+                        // never been filled in — so the one button this whole
+                        // screen exists to provide was invisible.
+                        Button(action: shareToInstagram) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "camera.fill")
+                                    .accessibilityHidden(true)
+                                Text("Instagram Stories")
                             }
-                            .disabled(generatedImage == nil)
+                            .font(MADTheme.Typography.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color(red: 0.76, green: 0.23, blue: 0.55),
+                                                     Color(red: 0.96, green: 0.42, blue: 0.20)],
+                                            startPoint: .leading, endPoint: .trailing
+                                        )
+                                    )
+                            )
                         }
+                        .disabled(generatedImage == nil)
 
                         HStack(spacing: 12) {
                             Button {
@@ -383,6 +387,11 @@ struct EnhancedShareView: View {
             } message: {
                 Text("Try \"Share\" and pick Instagram from the share sheet instead.")
             }
+            .alert("Saved to Photos", isPresented: $savedForInstagram) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Add it to your story from your camera roll.")
+            }
             .onAppear {
                 selectedTheme = systemColorScheme
                 TelemetryService.record(ShareTelemetry.opened)
@@ -409,6 +418,15 @@ struct EnhancedShareView: View {
         ) {
             MADHaptics.action()
             TelemetryService.record(ShareTelemetry.instagram)
+            return
+        }
+        // No direct handoff (no Meta App ID configured, or Instagram declined
+        // the open): save the card and open Instagram, so the button does
+        // something real rather than reporting a failure the user can't fix.
+        if InstagramStoryShare.openApp(after: image) {
+            MADHaptics.success()
+            TelemetryService.record(ShareTelemetry.instagram)
+            savedForInstagram = true
         } else {
             instagramFailed = true
         }

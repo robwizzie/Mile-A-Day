@@ -435,6 +435,7 @@ struct ActivityCardView: View {
             // A raw workout card carries no streak (`stats` sets it nil) —
             // pass none rather than a number this card never showed.
             streak: nil,
+            activityName: PostCardView.activityNoun(entry.workout_type, pace: pace),
             date: RelativeTime.date(from: entry.sort_ts),
             dateText: dateText,
             coordinates: entry.routeCoordinates ?? [],

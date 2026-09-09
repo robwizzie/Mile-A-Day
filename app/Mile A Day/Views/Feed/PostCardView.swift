@@ -1315,6 +1315,7 @@ struct PostCardView: View {
             paceSecondsPerMile: stats?.pace,
             durationSeconds: stats?.duration,
             streak: stats?.streak,
+            activityName: Self.activityNoun(post.workout_type, pace: stats?.pace),
             date: nil,
             dateText: stats?.date,
             coordinates: post.routeCoordinates ?? [],

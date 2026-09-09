@@ -21,6 +21,11 @@
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>instagram-stories</string>
+		<!-- The fallback path when no Meta App ID is configured: save the card
+		     and open Instagram's story camera. `canOpenURL` answers false for
+		     any scheme not listed here however installed Instagram is, so
+		     without it the fallback can't tell installed from missing. -->
+		<string>instagram</string>
 	</array>
 	<!-- Meta App ID for the story handoff's `source_application`. Register a
 	     Meta app (developers.facebook.com) and paste the ID here — until then

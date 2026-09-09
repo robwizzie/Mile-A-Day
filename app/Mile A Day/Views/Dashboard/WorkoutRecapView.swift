@@ -397,6 +397,7 @@ struct WorkoutRecapView: View {
             paceSecondsPerMile: distance > 0 ? duration / distance : nil,
             durationSeconds: duration,
             streak: streak,
+            activityName: activityName,
             date: Date(),
             coordinates: routeCoordinates,
             // `workoutColor` keys on "walking"/"running", NOT the recap's
