@@ -1133,10 +1133,25 @@ struct RouteFlyoverPlayerView: View {
                 }
             }
 
-            // The odometer — the FOLLOWED track's own geographic miles (plus
-            // any earlier legs of a chained tour).
             finishStandingsCard
 
+            odometerBlock
+
+            scrubberAndControls
+        }
+        .padding(.bottom, 26)
+        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: showsStandings)
+    }
+
+    /// The odometer, the stitched-day chip and the stat chips as ONE child of
+    /// the HUD stack. Grouped so the HUD's own `VStack` stays at ten children:
+    /// past that the whole block leans on the parameter-pack `buildBlock`, and
+    /// this stack's children are long modifier chains that the type-checker
+    /// then has to solve together.
+    private var odometerBlock: some View {
+        VStack(spacing: 12) {
+            // The odometer — the FOLLOWED track's own geographic miles (plus
+            // any earlier legs of a chained tour).
             HStack(alignment: .firstTextBaseline, spacing: 7) {
                 // The stats band's own formatter — which is the app's floor
                 // (`milesText`) now that the band no longer rounds: this
@@ -1191,7 +1206,13 @@ struct RouteFlyoverPlayerView: View {
                     }
                 }
             }
+        }
+    }
 
+    /// The scrubber, the speed row and the Replay/Hype (or pause) controls, as
+    /// the HUD stack's last child. Same grouping reason as `odometerBlock`.
+    private var scrubberAndControls: some View {
+        VStack(spacing: 12) {
             // The progress line IS a scrubber: grab anywhere and drag to any
             // point of the walk — the camera, trail, badges and odometer all
             // jump with it, and playback resumes from wherever you let go.
@@ -1323,8 +1344,6 @@ struct RouteFlyoverPlayerView: View {
                 }
             }
         }
-        .padding(.bottom, 26)
-        .animation(.spring(response: 0.45, dampingFraction: 0.85), value: showsStandings)
     }
 
     private var statChips: [(String, String, String)]? {

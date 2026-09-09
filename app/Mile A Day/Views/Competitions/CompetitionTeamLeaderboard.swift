@@ -222,8 +222,9 @@ extension CompetitionDetailView {
                     TeamLivesChip(lives: lives)
                 }
 
-                // A streak's digits wrap without this, and a team score is
-                // bounded, so publishing its minimum width is safe.
+                // A number beside a name wraps its DIGITS without this. Safe to
+                // fix the size here and not on the team NAME beside it: a score
+                // is bounded, a user-typed team name is not.
                 Text(competition.teamScoreLabel(team))
                     .font(.system(size: 16, weight: .heavy, design: .rounded))
                     .foregroundColor(rank == 1 ? .yellow : .white.opacity(0.9))
@@ -406,7 +407,11 @@ extension CompetitionDetailView {
             .padding(.top, 8)
             .padding(.bottom, 2)
 
-            ForEach(Array(users.enumerated()), id: \.element.id) { index, user in
+            // Ranked among themselves: they compete individually, so their own
+            // score is the number that means something here — and a row of
+            // 1, 2, 3 beside an unsorted list would be a ranking that isn't one.
+            ForEach(Array(users.sorted { ($0.score ?? 0) > ($1.score ?? 0) }.enumerated()),
+                    id: \.element.id) { index, user in
                 teamMemberRow(user, placeInTeam: index + 1, color: .gray)
             }
         }
