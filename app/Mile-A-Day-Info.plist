@@ -15,6 +15,21 @@
 			</array>
 		</dict>
 	</array>
+	<!-- Instagram story sharing. `canOpenURL` answers false for any scheme not
+	     declared here however installed the app is, so without this the
+	     "Instagram Stories" button hides itself permanently. -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>instagram-stories</string>
+	</array>
+	<!-- Meta App ID for the story handoff's `source_application`. Register a
+	     Meta app (developers.facebook.com) and paste the ID here — until then
+	     `InstagramStoryShare.isAvailable` is false and sharing falls back to
+	     the system share sheet, which is a working feature, just one more tap.
+	     Deliberately NOT a guessed bundle id: Instagram accepts the open and
+	     then shows an empty composer, which reads as broken. -->
+	<key>MADFacebookAppID</key>
+	<string></string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.mileaday.background-refresh</string>
