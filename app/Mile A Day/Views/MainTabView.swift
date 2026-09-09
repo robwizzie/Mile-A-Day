@@ -136,6 +136,13 @@ struct MainTabView: View {
             InAppNotificationBanner()
                 .padding(.top, 4)
         }
+        .safeAreaInset(edge: .top) {
+            // An outage is a fact about the whole app, so it's hosted once here
+            // rather than by a tab that might not be the one you're looking at.
+            // A safe-area inset, not an overlay: it takes its own room instead
+            // of sitting on top of the notification banner.
+            ServiceOutageBanner()
+        }
         .onChange(of: trackingManager.isTracking) { _, tracking in
             activeWorkoutForBanner = tracking ? InProgressWorkoutStore.load() : nil
         }
@@ -333,6 +340,9 @@ struct MainTabView: View {
                 // show an unlocked composer for a window that has already
                 // closed — and the server would refuse the post.
                 FreshPostWindowManager.shared.refresh()
+                // A phone backgrounded through an outage comes back to a banner
+                // about a service that may already be up again.
+                ServiceHealthMonitor.shared.recheck()
                 Task {
                     await competitionService.refreshAllData()
                     await friendService.refreshAllData()
