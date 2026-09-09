@@ -449,3 +449,34 @@ extension MADStoryCard {
         return renderer.uiImage
     }
 }
+
+// MARK: - Goal celebration
+
+extension GoalCompletionStats {
+    /// This DAY, as a story card.
+    ///
+    /// One construction shared by all three goal celebrations (classic, Modern,
+    /// Fun) rather than three copies — the two dashboard heroes forked their
+    /// stat line exactly this way and drifted.
+    ///
+    /// Deliberately no route: a goal celebration is about the day, which can be
+    /// several walks, and pinning one walk's line under the day's rollup is the
+    /// mismatch `dayRollupStats` exists to avoid. That leaves the Streak face,
+    /// which is the one this moment wants anyway.
+    ///
+    /// This extension lives HERE and not in CelebrationManager.swift, which is
+    /// a Watch target member: a dependency added there compiles on iPhone and
+    /// fails the Watch with "Cannot find 'MADStoryContent' in scope".
+    var storyContent: MADStoryContent {
+        MADStoryContent(
+            distanceMiles: todaysDistance,
+            // `todaysAveragePace` is MINUTES per mile; every consumer that
+            // wants seconds multiplies by 60 (RunPostService, SocialFeedView).
+            paceSecondsPerMile: todaysAveragePace.map { $0 * 60 },
+            durationSeconds: todaysTotalDuration > 0 ? todaysTotalDuration : nil,
+            streak: currentStreak,
+            totalMiles: totalLifetimeMiles,
+            date: Date()
+        )
+    }
+}
