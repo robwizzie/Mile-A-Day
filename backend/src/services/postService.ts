@@ -4043,6 +4043,45 @@ export async function addCrewPhoto(
 }
 
 /**
+ * Edit the caption on YOUR OWN slide of a shared post, without re-sending the
+ * photo.
+ *
+ * The author has had this since captions existed (`updatePost`); a credited
+ * participant had no equivalent, so their only way to put words under their
+ * own picture was to have typed them in the composer at the moment they added
+ * it — and everyone who added a photo before per-slide captions shipped, or
+ * who simply didn't write one, was left with a slide that could never carry
+ * their voice. The card then falls back to nothing under their photo, which
+ * reads as the app having lost what they wrote.
+ *
+ * Deliberately NOT behind the posting window. That gate exists because a
+ * PHOTO is reaching the feed; the picture here is already on the card and is
+ * not touched. Charging words the camera's ten minutes would mean a caption
+ * can only ever be written in the same ten minutes as the walk, which is the
+ * thing being fixed. Same membership rule as `addCrewPhoto`, and it only
+ * matches a row that HAS a slide — there is nothing to caption otherwise.
+ */
+export async function setCrewCaption(
+  postId: string,
+  userId: string,
+  caption: string | null,
+): Promise<boolean> {
+  const rows = await db.query<{ post_id: string }>(
+    `UPDATE post_coauthors
+				SET caption = $3
+			WHERE post_id = $1 AND user_id = $2 AND status = 'accepted'
+				AND media_url IS NOT NULL
+				AND EXISTS (
+					SELECT 1 FROM posts p
+					WHERE p.post_id = $1 AND p.deleted_at IS NULL AND p.share_to_feed
+				)
+			RETURNING post_id`,
+    [postId, userId, caption],
+  );
+  return rows.length > 0;
+}
+
+/**
  * "3 of you were out, 1 photo so far" — the nudge that turns a buddy post into
  * something people come back to.
  *
@@ -4698,17 +4737,55 @@ export interface PostHighlight {
 }
 
 /**
+ * SQL: is `owner` still credited on post `p` as an accepted participant?
+ *
+ * The multi-person arm only — a buddy walk's crew lives in `post_coauthors`,
+ * and the scalar `coauthor_user_id` mirrors just the first of them. Same
+ * liveness rule as everywhere else (`MULTI_COLLAB_ACTIVE`), restated against
+ * an arbitrary owner expression because this one is not evaluated per viewer.
+ *
+ * Deliberately NOT gated on `coauthorOnProfileSql`: that switch is grid-only,
+ * and putting a walk in a highlight is a publish decision of its own — the
+ * same reason `share_to_feed` is dropped below. Hiding a collab from the
+ * chronological grid must not silently empty a highlight the owner built.
+ */
+const highlightCoauthorSql = (owner: string) => `EXISTS (
+			SELECT 1 FROM post_coauthors hpca
+			WHERE hpca.post_id = p.post_id
+				AND hpca.user_id = ${owner}
+				AND hpca.status = 'accepted'
+				AND NOT EXISTS (
+					SELECT 1 FROM user_blocks hcb
+					WHERE (hcb.blocker_id = p.user_id AND hcb.blocked_id = hpca.user_id)
+						OR (hcb.blocker_id = hpca.user_id AND hcb.blocked_id = p.user_id)
+				)
+		)`;
+
+/**
  * SQL: may viewer `viewer` see owner `owner`'s post `p` AS A HIGHLIGHT MEMBER?
  *
  * The grid's rules minus `share_to_feed` (membership is the publish decision,
- * see above) and minus the collab arm (a highlight only ever holds the owner's
- * own posts, enforced at write time). Everything that protects another person
- * — visibility, blocks — is unchanged and stated here rather than assumed.
+ * see above). Everything that protects another person — the AUTHOR's
+ * visibility, their privacy setting, blocks in either direction — is unchanged
+ * and stated here rather than assumed.
+ *
+ * The owner arm has two halves now: a post they wrote, or one they are an
+ * accepted participant on. A buddy walk is ONE shared card, so the walks
+ * people most want to keep are routinely authored by somebody else — gating on
+ * authorship alone meant the whole buddy feature was the one thing a highlight
+ * could not hold, and the picker offered those posts anyway (it reads the
+ * profile grid, which has always included them), so choosing one silently
+ * dropped it on save.
+ *
+ * This widens what a highlight may POINT AT, never what a viewer may SEE.
+ * Every gate below still names `p.user_id` — the author — so a post whose
+ * author goes private, blocks the viewer or deletes it leaves the highlight
+ * exactly as it always did, and a collab that ends takes the pointer with it.
  */
 const highlightMemberWhere = (viewer: string, owner: string) => `(
-			p.user_id = ${owner}
+			(p.user_id = ${owner} OR ${highlightCoauthorSql(owner)})
 			AND p.deleted_at IS NULL
-			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL(owner, viewer)}
+			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("p.user_id", viewer)}
 			AND (p.user_id = ${viewer} OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")})
 			AND (p.user_id = ${viewer} OR NOT EXISTS (
 				SELECT 1 FROM user_blocks b
@@ -4735,7 +4812,20 @@ export async function listUserHighlights(
 			h.cover_post_id,
 			h.cover_image_url,
 			COALESCE(h.cover_image_url, (
-				SELECT p.media_url FROM post_highlight_items i
+				-- The circle shows the FACE the owner kept, not the post's lead
+				-- photo: a highlight of buddy walks whose members are all "my
+				-- slide of it" would otherwise wear a friend's picture on every
+				-- one. A crew slide resolves to that person's photo; the whole
+				-- post and the map fall back to the post's own, which is what
+				-- every pre-slide row means and the only image a map has.
+				SELECT COALESCE(
+					(SELECT cpca.media_url FROM post_coauthors cpca
+						WHERE cpca.post_id = p.post_id
+							AND cpca.user_id = i.slide_key
+							AND cpca.status = 'accepted'),
+					p.media_url
+				)
+				FROM post_highlight_items i
 				JOIN posts p ON p.post_id = i.post_id
 				WHERE i.highlight_id = h.highlight_id
 					AND ${highlightMemberWhere("$1", "h.user_id")}
@@ -4762,11 +4852,27 @@ export async function listUserHighlights(
   );
 }
 
+/**
+ * A highlight member: the whole post row, plus WHICH FACE of it the owner
+ * kept.
+ *
+ * The face is served as a key, never as a resolved media url, on purpose. The
+ * url for every face is already on the row — `media_url` for the post's own
+ * photo, `coauthors[].media_url` for a participant's, `route` for the map —
+ * and those are exactly the fields `lockUnearnedPhotos` blanks on the way out.
+ * A second, pre-resolved copy of the same photo would be a field the lock
+ * doesn't know about, i.e. a way to read a withheld picture, so the client
+ * picks the face out of the row it was already given.
+ */
+export interface HighlightItem extends PostRow {
+  slide_key: string;
+}
+
 export interface HighlightDetail {
   highlight_id: string;
   user_id: string;
   title: string;
-  items: PostRow[];
+  items: HighlightItem[];
 }
 
 /** One highlight, opened. Members in the owner's chosen order. */
@@ -4784,9 +4890,10 @@ export async function getHighlight(
   );
   if (head.length === 0) return null;
 
-  const items = await db.query<PostRow>(
+  const items = await db.query<HighlightItem>(
     `
 		SELECT ${POST_SELECT},
+			i.slide_key,
 			${URL_SAFE_CURSOR("p.created_at")} AS cursor
 		FROM post_highlight_items i
 		JOIN posts p ON p.post_id = i.post_id
@@ -4817,28 +4924,132 @@ function normalizeHighlightTitle(raw: unknown): string | null {
   return title;
 }
 
+/** The whole post — its own lead photo. What every shipped client asks for. */
+export const HIGHLIGHT_SLIDE_WHOLE_POST = "";
+/** The walk's route face rather than anybody's photograph. */
+export const HIGHLIGHT_SLIDE_MAP = "map";
+
+/** One member of a highlight: a post, and which face of it. */
+export interface HighlightSlide {
+  post_id: string;
+  slide_key: string;
+}
+
 /**
- * Which of `postIds` are genuinely the caller's own live posts, in the order
+ * The client's `post_ids` / `slides` input as one normalized list.
+ *
+ * `slides` wins when it is there; `post_ids` remains the whole wire format for
+ * every build already in the field, and each of its entries means the whole
+ * post. Both are capped and de-duplicated on the PAIR, since the same post may
+ * legitimately appear twice under two different faces — that is the point of
+ * the column.
+ */
+function requestedSlides(input: {
+  post_ids?: unknown;
+  slides?: unknown;
+}): HighlightSlide[] {
+  const raw: HighlightSlide[] = Array.isArray(input.slides)
+    ? input.slides.flatMap((entry) => {
+        if (!entry || typeof entry !== "object") return [];
+        const postId = String((entry as any).post_id ?? "");
+        const key = (entry as any).slide_key;
+        return [
+          {
+            post_id: postId,
+            slide_key:
+              typeof key === "string" ? key : HIGHLIGHT_SLIDE_WHOLE_POST,
+          },
+        ];
+      })
+    : Array.isArray(input.post_ids)
+      ? input.post_ids.map((id) => ({
+          post_id: String(id),
+          slide_key: HIGHLIGHT_SLIDE_WHOLE_POST,
+        }))
+      : [];
+
+  const seen = new Set<string>();
+  const out: HighlightSlide[] = [];
+  for (const slide of raw) {
+    if (!isUuid(slide.post_id)) continue;
+    const dedupeKey = `${slide.post_id} ${slide.slide_key}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push(slide);
+    if (out.length >= MAX_HIGHLIGHT_ITEMS) break;
+  }
+  return out;
+}
+
+/**
+ * Which of the requested slides the caller may actually keep, in the order
  * they were given. Everything else is DROPPED rather than rejected: the client
  * builds this list from a grid it may have loaded minutes ago, and a post
  * deleted in the meantime should not fail the whole save.
+ *
+ * A post qualifies when the caller AUTHORED it or is an accepted participant
+ * on it — a buddy walk is one shared card, so "my walk" and "my post" are
+ * routinely not the same row, and requiring authorship made the buddy feature
+ * the one thing a highlight could not hold.
+ *
+ * A slide key qualifies when it names a face that post actually has: the whole
+ * post, its map, or one of the people on it (the author or an accepted
+ * participant). An unrecognised key falls back to the whole post rather than
+ * dropping the member — the walk the user picked is what they asked to keep,
+ * and losing it entirely over a face we can't resolve is the worse failure.
  */
-async function ownedPostIds(
+async function highlightableSlides(
   userId: string,
-  postIds: string[],
-): Promise<string[]> {
-  const wanted = Array.from(new Set(postIds.filter(isUuid))).slice(
-    0,
-    MAX_HIGHLIGHT_ITEMS,
-  );
+  wanted: HighlightSlide[],
+): Promise<HighlightSlide[]> {
   if (wanted.length === 0) return [];
-  const rows = await db.query<{ post_id: string }>(
-    `SELECT post_id FROM posts
-		 WHERE post_id = ANY($1::uuid[]) AND user_id = $2 AND deleted_at IS NULL`,
-    [wanted, userId],
+  const postIds = Array.from(new Set(wanted.map((s) => s.post_id)));
+  const rows = await db.query<{
+    post_id: string;
+    author_id: string;
+    crew: string[] | null;
+  }>(
+    `SELECT p.post_id, p.user_id AS author_id,
+			(SELECT array_agg(pca.user_id) FROM post_coauthors pca
+				WHERE pca.post_id = p.post_id AND pca.status = 'accepted') AS crew
+		 FROM posts p
+		 WHERE p.post_id = ANY($1::uuid[])
+			AND p.deleted_at IS NULL
+			AND (p.user_id = $2 OR EXISTS (
+				SELECT 1 FROM post_coauthors mine
+				WHERE mine.post_id = p.post_id
+					AND mine.user_id = $2
+					AND mine.status = 'accepted'
+			))`,
+    [postIds, userId],
   );
-  const live = new Set(rows.map((r) => r.post_id));
-  return wanted.filter((id) => live.has(id));
+  const faces = new Map<string, Set<string>>();
+  for (const row of rows) {
+    faces.set(
+      row.post_id,
+      new Set([
+        HIGHLIGHT_SLIDE_WHOLE_POST,
+        HIGHLIGHT_SLIDE_MAP,
+        row.author_id,
+        ...(row.crew ?? []),
+      ]),
+    );
+  }
+
+  const seen = new Set<string>();
+  const out: HighlightSlide[] = [];
+  for (const slide of wanted) {
+    const allowed = faces.get(slide.post_id);
+    if (!allowed) continue;
+    const key = allowed.has(slide.slide_key)
+      ? slide.slide_key
+      : HIGHLIGHT_SLIDE_WHOLE_POST;
+    const dedupeKey = `${slide.post_id} ${key}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push({ post_id: slide.post_id, slide_key: key });
+  }
+  return out;
 }
 
 /**
@@ -4861,6 +5072,7 @@ export async function createHighlight(
   input: {
     title: unknown;
     post_ids?: unknown;
+    slides?: unknown;
     cover_post_id?: unknown;
     cover_image_url?: unknown;
   },
@@ -4876,16 +5088,14 @@ export async function createHighlight(
     return { ok: false, error: "limit" };
   }
 
-  const postIds = await ownedPostIds(
-    userId,
-    Array.isArray(input.post_ids) ? input.post_ids.map(String) : [],
-  );
-  if (postIds.length === 0) return { ok: false, error: "no_posts" };
+  const slides = await highlightableSlides(userId, requestedSlides(input));
+  if (slides.length === 0) return { ok: false, error: "no_posts" };
+  const memberIds = slides.map((s) => s.post_id);
   const cover =
     typeof input.cover_post_id === "string" &&
-    postIds.includes(input.cover_post_id)
+    memberIds.includes(input.cover_post_id)
       ? input.cover_post_id
-      : postIds[0];
+      : memberIds[0];
 
   const created = await db.query<{ highlight_id: string }>(
     `INSERT INTO post_highlights (user_id, title, cover_post_id, cover_image_url, sort_index)
@@ -4895,7 +5105,7 @@ export async function createHighlight(
     [userId, title, cover, normalizeCoverImage(input.cover_image_url) ?? null],
   );
   const highlightId = created[0].highlight_id;
-  await replaceHighlightItems(highlightId, postIds);
+  await replaceHighlightItems(highlightId, slides);
   return { ok: true, highlight_id: highlightId };
 }
 
@@ -4908,20 +5118,30 @@ export async function createHighlight(
  */
 async function replaceHighlightItems(
   highlightId: string,
-  postIds: string[],
+  slides: HighlightSlide[],
 ): Promise<void> {
+  const postIds = slides.map((s) => s.post_id);
+  const slideKeys = slides.map((s) => s.slide_key);
+  // Membership is keyed on the PAIR now, so the delete has to be too: a walk
+  // kept twice under two faces would otherwise lose one of them whenever the
+  // other was re-sent.
   await db.query(
-    `DELETE FROM post_highlight_items
-		 WHERE highlight_id = $1 AND NOT (post_id = ANY($2::uuid[]))`,
-    [highlightId, postIds],
+    `DELETE FROM post_highlight_items i
+		 WHERE i.highlight_id = $1
+			AND NOT EXISTS (
+				SELECT 1 FROM UNNEST($2::uuid[], $3::text[]) AS v(post_id, slide_key)
+				WHERE v.post_id = i.post_id AND v.slide_key = i.slide_key
+			)`,
+    [highlightId, postIds, slideKeys],
   );
-  if (postIds.length === 0) return;
+  if (slides.length === 0) return;
   await db.query(
-    `INSERT INTO post_highlight_items (highlight_id, post_id, sort_index)
-		 SELECT $1, v.post_id, v.ord
-		 FROM UNNEST($2::uuid[]) WITH ORDINALITY AS v(post_id, ord)
-		 ON CONFLICT (highlight_id, post_id) DO UPDATE SET sort_index = EXCLUDED.sort_index`,
-    [highlightId, postIds],
+    `INSERT INTO post_highlight_items (highlight_id, post_id, slide_key, sort_index)
+		 SELECT $1, v.post_id, v.slide_key, v.ord
+		 FROM UNNEST($2::uuid[], $3::text[]) WITH ORDINALITY AS v(post_id, slide_key, ord)
+		 ON CONFLICT (highlight_id, post_id, slide_key)
+			DO UPDATE SET sort_index = EXCLUDED.sort_index`,
+    [highlightId, postIds, slideKeys],
   );
 }
 
@@ -4931,6 +5151,7 @@ export async function updateHighlight(
   input: {
     title?: unknown;
     post_ids?: unknown;
+    slides?: unknown;
     cover_post_id?: unknown;
     cover_image_url?: unknown;
     sort_index?: unknown;
@@ -4948,16 +5169,12 @@ export async function updateHighlight(
     if (!title) return { ok: false, error: "invalid_title" };
   }
 
-  let postIds: string[] | null = null;
-  if (input.post_ids !== undefined) {
-    postIds = await ownedPostIds(
-      userId,
-      Array.isArray(input.post_ids) ? input.post_ids.map(String) : [],
-    );
+  if (input.post_ids !== undefined || input.slides !== undefined) {
+    const slides = await highlightableSlides(userId, requestedSlides(input));
     // An empty highlight is a circle that opens onto nothing, so emptying one
     // is a delete in disguise — say so instead of leaving the shell behind.
-    if (postIds.length === 0) return { ok: false, error: "no_posts" };
-    await replaceHighlightItems(highlightId, postIds);
+    if (slides.length === 0) return { ok: false, error: "no_posts" };
+    await replaceHighlightItems(highlightId, slides);
   }
 
   const cover =

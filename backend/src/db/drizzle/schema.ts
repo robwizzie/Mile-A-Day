@@ -475,8 +475,10 @@ export const stealthWindows = pgTable(
   {
     id: bigserial({ mode: "number" }).primaryKey().notNull(),
     userId: text("user_id").notNull(),
-    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" })
-      .notNull(),
+    startedAt: timestamp("started_at", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
     endedAt: timestamp("ended_at", { withTimezone: true, mode: "string" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
@@ -2832,9 +2834,14 @@ export const weeklyChallengePushLog = pgTable(
  * ordinary post-visibility rules, so a post that later goes private or gets
  * deleted simply leaves the highlight for everyone but its owner.
  *
- * Owner-only content by construction: a highlight can only ever contain posts
- * whose author is the highlight's owner (enforced at write time), so there is
- * no path here for one user to publish another's photo.
+ * A highlight holds posts the owner AUTHORED and posts they are an accepted
+ * coauthor on — a buddy walk is one shared card, so a walk the owner took is
+ * routinely somebody else's post, and gating on authorship alone made the
+ * walks people most want to keep the only ones they could not. Nothing about
+ * that widens what a viewer may see: membership is only ever a pointer, and
+ * every read re-derives the AUTHOR's visibility, the collab's liveness and
+ * blocks in either direction, so a post whose author restricts it (or a
+ * collab that ends) leaves every highlight it was in.
  */
 export const postHighlights = pgTable(
   "post_highlights",
@@ -2878,16 +2885,40 @@ export const postHighlights = pgTable(
       foreignColumns: [posts.postId],
       name: "post_highlights_cover_post_id_fkey",
     }).onDelete("set null"),
-    check("post_highlights_title_check", sql`char_length(title) BETWEEN 1 AND 30`),
+    check(
+      "post_highlights_title_check",
+      sql`char_length(title) BETWEEN 1 AND 30`,
+    ),
   ],
 );
 
-/** Ordered membership of a highlight. Cascades from both sides. */
+/**
+ * Ordered membership of a highlight. Cascades from both sides.
+ *
+ * A member is a post AND WHICH FACE OF IT (`slide_key`), because a buddy
+ * walk's post is one card carrying several people's pictures plus the route,
+ * and "keep this walk" usually means one of those, not all of them. Keying on
+ * the post alone let a highlight hold a walk exactly once and always play the
+ * author's photo.
+ */
 export const postHighlightItems = pgTable(
   "post_highlight_items",
   {
     highlightId: uuid("highlight_id").notNull(),
     postId: uuid("post_id").notNull(),
+    /**
+     * Which face of the post this member is:
+     *   ''      the whole post, i.e. its own lead photo. The DEFAULT, so every
+     *           row written before this column — and by every shipped client,
+     *           which sends only post ids — means exactly what it meant then.
+     *   'map'   the walk's route face.
+     *   <uid>   that person's photo slide: the author's own id for the lead
+     *           photo, a credited participant's id for theirs.
+     * Part of the primary key, which is why it is NOT NULL with a constant
+     * default rather than nullable — a nullable key column cannot hold the
+     * uniqueness this table depends on.
+     */
+    slideKey: text("slide_key").default("").notNull(),
     sortIndex: integer("sort_index").default(0).notNull(),
     addedAt: timestamp("added_at", { withTimezone: true, mode: "string" })
       .defaultNow()
@@ -2917,7 +2948,7 @@ export const postHighlightItems = pgTable(
       name: "post_highlight_items_post_id_fkey",
     }).onDelete("cascade"),
     primaryKey({
-      columns: [table.highlightId, table.postId],
+      columns: [table.highlightId, table.postId, table.slideKey],
       name: "post_highlight_items_pkey",
     }),
   ],

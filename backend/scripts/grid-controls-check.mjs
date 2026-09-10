@@ -34,6 +34,14 @@
  *   8. an uploaded highlight cover outranks the member photo on the rail, a
  *      write that doesn't mention it leaves it alone, and "" puts the member
  *      photo back
+ *   9. a highlight can hold a walk you were ON but did not post, one FACE at
+ *      a time (your slide, theirs, the route) — while a non-participant still
+ *      cannot, an unknown face degrades to the whole post rather than losing
+ *      the walk, a block between the two authors empties it with no write,
+ *      and `post_ids` alone still means what it always meant
+ *  10. a credited participant can write and rewrite the caption under their
+ *      OWN slide without re-sending the photo, it reaches the card, it never
+ *      touches the post's own caption, and nobody else can write it
  *
  * Usage (same env as ci-smoke):
  *   DATABASE_URL=... node scripts/grid-controls-check.mjs
@@ -56,6 +64,7 @@ import {
   updateHighlight,
   deleteHighlight,
   addCrewPhoto,
+  setCrewCaption,
   POST_PIN_LIMIT,
 } from "../dist/services/postService.js";
 import { uploadWorkouts } from "../dist/services/workoutService.js";
@@ -323,11 +332,21 @@ async function main() {
   check("the switch wrote the multi-person row too", pcRow[0]?.on_feed, true);
 
   // ── 6 — per-post crew route consent ────────────────────────────────────
-  await addCrewPhoto({
-    postId: collab.post_id,
-    userId: MATE,
-    mediaUrl: "/uploads/posts/grid-mate-slide.jpg",
-  }).catch(() => {});
+  // Positional, and NOT swallowed. This was written as an object literal
+  // behind a `.catch(() => {})`, so it silently added no slide at all and
+  // every assertion below it was passing for the wrong reason — the crew
+  // route was resolving through the overlapping workout rather than through
+  // the row this section is about.
+  check(
+    "MATE's own slide lands on the shared post",
+    await addCrewPhoto(
+      collab.post_id,
+      MATE,
+      "/uploads/posts/grid-mate-slide.jpg",
+      "my side of it",
+    ),
+    true,
+  );
   const crewRoute = async (viewer) => {
     const row = (await getUnifiedFeed(viewer, 30, null)).find(
       (r) => r.kind === "post" && r.id === collab.post_id,
@@ -624,7 +643,11 @@ async function main() {
     covered.cover_media_url,
     "/uploads/posts/grid-cover.jpg",
   );
-  check("...and is reported separately", covered.cover_image_url, "/uploads/posts/grid-cover.jpg");
+  check(
+    "...and is reported separately",
+    covered.cover_image_url,
+    "/uploads/posts/grid-cover.jpg",
+  );
   await updateHighlight(AUTHOR, hid, { title: "Sunday loops" });
   check(
     "a write that doesn't mention the cover leaves it alone",
@@ -633,7 +656,11 @@ async function main() {
   );
   await updateHighlight(AUTHOR, hid, { cover_image_url: "" });
   const uncovered = (await listUserHighlights(AUTHOR, AUTHOR))[0];
-  check("clearing it restores the member photo", uncovered.cover_image_url, null);
+  check(
+    "clearing it restores the member photo",
+    uncovered.cover_image_url,
+    null,
+  );
   check(
     "...which is the chosen member's",
     uncovered.cover_media_url,
@@ -656,6 +683,162 @@ async function main() {
     "...and leaves the posts alone",
     (await gridIds(AUTHOR, AUTHOR)).includes(solo.post_id),
     true,
+  );
+
+  // ── 9 — highlights of walks you were ON, one face at a time ────────────
+  //
+  // A buddy walk is ONE shared card, so the walks people most want to keep
+  // are routinely somebody else's post. Membership is now "authored it OR
+  // accepted on it", and a member names WHICH FACE of the post it is — so the
+  // same walk can be kept twice, once as your own picture and once as the
+  // route. Every failure here is silent: a dropped slide just isn't in the
+  // highlight, which reads as the save having worked.
+  const crewHl = await createHighlight(MATE, {
+    title: "Walks together",
+    slides: [
+      { post_id: collab.post_id, slide_key: "" },
+      { post_id: collab.post_id, slide_key: MATE },
+      { post_id: collab.post_id, slide_key: "map" },
+    ],
+  });
+  check("a coauthor can highlight the walk's shared post", crewHl.ok, true);
+  const crewDetail = await getHighlight(MATE, crewHl.highlight_id);
+  check(
+    "...three faces of ONE post are three members",
+    crewDetail?.items.length,
+    3,
+  );
+  check(
+    "...each carrying its own face",
+    (crewDetail?.items ?? []).map((i) => i.slide_key).join(","),
+    `,${MATE},map`,
+  );
+  check(
+    "...and the post is the AUTHOR's, not the highlight owner's",
+    crewDetail?.items[0].user_id,
+    AUTHOR,
+  );
+  // The rail must count and cover it the same way it counts anything else.
+  const crewRail = (await listUserHighlights(MATE, MATE)).find(
+    (h) => h.highlight_id === crewHl.highlight_id,
+  );
+  check("the rail counts the faces", crewRail?.item_count, 3);
+
+  // Someone who was NOT on the walk still can't keep it — the widening is to
+  // participants, not to anyone who can see the post.
+  check(
+    "a non-participant still cannot highlight it",
+    (
+      await createHighlight(MATEPAL, {
+        title: "Not mine",
+        slides: [{ post_id: collab.post_id, slide_key: "" }],
+      })
+    ).error,
+    "no_posts",
+  );
+  // A face that isn't on the post falls back to the whole post rather than
+  // dropping the walk the user asked to keep.
+  const oddFace = await createHighlight(MATE, {
+    title: "Odd face",
+    slides: [{ post_id: collab.post_id, slide_key: AUTHPAL }],
+  });
+  const oddDetail = await getHighlight(MATE, oddFace.highlight_id);
+  check(
+    "an unknown face keeps the walk, as the whole post",
+    oddDetail?.items.length === 1 && oddDetail.items[0].slide_key === "",
+    true,
+  );
+  await deleteHighlight(MATE, oddFace.highlight_id);
+
+  // A friend of the AUTHOR can open it — the read re-derives the AUTHOR's
+  // visibility, never the highlight owner's.
+  check(
+    "the author's friend can open a coauthor's highlight of it",
+    (await getHighlight(AUTHPAL, crewHl.highlight_id))?.items.length,
+    3,
+  );
+  // ...and a collab that ENDS takes the pointer with it, with no write. This
+  // is the whole reason membership stays a pointer instead of a copy.
+  await db.query(
+    `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)
+     ON CONFLICT DO NOTHING`,
+    [AUTHOR, MATE],
+  );
+  check(
+    "a block between the two authors empties it",
+    (await getHighlight(MATE, crewHl.highlight_id))?.items.length,
+    0,
+  );
+  await db.query(`DELETE FROM user_blocks WHERE blocker_id = $1`, [AUTHOR]);
+  check(
+    "...and un-blocking brings it back",
+    (await getHighlight(MATE, crewHl.highlight_id))?.items.length,
+    3,
+  );
+
+  // The legacy wire format still means exactly what it meant: post ids only,
+  // every member the whole post.
+  const legacy = await updateHighlight(MATE, crewHl.highlight_id, {
+    post_ids: [collab.post_id],
+  });
+  const legacyDetail = await getHighlight(MATE, crewHl.highlight_id);
+  check(
+    "post_ids alone still writes whole-post members",
+    legacy.ok === true &&
+      legacyDetail?.items.length === 1 &&
+      legacyDetail.items[0].slide_key === "",
+    true,
+  );
+  await deleteHighlight(MATE, crewHl.highlight_id);
+
+  // ── 10 — a crew member's own words under their own slide ───────────────
+  //
+  // The author has been able to edit their caption since captions existed; a
+  // participant could only ever type one in the composer at the instant they
+  // added the photo. Everyone who didn't — or whose build predates per-slide
+  // captions — had a picture on the card that could never carry their voice,
+  // and the card correctly shows nothing under it, which reads as the app
+  // having lost what they wrote.
+  const crewCaption = async (viewer) => {
+    const row = (await getUnifiedFeed(viewer, 30, null)).find(
+      (r) => r.kind === "post" && r.id === collab.post_id,
+    );
+    return (row?.coauthors ?? []).find((c) => c.user_id === MATE)?.caption;
+  };
+  check(
+    "the slide's caption reaches the card",
+    await crewCaption(AUTHPAL),
+    "my side of it",
+  );
+  check(
+    "the participant can rewrite it without re-sending the photo",
+    await setCrewCaption(collab.post_id, MATE, "actually, this"),
+    true,
+  );
+  check(
+    "...and the card says so",
+    await crewCaption(AUTHPAL),
+    "actually, this",
+  );
+  check(
+    "...and it stays THEIR words, not the post's",
+    (
+      await db.query(`SELECT caption FROM posts WHERE post_id = $1`, [
+        collab.post_id,
+      ])
+    )[0].caption,
+    "we walked",
+  );
+  check(
+    "clearing it is allowed",
+    (await setCrewCaption(collab.post_id, MATE, null)) === true &&
+      (await crewCaption(AUTHPAL)) === null,
+    true,
+  );
+  check(
+    "somebody not on the post cannot caption a slide there",
+    await setCrewCaption(collab.post_id, MATEPAL, "mine now"),
+    false,
   );
 
   if (!process.env.KEEP_SEED) await cleanup();

@@ -19,10 +19,15 @@ struct SplitsChipButton: View {
                     .foregroundColor(accent)
                 Text("SPLITS")
                     .font(.system(size: 12, weight: .heavy, design: .rounded))
-                    .tracking(1.0)
+                    .tracking(0.6)
                     .foregroundColor(.white)
+                    // Constant text, so a published width can't run away —
+                    // and without it a squeezed row wraps the word inside its
+                    // own capsule instead of the row re-arranging.
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
             .padding(.vertical, 8)
             // Lifted off the card's ground, not the black glass it wore when
             // it sat ON a photo: both call sites moved into the control row

@@ -45,7 +45,7 @@ struct HighlightViewerView: View {
     let onChanged: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var items: [PostItem] = []
+    @State private var items: [PostHighlightItem] = []
     @State private var index = 0
     @State private var isLoading = true
     @State private var loadFailed = false
@@ -62,8 +62,11 @@ struct HighlightViewerView: View {
                 emptyState
             } else {
                 TabView(selection: $index) {
-                    ForEach(Array(items.enumerated()), id: \.element.post_id) { offset, post in
-                        slide(post).tag(offset)
+                    // Keyed on the member's own id (post AND face), never the
+                    // post id: one walk can be kept twice under two faces, and
+                    // duplicate ForEach ids silently collapse the pages.
+                    ForEach(Array(items.enumerated()), id: \.element.id) { offset, item in
+                        slide(item).tag(offset)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
@@ -144,7 +147,7 @@ struct HighlightViewerView: View {
                 Menu {
                     Button {
                         reportingPostId = items.indices.contains(index)
-                            ? items[index].post_id : nil
+                            ? items[index].post.post_id : nil
                     } label: {
                         Label("Report this photo", systemImage: "flag")
                     }
@@ -188,22 +191,34 @@ struct HighlightViewerView: View {
         }
     }
 
-    private func slide(_ post: PostItem) -> some View {
+    @ViewBuilder
+    private func slide(_ item: PostHighlightItem) -> some View {
         GeometryReader { geo in
             ZStack {
-                AsyncImage(url: post.storyPhotoURL ?? post.mediaURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().scaledToFit()
-                    case .failure:
-                        Image(systemName: "photo")
-                            .font(.system(size: 44))
-                            .foregroundColor(.white.opacity(0.3))
-                    default:
-                        ProgressView().tint(.white)
+                // The FACE the owner kept, not the post's lead photo — on a
+                // buddy walk those are routinely different people's pictures,
+                // and playing the author's would ignore the whole choice.
+                if item.slideKey == .map {
+                    RouteArtView(
+                        coordinates: item.post.routeCoordinates ?? [],
+                        routeColor: ActivityCardView.color(item.post.workout_type)
+                    )
+                    .frame(width: geo.size.width, height: geo.size.height)
+                } else {
+                    AsyncImage(url: item.slideImageURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFit()
+                        case .failure:
+                            Image(systemName: "photo")
+                                .font(.system(size: 44))
+                                .foregroundColor(.white.opacity(0.3))
+                        default:
+                            ProgressView().tint(.white)
+                        }
                     }
+                    .frame(width: geo.size.width, height: geo.size.height)
                 }
-                .frame(width: geo.size.width, height: geo.size.height)
 
                 // Tap zones. A pager already swipes; these are for the thumb
                 // that's holding the phone one-handed.
@@ -216,24 +231,28 @@ struct HighlightViewerView: View {
 
                 VStack {
                     Spacer()
-                    caption(post)
+                    caption(item)
                 }
             }
         }
     }
 
     @ViewBuilder
-    private func caption(_ post: PostItem) -> some View {
-        let miles = post.stats_snapshot?.distance
-        if (post.caption?.isEmpty == false) || (miles ?? 0) > 0 {
+    private func caption(_ item: PostHighlightItem) -> some View {
+        let miles = item.post.stats_snapshot?.distance
+        // The words that belong to THIS face, the same rule the feed card
+        // follows — a crew member's photo carries their line, never the
+        // author's, which would read as them having said it.
+        let words = item.slideCaption
+        if words != nil || (miles ?? 0) > 0 {
             VStack(alignment: .leading, spacing: 4) {
                 if let miles, miles > 0 {
-                    Text("\(miles.milesText) mi")
+                    Text(miles.distanceFormatted)
                         .font(.system(size: 13, weight: .heavy, design: .rounded))
                         .foregroundColor(.white.opacity(0.85))
                 }
-                if let caption = post.caption, !caption.isEmpty {
-                    Text(caption)
+                if let words {
+                    Text(words.text)
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundColor(.white)
                 }
@@ -320,9 +339,34 @@ struct HighlightEditorView: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    /// One picked member: a post AND which face of it.
+    ///
+    /// A buddy walk is ONE shared post carrying several people's pictures, so
+    /// a picker that could only say "this walk" kept it once and always played
+    /// the author's photo — on a card where your own picture might be the
+    /// second or third slide. Identity is the PAIR, because the same walk
+    /// legitimately appears twice under two faces.
+    private struct SlideRef: Hashable, Identifiable {
+        let postId: String
+        let slideKey: HighlightSlideKey
+        var id: String { "\(postId)#\(slideKey.wireValue)" }
+    }
+
+    /// One choosable face of a post, for the picker sheet.
+    private struct PostFace: Identifiable {
+        let key: HighlightSlideKey
+        let name: String
+        let url: URL?
+        /// The route face has no photograph of its own.
+        let isMap: Bool
+        var id: String { key.wireValue }
+    }
+
     @State private var title = ""
     /// Ordered — position in this array becomes the highlight's play order.
-    @State private var selected: [String] = []
+    @State private var selected: [SlideRef] = []
+    /// The collab post whose faces are being chosen, if the sheet is up.
+    @State private var facePickerPost: PostItem?
     @State private var coverPostId: String?
     /// A cover picked from the camera roll this session, not uploaded yet —
     /// uploading on Save means a cancelled edit costs nothing and a bad
@@ -399,6 +443,12 @@ struct HighlightEditorView: View {
             .sheet(isPresented: $showingCoverPicker) {
                 ImagePicker(selectedImage: $pickedFromLibrary)
             }
+            // `item:` rather than a bool plus separate state: the tapped post
+            // and the presentation have to arrive together or the sheet races
+            // to a stale nil.
+            .sheet(item: $facePickerPost) { post in
+                facePicker(post)
+            }
             // The rail draws covers in a circle, so the crop is the same one
             // the profile photo gets — what you frame here is what shows.
             .fullScreenCover(isPresented: $showingCoverCropper) {
@@ -441,8 +491,58 @@ struct HighlightEditorView: View {
 
     /// The post whose photo would be the cover if there were no uploaded one.
     private var coverPost: PostItem? {
-        guard let id = coverPostId ?? selected.first else { return nil }
+        guard let id = coverPostId ?? selected.first?.postId else { return nil }
         return pickedPost(id)
+    }
+
+    /// Every face of a post that can be kept on its own.
+    ///
+    /// The author's photo IS the post's lead photo, so it is `.wholePost`
+    /// rather than a person key — one representation for one picture, which
+    /// also means a member written before faces existed stays byte-identical.
+    /// The route joins the list only when there is actually a line to draw.
+    private func faces(of post: PostItem) -> [PostFace] {
+        var out: [PostFace] = [
+            PostFace(key: .wholePost, name: post.displayName,
+                     url: post.storyPhotoURL ?? post.mediaURL, isMap: false)
+        ]
+        for crew in post.acceptedCoauthors {
+            guard let url = crew.mediaURL else { continue }
+            out.append(PostFace(key: .person(crew.user_id), name: crew.displayName,
+                                url: url, isMap: false))
+        }
+        if (post.routeCoordinates?.count ?? 0) >= 2 {
+            out.append(PostFace(key: .map, name: "Route", url: nil, isMap: true))
+        }
+        return out
+    }
+
+    /// Does this post need the "which one?" sheet, or is a tap unambiguous?
+    ///
+    /// Only when somebody ELSE's picture is on the card. A solo post keeps its
+    /// single tap — offering a route-or-photo choice on every ordinary post
+    /// would charge the common case a sheet to solve a buddy-walk problem.
+    private func hasChoosableFaces(_ post: PostItem) -> Bool {
+        post.acceptedCoauthors.contains { $0.mediaURL != nil }
+    }
+
+    private func isSelected(_ ref: SlideRef) -> Bool {
+        selected.contains(ref)
+    }
+
+    /// Whose picture a face is, for the tile badges.
+    private func faceName(of post: PostItem, key: HighlightSlideKey) -> String {
+        if case .person(let userId) = key, userId != post.user_id,
+           let crew = post.acceptedCoauthors.first(where: { $0.user_id == userId }) {
+            return crew.displayName
+        }
+        return post.displayName
+    }
+
+    /// How many faces of this post are in the highlight — the number the grid
+    /// tile badges, so a walk kept twice doesn't look like a walk kept once.
+    private func selectedCount(forPost postId: String) -> Int {
+        selected.filter { $0.postId == postId }.count
     }
 
     private var coverField: some View {
@@ -567,8 +667,8 @@ struct HighlightEditorView: View {
                 .foregroundColor(.white.opacity(0.45))
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(Array(selected.enumerated()), id: \.element) { position, postId in
-                        selectionTile(postId: postId, position: position)
+                    ForEach(Array(selected.enumerated()), id: \.element.id) { position, ref in
+                        selectionTile(ref: ref, position: position)
                     }
                 }
                 .padding(.vertical, 2)
@@ -576,18 +676,24 @@ struct HighlightEditorView: View {
         }
     }
 
-    private func selectionTile(postId: String, position: Int) -> some View {
-        let post = pickedPost(postId)
+    private func selectionTile(ref: SlideRef, position: Int) -> some View {
+        let post = pickedPost(ref.postId)
         // A highlight has ONE cover: picking a post's photo has to retire the
         // uploaded one, or the tap does nothing visible and reads as broken.
-        let isCover = coverPostId == postId && !usesCustomCover
+        let isCover = coverPostId == ref.postId && !usesCustomCover
+        // The strip shows the FACE that was kept, not the post's lead photo —
+        // a strip of buddy walks would otherwise be a row of the same friend's
+        // picture, with no way to tell which slide each tile stood for.
+        let faceURL = post.flatMap {
+            PostHighlightItem(post: $0, slideKey: ref.slideKey).slideImageURL
+        }
         return Button {
             MADHaptics.tap()
-            coverPostId = postId
+            coverPostId = ref.postId
             pickedCover = nil
             if coverImageUrl?.isEmpty == false { coverCleared = true }
         } label: {
-            AsyncImage(url: post?.storyPhotoURL ?? post?.mediaURL) { phase in
+            AsyncImage(url: faceURL) { phase in
                 switch phase {
                 case .success(let image): image.resizable().scaledToFill()
                 default: Color.white.opacity(0.06)
@@ -611,10 +717,34 @@ struct HighlightEditorView: View {
                     .background(Capsule().fill(.black.opacity(0.55)))
                     .padding(4)
             }
+            .overlay(alignment: .bottomTrailing) {
+                // Which face this tile is. Only ever drawn when the post has
+                // more than one, so an ordinary photo carries no chrome.
+                if let post, hasChoosableFaces(post) {
+                    Group {
+                        if ref.slideKey == .map {
+                            Image(systemName: "map.fill")
+                                .font(.system(size: 8, weight: .heavy))
+                                .foregroundColor(.white)
+                                .padding(4)
+                                .background(Circle().fill(.black.opacity(0.6)))
+                        } else {
+                            Text(faceName(of: post, key: ref.slideKey))
+                                .font(.system(size: 8, weight: .heavy, design: .rounded))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(.black.opacity(0.6)))
+                        }
+                    }
+                    .padding(4)
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 Button {
                     MADHaptics.tap()
-                    remove(postId)
+                    remove(ref)
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 8, weight: .heavy))
@@ -661,10 +791,21 @@ struct HighlightEditorView: View {
     }
 
     private func libraryTile(_ post: PostItem) -> some View {
-        let position = selected.firstIndex(of: post.post_id)
+        // The badge counts FACES of this post that are in, not one tick: a
+        // buddy walk can be kept twice (your photo and the route), and a tick
+        // would say the same thing for one as for both.
+        let chosen = selectedCount(forPost: post.post_id)
+        let position = selected.firstIndex { $0.postId == post.post_id }
+        let multiFace = hasChoosableFaces(post)
         return Button {
             MADHaptics.tap()
-            toggle(post.post_id)
+            // A card with somebody else's picture on it asks which one; a
+            // solo post keeps the single tap it has always had.
+            if multiFace {
+                facePickerPost = post
+            } else {
+                toggle(SlideRef(postId: post.post_id, slideKey: .wholePost))
+            }
         } label: {
             Color.clear
                 .aspectRatio(1, contentMode: .fit)
@@ -687,12 +828,19 @@ struct HighlightEditorView: View {
                 .overlay(alignment: .topTrailing) {
                     // The badge carries the ORDER, not just a tick: selection
                     // order is what the highlight plays in, so it has to be
-                    // visible while you're picking.
+                    // visible while you're picking. On a card kept under more
+                    // than one face it carries the COUNT instead — the play
+                    // positions of those faces aren't contiguous, so a single
+                    // number there would be a half-truth.
                     ZStack {
                         Circle()
-                            .fill(position != nil ? MADTheme.Colors.madRed : Color.black.opacity(0.35))
+                            .fill(chosen > 0 ? MADTheme.Colors.madRed : Color.black.opacity(0.35))
                             .frame(width: 20, height: 20)
-                        if let position {
+                        if chosen > 1 {
+                            Text("×\(chosen)")
+                                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                                .foregroundColor(.white)
+                        } else if let position {
                             Text("\(position + 1)")
                                 .font(.system(size: 10, weight: .heavy, design: .rounded))
                                 .foregroundColor(.white)
@@ -701,16 +849,28 @@ struct HighlightEditorView: View {
                     .padding(5)
                 }
                 .overlay(alignment: .bottomLeading) {
-                    if post.share_to_feed == false {
-                        Text("STORY")
-                            .font(.system(size: 8, weight: .heavy, design: .rounded))
-                            .tracking(0.6)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(.black.opacity(0.5)))
-                            .padding(5)
+                    HStack(spacing: 4) {
+                        if post.share_to_feed == false {
+                            Text("STORY")
+                                .font(.system(size: 8, weight: .heavy, design: .rounded))
+                                .tracking(0.6)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(.black.opacity(0.5)))
+                        }
+                        // "There's more than one picture in here" — the same
+                        // signal a carousel corner gives, so the sheet that
+                        // opens on tap isn't a surprise.
+                        if multiFace {
+                            Image(systemName: "square.on.square")
+                                .font(.system(size: 8, weight: .heavy))
+                                .foregroundColor(.white)
+                                .padding(4)
+                                .background(Circle().fill(.black.opacity(0.5)))
+                        }
                     }
+                    .padding(5)
                 }
         }
         .buttonStyle(.plain)
@@ -718,20 +878,121 @@ struct HighlightEditorView: View {
 
     // MARK: - Selection
 
-    private func toggle(_ postId: String) {
-        if selected.contains(postId) {
-            remove(postId)
+    private func toggle(_ ref: SlideRef) {
+        if selected.contains(ref) {
+            remove(ref)
         } else {
-            selected.append(postId)
-            if coverPostId == nil { coverPostId = postId }
+            selected.append(ref)
+            if coverPostId == nil { coverPostId = ref.postId }
         }
     }
 
-    private func remove(_ postId: String) {
-        selected.removeAll { $0 == postId }
+    private func remove(_ ref: SlideRef) {
+        selected.removeAll { $0 == ref }
         // The cover must stay a member, or the rail draws a photo the
-        // highlight no longer holds — the server refuses it anyway.
-        if coverPostId == postId { coverPostId = selected.first }
+        // highlight no longer holds — the server refuses it anyway. The cover
+        // points at a POST, so it survives as long as ANY face of that post is
+        // still in; only the last one leaving takes it.
+        if coverPostId == ref.postId, selectedCount(forPost: ref.postId) == 0 {
+            coverPostId = selected.first?.postId
+        }
+    }
+
+    /// "Which of these do you want to keep?" — the faces of one shared card.
+    ///
+    /// A sheet rather than an expanded grid row because the answer is usually
+    /// more than one thing and the choice is about PEOPLE: the faces need
+    /// names, and a name under a 1/3-width grid cell is unreadable.
+    private func facePicker(_ post: PostItem) -> some View {
+        let options = faces(of: post)
+        return NavigationStack {
+            ZStack {
+                MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                        Text("You were all on this walk, so it's one post. Keep whichever parts of it you want — your own picture, somebody else's, the route.")
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.6))
+                            .fixedSize(horizontal: false, vertical: true)
+                        LazyVGrid(columns: columns, spacing: 8) {
+                            ForEach(options) { face in
+                                faceTile(post: post, face: face)
+                            }
+                        }
+                    }
+                    .padding(MADTheme.Spacing.md)
+                }
+            }
+            .navigationTitle("Which one?")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { facePickerPost = nil }
+                        .fontWeight(.bold)
+                        .foregroundColor(MADTheme.Colors.madRed)
+                }
+            }
+        }
+    }
+
+    private func faceTile(post: PostItem, face: PostFace) -> some View {
+        let ref = SlideRef(postId: post.post_id, slideKey: face.key)
+        let picked = isSelected(ref)
+        return Button {
+            MADHaptics.tap()
+            toggle(ref)
+        } label: {
+            VStack(spacing: 4) {
+                Color.clear
+                    .aspectRatio(1, contentMode: .fit)
+                    .overlay {
+                        if face.isMap {
+                            // No photograph to show — the line itself is the
+                            // face, drawn the way every other route surface
+                            // draws it.
+                            RouteArtView(
+                                coordinates: post.routeCoordinates ?? [],
+                                routeColor: ActivityCardView.color(post.workout_type)
+                            )
+                        } else {
+                            AsyncImage(url: face.url) { phase in
+                                switch phase {
+                                case .success(let image): image.resizable().scaledToFill()
+                                default: Color.white.opacity(0.05)
+                                }
+                            }
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(
+                                picked ? MADTheme.Colors.madRed : Color.white.opacity(0.08),
+                                lineWidth: picked ? 2 : 0.5
+                            )
+                    )
+                    .overlay(alignment: .topTrailing) {
+                        ZStack {
+                            Circle()
+                                .fill(picked ? MADTheme.Colors.madRed : Color.black.opacity(0.35))
+                                .frame(width: 20, height: 20)
+                            if picked {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 10, weight: .heavy))
+                                    .foregroundColor(.white)
+                            }
+                        }
+                        .padding(5)
+                    }
+                Text(face.name)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.75))
+                    .lineLimit(1)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Loading / saving
@@ -749,15 +1010,20 @@ struct HighlightEditorView: View {
                 highlightId: existing.highlight_id
             ) {
                 var byId: [String: PostItem] = [:]
-                for item in detail.items { byId[item.post_id] = item }
+                for item in detail.items { byId[item.post.post_id] = item.post }
                 await MainActor.run {
-                    selected = detail.items.map(\.post_id)
+                    selected = detail.items.map {
+                        SlideRef(postId: $0.post.post_id, slideKey: $0.slideKey)
+                    }
                     memberPosts = byId
                 }
             }
         } else if let seed = target.seedPostId {
             await MainActor.run {
-                selected = [seed]
+                // Seeded from "save this one" on the grid, which names a post
+                // and not a face — so it starts as the whole post, and the
+                // sheet is one tap away if it turns out to be a buddy walk.
+                selected = [SlideRef(postId: seed, slideKey: .wholePost)]
                 coverPostId = seed
             }
         }
@@ -806,18 +1072,21 @@ struct HighlightEditorView: View {
             } else if coverCleared {
                 coverImage = ""
             }
+            let slides = selected.map {
+                PostService.HighlightSlideRef(postId: $0.postId, slideKey: $0.slideKey)
+            }
             if let existing = target.existing {
                 try await PostService.updateHighlight(
                     highlightId: existing.highlight_id,
                     title: name,
-                    postIds: selected,
+                    slides: slides,
                     coverPostId: coverPostId,
                     coverImageUrl: coverImage
                 )
             } else {
                 try await PostService.createHighlight(
                     title: name,
-                    postIds: selected,
+                    slides: slides,
                     coverPostId: coverPostId,
                     // Nothing to clear on a highlight that doesn't exist yet.
                     coverImageUrl: coverImage?.isEmpty == false ? coverImage : nil
@@ -837,6 +1106,13 @@ struct HighlightEditorView: View {
         } catch let APIError.apiError(message) where message == "highlight_limit_reached" {
             await MainActor.run {
                 errorMessage = "You've reached the highlight limit. Delete one to make room."
+            }
+        // Everything picked has been deleted, or is no longer a walk this
+        // account is on (a collab that ended). "Check your connection" was
+        // what this used to say, which sent people to look at their wifi.
+        } catch let APIError.apiError(message) where message == "no_posts" {
+            await MainActor.run {
+                errorMessage = "None of those are available any more. Pick again and try once more."
             }
         } catch {
             await MainActor.run {

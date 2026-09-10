@@ -286,19 +286,26 @@ struct FlyoverChipButton: View {
             }
             action()
         } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
                 Image(systemName: "play.fill")
                     .font(.system(size: 10, weight: .black))
                     .foregroundColor(accent)
-                    .frame(width: 22, height: 22)
+                    .frame(width: 20, height: 20)
                     .background(Circle().fill(Color.white))
                 Text("FLYOVER")
                     .font(.system(size: 12, weight: .heavy, design: .rounded))
-                    .tracking(1.0)
+                    .tracking(0.6)
                     .foregroundColor(.white)
+                    // The word is a constant, so publishing its true width is
+                    // safe (the `.fixedSize` trap is a label whose text is
+                    // DATA) — and it is the only thing that stops a squeezed
+                    // row breaking the pill's own word into "FLYOVE / R".
+                    // Fitting the ROW is the host's job; see `mediaControls`.
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .padding(.leading, 5)
-            .padding(.trailing, 13)
+            .padding(.trailing, 11)
             .padding(.vertical, 5)
             .background(Capsule().fill(accent))
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.35), lineWidth: 1))
