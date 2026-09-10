@@ -5,7 +5,7 @@ import SwiftUI
 // ONE share sheet for a walk, from every surface that shows one.
 //
 // The sheet asks TWO questions and says so on screen: what the card shows
-// (Photo / Route / Streak) and what shape it arrives in (Full screen / Sticker).
+// (Photo / Route / Streak) and what shape it arrives in (Full story / Sticker).
 // It used to ask them as ONE four-way rail — Photo | Route | Streak | Sticker —
 // which is two axes crushed into one control: choosing "Sticker" threw away the
 // design and choosing a design threw away the sticker, so neither choice ever
