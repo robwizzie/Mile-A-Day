@@ -268,12 +268,36 @@ final class PostComposerViewModel: ObservableObject {
         let service = CompetitionService()
         guard (try? await service.loadCompetitions()) != nil else { return }
         liveCompetitions = RunPostService.competitionStickers()
+        await warmCompetitionFaces(liveCompetitions)
         let fresh = liveCompetitions.first { $0.competitionId == stats.competition?.competitionId }
             ?? liveCompetitions.first
         guard fresh != stats.competition else { return }
         stats.competition = fresh
         if fresh == nil {
             config.enabled.removeAll { $0 == .competition }
+        }
+    }
+
+    /// Pull every face the competition sticker might draw into `FeedImageCache`
+    /// before it is baked.
+    ///
+    /// The sticker is rendered into the photo by `ImageRenderer`, which drives
+    /// no view lifecycle and cannot wait on a download, so it reads the cache
+    /// SYNCHRONOUSLY and falls back to initials on a miss. Without this warm-up
+    /// the first post of a session would bake initials for everyone even though
+    /// the pictures exist — the miss has to be the exception, not the norm.
+    @MainActor
+    private func warmCompetitionFaces(_ competitions: [CompetitionStickerData]) async {
+        let urls = Set(competitions.flatMap { competition in
+            competition.rows.flatMap { row in
+                [row.avatarURL] + row.members.map(\.avatarURL)
+            }
+        }.compactMap { $0 }.filter { !$0.isEmpty })
+        guard !urls.isEmpty else { return }
+        await withTaskGroup(of: Void.self) { group in
+            for url in urls {
+                group.addTask { _ = await RouteAvatarImageLoader.loadImage(for: url) }
+            }
         }
     }
 

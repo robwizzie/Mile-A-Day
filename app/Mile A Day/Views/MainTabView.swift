@@ -720,7 +720,7 @@ struct MainTabView: View {
         let rankedTeams = top.rankedTeams
         var rankText = ""
         if let myTeam, let index = rankedTeams.firstIndex(where: { $0.id == myTeam.id }) {
-            rankText = "Team \(myTeam.name) · \(ActiveCompetitionRow.ordinal(index + 1)) of \(rankedTeams.count)"
+            rankText = "\(myTeam.teamLabel) · \(ActiveCompetitionRow.ordinal(index + 1)) of \(rankedTeams.count)"
         } else if let uid = userId, let index = ranked.firstIndex(where: { $0.user_id == uid }) {
             rankText = "\(ActiveCompetitionRow.ordinal(index + 1)) of \(ranked.count)"
         }

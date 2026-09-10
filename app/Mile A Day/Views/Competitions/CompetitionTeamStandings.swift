@@ -212,35 +212,11 @@ struct CompetitionTeamStandings: View {
 
 // MARK: - Score formatting
 
-extension Competition {
-    /// Score label for a whole team, matching the individual leaderboard's units.
-    func teamScoreLabel(_ team: CompetitionTeam) -> String {
-        formattedScore(team.score ?? 0)
-    }
-
-    /// Label for one member inside a team row — what they CONTRIBUTED, in the
-    /// competition's own unit.
-    ///
-    /// Not their score. The team is scored as one competitor over the members'
-    /// combined miles, so member points don't sum to the team's number: "Red
-    /// Team 4 pts" over "Alice 3 pts, Bob 2 pts" reads as arithmetic that got
-    /// away from us. Miles are the thing that does add up, and they answer the
-    /// question a member row is actually asked — who carried this.
-    ///
-    /// Falls back to the score for older servers that send no contribution,
-    /// which is byte-identical to what shipped.
-    func memberScoreLabel(_ user: CompetitionUser) -> String {
-        if let contribution = user.team_contribution {
-            return options.formatQuantityWithUnit(contribution)
-        }
-        return formattedScore(user.score ?? 0)
-    }
-
-    private func formattedScore(_ score: Double) -> String {
-        switch type {
-        case .streaks: return "\(Int(score))d"
-        case .apex, .race: return options.formatQuantityWithUnit(score)
-        case .targets, .clash: return "\(Int(score)) pts"
-        }
-    }
-}
+// The three score formatters below LIVED HERE and moved to Models/Competition.swift.
+// `stickerSummary` needs `memberScoreLabel` so the post sticker and this
+// leaderboard describe the same person's contribution identically, and a
+// Models/ file may also be a Watch target member — a dependency reaching from
+// there into Views/ compiles on iPhone and fails the Watch with "Cannot find
+// 'memberScoreLabel' in scope", which neither CI workflow would catch (ios.md).
+// Everything they need (`options.formatQuantityWithUnit`, `type`) was already
+// on the model.

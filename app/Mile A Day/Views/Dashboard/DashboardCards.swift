@@ -78,10 +78,13 @@ struct DashboardHeroCard: View {
                         .foregroundColor(.green)
                 }
                 Spacer()
-                // Quiet share affordance; the whole card taps to share.
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.35))
+                // A real control, not a hint. This was a bare `Image` at 0.35
+                // opacity with no gesture of its own, so the only way to share
+                // was to know the whole card was tappable.
+                HeroShareButton {
+                    MADHaptics.action()
+                    showingShareSheet = true
+                }
             }
 
             // The two halves: today's ring + the streak.

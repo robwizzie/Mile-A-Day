@@ -30,8 +30,18 @@ struct FlameBuddyView: View {
     /// gets. Drawn INSIDE the flame's own animated stack so it bobs and
     /// shrinks with the figure.
     var mood: FlameMood? = nil
+    /// Render the finished frame with no clock, for a caller that is producing
+    /// a STILL — a share card baked by `ImageRenderer`, which drives no view
+    /// lifecycle. Without it the snapshot catches the 12 fps flicker/blink
+    /// wherever it happens to land, so Flamey can be baked mid-blink into a
+    /// picture somebody posts. `accessibilityReduceMotion` cannot be forced
+    /// from a caller — it is a read-only environment value — which is why this
+    /// is a parameter and not `.environment(...)` at the call site.
+    var still: Bool = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The house pattern: an explicit still OR the system setting.
+    private var effectiveStill: Bool { still || reduceMotion }
     @State private var ignitionDate: Date?
     @State private var smokeDate: Date?
 
@@ -72,18 +82,18 @@ struct FlameBuddyView: View {
                 FlameIgnitionBurst(startDate: ignitionDate, size: size)
             }
         }
-        .animation(reduceMotion ? nil : .spring(response: 0.55, dampingFraction: 0.62), value: resolvedPhase)
+        .animation(effectiveStill ? nil : .spring(response: 0.55, dampingFraction: 0.62), value: resolvedPhase)
         .onChange(of: resolvedPhase) { oldValue, newValue in
             guard oldValue != newValue else { return }
             if newValue == .blazing {
                 MADHaptics.success()
-                guard !reduceMotion else { return }
+                guard !effectiveStill else { return }
                 ignitionDate = Date()
                 DispatchQueue.main.asyncAfter(deadline: .now() + FlameIgnitionBurst.duration + 0.1) {
                     ignitionDate = nil
                 }
             } else if newValue == .coal, oldValue == .burning {
-                guard !reduceMotion else { return }
+                guard !effectiveStill else { return }
                 smokeDate = Date()
                 DispatchQueue.main.asyncAfter(deadline: .now() + FlameSmokePuff.duration + 0.1) {
                     smokeDate = nil
@@ -100,7 +110,7 @@ struct FlameBuddyView: View {
 
     private var flameView: some View {
         Group {
-            if reduceMotion {
+            if effectiveStill {
                 staticFlame
             } else {
                 animatedFlame
@@ -108,7 +118,7 @@ struct FlameBuddyView: View {
         }
         // When the day rolls over, dayEnd jumps a full day forward and the
         // burn-down scale snaps with it — ease the regrowth instead of popping.
-        .animation(reduceMotion ? nil : .easeInOut(duration: 1.4), value: dayEnd)
+        .animation(effectiveStill ? nil : .easeInOut(duration: 1.4), value: dayEnd)
     }
 
     // Mood gestures are SwiftUI animations on the CONTAINER — Core Animation
@@ -173,14 +183,14 @@ struct FlameBuddyView: View {
     /// The idle bob — used to be a sine sampled on the 12 fps content clock;
     /// now a 60 fps container animation, so the mood props ride it too.
     private var bobOffset: CGFloat {
-        guard !reduceMotion else { return 0 }
+        guard !effectiveStill else { return 0 }
         let bodyScale = figureScale(vigor: currentVigor(at: Date()))
         let amplitude: CGFloat = 2.2 * (resolvedPhase == .blazing ? 1 : max(0.35, bodyScale))
         return bobPhase ? -amplitude : amplitude
     }
 
     private func startBob() {
-        guard !reduceMotion else { return }
+        guard !effectiveStill else { return }
         withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) { bobPhase = true }
     }
 
@@ -247,7 +257,7 @@ struct FlameBuddyView: View {
     /// Ready / halfway / almost / party: a bounce whose height and tempo rise
     /// with the mood. Zero for every other mood, so the phase flag is inert.
     private var hopOffset: CGFloat {
-        guard !reduceMotion, let kind = mood?.kind else { return 0 }
+        guard !effectiveStill, let kind = mood?.kind else { return 0 }
         let height: CGFloat
         switch kind {
         case .ready: height = 0.025
@@ -261,12 +271,12 @@ struct FlameBuddyView: View {
 
     /// Nervous: pacing side to side.
     private var paceOffset: CGFloat {
-        guard !reduceMotion, mood?.kind == .nervous else { return 0 }
+        guard !effectiveStill, mood?.kind == .nervous else { return 0 }
         return moodPacePhase ? size * 0.05 : -size * 0.05
     }
 
     private func startMoodMotion() {
-        guard !reduceMotion, let kind = mood?.kind else { return }
+        guard !effectiveStill, let kind = mood?.kind else { return }
         switch kind {
         case .ready:
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { moodHopPhase = true }
@@ -298,7 +308,7 @@ struct FlameBuddyView: View {
 
     /// Poked: squash, then spring back.
     private func pokeBounce() {
-        guard !reduceMotion else { return }
+        guard !effectiveStill else { return }
         withAnimation(.spring(response: 0.16, dampingFraction: 0.6)) { pokeSquash = 0.88 }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             // Settles without overshooting: a stretch past 1 tall-ens the

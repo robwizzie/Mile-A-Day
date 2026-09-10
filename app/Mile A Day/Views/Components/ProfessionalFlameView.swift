@@ -15,6 +15,9 @@ struct ProfessionalFlameView: View {
     var dayEnd: Date? = nil
     /// Today's partial mile progress (0-1) — warms the coal before ignition.
     var coalWarmth: Double = 0
+    /// Render the finished frame with no clock — for a caller baking a STILL
+    /// (a share card through `ImageRenderer`). Passed straight down.
+    var still: Bool = false
 
     var body: some View {
         ZStack {
@@ -29,7 +32,8 @@ struct ProfessionalFlameView: View {
                 phase: phase,
                 dayEnd: dayEnd,
                 coalWarmth: coalWarmth,
-                grounded: false
+                grounded: false,
+                still: still
             )
             .offset(y: -size * 0.035)
         }

@@ -1372,23 +1372,23 @@ private struct FlameBuddyHeroCard: View {
         .padding(18)
         .padding(.top, 18)
         .background(cardBackground)
+        // Share sits beside the savers chip, NOT in the top-left corner where
+        // it first went: Flamey's frame is 1.5× his size and offset 28pt up, so
+        // it overflows the left column into that corner, covered the glyph, and
+        // — since the glyph was a bare Image with no gesture — swallowed its
+        // taps into `poke()`. The top-right is the one corner of this card
+        // nothing else reaches.
         .overlay(alignment: .topTrailing) {
-            tokensChip
-                // Right edge lines up with the streak box below it.
-                .padding(.horizontal, 18)
-                .padding(.top, 14)
-        }
-        // The Modern hero carries this glyph and the Fun one didn't, so on Fun
-        // the whole share feature was an invisible tap on a card that gives no
-        // sign it is tappable. Quiet, but present — it is the only thing
-        // telling anyone the sticker builder exists.
-        .overlay(alignment: .topLeading) {
-            Image(systemName: "square.and.arrow.up")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white.opacity(0.35))
-                .padding(.horizontal, 18)
-                .padding(.top, 14)
-                .accessibilityLabel("Share your streak")
+            HStack(spacing: 6) {
+                HeroShareButton {
+                    MADHaptics.action()
+                    showShareSheet = true
+                }
+                tokensChip
+            }
+            // The chip's right edge still lines up with the streak box below.
+            .padding(.horizontal, 18)
+            .padding(.top, 14)
         }
         .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .onTapGesture {

@@ -3,59 +3,108 @@ import CoreLocation
 
 // MARK: - Story share canvas
 //
-// The app's share images are 4:5 (1080×1350) and 2:3 (1800×2700). An Instagram
-// Story is 9:16 (1080×1920), so every one of them lands letterboxed with about
-// a third of the screen as empty bar — which is most of why a good share card
-// still doesn't get posted. This is the one canvas built for that shape.
+// The app's other share images are 4:5 and 2:3. An Instagram Story is 9:16, so
+// every one of them lands letterboxed with about a third of the screen as empty
+// bar — which is most of why a good share card still doesn't get posted. This is
+// the one canvas built for that shape.
 //
-// Four faces over the same geometry, so they can't drift: the route (the thing
-// a walk looks like), the walker's own photo, the streak, and a transparent
-// sticker for placing over somebody else's story.
+// TWO AXES, and keeping them apart is the whole point. `MADStoryDesign` is WHAT
+// the card shows (the photo, the route, the streak). `MADStoryFormat` is WHAT
+// SHAPE it arrives in (a full story frame, or a sticker to drop on one). They
+// used to be one four-way picker — Photo | Route | Streak | Sticker — which
+// asked two different questions in one control and so could not be learned:
+// picking "Sticker" silently threw away the design you had chosen, and picking
+// a design silently threw away the sticker. Every design now renders in both
+// formats off the same layout, so the two choices are independent and neither
+// one destroys the other.
 //
-// Two rules hold on every face:
-//   * The footer lockup — wordmark + mileaday.run — is not decoration. A story
-//     link isn't tappable for most accounts, so the URL baked into the picture
-//     is the only thing that can turn a share into a download.
+// Three rules hold on every card:
+//   * ONE brand lockup, bottom-left, and it carries mileaday.run. There used to
+//     be a second one at the top of every frame — the same logo and wordmark
+//     twice on one card, which is the thing that made these read as unfinished.
+//     A story link isn't tappable for most accounts, so the URL baked into the
+//     picture is the only route from a screenshot back to the app.
 //   * The STREAK rides along wherever we have one. It is the number Strava
 //     structurally cannot show, and the one most likely to make a viewer ask
 //     what app this is.
+//   * Distances go through `DistanceUnits`, never a hardcoded "MI". A card is a
+//     surface the user reads, and it was the one place still printing miles at
+//     someone who set the app to kilometres.
+//   * Colours come from `MADTheme` tokens and the flame is the app's OWN — the
+//     Modern dashboard's `ProfessionalFlameView` or Fun's `FlameBuddyView`,
+//     picked by `DashboardStylePreference`, so the card looks like the app the
+//     user actually opens. Hand-mixed near-copies of either drift, and this
+//     file had already drifted: a bespoke orange `flame.fill` belonging to
+//     neither style, over a ground a shade darker than the real token.
 
-enum MADStoryFace: String, CaseIterable, Identifiable {
-    case route, photo, streak, sticker
+/// What the card shows.
+enum MADStoryDesign: String, CaseIterable, Identifiable {
+    case photo, route, streak
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .route: return "Route"
         case .photo: return "Photo"
+        case .route: return "Route"
         case .streak: return "Streak"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .photo: return "photo"
+        case .route: return "point.topleft.down.curvedto.point.bottomright.up"
+        case .streak: return "flame.fill"
+        }
+    }
+}
+
+/// What shape it arrives in.
+enum MADStoryFormat: String, CaseIterable, Identifiable {
+    /// The full 9:16 frame. One tap in Instagram and the story is finished.
+    case story
+    /// A card with transparent surround, dropped draggable onto a story the
+    /// walker was already making.
+    case sticker
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .story: return "Full screen"
         case .sticker: return "Sticker"
         }
     }
 
     var icon: String {
         switch self {
-        case .route: return "point.topleft.down.curvedto.point.bottomright.up"
-        case .photo: return "photo"
-        case .streak: return "flame.fill"
+        case .story: return "rectangle.portrait.fill"
         case .sticker: return "square.on.square"
         }
     }
 
-    /// The sticker is not a story frame — it's a thing you drop ON one, so it
-    /// carries its own aspect and a transparent surround.
-    var designSize: CGSize {
-        self == .sticker
-            ? CGSize(width: 320, height: 200)
-            : CGSize(width: 360, height: 640)
+    /// Rendered at scale 3, so the story frame lands at exactly the 1080×1920
+    /// Instagram wants and the sticker at 960×1200.
+    var size: CGSize {
+        switch self {
+        case .story: return CGSize(width: 360, height: 640)
+        case .sticker: return CGSize(width: 320, height: 400)
+        }
     }
 
     var isTransparent: Bool { self == .sticker }
+
+    var margin: CGFloat { self == .story ? 28 : 22 }
+
+    var cornerRadius: CGFloat { self == .story ? 0 : 30 }
+
+    /// A sticker is narrow enough that a third column squeezes every value.
+    var maxStats: Int { self == .story ? 3 : 2 }
 }
 
-/// Everything a story face can draw. Built by the caller from whatever it has —
-/// every field is optional, and a face simply omits what it wasn't given rather
+/// Everything a card can draw. Built by the caller from whatever it has — every
+/// field is optional, and a design simply omits what it wasn't given rather
 /// than printing a zero.
 struct MADStoryContent: Identifiable {
     let id = UUID()
@@ -64,6 +113,8 @@ struct MADStoryContent: Identifiable {
     var durationSeconds: Double?
     var streak: Int?
     var totalMiles: Double?
+    /// "Walk" / "Run", for the kicker line above the distance.
+    var activityName: String?
     /// When the walk happened — drives `RouteArtView`'s time-of-day cast.
     var date: Date?
     /// Already-formatted date, for callers holding the server's string rather
@@ -77,349 +128,358 @@ struct MADStoryContent: Identifiable {
     var hasRoute: Bool { coordinates.count >= 2 }
     var hasPhoto: Bool { photo != nil }
 
-    /// Which faces this walk can actually draw. Never offer a Route tab for an
+    /// Which designs this walk can actually draw. Never offer Route for an
     /// indoor walk — an empty canvas reads as the feature being broken.
-    var availableFaces: [MADStoryFace] {
-        var out: [MADStoryFace] = []
+    var availableDesigns: [MADStoryDesign] {
+        var out: [MADStoryDesign] = []
         if hasPhoto { out.append(.photo) }
         if hasRoute { out.append(.route) }
         if (streak ?? 0) > 0 { out.append(.streak) }
-        out.append(.sticker)
-        return out
+        // Never empty: a walk with no photo, no route and no streak still has a
+        // distance, and the streak design degrades to that rather than leaving
+        // the sheet with nothing to select.
+        return out.isEmpty ? [.streak] : out
     }
 
     /// Photo first when there is one: a face gets engagement, a map doesn't,
     /// and the whole point is that this actually gets posted.
-    var defaultFace: MADStoryFace { availableFaces.first ?? .sticker }
+    var defaultDesign: MADStoryDesign { availableDesigns.first ?? .streak }
 }
 
 // MARK: - The card
 
 struct MADStoryCard: View {
     let content: MADStoryContent
-    let face: MADStoryFace
+    let design: MADStoryDesign
+    var format: MADStoryFormat = .story
 
     var body: some View {
-        Group {
-            switch face {
-            case .route: routeFace
-            case .photo: photoFace
-            case .streak: streakFace
-            case .sticker: stickerFace
-            }
-        }
-        .frame(width: face.designSize.width, height: face.designSize.height)
-    }
-
-    // MARK: Faces
-
-    private var routeFace: some View {
         ZStack {
-            storyBackground(glow: content.routeColor)
-            VStack(alignment: .leading, spacing: 0) {
-                wordmark
-                    .padding(.horizontal, 26)
-                    .padding(.top, 26)
-
-                RouteArtView.still(
-                    coordinates: content.coordinates,
-                    routeColor: content.routeColor,
-                    authorAvatar: content.avatar,
-                    showsMileMarkers: true,
-                    paletteDate: content.date,
-                    size: CGSize(width: 360, height: 300)
-                )
-                .frame(height: 300)
-
-                Spacer(minLength: 0)
-                statBlock
-                    .padding(.horizontal, 26)
-                footer
+            backdrop
+            layout
+        }
+        .frame(width: format.size.width, height: format.size.height)
+        .clipShape(RoundedRectangle(cornerRadius: format.cornerRadius, style: .continuous))
+        .overlay {
+            if format == .sticker {
+                RoundedRectangle(cornerRadius: format.cornerRadius, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 1.5)
             }
         }
     }
 
-    private var photoFace: some View {
+    // MARK: Ground
+
+    private var backdrop: some View {
         ZStack {
-            storyBackground(glow: content.routeColor)
-            if let photo = content.photo {
+            // The app's OWN ground, straight from the token — not a copy of its
+            // stops. This was hand-written here and had already drifted a shade
+            // darker at the bottom, which is exactly how a share card stops
+            // looking like the app it came from.
+            MADTheme.Colors.appBackgroundGradient
+            RadialGradient(
+                colors: [glowColor.opacity(0.36), glowColor.opacity(0.08), .clear],
+                center: UnitPoint(x: 0.82, y: 0.08),
+                startRadius: 8, endRadius: format.size.height * 0.55
+            )
+            if design == .photo, let photo = content.photo {
                 Image(uiImage: photo)
                     .resizable()
                     .scaledToFill()
-                    .frame(width: 360, height: 640)
+                    .frame(width: format.size.width, height: format.size.height)
                     .clipped()
-                // The stats sit over the lower third, so it has to be readable
-                // whatever the photo is doing down there.
-                LinearGradient(
-                    colors: [.black.opacity(0.45), .clear, .clear, .black.opacity(0.88)],
-                    startPoint: .top, endPoint: .bottom
-                )
-            }
-            VStack(alignment: .leading, spacing: 0) {
-                wordmark
-                    .padding(.horizontal, 26)
-                    .padding(.top, 26)
-                Spacer(minLength: 0)
-                statBlock
-                    .padding(.horizontal, 26)
-                footer
+                photoScrim
             }
         }
     }
 
-    private var streakFace: some View {
-        ZStack {
-            storyBackground(glow: MADTheme.Colors.warning)
-            VStack(alignment: .leading, spacing: 0) {
-                wordmark
-                    .padding(.horizontal, 26)
-                    .padding(.top, 26)
-
-                Spacer(minLength: 0)
-                VStack(spacing: 4) {
-                    Image(systemName: "flame.fill")
-                        .font(.system(size: 78))
-                        .foregroundStyle(
-                            LinearGradient(colors: [Color(red: 1, green: 0.78, blue: 0.32),
-                                                    MADTheme.Colors.warning],
-                                           startPoint: .top, endPoint: .bottom)
-                        )
-                        .shadow(color: MADTheme.Colors.warning.opacity(0.5), radius: 22)
-                        .accessibilityHidden(true)
-                    Text("\(content.streak ?? 0)")
-                        .font(.system(size: 96, weight: .black, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundColor(.white)
-                    Text("DAY STREAK")
-                        .font(.system(size: 15, weight: .black, design: .rounded))
-                        .tracking(4)
-                        .foregroundColor(Color(red: 1, green: 0.75, blue: 0.38))
-                }
-                .frame(maxWidth: .infinity)
-                Spacer(minLength: 0)
-
-                HStack(spacing: 0) {
-                    ForEach(streakStats, id: \.0) { stat in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(stat.0)
-                                .font(.system(size: 11, weight: .black, design: .rounded))
-                                .tracking(1.4)
-                                .foregroundColor(.white.opacity(0.4))
-                            Text(stat.1)
-                                .font(.system(size: 19, weight: .heavy, design: .rounded))
-                                .monospacedDigit()
-                                .foregroundColor(.white)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                .padding(.horizontal, 26)
-                .padding(.bottom, 4)
-                footer
-            }
-        }
-    }
-
-    /// Transparent by design — this one is handed to Instagram as a sticker the
-    /// walker drags onto a story they're already making.
-    private var stickerFace: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            wordmark
-            Text(distanceText)
-                .font(.system(size: 54, weight: .black, design: .rounded))
-                .monospacedDigit()
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            HStack(spacing: 18) {
-                ForEach(compactStats, id: \.0) { stat in
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(stat.0)
-                            .font(.system(size: 10, weight: .black, design: .rounded))
-                            .tracking(1.2)
-                            .foregroundColor(.white.opacity(0.42))
-                        Text(stat.1)
-                            .font(.system(size: 18, weight: .heavy, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundColor(.white)
-                    }
-                }
-            }
-        }
-        .padding(22)
-        .frame(width: 320, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(Color.black.opacity(0.66))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .stroke(Color.white.opacity(0.2), lineWidth: 1.5)
+    /// The stats sit over the lower third, so it has to be readable whatever the
+    /// photo is doing down there — and the fade has to start well above them or
+    /// the top of a 78pt number lands on daylight.
+    private var photoScrim: some View {
+        LinearGradient(
+            stops: [
+                .init(color: .black.opacity(0.42), location: 0.00),
+                .init(color: .black.opacity(0.00), location: 0.26),
+                .init(color: .black.opacity(0.10), location: 0.38),
+                .init(color: .black.opacity(0.62), location: 0.62),
+                .init(color: .black.opacity(0.90), location: 0.82),
+                .init(color: .black.opacity(0.96), location: 1.00),
+            ],
+            startPoint: .top, endPoint: .bottom
         )
     }
 
-    // MARK: Shared chrome
-
-    private func storyBackground(glow: Color) -> some View {
-        ZStack {
-            // The app's own ground, so a story reads as Mile A Day before a
-            // single word is read.
-            LinearGradient(
-                colors: [
-                    Color(red: 0.15, green: 0.08, blue: 0.10),
-                    Color(red: 0.12, green: 0.06, blue: 0.08),
-                    Color(red: 0.08, green: 0.04, blue: 0.06),
-                    Color(red: 0.05, green: 0.02, blue: 0.04),
-                ],
-                startPoint: .top, endPoint: .bottom
-            )
-            RadialGradient(
-                colors: [glow.opacity(0.42), glow.opacity(0.10), .clear],
-                center: UnitPoint(x: 0.82, y: 0.10),
-                startRadius: 10, endRadius: 300
-            )
-        }
-        .ignoresSafeArea()
+    private var glowColor: Color {
+        design == .streak ? MADTheme.Colors.warning : content.routeColor
     }
 
-    private var wordmark: some View {
-        HStack(spacing: 8) {
-            MADLogoMark(size: 26, shadow: false)
-            Text("MILE A DAY")
-                .font(.system(size: 13, weight: .black, design: .rounded))
-                .tracking(2.4)
-                .foregroundColor(.white)
+    // MARK: Layout
+    //
+    // One skeleton for all three designs: slack at the top, the art, a CAPPED
+    // gap, then the bottom block over the lockup. The cap is what stops the
+    // streak design — which has less art than the others — from opening a hole
+    // in the middle of the card, which is what a plain pair of Spacers did.
+
+    private var layout: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            artZone
+            Spacer(minLength: 0)
+                .frame(maxHeight: format == .story ? 34 : 20)
+            VStack(alignment: .leading, spacing: 0) {
+                bottomBlock
+                footer
+            }
+            .padding(.horizontal, format.margin)
+            .padding(.bottom, format.margin)
         }
     }
 
     @ViewBuilder
-    private var statBlock: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if content.distanceMiles != nil {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(distanceText)
-                        .font(.system(size: 74, weight: .black, design: .rounded))
+    private var artZone: some View {
+        switch design {
+        case .photo:
+            // The photo IS the art; it's full-bleed in the backdrop.
+            EmptyView()
+        case .route:
+            RouteArtView.still(
+                coordinates: content.coordinates,
+                routeColor: content.routeColor,
+                authorAvatar: content.avatar,
+                showsMileMarkers: format == .story,
+                paletteDate: content.date,
+                size: routeArtSize
+            )
+            .frame(width: routeArtSize.width, height: routeArtSize.height)
+        case .streak:
+            streakBlock
+        }
+    }
+
+    private var routeArtSize: CGSize {
+        format == .story
+            ? CGSize(width: 360, height: 340)
+            : CGSize(width: 320, height: 196)
+    }
+
+    @ViewBuilder
+    private var bottomBlock: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // The streak design already carries its headline number up in the
+            // art zone, so repeating a distance hero under it would give the
+            // card two competing subjects.
+            if design != .streak {
+                if let kicker {
+                    Text(kicker)
+                        .font(.system(size: format == .story ? 11.5 : 10,
+                                      weight: .black, design: .rounded))
+                        .tracking(2.4)
+                        .foregroundColor(.white.opacity(0.45))
+                        .lineLimit(1)
+                        .padding(.bottom, 10)
+                }
+                heroRow
+            }
+            if !stats.isEmpty {
+                statRail
+                    .padding(.top, design == .streak ? 0 : (format == .story ? 18 : 14))
+            }
+        }
+    }
+
+    private var heroRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(heroValue)
+                .font(.system(size: format == .story ? 78 : 58,
+                              weight: .black, design: .rounded))
+                .monospacedDigit()
+                .foregroundColor(.white)
+            Text(DistanceUnits.current.abbreviation.uppercased())
+                .font(.system(size: format == .story ? 20 : 16,
+                              weight: .black, design: .rounded))
+                .tracking(1.4)
+                .foregroundColor(.white.opacity(0.5))
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.55)
+    }
+
+    private var streakBlock: some View {
+        VStack(spacing: 0) {
+            heroFlame
+                .frame(width: flameSize, height: flameSize)
+                .accessibilityHidden(true)
+
+            Text("\(content.streak ?? 0)")
+                .font(.system(size: format == .story ? 116 : 84,
+                              weight: .black, design: .rounded))
+                .monospacedDigit()
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .padding(.top, format == .story ? 4 : 2)
+
+            Text("DAY STREAK")
+                .font(.system(size: format == .story ? 13 : 11,
+                              weight: .black, design: .rounded))
+                .tracking(format == .story ? 4.5 : 3.6)
+                .foregroundColor(MADTheme.Colors.warning)
+                .padding(.top, 10)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, format.margin)
+    }
+
+    private var flameSize: CGFloat { format == .story ? 150 : 106 }
+
+    /// The SAME flame the user's own dashboard draws, so the card they share
+    /// looks like the app they opened.
+    ///
+    /// It was an SF Symbol `flame.fill` under a hand-mixed orange gradient —
+    /// which is neither of the app's two flames and belongs to neither style.
+    ///
+    /// Both get `still: true`. A card is baked by `ImageRenderer`, which drives
+    /// no view lifecycle, so the flame's 12 fps flicker/blink would be
+    /// snapshotted wherever it happened to land — Flamey mid-blink, baked into
+    /// a picture somebody posts. It has to be a parameter: Reduce Motion, which
+    /// the flames already branch on, is a READ-ONLY environment value and
+    /// cannot be forced from a caller.
+    @ViewBuilder
+    private var heroFlame: some View {
+        switch DashboardStylePreference.current {
+        case .fun:
+            // Flamey himself, face and all. No `mood`: the hero's props and
+            // speech bubble are dressing for a live dashboard, and a bubble
+            // baked into a shared picture reads as a caption nobody wrote.
+            FlameBuddyView(health: .blazing, size: flameSize,
+                           phase: .blazing, coalWarmth: 1, still: true)
+        case .modern:
+            // The Modern dashboard's own flame: the same figure with no face,
+            // ungrounded so it stays framed. `.blazing` also means no countdown
+            // ring — a still has no countdown to draw.
+            ProfessionalFlameView(phase: .blazing, health: .blazing,
+                                  size: flameSize, coalWarmth: 1, still: true)
+        }
+    }
+
+    /// Equal columns under one hairline, split by hairlines. An `HStack` with
+    /// fixed spacing let the columns drift with their content, which is what
+    /// made the old stat row read as three loose labels rather than a rail.
+    private var statRail: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(stats.enumerated()), id: \.element.label) { index, stat in
+                if index > 0 {
+                    // An explicit height, not a flexible one: a `Rectangle` with
+                    // only a width has no ideal height, and the enclosing
+                    // `fixedSize(vertical:)` then has nothing to measure it by.
+                    Rectangle()
+                        .fill(Color.white.opacity(0.13))
+                        .frame(width: 1, height: format == .story ? 36 : 31)
+                        .padding(.trailing, 14)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(stat.value)
+                        .font(.system(size: format == .story ? 21 : 18,
+                                      weight: .black, design: .rounded))
                         .monospacedDigit()
-                        .foregroundColor(.white)
-                    Text("MI")
-                        .font(.system(size: 21, weight: .black, design: .rounded))
-                        .tracking(1)
-                        .foregroundColor(.white.opacity(0.55))
+                        .foregroundColor(stat.tint)
+                    Text(stat.label)
+                        .font(.system(size: format == .story ? 10 : 9,
+                                      weight: .black, design: .rounded))
+                        .tracking(1.7)
+                        .foregroundColor(.white.opacity(0.4))
                 }
                 .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            }
-
-            if !secondaryStats.isEmpty {
-                HStack(spacing: 26) {
-                    ForEach(secondaryStats, id: \.0) { stat in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(stat.0)
-                                .font(.system(size: 11, weight: .black, design: .rounded))
-                                .tracking(1.4)
-                                .foregroundColor(.white.opacity(0.4))
-                            Text(stat.1)
-                                .font(.system(size: 21, weight: .heavy, design: .rounded))
-                                .monospacedDigit()
-                                .foregroundColor(.white)
-                        }
-                    }
-                }
-            }
-
-            if let streak = content.streak, streak > 0 {
-                streakChip(streak)
+                .minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-    }
-
-    private func streakChip(_ streak: Int) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: "flame.fill")
-                .font(.system(size: 15, weight: .bold))
-                .accessibilityHidden(true)
-            Text("\(streak) DAY STREAK")
-                .font(.system(size: 15, weight: .black, design: .rounded))
-                .tracking(0.6)
-                .monospacedDigit()
-        }
-        .foregroundColor(Color(red: 1, green: 0.77, blue: 0.4))
-        .padding(.horizontal, 15)
-        .padding(.vertical, 8)
-        .background(Capsule().fill(MADTheme.Colors.warning.opacity(0.17)))
-        .overlay(Capsule().stroke(MADTheme.Colors.warning.opacity(0.55), lineWidth: 1.5))
-        .fixedSize()
-    }
-
-    /// The download driver. A story link isn't tappable for most accounts, so
-    /// this is the only route back to the app from a screenshot.
-    private var footer: some View {
-        HStack {
-            wordmark
-            Spacer()
-            Text("mileaday.run")
-                .font(.system(size: 14, weight: .heavy, design: .rounded))
-                .foregroundColor(.white.opacity(0.55))
-        }
-        .padding(.horizontal, 26)
-        .padding(.top, 18)
-        .padding(.bottom, 28)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, 14)
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(Color.white.opacity(0.11))
+                .fill(Color.white.opacity(0.13))
                 .frame(height: 1)
-                .padding(.horizontal, 26)
         }
+    }
+
+    /// The download driver, and the card's only brand lockup.
+    private var footer: some View {
+        HStack(spacing: 0) {
+            MADLogoMark(size: format == .story ? 22 : 19, shadow: false)
+            Text("MILE A DAY")
+                .font(.system(size: format == .story ? 11.5 : 10,
+                              weight: .black, design: .rounded))
+                .tracking(2)
+                .foregroundColor(.white)
+                .padding(.leading, 8)
+            Spacer(minLength: 8)
+            Text("mileaday.run")
+                .font(.system(size: format == .story ? 12 : 10.5,
+                              weight: .heavy, design: .rounded))
+                .foregroundColor(.white.opacity(0.45))
+        }
+        .lineLimit(1)
+        .padding(.top, format == .story ? 20 : 16)
     }
 
     // MARK: Values
 
-    private var distanceText: String {
-        (content.distanceMiles ?? 0).milesText
+    private var heroValue: String {
+        (content.distanceMiles ?? 0).distanceText
     }
 
-    private var secondaryStats: [(String, String)] {
-        var out: [(String, String)] = []
-        if let pace = content.paceSecondsPerMile, pace > 0 {
-            out.append(("PACE", RunStatsStickerView.paceText(pace)))
-        }
-        if let duration = content.durationSeconds, duration > 0 {
-            out.append(("TIME", RunStatsStickerView.durationText(duration)))
-        }
-        if let text = displayDate {
-            out.append(("DATE", text))
+    private var kicker: String? {
+        let parts = [displayDate, content.activityName?.uppercased()].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// Capped at the format's column count, so a sticker never squeezes three
+    /// values into 320pt.
+    private var stats: [MADStoryStat] {
+        Array(allStats.prefix(format.maxStats))
+    }
+
+    private var allStats: [MADStoryStat] {
+        var out: [MADStoryStat] = []
+        switch design {
+        case .photo, .route:
+            if let pace = content.paceSecondsPerMile, pace > 0 {
+                out.append(MADStoryStat(value: paceText(pace), label: "PACE"))
+            }
+            if let duration = content.durationSeconds, duration > 0 {
+                out.append(MADStoryStat(value: RunStatsStickerView.durationText(duration),
+                                        label: "TIME"))
+            }
+            if let streak = content.streak, streak > 0 {
+                out.append(MADStoryStat(value: "\(streak)", label: "STREAK",
+                                        tint: MADTheme.Colors.warning))
+            }
+        case .streak:
+            if let distance = content.distanceMiles, distance > 0 {
+                out.append(MADStoryStat(value: distance.distanceText, label: "TODAY"))
+            }
+            if let pace = content.paceSecondsPerMile, pace > 0 {
+                out.append(MADStoryStat(value: paceText(pace), label: "PACE"))
+            }
+            if let total = content.totalMiles, total > 0 {
+                // Lifetime totals are whole units — two decimals on a four-digit
+                // number is false precision and it blows the column's width.
+                out.append(MADStoryStat(value: "\(Int(total.inDisplayUnit))", label: "TOTAL"))
+            }
         }
         return out
     }
 
-    private var compactStats: [(String, String)] {
-        var out: [(String, String)] = []
-        if let pace = content.paceSecondsPerMile, pace > 0 {
-            out.append(("PACE", RunStatsStickerView.paceText(pace)))
-        }
-        if let streak = content.streak, streak > 0 {
-            out.append(("STREAK", "\(streak)"))
-        }
-        return out
-    }
-
-    private var streakStats: [(String, String)] {
-        var out: [(String, String)] = []
-        if let distance = content.distanceMiles {
-            out.append(("TODAY", "\(distance.milesText) mi"))
-        }
-        if let pace = content.paceSecondsPerMile, pace > 0 {
-            out.append(("PACE", RunStatsStickerView.paceText(pace)))
-        }
-        if let total = content.totalMiles, total > 0 {
-            out.append(("TOTAL", "\(Int(total)) mi"))
-        }
-        return out
+    /// Pace is stored per MILE and shown per display unit, like everywhere else.
+    private func paceText(_ secondsPerMile: Double) -> String {
+        RunStatsStickerView.paceText(secondsPerMile.pacePerDisplayUnit)
     }
 
     private var displayDate: String? {
-        if let text = content.dateText, !text.isEmpty { return text }
-        if let date = content.date { return Self.dateFormatter.string(from: date) }
+        if let text = content.dateText, !text.isEmpty { return text.uppercased() }
+        if let date = content.date { return Self.dateFormatter.string(from: date).uppercased() }
         return nil
     }
 
@@ -430,22 +490,30 @@ struct MADStoryCard: View {
     }()
 }
 
+/// One column of the stat rail.
+struct MADStoryStat {
+    let value: String
+    let label: String
+    var tint: Color = .white
+}
+
 // MARK: - Rendering
 
 extension MADStoryCard {
     /// The image handed to Instagram (or the share sheet).
     ///
-    /// Scale 3 over the design size, so a story frame lands at exactly the
-    /// 1080×1920 Instagram wants and the sticker at 960×600. Opaque for the
-    /// full-frame faces and transparent for the sticker — a sticker with a
-    /// black rectangle behind it is not a sticker.
+    /// Scale 3 over the design size. Opaque for the story frame and transparent
+    /// for the sticker — a sticker with a black rectangle behind it is not a
+    /// sticker.
     @MainActor
-    static func render(content: MADStoryContent, face: MADStoryFace) -> UIImage? {
+    static func render(content: MADStoryContent,
+                       design: MADStoryDesign,
+                       format: MADStoryFormat) -> UIImage? {
         let renderer = ImageRenderer(
-            content: MADStoryCard(content: content, face: face)
+            content: MADStoryCard(content: content, design: design, format: format)
         )
         renderer.scale = 3.0
-        renderer.isOpaque = !face.isTransparent
+        renderer.isOpaque = !format.isTransparent
         return renderer.uiImage
     }
 }
@@ -461,7 +529,7 @@ extension GoalCompletionStats {
     ///
     /// Deliberately no route: a goal celebration is about the day, which can be
     /// several walks, and pinning one walk's line under the day's rollup is the
-    /// mismatch `dayRollupStats` exists to avoid. That leaves the Streak face,
+    /// mismatch `dayRollupStats` exists to avoid. That leaves the Streak design,
     /// which is the one this moment wants anyway.
     ///
     /// This extension lives HERE and not in CelebrationManager.swift, which is

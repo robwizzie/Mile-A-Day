@@ -13,7 +13,11 @@ import {
   getUserScores,
   usesTeamEntityScoring,
 } from "./competitionService.js";
-import { Competition, CompetitionUser } from "../types/competitions.js";
+import {
+  Competition,
+  CompetitionUser,
+  teamLabel,
+} from "../types/competitions.js";
 import {
   getTodayMiles,
   getTodayStats,
@@ -1178,7 +1182,7 @@ export async function checkLeadChanges(
           entities = teams
             .map((t) => ({
               id: `team:${t.id}`,
-              label: `Team ${t.name}`,
+              label: teamLabel(t.name),
               score: t.score ?? 0,
               memberIds: acceptedUsers
                 .filter((u) => u.team_id === t.id)
@@ -1227,7 +1231,9 @@ export async function checkLeadChanges(
         const maxScore = newLeader?.score ?? 0;
         const uploaderEntity = entityByUser.get(userId);
         // Who the push names: the team, or the person.
-        const leadName = uploaderEntity?.isTeam ? uploaderEntity.label : username;
+        const leadName = uploaderEntity?.isTeam
+          ? uploaderEntity.label
+          : username;
 
         // Per-interval dedup key. For race/apex (no interval option),
         // getCurrentInterval falls through to a daily key — fine, since
@@ -1285,7 +1291,9 @@ export async function checkLeadChanges(
             }
 
             sendPush(userId, {
-              title: leader.isTeam ? "Your team's in first!" : "You're in first!",
+              title: leader.isTeam
+                ? "Your team's in first!"
+                : "You're in first!",
               body: leader.isTeam
                 ? `You just put ${leader.label} in first in ${fullComp.competition_name}! Keep it up!`
                 : `You just took the lead in ${fullComp.competition_name}! Keep it up!`,

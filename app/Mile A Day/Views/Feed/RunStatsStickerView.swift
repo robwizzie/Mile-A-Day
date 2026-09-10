@@ -387,6 +387,9 @@ struct RunStatsStickerView: View, Equatable {
                 }
                 ForEach(competition.rows) { row in
                     standingRow(row)
+                    if !row.members.isEmpty {
+                        memberStrip(row.members)
+                    }
                 }
             }
             .padding(.top, 2)
@@ -406,6 +409,9 @@ struct RunStatsStickerView: View, Equatable {
                 .foregroundColor(row.isMe ? trophyGold : .white.opacity(0.45))
                 .monospacedDigit()
                 .frame(width: 14, alignment: .leading)
+            if row.avatarURL != nil {
+                stickerFace(row.avatarURL, row.name, size: 17)
+            }
             Text(row.name)
                 .font(.system(size: 13, weight: row.isMe ? .heavy : .semibold, design: .rounded))
                 .foregroundColor(.white.opacity(row.isMe ? 1 : 0.72))
@@ -428,6 +434,60 @@ struct RunStatsStickerView: View, Equatable {
                 .fill(trophyGold.opacity(row.isMe ? 0.18 : 0))
         )
         .padding(.leading, row.isMe ? -6 : 0)
+    }
+
+    /// Who is in this team and what they put in.
+    ///
+    /// A team row's score is the TEAM's — derived server-side from combined
+    /// miles — so on its own it names nobody and explains nothing about who
+    /// carried it. These are the numbers that actually add up.
+    private func memberStrip(_ members: [CompetitionStickerData.Member]) -> some View {
+        HStack(spacing: 9) {
+            ForEach(members) { member in
+                HStack(spacing: 4) {
+                    stickerFace(member.avatarURL, member.name, size: 15)
+                    Text(member.name)
+                        .font(.system(size: 9.5, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white.opacity(0.62))
+                    Text(member.value)
+                        .font(.system(size: 9.5, weight: .black, design: .rounded))
+                        .foregroundColor(.white.opacity(0.92))
+                        .monospacedDigit()
+                }
+            }
+        }
+        .lineLimit(1)
+        .padding(.leading, 22)
+        .padding(.top, 1)
+        .padding(.bottom, 2)
+    }
+
+    /// A face on the sticker.
+    ///
+    /// Cache-only (`RouteAvatarImageLoader.cachedImage`), because this whole
+    /// overlay is baked by `ImageRenderer` at post time and cannot wait on a
+    /// download — an `AsyncImage` here renders empty into the photo. Initials
+    /// are the miss behaviour; `PostComposerViewModel` warms the cache when it
+    /// loads the competitions, so the miss is rare rather than normal.
+    private func stickerFace(_ imageURL: String?, _ name: String, size: CGFloat) -> some View {
+        Group {
+            if let image = RouteAvatarImageLoader.cachedImage(for: imageURL) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    Color.white.opacity(0.16)
+                    Text(AvatarView.initials(for: name))
+                        .font(.system(size: size * 0.46, weight: .black, design: .rounded))
+                        .foregroundColor(.white.opacity(0.85))
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().strokeBorder(Color.white.opacity(0.22), lineWidth: 1))
+        .accessibilityHidden(true)
     }
 
     private var brandLine: some View {

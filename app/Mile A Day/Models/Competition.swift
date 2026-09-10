@@ -21,7 +21,28 @@ struct CompetitionStickerData: Equatable, Hashable {
         /// True on the viewer's own row when it was lifted from outside the
         /// top three, so the sticker can draw the gap it jumped.
         var truncated: Bool = false
+        /// The competitor's own face, on a competition scored on PEOPLE. Nil
+        /// on a team row — a team has no one face, so its people ride
+        /// `members` instead.
+        var avatarURL: String? = nil
+        /// Who is actually in this team and what each of them put IN. A team
+        /// row's score is the team's, derived server-side from combined miles,
+        /// so on its own it says nothing about who is in the competition or
+        /// who carried it.
+        var members: [Member] = []
         var id: String { "\(place)-\(name)" }
+    }
+
+    /// One person under a team row.
+    struct Member: Equatable, Hashable, Identifiable {
+        let name: String
+        /// What they put INTO the team over the scored window — miles, not
+        /// their own standing. `Competition.memberScoreLabel` is the one
+        /// formatter, shared with the team leaderboard so the two can't
+        /// disagree about the same person.
+        let value: String
+        let avatarURL: String?
+        var id: String { "\(name)-\(value)" }
     }
 
     let competitionId: String
@@ -190,7 +211,11 @@ struct Competition: Codable, Identifiable {
         return CompetitionStickerData(
             competitionId: competition_id,
             name: name,
-            subtitle: myTeam.map { CompetitionStickerData.capped("Team \($0.name)") },
+            // No subtitle on a team competition. It read "Team <name>" over a
+            // podium whose own first line was that same team — the viewer is
+            // always spliced onto the podium, so it could only ever repeat a
+            // row, and it was carrying the doubled "Team Team 2" besides.
+            subtitle: nil,
             place: place(for: userId),
             fieldSize: myTeam == nil ? acceptedRanked.count : rankedTeams.count,
             rows: standingsPodium(for: userId)
@@ -208,11 +233,17 @@ struct Competition: Codable, Identifiable {
         let myTeam = hasTeams ? userId.flatMap({ team(for: $0) }) : nil
         if hasTeams {
             return Self.podium(
-                rankedTeams.map {
+                rankedTeams.map { team in
                     CompetitionStickerData.Row(
-                        name: CompetitionStickerData.capped("Team \($0.name)"),
-                        score: scoreLabel($0.score ?? 0),
-                        isMe: $0.id == myTeam?.id
+                        // The team's OWN name, never prefixed. Teams created
+                        // in the lobby are literally named "Team 1"/"Team 2"
+                        // (CompetitionLobbyTeams), so prefixing produced
+                        // "Team Team 2"; a team someone named "Red" reads fine
+                        // as "Red" in a leaderboard row.
+                        name: CompetitionStickerData.capped(team.name),
+                        score: scoreLabel(team.score ?? 0),
+                        isMe: team.id == myTeam?.id,
+                        members: stickerMembers(of: team.id)
                     )
                 }
             )
@@ -222,10 +253,30 @@ struct Competition: Codable, Identifiable {
                 CompetitionStickerData.Row(
                     name: CompetitionStickerData.capped($0.displayName),
                     score: scoreLabel($0.score ?? 0),
-                    isMe: $0.user_id == userId
+                    isMe: $0.user_id == userId,
+                    // People ARE the competitors here, so the face belongs on
+                    // the row itself rather than in a member strip under it.
+                    avatarURL: $0.profile_image_url
                 )
             }
         )
+    }
+
+    /// The people under a team row, biggest contributor first.
+    ///
+    /// Capped at three: this is a sticker sitting on somebody's photo, and a
+    /// roster of eight would be taller than the walk it is annotating. The cap
+    /// is on the DATA rather than a `lineLimit` for the same reason `capped`
+    /// is — the sticker renders `.fixedSize()`, so anything trimmed only at
+    /// draw time still publishes its full intrinsic width.
+    private func stickerMembers(of teamId: String) -> [CompetitionStickerData.Member] {
+        members(of: teamId).prefix(3).map { user in
+            CompetitionStickerData.Member(
+                name: CompetitionStickerData.capped(user.displayName, max: 12),
+                value: memberScoreLabel(user),
+                avatarURL: user.profile_image_url
+            )
+        }
     }
 
     /// This user's place on whichever leaderboard the competition is scored
@@ -313,6 +364,37 @@ struct Competition: Codable, Identifiable {
     /// ties/pre-start.
     var rankedTeams: [CompetitionTeam] {
         (teams?.teams ?? []).sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+    }
+
+    /// Score label for a whole team, matching the individual leaderboard's units.
+    func teamScoreLabel(_ team: CompetitionTeam) -> String {
+        formattedScore(team.score ?? 0)
+    }
+
+    /// Label for one member inside a team row — what they CONTRIBUTED, in the
+    /// competition's own unit.
+    ///
+    /// Not their score. The team is scored as one competitor over the members'
+    /// combined miles, so member points don't sum to the team's number: "Red
+    /// Team 4 pts" over "Alice 3 pts, Bob 2 pts" reads as arithmetic that got
+    /// away from us. Miles are the thing that does add up, and they answer the
+    /// question a member row is actually asked — who carried this.
+    ///
+    /// Falls back to the score for older servers that send no contribution,
+    /// which is byte-identical to what shipped.
+    func memberScoreLabel(_ user: CompetitionUser) -> String {
+        if let contribution = user.team_contribution {
+            return options.formatQuantityWithUnit(contribution)
+        }
+        return formattedScore(user.score ?? 0)
+    }
+
+    private func formattedScore(_ score: Double) -> String {
+        switch type {
+        case .streaks: return "\(Int(score))d"
+        case .apex, .race: return options.formatQuantityWithUnit(score)
+        case .targets, .clash: return "\(Int(score)) pts"
+        }
     }
 
     /// Accepted members of a team, biggest contributor first.
@@ -1002,6 +1084,19 @@ struct CompetitionTeam: Codable, Identifiable, Equatable {
         self.score = score
         self.remaining_lives = remaining_lives
         self.quantity = quantity
+    }
+
+    /// The team's name in PROSE ("Team Red · 1st of 2"), where the word carries
+    /// meaning the surrounding sentence doesn't.
+    ///
+    /// Only prefixes a name that isn't already one: the lobby creates default
+    /// teams literally NAMED "Team 1"/"Team 2" (`CompetitionLobbyTeams`), so a
+    /// blind `"Team \(name)"` rendered "Team Team 2" — on the post sticker, the
+    /// dashboard rank line and a push, because three places each wrote it out.
+    /// A leaderboard ROW needs none of this and uses `name` directly; the
+    /// column it sits in is what says these are teams.
+    var teamLabel: String {
+        name.lowercased().hasPrefix("team") ? name : "Team \(name)"
     }
 }
 

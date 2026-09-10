@@ -771,6 +771,7 @@ struct WorkoutDetailView: View {
             durationSeconds: workout.duration > 0 ? workout.duration : nil,
             streak: UserManager.shared.currentUser.streak,
             totalMiles: UserManager.shared.currentUser.totalMiles,
+            activityName: workoutTypeString,
             date: workout.startDate,
             coordinates: isStealthWorkout ? [] : (routeCoordinates ?? []),
             routeColor: MADTheme.workoutColor(
