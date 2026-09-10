@@ -246,6 +246,11 @@ struct PostItem: Codable, Identifiable {
     /// The competitions the author was in on this post's day. Nil = none, or
     /// an older server.
     var competitions: [PostCompetitionRef]? = nil
+    /// The ONE competition the poster STICKERED onto this photo — never a
+    /// guess among the list above. Nil = they added none, or an older server.
+    /// Only meaningful alongside `competitions`: the matching entry's
+    /// `viewer_in` is what decides whether this viewer may open it.
+    var competition_id: String? = nil
     /// Per-mile splits for the linked workout — the indoor pace wave's data.
     /// Only the feed/single-post projections serve it; nil everywhere else and
     /// on older servers, which simply means no wave.
@@ -499,6 +504,9 @@ struct FeedEntry: Codable, Identifiable {
     let route_started_at: Double?
     /// The owner's competitions on the entry's day (both kinds). Nil = none.
     let competitions: [PostCompetitionRef]?
+    /// The competition the poster stickered onto the photo, when they did.
+    /// Post entries only. Same CodingKeys rule as everything here.
+    let competition_id: String?
     /// Per-mile splits for the entry's workout — the indoor pace wave. Nil on
     /// older servers, stitched rollups and auto posts. Same CodingKeys rule as
     /// everything here: listed below, or Codable synthesis dies.
@@ -569,7 +577,7 @@ struct FeedEntry: Codable, Identifiable {
         // synthesis for the whole struct (Xcode Cloud build 413).
         case workout_id, workout_type, feed_role, distance, total_duration
         case moving_seconds, calories, steps, route, splits, is_indoor, flyover_allowed
-        case route_times, route_started_at, competitions
+        case route_times, route_started_at, competitions, competition_id
         case stealth
         case segment_count, segments
         case is_self, is_hyped, hype_count, comment_count, comment_preview
@@ -618,6 +626,7 @@ struct FeedEntry: Codable, Identifiable {
             route: route,
             route_times: route_times, route_started_at: route_started_at,
             competitions: competitions,
+            competition_id: competition_id,
             splits: splits, is_indoor: is_indoor,
             flyover_allowed: flyover_allowed,
             stealth: stealth,
@@ -864,7 +873,13 @@ enum PostService {
         // 10 minutes after the walk and a camera-roll pick (or a story being
         // promoted) to the rest of the day. Omitted on the auto route/stats
         // card, which is exempt from both.
-        photoSource: PostPhotoSource? = nil
+        photoSource: PostPhotoSource? = nil,
+        // The competition the poster put on the photo via the sticker tray, so
+        // a fellow member can tap the chip through to the standings. Sent only
+        // when the sticker is actually ON — the server re-checks the author's
+        // membership before storing it, and stores nothing when they aren't in
+        // it, so this is a claim rather than an authorization.
+        competitionId: String? = nil
     ) async throws -> PostItem {
         struct Body: Encodable {
             let media_url: String
@@ -879,6 +894,7 @@ enum PostService {
             let coauthor_user_ids: [String]?
             let buddy_session_id: String?
             let photo_source: String?
+            let competition_id: String?
         }
         let bodyData = try JSONEncoder().encode(
             Body(
@@ -893,7 +909,8 @@ enum PostService {
                 coauthor_user_id: coauthorUserId,
                 coauthor_user_ids: coauthorUserIds,
                 buddy_session_id: buddySessionId,
-                photo_source: photoSource?.rawValue
+                photo_source: photoSource?.rawValue,
+                competition_id: competitionId
             )
         )
         return try await APIClient.fancyFetch(

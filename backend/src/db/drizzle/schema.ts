@@ -1792,6 +1792,17 @@ export const posts = pgTable(
     // yet" on every open, for every participant, and that question is what
     // stops two people opening two posts for one walk.
     buddySessionId: varchar("buddy_session_id", { length: 32 }),
+    // The ONE competition the poster put on this photo, or NULL.
+    //
+    // Opt-in by construction, which is the whole point: a post already carries
+    // `competitions` (every live competition the author is in, for the sticker
+    // tray), and drawing a chip from THAT is what `CompetitionFlairRow` did —
+    // it announced a closed group's user-typed name to the author's whole
+    // circle, unasked, on walks that had nothing to do with it. This records
+    // which one they actually chose, so the tappable chip can name that one and
+    // no other. Nullable with no default: absent means the poster added none,
+    // which is what every existing row and every shipped client means.
+    competitionId: varchar("competition_id", { length: 32 }),
   },
   (table) => [
     // "Has this session been posted?" — asked on every recap open. Partial

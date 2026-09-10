@@ -207,6 +207,10 @@ export interface PostRow {
   // Additive: the competitions the AUTHOR was in on the post's day, so a
   // card can say "competing in …" (see COMPETITIONS_JSON). Null when none.
   competitions?: PostCompetitionRef[] | null;
+  // Additive: the ONE competition the poster stickered onto the photo, or
+  // null. Meaningful only alongside `competitions` — the matching entry's
+  // `viewer_in` is what decides whether this viewer gets a tappable chip.
+  competition_id?: string | null;
   workout_type: string | null;
   is_self: boolean;
   is_hyped: boolean;
@@ -357,6 +361,12 @@ const POST_COLUMNS = `
 	p.media_url,
 	p.caption,
 	p.workout_id,
+	-- The ONE competition the poster stickered, or NULL. Additive and inert for
+	-- shipped clients. The chip a viewer can tap is drawn by matching this id
+	-- against the competitions array below, which already carries viewer_in --
+	-- so membership is decided server-side and a non-member gets no chip
+	-- without this read costing an extra subquery to find that out.
+	p.competition_id,
 	-- Linked workout's feed_role, display framing only (extra vs goal
 	-- entry) — same additive field the unified feed carries.
 	(SELECT w0.feed_role FROM workouts w0 WHERE w0.workout_id = p.workout_id)
@@ -881,7 +891,18 @@ const AUTHOR_ROUTE_TIMING_SQL = `
  * user-typed and shown to anyone who can already see the post — the same
  * circle that can be invited to it. `$1` = viewer, for `viewer_in`.
  */
-const competitionsJson = (userExpr: string, dateExpr: string) => `(
+const competitionsJson = (
+  userExpr: string,
+  dateExpr: string,
+  // The competition this post STICKERED, when the caller has one to name.
+  // It only reorders the LIMIT 3 below so the stickered comp is never the one
+  // cut: the client draws its tappable chip by matching competition_id against
+  // this array, and a poster in four competitions who picked the one ending
+  // last would otherwise sticker a card whose chip could not resolve. NULL
+  // (the default, and every non-post caller) leaves the ordering exactly as it
+  // was -- the term is then NULL for every row and end_date decides.
+  pinnedExpr: string = "NULL",
+) => `(
 	SELECT jsonb_agg(jsonb_build_object(
 		'id', pc.id,
 		'name', pc.competition_name,
@@ -910,7 +931,7 @@ const competitionsJson = (userExpr: string, dateExpr: string) => `(
 			AND c.start_date IS NOT NULL
 			AND c.start_date <= ${dateExpr}
 			AND COALESCE(c.end_date, ${dateExpr}) >= ${dateExpr}
-		ORDER BY c.end_date, c.id
+		ORDER BY (c.id = ${pinnedExpr}) DESC NULLS LAST, c.end_date, c.id
 		LIMIT 3
 	) pc
 )`;
@@ -1010,7 +1031,7 @@ function commentPreviewSql(matchSql: string): string {
 const POST_SELECT = `${POST_COLUMNS},
 	${AUTHOR_ROUTE_SQL} AS route,
 	${AUTHOR_ROUTE_TIMING_SQL},
-	${competitionsJson("p.user_id", "p.local_date")} AS competitions,
+	${competitionsJson("p.user_id", "p.local_date", "p.competition_id")} AS competitions,
 	(p.user_id = $1) AS is_self,
 	EXISTS (
 		SELECT 1 FROM hype_log h
@@ -1057,6 +1078,11 @@ export interface CreatePostInput {
   coauthorUserIds?: string[] | null;
   // Links the post back to the session it came from (analytics + recap).
   buddySessionId?: string | null;
+  // The ONE competition the poster put on this photo via the sticker tray.
+  // Validated in the INSERT itself against the author's accepted membership,
+  // so a client claiming a competition it isn't in stores NULL rather than a
+  // name it could then get a chip for.
+  competitionId?: string | null;
   // The author shared this inside their 10-minute fresh window (client-owned:
   // the window anchors to when the app SAW the finished workout). Drives the
   // FRESH chip for every viewer. Ignored for auto posts; legacy clients that
@@ -1070,7 +1096,7 @@ const CREATED_POST_SELECT = `
 	SELECT ${POST_COLUMNS},
 		${AUTHOR_ROUTE_SQL} AS route,
 		${AUTHOR_ROUTE_TIMING_SQL},
-		${competitionsJson("p.user_id", "p.local_date")} AS competitions,
+		${competitionsJson("p.user_id", "p.local_date", "p.competition_id")} AS competitions,
 		true AS is_self, false AS is_hyped, 0 AS hype_count, 0 AS comment_count,
 		${COAUTHOR_COLUMNS}`;
 
@@ -1405,7 +1431,8 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 				user_id, media_url, caption, workout_id, stats_snapshot,
 				local_date, share_to_feed, share_to_story, story_expires_at,
 				is_auto, include_route, coauthor_user_id, coauthor_status,
-				coauthor_workout_id, posted_fresh, buddy_session_id
+				coauthor_workout_id, posted_fresh, buddy_session_id,
+				competition_id
 			)
 			VALUES (
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
@@ -1429,7 +1456,19 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 				-- has no row for the author, so a walk whose crew all dropped out
 				-- (or a solo finisher's) had a post nothing could find by session.
 				-- The recap's "has this walk been posted yet" reads this.
-				$13
+				$13,
+				-- The stickered competition, RESOLVED here rather than taken on
+				-- the client's word: it survives only if the author is an
+				-- accepted member. A claim to a competition they aren't in
+				-- yields NULL, so the worst a bad client can do is post without
+				-- a chip. Fails closed, and costs no extra round trip.
+				(
+					SELECT c.id FROM competitions c
+					JOIN competition_users cu ON cu.competition_id = c.id
+					WHERE c.id = $14::varchar
+						AND cu.user_id = $1
+						AND cu.invite_status = 'accepted'
+				)
 			)
 				ON CONFLICT ${conflictTarget}
 				DO UPDATE SET
@@ -1452,7 +1491,14 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 					-- inherits the session link rather than losing it. COALESCE
 					-- because an auto card resolves its own session now, and a
 					-- shipped build's photo replacing it sends none.
-					buddy_session_id = COALESCE(EXCLUDED.buddy_session_id, posts.buddy_session_id)${flagUpdates}
+					buddy_session_id = COALESCE(EXCLUDED.buddy_session_id, posts.buddy_session_id),
+					-- Same reasoning as the coauthor columns: the guard only ever
+					-- overwrites an AUTO card, which never carries a competition
+					-- (nothing stickers one on the user's behalf), so EXCLUDED
+					-- wholesale is safe. It has to be wholesale rather than
+					-- COALESCE, or a re-post with the sticker turned OFF would
+					-- keep the chip the poster just removed.
+					competition_id = EXCLUDED.competition_id${flagUpdates}
 				${updateGuard}
 			RETURNING *
 		)
@@ -1478,6 +1524,9 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       // when nothing reached the feed. Auto cards carry it too now — an auto
       // card that doesn't know its walk is a second card waiting to happen.
       resolvedSessionId,
+      // Never trusted as sent — the INSERT resolves it against the author's
+      // accepted membership and stores NULL if they aren't in it.
+      input.competitionId ?? null,
     ],
   );
   if (rows[0]) {
@@ -2452,6 +2501,11 @@ export interface FeedEntryRow {
   route_started_at: number | null;
   // Additive: the owner's competitions on the entry's day (both kinds).
   competitions: PostCompetitionRef[] | null;
+  // post-only, additive: the competition the poster stickered onto the photo.
+  // Null on workout entries and on any post without one. The tappable chip is
+  // drawn by matching this against `competitions` above — its `viewer_in` is
+  // the membership gate, so no extra query decides who may open it.
+  competition_id?: string | null;
   // Additive: the entry's per-mile splits, so indoor cards can draw a pace
   // wave. Pace/time only — no location — hence no share_route_maps gate (the
   // same figures are already public via stats_snapshot). Null when absent, on
@@ -2577,6 +2631,12 @@ const FEED_ENTRY_PROJECTION = `
 			-- The author's route-slide choice, so the card's ⋯ menu can offer to
 			-- withdraw or restore it without a second round trip. Additive.
 			p.include_route,
+			-- The stickered competition. NULL on workout entries and on every
+			-- post that didn't add one. Paired with the competitions array this
+			-- arm already carries, whose viewer_in decides whether this viewer
+			-- gets a tappable chip -- so the feed's hottest query gains a bare
+			-- column and no new subquery.
+			p.competition_id,
 			page.workout_id,
 			-- Populated for posts (via their linked workout) and workouts alike.
 			wt.workout_type,
@@ -2632,7 +2692,7 @@ const FEED_ENTRY_PROJECTION = `
 			${unifiedFeedRouteSql("wr.times")} AS route_times,
 			${unifiedFeedRouteSql(ROUTE_STARTED_AT_EXPR)} AS route_started_at,
 			-- The owner's competitions on the entry's day, both kinds.
-			${competitionsJson("page.owner_id", "COALESCE(p.local_date, wt.local_date)")} AS competitions,
+			${competitionsJson("page.owner_id", "COALESCE(p.local_date, wt.local_date)", "p.competition_id")} AS competitions,
 			-- Additive: per-mile splits for the entry's workout, so indoor cards
 			-- can draw a pace wave. Same arm structure as \`route\` above, but NO
 			-- share_route_maps gate — splits are pace/time, not location, and the

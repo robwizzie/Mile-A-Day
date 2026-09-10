@@ -47,6 +47,27 @@ final class DeepLinkRouter: ObservableObject {
         pendingCompetitionId = id
     }
 
+    /// The same, raised only AFTER a full-screen host has finished dismissing,
+    /// and switching to the Compete tab itself.
+    ///
+    /// A caller inside a cover or sheet (`PostDetailView`, opened from a
+    /// profile grid or a post link) needs this one: flipping the tab
+    /// underneath a presentation changes nothing the user can see, so the tap
+    /// reads as dead. The delay is the same one `requestOpenBuddySessionAfterDismiss`
+    /// uses — a presentation raised in a dismissal's own transaction is the
+    /// one SwiftUI silently drops.
+    func requestOpenCompetitionAfterDismiss(id: String) {
+        guard !id.isEmpty else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            self?.pendingCompetitionId = id
+            NotificationCenter.default.post(
+                name: NSNotification.Name("MAD_SwitchTab"),
+                object: nil,
+                userInfo: ["tab": 1]
+            )
+        }
+    }
+
     /// Asks the Dashboard to open a Buddy Walk once it's alive. Callers should
     /// also switch to the Dashboard tab (`MAD_SwitchTab`, tab 0).
     func requestOpenBuddySession(code: String? = nil, sessionId: String? = nil) {

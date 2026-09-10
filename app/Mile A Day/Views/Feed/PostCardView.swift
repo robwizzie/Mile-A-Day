@@ -72,6 +72,12 @@ struct PostCardView: View {
     var onSetMyCollabRoute: ((Bool) -> Void)? = nil
     /// Author: add or withdraw the route map slide after posting.
     var onSetIncludeRoute: ((Bool) -> Void)? = nil
+    /// Tap the stickered competition's chip to open its standings. Wired by
+    /// the SURFACE, like every other navigation closure here — a host that is
+    /// itself inside a sheet has to dismiss before routing, which the card
+    /// can't do for it. Unwired, the chip falls back to the Compete tab,
+    /// which is right for the feed and every other full-screen host.
+    var onOpenCompetition: ((String) -> Void)? = nil
 
     @State private var hypeBurst = 0
     /// The legend chip that was tapped: that walker's line leads, the rest
@@ -1272,6 +1278,9 @@ struct PostCardView: View {
                     streakChip(streak)
                 }
             }
+            if let competition = tappableCompetition {
+                competitionChip(competition)
+            }
             captionLine
             commentPreview
             if let timestamp = absoluteTimestamp {
@@ -1316,6 +1325,76 @@ struct PostCardView: View {
                 .accessibilityLabel("\(count) hype\(count == 1 ? "" : "s")")
             }
         }
+    }
+
+    /// The competition this card can open, or nil — which is the usual answer.
+    ///
+    /// THREE things must line up, and each is doing real work. The poster has
+    /// to have STICKERED one (`competition_id`): a competition reaches a post
+    /// because someone put it there, never because the author happened to be
+    /// in it — the old `CompetitionFlairRow` drew from the plain list and so
+    /// announced a closed group's user-typed name to the poster's whole circle
+    /// on a walk that had nothing to do with it. The server has to still be
+    /// serving it in `competitions` (it lists the author's accepted comps for
+    /// the post's day, three soonest-ending), which is what keeps a chip off a
+    /// card whose competition has since gone. And `viewer_in` has to be true:
+    /// standings belong to the people in them, every competition in this app
+    /// is a closed invite group, so a non-member gets the sticker as a picture
+    /// and no way in. Nil on older servers ⇒ no chip, since "unknown" here has
+    /// to fail closed.
+    private var tappableCompetition: PostCompetitionRef? {
+        guard let stickered = post.competition_id, !stickered.isEmpty else { return nil }
+        return post.competitions?.first { $0.id == stickered && $0.viewer_in == true }
+    }
+
+    /// "OPEN STANDINGS · Office Mile Club" — the way into the competition on
+    /// the photo above it.
+    ///
+    /// Its own row rather than a chip beside the streak: a competition name is
+    /// user-typed DATA, and the footer's right-hand chips are `.fixedSize()`,
+    /// which publishes a minimum width no ancestor can shrink (the
+    /// `WorkoutSourceChip` overflow in ios.md — a row that demanded 487pt of a
+    /// 430pt screen and took the card's gutter with it). On its own line the
+    /// name simply truncates.
+    private func competitionChip(_ competition: PostCompetitionRef) -> some View {
+        Button {
+            openCompetition(competition.id)
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .accessibilityHidden(true)
+                Text(competition.displayName)
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .black))
+                    .opacity(0.7)
+                    .accessibilityHidden(true)
+            }
+            .foregroundColor(MADTheme.Colors.madRed)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(MADTheme.Colors.madRed.opacity(0.14)))
+            .overlay(Capsule().strokeBorder(MADTheme.Colors.madRed.opacity(0.32), lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open \(competition.displayName) standings")
+    }
+
+    private func openCompetition(_ id: String) {
+        if let onOpenCompetition {
+            onOpenCompetition(id)
+            return
+        }
+        DeepLinkRouter.shared.requestOpenCompetition(id: id)
+        NotificationCenter.default.post(
+            name: NSNotification.Name("MAD_SwitchTab"),
+            object: nil,
+            userInfo: ["tab": 1]
+        )
     }
 
     /// "6 DAY STREAK" — the streak the post was made on, in the app's orange.

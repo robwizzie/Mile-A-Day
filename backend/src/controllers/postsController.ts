@@ -156,6 +156,7 @@ export async function createPostController(
     buddy_session_id,
     posted_live,
     photo_source,
+    competition_id,
   } = req.body ?? {};
 
   try {
@@ -364,6 +365,12 @@ export async function createPostController(
       // saw the run). Cosmetic; legacy clients omit it and get the feed
       // query's server-side derivation instead.
       postedLive: posted_live === true,
+      // The competition the poster STICKERED on the card. It is what makes the
+      // sticker tappable for a fellow member — never a guess among the
+      // author's live comps, which is what the read path would otherwise have
+      // to do. createPost validates membership in SQL, so a foreign id stores
+      // NULL rather than pointing a stranger's card at a closed group.
+      competitionId: typeof competition_id === "string" ? competition_id : null,
     });
 
     // Collab tag — fire-and-forget push to the person just added. Gated on
