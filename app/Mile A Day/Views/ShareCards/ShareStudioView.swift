@@ -12,15 +12,24 @@ import SwiftUI
 // stuck and there was no model of it to learn. Splitting them is the fix; both
 // rows are labelled, and every combination renders.
 //
+// TWO actions, not three. Instagram Stories, More… and Save sat side by side
+// once, which is a menu on a screen whose job is a decision. Save went first and
+// cost nothing — the system share sheet behind the second button carries Save
+// Image itself, so it was a second door to a room already on the way.
+//
 // The Instagram button is ALWAYS offered. It used to be gated on
 // `InstagramStoryShare.isAvailable`, which requires a Meta App ID that has never
 // been filled in — so the marquee action of the whole feature rendered for
-// nobody, and what a user actually met was a preview, some unexplained chips and
-// two grey buttons. When the direct handoff isn't wired up it now falls back to
-// saving the card and opening Instagram, which is a longer path but a real one.
+// nobody. Without that ID the direct pasteboard handoff is impossible (Meta
+// requires `source_application`), so the button opens the SYSTEM SHARE SHEET,
+// where Instagram's own extension takes the image into its story composer. That
+// needs no App ID. It used to save the card and open Instagram's camera, which
+// left the walker hunting their camera roll for a picture we were holding.
 //
 // The preview is the real `MADStoryCard`, scaled — not an approximation of it —
-// so what you tap Share on is what lands in the story.
+// so what you tap Share on is what lands in the story. It carries the card's
+// asynchronous inputs (`cardContent`) because `ImageRenderer` runs no view
+// lifecycle: anything a subview would fetch for itself bakes as its fallback.
 
 struct ShareStudioView: View {
     let content: MADStoryContent
@@ -32,8 +41,9 @@ struct ShareStudioView: View {
     @State private var design: MADStoryDesign
     @State private var format: MADStoryFormat = .story
     @State private var shareItems: ShareStudioItems?
-    @State private var toast: String?
-    @State private var instagramFailed = false
+    /// Resolved once, before anything renders — see the `.task` in `body`.
+    @State private var avatarImage: UIImage?
+    @State private var photoWash: UIImage?
 
     init(content: MADStoryContent, link: URL? = nil) {
         self.content = content
@@ -43,52 +53,80 @@ struct ShareStudioView: View {
 
     private var designs: [MADStoryDesign] { content.availableDesigns }
 
+    /// The content the card actually draws: whatever the caller handed us, plus
+    /// the two things that can only be resolved asynchronously. Both are set on
+    /// a copy rather than fetched inside the card, because the card is rendered
+    /// by `ImageRenderer` for the real share and that runs no view lifecycle.
+    private var cardContent: MADStoryContent {
+        var resolved = content
+        resolved.avatarImage = avatarImage
+        resolved.photoWash = photoWash
+        return resolved
+    }
+
+    private func loadAvatar() async {
+        guard avatarImage == nil,
+              let key = content.avatar?.imageURL, !key.isEmpty else { return }
+        avatarImage = await RouteAvatarImageLoader.loadImage(for: key)
+    }
+
+    private func buildWash() {
+        guard photoWash == nil, let photo = content.photo else { return }
+        photoWash = MADStoryCard.wash(from: photo)
+    }
+
     var body: some View {
-        NavigationStack {
-            ZStack {
-                MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
+        // No NavigationStack: its bar wanted an opaque background of its own,
+        // which put a black slab across the top of a card screen whose whole
+        // point is one continuous ground. The header below is 44pt of the same
+        // gradient with a real close button in it.
+        ZStack {
+            MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    preview
-                    controls
-                        .padding(.top, MADTheme.Spacing.md)
-                    actions
-                        .padding(.top, MADTheme.Spacing.md)
-                }
-                .padding(.horizontal, MADTheme.Spacing.md)
-                .padding(.bottom, MADTheme.Spacing.lg)
-
-                if let toast { toastView(toast) }
+            VStack(spacing: 0) {
+                header
+                preview
+                controls
+                actions
             }
-            .navigationTitle("Share")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 34, height: 34)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("Close")
-                }
-            }
-            .toolbarBackground(.black, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .sheet(item: $shareItems) { items in
-                ActivityViewController(activityItems: items.items)
-            }
-            .alert("Couldn't open Instagram", isPresented: $instagramFailed) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("Try \"More…\" and pick Instagram from the share sheet instead.")
-            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 8)
         }
         .preferredColorScheme(.dark)
+        .task {
+            // Both of these have to exist BEFORE the first render: ImageRenderer
+            // runs no view lifecycle, so anything a subview would fetch for
+            // itself bakes as its fallback (initials, in the avatar's case).
+            await loadAvatar()
+            buildWash()
+        }
+        .sheet(item: $shareItems) { items in
+            ActivityViewController(activityItems: items.items)
+        }
+    }
+
+    private var header: some View {
+        ZStack {
+            Text("Share your walk")
+                .font(.system(size: 16, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+            HStack {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 14, weight: .black))
+                        .foregroundColor(.white.opacity(0.9))
+                        .frame(width: 34, height: 34)
+                        .background(Circle().fill(Color.white.opacity(0.10)))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close")
+                Spacer()
+            }
+        }
+        .frame(height: 44)
     }
 
     // MARK: Preview
@@ -120,12 +158,19 @@ struct ShareStudioView: View {
                         startPoint: .topLeading, endPoint: .bottomTrailing
                     )
                 }
-                MADStoryCard(content: content, design: design, format: format)
+                MADStoryCard(content: cardContent, design: design, format: format)
                     .scaleEffect(scale)
                     .frame(width: card.width * scale, height: card.height * scale)
             }
             .frame(width: frameWidth, height: frameHeight)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            // The card SWAPS, it does not cross-fade. `artZone` is a switch, so
+            // each design is a different view identity — animating the change
+            // dissolves one into the other, and a screenshot taken during it
+            // shows the streak's flame and day count ghosting through a photo.
+            .id("\(design.rawValue)-\(format.rawValue)")
+            .transition(.identity)
+            .shadow(color: .black.opacity(0.6), radius: 24, x: 0, y: 14)
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .frame(maxHeight: .infinity)
@@ -161,7 +206,17 @@ struct ShareStudioView: View {
                     }
                 }
             }
+            // "Sticker" is the one word here nobody can infer — it names a
+            // FILE PROPERTY (a transparent edge), not something visible in a
+            // preview that necessarily shows it standing on some background.
+            // So the sheet says what the selected shape actually does.
+            Text(format.explainer)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.45))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.top, 4)
     }
 
     private func labelledRow<Row: View>(
@@ -209,19 +264,27 @@ struct ShareStudioView: View {
 
     // MARK: Actions
 
+    /// ONE primary action and one way out of it.
+    ///
+    /// There were three side by side — Instagram Stories, More…, Save — which
+    /// is two too many for a screen whose job is "post this". Save was the
+    /// first to go and cost nothing: the system share sheet behind "Other apps"
+    /// carries Save Image itself, so the button was a second door to a room
+    /// that was already on the way. What's left reads as a decision (post it)
+    /// and an escape hatch (everything else), not a menu.
     private var actions: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 2) {
             Button(action: shareToInstagram) {
                 HStack(spacing: 8) {
                     Image(systemName: "camera.fill")
                         .font(.system(size: 15, weight: .bold))
                         .accessibilityHidden(true)
-                    Text("Instagram Stories")
+                    Text("Share to Instagram")
                         .font(.system(size: 16, weight: .heavy, design: .rounded))
                 }
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 15)
+                .padding(.vertical, 16)
                 .background(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(
@@ -235,52 +298,17 @@ struct ShareStudioView: View {
             }
             .buttonStyle(.plain)
 
-            HStack(spacing: 10) {
-                actionButton(icon: "square.and.arrow.up", title: "More…", action: shareElsewhere)
-                actionButton(icon: "arrow.down.to.line", title: "Save", action: saveToPhotos)
-            }
-        }
-    }
-
-    private func actionButton(icon: String, title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 7) {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .bold))
-                    .accessibilityHidden(true)
-                Text(title)
+            Button(action: shareElsewhere) {
+                Text("Other apps, or save…")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.62))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .contentShape(Rectangle())
             }
-            .foregroundColor(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.white.opacity(0.12))
-            )
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
-    }
-
-    private func toastView(_ text: String) -> some View {
-        VStack {
-            Spacer()
-            HStack(spacing: 7) {
-                Image(systemName: "checkmark.circle.fill")
-                    .accessibilityHidden(true)
-                Text(text)
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .multilineTextAlignment(.center)
-            }
-            .foregroundColor(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 11)
-            .background(Capsule().fill(Color.black.opacity(0.85)))
-            .padding(.horizontal, 24)
-            .padding(.bottom, 150)
-        }
-        .transition(.opacity)
-        .allowsHitTesting(false)
+        .padding(.top, 14)
     }
 
     // MARK: Doing the thing
@@ -289,7 +317,7 @@ struct ShareStudioView: View {
     private var stickerBottom: Color { Color(red: 0.17, green: 0.07, blue: 0.12) }
 
     private func render() -> UIImage? {
-        MADStoryCard.render(content: content, design: design, format: format)
+        MADStoryCard.render(content: cardContent, design: design, format: format)
     }
 
     private func shareToInstagram() {
@@ -306,17 +334,19 @@ struct ShareStudioView: View {
             }
         }
 
-        // No direct handoff (no Meta App ID configured, or Instagram declined
-        // the open). Saving the card and opening Instagram is a longer path but
-        // a working one — and it is strictly better than the button not being
-        // there at all, which is what shipped.
-        if InstagramStoryShare.openApp(after: image) {
-            MADHaptics.success()
-            TelemetryService.record(ShareTelemetry.instagram)
-            flash("Saved to Photos — pick it in Instagram")
-        } else {
-            instagramFailed = true
-        }
+        // No direct handoff — `isAvailable` needs a Meta App ID in
+        // `MADFacebookAppID` and there isn't one yet.
+        //
+        // The SYSTEM SHARE SHEET is the best path that exists without it, and
+        // it needs no App ID at all: Instagram ships a share extension that
+        // appears there and takes the image straight into its own story
+        // composer. What this used to do was save the card to Photos and open
+        // Instagram's CAMERA, which leaves the walker hunting their own camera
+        // roll for a picture the app was already holding — the longest version
+        // of the shortest job on this screen.
+        MADHaptics.action()
+        TelemetryService.record(ShareTelemetry.instagram)
+        shareItems = ShareStudioItems(items: [image])
     }
 
     private func shareElsewhere() {
@@ -329,20 +359,6 @@ struct ShareStudioView: View {
         TelemetryService.record(ShareTelemetry.sheet)
     }
 
-    private func saveToPhotos() {
-        guard let image = render() else { return }
-        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-        MADHaptics.success()
-        TelemetryService.record(ShareTelemetry.saved)
-        flash("Saved to Photos")
-    }
-
-    private func flash(_ text: String) {
-        withAnimation { toast = text }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
-            withAnimation { if toast == text { toast = nil } }
-        }
-    }
 }
 
 /// `.sheet(item:)` needs identity, and `[Any]` has none.

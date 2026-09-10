@@ -2247,8 +2247,13 @@ extension View {
 ///
 /// A real `Button`, and a LABELLED one: the word is what makes it findable,
 /// where a lone glyph is a thing you have to already know. It lives in the top
-/// RIGHT beside the savers chip and deliberately wears that chip's capsule —
-/// same row, same language, so it reads as a control rather than an ornament.
+/// The hero's share affordance, at the card's top-RIGHT CORNER with the savers
+/// chip inboard of it — action at the corner, status beside it. It sat to the
+/// LEFT of that chip once, which anchored it to nothing: the gap between
+/// Flamey and the stat column, floating mid-card.
+///
+/// It is FILLED where the savers chip is outlined. Wearing that chip's exact
+/// capsule made the two read as a matched pair of which only one was pressable.
 ///
 /// A capsule and not a 44pt disc, which is what this first became: the Fun
 /// hero's stat column fills a fixed 258pt frame under this corner, so a 44pt
@@ -2268,11 +2273,14 @@ struct HeroShareButton: View {
                 Text("Share")
                     .font(.system(size: 12, weight: .heavy, design: .rounded))
             }
-            .foregroundColor(.white.opacity(0.92))
+            // Filled light, not another outlined chip. Beside the savers
+            // readout the outlined version read as its twin — two pills of
+            // equal weight, one of which happened to be a button. This one is
+            // the only filled thing in the corner, so it reads as the control.
+            .foregroundColor(.black.opacity(0.88))
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
-            .background(Capsule().fill(Color.white.opacity(0.13)))
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.20), lineWidth: 1))
+            .background(Capsule().fill(Color.white.opacity(0.92)))
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)

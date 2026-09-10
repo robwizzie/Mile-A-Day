@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import CoreLocation
 
 // MARK: - Story share canvas
@@ -72,8 +73,23 @@ enum MADStoryFormat: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .story: return "Full screen"
+        case .story: return "Full story"
         case .sticker: return "Sticker"
+        }
+    }
+
+    /// What picking this actually does, in the sheet, under the control.
+    ///
+    /// "Sticker" names a property of the FILE — a transparent edge — which no
+    /// preview can show, since a preview has to stand it on some background or
+    /// other. Without this line the choice is unguessable, and the answer
+    /// people reached for was "I'm not sure how sticker works".
+    var explainer: String {
+        switch self {
+        case .story:
+            return "Posts as a finished story, ready to share."
+        case .sticker:
+            return "Saves with a see-through edge, so you can drop it onto a story you're already making."
         }
     }
 
@@ -124,6 +140,20 @@ struct MADStoryContent: Identifiable {
     var routeColor: Color = MADTheme.Colors.madRed
     var photo: UIImage?
     var avatar: RouteArtAvatar?
+    /// The author's profile picture, ALREADY DOWNLOADED.
+    ///
+    /// `ImageRenderer` drives no view lifecycle, so a badge that fetches its own
+    /// picture bakes as initials every time — which is exactly what shipped: a
+    /// route card wearing "RO" over somebody's own walk. `ShareStudioView` loads
+    /// this before it renders and hands it down; nothing here ever awaits.
+    var avatarImage: UIImage?
+    /// A deliberately TINY copy of `photo`, drawn scaled-up as the card's
+    /// background wash behind the framed photo.
+    ///
+    /// Not `.blur()`: this has to survive `ImageRenderer`, and a 20pt-wide image
+    /// stretched to 360×640 with high interpolation is a smooth gradient by
+    /// construction — no effect for the renderer to drop.
+    var photoWash: UIImage?
 
     var hasRoute: Bool { coordinates.count >= 2 }
     var hasPhoto: Bool { photo != nil }
@@ -182,29 +212,30 @@ struct MADStoryCard: View {
                 center: UnitPoint(x: 0.82, y: 0.08),
                 startRadius: 8, endRadius: format.size.height * 0.55
             )
-            if design == .photo, let photo = content.photo {
-                Image(uiImage: photo)
+            // The photo's own colours, washed across the whole frame. The photo
+            // ITSELF is drawn uncropped in the art zone — see `artZone`.
+            if design == .photo, let wash = content.photoWash ?? content.photo {
+                Image(uiImage: wash)
                     .resizable()
+                    .interpolation(.high)
                     .scaledToFill()
                     .frame(width: format.size.width, height: format.size.height)
                     .clipped()
+                    .opacity(0.55)
                 photoScrim
             }
         }
     }
 
-    /// The stats sit over the lower third, so it has to be readable whatever the
-    /// photo is doing down there — and the fade has to start well above them or
-    /// the top of a 78pt number lands on daylight.
+    /// Keeps the washed photo from competing with the text over it. Gentler than
+    /// the scrim this replaced, because it no longer has to rescue white type
+    /// sitting directly on a photograph — the photo is in its own frame now.
     private var photoScrim: some View {
         LinearGradient(
             stops: [
-                .init(color: .black.opacity(0.42), location: 0.00),
-                .init(color: .black.opacity(0.00), location: 0.26),
-                .init(color: .black.opacity(0.10), location: 0.38),
-                .init(color: .black.opacity(0.62), location: 0.62),
-                .init(color: .black.opacity(0.90), location: 0.82),
-                .init(color: .black.opacity(0.96), location: 1.00),
+                .init(color: .black.opacity(0.34), location: 0.00),
+                .init(color: .black.opacity(0.44), location: 0.45),
+                .init(color: .black.opacity(0.78), location: 1.00),
             ],
             startPoint: .top, endPoint: .bottom
         )
@@ -226,7 +257,7 @@ struct MADStoryCard: View {
             Spacer(minLength: 0)
             artZone
             Spacer(minLength: 0)
-                .frame(maxHeight: format == .story ? 34 : 20)
+                .frame(maxHeight: format == .story ? 26 : 18)
             VStack(alignment: .leading, spacing: 0) {
                 bottomBlock
                 footer
@@ -236,31 +267,84 @@ struct MADStoryCard: View {
         }
     }
 
+    /// ONE art treatment, shared by the photo and the route.
+    ///
+    /// The photo used to be full-bleed `scaledToFill` behind the whole card,
+    /// which on a 9:16 frame crops a landscape shot to a letterbox slice and
+    /// takes the top off a portrait one — people were sharing a photo with the
+    /// subject cut out of it. The route, meanwhile, was a 360-wide canvas with
+    /// nothing around it, so its dark rectangle met the card's ground in a hard
+    /// horizontal seam across the middle of the design.
+    ///
+    /// Both now sit in the same inset, rounded, hairline-bordered frame, and the
+    /// photo's frame ADOPTS THE PHOTO'S OWN ASPECT (`photoBox`) so it is never
+    /// cropped and never letterboxed inside its own border. What fills the rest
+    /// of the card is the photo's own colours (`backdrop`).
     @ViewBuilder
     private var artZone: some View {
         switch design {
         case .photo:
-            // The photo IS the art; it's full-bleed in the backdrop.
-            EmptyView()
+            if let photo = content.photo {
+                Image(uiImage: photo)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: photoBox.width, height: photoBox.height)
+                    .clipped()
+                    .modifier(ArtFrame(cornerRadius: artCorner))
+            }
         case .route:
             RouteArtView.still(
                 coordinates: content.coordinates,
                 routeColor: content.routeColor,
                 authorAvatar: content.avatar,
+                // Preloaded, keyed the way RouteArtView keys them (the raw
+                // imageURL string). Without this the badge draws initials.
+                avatarImages: avatarImages,
                 showsMileMarkers: format == .story,
                 paletteDate: content.date,
                 size: routeArtSize
             )
             .frame(width: routeArtSize.width, height: routeArtSize.height)
+            .modifier(ArtFrame(cornerRadius: artCorner))
         case .streak:
             streakBlock
         }
     }
 
+    private var avatarImages: [String: UIImage] {
+        guard let key = content.avatar?.imageURL, !key.isEmpty,
+              let image = content.avatarImage else { return [:] }
+        return [key: image]
+    }
+
+    /// The art frame's outer bounds. Inset from the card edge so the frame reads
+    /// as a card ON the design rather than as the design itself.
+    private var artWidth: CGFloat { format.size.width - (format == .story ? 40 : 44) }
+
+    private var artMaxHeight: CGFloat { format == .story ? 340 : 208 }
+
+    private var artCorner: CGFloat { format == .story ? 20 : 16 }
+
+    /// The photo's own aspect, scaled to fit the art bounds — computed rather
+    /// than left to `.aspectRatio(.fit)` inside a `.frame`, which sizes the
+    /// FRAME to the bounds and letterboxes the image inside it (transparent
+    /// bars inside the border, which is the thing this design is avoiding).
+    private var photoBox: CGSize {
+        let bounds = CGSize(width: artWidth, height: artMaxHeight)
+        guard let photo = content.photo,
+              photo.size.width > 0, photo.size.height > 0 else { return bounds }
+        let aspect = photo.size.width / photo.size.height
+        var width = bounds.width
+        var height = width / aspect
+        if height > bounds.height {
+            height = bounds.height
+            width = height * aspect
+        }
+        return CGSize(width: width, height: height)
+    }
+
     private var routeArtSize: CGSize {
-        format == .story
-            ? CGSize(width: 360, height: 340)
-            : CGSize(width: 320, height: 196)
+        CGSize(width: artWidth, height: format == .story ? 320 : 190)
     }
 
     @ViewBuilder
@@ -490,6 +574,25 @@ struct MADStoryCard: View {
     }()
 }
 
+/// The rounded, hairline-bordered, shadowed frame both art faces wear.
+///
+/// A `ViewModifier` rather than two copies: the photo and the route drifting
+/// apart on corner radius or border is exactly the kind of near-copy this file
+/// has already been burned by.
+private struct ArtFrame: ViewModifier {
+    let cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        content
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.5), radius: 18, x: 0, y: 10)
+    }
+}
+
 /// One column of the stat rail.
 struct MADStoryStat {
     let value: String
@@ -500,6 +603,21 @@ struct MADStoryStat {
 // MARK: - Rendering
 
 extension MADStoryCard {
+    /// A tiny copy of a photo, for the card's background wash.
+    ///
+    /// 20pt wide. Drawn back up to card size with high interpolation it IS a
+    /// blur — and unlike `.blur()` there is no effect for `ImageRenderer` to
+    /// drop, which matters because the render is the only version anyone sees.
+    static func wash(from photo: UIImage) -> UIImage? {
+        let width: CGFloat = 20
+        guard photo.size.width > 0, photo.size.height > 0 else { return nil }
+        let size = CGSize(width: width, height: max(1, width * photo.size.height / photo.size.width))
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { _ in
+            photo.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
     /// The image handed to Instagram (or the share sheet).
     ///
     /// Scale 3 over the design size. Opaque for the story frame and transparent
