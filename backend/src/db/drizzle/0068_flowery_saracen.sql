@@ -1,0 +1,1 @@
+ALTER TABLE "posts" ADD COLUMN "competition_id" varchar(32);

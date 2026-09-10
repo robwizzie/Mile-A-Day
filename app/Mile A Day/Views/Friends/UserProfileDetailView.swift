@@ -1195,7 +1195,13 @@ struct FriendWorkoutDetailSheet: View {
                 onHype: {},
                 onReport: {},
                 onBlock: {},
-                onDelete: {}
+                onDelete: {},
+                // This screen is a sheet: dismiss before routing, or the tab
+                // flips behind it and the chip reads as dead.
+                onOpenCompetition: { competitionId in
+                    dismiss()
+                    DeepLinkRouter.shared.requestOpenCompetitionAfterDismiss(id: competitionId)
+                }
             )
         }
     }

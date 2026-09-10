@@ -90,6 +90,14 @@ jobs:
       - name: Admin analytics panel check
         run: node scripts/admin-analytics-check.mjs
 
+      # The competition a post carries. `CompetitionFlairRow` was removed for
+      # announcing a closed group to the poster's whole circle unasked; the
+      # opt-in replacement is only as good as its gate. Every failure is
+      # silent — a chip that resolves to nothing (the stickered comp cut by
+      # the array's LIMIT 3), or one offered to someone who isn't in it.
+      - name: Post competition sticker + membership gate check
+        run: node scripts/post-competition-check.mjs
+
       - name: Buddy group post check
         run: node scripts/buddy-group-post-check.mjs
       # The buddy history archive. Everything that can go wrong with a

@@ -232,7 +232,13 @@ struct BuddyWalkDetailView: View {
                         contextType: "post", contextId: post.post_id, targetUserId: post.user_id)
                 },
                 onOpenComments: { commentsPost = post },
-                onShare: { sharingURL = ShareURL(url: PostShareLink.url(for: post.post_id)) }
+                onShare: { sharingURL = ShareURL(url: PostShareLink.url(for: post.post_id)) },
+                // This screen is a sheet: dismiss before routing, or the tab
+                // flips behind it and the chip reads as dead.
+                onOpenCompetition: { competitionId in
+                    dismiss()
+                    DeepLinkRouter.shared.requestOpenCompetitionAfterDismiss(id: competitionId)
+                }
             )
         } else if isLoadingPost {
             loadingCard

@@ -307,6 +307,15 @@ final class PostComposerViewModel: ObservableObject {
     /// the one the walk was for.
     @Published var liveCompetitions: [CompetitionStickerData] = []
 
+    /// The competition this post will CARRY, as opposed to the ones the author
+    /// happens to be in. Nil unless the overlay is on, the competition block is
+    /// one of the enabled stats, and one is actually selected — all three, or a
+    /// chip would appear on a card that never showed the competition.
+    var stickeredCompetitionId: String? {
+        guard stickerEnabled, config.isOn(.competition) else { return nil }
+        return stats.competition?.competitionId
+    }
+
     /// Switch the sticker to a different competition (tray tap). Turns the
     /// sticker on, since choosing one is asking for it.
     @MainActor
@@ -534,7 +543,13 @@ final class PostComposerViewModel: ObservableObject {
                 coauthorUserId: nil,
                 coauthorUserIds: destination.toFeed ? resolvedCoauthorIds : nil,
                 buddySessionId: destination.toFeed ? buddySessionId : nil,
-                photoSource: photoSource
+                photoSource: photoSource,
+                // Only when the competition is actually ON the card. A
+                // competition reaches a post because the poster put it there —
+                // recording one they turned off would hand the card a chip
+                // for a group they chose not to mention, which is the row this
+                // sticker replaced.
+                competitionId: stickeredCompetitionId
             )
             // The run now has the user's one deliberate post — the server will
             // 409 `workout_already_posted` on a second, for a story-only share

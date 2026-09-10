@@ -292,7 +292,14 @@ struct PostDetailView: View {
                 : nil,
             onSetIncludeRoute: post.is_self
                 ? { include in Task { await setIncludeRoute(post, include: include) } }
-                : nil
+                : nil,
+            // This screen is a fullScreenCover, so the card's default (flip to
+            // the Compete tab) would move a screen nobody can see and the chip
+            // would read as dead. Close first, then route.
+            onOpenCompetition: { competitionId in
+                dismiss()
+                DeepLinkRouter.shared.requestOpenCompetitionAfterDismiss(id: competitionId)
+            }
         )
     }
 
