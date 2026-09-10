@@ -147,3 +147,18 @@ export interface CompetitionRecordResponse {
   /** True when the user has more finished competitions than the read's cap. */
   truncated: boolean;
 }
+
+/**
+ * A team's name in PROSE ("Team Red took the lead"), where the word carries
+ * meaning the surrounding sentence doesn't.
+ *
+ * Only prefixes a name that isn't already one: the iOS lobby creates default
+ * teams literally NAMED "Team 1"/"Team 2", so a blind `Team ${name}` rendered
+ * "Team Team 2" — here in the lead-change push, and in two places on the
+ * client, because each wrote the prefix out for itself. Mirrored by
+ * `CompetitionTeam.teamLabel` in Models/Competition.swift; the two must agree,
+ * since the push and the app describe the same team to the same person.
+ */
+export function teamLabel(name: string): string {
+  return name.trim().toLowerCase().startsWith("team") ? name : `Team ${name}`;
+}
