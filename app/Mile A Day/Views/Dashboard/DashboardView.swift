@@ -64,14 +64,14 @@ struct DashboardView: View {
     // a plain String? passed to the one existing initializer rather than a
     // second WorkoutTrackingView call site: branching between two initializers
     // is what previously destroyed the tracker's structural identity mid-run.
-    @State private var showBuddyStartSheet = false
-    @State private var showBuddyLobby = false
+    /// Non-nil = the buddy flow is up, and says which end of it opened.
+    @State private var buddyFlowEntry: BuddyWalkFlowEntry?
     @State private var activeBuddySessionId: String?
     @State private var buddyRecapSessionId: String?
     /// Why a tapped buddy link couldn't be opened. Its own state, not
-    /// `buddyService.errorMessage`: that one is only ever RENDERED inside
-    /// `BuddyStartSheet`, which is not on screen when a push or an inbox row
-    /// is tapped — so every failure of the thing the user just tapped was
+    /// `buddyService.errorMessage`: that one is only ever RENDERED inside the
+    /// buddy flow, which is not on screen when a push or an inbox row is
+    /// tapped — so every failure of the thing the user just tapped was
     /// invisible, which is indistinguishable from the tap doing nothing.
     @State private var buddyLinkError: String?
     /// Whether to show a compact "Resume workout" banner when an in‑progress workout exists
@@ -709,13 +709,12 @@ struct DashboardView: View {
                     onBuddySessionAdopted: { activeBuddySessionId = $0 }
                 )
             }
-            // Buddy Walks flow: pill → start sheet → lobby (synced countdown) →
-            // the normal tracker → recap. All of it lives in one ViewModifier —
-            // see BuddyFlowModifier for why it isn't inline.
+            // Buddy Walks flow: pill → setup steps → lobby (synced countdown)
+            // → the normal tracker → recap. All of it lives in one
+            // ViewModifier — see BuddyFlowModifier for why it isn't inline.
             .modifier(
                 BuddyFlowModifier(
-                    showStartSheet: $showBuddyStartSheet,
-                    showLobby: $showBuddyLobby,
+                    flowEntry: $buddyFlowEntry,
                     activeSessionId: $activeBuddySessionId,
                     recapSessionId: $buddyRecapSessionId,
                     showWorkoutView: $showWorkoutView,
@@ -1507,7 +1506,7 @@ struct DashboardView: View {
                     try await buddyService.join(sessionId: sessionId)
                 }
                 if buddyService.canReenterLiveSession {
-                    showBuddyLobby = true
+                    buddyFlowEntry = .lobby
                 } else if let session = buddyService.session,
                           session.me(buddyService.currentUserId)?.status == .finished {
                     // The tapped push led to a walk THIS user already finished

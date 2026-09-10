@@ -8,15 +8,26 @@ import SwiftUI
 /// friend list does better: it had to be read aloud or pasted, it could be
 /// mistyped, and it put a text field on the screen that most people read as the
 /// primary way in. Invites go out from the friend list; invites you receive
-/// land at the top of this sheet.
+/// land at the top of the first step.
 ///
 /// Opens on "Just Together" with no goal to set, so the common case — two
 /// friends about to walk — is pick-a-friend-and-go.
-struct BuddyStartSheet: View {
-    /// Handed back so the caller can push straight into the lobby.
+///
+/// CONTENT ONLY. The gradient, the top bar and the progress dots belong to
+/// `BuddyWalkFlowView`, which renders them once for every stage including the
+/// lobby — this was a `.sheet` with its own copy of them, so the wizard's own
+/// chrome slid away and a card with a near-identical one slid up in its place.
+/// `step` and `goingBack` are bindings for the same reason: the one back
+/// chevron lives up there, so it has to be able to walk these questions from
+/// outside them.
+struct BuddySetupStepsView: View {
+    @Binding var step: BuddySetupStep
+    /// Which edge the next transition comes from. Owned by the flow so a back
+    /// tap on the top bar and a forward tap on a card can't slide two ways.
+    @Binding var goingBack: Bool
+    /// Handed back so the flow can move on to the lobby.
     let onCreated: (BuddySessionState) -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var buddy = BuddySessionService.shared
 
     @State private var mode: BuddyMode = .together
@@ -24,12 +35,6 @@ struct BuddyStartSheet: View {
     @State private var isRun = false
     @State private var selected: Set<String> = []
     @State private var isCreating = false
-    /// Errors are mirrored into LOCAL state. Driving `.alert(isPresented:)`
-    /// straight off `buddy.errorMessage` meant the binding's setter wrote to an
-    /// @Published from inside a view update — "Publishing changes from within
-    /// view updates is not allowed". Local state has no such problem, and the
-    /// mirror below runs after the update, not during it.
-    @State private var errorText: String?
     /// Book the walk for later instead of starting it from the lobby. Off by
     /// default — starting now is overwhelmingly the common case.
     @State private var isScheduled = false
@@ -54,69 +59,32 @@ struct BuddyStartSheet: View {
     @State private var didRestore = false
 
     private var activityType: String { isRun ? "running" : "walking" }
-    private var accent: Color { MADTheme.workoutColor(activityType) }
 
-    /// Every pill control on this screen resolves to the same outer height.
-    /// A segmented capsule pads its chips by 4 on each side, so the chip is
-    /// `controlHeight - 8` and the capsule around it lands back on
-    /// `controlHeight` — that's what makes the two segmented rows and the
-    /// footer button read as one family instead of three near-misses.
-    private static let controlHeight: CGFloat = 52
+    /// White on the red gradient, like every other pre-start step. NOT the
+    /// activity colour: `workoutColor("running")` is this gradient's own top
+    /// stop, so a run's goal chips and check marks were red on red.
+    private var accent: Color { WizardPalette.accent }
+
+    /// Fixed so the segmented rows, the goal chips and the footer button all
+    /// resolve to the same outer height.
+    private static let controlHeight: CGFloat = WizardMetrics.controlHeight
     private static let chipHeight: CGFloat = controlHeight - 8
-    /// Fixed so BOTH grid rows are equal — otherwise each row sizes to its
-    /// tallest subtitle and the 2x2 comes out lopsided.
-    private static let modeTileHeight: CGFloat = 108
 
     /// The plain card behind repeated elements.
     ///
     /// `madLiquidGlass` is a REAL blur (`glassEffect`, or `.ultraThinMaterial`
-    /// pre-iOS 26). Four mode tiles plus the friend list meant 5+ blurred
-    /// surfaces recompositing on every selection tap, animated — which is what
-    /// made this screen feel sluggish. The hero card keeps its glass; the
-    /// things you tap repeatedly get a flat fill that is visually
+    /// pre-iOS 26), and the friend list plus the partner rows meant several
+    /// blurred surfaces recompositing on every selection tap, animated — which
+    /// is what made this screen feel sluggish. A flat fill is visually
     /// indistinguishable on this background and costs nothing.
-    private func plainCard(_ radius: CGFloat = MADTheme.CornerRadius.large) -> some View {
+    private func panel(_ radius: CGFloat = 20) -> some View {
         RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .fill(MADTheme.Colors.madWhite.opacity(0.06))
+            .fill(Color.white.opacity(0.10))
             .overlay(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(MADTheme.Colors.madWhite.opacity(0.10), lineWidth: 1)
+                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
             )
     }
-
-    // MARK: - Steps
-
-    /// The setup as the SAME wizard the solo flow uses.
-    ///
-    /// This was one long sheet — summary hero, segmented toggles, a 2x2 mode
-    /// grid, chips, a schedule row, a friend list, partners, routines — under a
-    /// navigation title, with a sticky "Create lobby" at the bottom. Tapping
-    /// "With a Buddy" on the Start Mile wizard therefore changed the app's
-    /// language mid-flow: three big question-and-cards screens, then a form.
-    /// It is steps now, in the wizard's own chrome, in the order the questions
-    /// actually get asked: who, then walk or run, then what kind of walk.
-    ///
-    /// Who is FIRST and is the one step with a Next button, because it is the
-    /// one multi-select question; the other two advance on a tap exactly like
-    /// the solo steps. `goal` is a sub-step of the plan (it shares the third
-    /// progress segment, the way the ghost options share the solo flow's), and
-    /// only appears for a mode that needs a target.
-    private enum SetupStep: Equatable {
-        case who, activity, plan, goal
-
-        var indicator: Int {
-            switch self {
-            case .who: return 1
-            case .activity: return 2
-            case .plan, .goal: return 3
-            }
-        }
-    }
-
-    @State private var step: SetupStep = .who
-    /// Set OUTSIDE the animated state change, or the enclosing transaction
-    /// picks the edge before this has flipped (ios.md).
-    @State private var goingBack = false
 
     private var hasFooter: Bool { step == .who || step == .goal }
 
@@ -124,58 +92,51 @@ struct BuddyStartSheet: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // The tracker's gradient, so this reads as the wizard's next step
-            // rather than a sheet from somewhere else.
-            WizardBackground()
+            GeometryReader { geo in
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 28) {
+                        Spacer(minLength: 8)
 
-            VStack(spacing: 0) {
-                // Persistent. The dots and the back action change, the bar
-                // doesn't — the same shape as the solo wizard, so only the
-                // question and the options ever move.
-                WizardTopBar(step: step.indicator) { back() }
-
-                GeometryReader { geo in
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing: 28) {
-                            Spacer(minLength: 8)
-
-                            ZStack {
-                                WizardHeader(
-                                    glyph: stepGlyph,
-                                    title: stepTitle,
-                                    subtitle: stepSubtitle
-                                )
-                                .id(step)
-                                .transition(.opacity)
-                            }
-
-                            ZStack {
-                                VStack(spacing: 16) { stepContent }
-                                    .id(step)
-                                    .transition(WizardMotion.transition(goingBack: goingBack))
-                            }
-                            .padding(.horizontal, 20)
-
-                            Spacer(minLength: 8)
-
-                            // Clears the sticky footer on the steps that have one.
-                            if hasFooter {
-                                Color.clear.frame(height: 116)
-                            }
+                        // Both animated regions sit in a ZStack so the outgoing
+                        // and incoming copies OVERLAP. In a VStack they'd each
+                        // be allocated their own row mid-transition and
+                        // everything below would jump.
+                        ZStack {
+                            WizardHeader(
+                                glyph: stepGlyph,
+                                title: stepTitle,
+                                subtitle: stepSubtitle
+                            )
+                            .id(step)
+                            // Crossfades in place rather than sliding: the
+                            // question is part of the frame, so moving it is
+                            // what made the whole screen feel like it swapped.
+                            .transition(.opacity)
                         }
-                        .frame(minHeight: geo.size.height)
+
+                        ZStack {
+                            VStack(spacing: 16) { stepContent }
+                                .id(step)
+                                .transition(WizardMotion.transition(goingBack: goingBack))
+                        }
+                        .padding(.horizontal, 20)
+
+                        Spacer(minLength: 8)
+
+                        // Clears the pinned footer on the steps that have one.
+                        if hasFooter {
+                            Color.clear.frame(height: WizardMetrics.footerClearance)
+                        }
                     }
+                    .frame(minHeight: geo.size.height)
                 }
             }
 
             if hasFooter { footer }
         }
         .task {
-            // This screen is several taps in a row; warm the Taptic Engine
-            // so the FIRST one lands as fast as the rest.
-            MADHaptics.warmUp()
             restoreLastSetup()
-            // Both already prefetched on the dashboard, so the sheet opens
+            // Both already prefetched on the dashboard, so this opens
             // populated and these are a refresh, not a blocking load. Run
             // concurrently — they have nothing to do with each other.
             async let candidates: Void = buddy.loadCandidates()
@@ -184,29 +145,13 @@ struct BuddyStartSheet: View {
             async let sessions: Void = buddy.refreshMySessions()
             _ = await (candidates, routines, partners, sessions)
             // Re-run once the list has landed: a cold launch can open this
-            // sheet before the prefetch finishes, and a remembered friend
-            // can only be re-selected once they're actually in the list.
+            // before the prefetch finishes, and a remembered friend can only
+            // be re-selected once they're actually in the list.
             restoreInvitees()
         }
-        .onChange(of: buddy.errorMessage) { _, newValue in
-            guard let newValue else { return }
-            errorText = newValue
-            buddy.errorMessage = nil
-        }
-        .alert(
-            "Couldn't create lobby",
-            isPresented: Binding(
-                get: { errorText != nil },
-                set: { if !$0 { errorText = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) { errorText = nil }
-        } message: {
-            Text(errorText ?? "")
-        }
         .sheet(isPresented: $showHistory) {
-            // "Walk with Sam again" from inside the setup form means
-            // exactly "tick Sam", not "open another setup form".
+            // "Walk with Sam again" from inside the setup flow means exactly
+            // "tick Sam", not "open another setup flow".
             BuddyWalksHistoryView(onWalkAgain: { userId in
                 guard let userId,
                     buddy.candidates.contains(where: { $0.userId == userId })
@@ -284,7 +229,7 @@ struct BuddyStartSheet: View {
             }
             // Starting later is a setting on the plan, not a step of its own:
             // set it, then tap the mode that commits. Collapsed to one row
-            // until it's wanted, same as before.
+            // until it's wanted.
             scheduleSection
                 .padding(.top, 4)
             // The single most important sentence on this screen. A mode card
@@ -292,7 +237,7 @@ struct BuddyStartSheet: View {
             // people backed out rather than find out.
             Text("Tapping a mode makes the lobby. Nobody moves until you start it.")
                 .font(MADTheme.Typography.caption)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                .foregroundStyle(Color.white.opacity(0.6))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
 
@@ -332,29 +277,10 @@ struct BuddyStartSheet: View {
         }
     }
 
-    private func advance(to next: SetupStep) {
+    private func advance(to next: BuddySetupStep) {
         MADHaptics.tap()
         goingBack = false
         withAnimation(MADTheme.Animation.standard) { step = next }
-    }
-
-    private func back() {
-        switch step {
-        case .who:
-            dismiss()
-        case .activity:
-            retreat(to: .who)
-        case .plan:
-            retreat(to: .activity)
-        case .goal:
-            retreat(to: .plan)
-        }
-    }
-
-    private func retreat(to previous: SetupStep) {
-        MADHaptics.tap()
-        goingBack = true
-        withAnimation(MADTheme.Animation.standard) { step = previous }
     }
 
     // MARK: - Invitations
@@ -386,7 +312,6 @@ struct BuddyStartSheet: View {
 
     private func inviteRow(_ invite: BuddySessionState) -> some View {
         let host = invite.participants.first(where: { $0.isHost })
-        let tint = MADTheme.workoutColor(invite.activityType)
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             HStack(spacing: MADTheme.Spacing.md) {
@@ -398,11 +323,11 @@ struct BuddyStartSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(host?.displayName ?? "A friend") invited you")
                         .font(MADTheme.Typography.bodyBold)
-                        .foregroundStyle(MADTheme.Colors.madWhite)
+                        .foregroundStyle(Color.white)
                         .lineLimit(1)
                     Text(inviteDetail(invite))
                         .font(MADTheme.Typography.caption)
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                        .foregroundStyle(Color.white.opacity(0.6))
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -416,10 +341,9 @@ struct BuddyStartSheet: View {
                             try await buddy.join(sessionId: invite.id)
                             if let joined = buddy.session {
                                 onCreated(joined)
-                                dismiss()
                             }
                         } catch {
-                            errorText =
+                            buddy.errorMessage =
                                 (error as? LocalizedError)?.errorDescription
                                 ?? "Couldn't join that walk."
                         }
@@ -429,8 +353,8 @@ struct BuddyStartSheet: View {
                         .font(MADTheme.Typography.bodyBold)
                         .frame(maxWidth: .infinity)
                         .frame(height: 42)
-                        .background(Capsule().fill(tint))
-                        .foregroundStyle(MADTheme.Colors.madWhite)
+                        .background(Capsule().fill(WizardPalette.accent))
+                        .foregroundStyle(WizardPalette.onAccent)
                 }
                 .buttonStyle(.plain)
 
@@ -442,20 +366,20 @@ struct BuddyStartSheet: View {
                         .font(MADTheme.Typography.body)
                         .frame(maxWidth: .infinity)
                         .frame(height: 42)
-                        .background(
-                            Capsule().fill(MADTheme.Colors.madWhite.opacity(0.10)))
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.75))
+                        .background(Capsule().fill(Color.white.opacity(0.12)))
+                        .foregroundStyle(Color.white.opacity(0.75))
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(MADTheme.Spacing.md)
-        .background(plainCard())
-        .overlay(
-            RoundedRectangle(
-                cornerRadius: MADTheme.CornerRadius.large, style: .continuous
-            )
-            .strokeBorder(tint.opacity(0.45), lineWidth: 1.5)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.white.opacity(0.15))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.45), lineWidth: 2)
+                )
         )
     }
 
@@ -499,7 +423,7 @@ struct BuddyStartSheet: View {
                                 .font(.system(size: 11, weight: .bold))
                         }
                         .font(MADTheme.Typography.caption)
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                        .foregroundStyle(Color.white.opacity(0.6))
                     }
                     .buttonStyle(.plain)
                 }
@@ -507,12 +431,12 @@ struct BuddyStartSheet: View {
                     ForEach(Array(buddy.partners.prefix(5).enumerated()), id: \.element.id) {
                         index, partner in
                         if index > 0 {
-                            Divider().background(MADTheme.Colors.madWhite.opacity(0.08))
+                            Divider().background(Color.white.opacity(0.12))
                         }
                         partnerRow(partner)
                     }
                 }
-                .background(plainCard())
+                .background(panel())
             }
         }
     }
@@ -542,10 +466,10 @@ struct BuddyStartSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(partner.displayName)
                         .font(MADTheme.Typography.smallBold)
-                        .foregroundStyle(MADTheme.Colors.madWhite)
+                        .foregroundStyle(Color.white)
                     Text(partner.summary)
                         .font(MADTheme.Typography.caption)
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.55))
+                        .foregroundStyle(Color.white.opacity(0.6))
                 }
                 Spacer(minLength: 0)
                 if canPick {
@@ -556,7 +480,7 @@ struct BuddyStartSheet: View {
                     .font(.system(size: 18))
                     .foregroundStyle(
                         selected.contains(partner.userId)
-                            ? accent : MADTheme.Colors.madWhite.opacity(0.25))
+                            ? accent : Color.white.opacity(0.3))
                 }
             }
             .padding(.horizontal, 14)
@@ -565,10 +489,6 @@ struct BuddyStartSheet: View {
         }
         .buttonStyle(.plain)
         .disabled(!canPick)
-    }
-
-    private var selectedCandidates: [BuddyCandidate] {
-        buddy.candidates.filter { selected.contains($0.userId) }
     }
 
     // MARK: - Goal
@@ -601,10 +521,9 @@ struct BuddyStartSheet: View {
             .frame(height: Self.controlHeight)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                    .fill(isOn ? accent : MADTheme.Colors.madWhite.opacity(0.10))
+                    .fill(isOn ? accent : Color.white.opacity(0.12))
             )
-            .foregroundStyle(
-                isOn ? MADTheme.Colors.madWhite : MADTheme.Colors.madWhite.opacity(0.75))
+            .foregroundStyle(isOn ? WizardPalette.onAccent : Color.white.opacity(0.8))
         }
         .buttonStyle(.plain)
     }
@@ -636,19 +555,19 @@ struct BuddyStartSheet: View {
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Image(systemName: isScheduled ? "calendar.badge.clock" : "bolt.fill")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(isScheduled ? accent : MADTheme.Colors.madWhite.opacity(0.7))
+                        .foregroundStyle(Color.white.opacity(isScheduled ? 1 : 0.7))
                     Text(isScheduled ? "Starting later" : "Starting now")
                         .font(MADTheme.Typography.smallBold)
-                        .foregroundStyle(MADTheme.Colors.madWhite)
+                        .foregroundStyle(Color.white)
                     Spacer(minLength: 0)
                     Text(isScheduled ? "Change" : "Schedule it")
                         .font(MADTheme.Typography.caption)
-                        .foregroundStyle(accent)
+                        .foregroundStyle(Color.white.opacity(0.8))
                 }
                 .padding(.horizontal, 14)
                 .frame(height: Self.chipHeight)
                 .frame(maxWidth: .infinity)
-                .background(plainCard(MADTheme.CornerRadius.medium))
+                .background(panel(MADTheme.CornerRadius.medium))
             }
             .buttonStyle(.plain)
 
@@ -664,8 +583,8 @@ struct BuddyStartSheet: View {
                 .padding(.horizontal, 14)
                 .frame(height: Self.chipHeight)
                 .frame(maxWidth: .infinity)
-                .background(plainCard(MADTheme.CornerRadius.medium))
-                .foregroundStyle(MADTheme.Colors.madWhite)
+                .background(panel(MADTheme.CornerRadius.medium))
+                .foregroundStyle(Color.white)
 
                 repeatRow
             }
@@ -683,16 +602,15 @@ struct BuddyStartSheet: View {
             HStack(spacing: 6) {
                 Image(systemName: "repeat")
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(
-                        repeatDays.isEmpty ? MADTheme.Colors.madWhite.opacity(0.6) : accent)
+                    .foregroundStyle(Color.white.opacity(repeatDays.isEmpty ? 0.6 : 1))
                 Text("Repeat weekly")
                     .font(MADTheme.Typography.smallBold)
-                    .foregroundStyle(MADTheme.Colors.madWhite)
+                    .foregroundStyle(Color.white)
                 Spacer(minLength: 0)
                 if !repeatDays.isEmpty {
                     Text(scheduledDate, format: .dateTime.hour().minute())
                         .font(MADTheme.Typography.caption)
-                        .foregroundStyle(accent)
+                        .foregroundStyle(Color.white.opacity(0.85))
                 }
             }
 
@@ -709,11 +627,11 @@ struct BuddyStartSheet: View {
                     : "We'll set this up every week and invite the same people."
             )
             .font(MADTheme.Typography.caption)
-            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+            .foregroundStyle(Color.white.opacity(0.55))
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(plainCard(MADTheme.CornerRadius.medium))
+        .background(panel(MADTheme.CornerRadius.medium))
     }
 
     private func dayChip(_ day: Int) -> some View {
@@ -732,16 +650,13 @@ struct BuddyStartSheet: View {
                 .font(.system(size: 13, weight: .bold, design: .rounded))
                 .frame(maxWidth: .infinity)
                 .frame(height: 34)
-                .background(
-                    Circle().fill(isOn ? accent : MADTheme.Colors.madWhite.opacity(0.10))
-                )
-                .foregroundStyle(
-                    isOn ? MADTheme.Colors.madWhite : MADTheme.Colors.madWhite.opacity(0.65))
+                .background(Circle().fill(isOn ? accent : Color.white.opacity(0.12)))
+                .foregroundStyle(isOn ? WizardPalette.onAccent : Color.white.opacity(0.7))
         }
         .buttonStyle(.plain)
     }
 
-    /// Standing walks already set up, so the sheet is also where you turn one
+    /// Standing walks already set up, so this step is also where you turn one
     /// off. Hidden entirely when there are none — an empty list here would just
     /// be noise on the screen someone opens to start walking.
     @ViewBuilder
@@ -752,12 +667,12 @@ struct BuddyStartSheet: View {
                 VStack(spacing: 0) {
                     ForEach(Array(buddy.routines.enumerated()), id: \.element.id) { index, routine in
                         if index > 0 {
-                            Divider().background(MADTheme.Colors.madWhite.opacity(0.08))
+                            Divider().background(Color.white.opacity(0.12))
                         }
                         routineRow(routine)
                     }
                 }
-                .background(plainCard())
+                .background(panel())
             }
         }
     }
@@ -766,21 +681,16 @@ struct BuddyStartSheet: View {
         HStack(spacing: MADTheme.Spacing.md) {
             Image(systemName: routine.isRunning ? "figure.run" : "figure.walk")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(
-                    routine.isActive
-                        ? MADTheme.workoutColor(routine.activityType)
-                        : MADTheme.Colors.madWhite.opacity(0.35)
-                )
+                .foregroundStyle(Color.white.opacity(routine.isActive ? 1 : 0.4))
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(routine.daysText) · \(routine.timeText)")
                     .font(MADTheme.Typography.smallBold)
-                    .foregroundStyle(
-                        MADTheme.Colors.madWhite.opacity(routine.isActive ? 1 : 0.5))
+                    .foregroundStyle(Color.white.opacity(routine.isActive ? 1 : 0.5))
                 Text(routine.mode.title)
                     .font(MADTheme.Typography.caption)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+                    .foregroundStyle(Color.white.opacity(0.55))
             }
 
             Spacer(minLength: MADTheme.Spacing.sm)
@@ -820,7 +730,7 @@ struct BuddyStartSheet: View {
                 if !selected.isEmpty {
                     Text("\(selected.count) invited")
                         .font(MADTheme.Typography.caption)
-                        .foregroundStyle(accent)
+                        .foregroundStyle(Color.white.opacity(0.85))
                 }
             }
 
@@ -830,12 +740,12 @@ struct BuddyStartSheet: View {
                 VStack(spacing: 0) {
                     ForEach(Array(buddy.candidates.enumerated()), id: \.element.id) { index, candidate in
                         if index > 0 {
-                            Divider().background(MADTheme.Colors.madWhite.opacity(0.08))
+                            Divider().background(Color.white.opacity(0.12))
                         }
                         friendRow(candidate)
                     }
                 }
-                .background(plainCard())
+                .background(panel())
             }
         }
     }
@@ -843,32 +753,29 @@ struct BuddyStartSheet: View {
     /// The candidate list is filtered to friends whose build has Buddy Walks and
     /// who haven't opted out — so "nobody here" can mean "none of them have
     /// updated", which must never be phrased as a problem with their friend
-    /// list.
-    ///
-    /// It must also not be a dead end. The old copy mentioned the share code in
-    /// passing, at the bottom, in the dimmest text on the card — so the one
-    /// thing you CAN still do read as a consolation prize. Creating the lobby
-    /// anyway and sending the code is a completely normal path (it's how you
-    /// walk with someone who hasn't updated), so it's stated as the next step.
+    /// list. It must also not be a dead end: making the lobby anyway and
+    /// inviting from there is a completely normal path, so it's stated as the
+    /// next step rather than left as a consolation prize.
     private var emptyFriendsCard: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
-            Image(systemName: "qrcode")
+            Image(systemName: "person.2")
                 .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(accent)
+                .foregroundStyle(Color.white.opacity(0.8))
+                .accessibilityHidden(true)
             Text("Nobody to invite from here yet")
                 .font(MADTheme.Typography.smallBold)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.85))
+                .foregroundStyle(Color.white.opacity(0.9))
                 .multilineTextAlignment(.center)
             Text(
-                "Friends show up once they're on a build with buddy walks. Create the lobby anyway — you'll get a code and a QR to send them."
+                "Friends show up once they're on a build with buddy walks. Make the lobby anyway — you can invite them from there the moment they update."
             )
             .font(MADTheme.Typography.caption)
-            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+            .foregroundStyle(Color.white.opacity(0.65))
             .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(MADTheme.Spacing.lg)
-        .background(plainCard())
+        .background(panel())
     }
 
     private func friendRow(_ candidate: BuddyCandidate) -> some View {
@@ -887,11 +794,11 @@ struct BuddyStartSheet: View {
                 )
                 Text(candidate.displayName)
                     .font(MADTheme.Typography.body)
-                    .foregroundStyle(MADTheme.Colors.madWhite)
+                    .foregroundStyle(Color.white)
                 Spacer()
                 Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
-                    .foregroundStyle(isOn ? accent : MADTheme.Colors.madWhite.opacity(0.25))
+                    .foregroundStyle(isOn ? accent : Color.white.opacity(0.3))
             }
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.vertical, MADTheme.Spacing.sm + 2)
@@ -903,27 +810,24 @@ struct BuddyStartSheet: View {
     // MARK: - Footer
 
     /// ONE action, on the two steps that need one: Next on Who (multi-select
-    /// can't advance on a tap) and Create on the goal sub-step. The scrim
-    /// fades to the wizard's own bottom colour, so the list underneath reads
-    /// as "behind" rather than as clipped content.
+    /// can't advance on a tap) and Create on the goal sub-step.
     private var footer: some View {
-        VStack(spacing: 0) {
-            LinearGradient(
-                colors: [WizardBackground.bottom.opacity(0), WizardBackground.bottom],
-                startPoint: .top, endPoint: .bottom
-            )
-            .frame(height: 28)
-            .allowsHitTesting(false)
-
-            VStack(spacing: 6) {
-                primaryButton
-                Text(footerCaption)
-                    .font(MADTheme.Typography.caption)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+        WizardFooter {
+            WizardPrimaryButton(
+                title: primaryTitle,
+                icon: step == .who ? "arrow.right" : "figure.2",
+                isBusy: isCreating
+            ) {
+                MADHaptics.action()
+                if step == .who {
+                    advance(to: .activity)
+                } else {
+                    Task { await create() }
+                }
             }
-            .padding(.horizontal, MADTheme.Spacing.md)
-            .padding(.bottom, MADTheme.Spacing.sm)
-            .background(WizardBackground.bottom)
+            Text(footerCaption)
+                .font(MADTheme.Typography.caption)
+                .foregroundStyle(Color.white.opacity(0.6))
         }
     }
 
@@ -933,42 +837,6 @@ struct BuddyStartSheet: View {
         default: return "Nobody moves until you start it."
         }
     }
-
-    /// White on the wizard's red, like the solo flow's own primary buttons —
-    /// the walk colour would vanish into this gradient.
-    private var primaryButton: some View {
-        Button {
-            MADHaptics.action()
-            if step == .who {
-                advance(to: .activity)
-            } else {
-                Task { await create() }
-            }
-        } label: {
-            HStack(spacing: 8) {
-                if isCreating {
-                    ProgressView().tint(WizardBackground.bottom)
-                } else if step == .who {
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 16, weight: .semibold))
-                } else {
-                    Image(systemName: "figure.2")
-                        .font(.system(size: 16, weight: .semibold))
-                }
-                Text(primaryTitle)
-            }
-            .font(MADTheme.Typography.bodyBold)
-            .frame(maxWidth: .infinity)
-            .frame(height: Self.controlHeight)
-            .background(Capsule().fill(Color.white))
-            .foregroundStyle(WizardBackground.bottom)
-        }
-        .buttonStyle(.plain)
-        .disabled(primaryDisabled)
-        .opacity(primaryDisabled ? 0.5 : 1)
-    }
-
-    private var primaryDisabled: Bool { isCreating }
 
     /// Says CREATE, never START.
     ///
@@ -991,19 +859,12 @@ struct BuddyStartSheet: View {
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
             .font(MADTheme.Typography.headline)
-            .foregroundStyle(MADTheme.Colors.madWhite)
+            .foregroundStyle(Color.white)
     }
 
     /// "2" / "1.5" — the unit is rendered separately in the chip.
     private func shortGoalNumber(_ value: Double) -> String {
         value == value.rounded() ? "\(Int(value))" : String(format: "%.1f", value)
-    }
-
-    private func goalLabel(_ value: Double) -> String {
-        mode == .raceTime
-            ? "\(Int(value)) min"
-            : (value == value.rounded()
-                ? "\(Int(value)) mi" : String(format: "%.1f mi", value))
     }
 
     /// Put back the mode and activity from last time. Friends are restored
@@ -1050,7 +911,7 @@ struct BuddyStartSheet: View {
                 goalValue: mode.needsGoal ? goal : nil,
                 activityType: activityType,
                 inviteUserIds: Array(selected),
-                // Nobody picked = a room made to share a code. That's a
+                // Nobody picked = a room made to invite from. That's a
                 // genuinely different intent from inviting named friends, and
                 // telling them apart is the whole point of tracking origin.
                 origin: selected.isEmpty ? .code : .invite,
@@ -1073,12 +934,14 @@ struct BuddyStartSheet: View {
             rememberSetup()
             MADHaptics.success()
             onCreated(state)
-            dismiss()
         } catch {
             MADHaptics.error()
-            errorText =
+            // Reported through the service so the ONE alert the flow owns is
+            // the only place an error can appear. A local alert here couldn't
+            // be raised at all once this stopped being a sheet with its own
+            // presentation context.
+            buddy.errorMessage =
                 (error as? LocalizedError)?.errorDescription ?? "Couldn't create the lobby."
         }
     }
-
 }

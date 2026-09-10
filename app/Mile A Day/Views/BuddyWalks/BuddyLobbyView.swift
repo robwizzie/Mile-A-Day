@@ -7,24 +7,41 @@ import SwiftUI
 /// The countdown is driven by the server's `started_at`, which is stamped a few
 /// seconds in the future — so every phone in the group hits zero on the same
 /// wall-clock instant rather than whenever its own request happened to return.
+///
+/// CONTENT ONLY, and drawn in the pre-start wizard's own language: the
+/// gradient, the top bar and the progress dots come from `BuddyWalkFlowView`,
+/// which renders them once for the setup questions and this alike. It used to
+/// be a `.fullScreenCover` on the app's dark gradient with activity-tinted
+/// controls — so answering three questions in white-on-red handed you a room
+/// that looked like a different app, and `workoutColor("running")` IS that
+/// gradient's top stop, which left a run lobby's countdown red on red.
 struct BuddyLobbyView: View {
     /// Fires when the countdown reaches zero, handing the session to the
     /// tracker.
     let onStart: (BuddySessionState) -> Void
+    /// The one control that means "not this". Cancel for the host, Leave for
+    /// everyone else — the flow owns which, so the top bar's chevron and the
+    /// button at the bottom of this screen can't drift apart.
+    let onLeave: () -> Void
+    /// Get out with nothing to answer for: the walk is already called off.
+    let onClose: () -> Void
+    /// Host only — change the plan of a room that already exists.
+    let onEditPlan: () -> Void
+    /// Open the ghost picker, which is a step of the flow rather than a sheet.
+    let onArmGhost: () -> Void
+    /// True while the flow is asking "cancel this walk?". The countdown keeps
+    /// ticking under that dialog, and handing off mid-decision means the
+    /// screen answers the question for them.
+    var holdHandOff: Bool = false
 
-    @Environment(\.dismiss) private var dismiss
     @ObservedObject private var buddy = BuddySessionService.shared
 
     @State private var now = Date()
     @State private var hasHandedOff = false
-    @State private var showGhostSetup = false
-    @State private var showSettings = false
     /// Friends with an invite request in flight, so their tile can show it.
     @State private var invitingIds: Set<String> = []
     /// Join requests being answered, so a double tap can't answer twice.
     @State private var answeringIds: Set<String> = []
-    @State private var confirmCancel = false
-    @State private var errorText: String?
 
     /// Nil until the first snapshot lands; then TRUE only for someone who
     /// arrived at a walk that was already moving.
@@ -62,33 +79,20 @@ struct BuddyLobbyView: View {
     @State private var pulsingIds: Set<String> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Ghost race arming for THIS buddy walk.
-    ///
-    /// The solo flow arms from a card on the location-picker screen — which a
-    /// buddy session never renders, because the hand-off jumps straight to
-    /// tracking. The lobby is the one screen every buddy session passes
-    /// through (start sheet → lobby → tracker, and a pushed/deep-linked invite
-    /// lands here too), so this is where the choice belongs.
-    ///
-    /// Stored rather than passed because the tracker is presented by
-    /// `BuddyFlowModifier`, not by this view — there's no parameter to hand it
-    /// through. It's re-decided every session since the lobby always runs
-    /// first, so a stale `true` can't leak into a walk the user didn't arm.
-    @AppStorage("buddyGhostArmedV1") private var buddyGhostArmed = false
-    /// The SAME keys the solo path uses, so "race 12:00" means one thing
-    /// everywhere rather than two settings that drift apart.
-    @AppStorage("ghostTargetV1.running") private var runTargetStorage = ""
-    @AppStorage("ghostTargetV1.walking") private var walkTargetStorage = ""
+    /// Whether a ghost is armed for this walk. The picker is a step of the
+    /// flow (`onArmGhost`); this is only the readout.
+    @AppStorage(BuddyGhostArming.armedKey) private var buddyGhostArmed = false
 
     /// Drives the countdown text. Local ticking only — no network involved.
     private let tick = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
 
     private var session: BuddySessionState? { buddy.session }
 
-    var body: some View {
-        ZStack {
-            MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
+    /// One accent for every pre-start screen — see `WizardPalette`.
+    private var accent: Color { WizardPalette.accent }
 
+    var body: some View {
+        Group {
             if let session {
                 if session.status == .cancelled {
                     // A cancel arrives through the POLL on everybody else's
@@ -103,7 +107,8 @@ struct BuddyLobbyView: View {
                     lobby(session)
                 }
             } else {
-                ProgressView().tint(MADTheme.Colors.madWhite)
+                ProgressView().tint(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .onReceive(tick) { value in
@@ -120,22 +125,11 @@ struct BuddyLobbyView: View {
         .onChange(of: currentInIds) { _, newIds in
             announceArrivals(newIds)
         }
-        // Rendered HERE: this lobby is a fullScreenCover, which sits above
-        // MainTabView's global banner overlay — a toast anywhere else is
-        // invisible from in here.
+        // Rendered HERE: the buddy flow is presented over MainTabView's global
+        // banner overlay (or inside the tracker's own cover), so a toast
+        // anywhere else is invisible from in here.
         .overlay(alignment: .top) { arrivalToastView }
         .onAppear { buddy.startPolling() }
-        .alert(
-            "Buddy Walk",
-            isPresented: Binding(
-                get: { errorText != nil },
-                set: { if !$0 { errorText = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) { errorText = nil }
-        } message: {
-            Text(errorText ?? "")
-        }
     }
 
     /// Decide ONCE, on the first snapshot, whether this user arrived late.
@@ -227,11 +221,11 @@ struct BuddyLobbyView: View {
             HStack(spacing: 8) {
                 Image(systemName: "person.crop.circle.badge.checkmark")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(session?.accentColor ?? MADTheme.Colors.madRed)
+                    .foregroundStyle(Color.white)
                     .accessibilityHidden(true)
                 Text(text)
                     .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundColor(MADTheme.Colors.madWhite)
+                    .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
@@ -239,13 +233,10 @@ struct BuddyLobbyView: View {
             .padding(.vertical, 10)
             .background(
                 Capsule()
-                    .fill(Color.black.opacity(0.75))
-                    .overlay(
-                        Capsule().strokeBorder(
-                            (session?.accentColor ?? MADTheme.Colors.madRed).opacity(0.45),
-                            lineWidth: 1))
+                    .fill(Color.black.opacity(0.5))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.45), lineWidth: 1))
             )
-            .padding(.top, 60)
+            .padding(.top, 12)
             .transition(.move(edge: .top).combined(with: .opacity))
             .allowsHitTesting(false)
         }
@@ -259,18 +250,20 @@ struct BuddyLobbyView: View {
     /// gets said.
     private func cancelledPanel(_ session: BuddySessionState) -> some View {
         VStack(spacing: MADTheme.Spacing.md) {
+            Spacer(minLength: 0)
+
             ZStack {
                 Circle()
-                    .fill(MADTheme.Colors.madWhite.opacity(0.10))
+                    .fill(Color.white.opacity(0.12))
                     .frame(width: 76, height: 76)
                 Image(systemName: "xmark")
                     .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
+                    .foregroundStyle(Color.white.opacity(0.8))
             }
 
             Text("Walk called off")
-                .font(MADTheme.Typography.title2)
-                .foregroundStyle(MADTheme.Colors.madWhite)
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.white)
 
             Text(
                 session.isHost(buddy.currentUserId)
@@ -278,27 +271,21 @@ struct BuddyLobbyView: View {
                     : "The host cancelled this walk before it started."
             )
             .font(MADTheme.Typography.body)
-            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.65))
+            .foregroundStyle(Color.white.opacity(0.75))
             .multilineTextAlignment(.center)
             .padding(.horizontal, MADTheme.Spacing.lg)
 
-            Button {
+            Spacer(minLength: 0)
+
+            WizardPrimaryButton(title: "Done") {
                 MADHaptics.tap()
                 // Clears the terminal session so the dashboard stops offering
                 // it as something to re-enter.
                 buddy.clearFinishedSession()
-                dismiss()
-            } label: {
-                Text("Done")
-                    .font(MADTheme.Typography.bodyBold)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, MADTheme.Spacing.sm + 2)
-                    .background(Capsule().fill(session.accentColor))
-                    .foregroundStyle(MADTheme.Colors.madWhite)
+                onClose()
             }
-            .buttonStyle(.plain)
-            .padding(.horizontal, MADTheme.Spacing.xl)
-            .padding(.top, MADTheme.Spacing.sm)
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.bottom, MADTheme.Spacing.md)
         }
     }
 
@@ -311,7 +298,8 @@ struct BuddyLobbyView: View {
     /// "Wait, no" happens in exactly this window (wrong mode, wrong friend,
     /// pressed by accident), so the host can call the whole thing off and
     /// everyone else can step out — both of which the server still allows right
-    /// up until `started_at` passes.
+    /// up until `started_at` passes, and both of which the flow's own back
+    /// chevron still offers while this is on screen.
     ///
     /// The other thing that happens in this window is that you are already
     /// walking. Eight seconds of staring at a number is the whole cost of a
@@ -323,33 +311,26 @@ struct BuddyLobbyView: View {
         let others = session.activeParticipants.contains { $0.userId != buddy.currentUserId }
 
         return VStack(spacing: MADTheme.Spacing.lg) {
+            Spacer(minLength: 0)
+
             Text("Starting together")
                 .font(MADTheme.Typography.headline)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.8))
+                .foregroundStyle(Color.white.opacity(0.85))
 
             Text("\(max(1, Int(remaining.rounded(.up))))")
                 .font(.system(size: 120, weight: .bold, design: .rounded))
-                .foregroundStyle(session.accentColor)
+                .foregroundStyle(Color.white)
                 .contentTransition(.numericText())
                 .animation(MADTheme.Animation.quick, value: Int(remaining.rounded(.up)))
 
             Text(session.mode.title)
                 .font(MADTheme.Typography.body)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
+                .foregroundStyle(Color.white.opacity(0.75))
+
+            Spacer(minLength: 0)
 
             VStack(spacing: MADTheme.Spacing.sm) {
-                Button {
-                    startNow(session)
-                } label: {
-                    Text("Start now")
-                        .font(MADTheme.Typography.bodyBold)
-                        .foregroundStyle(MADTheme.Colors.madWhite)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, MADTheme.Spacing.sm + 2)
-                        .background(Capsule().fill(session.accentColor))
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, MADTheme.Spacing.xl)
+                WizardPrimaryButton(title: "Start now") { startNow(session) }
 
                 // Says what the button does NOT do. It moves this phone only —
                 // `started_at` is untouched — so under a heading that reads
@@ -359,89 +340,51 @@ struct BuddyLobbyView: View {
                 if others {
                     Text("Everyone else starts when it hits zero.")
                         .font(MADTheme.Typography.small)
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+                        .foregroundStyle(Color.white.opacity(0.6))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, MADTheme.Spacing.lg)
                 }
 
-                exitButton(session, compact: true)
+                exitButton(session)
                     .padding(.top, MADTheme.Spacing.xs)
             }
-            .padding(.top, MADTheme.Spacing.sm)
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.bottom, MADTheme.Spacing.md)
         }
     }
 
-    /// The one control that means "not this". Cancel for the host — it closes
-    /// the room for everybody — and Leave for everyone else, who can only take
-    /// themselves out of a walk that isn't theirs to call off.
-    private func exitButton(_ session: BuddySessionState, compact: Bool) -> some View {
+    /// The labelled way out, under the primary action. The top bar's chevron
+    /// does the same thing — both call the flow's `onLeave`, which is where
+    /// host-vs-guest and the confirmation live.
+    private func exitButton(_ session: BuddySessionState) -> some View {
         let isHost = session.isHost(buddy.currentUserId)
-        return Button {
-            MADHaptics.tap()
-            if isHost {
-                confirmCancel = true
-            } else {
-                Task {
-                    await buddy.leave()
-                    dismiss()
-                }
-            }
-        } label: {
+        return Button(action: onLeave) {
             Text(isHost ? "Cancel walk" : "Leave")
-                .font(compact ? MADTheme.Typography.smallBold : MADTheme.Typography.body)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(isHost ? 0.75 : 0.6))
-                .padding(.horizontal, compact ? 18 : 0)
-                .padding(.vertical, compact ? 10 : 0)
-                // On the countdown it sits under "Start now" and needs enough
-                // weight to be seen against it — that screen is where "wait,
-                // no" gets pressed; in the lobby it sits under Start and must
-                // not compete with it.
-                .background(
-                    Capsule()
-                        .fill(MADTheme.Colors.madWhite.opacity(compact ? 0.12 : 0))
-                )
+                .font(MADTheme.Typography.smallBold)
+                .foregroundStyle(Color.white.opacity(0.8))
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .background(Capsule().fill(Color.white.opacity(0.12)))
         }
         .buttonStyle(.plain)
-        .confirmationDialog(
-            "Cancel this buddy walk?",
-            isPresented: $confirmCancel,
-            titleVisibility: .visible
-        ) {
-            Button("Cancel walk", role: .destructive) {
-                Task {
-                    do {
-                        try await buddy.cancel()
-                        MADHaptics.success()
-                        dismiss()
-                    } catch {
-                        MADHaptics.error()
-                        errorText =
-                            (error as? LocalizedError)?.errorDescription
-                            ?? "Couldn't cancel that walk."
-                    }
-                }
-            }
-            Button("Keep it", role: .cancel) {}
-        } message: {
-            Text("Everyone you invited will be told it's off. Nobody's miles are affected.")
-        }
     }
 
     // MARK: - Lobby
 
     /// The waiting room.
     ///
-    /// Ordering is the whole design here, and the previous one was backwards.
-    /// The roster used to be the ONLY flexible child — a `ScrollView` under a
-    /// fixed header, a 132pt QR card and the ghost row — so on a real phone it
-    /// collapsed to a ~60pt sliver with the first participant sliced in half.
-    /// The single most important question a lobby answers ("who's actually
-    /// here?") was the one thing you couldn't see.
+    /// Ordering is the whole design here, and an early one was backwards. The
+    /// roster used to be the ONLY flexible child — a `ScrollView` under a fixed
+    /// header, a QR card and the ghost row — so on a real phone it collapsed to
+    /// a ~60pt sliver with the first participant sliced in half. The single most
+    /// important question a lobby answers ("who's actually here?") was the one
+    /// thing you couldn't see.
     ///
-    /// So: who's here comes FIRST, at a size you can read across the room, with
-    /// the friends you could still add in the same card. One scroll view wraps
-    /// the lot so nothing can be squeezed by its neighbours, and the actions
-    /// stay pinned outside it because Start must never scroll away.
+    /// So: the plan reads as this step's question, who's here comes first at a
+    /// size you can read across the room, and the friends you could still add
+    /// sit in the same card. One scroll view wraps the lot so nothing can be
+    /// squeezed by its neighbours, and the actions stay pinned outside it
+    /// because Start must never scroll away.
     private func lobby(_ session: BuddySessionState) -> some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -462,9 +405,7 @@ struct BuddyLobbyView: View {
                 await buddy.loadCandidates()
             }
 
-            actions(session)
-                .padding(MADTheme.Spacing.md)
-                .background(.ultraThinMaterial)
+            WizardFooter { actions(session) }
         }
     }
 
@@ -472,65 +413,43 @@ struct BuddyLobbyView: View {
 
     /// What this room is, and — for the host — the way to change it.
     ///
-    /// Being able to edit the plan is what turns a lobby into a waiting room
-    /// rather than a receipt: plans change between "let's walk" and "everyone's
-    /// here", and the only way to act on that used to be abandoning the room and
-    /// rebuilding it.
+    /// Drawn as the wizard's own header, because that is what it is: the
+    /// glyph-over-question block every step before this one wore, answering
+    /// "what did we just set up". Being able to edit the plan is what turns a
+    /// lobby into a waiting room rather than a receipt: plans change between
+    /// "let's walk" and "everyone's here", and the only way to act on that used
+    /// to be abandoning the room and rebuilding it.
     ///
     /// Non-hosts see the same summary with no affordance. The server enforces
     /// host-only anyway (`not_host`), so this is about not offering something
     /// that would just fail.
     private func planHeader(_ session: BuddySessionState) -> some View {
-        VStack(spacing: MADTheme.Spacing.xs) {
-            ZStack {
-                Circle()
-                    .fill(session.accentColor.opacity(0.18))
-                    .frame(width: 76, height: 76)
-                Circle()
-                    .strokeBorder(session.accentColor.opacity(0.45), lineWidth: 1.5)
-                    .frame(width: 76, height: 76)
-                Image(systemName: session.mode.icon)
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(session.accentColor)
-            }
+        VStack(spacing: MADTheme.Spacing.sm) {
+            WizardHeader(
+                glyph: .symbol(session.mode.icon),
+                title: session.mode.title,
+                subtitle: planLine(session)
+            )
             // Keyed on the plan so a change the HOST made animates on every
             // other phone too, when the poll brings it in.
             .animation(MADTheme.Animation.quick, value: session.mode)
 
-            Text(session.mode.title)
-                .font(MADTheme.Typography.title2)
-                .foregroundStyle(MADTheme.Colors.madWhite)
-
-            Text(planLine(session))
-                .font(MADTheme.Typography.body)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
-                .multilineTextAlignment(.center)
-
             if session.isHost(buddy.currentUserId) {
                 Button {
                     MADHaptics.tap()
-                    showSettings = true
+                    onEditPlan()
                 } label: {
                     Label("Edit", systemImage: "slider.horizontal.3")
                         .font(MADTheme.Typography.caption)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(Capsule().fill(MADTheme.Colors.madWhite.opacity(0.10)))
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.85))
+                        .background(Capsule().fill(Color.white.opacity(0.15)))
+                        .foregroundStyle(Color.white.opacity(0.9))
                 }
                 .buttonStyle(.plain)
-                .padding(.top, 2)
             }
         }
-        .padding(.top, MADTheme.Spacing.xl)
-        // Its own presentation node: this view also carries the ghost-setup
-        // sheet, and two sheets on ONE node makes SwiftUI silently drop one.
-        .background(
-            Color.clear
-                .sheet(isPresented: $showSettings) {
-                    BuddyLobbySettingsSheet(session: session)
-                }
-        )
+        .padding(.top, MADTheme.Spacing.md)
     }
 
     /// "2.0 miles · Walk" — the plan as one line, so the goal and the activity
@@ -557,9 +476,6 @@ struct BuddyLobbyView: View {
     /// and QR that used to sit here are gone entirely — everyone you can walk
     /// with is already an accepted friend, so a code was a second, weaker path
     /// to a thing this row does better.
-    ///
-    /// Host-only, because the server is (`not_host`). A guest sees the roster,
-    /// which is everything they can act on.
     private func droppedInviteeText(_ names: [String]) -> String {
         let who: String
         switch names.count {
@@ -586,82 +502,75 @@ struct BuddyLobbyView: View {
                 && ($0.status == .joined || $0.status == .ready || $0.status == .active)
         }
 
-        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            HStack {
-                Text("Who's here")
-                    .font(MADTheme.Typography.headline)
-                    .foregroundStyle(MADTheme.Colors.madWhite)
-                Spacer()
-                Text(waitingText(here: here, total: people.count))
-                    .font(MADTheme.Typography.caption)
-                    .foregroundStyle(
-                        here == people.count
-                            ? session.accentColor
-                            : MADTheme.Colors.madWhite.opacity(0.55))
-            }
-
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 68), spacing: MADTheme.Spacing.sm)],
-                spacing: MADTheme.Spacing.md
-            ) {
-                ForEach(people) { participant in
-                    rosterTile(participant, session: session)
-                }
-            }
-
-            // Someone tapped who never made the roster. The server drops an
-            // invitee it can't reach without an error, so without this the
-            // host counted faces and found one missing with no explanation.
-            if isHost, !buddy.droppedInviteeNames.isEmpty {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "exclamationmark.circle")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(MADTheme.Colors.warning)
-                    Text(droppedInviteeText(buddy.droppedInviteeNames))
+        return WizardPanel {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                HStack {
+                    Text("Who's here")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundStyle(Color.white)
+                    Spacer()
+                    Text(waitingText(here: here, total: people.count))
                         .font(MADTheme.Typography.caption)
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
-                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(Color.white.opacity(here == people.count ? 0.95 : 0.6))
                 }
-            }
-
-            if !session.pendingJoinRequests.isEmpty {
-                Divider().background(MADTheme.Colors.madWhite.opacity(0.10))
-                joinRequestsSection(session)
-            }
-
-            if amIn, !invitable.isEmpty {
-                Divider().background(MADTheme.Colors.madWhite.opacity(0.10))
-
-                Text("Tap to invite")
-                    .font(MADTheme.Typography.smallBold)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.75))
 
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 68), spacing: MADTheme.Spacing.sm)],
                     spacing: MADTheme.Spacing.md
                 ) {
-                    ForEach(invitable) { candidate in
-                        inviteTile(candidate, session: session)
+                    ForEach(people) { participant in
+                        rosterTile(participant)
                     }
                 }
-            }
 
-            if amIn, invitable.isEmpty, people.count <= 1 {
-                // Host, alone, with nobody left to ask. Say so plainly instead
-                // of leaving a card that looks like it's still loading.
-                Text("No friends available to invite right now.")
-                    .font(MADTheme.Typography.caption)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+                // Someone tapped who never made the roster. The server drops an
+                // invitee it can't reach without an error, so without this the
+                // host counted faces and found one missing with no explanation.
+                if isHost, !buddy.droppedInviteeNames.isEmpty {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.circle")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(MADTheme.Colors.warning)
+                            .accessibilityHidden(true)
+                        Text(droppedInviteeText(buddy.droppedInviteeNames))
+                            .font(MADTheme.Typography.caption)
+                            .foregroundStyle(Color.white.opacity(0.75))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                if !session.pendingJoinRequests.isEmpty {
+                    Divider().background(Color.white.opacity(0.2))
+                    joinRequestsSection(session)
+                }
+
+                if amIn, !invitable.isEmpty {
+                    Divider().background(Color.white.opacity(0.2))
+
+                    Text("Tap to invite")
+                        .font(MADTheme.Typography.smallBold)
+                        .foregroundStyle(Color.white.opacity(0.8))
+
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 68), spacing: MADTheme.Spacing.sm)],
+                        spacing: MADTheme.Spacing.md
+                    ) {
+                        ForEach(invitable) { candidate in
+                            inviteTile(candidate)
+                        }
+                    }
+                }
+
+                if amIn, invitable.isEmpty, people.count <= 1 {
+                    // Host, alone, with nobody left to ask. Say so plainly
+                    // instead of leaving a card that looks like it's still
+                    // loading.
+                    Text("No friends available to invite right now.")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(Color.white.opacity(0.55))
+                }
             }
         }
-        .padding(MADTheme.Spacing.md)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(
-                cornerRadius: MADTheme.CornerRadius.extraLarge, style: .continuous
-            )
-            .fill(MADTheme.Colors.madWhite.opacity(0.06))
-        )
         .padding(.horizontal, MADTheme.Spacing.md)
         .animation(MADTheme.Animation.standard, value: session.participants.count)
     }
@@ -678,9 +587,7 @@ struct BuddyLobbyView: View {
     /// One face. Presence is carried by the avatar — ringed and full strength
     /// once they're in, dimmed while the invite is still outstanding — with the
     /// word underneath only for the states a ring can't spell.
-    private func rosterTile(_ participant: BuddyParticipant, session: BuddySessionState)
-        -> some View
-    {
+    private func rosterTile(_ participant: BuddyParticipant) -> some View {
         let isIn = participant.status == .joined || participant.status == .ready
             || participant.status == .active
         let name =
@@ -696,7 +603,7 @@ struct BuddyLobbyView: View {
             .overlay(
                 Circle()
                     .strokeBorder(
-                        isIn ? session.accentColor : Color.clear,
+                        isIn ? accent : Color.clear,
                         // A thicker ring for the moment of arrival, then the
                         // ordinary one — so the tile itself says "new" even
                         // if the toast was missed.
@@ -712,23 +619,23 @@ struct BuddyLobbyView: View {
                 if participant.isHost {
                     Image(systemName: "star.fill")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(MADTheme.Colors.madBlack)
+                        .foregroundStyle(WizardPalette.onAccent)
                         .padding(4)
-                        .background(Circle().fill(session.accentColor))
+                        .background(Circle().fill(accent))
+                        .accessibilityLabel("Host")
                 }
             }
 
             Text(name)
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(isIn ? 1 : 0.5))
+                .foregroundStyle(Color.white.opacity(isIn ? 1 : 0.5))
                 .lineLimit(1)
 
             // "Joined", not "In": the word under a face is the one place the
             // arrival is spelled out, and "In" reads as a fragment.
             Text(isIn ? "Joined" : statusWord(participant.status))
                 .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundStyle(
-                    isIn ? session.accentColor : MADTheme.Colors.madWhite.opacity(0.4))
+                .foregroundStyle(Color.white.opacity(isIn ? 0.95 : 0.45))
         }
         // The poll is what surfaces an arrival, so this keys on the value that
         // changed rather than an onAppear that already ran.
@@ -736,15 +643,14 @@ struct BuddyLobbyView: View {
     }
 
     /// A friend who isn't in yet. Tapping sends the invite immediately — the
-    /// PATCH already exists and is idempotent, so there is nothing to confirm.
-    private func inviteTile(_ candidate: BuddyCandidate, session: BuddySessionState)
-        -> some View
-    {
+    /// endpoint already exists and is idempotent, so there is nothing to
+    /// confirm.
+    private func inviteTile(_ candidate: BuddyCandidate) -> some View {
         let sending = invitingIds.contains(candidate.userId)
         return Button {
             guard !sending else { return }
             MADHaptics.action()
-            invite(candidate, session: session)
+            invite(candidate)
         } label: {
             VStack(spacing: 6) {
                 AvatarView(
@@ -755,34 +661,34 @@ struct BuddyLobbyView: View {
                 .opacity(sending ? 0.45 : 0.8)
                 .overlay(alignment: .bottomTrailing) {
                     ZStack {
-                        Circle().fill(session.accentColor).frame(width: 20, height: 20)
+                        Circle().fill(accent).frame(width: 20, height: 20)
                         if sending {
                             ProgressView()
                                 .controlSize(.mini)
-                                .tint(MADTheme.Colors.madWhite)
+                                .tint(WizardPalette.onAccent)
                         } else {
                             Image(systemName: "plus")
                                 .font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(MADTheme.Colors.madWhite)
+                                .foregroundStyle(WizardPalette.onAccent)
                         }
                     }
                 }
 
                 Text(candidate.displayName)
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.85))
+                    .foregroundStyle(Color.white.opacity(0.9))
                     .lineLimit(1)
 
                 Text(sending ? "Inviting…" : "Invite")
                     .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundStyle(session.accentColor)
+                    .foregroundStyle(Color.white.opacity(0.8))
             }
         }
         .buttonStyle(.plain)
         .disabled(sending)
     }
 
-    private func invite(_ candidate: BuddyCandidate, session: BuddySessionState) {
+    private func invite(_ candidate: BuddyCandidate) {
         invitingIds.insert(candidate.userId)
         Task {
             // The response carries the new roster, so the tile moves from the
@@ -834,11 +740,11 @@ struct BuddyLobbyView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(request.displayName)
                     .font(MADTheme.Typography.smallBold)
-                    .foregroundStyle(MADTheme.Colors.madWhite)
+                    .foregroundStyle(Color.white)
                     .lineLimit(1)
                 Text(vouchText(request, session: session, canAnswer: canAnswer))
                     .font(MADTheme.Typography.caption)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                    .foregroundStyle(Color.white.opacity(0.65))
                     .lineLimit(2)
             }
             Spacer(minLength: MADTheme.Spacing.xs)
@@ -885,12 +791,12 @@ struct BuddyLobbyView: View {
         } label: {
             Text(title)
                 .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundStyle(filled ? MADTheme.Colors.madBlack : MADTheme.Colors.madWhite)
+                .foregroundStyle(filled ? MADTheme.Colors.madBlack : Color.white)
                 .padding(.horizontal, 12)
                 .frame(height: 32)
                 .background(
                     Capsule().fill(
-                        filled ? MADTheme.Colors.warning : MADTheme.Colors.madWhite.opacity(0.12)))
+                        filled ? MADTheme.Colors.warning : Color.white.opacity(0.15)))
         }
         .buttonStyle(.plain)
         .disabled(busy)
@@ -937,38 +843,32 @@ struct BuddyLobbyView: View {
     /// each of them is standing, and knowing that the friend whose pace looks
     /// strange is on a treadmill is the difference between a bug and a fact.
     private func locationCard(_ session: BuddySessionState) -> some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            HStack {
-                Text("Where are you?")
-                    .font(MADTheme.Typography.smallBold)
-                    .foregroundStyle(MADTheme.Colors.madWhite)
-                Spacer()
-                Text("Just for you")
-                    .font(MADTheme.Typography.caption)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.45))
-            }
-
-            HStack(spacing: 4) {
-                ForEach(BuddyLocationType.allCases) { option in
-                    locationChip(option, session: session)
+        WizardPanel {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                HStack {
+                    Text("Where are you?")
+                        .font(MADTheme.Typography.smallBold)
+                        .foregroundStyle(Color.white)
+                    Spacer()
+                    Text("Just for you")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(Color.white.opacity(0.55))
                 }
-            }
-            .padding(4)
-            .background(Capsule().fill(MADTheme.Colors.madWhite.opacity(0.10)))
 
-            Text(selectedLocation.subtitle)
-                .font(MADTheme.Typography.caption)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
-                .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 4) {
+                    ForEach(BuddyLocationType.allCases) { option in
+                        locationChip(option)
+                    }
+                }
+                .padding(4)
+                .background(Capsule().fill(Color.white.opacity(0.12)))
+
+                Text(selectedLocation.subtitle)
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(Color.white.opacity(0.6))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .padding(MADTheme.Spacing.md)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(
-                cornerRadius: MADTheme.CornerRadius.extraLarge, style: .continuous
-            )
-            .fill(MADTheme.Colors.madWhite.opacity(0.06))
-        )
     }
 
     /// The answer to act on: this user's own tap if they've made one, otherwise
@@ -977,9 +877,7 @@ struct BuddyLobbyView: View {
         pendingLocation ?? buddy.myLocationType
     }
 
-    private func locationChip(_ option: BuddyLocationType, session: BuddySessionState)
-        -> some View
-    {
+    private func locationChip(_ option: BuddyLocationType) -> some View {
         let isOn = selectedLocation == option
         return Button {
             guard !isOn else { return }
@@ -995,9 +893,8 @@ struct BuddyLobbyView: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 40)
-            .background(Capsule().fill(isOn ? session.accentColor : .clear))
-            .foregroundStyle(
-                isOn ? MADTheme.Colors.madWhite : MADTheme.Colors.madWhite.opacity(0.6))
+            .background(Capsule().fill(isOn ? accent : .clear))
+            .foregroundStyle(isOn ? WizardPalette.onAccent : Color.white.opacity(0.7))
         }
         .buttonStyle(.plain)
     }
@@ -1010,23 +907,24 @@ struct BuddyLobbyView: View {
     /// roster answers "how am I doing against them", the delta chip answers
     /// "how am I doing against me". A buddy walk already feeds
     /// `BestEffortStore.recordFinish` — this just lets it race what it feeds.
+    ///
+    /// The picker it opens is a STEP of the flow (`onArmGhost`), the same
+    /// inline screen the solo wizard shows after "Ghost Race" — it was a sheet
+    /// over a full-screen cover, which is two modal layers deep for a choice
+    /// the solo path makes in the flow itself.
     private func ghostRaceRow(_ session: BuddySessionState) -> some View {
         Button {
             MADHaptics.action()
-            showGhostSetup = true
+            onArmGhost()
         } label: {
             HStack(spacing: MADTheme.Spacing.md) {
                 ZStack {
                     Circle()
-                        .fill(
-                            buddyGhostArmed
-                                ? session.accentColor.opacity(0.25)
-                                : Color.white.opacity(0.10)
-                        )
+                        .fill(Color.white.opacity(buddyGhostArmed ? 0.9 : 0.12))
                         .frame(width: 34, height: 34)
                     GhostSprite(
                         size: 17,
-                        color: buddyGhostArmed ? session.accentColor : .white.opacity(0.7),
+                        color: buddyGhostArmed ? WizardPalette.onAccent : .white.opacity(0.8),
                         floats: false,
                         glancesBack: true
                     )
@@ -1035,174 +933,101 @@ struct BuddyLobbyView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Race your ghost")
                         .font(MADTheme.Typography.smallBold)
-                        .foregroundStyle(MADTheme.Colors.madWhite)
+                        .foregroundStyle(Color.white)
                     Text(ghostSubtitle(session))
                         .font(MADTheme.Typography.caption)
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                        .foregroundStyle(Color.white.opacity(0.65))
                         .lineLimit(1)
                 }
 
                 Spacer(minLength: 0)
 
-                if buddyGhostArmed, let ghost = resolvedGhost(session) {
+                if buddyGhostArmed, let ghost = BuddyGhostArming.resolved(session) {
                     Text(BestEffortStore.formatSeconds(ghost.effort.seconds))
                         .font(MADTheme.Typography.smallBold)
                         .monospacedDigit()
-                        .foregroundStyle(session.accentColor)
+                        .foregroundStyle(Color.white)
                 } else {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.4))
+                        .foregroundStyle(.white.opacity(0.5))
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.vertical, 12)
             .frame(maxWidth: .infinity)
-            .background(Capsule().fill(Color.white.opacity(0.08)))
-            .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 1))
+            .background(Capsule().fill(Color.white.opacity(0.10)))
+            .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
         }
         .buttonStyle(.plain)
-        // Its own presentation node: this view already owns a ShareLink and
-        // the flow that presents it stacks covers elsewhere, and two sheets on
-        // one node makes SwiftUI silently drop one.
-        .background(
-            Color.clear
-                .sheet(isPresented: $showGhostSetup) {
-                    GhostRaceSetupSheet(
-                        activityKey: ghostActivityKey(session),
-                        seedPaceSeconds: ghostSeedPaceSeconds,
-                        current: buddyGhostArmed ? storedGhostTarget(session) : nil
-                    ) { chosen in
-                        if let chosen {
-                            storeGhostTarget(chosen, session: session)
-                            buddyGhostArmed = true
-                        } else {
-                            buddyGhostArmed = false
-                        }
-                        showGhostSetup = false
-                    }
-                }
-        )
-    }
-
-    private func ghostActivityKey(_ session: BuddySessionState) -> String {
-        session.isRunning ? "running" : "walking"
-    }
-
-    /// Backend fastest-mile PR (minutes/mile on the user model → seconds).
-    private var ghostSeedPaceSeconds: Double? {
-        let pace = UserManager.shared.currentUser.fastestMilePace
-        return pace > 0 ? pace * 60 : nil
-    }
-
-    private func storedGhostTarget(_ session: BuddySessionState)
-        -> BestEffortStore.GhostTarget?
-    {
-        let raw = ghostActivityKey(session) == "running"
-            ? runTargetStorage : walkTargetStorage
-        return BestEffortStore.GhostTarget(storage: raw)
-    }
-
-    private func storeGhostTarget(
-        _ target: BestEffortStore.GhostTarget, session: BuddySessionState
-    ) {
-        if ghostActivityKey(session) == "running" {
-            runTargetStorage = target.storage
-        } else {
-            walkTargetStorage = target.storage
-        }
-    }
-
-    private func resolvedGhost(_ session: BuddySessionState)
-        -> BestEffortStore.ResolvedGhost?
-    {
-        guard let target = storedGhostTarget(session) else { return nil }
-        return BestEffortStore.resolve(
-            target,
-            activityKey: ghostActivityKey(session),
-            seedPaceSecondsPerMile: ghostSeedPaceSeconds
-        )
     }
 
     private func ghostSubtitle(_ session: BuddySessionState) -> String {
-        guard buddyGhostArmed, let ghost = resolvedGhost(session) else {
+        guard buddyGhostArmed, let ghost = BuddyGhostArming.resolved(session) else {
             return "Chase your own time while you walk together"
         }
         return "Chasing \(ghost.shortName)"
     }
 
+    // MARK: - Actions
 
-
+    @ViewBuilder
     private func actions(_ session: BuddySessionState) -> some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            if needsJoinConfirm == true {
-                // Arrived at a walk already in progress. There is no Start to
-                // wait for and no countdown to share — the only thing left is
-                // this person saying they're ready, which is also what keeps
-                // them on this screen long enough to answer the indoor/outdoor
-                // question above.
-                joinNowPanel(session)
-            } else if session.isScheduledPending {
-                // A booked walk starts itself — the server promotes it on time
-                // whether or not anyone has the app open. The host still gets
-                // an override, because plans change and waiting for a clock you
-                // set yourself is a strange thing to be forced into.
-                scheduledPanel(session)
-            } else if session.isHost(buddy.currentUserId) {
-                Button {
-                    Task {
-                        MADHaptics.emphasis()
-                        try? await buddy.start()
-                    }
-                } label: {
-                    VStack(spacing: 1) {
-                        Text(readyCount(session) > 1 ? "Start together" : "Start now")
-                            .font(MADTheme.Typography.bodyBold)
-                        if let note = startNote(session) {
-                            Text(note)
-                                .font(MADTheme.Typography.caption)
-                                .opacity(0.85)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, MADTheme.Spacing.sm + 2)
-                    .background(Capsule().fill(session.accentColor))
-                    .foregroundStyle(MADTheme.Colors.madWhite)
-                }
-                .buttonStyle(.plain)
-            } else {
-                Text("Waiting for the host to start…")
-                    .font(MADTheme.Typography.body)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.7))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, MADTheme.Spacing.md)
+        if needsJoinConfirm == true {
+            // Arrived at a walk already in progress. There is no Start to
+            // wait for and no countdown to share — the only thing left is
+            // this person saying they're ready, which is also what keeps
+            // them on this screen long enough to answer the indoor/outdoor
+            // question above.
+            joinNowPanel(session)
+        } else if session.isScheduledPending {
+            // A booked walk starts itself — the server promotes it on time
+            // whether or not anyone has the app open. The host still gets
+            // an override, because plans change and waiting for a clock you
+            // set yourself is a strange thing to be forced into.
+            scheduledPanel(session)
+        } else if session.isHost(buddy.currentUserId) {
+            WizardPrimaryButton(
+                title: readyCount(session) > 1 ? "Start together" : "Start now",
+                icon: "figure.2"
+            ) {
+                MADHaptics.emphasis()
+                Task { try? await buddy.start() }
             }
-
-            exitButton(session, compact: false)
+            if let note = startNote(session) {
+                Text(note)
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(Color.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+            }
+        } else {
+            Text("Waiting for the host to start…")
+                .font(MADTheme.Typography.body)
+                .foregroundStyle(Color.white.opacity(0.75))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, MADTheme.Spacing.sm)
         }
+
+        exitButton(session)
+            .padding(.top, 2)
     }
 
     /// The late arrival's Start button.
+    @ViewBuilder
     private func joinNowPanel(_ session: BuddySessionState) -> some View {
-        Button {
+        WizardPrimaryButton(
+            title: session.isRunning ? "Start my run" : "Start my walk",
+            icon: "figure.2"
+        ) {
             MADHaptics.emphasis()
             // Nothing to call: the join already landed this user 'active'
             // server-side. All this releases is the hand-off gate.
             needsJoinConfirm = false
-        } label: {
-            VStack(spacing: 1) {
-                Text(session.isRunning ? "Start my run" : "Start my walk")
-                    .font(MADTheme.Typography.bodyBold)
-                Text(alreadyMovingNote(session))
-                    .font(MADTheme.Typography.caption)
-                    .opacity(0.85)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, MADTheme.Spacing.sm + 2)
-            .background(Capsule().fill(session.accentColor))
-            .foregroundStyle(MADTheme.Colors.madWhite)
         }
-        .buttonStyle(.plain)
+        Text(alreadyMovingNote(session))
+            .font(MADTheme.Typography.caption)
+            .foregroundStyle(Color.white.opacity(0.6))
+            .multilineTextAlignment(.center)
     }
 
     /// "Sam is already out — you'll start from here." Names who, because the
@@ -1231,39 +1056,23 @@ struct BuddyLobbyView: View {
             VStack(spacing: MADTheme.Spacing.xs) {
                 Text("Starts \(when, style: .relative) from now")
                     .font(MADTheme.Typography.bodyBold)
-                    .foregroundStyle(MADTheme.Colors.madWhite)
+                    .foregroundStyle(Color.white)
                 Text(when, format: .dateTime.weekday(.wide).hour().minute())
                     .font(MADTheme.Typography.caption)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                    .foregroundStyle(Color.white.opacity(0.7))
                 Text("We'll start it for everyone — no need to keep this open")
                     .font(MADTheme.Typography.caption)
-                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.45))
+                    .foregroundStyle(Color.white.opacity(0.55))
                     .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, MADTheme.Spacing.sm + 2)
-            .background(
-                RoundedRectangle(
-                    cornerRadius: MADTheme.CornerRadius.large, style: .continuous
-                )
-                .fill(Color.white.opacity(0.08))
-            )
+            .padding(.vertical, MADTheme.Spacing.sm)
 
             if session.isHost(buddy.currentUserId) {
-                Button {
-                    Task {
-                        MADHaptics.emphasis()
-                        try? await buddy.start()
-                    }
-                } label: {
-                    Text("Start now instead")
-                        .font(MADTheme.Typography.smallBold)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, MADTheme.Spacing.sm)
-                        .background(Capsule().fill(session.accentColor))
-                        .foregroundStyle(MADTheme.Colors.madWhite)
+                WizardPrimaryButton(title: "Start now instead") {
+                    MADHaptics.emphasis()
+                    Task { try? await buddy.start() }
                 }
-                .buttonStyle(.plain)
             }
         }
     }
@@ -1309,7 +1118,7 @@ struct BuddyLobbyView: View {
         // handing off mid-decision means the screen answers the question for
         // them. The server's own window is what decides whether the cancel
         // actually lands; this only stops the UI racing the user.
-        guard !confirmCancel else { return }
+        guard !holdHandOff else { return }
         // A late arrival taps their way in — see `needsJoinConfirm`. Nil means
         // no snapshot has landed yet, so nothing has been decided.
         guard needsJoinConfirm == false else { return }
