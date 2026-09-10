@@ -1379,14 +1379,18 @@ private struct FlameBuddyHeroCard: View {
         // taps into `poke()`. The top-right is the one corner of this card
         // nothing else reaches.
         .overlay(alignment: .topTrailing) {
+            // ACTION at the corner, STATUS inboard of it. The two were the
+            // other way round, which left the Share button floating in the gap
+            // between Flamey and the stat column — anchored to nothing, and
+            // reading as a twin of the savers chip rather than as the one
+            // thing in this corner you can press.
             HStack(spacing: 6) {
+                tokensChip
                 HeroShareButton {
                     MADHaptics.action()
                     showShareSheet = true
                 }
-                tokensChip
             }
-            // The chip's right edge still lines up with the streak box below.
             .padding(.horizontal, 18)
             .padding(.top, 14)
         }

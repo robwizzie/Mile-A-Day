@@ -404,7 +404,13 @@ struct WorkoutRecapView: View {
             // "Walk"/"Run" — passing those falls to the default and paints a
             // walk red, against the app-wide walks-are-blue rule.
             routeColor: ActivityCardView.color(activityName == "Walk" ? "walking" : "running"),
-            avatar: nil
+            // The recap is always the current user's own walk, and this is the
+            // one card where their face belongs — it was nil, so the route
+            // drew with no rider at all while every feed card had one.
+            avatar: RouteArtAvatar(
+                name: UserManager.shared.currentUser.name,
+                imageURL: UserManager.shared.currentUser.profileImageUrl
+            )
         )
     }
 
