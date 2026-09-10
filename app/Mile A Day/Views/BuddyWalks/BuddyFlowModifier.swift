@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The whole Buddy Walks presentation flow — start sheet, lobby, recap, and the
+/// The whole Buddy Walks presentation flow — setup, lobby, recap, and the
 /// four events that open them — as ONE node on the dashboard's modifier chain.
 ///
 /// Why a ViewModifier instead of writing these inline: `DashboardView.body`
@@ -15,8 +15,13 @@ import SwiftUI
 /// carries a `.sheet` (manual entry) and a `.fullScreenCover` (the tracker);
 /// stacking more of either on the same node makes SwiftUI silently drop one.
 struct BuddyFlowModifier: ViewModifier {
-    @Binding var showStartSheet: Bool
-    @Binding var showLobby: Bool
+    /// Non-nil = the buddy flow is up, and says which end of it opened.
+    ///
+    /// ONE piece of state where there were two bools, because there is now one
+    /// screen where there were two presentations: setup and the lobby are
+    /// stages of `BuddyWalkFlowView`, not a sheet and a cover that had to be
+    /// flipped in the right order.
+    @Binding var flowEntry: BuddyWalkFlowEntry?
     /// Non-nil turns the ORDINARY tracker into a buddy walk — one flag, same
     /// tracker, which is the entire integration.
     @Binding var activeSessionId: String?
@@ -33,23 +38,25 @@ struct BuddyFlowModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            // ONE presentation for the whole flow. From here there is no
+            // wizard for it to be a step OF — the dashboard is not the Start
+            // Mile cover — so it arrives in the same full-screen container the
+            // tracker itself does, and looks identical either way.
+            //
+            // `item:` rather than `isPresented:` plus a separate @State for
+            // which end to open: that pair races to a stale value (ios.md).
             .background(
                 Color.clear
-                    .sheet(isPresented: $showStartSheet) {
-                        BuddyStartSheet { _ in
-                            showStartSheet = false
-                            showLobby = true
-                        }
-                    }
-            )
-            .background(
-                Color.clear
-                    .fullScreenCover(isPresented: $showLobby) {
-                        BuddyLobbyView { session in
-                            activeSessionId = session.id
-                            showLobby = false
-                            showWorkoutView = true
-                        }
+                    .fullScreenCover(item: $flowEntry) { entry in
+                        BuddyWalkFlowView(
+                            entry: entry,
+                            onExit: { flowEntry = nil },
+                            onStart: { session in
+                                activeSessionId = session.id
+                                flowEntry = nil
+                                showWorkoutView = true
+                            }
+                        )
                     }
             )
             .background(
@@ -77,7 +84,7 @@ struct BuddyFlowModifier: ViewModifier {
                 Text(linkError ?? "")
             }
             .onReceive(NotificationCenter.default.publisher(for: .madOpenBuddyLobby)) { _ in
-                showLobby = true
+                flowEntry = .lobby
             }
             .onReceive(NotificationCenter.default.publisher(for: .madStartBuddyWalk)) { _ in
                 // An invite already waiting goes straight to the lobby; there is
@@ -86,11 +93,8 @@ struct BuddyFlowModifier: ViewModifier {
                 // and the lobby hands a long-started session straight into
                 // tracking, which is how a finished walk restarted itself.
                 let open: () -> Void = {
-                    if BuddySessionService.shared.canReenterLiveSession {
-                        showLobby = true
-                    } else {
-                        showStartSheet = true
-                    }
+                    flowEntry =
+                        BuddySessionService.shared.canReenterLiveSession ? .lobby : .setup
                 }
                 // Setting up a NEW walk closes the last one's recap first. The
                 // request reaches here from inside that recap ("walks together"

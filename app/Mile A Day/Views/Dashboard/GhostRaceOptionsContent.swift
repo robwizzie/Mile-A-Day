@@ -11,10 +11,13 @@ import SwiftUI
 /// what am I chasing → how fast is it → what happens when I start.
 ///
 /// Deliberately chrome-free (no NavigationStack, no toolbar, no `dismiss`, no
-/// background of its own) because it renders in two very different places: as a
-/// step INSIDE the walk/run wizard, over that screen's red gradient, and as a
-/// sheet from the buddy lobby (`GhostRaceSetupSheet`) over the app gradient.
-/// The host owns the background, the way back, and what "done" means.
+/// background of its own) because it renders as a step in two flows: the solo
+/// wizard's own fourth question, and the buddy flow's ghost step off the
+/// lobby. The host owns the background, the way back, and what "done" means.
+/// It used to have a third home — a `GhostRaceSetupSheet` presented from the
+/// lobby over the app gradient, which put a NavigationStack two modal layers
+/// deep for a choice the solo path makes in the flow itself; the sheet is
+/// gone and both callers are now steps.
 struct GhostRaceOptionsContent: View {
     let activityKey: String
     /// Backend fastest-mile PR in seconds, when there is one.

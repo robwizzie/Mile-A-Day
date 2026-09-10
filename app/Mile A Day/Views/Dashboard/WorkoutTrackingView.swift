@@ -23,9 +23,9 @@ struct WorkoutTrackingView: View {
     /// 1 Hz tick also reports progress to the backend.
     var buddySessionId: String? = nil
     /// Tells the presenter this cover adopted a buddy session mid-flight — the
-    /// wizard's buddy card path, where setup and lobby run INSIDE the cover
-    /// (see `BuddyWizardFlowModifier`) instead of the user being bounced out
-    /// to the dashboard's sheets. The dashboard mirrors the id into
+    /// wizard's buddy card path, where setup and lobby are further STEPS of
+    /// this cover's own wizard (see `BuddyWalkFlowView`) instead of the user
+    /// being bounced out to the dashboard. The dashboard mirrors the id into
     /// `activeBuddySessionId`, which is what its dismiss handler reads to
     /// offer the group recap — and on the next render `buddySessionId` above
     /// arrives non-nil, making the adopted and handed-in paths
@@ -173,17 +173,17 @@ struct WorkoutTrackingView: View {
     @AppStorage("ghostTargetV1.walking") private var walkTargetStorage = ""
     /// Drops the NEW pill on the arming card until the race is first set up.
     @AppStorage("hasArmedGhostRaceOnce") private var hasArmedGhostRaceOnce = false
-    /// Set in `BuddyLobbyView` — the only screen a buddy session passes
-    /// through, since the hand-off below skips the whole pre-start wizard
-    /// where the solo race steps live. Read once on the buddy hand-off.
-    @AppStorage("buddyGhostArmedV1") private var buddyGhostArmed = false
+    /// Set in the buddy flow's ghost step — a buddy session skips the whole
+    /// pre-start wizard, where the solo race steps live. Read once on the
+    /// buddy hand-off.
+    @AppStorage(BuddyGhostArming.armedKey) private var buddyGhostArmed = false
     /// Drops the buddy card's NEW pill once it's been opened once.
     @AppStorage("hasOpenedBuddyStartOnce") private var hasOpenedBuddyStartOnce = false
-    /// The buddy flow presented from INSIDE this cover (the wizard's buddy
-    /// card). Bindings for `BuddyWizardFlowModifier`, which puts each on its
-    /// own presentation node.
-    @State private var showBuddyStartSheet = false
-    @State private var showBuddyLobby = false
+    /// The buddy flow, as further STEPS of this wizard rather than as modals
+    /// over it — setup, lobby and countdown all render in place, on the same
+    /// gradient under the same top bar, and the hand-off starts tracking in
+    /// the cover that was already hosting them. Nil = not in it.
+    @State private var buddyFlowEntry: BuddyWalkFlowEntry?
     /// Session adopted by the in-cover lobby hand-off. `buddySessionId` is the
     /// presenter's copy and only arrives non-nil a render after
     /// `onBuddySessionAdopted` fires — this one is set synchronously, so the
@@ -1803,10 +1803,11 @@ struct WorkoutTrackingView: View {
     /// on the Friends tab, so the Dashboard keeps this as a generic buddy
     /// entry point plus invite count only.
     ///
-    /// The whole flow stays INSIDE this cover: setup sheet and lobby present
-    /// over the wizard (`BuddyWizardFlowModifier` on the body), so Cancel and
-    /// Leave land back on this step and the countdown starts tracking in
-    /// place — no bouncing out to the dashboard and back.
+    /// The whole flow stays INSIDE this cover, as more steps of this same
+    /// wizard (`BuddyWalkFlowView`): setup, the lobby and the shared countdown
+    /// slide in exactly the way Outdoor/Indoor does, so Cancel and Leave land
+    /// back on this step and the hand-off starts tracking in place — no modal
+    /// stack, and no bouncing out to the dashboard and back.
     @ViewBuilder
     private var buddyOptionButton: some View {
         // Hidden mid-buddy-walk — this tracker is already in one.
@@ -1822,20 +1823,72 @@ struct WorkoutTrackingView: View {
                 ),
                 accessory: { optionChevron }
             ) {
-                MADHaptics.tap()
                 hasOpenedBuddyStartOnce = true
                 // Mirrors BuddyFlowModifier's notification handler: a room
                 // already waiting (an accepted invite, a live session) goes
                 // straight to the lobby — there is nothing left to configure.
                 // Re-enterable only: a session THIS user already finished must
                 // never route back toward the lobby's instant hand-off.
-                if buddyService.canReenterLiveSession {
-                    showBuddyLobby = true
-                } else {
-                    showBuddyStartSheet = true
-                }
+                let entry: BuddyWalkFlowEntry =
+                    buddyService.canReenterLiveSession ? .lobby : .setup
+                // `advance` carries the haptic and the forward slide, so
+                // stepping into the buddy flow reads as the same motion as
+                // stepping from Activity to Location.
+                advance { buddyFlowEntry = entry }
             }
         }
+    }
+
+    /// The buddy flow, rendered in place as the steps that follow this one.
+    ///
+    /// Back off its first question turns it off again, which lands on the
+    /// activity step it came from — the flags for that were never cleared, so
+    /// there is nothing to restore. The shared countdown hands the session to
+    /// the tracker that has been underneath the whole time.
+    private func buddyFlow(_ entry: BuddyWalkFlowEntry) -> some View {
+        BuddyWalkFlowView(
+            entry: entry,
+            onExit: {
+                goBack(to: {}, from: { buddyFlowEntry = nil })
+            },
+            onStart: { session in
+                // Cleared here as well as in `clearPreStartSteps`: the guards
+                // in `startBuddyWorkoutIfReady` can decline the hand-off (a
+                // workout is already running), and the lobby must still come
+                // down — it has already latched `hasHandedOff`.
+                buddyFlowEntry = nil
+                adoptedBuddySessionId = session.id
+                onBuddySessionAdopted?(session.id)
+                startBuddyWorkoutIfReady()
+            }
+        )
+    }
+
+    /// The finished-workout screen, lifted out of `body`.
+    ///
+    /// Fifteen arguments and two closures is the single most expensive
+    /// expression in that ZStack, and the body is at the type-checker's limit
+    /// (its ~40-modifier chain is the rest of the cost). Named here it is
+    /// solved once, on its own, instead of inside the branch chain.
+    private var recapContent: some View {
+        WorkoutRecapView(
+            distance: recapDistance,
+            duration: recapDuration,
+            activityName: selectedActivityType == .running ? "Run" : "Walk",
+            activityIcon: selectedActivityType == .running ? "figure.run" : "figure.walk",
+            startingDistance: recapStartingDistance,
+            goalDistance: recapGoalDistance,
+            streak: userManager.currentUser.streak,
+            healthManager: healthManager,
+            workoutId: recapWorkoutId,
+            isIndoor: recapWasIndoor,
+            raceSplits: recapRaceSplits,
+            raceGhostName: recapGhostName,
+            onDistanceAdjusted: { newDistance in
+                recapDistance = newDistance
+            },
+            onDismiss: { dismiss() }
+        )
     }
 
     var body: some View {
@@ -1853,33 +1906,24 @@ struct WorkoutTrackingView: View {
             )
             .ignoresSafeArea()
 
-            if let step = currentPreStartStep {
+            if let entry = buddyFlowEntry {
+                // Not a sheet and not a cover: the buddy questions and the
+                // lobby are further steps of THIS wizard, on the gradient
+                // already behind them, sliding in from the same edge as every
+                // other answer.
+                buddyFlow(entry)
+                    .transition(wizardTransition)
+            } else if let step = currentPreStartStep {
                 // ONE branch for all four steps: the scaffold stays mounted
                 // across them, so only what changed animates.
                 preStartWizard(step)
+                    .transition(wizardTransition)
             } else if showPresenceConsent {
                 presenceConsentContent
             } else if showCountdown {
                 countdownContent
             } else if showRecap {
-                WorkoutRecapView(
-                    distance: recapDistance,
-                    duration: recapDuration,
-                    activityName: selectedActivityType == .running ? "Run" : "Walk",
-                    activityIcon: selectedActivityType == .running ? "figure.run" : "figure.walk",
-                    startingDistance: recapStartingDistance,
-                    goalDistance: recapGoalDistance,
-                    streak: userManager.currentUser.streak,
-                    healthManager: healthManager,
-                    workoutId: recapWorkoutId,
-                    isIndoor: recapWasIndoor,
-                    raceSplits: recapRaceSplits,
-                    raceGhostName: recapGhostName,
-                    onDistanceAdjusted: { newDistance in
-                        recapDistance = newDistance
-                    },
-                    onDismiss: { dismiss() }
-                )
+                recapContent
             } else {
                 activeTrackingContent
             }
@@ -2136,20 +2180,9 @@ struct WorkoutTrackingView: View {
                 targetDistance: max(goalDistance, 0.1)
             )
         }
-        .modifier(
-            BuddyWizardFlowModifier(
-                showStartSheet: $showBuddyStartSheet,
-                showLobby: $showBuddyLobby,
-                onStarted: { session in
-                    adoptedBuddySessionId = session.id
-                    onBuddySessionAdopted?(session.id)
-                    startBuddyWorkoutIfReady()
-                },
-                // Lets the modifier keep the mid-walk join offer fresh without
-                // adding another node to this already type-check-fragile chain.
-                activeSessionId: effectiveBuddySessionId
-            )
-        )
+        // Keeps the mid-walk join offer fresh without adding another node to
+        // this already type-check-fragile chain.
+        .modifier(BuddyJoinOfferModifier(activeSessionId: effectiveBuddySessionId))
     }
 
     /// The buddy hand-off: the lobby already ran the server-synced countdown,
@@ -2206,6 +2239,10 @@ struct WorkoutTrackingView: View {
         showGhostOptions = false
         showPresenceConsent = false
         showCountdown = false
+        // The buddy questions and the lobby are steps of this wizard too now,
+        // so they clear with the rest of it — a hand-off that left this set
+        // would drop the lobby back on top of a running workout.
+        buddyFlowEntry = nil
     }
 
     /// Forward one step: haptic, slide direction, animate.

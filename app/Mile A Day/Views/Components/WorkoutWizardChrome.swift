@@ -45,9 +45,17 @@ struct WizardBackground: View {
 
 /// Back chevron + progress. Every pre-start step uses this so the screens read
 /// as one flow rather than views that happen to share a gradient. `step` is
-/// 1-based over three segments; a sub-step passes its parent's number.
+/// 1-based; a sub-step passes its parent's number.
+///
+/// `total` and `backTitle` are defaulted so the solo flow reads exactly as it
+/// always has. The buddy flow spends them: it has one more question than the
+/// solo wizard (the lobby is a place you arrive at, not a thing you skip), and
+/// backing out of a lobby is "Leave"/"Cancel", never "Back" — there is no
+/// earlier step to return to once the room exists on the server.
 struct WizardTopBar: View {
     let step: Int
+    var total: Int = 3
+    var backTitle: String = "Back"
     let onBack: () -> Void
 
     var body: some View {
@@ -58,7 +66,7 @@ struct WizardTopBar: View {
                         Image(systemName: "chevron.left")
                             .font(.title3)
                             .fontWeight(.semibold)
-                        Text("Back")
+                        Text(backTitle)
                             .font(.body)
                             .fontWeight(.medium)
                     }
@@ -75,7 +83,7 @@ struct WizardTopBar: View {
             }
 
             HStack(spacing: 6) {
-                ForEach(1...3, id: \.self) { index in
+                ForEach(1...max(1, total), id: \.self) { index in
                     Capsule()
                         .fill(Color.white.opacity(index <= step ? 0.9 : 0.25))
                         .frame(width: 22, height: 4)
@@ -84,6 +92,122 @@ struct WizardTopBar: View {
             .allowsHitTesting(false)
         }
         .padding(.top, 16)
+    }
+}
+
+/// The wizard's colours.
+///
+/// Everything on these screens is white on the red gradient, and that is a
+/// rule rather than a habit: `MADTheme.workoutColor("running")` IS this
+/// gradient's own top stop, so a running walk tinted with its activity colour
+/// puts red controls on a red screen. The buddy flow used to do exactly that —
+/// its goal chips, roster rings and countdown all took `session.accentColor` —
+/// which is why a run lobby read as flat and a walk lobby read as a different
+/// app. One palette for every step, solo or buddy.
+enum WizardPalette {
+    /// Selection, primary fills, anything that has to win.
+    static let accent = Color.white
+    /// Label colour ON `accent` — the gradient's darkest stop, so a white
+    /// capsule reads as a hole punched in the screen rather than a sticker.
+    static let onAccent = WizardBackground.bottom
+}
+
+/// Numbers a step and its pinned footer both have to agree on. A generic view
+/// can't publish one you could name without spelling out its `Content`, so
+/// they live here.
+enum WizardMetrics {
+    /// What a step's scrolling content must leave empty for `WizardFooter`.
+    static let footerClearance: CGFloat = 116
+    /// Every pill control on a wizard step resolves to this outer height, so
+    /// segmented capsules, goal chips and the primary button read as one
+    /// family instead of three near-misses.
+    static let controlHeight: CGFloat = 52
+}
+
+/// The wizard's plain surface: `WizardOptionCard`'s fill and stroke without the
+/// button behaviour, for panels that present rather than offer.
+///
+/// `prominent` is the option card's own weight; the quieter one is for
+/// surfaces nested INSIDE another panel, where the full stroke stacks into a
+/// double border.
+struct WizardPanel<Content: View>: View {
+    var prominent: Bool = true
+    var cornerRadius: CGFloat = 20
+    var padding: CGFloat = 16
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color.white.opacity(prominent ? 0.15 : 0.10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .stroke(
+                                Color.white.opacity(prominent ? 0.3 : 0.18),
+                                lineWidth: prominent ? 2 : 1)
+                    )
+            )
+    }
+}
+
+/// The one commit button a wizard step can carry.
+///
+/// White capsule, dark label, 52pt — the shape the solo flow's own primary
+/// buttons already use. Extracted so a step that grows one can't invent a
+/// fourth near-miss of it.
+struct WizardPrimaryButton: View {
+    let title: String
+    var icon: String? = nil
+    var isBusy: Bool = false
+    var isEnabled: Bool = true
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if isBusy {
+                    ProgressView().tint(WizardPalette.onAccent)
+                } else if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 16, weight: .semibold))
+                }
+                Text(title)
+            }
+            .font(MADTheme.Typography.bodyBold)
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .background(Capsule().fill(WizardPalette.accent))
+            .foregroundStyle(WizardPalette.onAccent)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled || isBusy)
+        .opacity(isEnabled && !isBusy ? 1 : 0.5)
+    }
+}
+
+/// The scrim + surface a pinned footer sits on, fading to the wizard's own
+/// bottom colour so the content underneath reads as "behind" rather than
+/// clipped. Its height is what a step must clear with a spacer.
+struct WizardFooter<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            LinearGradient(
+                colors: [WizardBackground.bottom.opacity(0), WizardBackground.bottom],
+                startPoint: .top, endPoint: .bottom
+            )
+            .frame(height: 28)
+            .allowsHitTesting(false)
+
+            VStack(spacing: 6) { content }
+                .padding(.horizontal, MADTheme.Spacing.md)
+                .padding(.bottom, MADTheme.Spacing.sm)
+                .background(WizardBackground.bottom)
+        }
     }
 }
 
