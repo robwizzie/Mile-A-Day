@@ -84,6 +84,10 @@ struct SocialFeedView: View {
     @State private var reportingPost: PostItem?
     /// Own post being caption-edited (presents EditCaptionSheet).
     @State private var editingPost: PostItem?
+    /// A buddy walk I'm credited on, whose own slide caption I'm writing.
+    /// Separate state from `editingPost` because they edit different rows and
+    /// a shared one would let the wrong save fire on the wrong post.
+    @State private var editingMySlidePost: PostItem?
     /// Own post pending delete confirmation.
     @State private var deletingEntry: FeedEntry?
     @State private var showTermsGate = false
@@ -514,6 +518,22 @@ struct SocialFeedView: View {
                 }
             }
         }
+        .sheet(item: $editingMySlidePost) { post in
+            EditCaptionSheet(post: post, subject: .myCollabSlide) { newCaption in
+                // Patch MY row in place rather than refetching: the card is on
+                // screen behind the sheet, and a caption that only appears
+                // after the next pull-to-refresh reads as the save not landing.
+                guard let me = currentUserId,
+                      let idx = feed.firstIndex(where: {
+                          $0.isPost && $0.entryId == post.post_id
+                      }),
+                      let crewIdx = feed[idx].coauthors?.firstIndex(where: {
+                          $0.user_id == me
+                      })
+                else { return }
+                feed[idx].coauthors?[crewIdx].caption = newCaption
+            }
+        }
         .alert(
             "Delete this post?",
             isPresented: Binding(
@@ -697,6 +717,7 @@ struct SocialFeedView: View {
                 onBlock: { Task { await block(entry) } },
                 onDelete: { deletingEntry = entry },
                 onEditCaption: post.is_self ? { editingPost = post } : nil,
+                onEditMyCollabCaption: { editingMySlidePost = post },
                 onTapAuthor: openProfile,
                 onTapCoauthor: openCoauthorProfile,
                 onTapCrewMember: { member in

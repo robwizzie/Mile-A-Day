@@ -206,10 +206,111 @@ struct PostHighlight: Codable, Identifiable, Equatable {
     var hasCustomCover: Bool { cover_image_url?.isEmpty == false }
 }
 
+/// Which FACE of a post a highlight kept.
+///
+/// A buddy walk is ONE shared card carrying several people's pictures plus the
+/// route, so "keep this walk" is nearly always one of those faces and not the
+/// whole carousel — and before this, a walk could be kept exactly once and
+/// always played the author's photo, however many of the pictures on it were
+/// yours.
+///
+/// The wire value is a bare string, deliberately open: `""` is the whole post
+/// (what every earlier row and every older client means), `"map"` is the route
+/// face, and anything else is a USER ID — the author's for the lead photo, a
+/// credited participant's for theirs. An unknown value must therefore read as
+/// "some person's slide" and fall back to the post's own photo, never as an
+/// error.
+enum HighlightSlideKey: Equatable, Hashable {
+    case wholePost
+    case map
+    case person(String)
+
+    static let mapWireValue = "map"
+
+    init(wire: String?) {
+        guard let wire, !wire.isEmpty else {
+            self = .wholePost
+            return
+        }
+        self = wire == HighlightSlideKey.mapWireValue ? .map : .person(wire)
+    }
+
+    var wireValue: String {
+        switch self {
+        case .wholePost: return ""
+        case .map: return HighlightSlideKey.mapWireValue
+        case .person(let userId): return userId
+        }
+    }
+}
+
+/// One member of a highlight: a post, and which face of it was kept.
+///
+/// The face is a KEY, not a resolved photo url, because the url for every face
+/// is already on the post — the lead photo, a crew member's slide, the route —
+/// and those are the fields the server's earn-to-view gate blanks. A
+/// pre-resolved second copy would be a picture that gate doesn't know about.
+struct PostHighlightItem: Codable, Identifiable {
+    let post: PostItem
+    let slideKey: HighlightSlideKey
+
+    /// Post AND face: the same walk can legitimately be in a highlight twice
+    /// under two faces, so the post id alone is not an identity here.
+    var id: String { "\(post.post_id)#\(slideKey.wireValue)" }
+
+    init(post: PostItem, slideKey: HighlightSlideKey) {
+        self.post = post
+        self.slideKey = slideKey
+    }
+
+    init(from decoder: Decoder) throws {
+        post = try PostItem(from: decoder)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        slideKey = HighlightSlideKey(
+            wire: try container.decodeIfPresent(String.self, forKey: .slide_key)
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try post.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(slideKey.wireValue, forKey: .slide_key)
+    }
+
+    private enum CodingKeys: String, CodingKey { case slide_key }
+
+    /// The picture this member shows: the crew member's own slide for a
+    /// person face that isn't the author's, else the post's lead photo. The
+    /// map face has no photo of its own and draws the route instead.
+    var slideImageURL: URL? {
+        if case .person(let userId) = slideKey, userId != post.user_id,
+           let crew = post.acceptedCoauthors.first(where: { $0.user_id == userId }) {
+            return crew.mediaURL
+        }
+        return post.storyPhotoURL ?? post.mediaURL
+    }
+
+    /// The words that belong under this face — the same rule the feed card
+    /// follows, so a highlight can't caption a photo with somebody else's line.
+    var slideCaption: (name: String, text: String)? {
+        if case .person(let userId) = slideKey, userId != post.user_id {
+            // Their picture carries THEIR words or NONE. Falling through to
+            // the post's caption here would print the author's line under
+            // somebody else's photo, which reads as that person having said
+            // it — the same trap the feed card's `currentCaption` avoids.
+            guard let crew = post.acceptedCoauthors.first(where: { $0.user_id == userId }),
+                  let caption = crew.caption, !caption.isEmpty else { return nil }
+            return (crew.displayName, caption)
+        }
+        guard let caption = post.caption, !caption.isEmpty else { return nil }
+        return (post.displayName, caption)
+    }
+}
+
 /// A highlight, opened — its members in the owner's chosen order.
 struct PostHighlightDetail: Codable {
     let highlight_id: String
     let user_id: String
     let title: String
-    let items: [PostItem]
+    let items: [PostHighlightItem]
 }

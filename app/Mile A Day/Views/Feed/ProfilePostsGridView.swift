@@ -832,11 +832,6 @@ struct ProfilePostsGridView: View {
                 )
             }
             Button {
-                editingHighlight = .newWithPost(post.post_id)
-            } label: {
-                Label("Save to a highlight", systemImage: "bookmark")
-            }
-            Button {
                 Task { await setIncludeRoute(post, include: !(post.include_route ?? true)) }
             } label: {
                 Label(
@@ -845,13 +840,47 @@ struct ProfilePostsGridView: View {
                 )
             }
         }
+        // Offered above the collab switches rather than inside them, and on
+        // its own condition: `canCurateOnProfile` keys on the LEGACY scalar
+        // `coauthor_user_id`, which holds only the FIRST participant, so on a
+        // crew of three it is false for two of the people who were there.
+        if canHighlight(post) { saveToHighlightButton(post) }
         collabProfileMenu(post)
+    }
+
+    /// Can the viewer keep this post in one of their highlights?
+    ///
+    /// Their own grid, and a post they either wrote or were credited on. A
+    /// buddy walk is ONE shared card, so the walks worth keeping are routinely
+    /// somebody else's post — and the server's rule is exactly this one, so
+    /// offering anything wider would be an option that silently does nothing.
+    private func canHighlight(_ post: PostItem) -> Bool {
+        guard isSelf, let me = currentUserId else { return false }
+        return post.user_id == me
+            || post.acceptedCoauthors.contains { $0.user_id == me }
     }
 
     /// Long-press a collab you're tagged in to pin it on or off your own Posts
     /// grid, or to stop it reaching your friends' feeds. Deliberately not
     /// destructive language: the tag survives either way and the post never
     /// leaves the Tagged tab.
+    /// "Save to a highlight", offered for a walk you were ON as well as one
+    /// you posted.
+    ///
+    /// A buddy walk is ONE shared card, so the walks people most want to keep
+    /// are routinely somebody else's post — gating this on authorship made the
+    /// buddy feature the one thing a highlight couldn't hold, on the grid
+    /// those posts already appear in. The editor asks WHICH face of the walk;
+    /// this only has to get them there.
+    @ViewBuilder
+    private func saveToHighlightButton(_ post: PostItem) -> some View {
+        Button {
+            editingHighlight = .newWithPost(post.post_id)
+        } label: {
+            Label("Save to a highlight", systemImage: "bookmark")
+        }
+    }
+
     @ViewBuilder
     private func collabProfileMenu(_ post: PostItem) -> some View {
         if canCurateOnProfile(post) {

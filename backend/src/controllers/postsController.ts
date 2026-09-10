@@ -42,6 +42,7 @@ import {
   getPostWindowStatus,
   photoSourceRequiresCameraWindow,
   addCrewPhoto,
+  setCrewCaption,
   notifyCrewPhoto,
   POST_WINDOW_MS,
   lockUnearnedPhotos,
@@ -1084,6 +1085,46 @@ export async function addCrewPhotoController(
   }
 }
 
+/**
+ * PATCH /posts/:postId/crew-photo — the caption on YOUR OWN slide.
+ *
+ * The counterpart of the author's `PATCH /posts/:postId`. Membership is the
+ * authorization, exactly as it is for the photo; a miss is 404 so the
+ * existence of someone else's post is never confirmed. No posting-window
+ * check on purpose — see `setCrewCaption`.
+ */
+export async function setCrewCaptionController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  const userId = req.userId!;
+  const postId = req.params.postId;
+  const { caption } = req.body ?? {};
+  if (
+    caption != null &&
+    (typeof caption !== "string" || caption.length > MAX_CAPTION)
+  ) {
+    return res.status(400).json({
+      error: `caption must be a string of at most ${MAX_CAPTION} characters`,
+    });
+  }
+  try {
+    if (!isUuid(postId)) {
+      return res.status(404).json({ error: "Post not found" });
+    }
+    const ok = await setCrewCaption(
+      postId,
+      userId,
+      typeof caption === "string" ? caption.trim() || null : null,
+    );
+    if (!ok) return res.status(404).json({ error: "Post not found" });
+    res.json({ ok: true });
+  } catch (error: any) {
+    console.error("Error setting crew caption:", error.message);
+    res.status(500).json({ error: "Error setting crew caption" });
+  }
+}
+
 export async function reportPostController(
   req: AuthenticatedRequest,
   res: Response,
@@ -1309,7 +1350,10 @@ export async function listHighlightsController(
       req.params.userId === req.userId
         ? items
         : items.filter((h) => h.item_count > 0);
-    res.json({ items: signMediaUrlsDeep(visible), limit: MAX_HIGHLIGHTS_PER_USER });
+    res.json({
+      items: signMediaUrlsDeep(visible),
+      limit: MAX_HIGHLIGHTS_PER_USER,
+    });
   } catch (error: any) {
     console.error("Error listing highlights:", error.message);
     res.status(500).json({ error: "Error loading highlights" });
@@ -1346,9 +1390,10 @@ function highlightWriteError(res: Response, error: string) {
     return res.status(404).json({ error: "highlight_not_found" });
   }
   if (error === "limit") {
-    return res
-      .status(409)
-      .json({ error: "highlight_limit_reached", limit: MAX_HIGHLIGHTS_PER_USER });
+    return res.status(409).json({
+      error: "highlight_limit_reached",
+      limit: MAX_HIGHLIGHTS_PER_USER,
+    });
   }
   if (error === "invalid_title") {
     return res.status(400).json({
@@ -1386,7 +1431,13 @@ function normalizeHighlightCoverImage(
   return bare;
 }
 
-/** POST /posts/highlights — create one from posts you own. */
+/**
+ * POST /posts/highlights — create one from posts you posted or were on.
+ *
+ * `slides` (each `{post_id, slide_key}`) rides through `...body` untouched;
+ * `post_ids` is still the whole wire format for every shipped build and means
+ * the same thing it always did.
+ */
 export async function createHighlightController(
   req: AuthenticatedRequest,
   res: Response,

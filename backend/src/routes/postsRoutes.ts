@@ -19,6 +19,7 @@ import {
   updatePostController,
   reportPostController,
   addCrewPhotoController,
+  setCrewCaptionController,
   getTermsStatusController,
   acceptTermsController,
   getPostWindowController,
@@ -130,6 +131,11 @@ router.post("/:postId/report", reportPostController);
 // same hour. PUT because re-sending replaces your slide; it is not a second
 // one.
 router.put("/:postId/crew-photo", addCrewPhotoController);
+// The words under your own slide, edited on their own. PATCH rather than the
+// PUT above because it changes one field of a slide that already exists — and
+// because it is NOT a photo reaching the feed, so it does not answer to the
+// posting window the way adding the picture did.
+router.patch("/:postId/crew-photo", setCrewCaptionController);
 router.patch("/:postId", updatePostController);
 router.delete("/:postId", deletePostController);
 // One post, shaped like its feed entry — opening a post directly.

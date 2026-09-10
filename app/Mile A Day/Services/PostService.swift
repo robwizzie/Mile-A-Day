@@ -101,7 +101,11 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     /// Their own words under their own slide. Nil until they write one, and
     /// on older servers — the card falls back to showing nothing under a
     /// crew slide rather than the author's caption, which isn't theirs.
-    let caption: String?
+    ///
+    /// `var` because the owner can edit it after the fact and the host patches
+    /// the row in place: the card is on screen behind the sheet, and a caption
+    /// that only turns up after the next refresh reads as the save failing.
+    var caption: String?
     /// Their GPS trace for the walk, so the card can draw the whole group on
     /// one map. Nil for an indoor walk, for anyone who turned "Share route
     /// maps" off, and on older servers.
@@ -932,6 +936,26 @@ enum PostService {
         )
     }
 
+    /// Edit the caption on YOUR OWN slide of a buddy walk's shared post.
+    ///
+    /// The author has always been able to edit theirs; a credited participant
+    /// could only ever type one in the composer at the moment they added the
+    /// photo, so anyone who didn't — or whose build predates per-slide
+    /// captions — had a picture on the card that could never carry their
+    /// words. Not the same call as `addCrewPhoto`: the photo is already there
+    /// and is not re-sent, which is also why the server doesn't charge this
+    /// the posting window.
+    static func setCrewCaption(postId: String, caption: String?) async throws {
+        struct Body: Encodable { let caption: String? }
+        let bodyData = try JSONEncoder().encode(Body(caption: caption))
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/\(postId)/crew-photo",
+            method: .PATCH,
+            body: bodyData,
+            responseType: OKResponse.self
+        )
+    }
+
     static func fetchStoriesRail() async throws -> [StoryGroup] {
         try await APIClient.fancyFetch(endpoint: "/posts/stories", responseType: [StoryGroup].self)
     }
@@ -1153,20 +1177,40 @@ enum PostService {
         )
     }
 
-    /// Create a highlight from posts you own. `postIds` order IS the order.
+    /// One member of a highlight on the wire: a post, and which face of it.
+    ///
+    /// Sent alongside `post_ids` rather than instead of it. The server reads
+    /// `slides` when it is there and `post_ids` otherwise, so a server that
+    /// predates faces still gets a usable list — it de-duplicates, so a walk
+    /// kept under two faces lands there once, as the whole post. Degrading to
+    /// the walk itself is right; sending no `post_ids` at all would make the
+    /// save fail outright against that server.
+    struct HighlightSlideRef: Encodable {
+        let post_id: String
+        let slide_key: String
+
+        init(postId: String, slideKey: HighlightSlideKey) {
+            post_id = postId
+            slide_key = slideKey.wireValue
+        }
+    }
+
+    /// Create a highlight from posts you posted or were on. `slides` order IS
+    /// the order.
     ///
     /// `coverImageUrl` is a media_url from `uploadMedia` — a cover picked from
     /// the camera roll, which outranks `coverPostId` server-side.
     @discardableResult
     static func createHighlight(
         title: String,
-        postIds: [String],
+        slides: [HighlightSlideRef],
         coverPostId: String? = nil,
         coverImageUrl: String? = nil
     ) async throws -> String {
         struct Body: Encodable {
             let title: String
             let post_ids: [String]
+            let slides: [HighlightSlideRef]
             let cover_post_id: String?
             let cover_image_url: String?
         }
@@ -1174,7 +1218,8 @@ enum PostService {
         let bodyData = try JSONEncoder().encode(
             Body(
                 title: title,
-                post_ids: postIds,
+                post_ids: slides.map(\.post_id),
+                slides: slides,
                 cover_post_id: coverPostId,
                 cover_image_url: coverImageUrl
             )
@@ -1187,7 +1232,7 @@ enum PostService {
         ).highlight_id
     }
 
-    /// Rename, re-cover or re-order. `postIds` is the list you want to END UP
+    /// Rename, re-cover or re-order. `slides` is the list you want to END UP
     /// with — adding, removing and reordering are all the same call, because a
     /// drag-to-reorder UI can't honestly produce anything else.
     ///
@@ -1198,20 +1243,22 @@ enum PostService {
     static func updateHighlight(
         highlightId: String,
         title: String? = nil,
-        postIds: [String]? = nil,
+        slides: [HighlightSlideRef]? = nil,
         coverPostId: String? = nil,
         coverImageUrl: String? = nil
     ) async throws {
         struct Body: Encodable {
             let title: String?
             let post_ids: [String]?
+            let slides: [HighlightSlideRef]?
             let cover_post_id: String?
             let cover_image_url: String?
         }
         let bodyData = try JSONEncoder().encode(
             Body(
                 title: title,
-                post_ids: postIds,
+                post_ids: slides?.map(\.post_id),
+                slides: slides,
                 cover_post_id: coverPostId,
                 cover_image_url: coverImageUrl
             )

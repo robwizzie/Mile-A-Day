@@ -26,6 +26,10 @@ struct PostCardView: View {
     let onDelete: () -> Void
     /// Own posts: opens the caption editor (hidden from the menu when nil).
     var onEditCaption: (() -> Void)? = nil
+    /// A buddy walk you're credited on: the words under YOUR OWN slide. Not
+    /// `onEditCaption` — that one edits the post's caption, which belongs to
+    /// the author and is not this person's to change.
+    var onEditMyCollabCaption: (() -> Void)? = nil
     /// Tap the author's avatar or name to open their profile.
     var onTapAuthor: (() -> Void)? = nil
     /// Tap the collab coauthor's avatar or name to open THEIR profile —
@@ -382,6 +386,22 @@ struct PostCardView: View {
                     // delete, but leaving it is theirs. Reporting/blocking a
                     // post you're an author of makes no sense, so neither shows.
                     //
+                    // Your words under your own picture, first because it is
+                    // the only thing here that ADDS to the post. The author
+                    // has had "Edit caption" since captions existed; a
+                    // credited participant could only ever type one in the
+                    // composer at the instant they added the photo, so anyone
+                    // who didn't had a slide on the card that could never
+                    // carry their voice — and the card, correctly, shows
+                    // nothing under it, which reads as their words being lost.
+                    // Only offered once there IS a slide of theirs to caption.
+                    if let onEditMyCollabCaption, myCoauthorRow?.media_url != nil {
+                        Button(action: onEditMyCollabCaption) {
+                            Label(myCoauthorRow?.caption?.isEmpty == false
+                                  ? "Edit my caption" : "Add my caption",
+                                  systemImage: "pencil")
+                        }
+                    }
                     // Curating comes BEFORE leaving, and isn't destructive:
                     // most people who don't want a tag on their grid still
                     // want the tag. `coauthor_on_profile` is nil on servers
@@ -530,7 +550,7 @@ struct PostCardView: View {
         /// A crew member's own photo on a buddy walk's shared post — captioned
         /// with their name, because on a card with four pictures on it "whose
         /// is this" is the question every slide raises.
-        case crewPhoto(url: URL, name: String, username: String?, caption: String?)
+        case crewPhoto(url: URL, userId: String, name: String, username: String?, caption: String?)
         case route(coords: [CLLocationCoordinate2D])
         case statsCard(stats: PostStats)
     }
@@ -541,7 +561,8 @@ struct PostCardView: View {
     private var crewPhotoSlides: [MediaSlide] {
         post.acceptedCoauthors.compactMap { coauthor -> MediaSlide? in
             guard let url = coauthor.mediaURL else { return nil }
-            return .crewPhoto(url: url, name: coauthor.displayName,
+            return .crewPhoto(url: url, userId: coauthor.user_id,
+                              name: coauthor.displayName,
                               username: coauthor.username, caption: coauthor.caption)
         }
     }
@@ -587,7 +608,7 @@ struct PostCardView: View {
               let mine = post.acceptedCoauthors.first(where: { $0.user_id == me }),
               let myURL = mine.mediaURL,
               let index = slides.firstIndex(where: {
-                  if case .crewPhoto(let url, _, _, _) = $0 { return url == myURL }
+                  if case .crewPhoto(let url, _, _, _, _) = $0 { return url == myURL }
                   return false
               })
         else { return slides }
@@ -650,7 +671,7 @@ struct PostCardView: View {
                 badge: badged ? ("Stats", "chart.bar.fill") : nil,
                 onDoubleTap: doubleTapHype
             )
-        case .crewPhoto(let url, let name, _, _):
+        case .crewPhoto(let url, _, let name, _, _):
             ZoomablePhotoSlide(
                 url: url,
                 badge: (name, "person.fill"),
@@ -722,16 +743,47 @@ struct PostCardView: View {
     /// Under the media there is no collision to dodge, so the position is the
     /// same on every card and every face — and the chips stop competing with
     /// the photograph, which is the thing the card is for.
+    /// The row must fit the CARD, and on the narrowest phone all three
+    /// controls together are wider than it is. A squeezed `HStack` does not
+    /// re-arrange — it hands the shortfall to the innermost `Text`, which
+    /// wraps, so the pills rendered "FLYOVE / R" and "PHOT / O" with the row
+    /// itself still nominally in one line. The labels now refuse to wrap
+    /// (constant words, so a published width is bounded), which makes fitting
+    /// the row this view's job: one line where it fits, otherwise the same
+    /// three controls stacked — candidates that differ in ARRANGEMENT only,
+    /// never in content, so a wrong guess can only change the layout and
+    /// never silently delete a control.
     @ViewBuilder
     private var mediaControls: some View {
         if canPlayFlyover || hasSplits || hasFaceToggle {
-            HStack(spacing: 8) {
-                if canPlayFlyover { flyoverChip }
-                if hasSplits { splitsChip }
-                Spacer(minLength: 8)
-                if hasFaceToggle { faceToggle }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    mediaControlChips
+                    Spacer(minLength: 8)
+                    if hasFaceToggle { faceToggle }
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        mediaControlChips
+                        Spacer(minLength: 0)
+                    }
+                    if hasFaceToggle {
+                        HStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            faceToggle
+                        }
+                    }
+                }
             }
         }
+    }
+
+    /// The leading half of the control row, shared by both arrangements so the
+    /// two candidates cannot drift into offering different things.
+    @ViewBuilder
+    private var mediaControlChips: some View {
+        if canPlayFlyover { flyoverChip }
+        if hasSplits { splitsChip }
     }
 
     /// The post's per-mile splits, shaped for drawing. Empty on older servers,
@@ -787,9 +839,14 @@ struct PostCardView: View {
         } label: {
             Text(title)
                 .font(.system(size: 10, weight: .heavy, design: .rounded))
-                .tracking(0.8)
+                .tracking(0.5)
                 .foregroundColor(selected ? .black : .white.opacity(0.85))
-                .padding(.horizontal, 10)
+                // "PHOTO" and "MAP"/"STATS" are constants, so this can't
+                // publish a runaway width — and it is what stopped a narrow
+                // card rendering the segment as "PHOT / O".
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, 9)
                 .padding(.vertical, 6)
                 .background(Capsule().fill(selected ? Color.white.opacity(0.94) : Color.clear))
                 .contentShape(Capsule())
@@ -1331,15 +1388,15 @@ struct PostCardView: View {
     /// for a shared carousel. A buddy post is one card with everyone's
     /// picture on it, and the author's caption under a friend's photo reads
     /// as the friend saying it.
-    private var currentCaption: (name: String, username: String?, text: String)? {
+    private var currentCaption: (id: String, name: String, username: String?, text: String)? {
         let pages = mediaPages
         if mediaPage < pages.count,
-           case .crewPhoto(_, let name, let username, let caption) = pages[mediaPage] {
+           case .crewPhoto(_, let userId, let name, let username, let caption) = pages[mediaPage] {
             guard let caption, !caption.isEmpty else { return nil }
-            return (name, username, caption)
+            return (userId, name, username, caption)
         }
         guard let caption = post.caption, !caption.isEmpty else { return nil }
-        return (post.displayName, post.username, caption)
+        return (post.user_id, post.displayName, post.username, caption)
     }
 
     /// Everyone's words, for the MAP face.
@@ -1365,10 +1422,14 @@ struct PostCardView: View {
     private var captionLine: some View {
         // The map is the whole walk's face, so it carries the whole walk's
         // words; a photo carries the words of whoever took it.
+        // The id is the person whose words these are, never the post's author:
+        // a crew caption filed under `post.user_id` gave the author's identity
+        // to somebody else's line, so swiping between two captioned slides
+        // reused the same row rather than replacing it.
         let rows: [(id: String, name: String, username: String?, text: String)] =
             currentFace == .map
                 ? allCaptions
-                : currentCaption.map { [(post.user_id, $0.name, $0.username, $0.text)] } ?? []
+                : currentCaption.map { [$0] } ?? []
         if !rows.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
                 ForEach(rows, id: \.id) { row in

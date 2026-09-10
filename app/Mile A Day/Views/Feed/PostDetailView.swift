@@ -41,6 +41,9 @@ struct PostDetailView: View {
     @State private var commentsPost: PostItem?
     /// Own post being caption-edited / pending delete confirmation.
     @State private var editingPost: PostItem?
+    /// A buddy walk I'm credited on, whose own slide caption I'm writing.
+    /// Separate from `editingPost`: they write different rows.
+    @State private var editingMySlidePost: PostItem?
     @State private var deletingPost: PostItem?
     @State private var reportingPost: PostItem?
     @State private var hypingIds: Set<String> = []
@@ -158,6 +161,20 @@ struct PostDetailView: View {
                     }
                 }
             }
+            .sheet(item: $editingMySlidePost) { post in
+                EditCaptionSheet(post: post, subject: .myCollabSlide) { newCaption in
+                    // Patch MY row in place — the card is on screen behind the
+                    // sheet, and a caption that only appears on the next fetch
+                    // reads as the save not having landed.
+                    guard let me = UserDefaults.standard.string(forKey: "backendUserId"),
+                          let idx = posts.firstIndex(where: { $0.post_id == post.post_id }),
+                          let crewIdx = posts[idx].coauthors?.firstIndex(where: {
+                              $0.user_id == me
+                          })
+                    else { return }
+                    posts[idx].coauthors?[crewIdx].caption = newCaption
+                }
+            }
             .sheet(item: $profileUser) { user in
                 NavigationStack {
                     UserProfileDetailView(user: user, friendService: profileFriendService)
@@ -233,6 +250,7 @@ struct PostDetailView: View {
             onBlock: { Task { await block(post) } },
             onDelete: { deletingPost = post },
             onEditCaption: post.is_self ? { editingPost = post } : nil,
+            onEditMyCollabCaption: { editingMySlidePost = post },
             onTapAuthor: openAuthor,
             onTapCoauthor: openCoauthor,
             onTapCrewMember: { member in

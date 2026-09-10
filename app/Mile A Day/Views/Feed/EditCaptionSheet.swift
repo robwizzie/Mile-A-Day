@@ -5,7 +5,23 @@ import SwiftUI
 /// Saves through PATCH /posts/:postId and hands the trimmed caption back so
 /// the presenting view can update in place without a refetch.
 struct EditCaptionSheet: View {
+    /// Whose words this sheet is editing.
+    ///
+    /// A buddy walk is ONE post with several people's pictures on it, and each
+    /// picture carries its own caption. The author's is `posts.caption`; a
+    /// credited participant's is their row in `post_coauthors`. Same editor,
+    /// two different things being written — so the mode is explicit rather
+    /// than inferred from `is_self`, which is the server's "you POSTED this"
+    /// and is false for exactly the person this second mode exists for.
+    enum Subject {
+        /// The post's own caption. Author only.
+        case post
+        /// My own slide's caption on a walk I'm credited on.
+        case myCollabSlide
+    }
+
     let post: PostItem
+    var subject: Subject = .post
     /// Called after a successful save with the new caption (nil when cleared).
     let onSaved: (String?) -> Void
 
@@ -17,10 +33,18 @@ struct EditCaptionSheet: View {
 
     private static let maxLength = 280
 
-    init(post: PostItem, onSaved: @escaping (String?) -> Void) {
+    init(post: PostItem, subject: Subject = .post, onSaved: @escaping (String?) -> Void) {
         self.post = post
+        self.subject = subject
         self.onSaved = onSaved
-        _text = State(initialValue: post.caption ?? "")
+        switch subject {
+        case .post:
+            _text = State(initialValue: post.caption ?? "")
+        case .myCollabSlide:
+            let me = UserDefaults.standard.string(forKey: "backendUserId")
+            let mine = post.acceptedCoauthors.first { $0.user_id == me }
+            _text = State(initialValue: mine?.caption ?? "")
+        }
     }
 
     var body: some View {
@@ -84,7 +108,10 @@ struct EditCaptionSheet: View {
                 }
                 .padding(MADTheme.Spacing.md)
             }
-            .navigationTitle("Edit caption")
+            // Named for what it edits: on a card with four pictures on it,
+            // "Edit caption" alone reads as the post's, which is the author's
+            // and not this person's to change.
+            .navigationTitle(subject == .post ? "Edit caption" : "Your caption")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
@@ -119,7 +146,15 @@ struct EditCaptionSheet: View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             do {
-                try await PostService.updateCaption(postId: post.post_id, caption: trimmed)
+                switch subject {
+                case .post:
+                    try await PostService.updateCaption(postId: post.post_id, caption: trimmed)
+                case .myCollabSlide:
+                    try await PostService.setCrewCaption(
+                        postId: post.post_id,
+                        caption: trimmed.isEmpty ? nil : trimmed
+                    )
+                }
                 await MainActor.run {
                     onSaved(trimmed.isEmpty ? nil : trimmed)
                     dismiss()
