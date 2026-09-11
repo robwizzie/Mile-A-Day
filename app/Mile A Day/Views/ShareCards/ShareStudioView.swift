@@ -5,7 +5,7 @@ import SwiftUI
 // ONE share sheet for a walk, from every surface that shows one.
 //
 // The sheet asks TWO questions and says so on screen: what the card shows
-// (Photo / Route / Streak) and what shape it arrives in (Full screen / Sticker).
+// (Photo / Route / Streak) and what shape it arrives in (Full story / Sticker).
 // It used to ask them as ONE four-way rail — Photo | Route | Streak | Sticker —
 // which is two axes crushed into one control: choosing "Sticker" threw away the
 // design and choosing a design threw away the sticker, so neither choice ever
@@ -111,15 +111,24 @@ struct ShareStudioView: View {
                 .font(.system(size: 16, weight: .heavy, design: .rounded))
                 .foregroundColor(.white)
             HStack {
+                // A 28pt disc inside a 44pt target. It was a 34pt disc carrying
+                // a black-weight glyph at 90% white — heavy enough to read as
+                // the most emphatic thing in the header, next to a title it is
+                // supposed to sit quietly beside, and still under the 44pt
+                // minimum. Lighter glyph, smaller disc, bigger tap area.
                 Button {
                     dismiss()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .black))
-                        .foregroundColor(.white.opacity(0.9))
-                        .frame(width: 34, height: 34)
-                        .background(Circle().fill(Color.white.opacity(0.10)))
-                        .contentShape(Circle())
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white.opacity(0.62))
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.white.opacity(0.13)))
+                        // Leading, so the disc lines up with the content margin
+                        // the preview and controls share; the extra tap area
+                        // grows inward where there is nothing to hit.
+                        .frame(width: 44, height: 44, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Close")
@@ -143,9 +152,10 @@ struct ShareStudioView: View {
             let frameHeight = geo.size.height
             let frameWidth = min(geo.size.width, frameHeight * 9.0 / 16.0)
             let card = format.size
-            // A sticker sits at ~72% of the story's width, roughly where a
-            // thumb drops it.
-            let target = format == .sticker ? frameWidth * 0.72 : frameWidth
+            // A sticker sits at ~80% of the story's width, roughly where a
+            // thumb drops it. It previewed at 72%, which on top of a loud
+            // backdrop left it looking like a small thing lost on a big one.
+            let target = format == .sticker ? frameWidth * 0.80 : frameWidth
             let scale = target / card.width
 
             ZStack {
@@ -313,8 +323,36 @@ struct ShareStudioView: View {
 
     // MARK: Doing the thing
 
-    private var stickerTop: Color { content.routeColor }
-    private var stickerBottom: Color { Color(red: 0.17, green: 0.07, blue: 0.12) }
+    /// The gradient a sticker stands on — in the preview AND, because these two
+    /// colours ride the Instagram payload, in the story it lands in.
+    ///
+    /// The top was `content.routeColor` at full strength, which is an accent
+    /// colour asked to cover a whole 9:16 frame: walk blue became a bright slab
+    /// that was the loudest thing on the screen, made the sticker look small and
+    /// lost on it, and ran through muddy purple on its way to a maroon floor.
+    /// Taken deep it does the opposite job — it reads as a ground, and the
+    /// sticker is the thing you see.
+    private var stickerTop: Color {
+        Self.deepened(content.routeColor, amount: 0.65)
+    }
+
+    /// Near-black, a shade warm, so the gradient lands on the app's own floor
+    /// rather than on a second colour competing with the top.
+    private var stickerBottom: Color { Color(red: 0.055, green: 0.031, blue: 0.043) }
+
+    /// Mix a colour toward the card's dark ground. Keeps the hue, drops the
+    /// brightness — a darkened accent still says "walk", a flat one doesn't.
+    private static func deepened(_ color: Color, amount: CGFloat) -> Color {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a) else { return color }
+        let floor: (CGFloat, CGFloat, CGFloat) = (0.051, 0.027, 0.035)
+        return Color(
+            red: Double(r + (floor.0 - r) * amount),
+            green: Double(g + (floor.1 - g) * amount),
+            blue: Double(b + (floor.2 - b) * amount),
+            opacity: Double(a)
+        )
+    }
 
     private func render() -> UIImage? {
         MADStoryCard.render(content: cardContent, design: design, format: format)
