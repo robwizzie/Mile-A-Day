@@ -34,6 +34,10 @@ struct StoryViewerView: View {
     /// A commit/cancel animation is in flight — input is ignored until the
     /// cube settles so a mid-flight tap can't tear the transition.
     @State private var isTransitioning = false
+    /// A committed swipe-down is finishing its exit animation. While this is
+    /// true, playback and input stay paused until the parent cover dismisses.
+    @State private var isClosing = false
+    @State private var didClose = false
     @State private var changed = false
     /// Keep cube faces just shy of edge-on. At an exact 90° SwiftUI can emit
     /// "ignoring singular matrix" and the image view visibly reprojects before
@@ -60,10 +64,12 @@ struct StoryViewerView: View {
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
+            let height = geo.size.height
             ZStack {
                 // Backdrop behind the rotating faces (and the shrunken card
                 // while dragging down to dismiss).
-                Color.black.ignoresSafeArea()
+                Color.black.opacity(backdropOpacity(height: height))
+                    .ignoresSafeArea()
 
                 if groups.isEmpty {
                     Color.clear.onAppear { close() }
@@ -78,13 +84,19 @@ struct StoryViewerView: View {
                     // clip shape here: clipping would letterbox the stories'
                     // edge-to-edge backgrounds at the safe-area bounds.)
                     .offset(y: dragY)
-                    .scaleEffect(max(0.82, 1 - dragY / 1400))
+                    .scaleEffect(deckScale(height: height))
+                    .opacity(deckOpacity(height: height))
+                    .shadow(
+                        color: .black.opacity(Double(dismissProgress(height: height) * 0.45)),
+                        radius: 26,
+                        y: 16
+                    )
                 }
             }
             .contentShape(Rectangle())
-            .gesture(pagerGesture(width: width))
+            .gesture(pagerGesture(width: width, height: height))
         }
-        .background(Color.black.ignoresSafeArea())
+        .background(Color.clear.ignoresSafeArea())
         .statusBarHidden(true)
     }
 
@@ -104,8 +116,8 @@ struct StoryViewerView: View {
             group: groups[i],
             currentUserId: currentUserId,
             allowedDays: allowedDaysFor(groups[i]),
-            isActive: i == currentIndex && !isTransitioning,
-            isGesturing: dragAxis != nil || isTransitioning,
+            isActive: i == currentIndex && !isTransitioning && !isClosing,
+            isGesturing: dragAxis != nil || isTransitioning || isClosing,
             onAdvancePastEnd: { advance(from: i, width: width) },
             onBackPastStart: { goBack(from: i, width: width) },
             onGroupEmpty: { skipEmptyGroup(i, width: width) },
@@ -126,7 +138,7 @@ struct StoryViewerView: View {
         .opacity(abs(progress) >= 0.995 ? 0 : 1)
         .offset(x: offset)
         .zIndex(i == currentIndex ? 1 : 0)
-        .allowsHitTesting(i == currentIndex && !isTransitioning)
+        .allowsHitTesting(i == currentIndex && !isTransitioning && !isClosing)
     }
 
     private func slotOffset(_ i: Int, width: CGFloat) -> CGFloat {
@@ -135,10 +147,10 @@ struct StoryViewerView: View {
 
     // MARK: - Gesture
 
-    private func pagerGesture(width: CGFloat) -> some Gesture {
+    private func pagerGesture(width: CGFloat, height: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12, coordinateSpace: .local)
             .onChanged { value in
-                guard !isTransitioning else { return }
+                guard !isTransitioning, !isClosing else { return }
                 if dragAxis == nil {
                     dragAxis = abs(value.translation.width) > abs(value.translation.height)
                         ? .horizontal : .vertical
@@ -159,10 +171,10 @@ struct StoryViewerView: View {
             .onEnded { value in
                 let axis = dragAxis
                 dragAxis = nil
-                guard !isTransitioning else { return }
+                guard !isTransitioning, !isClosing else { return }
                 switch axis {
                 case .horizontal: settleHorizontal(value, width: width)
-                case .vertical: settleVertical(value)
+                case .vertical: settleVertical(value, height: height)
                 case nil: break
                 }
             }
@@ -188,12 +200,32 @@ struct StoryViewerView: View {
         }
     }
 
-    private func settleVertical(_ value: DragGesture.Value) {
-        if value.translation.height > 140 || value.predictedEndTranslation.height > 320 {
-            close()
+    private func settleVertical(_ value: DragGesture.Value, height: CGFloat) {
+        let translation = value.translation.height
+        let predicted = value.predictedEndTranslation.height
+        if translation > 130 || predicted > max(280, height * 0.34) {
+            dismissDown(height: height)
         } else {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { dragY = 0 }
+            withAnimation(.interactiveSpring(duration: 0.28, extraBounce: 0.08)) {
+                dragY = 0
+            }
         }
+    }
+
+    private func dismissProgress(height: CGFloat) -> CGFloat {
+        min(max(dragY / max(height * 0.44, 1), 0), 1)
+    }
+
+    private func backdropOpacity(height: CGFloat) -> Double {
+        Double(max(0, 1 - dismissProgress(height: height) * 0.92))
+    }
+
+    private func deckScale(height: CGFloat) -> CGFloat {
+        max(0.82, 1 - dismissProgress(height: height) * 0.14)
+    }
+
+    private func deckOpacity(height: CGFloat) -> Double {
+        isClosing ? Double(max(0, 1 - dismissProgress(height: height))) : 1
     }
 
     // MARK: - Navigation
@@ -203,7 +235,7 @@ struct StoryViewerView: View {
     /// transaction. The transition flag flips in that same pass so the landed
     /// page never renders one inactive frame.
     private func animate(to target: Int, width: CGFloat) {
-        guard groups.indices.contains(target), target != currentIndex else { return }
+        guard groups.indices.contains(target), target != currentIndex, !isClosing else { return }
         isTransitioning = true
         MADHaptics.action()
         withAnimation(
@@ -225,7 +257,7 @@ struct StoryViewerView: View {
     /// A group's last story finished (timer or tap) — flow straight into the
     /// next author, or end the show after the last one.
     private func advance(from i: Int, width: CGFloat) {
-        guard i == currentIndex, !isTransitioning else { return }
+        guard i == currentIndex, !isTransitioning, !isClosing else { return }
         if currentIndex < groups.count - 1 {
             animate(to: currentIndex + 1, width: width)
         } else {
@@ -237,7 +269,7 @@ struct StoryViewerView: View {
     /// (the first group just replays its first story — the player already
     /// reset its progress).
     private func goBack(from i: Int, width: CGFloat) {
-        guard i == currentIndex, !isTransitioning, currentIndex > 0 else { return }
+        guard i == currentIndex, !isTransitioning, !isClosing, currentIndex > 0 else { return }
         animate(to: currentIndex - 1, width: width)
     }
 
@@ -246,7 +278,7 @@ struct StoryViewerView: View {
     /// flow; closing only when there's nowhere left to go.
     private func skipEmptyGroup(_ i: Int, width: CGFloat) {
         changed = true
-        guard i == currentIndex, !isTransitioning else { return }
+        guard i == currentIndex, !isTransitioning, !isClosing else { return }
         if currentIndex < groups.count - 1 {
             animate(to: currentIndex + 1, width: width)
         } else if currentIndex > 0 {
@@ -257,7 +289,23 @@ struct StoryViewerView: View {
     }
 
     private func close() {
+        guard !didClose else { return }
+        didClose = true
         onClose(changed)
+    }
+
+    private func dismissDown(height: CGFloat) {
+        guard !isClosing else { return }
+        isClosing = true
+        MADHaptics.tap()
+        withAnimation(
+            .easeOut(duration: 0.2),
+            completionCriteria: .logicallyComplete
+        ) {
+            dragY = height + 120
+        } completion: {
+            close()
+        }
     }
 }
 

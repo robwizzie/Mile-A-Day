@@ -47,7 +47,13 @@ struct StoriesRailView: View {
                 ForEach(friendGroups) { group in
                     let viewable = isGroupViewable(group)
                     Button {
-                        if viewable { onTapGroup(group) } else { onLockedStoryTap() }
+                        if viewable {
+                            MADHaptics.tap()
+                            onTapGroup(group)
+                        } else {
+                            MADHaptics.warning()
+                            onLockedStoryTap()
+                        }
                     } label: {
                         cell(
                             name: group.displayName,
@@ -59,7 +65,7 @@ struct StoriesRailView: View {
                             locked: !viewable
                         )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(StoryRingButtonStyle())
                 }
             }
             .padding(.horizontal, MADTheme.Spacing.md)
@@ -71,6 +77,11 @@ struct StoriesRailView: View {
     // the small "+" always opens the composer (when allowed).
     private var addCell: some View {
         Button {
+            if myGroup == nil && !canPost {
+                MADHaptics.warning()
+            } else {
+                MADHaptics.tap()
+            }
             // If the viewer already has an active story, open it; otherwise
             // (or when they can post) open the composer. The compose FAB in the
             // feed also reaches the composer, so adding-more is always available.
@@ -116,7 +127,7 @@ struct StoriesRailView: View {
             }
             .frame(width: 76)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(StoryRingButtonStyle())
     }
 
     private func cell(name: String, imageURL: String?, unviewed: Bool, locked: Bool) -> some View {
@@ -161,5 +172,13 @@ struct StoriesRailView: View {
                         style: StrokeStyle(lineWidth: 2.5, dash: dashed ? [4] : [])
                     )
             )
+    }
+}
+
+private struct StoryRingButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.72), value: configuration.isPressed)
     }
 }

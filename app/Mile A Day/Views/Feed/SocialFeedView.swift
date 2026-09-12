@@ -30,6 +30,13 @@ private struct WorkoutCommentsTarget: Identifiable {
     var id: String { entry.id }
 }
 
+private struct FeedSection: Identifiable {
+    let title: String
+    let items: [FeedEntry]
+
+    var id: String { title }
+}
+
 /// The single social surface inside the Friends tab: a stories rail, an optional
 /// "On this day" memories card, then one unified, infinitely-scrollable feed of
 /// photo posts AND raw walk/run activity. Posting and viewing friends' stories
@@ -67,6 +74,10 @@ struct SocialFeedView: View {
     /// re-pulling the whole feed on every return just adds latency and server
     /// load. A manual pull or a longer gap still does the full refresh.
     @State private var lastFeedRefreshAt: Date?
+    /// A soft heads-up after a background refresh brought in newer cards while
+    /// the user was reading lower in the feed.
+    @State private var newActivityCount = 0
+    @State private var showNewActivityPill = false
 
     @State private var hypingIds: Set<String> = []
     @State private var termsAccepted: Bool?
@@ -115,6 +126,7 @@ struct SocialFeedView: View {
     @State private var pendingProfileUser: BackendUser?
 
     private var currentUserId: String? { UserDefaults.standard.string(forKey: "backendUserId") }
+    private let feedTopAnchorId = "feed-top-anchor"
     /// Completing the daily mile unlocks viewing friends' stories (all day) and
     /// is the first half of the gate on posting.
     private var mileDone: Bool {
@@ -291,6 +303,43 @@ struct SocialFeedView: View {
         )
     }
 
+    /// Feed rows grouped into familiar social time buckets. This is display
+    /// only; the backend's keyset order stays exactly as received.
+    private var groupedFeedSections: [FeedSection] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let titles = ["Today", "Yesterday", "Earlier this week", "Older"]
+        var buckets: [Int: [FeedEntry]] = [:]
+
+        for entry in feed {
+            let bucket: Int
+            if let date = RelativeTime.date(from: entry.sort_ts) {
+                let days = cal.dateComponents(
+                    [.day],
+                    from: cal.startOfDay(for: date),
+                    to: today
+                ).day ?? 0
+                if days <= 0 {
+                    bucket = 0
+                } else if days == 1 {
+                    bucket = 1
+                } else if days < 7 {
+                    bucket = 2
+                } else {
+                    bucket = 3
+                }
+            } else {
+                bucket = 3
+            }
+            buckets[bucket, default: []].append(entry)
+        }
+
+        return titles.enumerated().compactMap { index, title in
+            guard let items = buckets[index], !items.isEmpty else { return nil }
+            return FeedSection(title: title, items: items)
+        }
+    }
+
     /// Out of hypes today (never true for unlimited roles) — dims unspent
     /// hype buttons on cards, same as the friends list.
     private var isOutOfHypes: Bool {
@@ -328,23 +377,27 @@ struct SocialFeedView: View {
             ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: MADTheme.Spacing.md) {
-                    StoriesRailView(
-                        groups: stories,
-                        currentUserId: currentUserId,
-                        myName: userManager.currentUser.username ?? userManager.currentUser.name,
-                        myImageURL: userManager.currentUser.profileImageUrl,
-                        canPost: canPostNow,
-                        hasSharedWorkout: alreadySharedWorkout,
-                        // The ring tracks the CAMERA countdown only; posting
-                        // itself outlives it, so the "+" stays unlocked.
-                        windowOpen: freshWindow.isCameraOpen,
-                        windowOpenedAt: freshWindow.windowOpenedAt,
-                        isGroupViewable: { canViewStories(of: $0) },
-                        isGroupUnviewed: { isGroupUnviewed(of: $0) },
-                        onTapAdd: handleCompose,
-                        onTapGroup: { viewerGroup = $0 },
-                        onLockedStoryTap: { showMileHint = true }
-                    )
+                    if isLoading && stories.isEmpty {
+                        StoriesRailSkeletonView()
+                    } else {
+                        StoriesRailView(
+                            groups: stories,
+                            currentUserId: currentUserId,
+                            myName: userManager.currentUser.username ?? userManager.currentUser.name,
+                            myImageURL: userManager.currentUser.profileImageUrl,
+                            canPost: canPostNow,
+                            hasSharedWorkout: alreadySharedWorkout,
+                            // The ring tracks the CAMERA countdown only; posting
+                            // itself outlives it, so the "+" stays unlocked.
+                            windowOpen: freshWindow.isCameraOpen,
+                            windowOpenedAt: freshWindow.windowOpenedAt,
+                            isGroupViewable: { canViewStories(of: $0) },
+                            isGroupUnviewed: { isGroupUnviewed(of: $0) },
+                            onTapAdd: handleCompose,
+                            onTapGroup: { viewerGroup = $0 },
+                            onLockedStoryTap: { showMileHint = true }
+                        )
+                    }
 
                     if !memories.isEmpty {
                         MemoriesCardView(memories: memories) { showMemories = true }
@@ -356,37 +409,45 @@ struct SocialFeedView: View {
                             .padding(.horizontal, MADTheme.Spacing.md)
                     }
 
-                    Divider().overlay(Color.white.opacity(0.08))
+                    Divider()
+                        .overlay(Color.white.opacity(0.08))
+                        .id(feedTopAnchorId)
 
                     if isLoading && feed.isEmpty {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
-                            .padding(.top, MADTheme.Spacing.xxl)
+                        FeedLoadingSkeletonView()
                     } else if feed.isEmpty {
                         emptyState
                     } else {
-                        ForEach(feed) { entry in
-                            feedCard(entry)
-                                // Deep-link landing ring — fades once seen.
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                                        .strokeBorder(
-                                            Color.orange.opacity(highlightedEntryId == entry.id ? 0.75 : 0),
-                                            lineWidth: 2
-                                        )
-                                        .allowsHitTesting(false)
-                                )
-                                .animation(.easeInOut(duration: 0.35), value: highlightedEntryId)
-                                // Prefetch a few cards early (not just on the
-                                // very last row) so the next page is usually
-                                // there before the user reaches the bottom.
-                                .onAppear {
-                                    if feed.suffix(3).contains(where: { $0.id == entry.id }) {
-                                        Task { await loadMore() }
+                        ForEach(groupedFeedSections) { section in
+                            VStack(alignment: .leading, spacing: 10) {
+                                feedSectionHeader(section.title)
+                                    .padding(.horizontal, MADTheme.Spacing.md)
+                                VStack(spacing: MADTheme.Spacing.md) {
+                                    ForEach(section.items) { entry in
+                                        feedCard(entry)
+                                            // Deep-link landing ring — fades once seen.
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                                                    .strokeBorder(
+                                                        Color.orange.opacity(highlightedEntryId == entry.id ? 0.75 : 0),
+                                                        lineWidth: 2
+                                                    )
+                                                    .allowsHitTesting(false)
+                                            )
+                                            .animation(.easeInOut(duration: 0.35), value: highlightedEntryId)
+                                            // Prefetch a few cards early (not just on the
+                                            // very last row) so the next page is usually
+                                            // there before the user reaches the bottom.
+                                            .onAppear {
+                                                if feed.suffix(3).contains(where: { $0.id == entry.id }) {
+                                                    Task { await loadMore() }
+                                                }
+                                            }
+                                            .padding(.horizontal, MADTheme.Spacing.md)
+                                            .id(entry.id)
                                     }
                                 }
-                                .padding(.horizontal, MADTheme.Spacing.md)
-                                .id(entry.id)
+                            }
                         }
                         if isLoadingMore {
                             ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
@@ -400,6 +461,19 @@ struct SocialFeedView: View {
                 .lockedToScrollWidth()
             }
             .scrollIndicators(.hidden)
+            .overlay(alignment: .top) {
+                if showNewActivityPill {
+                    newActivityPill {
+                        MADHaptics.tap()
+                        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                            proxy.scrollTo(feedTopAnchorId, anchor: .top)
+                            showNewActivityPill = false
+                        }
+                    }
+                    .padding(.top, MADTheme.Spacing.sm)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
             .refreshable {
                 async let feedLoad: Void = refresh()
                 async let hypeLoad: Void = loadHypeStatus()
@@ -482,6 +556,7 @@ struct SocialFeedView: View {
                     Task { await refreshRail() }
                 }
             }
+            .presentationBackground(.clear)
         }
         .sheet(item: $reportingPost) { post in
             ReportPostSheet(postId: post.post_id) { reportingPost = nil }
@@ -652,6 +727,46 @@ struct SocialFeedView: View {
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
                             .strokeBorder(MADTheme.Colors.madRed.opacity(0.3), lineWidth: 1)
                     )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func feedSectionHeader(_ title: String) -> some View {
+        HStack(spacing: 10) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .tracking(1.4)
+                .foregroundColor(.white.opacity(0.4))
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.12), Color.white.opacity(0)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(height: 1)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func newActivityPill(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 14, weight: .bold))
+                Text(newActivityCount == 1 ? "New activity" : "\(newActivityCount) new updates")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .contentTransition(.numericText(value: Double(newActivityCount)))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(MADTheme.Colors.redGradient)
+                    .shadow(color: .black.opacity(0.35), radius: 12, y: 5)
             )
         }
         .buttonStyle(.plain)
@@ -1038,6 +1153,13 @@ struct SocialFeedView: View {
         print("[Feed] unified feed: \(Int(Date().timeIntervalSince(feedStart) * 1000))ms")
         await MainActor.run {
             if let feedResponse {
+                let newCount = countNewTopEntries(in: feedResponse.items, comparedTo: feed)
+                if loadedOnce, !feed.isEmpty, newCount > 0 {
+                    newActivityCount = newCount
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+                        showNewActivityPill = true
+                    }
+                }
                 feed = feedResponse.items
                 nextBefore = feedResponse.next_before
                 loadMoreFailed = false
@@ -1108,6 +1230,19 @@ struct SocialFeedView: View {
             if gotFresh || nextBefore == nil { break }
         }
         await MainActor.run { isLoadingMore = false }
+    }
+
+    /// Count only the newly prepended rows before the first already-known id.
+    /// Existing cards with updated counts/captions shouldn't trigger a "new"
+    /// affordance; genuinely newer activity should.
+    private func countNewTopEntries(in incoming: [FeedEntry], comparedTo existing: [FeedEntry]) -> Int {
+        guard let firstKnown = existing.first?.id else { return 0 }
+        var count = 0
+        for entry in incoming {
+            if entry.id == firstKnown { return count }
+            count += 1
+        }
+        return 0
     }
 
     private var loadMoreRetryRow: some View {
@@ -1366,5 +1501,102 @@ struct SocialFeedView: View {
         let f = DateFormatter()
         f.dateFormat = "MMM d"
         return f.string(from: Date())
+    }
+}
+
+private struct StoriesRailSkeletonView: View {
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
+                ForEach(0..<6, id: \.self) { i in
+                    VStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.white.opacity(i == 0 ? 0.1 : 0.07))
+                            .frame(width: 70, height: 70)
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 2.5)
+                            )
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .fill(Color.white.opacity(0.08))
+                            .frame(width: i == 0 ? 48 : 42, height: 8)
+                    }
+                    .frame(width: 76)
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.vertical, MADTheme.Spacing.sm)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct FeedLoadingSkeletonView: View {
+    var body: some View {
+        VStack(spacing: MADTheme.Spacing.md) {
+            ForEach(0..<3, id: \.self) { i in
+                FeedSkeletonCardView(imageHeight: i == 1 ? 190 : 260)
+            }
+        }
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.top, MADTheme.Spacing.sm)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct FeedSkeletonCardView: View {
+    let imageHeight: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(Color.white.opacity(0.09))
+                    .frame(width: 42, height: 42)
+                VStack(alignment: .leading, spacing: 7) {
+                    skeletonLine(width: 110, height: 10)
+                    skeletonLine(width: 70, height: 8, opacity: 0.06)
+                }
+                Spacer()
+            }
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+                .frame(height: imageHeight)
+                .overlay(alignment: .bottomLeading) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        skeletonLine(width: 150, height: 12, opacity: 0.1)
+                        HStack(spacing: 8) {
+                            skeletonLine(width: 74, height: 22, opacity: 0.08)
+                            skeletonLine(width: 64, height: 22, opacity: 0.08)
+                        }
+                    }
+                    .padding(14)
+                }
+            HStack(spacing: 10) {
+                skeletonLine(width: 76, height: 12)
+                skeletonLine(width: 62, height: 12, opacity: 0.06)
+                Spacer()
+                Circle()
+                    .fill(Color.white.opacity(0.07))
+                    .frame(width: 28, height: 28)
+            }
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
+    }
+
+    private func skeletonLine(width: CGFloat, height: CGFloat, opacity: Double = 0.08) -> some View {
+        RoundedRectangle(cornerRadius: height / 2, style: .continuous)
+            .fill(Color.white.opacity(opacity))
+            .frame(width: width, height: height)
     }
 }
