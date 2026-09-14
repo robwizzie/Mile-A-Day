@@ -41,6 +41,36 @@ export function mediaSrc(url: string): string {
   return url;
 }
 
+// ─── Referral-source catalog ────────────────────────────────────────
+
+/**
+ * Pretty labels for the fixed "how did you hear about us" catalog. The
+ * backend normalises anything off-catalog to "other", and users who predate
+ * the onboarding step read "unknown". This is one of the three copies of the
+ * catalog that move together (iOS `referralOptions`, backend
+ * `REFERRAL_SOURCES`, and this) — a chip the dashboard can't name renders as
+ * its raw key.
+ */
+export const SOURCE_LABELS: Record<string, string> = {
+  app_store: "App Store search",
+  friend: "Friend",
+  developer: "Sent by the team",
+  instagram: "Instagram",
+  tiktok: "TikTok",
+  reddit: "Reddit",
+  google: "Google",
+  youtube: "YouTube",
+  ai_chat: "ChatGPT / AI",
+  social_ad: "Social media ad",
+  flyer: "Flyer or poster",
+  other: "Other",
+  unknown: "Not asked yet",
+};
+
+export const prettySource = (s: string) =>
+  SOURCE_LABELS[s] ??
+  s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
 // ─── Formatting ─────────────────────────────────────────────────────
 
 export const fmt = (n: number) =>

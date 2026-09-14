@@ -107,6 +107,16 @@ export async function updateProfileBanner({ userId, profileBannerUrl }: { userId
  */
 export const PERSON_REFERRAL_SOURCES = ['friend', 'developer'] as const;
 
+/**
+ * The typed referral name as a comparable handle: trimmed, case-folded, a
+ * leading "@" stripped. This is the ONE normalisation — the attribution graph,
+ * the per-user acquisition block and `referral_aliases.alias` all resolve
+ * through it, so a name matches the same account from every panel. Takes the
+ * column expression so it can be applied to any alias of `users`.
+ */
+export const referralHandleSql = (expr: string) =>
+	`lower(regexp_replace(btrim(${expr}), '^@', ''))`;
+
 export async function updateOnboardingInfo({
 	userId,
 	referralSource,

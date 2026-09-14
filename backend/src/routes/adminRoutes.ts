@@ -5,6 +5,8 @@ import {
   milesByDay,
   users,
   userDetail,
+  userFriends,
+  userPosts,
   engagement,
   signupsByDay,
   leaderboards,
@@ -53,6 +55,10 @@ adminRouter.get("/workout-types", workoutTypes);
 // Users: paginated + searchable directory, and per-user deep detail.
 adminRouter.get("/users", users);
 adminRouter.get("/users/:userId", userDetail);
+// The social half of a profile: who they're friends with (each openable in
+// turn) and what they've posted — loaded on demand by the modal's tabs.
+adminRouter.get("/users/:userId/friends", userFriends);
+adminRouter.get("/users/:userId/posts", userPosts);
 
 // Storage + post/photo analytics.
 adminRouter.get("/storage", storage);

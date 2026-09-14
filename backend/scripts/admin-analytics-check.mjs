@@ -42,7 +42,12 @@ import {
   setReferralAlias,
   clearReferralAlias,
 } from "../dist/services/adminAnalyticsService.js";
-import { getUsers } from "../dist/services/adminService.js";
+import {
+  getUsers,
+  getUserDetail,
+  getUserFriends,
+  getUserPosts,
+} from "../dist/services/adminService.js";
 
 const db = PostgresService.getInstance();
 
@@ -301,12 +306,16 @@ async function seed() {
     );
   }
 
-  // Accepted friendships are stored BIDIRECTIONALLY: two pairs, four rows.
+  // Accepted friendships are stored BIDIRECTIONALLY: three pairs, six rows.
+  // Bob–Carol closes the triangle, so Alice's friend list has one mutual
+  // friend to count on each of them.
   for (const [a, b, status] of [
     [ALICE, BOB, "accepted"],
     [BOB, ALICE, "accepted"],
     [ALICE, CAROL, "accepted"],
     [CAROL, ALICE, "accepted"],
+    [BOB, CAROL, "accepted"],
+    [CAROL, BOB, "accepted"],
     [DAVE, ERIN, "pending"],
   ]) {
     await db.query(
@@ -316,9 +325,12 @@ async function seed() {
     );
   }
 
+  // Alice hyped Bob's photo — keyed on the post, the way the app files a
+  // post hype, so the per-post count on Bob's profile has one row to find.
   await db.query(
-    `INSERT INTO hype_log (sender_id, target_id, context_type, created_at)
-     VALUES ($1, $2, 'post', NOW() - INTERVAL '1 day')`,
+    `INSERT INTO hype_log (sender_id, target_id, context_type, context_id, created_at)
+     SELECT $1, $2, 'post', p.post_id::text, NOW() - INTERVAL '1 day'
+     FROM posts p WHERE p.user_id = $2 ORDER BY p.created_at DESC LIMIT 1`,
     [ALICE, BOB],
   );
   await db.query(
@@ -522,7 +534,7 @@ async function main() {
   check(
     "friend pairs (bidirectional rows halved)",
     d("community.friends.pairs"),
-    2,
+    3,
   );
   check("pending requests", d("community.friends.pending"), 1);
   check("connected users", d("community.friends.connected_users"), 3);
@@ -816,6 +828,82 @@ async function main() {
     unlinked.referrers.some((r) => r.typed_as === "adm-ghost"),
     true,
   );
+
+  console.log("\n--- one user's friends, posts and referral chain ---");
+  const aliceDetail = await getUserDetail(ALICE);
+  check(
+    "a referrer's profile lists everyone who named them",
+    (aliceDetail.acquisition.referred.map((u) => u.user_id).sort()).join(","),
+    [CAROL, DAVE].sort().join(","),
+  );
+  truthy(
+    "and says which of them are also friends",
+    aliceDetail.acquisition.referred.find((u) => u.user_id === CAROL)?.is_friend === true &&
+      aliceDetail.acquisition.referred.find((u) => u.user_id === DAVE)?.is_friend === false,
+  );
+  const daveDetail = await getUserDetail(DAVE);
+  check(
+    "a referred user's profile resolves the name they typed",
+    daveDetail.acquisition.referred_by?.user_id ?? null,
+    ALICE,
+  );
+  check(
+    "keeping exactly what they typed beside it",
+    daveDetail.acquisition.typed_as,
+    " Adm-Alice ",
+  );
+  const frankDetail = await getUserDetail(FRANK);
+  check(
+    "a name that matches nobody resolves to nobody",
+    frankDetail.acquisition.referred_by,
+    null,
+  );
+  check("but is still shown as typed", frankDetail.acquisition.typed_as, "adm-ghost");
+  await setReferralAlias("adm-ghost", BOB, ALICE);
+  const frankLinked = await getUserDetail(FRANK);
+  truthy(
+    "a hand-recorded alias resolves it and says so",
+    frankLinked.acquisition.referred_by?.user_id === BOB &&
+      frankLinked.acquisition.referred_by?.linked_by_hand === true,
+  );
+  const bobLinked = await getUserDetail(BOB);
+  truthy(
+    "and the alias target's profile now lists them",
+    bobLinked.acquisition.referred.some((u) => u.user_id === FRANK),
+  );
+  await clearReferralAlias("adm-ghost");
+  resetAnalyticsCaches();
+
+  const aliceFriends = await getUserFriends(ALICE);
+  check("friend list reads the accepted rows once each", aliceFriends.total, 2);
+  const carolRow = aliceFriends.friends.find((f) => f.user_id === CAROL);
+  const bobRow = aliceFriends.friends.find((f) => f.user_id === BOB);
+  truthy("a friend who named them is flagged as brought in", carolRow?.referred_by_me === true);
+  truthy("and one who didn't is not", bobRow?.referred_by_me === false);
+  check("a friend's own source rides along", carolRow?.referral_source, "friend");
+  check("mutual friends count the third side of the triangle", bobRow?.mutual_friends, 1);
+  check("a pending request is not a friend", aliceFriends.pending.length, 0);
+  const daveFriends = await getUserFriends(DAVE);
+  check("a pending request shows as sent on the requester", daveFriends.pending[0]?.direction, "sent");
+  check("and names the recipient", daveFriends.pending[0]?.user_id, ERIN);
+  const erinFriends = await getUserFriends(ERIN);
+  check("and as received on the recipient", erinFriends.pending[0]?.direction, "received");
+  check("a friend list for nobody is null", await getUserFriends("adm-nobody"), null);
+
+  const alicePosts = await getUserPosts(ALICE, { scope: "all", limit: 10, offset: 0 });
+  check("posts summary counts photos apart from auto cards", alicePosts.summary.photos, 2);
+  check("and the auto card apart from photos", alicePosts.summary.auto, 1);
+  check("the all scope lists every card", alicePosts.posts.length, 3);
+  const alicePhotos = await getUserPosts(ALICE, { scope: "photos", limit: 10, offset: 0 });
+  check("the photos scope drops the auto card", alicePhotos.matching, 2);
+  const carolPosts = await getUserPosts(CAROL, { scope: "deleted", limit: 10, offset: 0 });
+  check("the deleted scope finds a soft-deleted post", carolPosts.matching, 1);
+  check("which the summary counts as deleted, not live", carolPosts.summary.live, 0);
+  const bobPosts = await getUserPosts(BOB, { scope: "all", limit: 10, offset: 0 });
+  check("a post carries the hypes filed against it", bobPosts.posts[0]?.hype_count, 1);
+  const page2 = await getUserPosts(ALICE, { scope: "all", limit: 2, offset: 2 });
+  check("pagination walks past the first page", page2.posts.length, 1);
+  check("a posts list for nobody is null", await getUserPosts("adm-nobody", { scope: "all", limit: 1, offset: 0 }), null);
 
   // Every declared kind must answer without throwing, including on ids that
   // match nothing — the drawer opens before it knows there are rows.
