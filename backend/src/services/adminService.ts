@@ -2,7 +2,7 @@ import fs from "fs";
 import { promises as fsp } from "fs";
 import path from "path";
 import { PostgresService } from "./DbService.js";
-import { PERSON_REFERRAL_SOURCES } from "./userService.js";
+import { PERSON_REFERRAL_SOURCES, referralHandleSql } from "./userService.js";
 import { START_OF_TODAY_ET_SQL, TODAY_ET_DATE_SQL } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
@@ -419,6 +419,8 @@ export async function getUserDetail(userId: string) {
     [userId],
   );
 
+  const acquisition = await getUserAcquisition(userId);
+
   return {
     profile,
     stats,
@@ -426,7 +428,266 @@ export async function getUserDetail(userId: string) {
     devices,
     recent_workouts: recentWorkouts,
     recent_posts: recentPosts,
+    acquisition,
   };
+}
+
+// ─── Per-user social graph ──────────────────────────────────────────
+
+const NAME_SQL = (u: string) =>
+  `NULLIF(TRIM(COALESCE(${u}.first_name, '') || ' ' || COALESCE(${u}.last_name, '')), '')`;
+
+/**
+ * "Did `u` name `target` as the person who sent them?" — the reverse of the
+ * attribution graph's lookup, spelled with the same precedence: a typed name
+ * that IS a real username resolves to that account and nothing else; a
+ * hand-recorded alias only fills the gap when no username matches. `target`
+ * is any SQL expression for the candidate referrer's id (a bound `$n` or a
+ * correlated column); `srcIdx` is bound to `PERSON_REFERRAL_SOURCES`, since
+ * only a person-source's detail is a name at all.
+ */
+const referredBySql = (u: string, target: string, srcIdx: number) => {
+  const handle = referralHandleSql(`${u}.referral_detail`);
+  return `(${u}.referral_source = ANY($${srcIdx}::text[])
+    AND COALESCE(${u}.referral_detail, '') <> ''
+    AND (
+      ${handle} = (SELECT lower(username) FROM users WHERE user_id = ${target})
+      OR (${handle} IN (SELECT alias FROM referral_aliases WHERE user_id = ${target})
+          AND NOT EXISTS (SELECT 1 FROM users x WHERE lower(x.username) = ${handle}))
+    ))`;
+};
+
+/**
+ * Where this one person came from, and who they brought in — the per-user
+ * face of the referral graph. Attribution is a free-text name typed at
+ * onboarding, so `referred_by` is the RESOLVED account (username match, else
+ * a hand-recorded alias) beside exactly what was typed; when nothing resolves,
+ * `typed_as` alone says what they wrote. `referred` lists everyone whose typed
+ * name resolves to THIS user, each with their own activity, because the number
+ * that matters isn't how many names they collected — it's how many are still
+ * running.
+ */
+export async function getUserAcquisition(userId: string) {
+  const [me] = await db.query<{
+    referral_source: string | null;
+    referral_detail: string | null;
+    referrer_id: string | null;
+    referrer_username: string | null;
+    linked_by_hand: boolean;
+  }>(
+    `WITH me AS (
+       SELECT u.user_id, u.referral_source, u.referral_detail,
+              ${referralHandleSql("u.referral_detail")} AS handle,
+              (u.referral_source = ANY($2::text[])
+                AND COALESCE(u.referral_detail, '') <> '') AS named
+       FROM users u WHERE u.user_id = $1
+     )
+     SELECT me.referral_source, me.referral_detail,
+            CASE WHEN me.named THEN COALESCE(ru.user_id, au.user_id) END AS referrer_id,
+            CASE WHEN me.named THEN COALESCE(ru.username, au.username) END AS referrer_username,
+            (me.named AND ru.user_id IS NULL AND au.user_id IS NOT NULL) AS linked_by_hand
+     FROM me
+     LEFT JOIN users ru ON me.named AND lower(ru.username) = me.handle
+     LEFT JOIN referral_aliases ra ON me.named AND ra.alias = me.handle
+     LEFT JOIN users au ON au.user_id = ra.user_id`,
+    [userId, [...PERSON_REFERRAL_SOURCES]],
+  );
+
+  const referred = await db.query<{
+    user_id: string;
+    username: string | null;
+    name: string | null;
+    profile_image_url: string | null;
+    created_at: string;
+    current_streak: number;
+    typed_as: string | null;
+    last_active: string | null;
+    total_miles: number;
+    is_friend: boolean;
+  }>(
+    `SELECT u.user_id, u.username, ${NAME_SQL("u")} AS name, u.profile_image_url,
+            u.created_at, u.current_streak, u.referral_detail AS typed_as,
+            w.last_active, COALESCE(w.total_miles, 0)::float AS total_miles,
+            EXISTS (SELECT 1 FROM friendships f
+                    WHERE f.user_id = $1 AND f.friend_id = u.user_id AND f.status = 'accepted') AS is_friend
+     FROM users u
+     LEFT JOIN LATERAL (
+       SELECT MAX(w.local_date)::text AS last_active, SUM(w.distance) AS total_miles
+       FROM workouts w
+       WHERE w.user_id = u.user_id AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+     ) w ON TRUE
+     WHERE u.user_id <> $1 AND ${referredBySql("u", "$1", 2)}
+     ORDER BY u.created_at DESC
+     LIMIT 200`,
+    [userId, [...PERSON_REFERRAL_SOURCES]],
+  );
+
+  const isPersonSource =
+    me?.referral_source != null &&
+    (PERSON_REFERRAL_SOURCES as readonly string[]).includes(me.referral_source);
+
+  return {
+    source: me?.referral_source ?? null,
+    /** Exactly what they typed at onboarding, untouched. */
+    typed_as: isPersonSource ? (me?.referral_detail ?? null) : null,
+    referred_by: me?.referrer_id
+      ? {
+          user_id: me.referrer_id,
+          username: me.referrer_username,
+          linked_by_hand: Boolean(me.linked_by_hand),
+        }
+      : null,
+    referred,
+  };
+}
+
+/**
+ * One person's friend list as the admin sees it: every accepted friend with
+ * their own activity and acquisition answer, plus the requests still in
+ * flight in either direction. Accepted friendships are stored in BOTH
+ * directions, so reading `user_id = me` is the whole list; pending/ignored
+ * rows exist only requester → recipient, which is what splits `sent` from
+ * `received`.
+ *
+ * `referred_by_me` / `referred_me` overlay the referral graph on the friend
+ * graph — the question this screen exists to answer is whether "a friend told
+ * me" and "we're friends in the app" are the same people.
+ */
+export async function getUserFriends(userId: string) {
+  const [exists] = await db.query(`SELECT 1 FROM users WHERE user_id = $1`, [
+    userId,
+  ]);
+  if (!exists) return null;
+
+  const friends = await db.query(
+    `SELECT u.user_id, u.username, ${NAME_SQL("u")} AS name, u.profile_image_url,
+            u.role, u.current_streak, u.referral_source, u.referral_detail,
+            u.created_at AS joined_at, f.created_at AS friends_since,
+            w.last_active, COALESCE(w.total_miles, 0)::float AS total_miles,
+            COALESCE(p.photo_count, 0)::int AS photo_count,
+            m.mutual_friends,
+            ${referredBySql("u", "$1", 2)} AS referred_by_me,
+            ${referredBySql("me", "u.user_id", 2)} AS referred_me
+     FROM friendships f
+     JOIN users u ON u.user_id = f.friend_id
+     JOIN users me ON me.user_id = $1
+     LEFT JOIN LATERAL (
+       SELECT MAX(w.local_date)::text AS last_active, SUM(w.distance) AS total_miles
+       FROM workouts w
+       WHERE w.user_id = u.user_id AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+     ) w ON TRUE
+     LEFT JOIN LATERAL (
+       SELECT COUNT(*) FILTER (WHERE NOT is_auto) AS photo_count
+       FROM posts WHERE user_id = u.user_id AND deleted_at IS NULL
+     ) p ON TRUE
+     LEFT JOIN LATERAL (
+       -- Friends of theirs who are also friends of mine.
+       SELECT COUNT(*)::int AS mutual_friends
+       FROM friendships a
+       JOIN friendships b ON b.user_id = $1 AND b.friend_id = a.friend_id AND b.status = 'accepted'
+       WHERE a.user_id = u.user_id AND a.status = 'accepted' AND a.friend_id <> $1
+     ) m ON TRUE
+     WHERE f.user_id = $1 AND f.status = 'accepted'
+     ORDER BY f.created_at DESC NULLS LAST, u.username
+     LIMIT 500`,
+    [userId, [...PERSON_REFERRAL_SOURCES]],
+  );
+
+  const pending = await db.query(
+    `SELECT 'sent' AS direction, f.status, f.created_at,
+            u.user_id, u.username, ${NAME_SQL("u")} AS name, u.profile_image_url
+     FROM friendships f JOIN users u ON u.user_id = f.friend_id
+     WHERE f.user_id = $1 AND f.status IN ('pending', 'ignored')
+     UNION ALL
+     SELECT 'received', f.status, f.created_at,
+            u.user_id, u.username, ${NAME_SQL("u")}, u.profile_image_url
+     FROM friendships f JOIN users u ON u.user_id = f.user_id
+     WHERE f.friend_id = $1 AND f.status IN ('pending', 'ignored')
+     ORDER BY created_at DESC
+     LIMIT 200`,
+    [userId],
+  );
+
+  return { total: friends.length, friends, pending };
+}
+
+export type UserPostsScope = "all" | "photos" | "auto" | "deleted";
+
+/**
+ * One person's posts, newest first, with the engagement each drew. Hypes on
+ * a post are `hype_log` rows keyed `context_type = 'post'` on the post id;
+ * comments follow `post_comments.post_id` and skip soft-deleted ones. Both
+ * are counted the plain way here rather than through the feed's buddy-aware
+ * matchers — the admin wants the number on THIS card, not the walk's merged
+ * conversation.
+ */
+export async function getUserPosts(
+  userId: string,
+  opts: { scope: UserPostsScope; limit: number; offset: number },
+) {
+  const [exists] = await db.query(`SELECT 1 FROM users WHERE user_id = $1`, [
+    userId,
+  ]);
+  if (!exists) return null;
+
+  const scopeSql =
+    opts.scope === "photos"
+      ? "AND p.deleted_at IS NULL AND NOT p.is_auto"
+      : opts.scope === "auto"
+        ? "AND p.deleted_at IS NULL AND p.is_auto"
+        : opts.scope === "deleted"
+          ? "AND p.deleted_at IS NOT NULL"
+          : "";
+
+  const [summary] = await db.query<{
+    total: number;
+    live: number;
+    photos: number;
+    auto: number;
+    deleted: number;
+    on_feed: number;
+    stories: number;
+  }>(
+    `SELECT COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE deleted_at IS NULL)::int AS live,
+            COUNT(*) FILTER (WHERE deleted_at IS NULL AND NOT is_auto)::int AS photos,
+            COUNT(*) FILTER (WHERE deleted_at IS NULL AND is_auto)::int AS auto,
+            COUNT(*) FILTER (WHERE deleted_at IS NOT NULL)::int AS deleted,
+            COUNT(*) FILTER (WHERE deleted_at IS NULL AND share_to_feed)::int AS on_feed,
+            COUNT(*) FILTER (WHERE deleted_at IS NULL AND share_to_story)::int AS stories
+     FROM posts WHERE user_id = $1`,
+    [userId],
+  );
+
+  const [{ matching }] = await db.query<{ matching: number }>(
+    `SELECT COUNT(*)::int AS matching FROM posts p WHERE p.user_id = $1 ${scopeSql}`,
+    [userId],
+  );
+
+  const posts = await db.query(
+    `SELECT p.post_id::text AS post_id, p.media_url, p.caption, p.is_auto,
+            p.share_to_feed, p.share_to_story, p.include_route,
+            p.local_date::text AS local_date, p.created_at, p.deleted_at, p.pinned_at,
+            (p.buddy_session_id IS NOT NULL) AS is_buddy_walk,
+            p.competition_id,
+            w.workout_type, w.distance::float AS workout_distance,
+            cu.user_id AS coauthor_user_id, cu.username AS coauthor_username,
+            (SELECT COUNT(*) FROM hype_log h
+              WHERE h.context_type = 'post' AND h.context_id = p.post_id::text)::int AS hype_count,
+            (SELECT COUNT(*) FROM post_comments c
+              WHERE c.post_id = p.post_id AND c.deleted_at IS NULL)::int AS comment_count,
+            (SELECT COUNT(*) FROM post_coauthors pc
+              WHERE pc.post_id = p.post_id AND pc.media_url IS NOT NULL)::int AS crew_photos
+     FROM posts p
+     LEFT JOIN workouts w ON w.workout_id = p.workout_id
+     LEFT JOIN users cu ON cu.user_id = p.coauthor_user_id AND p.coauthor_status = 'accepted'
+     WHERE p.user_id = $1 ${scopeSql}
+     ORDER BY p.created_at DESC
+     LIMIT $2 OFFSET $3`,
+    [userId, opts.limit, opts.offset],
+  );
+
+  return { summary, matching, posts };
 }
 
 // ─── Engagement + growth ────────────────────────────────────────────

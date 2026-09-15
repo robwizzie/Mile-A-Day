@@ -26,7 +26,7 @@
 
 import { PostgresService } from "./DbService.js";
 import { FLYOVER_PLAY_FEATURE } from "./telemetryService.js";
-import { PERSON_REFERRAL_SOURCES } from "./userService.js";
+import { PERSON_REFERRAL_SOURCES, referralHandleSql } from "./userService.js";
 import {
   START_OF_TODAY_ET_SQL,
   TODAY_ET_DATE_SQL,
@@ -961,7 +961,7 @@ async function loadReferralGraph(): Promise<ReferralGraph> {
       SELECT u.user_id, u.username,
              NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS name,
              u.created_at, u.current_streak,
-             lower(regexp_replace(btrim(u.referral_detail), '^@', '')) AS handle
+             ${referralHandleSql('u.referral_detail')} AS handle
       FROM users u
       WHERE u.referral_source = ANY($1::text[])
         AND COALESCE(btrim(u.referral_detail), '') <> ''

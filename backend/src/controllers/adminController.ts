@@ -15,6 +15,9 @@ import {
   restoreDeletedPost,
   getUsers,
   getUserDetail,
+  getUserFriends,
+  getUserPosts,
+  type UserPostsScope,
   getEngagement,
   getSignupsByDay,
   getLeaderboards,
@@ -143,6 +146,37 @@ export async function userDetail(req: Request, res: Response) {
   const detail = await getUserDetail(req.params.userId);
   if (!detail) return res.status(404).json({ error: "User not found" });
   res.json(signMediaUrlsDeep(detail));
+}
+
+/** A user's accepted friends + in-flight requests, for the profile modal. */
+export async function userFriends(req: Request, res: Response) {
+  const result = await getUserFriends(req.params.userId);
+  if (!result) return res.status(404).json({ error: "User not found" });
+  res.json(signMediaUrlsDeep(result));
+}
+
+const USER_POST_SCOPES = new Set<UserPostsScope>([
+  "all",
+  "photos",
+  "auto",
+  "deleted",
+]);
+
+/** A user's posts, newest first, with per-card engagement counts. */
+export async function userPosts(req: Request, res: Response) {
+  const scopeParam = String(req.query.scope ?? "all") as UserPostsScope;
+  const scope = USER_POST_SCOPES.has(scopeParam) ? scopeParam : "all";
+  const limit = Math.min(
+    Math.max(parseInt(String(req.query.limit ?? "48"), 10) || 48, 1),
+    100,
+  );
+  const offset = Math.max(
+    parseInt(String(req.query.offset ?? "0"), 10) || 0,
+    0,
+  );
+  const result = await getUserPosts(req.params.userId, { scope, limit, offset });
+  if (!result) return res.status(404).json({ error: "User not found" });
+  res.json(signMediaUrlsDeep(result));
 }
 
 export async function engagement(_req: Request, res: Response) {

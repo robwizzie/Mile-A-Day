@@ -10,6 +10,7 @@ import {
   getData,
   HEAT_HUE,
   postData,
+  prettySource,
   Loading,
   MAD_SUCCESS,
   MAD_WARNING,
@@ -76,27 +77,9 @@ type Referrals = {
   funnel: { total: number; completed_onboarding: number; gave_source: number };
 };
 
-// Pretty labels for the fixed referral-source catalog (backend normalizes
-// anything off-catalog to "other"; pre-onboarding users read "unknown").
-const SOURCE_LABELS: Record<string, string> = {
-  app_store: "App Store search",
-  friend: "Friend",
-  developer: "Sent by the team",
-  instagram: "Instagram",
-  tiktok: "TikTok",
-  reddit: "Reddit",
-  google: "Google",
-  youtube: "YouTube",
-  ai_chat: "ChatGPT / AI",
-  social_ad: "Social media ad",
-  flyer: "Flyer or poster",
-  other: "Other",
-  unknown: "Not asked yet",
-};
-
-const pretty = (s: string) =>
-  SOURCE_LABELS[s] ??
-  s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+// The referral-source catalog's labels live in lib.tsx (`SOURCE_LABELS`)
+// so the user modal can name a source the same way this tab does.
+const pretty = prettySource;
 
 /**
  * Who brought whom in.
