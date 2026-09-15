@@ -44,6 +44,7 @@ import { startWeeklyChallengeCron } from "./cron/weeklyChallengeCron.js";
 import { startH2hChallengeCron } from "./cron/h2hChallengeCron.js";
 import { startStreakFeaturesCron } from "./cron/streakFeaturesCron.js";
 import { startLastCallCron } from "./cron/lastCallCron.js";
+import { healUncomputedStreaks } from "./services/streakFeatureCore.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
 import { seedWeeklyChallenges } from "./services/weeklyChallengeService.js";
@@ -396,6 +397,17 @@ runPendingMigrations()
       // users.longest_streak from workout history; rows it hasn't reached
       // read 0, which every API surface degrades to max(0, current streak).
       void backfillLongestStreaks();
+      // Same contract again: compute-and-store the streak snapshot for every
+      // active user the new columns (0057) haven't been written for. Until a
+      // row is reached it reads its old stored value (as before); a few
+      // thousand users is seconds. Empty — one SELECT — on every later boot.
+      void healUncomputedStreaks()
+        .then((n) => {
+          if (n > 0) console.log(`[Streaks] boot sweep computed ${n} row(s)`);
+        })
+        .catch((err) =>
+          console.error("[Streaks] boot sweep failed:", err?.message ?? err),
+        );
     });
   });
 

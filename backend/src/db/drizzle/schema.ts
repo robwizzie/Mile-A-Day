@@ -175,6 +175,23 @@ export const users = pgTable(
     // are filled by db/backfillLongestStreaks.ts after boot; until it lands a
     // row reads 0 and API responses degrade to max(0, current streak).
     longestStreak: integer("longest_streak").default(0).notNull(),
+    // Stored streak snapshot — what current_streak DESCRIBES, so reads never
+    // recompute it (streakFeatureCore.refreshStoredStreak is the only writer):
+    //   streak_start_date    first day of the stored run (null at 0)
+    //   streak_valid_through last LOCAL day the stored number still stands
+    //                        without a recompute (= last counted day + 1, or
+    //                        the day a bridging pause ends); null = frozen by
+    //                        an open injury pause, i.e. never expires
+    //   streak_computed_at   null = row never computed by the snapshot code
+    //                        (legacy) → healed on first read / boot sweep
+    // Reads apply the decay themselves (effectiveStreakSql / readStoredStreak):
+    // a row past streak_valid_through reads 0 without touching workouts.
+    streakStartDate: date("streak_start_date"),
+    streakValidThrough: date("streak_valid_through"),
+    streakComputedAt: timestamp("streak_computed_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
     // One-time acceptance of the UGC terms / EULA, required before a user can
     // post photos (App Store Guideline 1.2). Null = not yet accepted.
     termsAcceptedAt: timestamp("terms_accepted_at", {

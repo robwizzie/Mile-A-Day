@@ -10,11 +10,9 @@ import {
 } from "./stealthService.js";
 import { VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL } from "./visibilityService.js";
 import {
-  coverageActiveFor,
-  computeCoveredStreak,
   computeStreakEras,
   type StreakEra,
-  needsFeatureWalk,
+  readStoredStreak,
 } from "./streakFeatureCore.js";
 
 const db = PostgresService.getInstance();
@@ -1082,13 +1080,6 @@ export async function recomputeFeedRolesForDay(
   ]);
 }
 
-function dateStringMinus(dateStr: string, days: number): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d));
-  date.setUTCDate(date.getUTCDate() - days);
-  return date.toISOString().slice(0, 10);
-}
-
 /**
  * Today's date (YYYY-MM-DD) in the user's local timezone, derived from the
  * timezone_offset of their most recent workout (UTC if they have none).
@@ -1121,69 +1112,13 @@ export async function getStreakErasForUser(
   return computeStreakEras(userId, userToday);
 }
 
+/**
+ * The user's current streak, as stored (see streakFeatureCore): one row read
+ * with the calendar decay applied. Nothing here walks workouts any more —
+ * uploads, edits, deletes, coverage and pauses all refresh the stored value.
+ */
 export async function getActiveStreak(userId: string) {
-  const userToday = await getUserLocalToday(userId);
-
-  // Streak-features gate: enrolled users (new build + env switch on) walk the
-  // coverage-aware path so token-covered days count. Everyone else falls
-  // through to the UNTOUCHED legacy walk below — their output is byte-
-  // identical to before this feature existed.
-  // needsFeatureWalk covers the paused case too — the legacy walk below has no
-  // knowledge of streak_pauses and would report an injured user as broken.
-  if (await needsFeatureWalk(userId)) {
-    return computeCoveredStreak(userId, userToday);
-  }
-
-  const yesterday = dateStringMinus(userToday, 1);
-
-  const qualifyingDaysQuery = `
-    SELECT to_char(local_date, 'YYYY-MM-DD') AS local_date
-    FROM workouts
-    WHERE user_id = $1
-    AND deleted_at IS NULL AND exclusion_reason IS NULL
-    GROUP BY local_date
-    HAVING SUM(distance) >= 0.95
-    ORDER BY local_date DESC
-    LIMIT $2 OFFSET $3
-  `;
-
-  const LIMIT = 100;
-  let index = 0;
-  let streak = 0;
-  let streakStartDay: string | undefined;
-  let expectedDate: string | undefined;
-
-  while (true) {
-    const results = await db.query(qualifyingDaysQuery, [
-      userId,
-      LIMIT,
-      index * LIMIT,
-    ]);
-    if (results.length === 0) break;
-
-    for (const row of results) {
-      const date: string = row.local_date;
-
-      if (expectedDate === undefined) {
-        if (date !== userToday && date !== yesterday) {
-          return { streak: 0, start: undefined };
-        }
-        streak = 1;
-        streakStartDay = date;
-        expectedDate = dateStringMinus(date, 1);
-      } else if (date === expectedDate) {
-        streak++;
-        streakStartDay = date;
-        expectedDate = dateStringMinus(date, 1);
-      } else {
-        return { streak, start: streakStartDay };
-      }
-    }
-
-    index++;
-  }
-
-  return { streak, start: streakStartDay };
+  return readStoredStreak(userId);
 }
 
 export async function getTotalMiles(userId: string, startDate?: string) {

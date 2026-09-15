@@ -14,27 +14,30 @@ import {
   getTodayMiles,
   DAILY_GOAL_TOLERANCE,
 } from "../services/workoutService.js";
-import { refreshCurrentStreak } from "../services/leaderboardService.js";
+import { effectiveStreakSql } from "../services/streakFeatureCore.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import { PostgresService } from "../services/DbService.js";
 
 const db = PostgresService.getInstance();
 
-/// Returns a map of user_id -> fresh current_streak for the given users.
-/// Streaks decay when the calendar rolls over, even if the user has not
-/// uploaded anything, so nudge/status reads reconcile before answering.
+/// Returns a map of user_id -> current_streak for the given users: the stored
+/// snapshot with the calendar decay applied in SQL, ONE query for the batch.
+/// (This used to recompute every friend's streak from their workout history —
+/// and write it — on every nudge-status read.)
 async function fetchStreaks(
   userIds: string[],
 ): Promise<Record<string, number>> {
   if (userIds.length === 0) return {};
   const uniqueIds = [...new Set(userIds)];
   try {
-    const map: Record<string, number> = {};
-    await Promise.all(
-      uniqueIds.map(async (userId) => {
-        map[userId] = await refreshCurrentStreak(userId);
-      }),
+    const rows = await db.query<{ user_id: string; current_streak: number }>(
+      `SELECT u.user_id, (${effectiveStreakSql("u")})::int AS current_streak
+         FROM users u
+        WHERE u.user_id = ANY($1::text[])`,
+      [uniqueIds],
     );
+    const map: Record<string, number> = {};
+    for (const r of rows) map[r.user_id] = Number(r.current_streak) || 0;
     return map;
   } catch (err: any) {
     console.error(

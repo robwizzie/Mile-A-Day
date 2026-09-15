@@ -115,12 +115,16 @@ export async function uploadWorkouts(req: Request, res: Response) {
 
     const uploadedWorkoutIds = await uploadWorkoutsDb(userId, req.body);
 
-    // Refresh the precomputed streak so the streak leaderboard stays fresh.
-    // Fire-and-forget — recomputation reads ≤500 qualifying days for one
-    // user, so it's cheap, but blocking the response on it isn't worth it.
-    refreshCurrentStreak(userId).catch((err) =>
-      console.error("Error refreshing current_streak:", err.message),
-    );
+    // Refresh the STORED streak before answering: every read path serves that
+    // snapshot now (nothing recomputes on read), and the client fetches /stats
+    // the moment this returns — fire-and-forget here raced that read and could
+    // hand back the pre-upload number. It's one gaps-and-islands query,
+    // however long the history. Never fails the upload.
+    try {
+      await refreshCurrentStreak(userId);
+    } catch (err: any) {
+      console.error("Error refreshing current_streak:", err.message);
+    }
 
     // Streak tokens: detect a completed Double Down (missed yesterday, 2× goal
     // today). Fire-and-forget and double-gated — instant no-op until the env
@@ -873,6 +877,14 @@ export async function updateWorkout(req: Request, res: Response) {
       return res.status(404).json({ error: "Workout not found" });
     }
 
+    // A distance edit can carry a day across (or back under) the mile, and
+    // the streak is a stored snapshot that only this refresh moves.
+    try {
+      await refreshCurrentStreak(userId);
+    } catch (err: any) {
+      console.error("Error refreshing current_streak:", err.message);
+    }
+
     try {
       await checkRaceCompletions(userId);
     } catch (raceError: any) {
@@ -916,6 +928,13 @@ export async function setDuplicateDecisionController(
     );
     if (result === null) {
       return res.status(404).json({ error: "workout_not_found" });
+    }
+    // Counting or excluding a workout can make or break that day's mile, and
+    // the streak is a stored snapshot that only this refresh moves.
+    try {
+      await refreshCurrentStreak(req.params.userId);
+    } catch (err: any) {
+      console.error("Error refreshing current_streak:", err.message);
     }
     // The day's totals just moved. The client refreshes its own stats — this
     // returns the affected date so it knows which day to re-pull.

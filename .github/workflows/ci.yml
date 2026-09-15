@@ -65,6 +65,13 @@ jobs:
         run: node dist/db/migrateCli.js
       - name: Seeded feed/story/hype/signing smoke test
         run: node scripts/ci-smoke.mjs
+      # The stored streak snapshot. A 2,500-day streak once read back as
+      # exactly 500 from Recalibrate (a LIMIT in the writer) and nothing
+      # noticed; the friends list decaying a day late, a covered day that
+      # stops counting, a pause that un-freezes — all silent. Pinned here,
+      # plus random histories diffed against an independent reference walk.
+      - name: Streak snapshot check
+        run: node scripts/streak-check.mjs
       # Buddy Walks shipped fully built and then sat dead in production because
       # a rollout flag defaulted off and every endpoint answered 404 in silence.
       # These assertions pin the flag's direction, the enrollment that rides

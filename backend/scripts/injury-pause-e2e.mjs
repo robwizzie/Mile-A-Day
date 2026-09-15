@@ -182,6 +182,9 @@ check(
 await ips.endInjuryPause("u-bridge");
 check("R7 streak survives the pause intact", await streakOf("u-bridge"), 370);
 await seedDays("u-bridge", 0, 0); // first run back, today
+// The streak is a stored snapshot; seeding by SQL bypasses the upload path
+// that refreshes it, so do what the upload would.
+await refreshCurrentStreak("u-bridge");
 check(
   "R7 first day back continues from frozen value",
   await streakOf("u-bridge"),

@@ -1,7 +1,7 @@
 import { Friendship, User } from "../types/user.js";
 import { PostgresService } from "./DbService.js";
 import { runHypeMatchSql, runHypedByViewerMatchSql } from "./hypeService.js";
-import { refreshCurrentStreak } from "./leaderboardService.js";
+import { effectiveStreakSql } from "./streakFeatureCore.js";
 import { START_OF_TODAY_ET_SQL } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
@@ -63,9 +63,14 @@ export async function getFriendship(
  * whose `email` is a NON-optional String, so an absent key hard-fails Codable
  * and empties the list. The empty-string email is present for the old client
  * and leaks nothing. Drop it once the email-optional build has fully rolled out.
+ *
+ * current_streak is the STORED snapshot with the calendar decay applied in SQL
+ * (effectiveStreakSql) — this list used to recompute every friend's streak
+ * from their whole workout history on every read, N walks and N writes per
+ * open of the Friends tab.
  */
 const FRIEND_SAFE_USER_COLUMNS = `u.user_id, u.username, u.first_name, u.last_name, u.bio,
-			u.profile_image_url, u.current_streak, '' AS email`;
+			u.profile_image_url, (${effectiveStreakSql("u")})::int AS current_streak, '' AS email`;
 
 export async function getFriends(user: string): Promise<User[]> {
   const friends = await db.query(
@@ -79,20 +84,7 @@ export async function getFriends(user: string): Promise<User[]> {
     [user],
   );
 
-  return refreshFriendStreaks(friends);
-}
-
-async function refreshFriendStreaks<
-  T extends { user_id: string; current_streak?: number | null },
->(friends: T[]): Promise<T[]> {
-  if (friends.length === 0) return friends;
-  const refreshed = await Promise.all(
-    friends.map(async (friend) => ({
-      ...friend,
-      current_streak: await refreshCurrentStreak(friend.user_id),
-    })),
-  );
-  return refreshed;
+  return friends;
 }
 
 export async function getSentRequests(user: string): Promise<User[]> {

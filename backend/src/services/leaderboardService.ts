@@ -1,9 +1,8 @@
 import { PostgresService } from "./DbService.js";
 import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
 import {
-  coverageActiveFor,
-  computeCoveredStreak,
-  needsFeatureWalk,
+  refreshStoredStreak,
+  reconcileAllStreaks,
 } from "./streakFeatureCore.js";
 
 const db = PostgresService.getInstance();
@@ -689,95 +688,17 @@ async function getCurrentUserPaceEntry(
 }
 
 /**
- * Recompute a single user's current streak and write it to users.current_streak.
- * Called by the workout upload pipeline so the streak leaderboard stays fresh
- * without a cron job. Mirrors the qualifying-day rule from getActiveStreak:
- * a day qualifies when SUM(distance) >= 0.95 mi, counting consecutive
- * qualifying days back from today (or yesterday if today has no workouts yet).
+ * Recompute a single user's current streak and write it to users.current_streak
+ * (+ streak_start_date / streak_valid_through / streak_computed_at, and the
+ * longest_streak ratchet). THE only writer of those columns — every workout,
+ * coverage or pause mutation calls this, and no read path recomputes. The
+ * whole thing is one gaps-and-islands query in streakFeatureCore, so a
+ * 2,000-day history costs the same as a 20-day one; the previous walk here was
+ * capped at LIMIT 500, which is why every streak past 500 days (Recalibrate
+ * included) read back as exactly 500.
  */
 export async function refreshCurrentStreak(userId: string): Promise<number> {
-  const todayRow = await db.query(
-    `
-		SELECT to_char(
-		  (NOW() + (COALESCE(
-		    (SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
-		    0
-		  ) || ' minutes')::interval)::date,
-		  'YYYY-MM-DD'
-		) AS user_today
-		`,
-    [userId],
-  );
-  const userToday: string = todayRow[0]?.user_today;
-  if (!userToday) {
-    await db.query(`UPDATE users SET current_streak = 0 WHERE user_id = $1`, [
-      userId,
-    ]);
-    return 0;
-  }
-
-  // Streak-features gate. CRITICAL: this function is the ONLY writer of
-  // users.current_streak and is also invoked by the 6-hourly
-  // reconcileStaleStreaks cron — if it didn't honor coverage, that cron would
-  // silently erase every token-saved streak within hours. Enrolled users (new
-  // build + env switch on) get the coverage-aware walk; everyone else runs
-  // the untouched legacy loop below, byte-identical to before.
-  // needsFeatureWalk, not coverageActiveFor: a user with an open injury pause
-  // must never fall into the legacy loop, which would persist their frozen
-  // streak as broken. See streakFeatureCore.needsFeatureWalk.
-  if (await needsFeatureWalk(userId)) {
-    const covered = await computeCoveredStreak(userId, userToday);
-    await db.query(
-      `UPDATE users SET current_streak = $1,
-              longest_streak = GREATEST(longest_streak, $1)
-       WHERE user_id = $2`,
-      [covered.streak, userId],
-    );
-    return covered.streak;
-  }
-
-  const days = await db.query(
-    `
-		SELECT to_char(local_date, 'YYYY-MM-DD') AS local_date
-		FROM workouts
-		WHERE user_id = $1
-		AND deleted_at IS NULL AND exclusion_reason IS NULL
-		GROUP BY local_date
-		HAVING SUM(distance) >= 0.95
-		ORDER BY local_date DESC
-		LIMIT 500
-		`,
-    [userId],
-  );
-
-  let streak = 0;
-  let expected: string | undefined;
-  const yesterday = dateStringMinus(userToday, 1);
-
-  for (const row of days) {
-    const date: string = row.local_date;
-    if (expected === undefined) {
-      if (date !== userToday && date !== yesterday) {
-        streak = 0;
-        break;
-      }
-      streak = 1;
-      expected = dateStringMinus(date, 1);
-    } else if (date === expected) {
-      streak++;
-      expected = dateStringMinus(date, 1);
-    } else {
-      break;
-    }
-  }
-
-  await db.query(
-    `UPDATE users SET current_streak = $1,
-            longest_streak = GREATEST(longest_streak, $1)
-     WHERE user_id = $2`,
-    [streak, userId],
-  );
-  return streak;
+  return refreshStoredStreak(userId);
 }
 
 /**
@@ -800,47 +721,15 @@ export async function ratchetLongestStreak(
 }
 
 /**
- * Recompute current_streak for every user who currently has a non-zero stored
- * streak, and write back the corrected value.
- *
- * Why this is needed: refreshCurrentStreak only runs on the workout-upload path,
- * so a user who hit their goal and then stopped uploading keeps their last
- * computed streak forever — the stored value never decays as the calendar moves
- * past the today/yesterday grace window. That makes the streak leaderboard and
- * the public-streak endpoint show stale streaks (commonly a stuck "1"). This job
- * reconciles them daily. Only users with current_streak > 0 can be stale-high,
- * so we scope to those; the upload path keeps values fresh in the upward
- * direction. refreshCurrentStreak derives "today" from each user's own timezone
- * offset, so the result is correct regardless of when this job runs.
+ * Daily safety net: recompute current_streak for every user with a non-zero
+ * stored streak and write back whatever changed. Calendar decay no longer
+ * needs this (reads apply it from streak_valid_through, and the hourly
+ * decayExpiredStreaks sweep zeroes the rows); it exists to catch anything that
+ * mutated workouts without calling refreshCurrentStreak.
  */
 export async function reconcileStaleStreaks(): Promise<{
   checked: number;
   changed: number;
 }> {
-  const rows = await db.query<{ user_id: string; current_streak: number }>(
-    `SELECT user_id, current_streak FROM users WHERE current_streak > 0`,
-  );
-
-  let changed = 0;
-  for (const { user_id, current_streak } of rows) {
-    try {
-      const after = await refreshCurrentStreak(user_id);
-      if (current_streak !== after) changed++;
-    } catch (err: any) {
-      // Isolate per-user failures so one bad row doesn't abort the sweep.
-      console.error(
-        `[Streaks] Failed to reconcile streak for ${user_id}:`,
-        err.message,
-      );
-    }
-  }
-
-  return { checked: rows.length, changed };
-}
-
-function dateStringMinus(dateStr: string, days: number): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d));
-  date.setUTCDate(date.getUTCDate() - days);
-  return date.toISOString().slice(0, 10);
+  return reconcileAllStreaks();
 }

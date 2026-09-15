@@ -13,6 +13,10 @@ import {
 } from "../services/notificationService.js";
 import { sendPendingDailyReminders } from "../services/dailyReminderService.js";
 import { reconcileStaleStreaks } from "../services/leaderboardService.js";
+import {
+  decayExpiredStreaks,
+  healUncomputedStreaks,
+} from "../services/streakFeatureCore.js";
 import { expireStalePendingNotifications } from "../services/pendingNotificationService.js";
 import { sendPendingFriendRequestReminders } from "../services/friendRequestReminderService.js";
 import { runJob } from "./cronRunner.js";
@@ -99,21 +103,45 @@ export function startNotificationCron(): void {
     },
   );
 
-  // Reconcile stored current_streak values every 6 hours. refreshCurrentStreak
-  // only runs on workout upload, so streaks of users who stopped running go
-  // stale (a stuck "1" on the streak leaderboard / public-streak endpoint).
-  // Running every 6h keeps the leaderboard fresh across timezones as each
-  // user's local day rolls over. Bounded to users with current_streak > 0.
-  cron.schedule("0 */6 * * *", async () => {
-    await runJob("streaks.reconcile_stale", async () => {
-      const { checked, changed } = await reconcileStaleStreaks();
-      console.log(
-        `[CRON] Streak reconcile complete: ${changed}/${checked} updated.`,
-      );
+  // Hourly streak upkeep, both halves cheap regardless of user count:
+  //  - decayExpiredStreaks: ONE UPDATE zeroing every stored streak whose
+  //    valid-through day has passed in the user's own timezone. Reads already
+  //    apply that decay themselves; this keeps the leaderboard's
+  //    current_streak index from ranking rows that would read 0.
+  //  - healUncomputedStreaks: compute-and-store any row the snapshot code has
+  //    never written (empty after the first boot sweep). At :25 so it never
+  //    shares a tick with the other hourly jobs (:00, :10, :20, :35, :50).
+  cron.schedule("25 * * * *", async () => {
+    await runJob("streaks.upkeep", async () => {
+      const decayed = await decayExpiredStreaks();
+      const healed = await healUncomputedStreaks();
+      if (decayed > 0 || healed > 0) {
+        console.log(
+          `[CRON] Streak upkeep: ${decayed} expired, ${healed} healed.`,
+        );
+      }
     });
   });
 
+  // Daily full reconcile (3:30 AM ET, the quietest hour for US users):
+  // recompute every active user's streak from their workouts and write back
+  // whatever changed. The safety net for anything that mutated workouts
+  // without calling refreshCurrentStreak; the no-op-write skip makes it one
+  // or two cheap queries per user.
+  cron.schedule(
+    "30 3 * * *",
+    async () => {
+      await runJob("streaks.reconcile_stale", async () => {
+        const { checked, changed } = await reconcileStaleStreaks();
+        console.log(
+          `[CRON] Streak reconcile complete: ${changed}/${checked} updated.`,
+        );
+      });
+    },
+    { timezone: "America/New_York" },
+  );
+
   console.log(
-    "Notification cron jobs scheduled (hourly daily-reminder + streak reconcile every 6h + 3 AM, 9 AM, 6 PM ET).",
+    "Notification cron jobs scheduled (hourly daily-reminder + hourly streak upkeep + daily streak reconcile + 3 AM, 9 AM, 6 PM ET).",
   );
 }

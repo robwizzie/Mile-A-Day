@@ -3,19 +3,36 @@ import { PostgresService } from "./DbService.js";
 const db = PostgresService.getInstance();
 
 /**
- * Low-level streak-features plumbing shared by the streak walks. Deliberately
- * imports ONLY DbService so both workoutService and leaderboardService can use
- * it without an import cycle (the high-level token logic lives in
- * streakFeatureService, which imports those services in turn).
+ * The streak: how it is computed, how it is STORED, and how it is read.
  *
- * The safety contract of the whole feature lives here:
+ * Deliberately imports ONLY DbService so workoutService, leaderboardService
+ * and friendshipService can all use it without an import cycle (the
+ * high-level token logic lives in streakFeatureService, which imports those
+ * services in turn).
+ *
+ * THE RULE: nothing recomputes a streak on a read path. `users.current_streak`
+ * is a stored snapshot, written only by `refreshStoredStreak`, and every read
+ * (`readStoredStreak`, `effectiveStreakSql`) applies the calendar decay itself
+ * from `streak_valid_through`. So every mutation that can change which days
+ * qualify — a workout upload/edit/delete/exclusion, a coverage row, a pause —
+ * MUST call refreshStoredStreak (via leaderboardService.refreshCurrentStreak).
+ * Miss one and the number is stale until the daily reconcile.
+ *
+ * Why it's built this way: the previous walks paginated qualifying days 100 at
+ * a time (each page re-aggregating the user's whole history — O(N²) for a
+ * 2,000-day streak), the stored writer was capped at `LIMIT 500` (so every
+ * streak over 500 days read back as exactly 500, including from Recalibrate),
+ * and the friends list re-ran the whole thing for EVERY friend on EVERY read.
+ * Now a recompute is ONE gaps-and-islands query and a read is one row.
+ *
+ * The safety contract of the token feature still lives here:
  *   - the per-user gate is the ENROLLMENT STAMP, which only app builds that
  *     ship the token UI write — so the feature reaches a user exactly when
- *     their app can display it. Un-enrolled users' streak math runs the EXACT
- *     legacy code path — the callers branch before any of this runs.
+ *     their app can display it. Un-enrolled users never see coverage.
  *   - STREAK_FEATURES_DISABLED=true is the emergency kill switch: it freezes
- *     every token behavior (walks fall back to legacy, no earning/consuming,
- *     no pushes) for everyone without needing an app release. Normally unset.
+ *     every token behavior (coverage ignored, no earning/consuming, no pushes)
+ *     for everyone without needing an app release. Normally unset. Pauses are
+ *     NOT behind it — see needsFeatureWalk for why.
  *   - a covered day (one streak_coverage row) counts as "not a miss" in the
  *     walk, no matter WHICH token wrote it. The walks never branch per token.
  */
@@ -27,6 +44,13 @@ export function streakFeaturesGloballyEnabled(): boolean {
   // config to freeze it in an incident.
   return process.env.STREAK_FEATURES_DISABLED !== "true";
 }
+
+/**
+ * A day qualifies for the streak when its counted miles reach this. It is
+ * workoutService.DAILY_GOAL_TOLERANCE (0.95 — a GPS 0.98-mile day must not
+ * break a streak), restated here because this module can't import that file.
+ */
+export const STREAK_QUALIFYING_MILES = 0.95;
 
 /** One users-row read of everything the token logic needs. */
 export interface StreakFeatureUserRow {
@@ -53,10 +77,8 @@ export async function getStreakFeatureRow(
 }
 
 /**
- * Should this user's streak walk honor coverage? False for everyone until the
- * env switch flips AND the user's (new-build-only) enrollment stamp exists —
- * the callers run their untouched legacy code in that case, so live users'
- * streak output stays byte-identical.
+ * Should this user's streak honor coverage? False for everyone until the
+ * env switch is on AND the user's (new-build-only) enrollment stamp exists.
  */
 export async function coverageActiveFor(userId: string): Promise<boolean> {
   if (!streakFeaturesGloballyEnabled()) return false;
@@ -68,16 +90,14 @@ export async function coverageActiveFor(userId: string): Promise<boolean> {
 }
 
 /**
- * Must this user's streak skip the LEGACY walk? True when token coverage is
- * live for them, and — independently — whenever they have any pause on record.
+ * Does this user's streak need coverage or pause handling? Kept for callers
+ * that branch on it; the walks themselves no longer need to be told — they
+ * read the user's enrollment and pauses in the same query as everything else.
  *
- * The pause half is not an optimization, it's a safety interlock. The legacy
- * loop knows nothing about streak_pauses, so if STREAK_FEATURES_DISABLED were
- * flipped during an incident, every injured user would fall into it and
- * refreshCurrentStreak (the ONLY writer of users.current_streak, also driven by
- * a 6-hourly cron) would persist their frozen streak as BROKEN. That write is
- * not recoverable, and it would come from the switch whose entire purpose is to
- * be safe to flip. Killing the tokens must never un-bridge a pause.
+ * The pause half is a safety interlock, not an optimization: killing the
+ * tokens (STREAK_FEATURES_DISABLED) must never un-bridge a pause, because
+ * refreshStoredStreak would then persist a frozen streak as BROKEN, and that
+ * write is not recoverable.
  */
 export async function needsFeatureWalk(userId: string): Promise<boolean> {
   if (await coverageActiveFor(userId)) return true;
@@ -116,9 +136,8 @@ export interface CoveredDay {
  * Covered days for a user, newest first, optionally from `sinceDate` on.
  *
  * Returns [] whenever coverage is not ACTIVE for this user (env off, or not
- * enrolled) — those users' streaks are computed by the byte-identical legacy
- * loop that ignores coverage entirely, so reporting covered days would explain
- * a save that never happened.
+ * enrolled) — those users' streaks ignore coverage entirely, so reporting
+ * covered days would explain a save that never happened.
  */
 export async function fetchCoveredDays(
   userId: string,
@@ -252,178 +271,207 @@ export function dateStrPlus(dateStr: string, days: number): string {
   return dateStrMinus(dateStr, -days);
 }
 
+// ─── The user's "today" ────────────────────────────────────────────────────
+
 /**
- * Descending, de-duped stream over the UNION of the user's qualifying workout
- * days and the given covered days (YYYY-MM-DD strings). Pass coverage=[] and
- * the stream degenerates to the plain qualifying-day sequence — byte-identical
- * input to the legacy walks. Extracted verbatim from computeCoveredStreak so
- * every consumer (active streak, streak eras) walks THE same stream; per the
- * house rule, streak recomputes must never fork this.
+ * Today's date in the user's local timezone, as a SQL expression over a
+ * `users` row aliased `alias`: derived from the timezone_offset of their most
+ * recent workout (UTC if they have none) — the same derivation every streak
+ * and stats surface uses, so "today" can never mean two things.
+ * Index-backed per row (idx_workouts_user_device_end), so it's fine inside a
+ * list query.
  */
-export function mergedQualifyingDayStream(
-  userId: string,
-  coverage: string[], // DESC
-): { next: () => Promise<string | undefined> } {
-  const qualifyingDaysQuery = `
-    SELECT to_char(local_date, 'YYYY-MM-DD') AS local_date
-    FROM workouts
-    WHERE user_id = $1
-    AND deleted_at IS NULL AND exclusion_reason IS NULL
-    GROUP BY local_date
-    HAVING SUM(distance) >= 0.95
-    ORDER BY local_date DESC
-    LIMIT $2 OFFSET $3
-  `;
-  const LIMIT = 100;
-
-  // Lazily merge the paginated qualifying stream with the (small) coverage
-  // list, descending, de-duped — a backfilled workout can land on an
-  // already-covered day and must not count twice.
-  let pageIndex = 0;
-  let page: { local_date: string }[] | null = null;
-  let pi = 0; // cursor into page
-  let ci = 0; // cursor into coverage
-  let last: string | undefined;
-
-  const next = async (): Promise<string | undefined> => {
-    if (page === null) {
-      page = await db.query(qualifyingDaysQuery, [userId, LIMIT, 0]);
-    }
-    while (true) {
-      if (pi >= page.length && page.length === LIMIT) {
-        pageIndex++;
-        page = await db.query(qualifyingDaysQuery, [
-          userId,
-          LIMIT,
-          pageIndex * LIMIT,
-        ]);
-        pi = 0;
-      }
-      const q = pi < page.length ? page[pi].local_date : undefined;
-      const c = ci < coverage.length ? coverage[ci] : undefined;
-      let candidate: string | undefined;
-      if (q !== undefined && (c === undefined || q >= c)) {
-        candidate = q;
-        pi++;
-        if (c !== undefined && c === q) ci++; // dupe: consume both
-      } else if (c !== undefined) {
-        candidate = c;
-        ci++;
-      } else {
-        return undefined;
-      }
-      if (candidate === last) continue; // safety de-dupe
-      last = candidate;
-      return candidate;
-    }
-  };
-
-  return { next };
+export function userTodaySql(alias: string): string {
+  return `(NOW() + (COALESCE((
+      SELECT w.timezone_offset FROM workouts w
+      WHERE w.user_id = ${alias}.user_id
+      ORDER BY w.device_end_date DESC LIMIT 1), 0) || ' minutes')::interval)::date`;
 }
 
 /**
- * The coverage-aware streak walk: identical anchor/grace/consecutive semantics
- * to the legacy walks (today counts if present but isn't required; stop at the
- * first uncovered miss), over the UNION of qualifying workout days and covered
- * days. Paginates the same qualifying-days query the legacy walk uses.
- *
- * Only ever called for enrolled users with the env switch on.
+ * The stored streak WITH the calendar decay applied, as a SQL expression over
+ * a `users` row aliased `alias` — for lists (friends, nudge status) that used
+ * to recompute every member's streak on every read. A row past its
+ * `streak_valid_through` reads 0; a null valid-through (frozen by a pause, or
+ * a legacy row the boot sweep hasn't reached) reads the column as-is.
  */
-export async function computeCoveredStreak(
+export function effectiveStreakSql(alias: string): string {
+  return `CASE WHEN ${alias}.streak_valid_through IS NOT NULL
+               AND ${alias}.streak_valid_through < ${userTodaySql(alias)}
+          THEN 0 ELSE ${alias}.current_streak END`;
+}
+
+// ─── Qualifying days ───────────────────────────────────────────────────────
+
+/**
+ * The user's qualifying days ($1 = user, $2 = the latest day to consider):
+ * every local_date whose counted miles reach the threshold, UNIONed with their
+ * covered days when coverage applies. Un-enrolled users get the plain
+ * qualifying-day set. `local_date <= $2` caps the walk at the user's today so
+ * a future-dated row (a device clock ahead of itself) can't anchor the streak
+ * off tomorrow and read a live run as 0.
+ */
+function qualifyingDaysSql(includeCoverage: boolean): string {
+  return `SELECT local_date FROM workouts
+          WHERE user_id = $1 AND local_date <= $2::date
+            AND deleted_at IS NULL AND exclusion_reason IS NULL
+          GROUP BY local_date
+          HAVING SUM(distance) >= ${STREAK_QUALIFYING_MILES}
+          ${
+            includeCoverage
+              ? `UNION
+          SELECT local_date FROM streak_coverage
+          WHERE user_id = $1 AND local_date <= $2::date`
+              : ""
+          }`;
+}
+
+/**
+ * Descending, de-duped list of the user's qualified-or-covered days up to
+ * `upTo`. ONE query, however long the history — this feeds the JavaScript
+ * walks, which only run for users with a pause on record (elision doesn't
+ * express cleanly in SQL). Everyone else is answered by the island queries
+ * below without the days ever leaving Postgres.
+ */
+async function fetchQualifyingDaysDesc(
   userId: string,
-  userToday: string,
-): Promise<{ streak: number; start: string | undefined }> {
-  // Coverage is gated INSIDE rather than assumed by the caller, because this
-  // walk is now also the path for a paused user whose token coverage is switched
-  // off — see needsFeatureWalk. Pauses are always applied; tokens only when live.
-  const coverage = (await coverageActiveFor(userId))
-    ? await fetchCoverageDates(userId) // DESC
-    : [];
-  const { suppress, bridge } = makePauseGates(
-    await fetchPauseIntervals(userId),
+  includeCoverage: boolean,
+  upTo: string,
+): Promise<string[]> {
+  const rows = await db.query<{ d: string }>(
+    `SELECT to_char(local_date, 'YYYY-MM-DD') AS d
+     FROM (${qualifyingDaysSql(includeCoverage)}) q
+     ORDER BY local_date DESC`,
+    [userId, upTo],
   );
-  // The anchor elides too, and it has to: a user who resumes today after a
-  // 90-day pause has no qualifying day anywhere near today, so anchoring on the
-  // literal today/yesterday would read their 400-day streak as 0 the instant
-  // they came back. Anchoring on the last day that COUNTS makes the pause
-  // invisible to the walk from both ends.
-  const anchorToday = elidePaused(userToday, bridge);
-  const anchorYesterday = elidePaused(dateStrMinus(anchorToday, 1), bridge);
-  const { next } = mergedQualifyingDayStream(userId, coverage);
-
-  let streak = 0;
-  let streakStartDay: string | undefined;
-  let expectedDate: string | undefined;
-
-  while (true) {
-    const date = await next();
-    if (date === undefined) break;
-    // A run logged DURING a pause earns nothing — the streak is frozen, not
-    // merely protected. Skipping here (rather than filtering the query) keeps
-    // the day in every other total: miles, competitions and the feed all still
-    // count it, because only the streak is paused.
-    if (suppress(date)) continue;
-
-    if (expectedDate === undefined) {
-      if (date !== anchorToday && date !== anchorYesterday) {
-        return { streak: 0, start: undefined };
-      }
-      streak = 1;
-      streakStartDay = date;
-      expectedDate = elidePaused(dateStrMinus(date, 1), bridge);
-    } else if (date === expectedDate) {
-      streak++;
-      streakStartDay = date;
-      expectedDate = elidePaused(dateStrMinus(date, 1), bridge);
-    } else {
-      return { streak, start: streakStartDay };
-    }
-  }
-
-  return { streak, start: streakStartDay };
+  return rows.map((r) => r.d);
 }
 
-export interface StreakEra {
-  start_date: string; // YYYY-MM-DD
-  end_date: string; // YYYY-MM-DD
-  length: number;
-  is_current: boolean;
+// ─── The stored snapshot ───────────────────────────────────────────────────
+
+/** Everything a recompute or a read needs about one user, in ONE row read. */
+interface StreakContext {
+  userId: string;
+  userToday: string;
+  enrolled: boolean;
+  pauses: PauseInterval[];
+  stored: {
+    streak: number;
+    start: string | null;
+    validThrough: string | null;
+    /** false = never written by the snapshot code → heal on first read. */
+    computed: boolean;
+  };
+}
+
+async function loadStreakContext(
+  userId: string,
+): Promise<StreakContext | null> {
+  const rows = await db.query<{
+    user_today: string;
+    enrolled: boolean;
+    current_streak: number;
+    streak_start_date: string | null;
+    streak_valid_through: string | null;
+    computed: boolean;
+    pauses: PauseInterval[];
+  }>(
+    `SELECT to_char(${userTodaySql("u")}, 'YYYY-MM-DD') AS user_today,
+            (u.streak_features_at IS NOT NULL) AS enrolled,
+            u.current_streak,
+            to_char(u.streak_start_date, 'YYYY-MM-DD') AS streak_start_date,
+            to_char(u.streak_valid_through, 'YYYY-MM-DD') AS streak_valid_through,
+            (u.streak_computed_at IS NOT NULL) AS computed,
+            COALESCE((
+              SELECT json_agg(json_build_object(
+                       'started_on', to_char(sp.started_on, 'YYYY-MM-DD'),
+                       'resumed_on', to_char(sp.resumed_on, 'YYYY-MM-DD'),
+                       'expired', (sp.expired_at IS NOT NULL))
+                     ORDER BY sp.started_on DESC)
+              FROM streak_pauses sp WHERE sp.user_id = u.user_id
+            ), '[]'::json) AS pauses
+     FROM users u WHERE u.user_id = $1`,
+    [userId],
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    userId,
+    userToday: r.user_today,
+    enrolled: r.enrolled,
+    pauses: r.pauses ?? [],
+    stored: {
+      streak: Number(r.current_streak) || 0,
+      start: r.streak_start_date,
+      validThrough: r.streak_valid_through,
+      computed: r.computed,
+    },
+  };
+}
+
+/** What a recompute produces — the four columns refreshStoredStreak writes. */
+export interface StreakSnapshot {
+  streak: number;
+  /** First and last counted day of the run; undefined at 0. */
+  start?: string;
+  end?: string;
+  /**
+   * Last local day this number stands without a recompute. null = frozen by
+   * an open pause (never expires) — or nothing to expire, at 0.
+   */
+  validThrough: string | null;
 }
 
 /**
- * The user's ENTIRE qualified-or-covered day history grouped into consecutive
- * runs ("eras"), newest first. Covered days count exactly when the live walks
- * would count them (same enrollment + env gate via coverageActiveFor), so the
- * current era's length always agrees with getActiveStreak /
- * refreshCurrentStreak — un-enrolled users get the plain qualifying-day
- * grouping, legacy parity. `is_current` uses the walks' today/yesterday grace,
- * and by descending construction only the first era can carry it.
+ * The consecutive-days walk, over an already-fetched descending day list:
+ * today counts if present but isn't required (yesterday anchors too), stop at
+ * the first uncovered miss. A run logged DURING a pause earns nothing — the
+ * streak is frozen, not merely protected — so suppressed days are skipped
+ * here rather than filtered out of the query, which keeps them in every other
+ * total (miles, competitions, the feed all still count them).
  */
-export async function computeStreakEras(
-  userId: string,
-  userToday: string,
-): Promise<{ eras: StreakEra[]; longest: number }> {
-  const active = await coverageActiveFor(userId);
-  const coverage = active ? await fetchCoverageDates(userId) : [];
-  // Pauses are fetched unconditionally, NOT behind `active`. With the kill
-  // switch on, the live walks still bridge open pauses (needsFeatureWalk), so
-  // gating this on coverage would make /streak-eras call the current era broken
-  // while the streak endpoint calls it intact — the same user, two answers.
-  const { suppress, bridge } = makePauseGates(await fetchPauseIntervals(userId));
-  const { next } = mergedQualifyingDayStream(userId, coverage);
-  // Same elided anchor as computeCoveredStreak, so the current era's length
-  // keeps agreeing with getActiveStreak across a pause (house rule: the walks
-  // must never disagree about the live number).
-  const anchorToday = elidePaused(userToday, bridge);
-  const anchorYesterday = elidePaused(dateStrMinus(anchorToday, 1), bridge);
+function walkCurrent(
+  daysDesc: string[],
+  anchorToday: string,
+  anchorYesterday: string,
+  suppress: (d: string) => boolean,
+  bridge: (d: string) => boolean,
+): { streak: number; start?: string; end?: string } {
+  let streak = 0;
+  let start: string | undefined;
+  let end: string | undefined;
+  let expected: string | undefined;
+  for (const date of daysDesc) {
+    if (suppress(date)) continue;
+    if (expected === undefined) {
+      if (date !== anchorToday && date !== anchorYesterday)
+        return { streak: 0 };
+      streak = 1;
+      start = date;
+      end = date;
+    } else if (date === expected) {
+      streak++;
+      start = date;
+    } else {
+      break;
+    }
+    expected = elidePaused(dateStrMinus(date, 1), bridge);
+  }
+  return { streak, start, end };
+}
 
+/** Same walk, but grouping the WHOLE list into runs ("eras"), newest first. */
+function walkEras(
+  daysDesc: string[],
+  anchorToday: string,
+  anchorYesterday: string,
+  suppress: (d: string) => boolean,
+  bridge: (d: string) => boolean,
+): StreakEra[] {
   const eras: StreakEra[] = [];
   let open: StreakEra | null = null;
   let expected: string | undefined;
-
-  while (true) {
-    const date = await next();
-    if (date === undefined) break;
+  for (const date of daysDesc) {
     if (suppress(date)) continue;
     if (open !== null && date === expected) {
       open.start_date = date;
@@ -440,12 +488,386 @@ export async function computeStreakEras(
     expected = elidePaused(dateStrMinus(date, 1), bridge);
   }
   if (open !== null) eras.push(open);
+  return eras;
+}
+
+/**
+ * Until which local day does a streak ending on `end` stand without a new
+ * qualifying day? Normally `end + 1` (the yesterday grace). A LIVE pause moves
+ * it: days inside a bridging pause don't count as misses, so the run stays
+ * valid until the first unpaused day after it — and an OPEN pause has no such
+ * day, so the streak is frozen (null). Exactly mirrors how the walk anchors:
+ * on day T the run is current iff `end` is the elided today or yesterday.
+ */
+export function streakValidThrough(
+  end: string,
+  pauses: PauseInterval[],
+): string | null {
+  if (pauses.some((p) => p.resumed_on === null && !p.expired)) return null;
+  const { bridge } = makePauseGates(pauses);
+  let d = dateStrPlus(end, 1);
+  for (let i = 0; i < MAX_PAUSE_ELIDE_DAYS; i++) {
+    if (!bridge(d)) return d;
+    d = dateStrPlus(d, 1);
+  }
+  return null;
+}
+
+async function computeSnapshotWith(
+  ctx: StreakContext,
+  userToday: string,
+): Promise<StreakSnapshot> {
+  const includeCoverage = ctx.enrolled && streakFeaturesGloballyEnabled();
+
+  if (ctx.pauses.length === 0) {
+    // The common case, answered entirely in Postgres: gaps-and-islands over
+    // the qualifying days, keeping the island the NEWEST day belongs to. Under
+    // a DESC row numbering the island key must ADD the row number (`d + rn`);
+    // consecutive days then share a key. (Subtracting under DESC drifts two
+    // days per row and makes every date its own island — the bug that once
+    // had streakEndingAt answer 1 for every real streak.)
+    const rows = await db.query<{
+      len: number;
+      start_d: string | null;
+      end_d: string | null;
+    }>(
+      `WITH days AS (${qualifyingDaysSql(includeCoverage)}),
+       numbered AS (
+         SELECT local_date,
+                local_date + (ROW_NUMBER() OVER (ORDER BY local_date DESC))::int AS grp
+         FROM days
+       ),
+       newest AS (SELECT grp FROM numbered ORDER BY local_date DESC LIMIT 1)
+       SELECT COUNT(*)::int AS len,
+              to_char(MIN(n.local_date), 'YYYY-MM-DD') AS start_d,
+              to_char(MAX(n.local_date), 'YYYY-MM-DD') AS end_d
+       FROM numbered n JOIN newest ON newest.grp = n.grp`,
+      [ctx.userId, userToday],
+    );
+    const r = rows[0];
+    const end = r?.end_d ?? null;
+    // Anchor rule, unchanged: the run must reach today or yesterday.
+    if (!r || !end || !r.start_d || r.len <= 0)
+      return { streak: 0, validThrough: null };
+    if (end !== userToday && end !== dateStrMinus(userToday, 1)) {
+      return { streak: 0, validThrough: null };
+    }
+    return {
+      streak: Number(r.len),
+      start: r.start_d,
+      end,
+      validThrough: streakValidThrough(end, ctx.pauses),
+    };
+  }
+
+  // A user with a pause on record: elision is a JavaScript walk, over ONE
+  // fetch of their days. The anchor elides too, and it has to: a user who
+  // resumes today after a 90-day pause has no qualifying day anywhere near
+  // today, so anchoring on the literal today/yesterday would read their
+  // 400-day streak as 0 the instant they came back.
+  const { suppress, bridge } = makePauseGates(ctx.pauses);
+  const anchorToday = elidePaused(userToday, bridge);
+  const anchorYesterday = elidePaused(dateStrMinus(anchorToday, 1), bridge);
+  const days = await fetchQualifyingDaysDesc(
+    ctx.userId,
+    includeCoverage,
+    userToday,
+  );
+  const w = walkCurrent(days, anchorToday, anchorYesterday, suppress, bridge);
+  if (w.streak <= 0 || !w.end) return { streak: 0, validThrough: null };
+  return {
+    streak: w.streak,
+    start: w.start,
+    end: w.end,
+    validThrough: streakValidThrough(w.end, ctx.pauses),
+  };
+}
+
+/**
+ * Recompute a user's current streak from their workouts (plus coverage and
+ * pauses) WITHOUT writing it. `userToday` overrides the user's derived today —
+ * the tests use that to ask "what will this read tomorrow?".
+ */
+export async function computeStreakSnapshot(
+  userId: string,
+  userToday?: string,
+): Promise<StreakSnapshot> {
+  const ctx = await loadStreakContext(userId);
+  if (!ctx) return { streak: 0, validThrough: null };
+  return computeSnapshotWith(ctx, userToday ?? ctx.userToday);
+}
+
+async function persistSnapshot(ctx: StreakContext): Promise<StreakSnapshot> {
+  const snap = await computeSnapshotWith(ctx, ctx.userToday);
+  const s = ctx.stored;
+  const unchanged =
+    s.computed &&
+    s.streak === snap.streak &&
+    s.start === (snap.start ?? null) &&
+    s.validThrough === snap.validThrough;
+  // Skip the no-op write: the daily reconcile visits every active user, and
+  // rewriting an identical row is WAL, index churn (idx_users_current_streak)
+  // and a row lock for nothing. longest_streak is already >= streak on an
+  // unchanged row because the previous write ratcheted it.
+  if (!unchanged) {
+    await db.query(
+      `UPDATE users
+          SET current_streak = $1,
+              longest_streak = GREATEST(longest_streak, $1),
+              streak_start_date = $2::date,
+              streak_valid_through = $3::date,
+              streak_computed_at = NOW()
+        WHERE user_id = $4`,
+      [snap.streak, snap.start ?? null, snap.validThrough, ctx.userId],
+    );
+  }
+  return snap;
+}
+
+/**
+ * THE writer of users.current_streak (+ start / valid-through / computed-at,
+ * and the longest_streak ratchet). Two queries for a user with no pause, three
+ * with — regardless of how long the history is. Returns the streak.
+ *
+ * Call it after ANY mutation of what qualifies (see the header). Callers
+ * outside this module go through leaderboardService.refreshCurrentStreak,
+ * which is this.
+ */
+export async function refreshStoredStreak(userId: string): Promise<number> {
+  const ctx = await loadStreakContext(userId);
+  if (!ctx) return 0;
+  return (await persistSnapshot(ctx)).streak;
+}
+
+/**
+ * The user's current streak as every read path should answer it: the stored
+ * snapshot with the calendar decay applied (past `streak_valid_through` it
+ * reads 0). ONE row read, no workouts touched — with a single exception: a
+ * row the snapshot code has never written (legacy, or a brand-new user) is
+ * computed and stored right here, once, so it's never wrong for long.
+ */
+export async function readStoredStreak(
+  userId: string,
+): Promise<{ streak: number; start: string | undefined }> {
+  const ctx = await loadStreakContext(userId);
+  if (!ctx) return { streak: 0, start: undefined };
+  if (!ctx.stored.computed) {
+    const snap = await persistSnapshot(ctx);
+    return { streak: snap.streak, start: snap.start };
+  }
+  const { streak, start, validThrough } = ctx.stored;
+  if (streak <= 0) return { streak: 0, start: undefined };
+  if (validThrough !== null && validThrough < ctx.userToday) {
+    return { streak: 0, start: undefined };
+  }
+  return { streak, start: start ?? undefined };
+}
+
+/**
+ * Hourly: zero every stored streak whose valid-through day has passed in the
+ * user's own timezone. ONE statement over the active users — no recompute,
+ * because past `streak_valid_through` the answer is 0 by construction (any
+ * later qualifying day would have refreshed the row when it landed). The
+ * `<= CURRENT_DATE` prefilter is just the cheap bound: a user's today is
+ * within a day of the server's, so nothing later can have expired anywhere.
+ * Reads already apply this decay themselves; the sweep exists so the
+ * leaderboard's `current_streak DESC` index doesn't rank the stale rows.
+ */
+export async function decayExpiredStreaks(): Promise<number> {
+  const rows = await db.query<{ user_id: string }>(
+    `UPDATE users u
+        SET current_streak = 0,
+            streak_start_date = NULL,
+            streak_valid_through = NULL,
+            streak_computed_at = NOW()
+      WHERE u.current_streak > 0
+        AND u.streak_valid_through IS NOT NULL
+        AND u.streak_valid_through <= CURRENT_DATE
+        AND u.streak_valid_through < ${userTodaySql("u")}
+      RETURNING u.user_id`,
+  );
+  return rows.length;
+}
+
+/**
+ * Compute-and-store every row the snapshot code has never written. Runs once
+ * post-listen at boot (the deploy that introduces the columns finds every
+ * active user here; a few thousand users is seconds) and hourly as a
+ * backstop. Idempotent — after the first pass the set is empty, so it costs
+ * one SELECT. Never throws: one bad row must not strand the rest.
+ */
+export async function healUncomputedStreaks(): Promise<number> {
+  const rows = await db.query<{ user_id: string }>(
+    `SELECT user_id FROM users
+      WHERE streak_computed_at IS NULL AND current_streak > 0
+      ORDER BY user_id`,
+  );
+  let healed = 0;
+  for (const { user_id } of rows) {
+    try {
+      await refreshStoredStreak(user_id);
+      healed++;
+    } catch (err: any) {
+      console.error(
+        `[Streaks] heal failed for ${user_id}:`,
+        err?.message ?? err,
+      );
+    }
+  }
+  return healed;
+}
+
+/**
+ * Daily safety net: recompute every active user's streak from scratch and
+ * write back whatever changed. Catches anything that mutated workouts without
+ * calling refreshStoredStreak (a manual data fix, a path someone forgets).
+ * With the no-op-write skip it's one or two cheap queries per user.
+ */
+export async function reconcileAllStreaks(): Promise<{
+  checked: number;
+  changed: number;
+}> {
+  const rows = await db.query<{ user_id: string; current_streak: number }>(
+    `SELECT user_id, current_streak FROM users WHERE current_streak > 0 ORDER BY user_id`,
+  );
+  let changed = 0;
+  for (const { user_id, current_streak } of rows) {
+    try {
+      const after = await refreshStoredStreak(user_id);
+      if (Number(current_streak) !== after) changed++;
+    } catch (err: any) {
+      console.error(
+        `[Streaks] Failed to reconcile streak for ${user_id}:`,
+        err?.message ?? err,
+      );
+    }
+  }
+  return { checked: rows.length, changed };
+}
+
+/**
+ * Compute-only streak for a given today (coverage + pauses applied). Kept for
+ * callers that want the live number without touching the stored row.
+ */
+export async function computeCoveredStreak(
+  userId: string,
+  userToday: string,
+): Promise<{ streak: number; start: string | undefined }> {
+  const snap = await computeStreakSnapshot(userId, userToday);
+  return { streak: snap.streak, start: snap.start };
+}
+
+export interface StreakEra {
+  start_date: string; // YYYY-MM-DD
+  end_date: string; // YYYY-MM-DD
+  length: number;
+  is_current: boolean;
+}
+
+/**
+ * The user's ENTIRE qualified-or-covered day history grouped into consecutive
+ * runs ("eras"), newest first. Covered days count exactly when the live
+ * streak counts them (same enrollment + env gate), so the current era's
+ * length always agrees with the stored streak — un-enrolled users get the
+ * plain qualifying-day grouping. `is_current` uses the same today/yesterday
+ * grace, and only the newest era can carry it.
+ *
+ * One island query for users without a pause; the JavaScript walk over one
+ * fetch for users with one. Pauses are applied unconditionally, NOT behind the
+ * kill switch: the live streak still bridges open pauses with the switch on,
+ * and this must never call the current era broken while /streak calls it
+ * intact — the same user, two answers.
+ */
+export async function computeStreakEras(
+  userId: string,
+  userToday: string,
+): Promise<{ eras: StreakEra[]; longest: number }> {
+  const ctx = await loadStreakContext(userId);
+  if (!ctx) return { eras: [], longest: 0 };
+  const includeCoverage = ctx.enrolled && streakFeaturesGloballyEnabled();
+  const { suppress, bridge } = makePauseGates(ctx.pauses);
+  const anchorToday = elidePaused(userToday, bridge);
+  const anchorYesterday = elidePaused(dateStrMinus(anchorToday, 1), bridge);
+
+  let eras: StreakEra[];
+  if (ctx.pauses.length === 0) {
+    // ASC numbering pairs with `d - rn` (the mirror of the DESC rule above).
+    const rows = await db.query<{
+      start_date: string;
+      end_date: string;
+      length: number;
+    }>(
+      `WITH days AS (${qualifyingDaysSql(includeCoverage)}),
+       numbered AS (
+         SELECT local_date,
+                local_date - (ROW_NUMBER() OVER (ORDER BY local_date ASC))::int AS grp
+         FROM days
+       )
+       SELECT to_char(MIN(local_date), 'YYYY-MM-DD') AS start_date,
+              to_char(MAX(local_date), 'YYYY-MM-DD') AS end_date,
+              COUNT(*)::int AS length
+       FROM numbered
+       GROUP BY grp
+       ORDER BY MAX(local_date) DESC`,
+      [userId, userToday],
+    );
+    eras = rows.map((r) => ({
+      start_date: r.start_date,
+      end_date: r.end_date,
+      length: Number(r.length),
+      is_current: r.end_date === anchorToday || r.end_date === anchorYesterday,
+    }));
+  } else {
+    eras = walkEras(
+      await fetchQualifyingDaysDesc(userId, includeCoverage, userToday),
+      anchorToday,
+      anchorYesterday,
+      suppress,
+      bridge,
+    );
+  }
 
   let longest = 0;
   for (const era of eras) {
     if (era.length > longest) longest = era.length;
   }
   return { eras, longest };
+}
+
+/**
+ * streakEndingAt for the rare user who has an injury pause in their history.
+ *
+ * The SQL below is a gaps-and-islands over raw dates, and elision doesn't
+ * express cleanly there — you'd need a per-row count of paused days to compress
+ * the date axis before islanding. Rather than complicate a query every break
+ * stamp runs, users WITHOUT pauses keep the untouched SQL (byte-identical, no
+ * new risk for effectively everyone) and only paused users pay for this walk.
+ * Coverage is unconditional here, as in the SQL path: this only runs in token
+ * contexts (break stamps, pause freezing), i.e. for enrolled users.
+ */
+async function streakEndingAtElided(
+  userId: string,
+  endDate: string,
+  suppress: (d: string) => boolean,
+  bridge: (d: string) => boolean,
+): Promise<number> {
+  const days = await fetchQualifyingDaysDesc(userId, true, endDate);
+
+  let streak = 0;
+  let expected: string | undefined;
+  for (const date of days) {
+    if (suppress(date)) continue;
+    if (expected === undefined) {
+      if (date !== endDate) return 0; // endDate itself must qualify
+      streak = 1;
+    } else if (date !== expected) {
+      break;
+    } else {
+      streak++;
+    }
+    expected = elidePaused(dateStrMinus(date, 1), bridge);
+  }
+  return streak;
 }
 
 /**
@@ -462,44 +884,6 @@ export async function computeStreakEras(
  * and `recordBreak`'s `prior >= MIN_NOTIFY_PRIOR_STREAK` gate never opened, so
  * the "their streak just broke, you can save it" push never fired at all.
  */
-/**
- * streakEndingAt for the rare user who has an injury pause in their history.
- *
- * The SQL below is a gaps-and-islands over raw dates, and elision doesn't
- * express cleanly there — you'd need a per-row count of paused days to compress
- * the date axis before islanding. Rather than complicate a query every break
- * stamp runs, users WITHOUT pauses keep the untouched SQL (byte-identical, no
- * new risk for effectively everyone) and only paused users pay for this walk.
- */
-async function streakEndingAtElided(
-  userId: string,
-  endDate: string,
-  suppress: (d: string) => boolean,
-  bridge: (d: string) => boolean,
-): Promise<number> {
-  const coverage = await fetchCoverageDates(userId);
-  const { next } = mergedQualifyingDayStream(userId, coverage);
-
-  let streak = 0;
-  let expected: string | undefined;
-  while (true) {
-    const date = await next();
-    if (date === undefined) break;
-    if (date > endDate) continue; // stream starts at the newest day
-    if (suppress(date)) continue;
-    if (expected === undefined) {
-      if (date !== endDate) return 0; // endDate itself must qualify
-      streak = 1;
-    } else if (date !== expected) {
-      break;
-    } else {
-      streak++;
-    }
-    expected = elidePaused(dateStrMinus(date, 1), bridge);
-  }
-  return streak;
-}
-
 export async function streakEndingAt(
   userId: string,
   endDate: string,
@@ -515,7 +899,7 @@ export async function streakEndingAt(
        SELECT local_date FROM workouts
        WHERE user_id = $1 AND local_date <= $2::date
          AND deleted_at IS NULL AND exclusion_reason IS NULL
-       GROUP BY local_date HAVING SUM(distance) >= 0.95
+       GROUP BY local_date HAVING SUM(distance) >= ${STREAK_QUALIFYING_MILES}
        UNION
        SELECT local_date FROM streak_coverage
        WHERE user_id = $1 AND local_date <= $2::date
