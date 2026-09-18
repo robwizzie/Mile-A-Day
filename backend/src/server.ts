@@ -54,6 +54,7 @@ import {
   getMigrationReport,
 } from "./db/runMigrations.js";
 import { backfillFeedRoles } from "./db/backfillFeedRoles.js";
+import { repairSweptMedia } from "./db/repairSweptMedia.js";
 import { backfillLongestStreaks } from "./db/backfillLongestStreaks.js";
 import {
   getUnifiedFeed,
@@ -401,6 +402,13 @@ runPendingMigrations()
       // active user the new columns (0057) haven't been written for. Until a
       // row is reached it reads its old stored value (as before); a few
       // thousand users is seconds. Empty — one SELECT — on every later boot.
+      // Same contract once more: clear the rows still pointing at crew photos
+      // and highlight covers the orphan sweep deleted before it learned to
+      // recognise them. Nothing can restore those files; this stops the UI
+      // drawing a broken frame where a photo was, and re-offers "add your
+      // photo" to the person whose slide was lost. Guarded against an
+      // unmounted volume — see repairSweptMedia.
+      void repairSweptMedia();
       void healUncomputedStreaks()
         .then((n) => {
           if (n > 0) console.log(`[Streaks] boot sweep computed ${n} row(s)`);
