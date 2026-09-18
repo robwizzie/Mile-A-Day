@@ -659,8 +659,13 @@ struct HighlightEditorView: View {
     /// makes it the cover; the ✕ removes it.
     private var selectionStrip: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // While an uploaded cover is in use, this strip does NOT offer to
+            // replace it. Throwing away a photo the user chose is a real loss
+            // with no undo, so it belongs to the one labelled control that says
+            // so ("Use a photo from inside instead") — not to a 64pt tile in a
+            // scroller people drag past.
             Text(usesCustomCover
-                 ? "IN THIS HIGHLIGHT · TAP ONE TO USE IT AS THE COVER"
+                 ? "IN THIS HIGHLIGHT"
                  : "IN THIS HIGHLIGHT · TAP TO SET THE COVER")
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
                 .tracking(1.0)
@@ -678,8 +683,9 @@ struct HighlightEditorView: View {
 
     private func selectionTile(ref: SlideRef, position: Int) -> some View {
         let post = pickedPost(ref.postId)
-        // A highlight has ONE cover: picking a post's photo has to retire the
-        // uploaded one, or the tap does nothing visible and reads as broken.
+        // A highlight has ONE cover, and an uploaded one outranks any member
+        // photo — so while a custom cover is in use NO tile is ringed. The ring
+        // marks the member photo that would stand in, not a competing choice.
         let isCover = coverPostId == ref.postId && !usesCustomCover
         // The strip shows the FACE that was kept, not the post's lead photo —
         // a strip of buddy walks would otherwise be a row of the same friend's
@@ -687,76 +693,90 @@ struct HighlightEditorView: View {
         let faceURL = post.flatMap {
             PostHighlightItem(post: $0, slideKey: ref.slideKey).slideImageURL
         }
-        return Button {
-            MADHaptics.tap()
-            coverPostId = ref.postId
-            pickedCover = nil
-            if coverImageUrl?.isEmpty == false { coverCleared = true }
-        } label: {
-            AsyncImage(url: faceURL) { phase in
-                switch phase {
-                case .success(let image): image.resizable().scaledToFill()
-                default: Color.white.opacity(0.06)
-                }
-            }
-            .frame(width: 64, height: 64)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(
-                        isCover ? MADTheme.Colors.madRed : Color.white.opacity(0.12),
-                        lineWidth: isCover ? 2 : 1
-                    )
-            )
-            .overlay(alignment: .bottomLeading) {
-                Text("\(position + 1)")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(.black.opacity(0.55)))
-                    .padding(4)
-            }
-            .overlay(alignment: .bottomTrailing) {
-                // Which face this tile is. Only ever drawn when the post has
-                // more than one, so an ordinary photo carries no chrome.
-                if let post, hasChoosableFaces(post) {
-                    Group {
-                        if ref.slideKey == .map {
-                            Image(systemName: "map.fill")
-                                .font(.system(size: 8, weight: .heavy))
-                                .foregroundColor(.white)
-                                .padding(4)
-                                .background(Circle().fill(.black.opacity(0.6)))
-                        } else {
-                            Text(faceName(of: post, key: ref.slideKey))
-                                .font(.system(size: 8, weight: .heavy, design: .rounded))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(.black.opacity(0.6)))
-                        }
+        // ZStack, not an overlay INSIDE the button's label: the remove control
+        // below is a Button, and a Button nested in another Button's label
+        // doesn't reliably get its taps (the same trap as
+        // WorkoutRoutePreviewCard's row and the comment-preview row). A 16pt
+        // glyph on a 64pt tile meant almost every "remove this one" landed on
+        // the tile instead — which used to ALSO discard the uploaded cover, so
+        // the highlight's custom picture vanished on the next save and the only
+        // visible effect was the thing the user had not asked for.
+        return ZStack(alignment: .topTrailing) {
+            Button {
+                MADHaptics.tap()
+                // Sets which member photo stands in as the cover. It no longer
+                // destroys an uploaded one: that is what the labelled control
+                // above is for, and doing it from here made an unrecoverable
+                // change out of a stray tap.
+                coverPostId = ref.postId
+            } label: {
+                AsyncImage(url: faceURL) { phase in
+                    switch phase {
+                    case .success(let image): image.resizable().scaledToFill()
+                    default: Color.white.opacity(0.06)
                     }
-                    .padding(4)
                 }
-            }
-            .overlay(alignment: .topTrailing) {
-                Button {
-                    MADHaptics.tap()
-                    remove(ref)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .heavy))
+                .frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(
+                            isCover ? MADTheme.Colors.madRed : Color.white.opacity(0.12),
+                            lineWidth: isCover ? 2 : 1
+                        )
+                )
+                .overlay(alignment: .bottomLeading) {
+                    Text("\(position + 1)")
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(.black.opacity(0.55)))
                         .padding(4)
-                        .background(Circle().fill(.black.opacity(0.6)))
                 }
-                .buttonStyle(.plain)
-                .padding(3)
+                .overlay(alignment: .bottomTrailing) {
+                    // Which face this tile is. Only ever drawn when the post has
+                    // more than one, so an ordinary photo carries no chrome.
+                    if let post, hasChoosableFaces(post) {
+                        Group {
+                            if ref.slideKey == .map {
+                                Image(systemName: "map.fill")
+                                    .font(.system(size: 8, weight: .heavy))
+                                    .foregroundColor(.white)
+                                    .padding(4)
+                                    .background(Circle().fill(.black.opacity(0.6)))
+                            } else {
+                                Text(faceName(of: post, key: ref.slideKey))
+                                    .font(.system(size: 8, weight: .heavy, design: .rounded))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(Capsule().fill(.black.opacity(0.6)))
+                            }
+                        }
+                        .padding(4)
+                    }
+                }
             }
+            .buttonStyle(.plain)
+
+            // Sibling of the tile, not a child of its label, so this gets its
+            // own taps. Kept small on purpose — the hit area is what was
+            // broken, not the size of the glyph.
+            Button {
+                MADHaptics.tap()
+                remove(ref)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .heavy))
+                    .foregroundColor(.white)
+                    .padding(4)
+                    .background(Circle().fill(.black.opacity(0.6)))
+            }
+            .buttonStyle(.plain)
+            .padding(3)
         }
-        .buttonStyle(.plain)
     }
 
     @ViewBuilder

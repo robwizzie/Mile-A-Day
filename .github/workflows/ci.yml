@@ -152,6 +152,26 @@ jobs:
       # here too: every shipped client sends no parameters.
       - name: Grid controls + collab switches + highlights check
         run: node scripts/grid-controls-check.mjs
+      # A buddy walk is ONE post for N people, so for everyone but the poster
+      # it arrives shaped like a tag — and every rule written for tags was
+      # applied to it. The feed's two post arms both run through the circle
+      # (author, or the LEGACY SCALAR coauthor, which holds ONE person), and
+      # the grid, the Tagged tab and the "Add to grid" write all asked that
+      # same scalar, so four people on a crew of five were credited on a card
+      # they could not see in their feed, were not tagged in, and could not put
+      # on their profile. Nothing throws; the card is just quietly elsewhere.
+      - name: Buddy walk reach check
+        run: node scripts/buddy-walk-reach-check.mjs
+      # The nightly orphan sweep DELETES files, so every table that can own a
+      # path under /uploads/posts must be a reference it recognises. It knew
+      # only about posts.media_url, which meant a Story Highlight's custom
+      # cover and a crew member's slide on a buddy walk were both unlinked 72h
+      # after they were set, while their rows went on pointing at them — no
+      # error anywhere, just a blank circle days later and a save that then
+      # 400s naming the wrong cause. Silent, permanent loss of a file the user
+      # may have no other copy of.
+      - name: Orphan media sweep check
+        run: node scripts/orphan-sweep-check.mjs
       # Two prod-only push failures, neither reproducible without a shell there.
       # APNS_KEY is pasted into a dashboard in four different shapes and one of
       # them silently produced an unsignable PEM; device-token pruning is the

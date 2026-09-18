@@ -2522,6 +2522,15 @@ export const postCoauthors = pgTable(
     // column can only ever withhold reach that was previously granted, never
     // grant new reach.
     onFeed: boolean("on_feed"),
+    // THIS participant's grid choice, the multi-person mirror of
+    // posts.coauthor_on_profile — "keep this walk on MY Posts grid".
+    //
+    // Needed as its own column for the same reason on_feed was: the scalar
+    // lives on the POST, so on a crew of five it can only ever record ONE
+    // person's answer, and the other four had no way to say yes. NULL = "follow
+    // my tagged_posts_on_profile setting", which is what every pre-existing row
+    // means; an explicit value pins this one walk either way.
+    onProfile: boolean("on_profile"),
     // THIS participant's per-post route consent, overriding their global
     // `share_route_maps` for this one card. Tri-state on purpose and in this
     // order: NULL = "follow my setting", which is what every existing crew

@@ -1506,7 +1506,20 @@ struct DashboardView: View {
                     try await buddyService.join(sessionId: sessionId)
                 }
                 if buddyService.canReenterLiveSession {
-                    buddyFlowEntry = .lobby
+                    // Same routing question the pill and the lobby
+                    // notification ask: a push or an inbox row tapped DURING a
+                    // walk must land in the tracker that is already recording,
+                    // not on a pre-start lobby that can neither start nor
+                    // cancel it. This is the path a buddy push takes, which is
+                    // the most likely way to arrive here mid-walk.
+                    switch BuddyWalkRouting.openTarget(buddyService) {
+                    case .resumeTracking(let id):
+                        if let id { activeBuddySessionId = id }
+                        buddyFlowEntry = nil
+                        showWorkoutView = true
+                    case .lobby, .setup:
+                        buddyFlowEntry = .lobby
+                    }
                 } else if let session = buddyService.session,
                           session.me(buddyService.currentUserId)?.status == .finished {
                     // The tapped push led to a walk THIS user already finished

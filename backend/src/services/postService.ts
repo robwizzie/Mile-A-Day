@@ -504,6 +504,26 @@ const coauthorOnProfileSql = (a: string, coauthorParam: string) => `COALESCE(
 	TRUE
 )`;
 
+/**
+ * SQL: the same question for a CREW member — does this buddy walk belong on
+ * their Posts grid?
+ *
+ * The scalar above lives on the POST, so it can record exactly one person's
+ * answer. A buddy walk credits up to eight, and four of five people on a walk
+ * were therefore unable to say yes at all: the write matched no row and the
+ * grid never looked at them. `post_coauthors.on_profile` is their copy of the
+ * switch, resolved in the same order — per-post override, then their own
+ * `tagged_posts_on_profile`, then TRUE.
+ *
+ * Requires the `pca` row in scope.
+ */
+const coauthorOnProfileMultiSql = (coauthorParam: string) => `COALESCE(
+	pca.on_profile,
+	(SELECT ns.tagged_posts_on_profile FROM notification_settings ns
+		WHERE ns.user_id = ${coauthorParam}),
+	TRUE
+)`;
+
 // ─── Multi-person collabs (post_coauthors) ──────────────────────────────
 //
 // A Buddy Walk post can credit up to 8 people, which the legacy scalar columns
@@ -565,6 +585,38 @@ const BLOCKED_VS_MULTI_COAUTHOR = `EXISTS (
 		OR (b.blocker_id = pca.user_id AND b.blocked_id = $1)
 	WHERE pca.post_id = p.post_id AND ${MULTI_COLLAB_ACTIVE}
 )`;
+
+/**
+ * SQL: is this post a BUDDY WALK the viewer was actually on?
+ *
+ * A buddy walk is ONE post for N people, so for everyone except whoever
+ * pressed Post it arrives as somebody else's card with their name on it —
+ * structurally a "tag". It is not one. A tag is a thing another person did
+ * that happens to mention you; this is the walk YOU took, and it is the only
+ * record of it, because the one-post-per-walk rule deliberately stops you
+ * having a card of your own (`buddyWalkPostForWorkout`).
+ *
+ * That distinction is why this fragment exists rather than another COALESCE
+ * inside the collab gates. Those gates answer "may this tag travel", and the
+ * switches behind them — `tagged_posts_on_profile`, `coauthor_on_feed` — were
+ * offered to users as control over OTHER people's posts about them. Letting
+ * either answer for a buddy walk means a user who quieted tags stops seeing
+ * their own walks, which is what happened: the walk showed under Tagged and
+ * nowhere else.
+ *
+ * So: accepted participation in a walk that has a session, and nothing about
+ * reach. The post still has to clear `POST_FEED_GATES` at the call site —
+ * a block, a deletion or an un-shared post hides it exactly as before. This
+ * can only ever ADD the viewer's own walk back to their own feed.
+ *
+ * `$1` must be the viewer. Requires `p` and, inside MULTI_COLLAB_ACTIVE, the
+ * `pca` row it is joined against.
+ */
+const VIEWER_WAS_ON_THIS_WALK = `(p.buddy_session_id IS NOT NULL AND EXISTS (
+	SELECT 1 FROM post_coauthors pca
+	WHERE pca.post_id = p.post_id AND pca.user_id = $1
+		AND ${MULTI_COLLAB_ACTIVE}
+))`;
 
 /**
  * SQL: one credited participant's route polyline, or NULL.
@@ -757,6 +809,8 @@ const MULTI_COAUTHORS_JSON = `(
 		-- he asked for.
 		'on_feed', CASE WHEN pca.user_id = $1
 			THEN COALESCE(pca.on_feed, TRUE) END,
+		'on_profile', CASE WHEN pca.user_id = $1
+			THEN ${coauthorOnProfileMultiSql("$1")} END,
 		'include_route', CASE WHEN pca.user_id = $1
 			THEN pca.include_route END,
 		-- HOW FAR this person went and HOW LONG it took them. A card whose
@@ -838,8 +892,18 @@ const COAUTHOR_COLUMNS = `
 	-- NULL for everyone else rather than leaking one user's curation choice
 	-- to the other. CASE guarantees the subquery only runs on collab rows the
 	-- viewer is actually part of.
-	CASE WHEN p.coauthor_user_id = $1
-		THEN ${coauthorOnProfileSql("p", "$1")} END AS coauthor_on_profile,
+	-- Falls back to the crew row so the control has a state to draw for the
+	-- four people on a five-person walk who are not the legacy scalar. Sending
+	-- NULL there is what made the client hide the option entirely (it branches
+	-- on nil to mean "this server doesn't offer it"), so the switch was
+	-- missing on exactly the posts it was built for.
+	COALESCE(
+		CASE WHEN p.coauthor_user_id = $1
+			THEN ${coauthorOnProfileSql("p", "$1")} END,
+		(SELECT ${coauthorOnProfileMultiSql("$1")} FROM post_coauthors pca
+			WHERE pca.post_id = p.post_id AND pca.user_id = $1
+				AND pca.status = 'accepted')
+	) AS coauthor_on_profile,
 	-- Same rule, same reason: the coauthor's reach switch is theirs to read.
 	CASE WHEN p.coauthor_user_id = $1
 		THEN COALESCE(p.coauthor_on_feed, TRUE) END AS coauthor_on_feed`;
@@ -2415,11 +2479,14 @@ export async function getFeed(
 		WHERE ${POST_FEED_GATES}
 			-- Accepted collab posts reach BOTH authors' circles (semi-join, not a
 			-- JOIN, so a post whose two authors share the viewer isn't doubled).
-			AND EXISTS (
+			-- A buddy walk this viewer was ON is theirs to see whether or not
+			-- anyone on it is in their circle — same rule as the unified feed's
+			-- third arm, kept here so the two feeds can't answer differently.
+			AND (EXISTS (
 				SELECT 1 FROM circle c
 				WHERE c.uid = p.user_id
 					OR (c.uid = p.coauthor_user_id AND ${COLLAB_REACH_SQL})
-			)
+			) OR ${VIEWER_WAS_ON_THIS_WALK})
 			AND ${CURSOR_BEFORE("p.created_at")}
 		ORDER BY p.created_at DESC
 		LIMIT $3
@@ -2966,6 +3033,51 @@ export const UNIFIED_FEED_SQL = `
 					ORDER BY p.created_at DESC
 					LIMIT $3
 				) pc
+
+				UNION
+
+				-- THIRD arm: a buddy walk I was on reaches MY OWN feed, always.
+				--
+				-- Not a third way for someone else's post to find me — the only
+				-- rows it can add are walks this viewer took. The two arms above
+				-- both run through the circle, and a buddy walk is the one card
+				-- that can fail BOTH: the poster needn't be my friend (a walk
+				-- reaches friends-of-members), and the legacy scalar coauthor
+				-- holds exactly ONE person, so on a crew of five, four of us are
+				-- not reachable through it at all. The walk then existed for me
+				-- only under Tagged, which is the wrong shelf for the one record
+				-- of a mile I actually walked.
+				--
+				-- Deliberately outside COLLAB_REACH_SQL: that gate is a REACH
+				-- decision about broadcasting a tag to a circle, and this is not
+				-- reach — it is the author of the walk seeing their own walk. It
+				-- keeps POST_FEED_GATES, so a block, a deletion or a story-only
+				-- post hides it exactly as before.
+				--
+				-- Bounded the same way the arms above are, just by a different
+				-- owner: driven from idx_post_coauthors_user for ONE user (the
+				-- viewer), so it reads this person's own credited walks and never
+				-- scales with the product's post volume. The cursor is pushed in
+				-- here too, or page 2 costs what page 1 costs.
+				SELECT
+					'post'::text AS kind,
+					pb.post_id::text AS id,
+					pb.post_id AS post_uuid,
+					pb.created_at AS sort_ts,
+					pb.user_id AS owner_id,
+					pb.workout_id AS workout_id
+				FROM (
+					SELECT p.post_id, p.created_at, p.user_id, p.workout_id
+					FROM post_coauthors pca
+					JOIN posts p ON p.post_id = pca.post_id
+					WHERE pca.user_id = $1
+						AND p.buddy_session_id IS NOT NULL
+						AND ${MULTI_COLLAB_ACTIVE}
+						AND ${POST_FEED_GATES}
+						AND ${CURSOR_BEFORE("p.created_at")}
+					ORDER BY p.created_at DESC
+					LIMIT $3
+				) pb
 			) post_candidates
 
 			UNION ALL
@@ -3325,7 +3437,19 @@ const userGridWhere = (
 				-- their Tagged tab, on the author's grid, and in both circles'
 				-- feeds.
 				OR (p.coauthor_user_id = ${author} AND ${COLLAB_ACTIVE}
-					AND ${coauthorOnProfileSql("p", author)}))
+					AND ${coauthorOnProfileSql("p", author)})
+				-- ...and the same for a CREW member. The scalar beside this one
+				-- holds ONE person, so on a buddy walk of five it answered for
+				-- the first participant and silently excluded the other four:
+				-- their "Add to grid" wrote no row and this query never looked
+				-- at them, so the walk they took could not be put on their own
+				-- profile by any means.
+				OR EXISTS (
+					SELECT 1 FROM post_coauthors pca
+					WHERE pca.post_id = p.post_id AND pca.user_id = ${author}
+						AND ${MULTI_COLLAB_ACTIVE}
+						AND ${coauthorOnProfileMultiSql(author)}
+				))
 			AND p.deleted_at IS NULL
 			AND (
 				p.share_to_feed
@@ -3344,12 +3468,39 @@ const userGridWhere = (
 					)
 				)
 			)
+			-- Photo-first curation: "don't put photo-less route cards on my
+			-- grid". Two things this must NOT do, both of which it did.
+			--
+			-- It read ns.user_id = p.user_id — the AUTHOR's setting — which is
+			-- right for your own posts (you are the author) and wrong for every
+			-- collab, where it handed a stranger's curation preference authority
+			-- over YOUR grid. A buddy walk is usually posted by whoever finished
+			-- first, so whether the walk could appear on your profile depended on
+			-- a switch in someone else's settings screen. It is the GRID OWNER's
+			-- question, so it reads the grid owner's row.
+			--
+			-- And it sat OUTSIDE the per-post override above, so a blanket
+			-- preference silently overruled a deliberate "Add to grid" on this
+			-- one post: the user tapped it, the write succeeded, and nothing
+			-- appeared. An explicit choice about a specific post is the most
+			-- specific thing anyone has said and must win.
 			AND (
 				NOT p.is_auto
 				OR ${AUTO_POST_HAS_PROFILE_PHOTO}
+				-- Each arm names the grid owner, so this can only ever exempt a
+				-- post for the person who explicitly asked for it. Left
+				-- unqualified, the scalar arm read one coauthor's "keep this"
+				-- as an exemption on the AUTHOR's grid too — handing a curation
+				-- choice to the wrong person, which is the bug in mirror image.
+				OR (p.coauthor_user_id = ${author} AND p.coauthor_on_profile IS TRUE)
+				OR EXISTS (
+					SELECT 1 FROM post_coauthors pca
+					WHERE pca.post_id = p.post_id AND pca.user_id = ${author}
+						AND pca.on_profile IS TRUE
+				)
 				OR COALESCE((
 					SELECT ns.auto_posts_on_profile FROM notification_settings ns
-					WHERE ns.user_id = p.user_id
+					WHERE ns.user_id = ${author}
 				), TRUE)
 			)
 			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL(author, viewer)}
@@ -3583,6 +3734,17 @@ export async function getUserTaggedPosts(
 			AND p.user_id <> $2
 			AND (
 				(p.coauthor_user_id = $2 AND ${COLLAB_ACTIVE})
+				-- A CREW member is tagged in exactly the sense this tab means.
+				-- Only the legacy scalar was asked, so on a buddy walk of five
+				-- the walk appeared in one participant's Tagged tab and in
+				-- nobody else's — the other four were credited on the card,
+				-- named in its header, and could not find it anywhere on their
+				-- own profile.
+				OR EXISTS (
+					SELECT 1 FROM post_coauthors pca
+					WHERE pca.post_id = p.post_id AND pca.user_id = $2
+						AND ${MULTI_COLLAB_ACTIVE}
+				)
 				OR ($5::text IS NOT NULL AND p.caption IS NOT NULL AND p.caption ~* $5)
 			)
 			-- Profile gate: may the viewer see the tagged user's content at all?
@@ -4377,13 +4539,29 @@ export async function setCoauthorProfileVisibility(
   postId: string,
   onProfile: boolean,
 ): Promise<{ author_id: string } | null> {
-  const rows = await db.query<{ author_id: string }>(
+  const scalar = await db.query<{ author_id: string }>(
     `UPDATE posts SET coauthor_on_profile = $3
 		 WHERE post_id = $2 AND coauthor_user_id = $1 AND deleted_at IS NULL
 		 RETURNING user_id AS author_id`,
     [userId, postId, onProfile],
   );
-  return rows[0] ?? null;
+  // Writes the multi-person row too, for the same reason
+  // setCoauthorFeedVisibility does: a buddy post carries the same person in
+  // BOTH representations, so moving only one makes the switch read as broken
+  // from whichever surface asks the other. And for everyone on a crew who is
+  // not the legacy scalar — four people out of five on the walk in front of
+  // me — this is the ONLY row there is: the scalar UPDATE matched nothing, so
+  // the call returned null, the controller 404'd, and "Add to grid" was a
+  // button that could never work for them.
+  const multi = await db.query<{ author_id: string }>(
+    `UPDATE post_coauthors pca SET on_profile = $3
+		 FROM posts p
+		 WHERE pca.post_id = $2 AND pca.user_id = $1
+			 AND p.post_id = pca.post_id AND p.deleted_at IS NULL
+		 RETURNING p.user_id AS author_id`,
+    [userId, postId, onProfile],
+  );
+  return scalar[0] ?? multi[0] ?? null;
 }
 
 /**
