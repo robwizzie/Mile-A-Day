@@ -589,6 +589,15 @@ struct FlyoverTick {
 /// actually won the walk or by how much.
 struct FlyoverStanding: Identifiable, Equatable {
     let id: String
+    /// Which rider this row is, as an index into the people array.
+    ///
+    /// Carried explicitly rather than parsed back out of `id` (which happens to
+    /// be the same number): the HUD indexes `launch.flyablePeople` and the
+    /// engine indexes its own people array, and the two are only
+    /// interchangeable because they are built in the same order — a rule this
+    /// file states twice. A row that drives the camera off that index should
+    /// say so in the type, not rely on a string that looks like one.
+    let personIndex: Int
     /// Position in whatever the standings are ordered by — finishing time on a
     /// timed flight, distance otherwise.
     let place: Int
@@ -810,7 +819,22 @@ struct RouteFlyoverPlayerView: View {
 
                 VStack(spacing: 6) {
                     ForEach(standings) { standing in
-                        standingRow(standing, timed: timed)
+                        // The rows are the picker too. The avatar strip above
+                        // is 30pt of circle per person with nothing next to it
+                        // saying who it is, so on a crew of five the only place
+                        // you can actually READ a name is here — and the names
+                        // were the one part you couldn't tap.
+                        Button {
+                            follow(standing.personIndex)
+                        } label: {
+                            standingRow(standing, timed: timed)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!people.indices.contains(standing.personIndex))
+                        .accessibilityLabel("Follow \(standing.name)")
+                        .accessibilityAddTraits(
+                            standing.isFollowed ? [.isButton, .isSelected] : [.isButton]
+                        )
                     }
                 }
             }
@@ -827,6 +851,15 @@ struct RouteFlyoverPlayerView: View {
             .padding(.horizontal, 20)
             .transition(.scale(scale: 0.92).combined(with: .opacity))
         }
+    }
+
+    /// Point the camera at one rider. The avatar strip and the standings rows
+    /// both come through here so they can't disagree about what selecting
+    /// someone means, and so the haptic is the same from either.
+    private func follow(_ index: Int) {
+        guard people.indices.contains(index), index != followedIndex else { return }
+        MADHaptics.tap()
+        followedIndex = index
     }
 
     private func standingRow(_ standing: FlyoverStanding, timed: Bool) -> some View {
@@ -861,6 +894,12 @@ struct RouteFlyoverPlayerView: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(standing.isFollowed ? standing.color.opacity(0.2) : Color.clear)
         )
+        // The whole row is the target, not just the pixels that happen to be
+        // drawn on. Every unfollowed row's background is Color.clear, which
+        // takes no hits, so without this the name would be tappable and the
+        // space either side of it would not — which is the shape of "it only
+        // sometimes works" rather than a fix.
+        .contentShape(Rectangle())
     }
 
     /// A rank badge only when the order is a real RESULT. An untimed flight is
@@ -1021,7 +1060,7 @@ struct RouteFlyoverPlayerView: View {
                 HStack(spacing: 10) {
                     ForEach(Array(people.enumerated()), id: \.element.id) { index, person in
                         Button {
-                            followedIndex = index
+                            follow(index)
                         } label: {
                             AvatarView(name: person.name, imageURL: person.imageURL, size: 30)
                                 .overlay(
@@ -2352,6 +2391,7 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             }
             return FlyoverStanding(
                 id: "\(index)",
+                personIndex: index,
                 place: place + 1,
                 name: person.avatar?.name ?? (index == 0 ? "Author" : "A friend"),
                 imageURL: person.avatar?.imageURL,
