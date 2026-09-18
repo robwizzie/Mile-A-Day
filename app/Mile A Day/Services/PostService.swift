@@ -385,20 +385,7 @@ struct PostItem: Codable, Identifiable {
         return "Someone"
     }
 
-    /// Their slide's photo, or nil when there isn't one to draw.
-    ///
-    /// The empty-string guard is the same one `PostItem.mediaURL` carries, and
-    /// for the same reason: `lockUnearnedPhotos` withholds a crew photo by
-    /// blanking it to "", NOT by nulling it (nil means "never added one", and
-    /// the two have to stay distinguishable — `hasWithheldPhoto` reads exactly
-    /// that difference to draw the lock once for the whole post). Without the
-    /// guard, "" still resolved to a URL, so `crewPhotoSlides` built a real
-    /// slide for it and the card carried a badged, empty frame with that
-    /// person's name on it — which reads as the app having lost their picture.
-    var mediaURL: URL? {
-        guard let media_url, !media_url.isEmpty else { return nil }
-        return ProfileImageService.fullImageURL(for: media_url)
-    }
+    var mediaURL: URL? { ProfileImageService.fullImageURL(for: media_url) }
 
     /// The run's story photo when present and distinct from the post media.
     var storyPhotoURL: URL? {

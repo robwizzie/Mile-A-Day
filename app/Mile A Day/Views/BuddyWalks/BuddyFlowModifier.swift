@@ -1,19 +1,5 @@
 import SwiftUI
 
-/// The whole Buddy Walks presentation flow — setup, lobby, recap, and the
-/// four events that open them — as ONE node on the dashboard's modifier chain.
-///
-/// Why a ViewModifier instead of writing these inline: `DashboardView.body`
-/// already carries a ~40-modifier chain, and every modifier wraps the body in
-/// another generic type the solver has to unify. Adding these seven inline tips
-/// it past the limit and the whole body fails with "unable to type-check this
-/// expression in reasonable time" — with the error pinned to some innocent
-/// `.onReceive` far from the real cause. Collapsing them here makes the chain
-/// see a single `.modifier(...)`, and gives the buddy flow one place to live.
-///
-/// Each presentation still hangs off its OWN invisible node. This chain already
-/// carries a `.sheet` (manual entry) and a `.fullScreenCover` (the tracker);
-/// stacking more of either on the same node makes SwiftUI silently drop one.
 /// Where "open my buddy walk" should actually land.
 ///
 /// The lobby is a PRE-start screen — its job is to hold people until the walk
@@ -58,15 +44,32 @@ enum BuddyWalkRouting {
         InProgressWorkoutStore.load()?.isActive == true
     }
 
-    static func openTarget(
-        _ service: BuddySessionService = .shared
-    ) -> BuddyWalkOpenTarget {
+    /// Takes the service rather than defaulting to `.shared`: a default
+    /// argument is evaluated in the CALLER's isolation, not this method's, so
+    /// `= .shared` on a main-actor-isolated singleton warns today and is an
+    /// error in Swift 6 even with the method itself isolated. Every caller
+    /// already has the service to hand.
+    static func openTarget(_ service: BuddySessionService) -> BuddyWalkOpenTarget {
         guard service.canReenterLiveSession else { return .setup }
         guard isWalking else { return .lobby }
         return .resumeTracking(sessionId: service.session?.id)
     }
 }
 
+/// The whole Buddy Walks presentation flow — setup, lobby, recap, and the
+/// four events that open them — as ONE node on the dashboard's modifier chain.
+///
+/// Why a ViewModifier instead of writing these inline: `DashboardView.body`
+/// already carries a ~40-modifier chain, and every modifier wraps the body in
+/// another generic type the solver has to unify. Adding these seven inline tips
+/// it past the limit and the whole body fails with "unable to type-check this
+/// expression in reasonable time" — with the error pinned to some innocent
+/// `.onReceive` far from the real cause. Collapsing them here makes the chain
+/// see a single `.modifier(...)`, and gives the buddy flow one place to live.
+///
+/// Each presentation still hangs off its OWN invisible node. This chain already
+/// carries a `.sheet` (manual entry) and a `.fullScreenCover` (the tracker);
+/// stacking more of either on the same node makes SwiftUI silently drop one.
 struct BuddyFlowModifier: ViewModifier {
     /// Non-nil = the buddy flow is up, and says which end of it opened.
     ///
@@ -155,7 +158,7 @@ struct BuddyFlowModifier: ViewModifier {
                 Text(linkError ?? "")
             }
             .onReceive(NotificationCenter.default.publisher(for: .madOpenBuddyLobby)) { _ in
-                self.open(BuddyWalkRouting.openTarget())
+                self.open(BuddyWalkRouting.openTarget(BuddySessionService.shared))
             }
             .onReceive(NotificationCenter.default.publisher(for: .madStartBuddyWalk)) { _ in
                 // An invite already waiting goes straight to the lobby; there is
@@ -164,7 +167,7 @@ struct BuddyFlowModifier: ViewModifier {
                 // and the lobby hands a long-started session straight into
                 // tracking, which is how a finished walk restarted itself.
                 let present: () -> Void = {
-                    self.open(BuddyWalkRouting.openTarget())
+                    self.open(BuddyWalkRouting.openTarget(BuddySessionService.shared))
                 }
                 // Setting up a NEW walk closes the last one's recap first. The
                 // request reaches here from inside that recap ("walks together"
