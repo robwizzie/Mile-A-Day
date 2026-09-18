@@ -40,6 +40,12 @@ enum BuddyWalkOpenTarget: Equatable {
     case resumeTracking(sessionId: String?)
 }
 
+/// `@MainActor` because it reads `BuddySessionService`, whose state is
+/// main-actor isolated — the isolation the call sites already had when this
+/// decision was written inline in each of them, and which a plain static func
+/// silently dropped. Every caller is view code on the main actor, so this only
+/// restores what was true before it was extracted.
+@MainActor
 enum BuddyWalkRouting {
     /// Is a workout of this user's own already recording?
     ///
