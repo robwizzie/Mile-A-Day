@@ -37,6 +37,13 @@ import path from "path";
  * Idempotent and cheap on every later boot: once the swept rows are cleared
  * there is nothing left whose file is missing, so it stats a bounded set and
  * writes nothing. `MEDIA_REPAIR_DISABLED=1` turns it off entirely.
+ *
+ * Every reference it clears is LOGGED with its path first. Clearing the column
+ * is what makes the card read honestly, but it also discards the only record
+ * of which file belonged to which slide — so if the uploads volume is ever
+ * restored from a snapshot, that log is what the files can be matched back
+ * against. Set the kill switch before the first deploy if a restore is being
+ * attempted, and let this run once the recovery is settled.
  */
 
 /** Sampled from posts.media_url — never swept, so a proxy for "disk is here". */
@@ -129,6 +136,15 @@ export async function repairSweptMedia(): Promise<void> {
       // photo_added_at goes with it: it is the timestamp OF the photo being
       // cleared, and leaving it behind describes a slide that isn't there.
       // The caption stays — those are their words, not the picture.
+      // Printed BEFORE the write, one line per reference, because this log is
+      // the only remaining record of which file each row pointed at. The file
+      // is already gone; the path is what a restore from a volume snapshot has
+      // to be matched back against, and nulling the column without recording
+      // it first would turn a recoverable loss into a permanent one.
+      console.log(
+        `[media-repair] crew slide post=${row.post_id} user=${row.user_id} ` +
+          `lost=${row.media_url}`,
+      );
       await client.query(
         `UPDATE post_coauthors SET media_url = NULL, photo_added_at = NULL
           WHERE post_id = $1 AND user_id = $2`,
@@ -150,6 +166,10 @@ export async function repairSweptMedia(): Promise<void> {
       // Clearing it is exactly what the editor's "use a photo from inside"
       // does, so the rail falls back to a member's photo instead of a blank
       // circle — and the highlight keeps working while they re-pick a cover.
+      console.log(
+        `[media-repair] highlight cover highlight=${row.highlight_id} ` +
+          `lost=${row.cover_image_url}`,
+      );
       await client.query(
         `UPDATE post_highlights SET cover_image_url = NULL, updated_at = NOW()
           WHERE highlight_id = $1`,
