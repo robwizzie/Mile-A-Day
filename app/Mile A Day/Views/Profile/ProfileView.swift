@@ -94,7 +94,8 @@ struct ProfileView: View {
                             streak: userManager.currentUser.streak,
                             totalMiles: userManager.currentUser.totalMiles,
                             friendCount: ownFriendCount,
-                            streakDoneToday: ownGoalDoneToday
+                            streakDoneToday: ownGoalDoneToday,
+                            streakSavedToday: ownSavedToday
                         ) {
                             FriendsListView(friendService: friendService)
                         }
@@ -282,6 +283,12 @@ struct ProfileView: View {
         // flat chrome and caps label (`profileCard` / `ProfileCardLabel`).
         VStack(spacing: MADTheme.Spacing.md) {
             dailyGoalRow
+            // Directly under the goal it explains: this is the one screen
+            // where a streak that went up sits beside a mile the owner knows
+            // they haven't run, and the answer has to be in that same glance.
+            if let saved = ownSavedToday {
+                SavedTodayBanner(day: saved, isSelf: true) { showTokenSheet = true }
+            }
             OwnTodayChallengeCard(healthManager: healthManager, userManager: userManager)
             if !ownWorkouts.isEmpty || !(ownDayTotals?.isEmpty ?? true) {
                 Last7DaysChart(
@@ -613,6 +620,18 @@ struct ProfileView: View {
             || userManager.currentUser.isStreakActiveToday
     }
 
+    /// A token holding TODAY, from the server's own resolution of the user's
+    /// local day (`today_covered`) — never re-derived here, because a device
+    /// a timezone away from the one the server files `local_date` under would
+    /// pick the wrong day. Suppressed once the mile is genuinely in: the
+    /// server refunds the coverage on that upload, and until the next stats
+    /// read lands the payload still carries it. ONE rule for the goal ring,
+    /// the streak tile and the daily-goal row, like `ownGoalDoneToday`.
+    private var ownSavedToday: CoveredDate? {
+        guard !ownGoalDoneToday else { return nil }
+        return tokensState.payload?.today_covered
+    }
+
     /// Banner (photo or gradient preset) with the avatar in today's goal ring
     /// hanging off it, and the wordmark + QR/edit/settings buttons riding the
     /// top. Tapping the avatar opens Edit Profile, same as the pencil.
@@ -631,6 +650,7 @@ struct ProfileView: View {
             milestoneThresholds: MileMilestones.thresholds(from: userManager.currentUser.getAllBadges()),
             goalProgress: progress,
             goalComplete: complete,
+            goalSavedToday: ownSavedToday,
             topInset: topInset,
             onTapAvatar: { showingEditProfile = true }
         ) {
@@ -746,15 +766,20 @@ struct ProfileView: View {
     /// than the old two-card block.
     private var dailyGoalRow: some View {
         let done = ownGoalDoneToday
+        let saved = ownSavedToday
         let goalMiles = userManager.currentUser.goalMiles
         let remaining = max(0, goalMiles - healthManager.todaysDistance)
         // Remaining CEILs — never promise the goal is closer than it is.
         let remainingText = String(format: "%.2f to go", (remaining * 100).rounded(.up) / 100)
+        // A covered day still has miles to run — the token bought the STREAK,
+        // not the mile — so the row keeps counting down and only the status
+        // pill changes. Saying "Done today" here would be a lie the user can
+        // disprove by looking at their own watch.
         let statusText = done ? "Done today" : remainingText
-        let accent: Color = done ? .green : MADTheme.Colors.madRed
+        let accent: Color = done ? .green : (saved != nil ? SavedDayStyle.tint : MADTheme.Colors.madRed)
 
         return HStack(spacing: MADTheme.Spacing.md) {
-            goalIcon(done: done, accent: accent)
+            goalIcon(done: done, saved: saved, accent: accent)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("DAILY GOAL")
@@ -774,7 +799,7 @@ struct ProfileView: View {
 
             Spacer()
 
-            goalStatusPill(text: statusText, done: done)
+            goalStatusPill(text: statusText, done: done, saved: saved != nil)
 
             goalEditButton
         }
@@ -817,24 +842,26 @@ struct ProfileView: View {
         .accessibilityLabel("Edit daily goal")
     }
 
-    private func goalIcon(done: Bool, accent: Color) -> some View {
-        ZStack {
+    private func goalIcon(done: Bool, saved: CoveredDate?, accent: Color) -> some View {
+        let glyph = done ? "checkmark" : (saved.map { SavedDayStyle.icon(for: $0.kind) } ?? "target")
+        return ZStack {
             Circle()
                 .fill(accent.opacity(0.15))
                 .frame(width: 40, height: 40)
-            Image(systemName: done ? "checkmark" : "target")
+            Image(systemName: glyph)
                 .font(.system(size: 17, weight: .bold))
                 .foregroundColor(accent)
         }
     }
 
-    private func goalStatusPill(text: String, done: Bool) -> some View {
-        let fill: Color = done ? Color.green.opacity(0.12) : Color.white.opacity(0.06)
-        let stroke: Color = done ? Color.green.opacity(0.3) : Color.white.opacity(0.12)
+    private func goalStatusPill(text: String, done: Bool, saved: Bool) -> some View {
+        let accent: Color? = done ? .green : (saved ? SavedDayStyle.tint : nil)
+        let fill: Color = accent.map { $0.opacity(0.12) } ?? Color.white.opacity(0.06)
+        let stroke: Color = accent.map { $0.opacity(0.3) } ?? Color.white.opacity(0.12)
         return Text(text)
             .font(.system(size: 12, weight: .heavy, design: .rounded))
             .monospacedDigit()
-            .foregroundColor(done ? .green : .white.opacity(0.7))
+            .foregroundColor(accent ?? .white.opacity(0.7))
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(Capsule().fill(fill))

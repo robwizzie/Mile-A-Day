@@ -14,7 +14,10 @@ import {
   getTodayMiles,
   DAILY_GOAL_TOLERANCE,
 } from "../services/workoutService.js";
-import { effectiveStreakSql } from "../services/streakFeatureCore.js";
+import {
+  effectiveStreakSql,
+  fetchTodayCoverage,
+} from "../services/streakFeatureCore.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import { PostgresService } from "../services/DbService.js";
 
@@ -126,20 +129,27 @@ export async function checkNudgeStatus(
   const senderId = req.userId!;
 
   try {
-    const [nudgedToday, unlimited, friendTodayMiles, streaks] =
+    const [nudgedToday, unlimited, friendTodayMiles, streaks, coverage] =
       await Promise.all([
         hasNudgedFriendToday(senderId, friendId),
         hasUnlimitedActions(senderId),
         getTodayMiles(friendId),
         fetchStreaks([friendId]),
+        fetchTodayCoverage([friendId]),
       ]);
     const canNudge = unlimited || !nudgedToday;
 
     const hasCompletedMile = friendTodayMiles >= DAILY_GOAL_TOLERANCE;
+    const covered = coverage[friendId] ?? null;
 
     res.status(200).json({
       can_nudge: canNudge && !hasCompletedMile,
       has_completed_mile: hasCompletedMile,
+      // A token is already holding their day. Additive and null for almost
+      // everyone; shipped builds ignore it. Without it the row paints a
+      // banked day as "0.00 / 1 mi · 0%" — the app reporting that the rescue
+      // the viewer may have just paid for did nothing.
+      today_covered: covered,
       // Legacy field: derived from can_nudge, so unlimited nudgers read
       // false here and old builds keep their re-nudge ability.
       already_nudged_today: !canNudge,
@@ -181,14 +191,22 @@ export async function checkNudgeStatusBatch(
         unlimited_nudges: boolean;
         today_miles: number;
         current_streak: number;
+        today_covered: {
+          local_date: string;
+          kind: string;
+          source_username: string | null;
+        } | null;
       }
     > = {};
 
     // One DB roundtrip for all streaks rather than N per-friend queries;
-    // the role bypass is per-sender, so look it up once.
-    const [streaks, unlimited] = await Promise.all([
+    // the role bypass is per-sender, so look it up once. Today's coverage is
+    // batched the same way — it resolves each friend's own local day, so it
+    // cannot be folded into the per-friend loop without N more queries.
+    const [streaks, unlimited, coverage] = await Promise.all([
       fetchStreaks(friendIds),
       hasUnlimitedActions(senderId),
+      fetchTodayCoverage(friendIds),
     ]);
 
     await Promise.all(
@@ -209,6 +227,7 @@ export async function checkNudgeStatusBatch(
           unlimited_nudges: unlimited,
           today_miles: Math.round(friendTodayMiles * 100) / 100,
           current_streak: streaks[friendId] ?? 0,
+          today_covered: coverage[friendId] ?? null,
         };
       }),
     );

@@ -359,6 +359,11 @@ const POST_COLUMNS = `
 	u.last_name,
 	u.profile_image_url,
 	p.media_url,
+	-- FRONT & BACK: the swapped composition of the same two frames. Additive
+	-- and NULL on every ordinary post; a client that doesn't know it simply
+	-- shows media_url, which already has the inset baked in and is a complete
+	-- picture on its own.
+	p.dual_media_url,
 	p.caption,
 	p.workout_id,
 	-- The ONE competition the poster stickered, or NULL. Additive and inert for
@@ -797,6 +802,8 @@ const MULTI_COAUTHORS_JSON = `(
 		'profile_image_url', mcu.profile_image_url,
 		'status', pca.status,
 		'media_url', pca.media_url,
+		-- Their slide's FRONT & BACK twin, same contract as the author's.
+		'dual_media_url', pca.dual_media_url,
 		-- Their own words under their own slide (additive; NULL until set).
 		'caption', pca.caption,
 		'route', ${CREW_ROUTE_SQL},
@@ -1119,6 +1126,12 @@ const POST_SELECT = `${POST_COLUMNS},
 export interface CreatePostInput {
   userId: string;
   mediaUrl: string;
+  /**
+   * FRONT & BACK: the swapped composition of the same two frames. Validated
+   * by the controller exactly like `mediaUrl` (own upload, on disk) — it is a
+   * media url visible to the whole circle, so the same ownership test applies.
+   */
+  dualMediaUrl?: string | null;
   caption?: string | null;
   workoutId?: string | null;
   localDate: string;
@@ -1496,7 +1509,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 				local_date, share_to_feed, share_to_story, story_expires_at,
 				is_auto, include_route, coauthor_user_id, coauthor_status,
 				coauthor_workout_id, posted_fresh, buddy_session_id,
-				competition_id
+				competition_id, dual_media_url
 			)
 			VALUES (
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
@@ -1532,11 +1545,17 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 					WHERE c.id = $14::varchar
 						AND cu.user_id = $1
 						AND cu.invite_status = 'accepted'
-				)
+				),
+				$15
 			)
 				ON CONFLICT ${conflictTarget}
 				DO UPDATE SET
 					media_url = EXCLUDED.media_url,
+					-- Wholesale, NOT COALESCE: the two urls are one photo, so a
+					-- re-post that replaces the picture with a single must drop
+					-- the old swapped frame with it, or the card would offer a
+					-- flip to somebody's previous shot.
+					dual_media_url = EXCLUDED.dual_media_url,
 					caption = COALESCE(EXCLUDED.caption, posts.caption),
 					stats_snapshot = COALESCE(EXCLUDED.stats_snapshot, posts.stats_snapshot),
 					share_to_feed = EXCLUDED.share_to_feed,
@@ -1591,6 +1610,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       // Never trusted as sent — the INSERT resolves it against the author's
       // accepted membership and stores NULL if they aren't in it.
       input.competitionId ?? null,
+      input.dualMediaUrl ?? null,
     ],
   );
   if (rows[0]) {
@@ -2424,9 +2444,14 @@ export function lockUnearnedPhotos<
     local_date?: string | null;
     is_auto?: boolean | null;
     media_url?: string | null;
+    dual_media_url?: string | null;
     story_photo_url?: string | null;
     photo_locked?: boolean;
-    coauthors?: { user_id: string; media_url?: string | null }[] | null;
+    coauthors?: {
+      user_id: string;
+      media_url?: string | null;
+      dual_media_url?: string | null;
+    }[] | null;
   },
 >(rows: T[], viewerId: string, gate: ViewerGoalGate): T[] {
   if (gate.completed || !gate.localDate) return rows;
@@ -2443,12 +2468,25 @@ export function lockUnearnedPhotos<
       r.media_url = "";
       withheld = true;
     }
+    // The FRONT & BACK twin is the SAME withheld photo seen from the other
+    // camera — handing it over would serve the picture the line above just
+    // took away. NULLed rather than blanked: it is optional by contract, so
+    // absent already means "no second frame" to every client.
+    if (r.is_auto !== true && r.dual_media_url) {
+      r.dual_media_url = null;
+      withheld = true;
+    }
     // A buddy post carries the whole crew's photos, so gating only the
     // author's would hand the viewer three unearned pictures on the very card
     // the gate exists for. The viewer's OWN slide survives — same "you can
     // always see your own" rule the author gets one branch up.
     for (const c of r.coauthors ?? []) {
-      if (c.user_id === viewerId || !c.media_url) continue;
+      if (c.user_id === viewerId) continue;
+      if (c.dual_media_url) {
+        c.dual_media_url = null;
+        withheld = true;
+      }
+      if (!c.media_url) continue;
       c.media_url = "";
       withheld = true;
     }
@@ -2656,7 +2694,7 @@ const FEED_ENTRY_PROJECTION = `
 			page.sort_ts,
 			page.owner_id AS user_id,
 			u.username, u.first_name, u.last_name, u.profile_image_url,
-			p.media_url, p.caption,
+			p.media_url, p.dual_media_url, p.caption,
 			-- A photo post on the day's anchor speaks for the whole mile, so its
 			-- baked snapshot is restated in the rollup's terms. Without this a
 			-- 3 x 0.33 day whose anchor carries a post would read "0.33 mi" — the
@@ -4249,17 +4287,31 @@ export async function addCrewPhoto(
   userId: string,
   mediaUrl: string,
   caption: string | null = null,
+  /**
+   * FRONT & BACK twin of this slide, already validated by the controller.
+   * Written UNCONDITIONALLY (not COALESCEd) for the same reason the author's
+   * is: re-adding replaces the slide, and a single shot replacing a dual must
+   * take the swapped frame with it rather than leave a flip to the old photo.
+   */
+  dualMediaUrl: string | null = null,
 ): Promise<boolean> {
   const rows = await db.query<{ post_id: string }>(
     `UPDATE post_coauthors
-				SET media_url = $3, photo_added_at = NOW(), caption = $4
+				SET media_url = $3, photo_added_at = NOW(), caption = $4,
+					dual_media_url = $5
 			WHERE post_id = $1 AND user_id = $2 AND status = 'accepted'
 				AND EXISTS (
 					SELECT 1 FROM posts p
 					WHERE p.post_id = $1 AND p.deleted_at IS NULL AND p.share_to_feed
 				)
 			RETURNING post_id`,
-    [postId, userId, stripMediaQuery(mediaUrl), caption],
+    [
+      postId,
+      userId,
+      stripMediaQuery(mediaUrl),
+      caption,
+      dualMediaUrl ? stripMediaQuery(dualMediaUrl) : null,
+    ],
   );
   return rows.length > 0;
 }

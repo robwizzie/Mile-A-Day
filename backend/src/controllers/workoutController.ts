@@ -57,6 +57,7 @@ import {
 } from "../services/leaderboardService.js";
 import {
   reconcileStreakFeaturesOnUpload,
+  refundEarnedCoverage,
   getStreakFeaturesPayload,
 } from "../services/streakFeatureService.js";
 import { reconcileBuddySessions } from "../services/buddySessionService.js";
@@ -131,6 +132,15 @@ export async function uploadWorkouts(req: Request, res: Response) {
     // switch is on AND this user enrolled via the new build.
     reconcileStreakFeaturesOnUpload(userId).catch((err) =>
       console.error("Error reconciling streak features:", err.message),
+    );
+
+    // ...and hand a token BACK when this upload turns a covered day into a
+    // day the user actually ran. A token buys a day you missed; the moment
+    // the miles land the rescue was not needed, so keeping it charged would
+    // leave a blue "saved" marker on a day they walked and a streak reading
+    // non-natural with no hole in it. Same fire-and-forget gating.
+    refundEarnedCoverage(userId).catch((err) =>
+      console.error("Error refunding streak coverage:", err.message),
     );
 
     // Buddy sessions: stamp the AUTHORITATIVE result now that the real workout
@@ -885,6 +895,12 @@ export async function updateWorkout(req: Request, res: Response) {
       console.error("Error refreshing current_streak:", err.message);
     }
 
+    // An edit that carries a covered day over the mile earns the token back,
+    // exactly as a fresh upload would.
+    refundEarnedCoverage(userId).catch((err: any) =>
+      console.error("Error refunding streak coverage:", err.message),
+    );
+
     try {
       await checkRaceCompletions(userId);
     } catch (raceError: any) {
@@ -936,6 +952,12 @@ export async function setDuplicateDecisionController(
     } catch (err: any) {
       console.error("Error refreshing current_streak:", err.message);
     }
+
+    // Counting a previously-excluded workout can also earn back a token that
+    // had covered that day.
+    refundEarnedCoverage(req.params.userId).catch((err: any) =>
+      console.error("Error refunding streak coverage:", err.message),
+    );
     // The day's totals just moved. The client refreshes its own stats — this
     // returns the affected date so it knows which day to re-pull.
     res.json({ ok: true, local_date: result.localDate });

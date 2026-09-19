@@ -221,6 +221,15 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     /// outline — never removed from the roster, because a friend who vanishes
     /// mid-walk reads as a crash.
     let isStale: Bool
+    /// Whole seconds since their last report, computed server-side. Optional:
+    /// absent from every older server, which reads as "we can't say how long"
+    /// and falls back to the plain out-of-range wording.
+    ///
+    /// The point of it is that a stale tile can keep the walker's NUMBER. The
+    /// roster used to blank the distance to a dash, which threw away the one
+    /// thing anyone on the walk wanted to know; "1.20 mi · 4m ago" is not a
+    /// stale lie, it is precisely what we know.
+    let lastHeardSeconds: Int?
     /// They are paused and still on the walk — manually, or by the tracker's
     /// movement gate having gone quiet for a full evidence window
     /// (`WorkoutLocationManager.isPausedForCrew`). Optional twice over: nil
@@ -257,6 +266,33 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     /// until then.
     var bestDistance: Double { finalDistanceMiles ?? distanceMiles }
 
+    /// "just now" / "4m ago" / "1h ago" — how old this walker's last report
+    /// is, or nil when the server didn't say (older build).
+    ///
+    /// Coarse on purpose: the number exists to tell someone whether their
+    /// friend dropped out a moment ago or twenty minutes back, and a ticking
+    /// seconds counter on a roster tile invites a precision the underlying
+    /// 90-second window doesn't have.
+    var lastHeardAgo: String? {
+        guard let seconds = lastHeardSeconds else { return nil }
+        if seconds < 60 { return "just now" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m ago" }
+        return "\(minutes / 60)h ago"
+    }
+
+    /// The same thing, spoken. VoiceOver reads "4m" as "four em".
+    var lastHeardAgoSpoken: String? {
+        guard let seconds = lastHeardSeconds else { return nil }
+        if seconds < 60 { return "just now" }
+        let minutes = seconds / 60
+        if minutes < 60 {
+            return "\(minutes) minute\(minutes == 1 ? "" : "s") ago"
+        }
+        let hours = minutes / 60
+        return "\(hours) hour\(hours == 1 ? "" : "s") ago"
+    }
+
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
         case username
@@ -267,6 +303,7 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
         case distanceMiles = "distance_miles"
         case durationSeconds = "duration_seconds"
         case isStale = "is_stale"
+        case lastHeardSeconds = "last_heard_seconds"
         case isPaused = "is_paused"
         case isHost = "is_host"
         case place

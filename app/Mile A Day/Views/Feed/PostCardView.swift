@@ -479,11 +479,17 @@ struct PostCardView: View {
     /// second slide — never a cramped corner thumbnail. Photos the server
     /// withheld arrive blank and drop out here; `photoSlides` puts a single
     /// lock in their place, ahead of whatever survived.
-    private var photoURLs: [URL] {
-        if let storyPhotoURL {
-            return [storyPhotoURL, post.mediaURL].compactMap { $0 }
+    ///
+    /// Each carries its own FRONT & BACK twin, and the STORY photo never has
+    /// one: it is a different picture entirely, so pairing it with the post's
+    /// swapped frame would offer a flip between two unrelated shots.
+    private var photoURLs: [(url: URL, flip: URL?)] {
+        var result: [(url: URL, flip: URL?)] = []
+        if let storyPhotoURL { result.append((url: storyPhotoURL, flip: nil)) }
+        if let media = post.mediaURL {
+            result.append((url: media, flip: post.dualMediaURL))
         }
-        return [post.mediaURL].compactMap { $0 }
+        return result
     }
 
     /// Whether to append a branded workout-stats card as the run's second
@@ -552,11 +558,12 @@ struct PostCardView: View {
     private enum MediaSlide {
         /// Stands in for the photo(s) the server withheld.
         case locked
-        case photo(url: URL, badged: Bool)
+        /// `flip` is FRONT & BACK's other arrangement, nil on a single shot.
+        case photo(url: URL, flip: URL?, badged: Bool)
         /// A crew member's own photo on a buddy walk's shared post — captioned
         /// with their name, because on a card with four pictures on it "whose
         /// is this" is the question every slide raises.
-        case crewPhoto(url: URL, userId: String, name: String, username: String?, caption: String?)
+        case crewPhoto(url: URL, flip: URL?, userId: String, name: String, username: String?, caption: String?)
         case route(coords: [CLLocationCoordinate2D])
         case statsCard(stats: PostStats)
     }
@@ -567,7 +574,8 @@ struct PostCardView: View {
     private var crewPhotoSlides: [MediaSlide] {
         post.acceptedCoauthors.compactMap { coauthor -> MediaSlide? in
             guard let url = coauthor.mediaURL else { return nil }
-            return .crewPhoto(url: url, userId: coauthor.user_id,
+            return .crewPhoto(url: url, flip: coauthor.dualMediaURL,
+                              userId: coauthor.user_id,
                               name: coauthor.displayName,
                               username: coauthor.username, caption: coauthor.caption)
         }
@@ -583,10 +591,11 @@ struct PostCardView: View {
     private var photoSlides: [MediaSlide] {
         var slides: [MediaSlide] = []
         if post.isPhotoLocked { slides.append(.locked) }
-        for url in photoURLs {
+        for photo in photoURLs {
             // Badge an auto route/stats card that trails a photo (or its lock)
             // so the swipe reads "photo → stats".
-            slides.append(.photo(url: url, badged: !slides.isEmpty && post.is_auto == true))
+            slides.append(.photo(url: photo.url, flip: photo.flip,
+                                 badged: !slides.isEmpty && post.is_auto == true))
         }
         // The crew's photos ride BEHIND the author's: a buddy walk reads "their
         // shot → everyone else's shots". Empty on every ordinary post.
@@ -614,7 +623,7 @@ struct PostCardView: View {
               let mine = post.acceptedCoauthors.first(where: { $0.user_id == me }),
               let myURL = mine.mediaURL,
               let index = slides.firstIndex(where: {
-                  if case .crewPhoto(let url, _, _, _, _) = $0 { return url == myURL }
+                  if case .crewPhoto(let url, _, _, _, _, _) = $0 { return url == myURL }
                   return false
               })
         else { return slides }
@@ -671,15 +680,17 @@ struct PostCardView: View {
         switch slide {
         case .locked:
             lockedMediaCard
-        case .photo(let url, let badged):
+        case .photo(let url, let flip, let badged):
             ZoomablePhotoSlide(
                 url: url,
+                flipURL: flip,
                 badge: badged ? ("Stats", "chart.bar.fill") : nil,
                 onDoubleTap: doubleTapHype
             )
-        case .crewPhoto(let url, _, let name, _, _):
+        case .crewPhoto(let url, let flip, _, let name, _, _):
             ZoomablePhotoSlide(
                 url: url,
+                flipURL: flip,
                 badge: (name, "person.fill"),
                 onDoubleTap: doubleTapHype
             )
@@ -1470,7 +1481,7 @@ struct PostCardView: View {
     private var currentCaption: (id: String, name: String, username: String?, text: String)? {
         let pages = mediaPages
         if mediaPage < pages.count,
-           case .crewPhoto(_, let userId, let name, let username, let caption) = pages[mediaPage] {
+           case .crewPhoto(_, _, let userId, let name, let username, let caption) = pages[mediaPage] {
             guard let caption, !caption.isEmpty else { return nil }
             return (userId, name, username, caption)
         }
@@ -1640,34 +1651,77 @@ struct PostCardView: View {
 /// identical to what's in the card.
 struct ZoomablePhotoSlide: View {
     let url: URL?
+    /// FRONT & BACK: the same photo arranged the other way round. Non-nil
+    /// turns the baked corner inset into a control — tap it and the two
+    /// frames trade places.
+    ///
+    /// Both urls are complete pictures, so this is a crossfade between two
+    /// finished images rather than any client-side compositing: nothing here
+    /// has to know where the inset is in order to DRAW it, only where to put
+    /// the tap (`DualPhotoLayout`, the one definition of that rectangle).
+    var flipURL: URL? = nil
     var badge: (text: String, icon: String)? = nil
     var onDoubleTap: (() -> Void)? = nil
 
     @State private var loadedImage: UIImage?
+    @State private var loadedFlip: UIImage?
+    /// Showing the swapped arrangement. Per-slide and deliberately NOT
+    /// persisted: it is a way of looking at one photo, not a preference.
+    @State private var flipped = false
+
+    /// Whichever frame is on screen, for the zoom host — pinching a photo has
+    /// to magnify the one being looked at.
+    private var shownImage: UIImage? {
+        flipped ? (loadedFlip ?? loadedImage) : loadedImage
+    }
 
     var body: some View {
-        FeedImageView(url: url, loadedImage: $loadedImage)
-            .frame(maxWidth: .infinity)
-            .aspectRatio(4.0 / 5.0, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-            .instagramZoomable(image: loadedImage, onDoubleTap: onDoubleTap)
-            .overlay(alignment: .topLeading) {
-                if let badge {
-                    HStack(spacing: 5) {
-                        Image(systemName: badge.icon)
-                            .font(.system(size: 11, weight: .bold))
-                        Text(badge.text)
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
+        ZStack {
+            FeedImageView(url: url, loadedImage: $loadedImage)
+            if let flipURL {
+                // BOTH frames load, stacked, and the swap is an opacity
+                // crossfade between two images already in hand. Fetching the
+                // second only on the first tap would put a spinner in the
+                // middle of the one gesture this feature is — and a swap that
+                // stalls reads as broken, not as loading. Feed rows are lazy,
+                // so nothing off screen pays for it.
+                FeedImageView(url: flipURL, loadedImage: $loadedFlip)
+                    .opacity(flipped ? 1 : 0)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+        .instagramZoomable(image: shownImage, onDoubleTap: onDoubleTap)
+        // AFTER the zoom host, like every other control on a slide — the
+        // zoom gesture host eats the taps of anything overlaid before it.
+        .overlay {
+            if flipURL != nil {
+                GeometryReader { geo in
+                    DualSwapTapTarget(canvas: geo.size) {
+                        MADHaptics.tap()
+                        withAnimation(.easeInOut(duration: 0.22)) { flipped.toggle() }
                     }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Color.black.opacity(0.55)))
-                    .padding(10)
-                    .allowsHitTesting(false)
                 }
             }
+        }
+        .overlay(alignment: .topLeading) {
+            if let badge {
+                HStack(spacing: 5) {
+                    Image(systemName: badge.icon)
+                        .font(.system(size: 11, weight: .bold))
+                    Text(badge.text)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.black.opacity(0.55)))
+                .padding(10)
+                .allowsHitTesting(false)
+            }
+        }
     }
 }
 

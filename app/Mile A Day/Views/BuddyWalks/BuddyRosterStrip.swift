@@ -316,11 +316,17 @@ private struct BuddyRosterAvatar: View {
                 // finished.
                 badge: badge
             )
-            // Stale = no report in 90s. Dimmed to a hairline, never removed:
-            // a friend who vanishes mid-walk reads as a crash. Never ME: a
-            // report of mine can fail to land, but I am plainly here, and
-            // dimming my own face over a dropped request says otherwise.
-            .opacity(isStale ? 0.4 : 1)
+            // Stale = no report in 90s. GREYED rather than faded to a
+            // hairline: the tile has things to say in this state now — the
+            // out-of-range badge on the circle and the age under the number —
+            // and a 40% ghost took the badge down with it, which is how the
+            // old treatment managed to signal "something is different" while
+            // explaining nothing. Never removed either way: a friend who
+            // vanishes mid-walk reads as a crash. And never ME — a report of
+            // mine can fail to land, but I am plainly here, and greying my
+            // own face over a dropped request says otherwise.
+            .grayscale(isStale ? 1 : 0)
+            .opacity(isStale ? 0.75 : 1)
             .overlay(alignment: .topTrailing) {
                 if isLeader && !session.mode.isCooperative {
                     Image(systemName: "crown.fill")
@@ -346,17 +352,31 @@ private struct BuddyRosterAvatar: View {
                     .lineLimit(1)
             }
 
-            // A paused walker KEEPS their number. Stale replaces it with "—"
-            // because a stale figure is a lie — they may have walked a mile
-            // since we last heard from them. A paused one is exactly true, so
-            // it stays and only changes colour; the badge on the circle is
-            // what explains why it has stopped moving.
-            Text(distanceLine)
+            // EVERY walker keeps their number, stale ones included.
+            //
+            // A stale figure used to be replaced with "—", on the reasoning
+            // that a number we hadn't refreshed in 90 seconds might be a lie.
+            // That threw away the only thing anyone on the walk wanted to
+            // know, and it made a friend whose phone dipped out of signal
+            // look like a friend the app had lost. The number is not a lie
+            // once it is DATED: "1.20 mi" over "4m ago" is exactly what we
+            // know, and the reader can decide what it is worth.
+            Text(participant.distanceMiles.distanceFormatted)
                 .font(MADTheme.Typography.smallBold)
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .foregroundStyle(distanceTint)
+
+            // Reserved on EVERY tile, not just the stale ones: a line that
+            // appears only when someone drops out would push that tile taller
+            // than the rest and jog the whole strip as phones come and go.
+            Text(staleAgeLine ?? " ")
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.45))
+                .opacity(staleAgeLine == nil ? 0 : 1)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityDescription)
@@ -381,10 +401,13 @@ private struct BuddyRosterAvatar: View {
         return participant.isPaused == true
     }
 
-    /// Finished outranks paused: a walk that is over is over.
+    /// Finished outranks paused, and paused outranks out-of-range: a walk
+    /// that is over is over, and a walker who told us they stopped is a fact
+    /// where "we can't hear them" is only an absence of one.
     private var badge: AvatarWithRing.Badge? {
         if participant.status == .finished { return .check }
         if isPaused { return .paused }
+        if isStale { return .outOfRange }
         return nil
     }
 
@@ -401,14 +424,12 @@ private struct BuddyRosterAvatar: View {
         return session.accentColor
     }
 
-    /// The app's own formatter: truncated to two decimals, in the reader's
-    /// unit. `%.2f` ROUNDS, so a walk sitting on 0.825 put "0.83" on my tile
-    /// over a tracker reading "0.82" — one screen, one number, two answers —
-    /// and the hardcoded "mi" printed miles to someone whose every other
-    /// screen is in kilometres.
-    private var distanceLine: String {
-        if isStale { return "—" }
-        return participant.distanceMiles.distanceFormatted
+    /// How old a stale walker's number is, or nil when there is nothing to
+    /// say. `lastHeardAgo` is nil on a server that predates the age, so the
+    /// tile still names the state rather than dating it.
+    private var staleAgeLine: String? {
+        guard isStale else { return nil }
+        return participant.lastHeardAgo ?? "no signal"
     }
 
     private var accessibilityDescription: String {
@@ -416,7 +437,15 @@ private struct BuddyRosterAvatar: View {
         // Spoken, not abbreviated: VoiceOver reads "mi" as a word, not as
         // "miles". Still the reader's own unit.
         let miles = "\(participant.distanceMiles.distanceText) \(DistanceUnits.current.plural)"
-        if isStale { return "\(who), out of range" }
+        if isStale {
+            // The number belongs in here too. "Out of range" alone told a
+            // VoiceOver user strictly less than the screen showed everyone
+            // else, and now the screen shows the distance as well.
+            guard let ago = participant.lastHeardAgoSpoken else {
+                return "\(who), out of range, last known \(miles)"
+            }
+            return "\(who), out of range, \(miles) as of \(ago)"
+        }
         if participant.status == .finished { return "\(who), finished, \(miles)" }
         if isPaused { return "\(who), paused at \(miles)" }
         return "\(who), \(miles)"

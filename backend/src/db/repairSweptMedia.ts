@@ -185,11 +185,44 @@ export async function repairSweptMedia(): Promise<void> {
       );
     }
 
-    if (clearedSlides || clearedCovers)
+    // FRONT & BACK's second frame, on both tables. Not historical damage —
+    // the sweep learned about these columns in the same change that added
+    // them — but a dual url whose file is gone is the one loss that renders
+    // as a BROKEN image rather than as an absence: the card keeps offering
+    // the flip and the tap lands on nothing. Clearing it leaves a perfectly
+    // good single photo (the primary already has the inset baked in), which
+    // is the same graceful shape every other repair here aims for.
+    let clearedDual = 0;
+    for (const table of ["posts", "post_coauthors"] as const) {
+      const key = table === "posts" ? "post_id" : "post_id, user_id";
+      const rows = await client.query<Record<string, string>>(
+        `SELECT ${key}, dual_media_url FROM ${table}
+          WHERE dual_media_url IS NOT NULL AND dual_media_url <> ''`,
+      );
+      for (const row of rows.rows) {
+        if (fileExists(row.dual_media_url)) continue;
+        console.log(
+          `[media-repair]${dryRun ? " [dry-run]" : ""} dual frame ` +
+            `${table} post=${row.post_id} lost=${row.dual_media_url}`,
+        );
+        clearedDual += 1;
+        if (dryRun) continue;
+        await client.query(
+          table === "posts"
+            ? `UPDATE posts SET dual_media_url = NULL WHERE post_id = $1`
+            : `UPDATE post_coauthors SET dual_media_url = NULL
+                WHERE post_id = $1 AND user_id = $2`,
+          table === "posts" ? [row.post_id] : [row.post_id, row.user_id],
+        );
+      }
+    }
+
+    if (clearedSlides || clearedCovers || clearedDual)
       console.log(
         `[media-repair] ${dryRun ? "WOULD clear" : "cleared"} ${clearedSlides} ` +
-          `crew slide(s) and ${clearedCovers} highlight cover(s) whose files ` +
-          `were swept.${dryRun ? " Nothing was written." : ""}`,
+          `crew slide(s), ${clearedCovers} highlight cover(s) and ` +
+          `${clearedDual} front-and-back frame(s) whose files were swept.` +
+          `${dryRun ? " Nothing was written." : ""}`,
       );
   } catch (error: any) {
     // Never fail a boot over this: the rows are already wrong, and a retry

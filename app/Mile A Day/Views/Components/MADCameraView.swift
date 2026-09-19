@@ -19,6 +19,15 @@ struct MADCameraView: View {
     /// at capture. Mid-run capture turns this off so it can save keyed by the
     /// snap's stash id instead (see SavedPhotoLibraryLedger).
     var autoSaveToPhotos: Bool = true
+    /// Offer FRONT & BACK — one shutter press, both cameras. Opt-in per
+    /// caller and OFF by default: the mid-run camera exists to catch a moment
+    /// in one tap while you are still moving, and a two-shot sequence that
+    /// asks you to stop and pose is the opposite of that. The post composer
+    /// turns it on, which is where someone is standing still and composing.
+    var allowsDual: Bool = false
+    /// Delivered instead of `image` when a FRONT & BACK capture completes.
+    /// Required for `allowsDual` to do anything.
+    var onDualCapture: ((DualCapture) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var camera = MADCameraController()
     /// Seconds left on a running self-timer; nil when idle.
@@ -39,6 +48,22 @@ struct MADCameraView: View {
     /// Display zoom captured at the start of a pinch, so the gesture scales from
     /// where the user was (not always from 1×). nil when no pinch is active.
     @State private var pinchBaseline: CGFloat?
+
+    // MARK: FRONT & BACK
+
+    /// The user's choice of capture mode for this session. Deliberately NOT
+    /// persisted: the next photo is usually an ordinary one, and silently
+    /// firing a selfie because of a choice made yesterday is a surprise.
+    @State private var dualMode = false
+    /// The deliberate shot, held while the second camera warms up. Non-nil
+    /// means we are between the two frames.
+    @State private var firstFrame: UIImage?
+    /// Which camera took `firstFrame`, so the delivered capture can say.
+    @State private var firstWasFront = false
+    /// Countdown to the automatic second shot; nil when not waiting.
+    @State private var secondCountdown: Int?
+    @State private var secondShotTask: Task<Void, Never>?
+    private var isDualActive: Bool { allowsDual && onDualCapture != nil }
 
     /// Whether the device has a camera the controller can actually drive
     /// (false on Simulator). Asks AVFoundation — the same stack that
@@ -100,19 +125,42 @@ struct MADCameraView: View {
                     .id(countdown)
             }
 
+            // The first frame, parked in the corner it is heading for, plus
+            // the prompt for the second.
+            //
+            // UNDER the chrome stack on purpose: the whole overlay is the
+            // shutter (tap anywhere to shoot now), and layering it over the
+            // top bar would take the X with it — leaving a 2-second state
+            // with no way out. The controls it must not compete with are
+            // hidden below instead, so what is left above it is exactly the
+            // cancel button.
+            if let firstFrame, let secondCountdown {
+                secondShotOverlay(first: firstFrame, remaining: secondCountdown)
+            }
+
             VStack {
                 topBar
                     .opacity(controlsAppeared ? 1 : 0)
                     .offset(y: controlsAppeared ? 0 : -14)
                 Spacer()
-                if camera.zoomOptions.count > 1 {
-                    zoomSelector
-                        .padding(.bottom, 14)
+                // While the second frame is pending, every control except
+                // cancel goes away: there is exactly one thing to do, and each
+                // of the others is a way to lose the shot already taken.
+                if firstFrame == nil {
+                    if camera.zoomOptions.count > 1 {
+                        zoomSelector
+                            .padding(.bottom, 14)
+                            .opacity(controlsAppeared ? 1 : 0)
+                    }
+                    if isDualActive {
+                        captureModeRail
+                            .padding(.bottom, 16)
+                            .opacity(controlsAppeared ? 1 : 0)
+                    }
+                    bottomBar
                         .opacity(controlsAppeared ? 1 : 0)
+                        .offset(y: controlsAppeared ? 0 : 16)
                 }
-                bottomBar
-                    .opacity(controlsAppeared ? 1 : 0)
-                    .offset(y: controlsAppeared ? 0 : 16)
             }
 
             // Shutter acknowledgment blink.
@@ -136,6 +184,7 @@ struct MADCameraView: View {
         }
         .onDisappear {
             countdownTask?.cancel()
+            secondShotTask?.cancel()
             camera.stop()
         }
     }
@@ -146,6 +195,7 @@ struct MADCameraView: View {
         HStack {
             glassCircleButton(icon: "xmark", size: 40, iconSize: 16) {
                 countdownTask?.cancel()
+                secondShotTask?.cancel()
                 dismiss()
             }
 
@@ -231,6 +281,144 @@ struct MADCameraView: View {
             .padding(.trailing, MADTheme.Spacing.lg)
         }
         .padding(.bottom, 36)
+    }
+
+    // MARK: - FRONT & BACK
+
+    /// PHOTO | FRONT & BACK, directly above the shutter.
+    ///
+    /// A rail rather than a toggle or a menu item, for the reason every camera
+    /// app uses one: the mode changes what the shutter DOES, so it has to be
+    /// readable without being opened, and the unselected option has to be
+    /// visible enough to be discovered by someone who was not looking for it.
+    /// Sits above the shutter (not in the top bar with flash and timer) for
+    /// the same reason — those change how a shot is taken, this changes how
+    /// many.
+    private var captureModeRail: some View {
+        HStack(spacing: 4) {
+            modeChip(title: "PHOTO", icon: "camera.fill", selected: !dualMode) {
+                dualMode = false
+            }
+            modeChip(title: "FRONT & BACK", icon: "person.2.fill", selected: dualMode) {
+                dualMode = true
+            }
+        }
+        .padding(4)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+        .overlay(alignment: .top) {
+            // One line of explanation, shown only in the mode that needs it.
+            // "Front and back" names the cameras, not what happens, and the
+            // whole gamble of this feature is that the second shot is not a
+            // surprise.
+            if dualMode {
+                Text("One tap shoots both ways")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.85))
+                    .shadow(color: .black.opacity(0.6), radius: 4)
+                    .fixedSize()
+                    .offset(y: -20)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .animation(.spring(response: 0.34, dampingFraction: 0.82), value: dualMode)
+    }
+
+    private func modeChip(
+        title: String, icon: String, selected: Bool, action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            MADHaptics.tap()
+            action()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .black))
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .tracking(0.5)
+            }
+            .lineLimit(1)
+            .fixedSize()
+            .foregroundColor(selected ? .black : .white.opacity(0.85))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule().fill(selected ? Color.white : Color.clear)
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(CameraControlButtonStyle())
+        .accessibilityLabel(title.lowercased())
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
+    /// Between the two frames: the shot already in hand, parked in the corner
+    /// it will end up in, with the countdown to the other camera.
+    ///
+    /// Showing the first frame ALREADY inset is what makes the mode explain
+    /// itself — the composition is visibly assembling, so nobody has to be
+    /// told in words what "front and back" is about to produce. It can only
+    /// approximate the finished placement (the preview is full-bleed, the
+    /// photo is 4:5), which is fine: the job here is "your shot is safe, in
+    /// that corner", not a pixel preview.
+    private func secondShotOverlay(first: UIImage, remaining: Int) -> some View {
+        let thumbWidth: CGFloat = 96
+        return ZStack {
+            // A wash, so the chrome reads over any scene and the moment feels
+            // like a held beat rather than the camera just sitting there.
+            Color.black.opacity(0.35).ignoresSafeArea()
+
+            VStack(spacing: 6) {
+                Text(firstWasFront ? "Now what you're looking at" : "Now you")
+                    .font(.system(size: 27, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(2)
+                Text("Tap anywhere to shoot now")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.78))
+                Text("\(remaining)")
+                    .font(.system(size: 66, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+                    .monospacedDigit()
+                    .contentTransition(.numericText(countsDown: true))
+                    .padding(.top, 4)
+            }
+            .shadow(color: .black.opacity(0.65), radius: 12)
+            .padding(.horizontal, MADTheme.Spacing.lg)
+        }
+        .overlay(alignment: .topTrailing) {
+            Image(uiImage: first)
+                .resizable()
+                .scaledToFill()
+                .frame(width: thumbWidth, height: thumbWidth / DualPhotoLayout.aspect)
+                .clipShape(RoundedRectangle(
+                    cornerRadius: DualPhotoLayout.cornerRadius(forInsetWidth: thumbWidth),
+                    style: .continuous))
+                .overlay(
+                    RoundedRectangle(
+                        cornerRadius: DualPhotoLayout.cornerRadius(forInsetWidth: thumbWidth),
+                        style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.92),
+                                      lineWidth: DualPhotoLayout.borderWidth(forInsetWidth: thumbWidth))
+                )
+                .shadow(color: .black.opacity(0.5), radius: 10, y: 3)
+                .padding(.trailing, MADTheme.Spacing.md)
+                .padding(.top, 64)
+                .transition(.scale(scale: 2.4).combined(with: .opacity))
+        }
+        // The whole screen is the shutter here. There is one thing to do, and
+        // hunting for a button while the countdown runs is how the second
+        // frame gets missed.
+        .contentShape(Rectangle())
+        .onTapGesture { fireSecondFrameNow() }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Second photo in \(remaining) seconds. Activate to shoot now.")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { fireSecondFrameNow() }
     }
 
     // MARK: - Zoom
@@ -392,27 +580,12 @@ struct MADCameraView: View {
         // Latch immediately — the shutter disables and a second tap during
         // the capture round-trip can't start a competing capture.
         didCapture = true
-        // Classic white blink acknowledges the shutter instantly, before the
-        // capture round-trip finishes.
-        withAnimation(.easeIn(duration: 0.06)) { captureFlash = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            withAnimation(.easeOut(duration: 0.2)) { captureFlash = false }
-        }
+        shutterBlink()
         camera.capturePhoto { captured in
             guard let captured else {
-                // Failed (session interrupted, processing error): re-arm the
-                // shutter and say so — a silent no-op after a 10s countdown
-                // reads as "the app ate my photo".
-                didCapture = false
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    showCaptureFailed = true
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
-                    withAnimation(.easeOut(duration: 0.25)) { showCaptureFailed = false }
-                }
+                reportCaptureFailure()
                 return
             }
-            image = captured
             // Every in-app capture also lands in the camera roll — the user's
             // own copy, independent of what happens to the post. The mid-run
             // path opts out (autoSaveToPhotos == false) so it can save keyed to
@@ -420,6 +593,105 @@ struct MADCameraView: View {
             if autoSaveToPhotos {
                 PhotoRollSaver.save(captured)
             }
+            guard isDualActive, dualMode else {
+                image = captured
+                dismiss()
+                return
+            }
+            beginSecondFrame(after: captured)
+        }
+    }
+
+    private func shutterBlink() {
+        withAnimation(.easeIn(duration: 0.06)) { captureFlash = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation(.easeOut(duration: 0.2)) { captureFlash = false }
+        }
+    }
+
+    /// Re-arm the shutter and say so — a silent no-op after a 10s countdown
+    /// reads as "the app ate my photo".
+    private func reportCaptureFailure() {
+        didCapture = false
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            showCaptureFailed = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+            withAnimation(.easeOut(duration: 0.25)) { showCaptureFailed = false }
+        }
+    }
+
+    /// Hold the deliberate shot, flip to the other camera, and count down to
+    /// the second frame.
+    ///
+    /// Sequential rather than simultaneous (`AVCaptureMultiCamSession`): one
+    /// session, one output, the flip path this controller already has, and it
+    /// works on every device the app runs on rather than the subset multi-cam
+    /// supports. The cost is the ~2s gap while the other lens warms up, and
+    /// the countdown turns that from dead time into the beat that makes the
+    /// second shot EXPECTED — which is the difference between a fun surprise
+    /// and a photo of someone frowning at their phone.
+    private func beginSecondFrame(after first: UIImage) {
+        firstFrame = first
+        firstWasFront = camera.isUsingFrontCamera
+        camera.flip()
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+            flipRotation += 180
+            secondCountdown = 3
+        }
+        secondShotTask = Task { @MainActor in
+            // 3 → 2 → 1 → shoot. Never renders a 0: the shutter IS the zero,
+            // and a beat spent showing it is a beat of people relaxing out of
+            // the pose.
+            for remaining in [2, 1] {
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                guard !Task.isCancelled else { return }
+                MADHaptics.tap()
+                withAnimation(.easeOut(duration: 0.2)) { secondCountdown = remaining }
+            }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled else { return }
+            captureSecondFrame()
+        }
+    }
+
+    /// Tapping anywhere during the countdown takes the shot immediately.
+    private func fireSecondFrameNow() {
+        guard secondCountdown != nil, firstFrame != nil else { return }
+        secondShotTask?.cancel()
+        secondShotTask = nil
+        MADHaptics.action()
+        captureSecondFrame()
+    }
+
+    private func captureSecondFrame() {
+        guard let first = firstFrame else { return }
+        secondShotTask?.cancel()
+        secondShotTask = nil
+        secondCountdown = nil
+        shutterBlink()
+        camera.capturePhoto { second in
+            guard let second else {
+                // The second frame is the one that can be lost; the first is
+                // already in hand. Hand that one back as an ordinary photo
+                // rather than discarding a picture the user took — and say
+                // what happened, because a FRONT & BACK that quietly becomes
+                // a single is otherwise just a mystery.
+                firstFrame = nil
+                image = first
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    showCaptureFailed = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { dismiss() }
+                return
+            }
+            if autoSaveToPhotos {
+                PhotoRollSaver.save(second)
+            }
+            firstFrame = nil
+            onDualCapture?(
+                DualCapture(primary: first, secondary: second, primaryWasFront: firstWasFront)
+            )
             dismiss()
         }
     }
@@ -471,6 +743,11 @@ final class MADCameraController {
     /// Discrete zoom/lens stops to show as buttons for the current camera —
     /// e.g. [0.5, 1, 2] on a phone with an ultra-wide, [1, 2] without one.
     var zoomOptions: [CGFloat] = [1.0]
+    /// Which way the attached camera faces. Published rather than read off
+    /// `videoInput`, which is session-queue-owned — a FRONT & BACK capture
+    /// has to record which lens took the deliberate shot at the instant it
+    /// fires, and reading that across the queue boundary is a race.
+    var isUsingFrontCamera = false
 
     @ObservationIgnored private let sessionQueue = DispatchQueue(label: "mad.camera.session")
     @ObservationIgnored private let photoOutput = AVCapturePhotoOutput()
@@ -766,9 +1043,16 @@ final class MADCameraController {
         }
     }
 
+    /// Publish everything that depends on WHICH camera is attached. Called
+    /// from the same two places an attach happens, so the flash affordance
+    /// and the front/back flag can never describe different cameras.
     private func publishFlashAvailability() {
         let supported = photoOutput.supportedFlashModes.contains(.on)
-        DispatchQueue.main.async { self.isFlashAvailable = supported }
+        let front = videoInput?.device.position == .front
+        DispatchQueue.main.async {
+            self.isFlashAvailable = supported
+            self.isUsingFrontCamera = front
+        }
     }
 
     /// UIImagePickerController used to handle these for us: restart the
