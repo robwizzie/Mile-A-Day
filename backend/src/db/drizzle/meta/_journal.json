@@ -505,6 +505,13 @@
       "when": 1789833985682,
       "tag": "0071_many_susan_delgado",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1789840338292,
+      "tag": "0072_colorful_captain_cross",
+      "breakpoints": true
     }
   ]
 }

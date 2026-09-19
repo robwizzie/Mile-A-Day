@@ -60,9 +60,12 @@ export async function sweepOrphanedMedia(): Promise<void> {
     // folder" — it is where `uploadPostMedia` puts everything, and three
     // different features point at it:
     //   * posts.media_url                  — the post's own photo
+    //   * posts.dual_media_url             — its FRONT & BACK twin (the
+    //                                        swapped composition)
     //   * post_highlights.cover_image_url  — a Story Highlight's custom cover
     //   * post_coauthors.media_url         — a crew member's slide on a
     //                                        buddy walk's shared post
+    //   * post_coauthors.dual_media_url    — that slide's FRONT & BACK twin
     // The last two were invisible to this query, so 72h after someone set a
     // highlight cover (or added their photo to a friend's buddy walk) this
     // job deleted the file while the row went on pointing at it. The symptom
@@ -75,11 +78,16 @@ export async function sweepOrphanedMedia(): Promise<void> {
       `SELECT EXISTS (
 				SELECT 1 FROM posts WHERE split_part(media_url, '?', 1) = $1
 				UNION ALL
+				SELECT 1 FROM posts WHERE split_part(dual_media_url, '?', 1) = $1
+				UNION ALL
 				SELECT 1 FROM post_highlights
 				 WHERE split_part(cover_image_url, '?', 1) = $1
 				UNION ALL
 				SELECT 1 FROM post_coauthors
 				 WHERE split_part(media_url, '?', 1) = $1
+				UNION ALL
+				SELECT 1 FROM post_coauthors
+				 WHERE split_part(dual_media_url, '?', 1) = $1
 			) AS exists`,
       [mediaUrl],
     );

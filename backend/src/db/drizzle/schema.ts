@@ -1792,6 +1792,23 @@ export const posts = pgTable(
     postId: uuid("post_id").defaultRandom().primaryKey().notNull(),
     userId: text("user_id").notNull(),
     mediaUrl: text("media_url").notNull(),
+    // FRONT & BACK (the "dual" capture): the SWAPPED composition of the same
+    // two frames — front camera large with the back inset, where `media_url`
+    // is back-large with the front inset. NULL on every ordinary post.
+    //
+    // Two finished pictures rather than two raw frames, deliberately. The
+    // inset is BAKED into both, so `media_url` alone is already a complete,
+    // recognisable front-and-back photo: the profile grid, the story viewer,
+    // the share cards, the website's unfurl, the widgets and every shipped
+    // app build render it correctly with no change at all, and this column is
+    // pure enhancement — the client that understands it lets you tap the
+    // inset to swap which frame is large. Storing two CLEAN frames instead
+    // would have left every one of those surfaces showing half the photo.
+    //
+    // The inset geometry is identical in both, so the swap reads as the small
+    // picture staying put while the big one changes (iOS `DualPhotoLayout` is
+    // the single definition of that rectangle).
+    dualMediaUrl: text("dual_media_url"),
     caption: text(),
     workoutId: varchar("workout_id", { length: 255 }),
     // Denormalized {distance, pace, duration, streak, date} captured at post time
@@ -2565,6 +2582,11 @@ export const postCoauthors = pgTable(
     // Null on every pre-existing row and on every participant who hasn't added
     // one, which are the same thing as far as any reader is concerned.
     mediaUrl: text("media_url"),
+    // The FRONT & BACK twin of this participant's slide — the same swapped
+    // composition `posts.dual_media_url` holds for the author's photo, and
+    // null for everyone who shot a single. See that column for why two
+    // finished pictures rather than two raw frames.
+    dualMediaUrl: text("dual_media_url"),
     photoAddedAt: timestamp("photo_added_at", {
       withTimezone: true,
       mode: "string",

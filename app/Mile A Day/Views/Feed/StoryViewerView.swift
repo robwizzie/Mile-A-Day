@@ -935,6 +935,11 @@ private struct StoryGroupPlayerView: View {
             // feed post, the server rejects it (one post per workout).
             _ = try await PostService.createPost(
                 mediaUrl: post.media_url,
+                // Carry the FRONT & BACK twin across: promoting a story is
+                // the same photo reaching the feed, and dropping half of it
+                // on the way would turn a flip into a plain picture for no
+                // reason the user could see.
+                dualMediaUrl: post.dual_media_url,
                 caption: post.caption,
                 workoutId: post.workout_id,
                 shareToFeed: true,
