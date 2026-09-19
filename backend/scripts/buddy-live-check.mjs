@@ -216,6 +216,43 @@ async function testLateJoin() {
     0.6,
   );
 
+  // `last_heard_seconds` is how a roster tile keeps a walker's NUMBER once
+  // they go quiet, instead of blanking it to a dash and throwing away the one
+  // thing the people on the walk want to know. A fresh report reads ~0, and
+  // the field has to exist at all — a missing one degrades the tile to
+  // "no signal" with no idea how long.
+  {
+    const fresh = participant(await getSessionState(created.id, HOST), LATE);
+    check("a fresh report is not stale", fresh?.is_stale, false);
+    check(
+      "...and its age is served, near zero",
+      typeof fresh?.last_heard_seconds === "number" &&
+        fresh.last_heard_seconds < 5,
+      true,
+    );
+
+    // Age it past the staleness window IN THE ROW, which is the state the
+    // roster actually renders: stale, but still holding their distance.
+    await db.query(
+      `UPDATE buddy_session_participants
+          SET last_progress_at = NOW() - INTERVAL '7 minutes'
+        WHERE session_id = $1 AND user_id = $2`,
+      [created.id, LATE],
+    );
+    const quiet = participant(await getSessionState(created.id, HOST), LATE);
+    check("a walker who stops reporting goes stale", quiet?.is_stale, true);
+    check(
+      "...and the roster still has their distance",
+      quiet?.distance_miles,
+      0.6,
+    );
+    check(
+      "...dated, so the tile can say how old it is",
+      quiet?.last_heard_seconds >= 400 && quiet?.last_heard_seconds < 500,
+      true,
+    );
+  }
+
   // Indoor vs outdoor is one person's answer about where they are: the host
   // changing their own must not disturb anybody else's.
   const afterHostChoice = await setParticipantLocationType(

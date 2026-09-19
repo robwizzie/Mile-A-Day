@@ -42,6 +42,13 @@ struct AvatarWithRing: View {
         /// them", and drawing the same thing for both is what makes a break
         /// look like a crash.
         case paused
+        /// We haven't heard from them. The counterpart the comment above
+        /// describes, and it needs a MARK of its own: dimming alone says
+        /// something is different without saying what, which on a roster
+        /// reads as the app losing somebody rather than as a phone out of
+        /// signal. Deliberately NOT the pause amber — a break is a choice,
+        /// this is weather.
+        case outOfRange
     }
 
     private var clamped: Double { max(0, min(1, progress)) }
@@ -111,6 +118,13 @@ struct AvatarWithRing: View {
                 .foregroundColor(.white)
                 .frame(width: size * 0.32, height: size * 0.32)
                 .background(Circle().fill(MADTheme.Colors.warning))
+                .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1.5))
+        case .outOfRange:
+            Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                .font(.system(size: size * 0.17, weight: .bold))
+                .foregroundColor(.white.opacity(0.9))
+                .frame(width: size * 0.32, height: size * 0.32)
+                .background(Circle().fill(Color(white: 0.28)))
                 .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1.5))
         case .live:
             ZStack {

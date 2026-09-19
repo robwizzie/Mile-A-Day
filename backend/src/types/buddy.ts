@@ -168,6 +168,22 @@ export interface BuddyParticipantView {
   /** True when last_progress_at is older than BUDDY_STALE_PROGRESS_SECONDS. */
   is_stale: boolean;
   /**
+   * Whole seconds since this walker's last progress report, or null when they
+   * are not active / have never reported.
+   *
+   * Exists so a stale tile can say HOW stale rather than just going quiet.
+   * The roster used to replace an out-of-range walker's distance with a dash,
+   * on the grounds that a figure we hadn't refreshed in 90 seconds might be a
+   * lie — but the cure threw away the last thing we actually knew about them,
+   * which is the only thing anyone on the walk wants. With an age attached,
+   * "1.20 mi · 4m ago" is not a lie; it is exactly what we know.
+   *
+   * An AGE, not the timestamp: a timestamptz would cross the wire with
+   * fractional seconds (the decoder trap) and would make the client subtract
+   * a server clock from a device clock.
+   */
+  last_heard_seconds: number | null;
+  /**
    * The walker MANUALLY paused, and is still on the walk. Additive: false from
    * a client that never sends the flag, which is exactly what those clients
    * mean. Never the tracker's auto-pause GUESS — that one is deliberately
