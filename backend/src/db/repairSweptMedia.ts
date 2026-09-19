@@ -108,6 +108,11 @@ async function diskLooksHealthy(client: Client): Promise<boolean> {
 
 export async function repairSweptMedia(): Promise<void> {
   if (process.env.MEDIA_REPAIR_DISABLED === "1") return;
+  // Inventory without consequences. The kill switch alone is all-or-nothing —
+  // it leaves the pointers intact but tells you nothing, so "how much did we
+  // lose, and is a snapshot restore worth it" stays unanswerable on a box with
+  // no shell. This logs exactly what the repair WOULD clear and writes nothing.
+  const dryRun = process.env.MEDIA_REPAIR_DRY_RUN === "1";
 
   // A dedicated connection for the same reason backfillFeedRoles takes one:
   // the shared pool's 30s timeouts are right for requests and wrong for a
@@ -142,15 +147,16 @@ export async function repairSweptMedia(): Promise<void> {
       // to be matched back against, and nulling the column without recording
       // it first would turn a recoverable loss into a permanent one.
       console.log(
-        `[media-repair] crew slide post=${row.post_id} user=${row.user_id} ` +
-          `lost=${row.media_url}`,
+        `[media-repair]${dryRun ? " [dry-run]" : ""} crew slide ` +
+          `post=${row.post_id} user=${row.user_id} lost=${row.media_url}`,
       );
+      clearedSlides += 1;
+      if (dryRun) continue;
       await client.query(
         `UPDATE post_coauthors SET media_url = NULL, photo_added_at = NULL
           WHERE post_id = $1 AND user_id = $2`,
         [row.post_id, row.user_id],
       );
-      clearedSlides += 1;
     }
 
     let clearedCovers = 0;
@@ -167,21 +173,23 @@ export async function repairSweptMedia(): Promise<void> {
       // does, so the rail falls back to a member's photo instead of a blank
       // circle — and the highlight keeps working while they re-pick a cover.
       console.log(
-        `[media-repair] highlight cover highlight=${row.highlight_id} ` +
-          `lost=${row.cover_image_url}`,
+        `[media-repair]${dryRun ? " [dry-run]" : ""} highlight cover ` +
+          `highlight=${row.highlight_id} lost=${row.cover_image_url}`,
       );
+      clearedCovers += 1;
+      if (dryRun) continue;
       await client.query(
         `UPDATE post_highlights SET cover_image_url = NULL, updated_at = NOW()
           WHERE highlight_id = $1`,
         [row.highlight_id],
       );
-      clearedCovers += 1;
     }
 
     if (clearedSlides || clearedCovers)
       console.log(
-        `[media-repair] cleared ${clearedSlides} crew slide(s) and ` +
-          `${clearedCovers} highlight cover(s) whose files were swept.`,
+        `[media-repair] ${dryRun ? "WOULD clear" : "cleared"} ${clearedSlides} ` +
+          `crew slide(s) and ${clearedCovers} highlight cover(s) whose files ` +
+          `were swept.${dryRun ? " Nothing was written." : ""}`,
       );
   } catch (error: any) {
     // Never fail a boot over this: the rows are already wrong, and a retry
