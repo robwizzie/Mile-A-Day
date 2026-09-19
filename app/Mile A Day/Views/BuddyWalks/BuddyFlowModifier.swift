@@ -1,5 +1,61 @@
 import SwiftUI
 
+/// Where "open my buddy walk" should actually land.
+///
+/// The lobby is a PRE-start screen — its job is to hold people until the walk
+/// begins — so it has no answer for someone whose walk is already recording.
+/// Shown to them anyway it offered two controls and both misled: "Start my
+/// walk" only releases the lobby's hand-off gate, and `startBuddyWorkoutIfReady`
+/// then declines because `isTracking` is already true, so it read as being sent
+/// back a step; and "Cancel walk" asked the server to cancel a session it
+/// bounds to `status = 'lobby'` or a countdown that hasn't elapsed, so it came
+/// back "already underway" — the app contradicting the screen it had just
+/// drawn. Nothing on that screen could reach the walk in progress.
+///
+/// So the question is asked BEFORE presenting, in one place, because the lobby
+/// is opened from several (the pill, a push, an inbox row, a deep link) and a
+/// guard added to some of them is a bug that comes back through whichever one
+/// was missed.
+enum BuddyWalkOpenTarget: Equatable {
+    /// No live session to re-enter: build one.
+    case setup
+    /// A live session and no workout of our own yet — the lobby is correct.
+    case lobby
+    /// Already walking. Adopt the session into the tracker that is ALREADY
+    /// recording and show it; never start a second one.
+    case resumeTracking(sessionId: String?)
+}
+
+/// `@MainActor` because it reads `BuddySessionService`, whose state is
+/// main-actor isolated — the isolation the call sites already had when this
+/// decision was written inline in each of them, and which a plain static func
+/// silently dropped. Every caller is view code on the main actor, so this only
+/// restores what was true before it was extracted.
+@MainActor
+enum BuddyWalkRouting {
+    /// Is a workout of this user's own already recording?
+    ///
+    /// Read from the persisted state rather than from `showWorkoutView`: the
+    /// tracker is a fullScreenCover and is destroyed every time the user peeks
+    /// at the dashboard, so "is the cover up" answers a different question and
+    /// answers it wrong exactly when someone has stepped out of the tracker to
+    /// look at the walk — which is the case this exists for.
+    static var isWalking: Bool {
+        InProgressWorkoutStore.load()?.isActive == true
+    }
+
+    /// Takes the service rather than defaulting to `.shared`: a default
+    /// argument is evaluated in the CALLER's isolation, not this method's, so
+    /// `= .shared` on a main-actor-isolated singleton warns today and is an
+    /// error in Swift 6 even with the method itself isolated. Every caller
+    /// already has the service to hand.
+    static func openTarget(_ service: BuddySessionService) -> BuddyWalkOpenTarget {
+        guard service.canReenterLiveSession else { return .setup }
+        guard isWalking else { return .lobby }
+        return .resumeTracking(sessionId: service.session?.id)
+    }
+}
+
 /// The whole Buddy Walks presentation flow — setup, lobby, recap, and the
 /// four events that open them — as ONE node on the dashboard's modifier chain.
 ///
@@ -35,6 +91,24 @@ struct BuddyFlowModifier: ViewModifier {
     /// `consumePendingBuddyLink(code:sessionId:)` — the dashboard owns it
     /// because it also clears the router's parked intent.
     let onPendingLink: (String?, String?) -> Void
+
+    /// Present whichever screen the target names. The `resumeTracking` case is
+    /// the whole point: it puts the user back in the workout that is already
+    /// recording — adopting the session into it on the way, so a walk joined
+    /// from a push still gets its crew — instead of covering it with a lobby
+    /// that cannot act on it.
+    private func open(_ target: BuddyWalkOpenTarget) {
+        switch target {
+        case .setup:
+            flowEntry = .setup
+        case .lobby:
+            flowEntry = .lobby
+        case .resumeTracking(let sessionId):
+            if let sessionId { activeSessionId = sessionId }
+            flowEntry = nil
+            showWorkoutView = true
+        }
+    }
 
     func body(content: Content) -> some View {
         content
@@ -84,7 +158,7 @@ struct BuddyFlowModifier: ViewModifier {
                 Text(linkError ?? "")
             }
             .onReceive(NotificationCenter.default.publisher(for: .madOpenBuddyLobby)) { _ in
-                flowEntry = .lobby
+                self.open(BuddyWalkRouting.openTarget(BuddySessionService.shared))
             }
             .onReceive(NotificationCenter.default.publisher(for: .madStartBuddyWalk)) { _ in
                 // An invite already waiting goes straight to the lobby; there is
@@ -92,18 +166,17 @@ struct BuddyFlowModifier: ViewModifier {
                 // user already finished stays `active` while friends walk on,
                 // and the lobby hands a long-started session straight into
                 // tracking, which is how a finished walk restarted itself.
-                let open: () -> Void = {
-                    flowEntry =
-                        BuddySessionService.shared.canReenterLiveSession ? .lobby : .setup
+                let present: () -> Void = {
+                    self.open(BuddyWalkRouting.openTarget(BuddySessionService.shared))
                 }
                 // Setting up a NEW walk closes the last one's recap first. The
                 // request reaches here from inside that recap ("walks together"
                 // → "walk again"), and a dismissal plus a presentation in one
                 // transaction race — SwiftUI drops one, which showed up as the
                 // button doing nothing at all.
-                guard recapSessionId != nil else { return open() }
+                guard recapSessionId != nil else { return present() }
                 recapSessionId = nil
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: open)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: present)
             }
             // A buddy deep link or push can land before the dashboard exists
             // (cold launch), so the intent is parked on DeepLinkRouter and

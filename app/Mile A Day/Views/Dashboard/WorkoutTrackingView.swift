@@ -2055,6 +2055,22 @@ struct WorkoutTrackingView: View {
                 Task { @MainActor in
                     await BuddySessionService.shared.refreshMySessions()
                 }
+            } else if let session = effectiveBuddySessionId,
+                      saved.buddySessionId == nil {
+                // ...and the other direction. Arriving here with a session the
+                // persisted workout doesn't carry is the tracker being REOPENED
+                // onto a walk already recording — a buddy push or the pill
+                // tapped mid-walk, which now routes here instead of to a lobby
+                // that could not act on it. The workout was persisted SOLO, so
+                // stamp it, exactly as the mid-walk join strip does: without
+                // this the crew survives only until the next relaunch, which is
+                // the failure the persisted room exists to prevent. Only when
+                // it carries no room — a workout already in one keeps it rather
+                // than being moved by whatever was tapped.
+                InProgressWorkoutStore.setBuddySession(session)
+                Task { @MainActor in
+                    await BuddySessionService.shared.refreshMySessions()
+                }
             }
 
             // Restore core state. The clock is settled AFTER tracking restarts
