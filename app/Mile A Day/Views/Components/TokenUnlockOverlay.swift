@@ -71,6 +71,18 @@ struct TokenUnlockOverlay: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.center)
 
+                    // "Who acts" rides the earn moment too, in the same badge
+                    // the dashboard tile and the explainer use. This is the
+                    // first time the user ever sees this token, and the whole
+                    // confusion the badge exists for starts here — two of
+                    // these spend themselves, one needs a friend, and the
+                    // celebration used to imply all three were the same.
+                    // Single-token only: three badges in a row is a legend,
+                    // not a fact about the thing just earned.
+                    if kinds.count == 1 {
+                        TokenUsageBadge(usage: kinds[0].usage)
+                    }
+
                     Text(subtitle)
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundColor(.white.opacity(0.72))

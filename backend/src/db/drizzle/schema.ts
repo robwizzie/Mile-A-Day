@@ -1460,6 +1460,24 @@ export const streakCoverage = pgTable(
     // Assist only: who rescued this user. Plain text (no FK) so a deleted
     // giver never blocks the receiver's history.
     sourceUser: text("source_user"),
+    // What the spender's token stamp read BEFORE this coverage was written
+    // (`users.<kind>_last_used`), so a refund can put the meter back exactly
+    // where it was rather than guessing. NULL means "never used before this
+    // one" — which is also the correct value to restore. Nullable and
+    // additive: rows written before the refund feature simply can't be
+    // refunded, and `refundEarnedCoverage` skips them rather than inventing a
+    // stamp.
+    priorLastUsed: date("prior_last_used"),
+    // The stamp this spend WROTE. Usually the same as `trigger_date`, but not
+    // for an Assist: the coverage is triggered on the DONOR's day while the
+    // meter is stamped in the RECIPIENT's, and those are different dates
+    // across a timezone. The refund rolls back only while the live stamp
+    // still equals this, so a later spend of the same token is never undone.
+    spentStamp: date("spent_stamp"),
+    // Assist only: the exchange that paid for this day. A refund closes it as
+    // 'refunded', which is what hands the donor's mile back (getDonationBudget
+    // counts only 'pending'/'accepted').
+    offerId: uuid("offer_id"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
@@ -1474,6 +1492,46 @@ export const streakCoverage = pgTable(
       columns: [table.userId, table.localDate],
       name: "streak_coverage_pkey",
     }),
+  ],
+);
+
+// A coverage row that was handed BACK, because the user went and earned the
+// day for real after a token had already carried it.
+//
+// The live row is DELETED rather than flagged, deliberately: `streak_coverage`
+// is read by fifteen-odd queries across the streak walks, the admin analytics
+// and the backfills, none of which carry a "still valid?" predicate — adding
+// one to all of them is a leak waiting to happen, and a day the user actually
+// ran is simply not a covered day any more. This table is the audit trail that
+// deletion would otherwise lose: what was returned, when, and what the token
+// stamp was rolled back to.
+export const streakCoverageRefunds = pgTable(
+  "streak_coverage_refunds",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    localDate: date("local_date").notNull(),
+    kind: varchar({ length: 32 }).notNull(),
+    sourceUser: text("source_user"),
+    offerId: uuid("offer_id"),
+    // The stamp the refund restored the meter to (NULL = "never used").
+    restoredLastUsed: date("restored_last_used"),
+    // When the coverage was originally written.
+    coveredAt: timestamp("covered_at", { withTimezone: true, mode: "string" }),
+    refundedAt: timestamp("refunded_at", {
+      withTimezone: true,
+      mode: "string",
+    })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "streak_coverage_refunds_user_id_fkey",
+    }).onDelete("cascade"),
+    index("streak_coverage_refunds_user_idx").on(table.userId, table.localDate),
   ],
 );
 

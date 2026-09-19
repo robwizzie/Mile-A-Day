@@ -30,6 +30,11 @@ struct AvatarWithRing: View {
 
     enum Badge {
         case check        // green checkmark — goal completed
+        /// A streak token is holding this day. Its own hue (SavedDayStyle's
+        /// blue) because it is a FOURTH state, not a shade of done: the
+        /// streak is safe, the miles are not in, and painting it green would
+        /// claim a run that didn't happen.
+        case saved
         case live         // pulsing red dot — workout in progress
         /// Two bars — the walker has stopped ON PURPOSE. Distinct from the
         /// dimmed-to-a-hairline treatment a host uses for someone who has gone
@@ -92,6 +97,13 @@ struct AvatarWithRing: View {
                 .foregroundColor(.white)
                 .frame(width: size * 0.32, height: size * 0.32)
                 .background(Circle().fill(Color.green))
+                .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1.5))
+        case .saved:
+            Image(systemName: "shield.fill")
+                .font(.system(size: size * 0.18, weight: .black))
+                .foregroundColor(.white)
+                .frame(width: size * 0.32, height: size * 0.32)
+                .background(Circle().fill(SavedDayStyle.tint))
                 .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1.5))
         case .paused:
             Image(systemName: "pause.fill")

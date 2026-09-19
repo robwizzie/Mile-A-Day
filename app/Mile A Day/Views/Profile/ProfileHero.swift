@@ -173,6 +173,11 @@ struct ProfileWordmark: View {
 struct GoalRingAvatar<Avatar: View>: View {
     let progress: Double?
     let isComplete: Bool
+    /// A streak token is carrying today. The ring fills in SavedDayStyle's
+    /// blue rather than reading as an unfinished orange arc — the day IS
+    /// safe, and the one thing this ring must never do is contradict the
+    /// streak number sitting under it.
+    var savedToday: Bool = false
     /// Avatar diameter; the ring sits outside it.
     let size: CGFloat
     var ringWidth: CGFloat = 5
@@ -183,7 +188,9 @@ struct GoalRingAvatar<Avatar: View>: View {
         size + 2 * gap + 2 * ringWidth
     }
 
-    private var clamped: Double { isComplete ? 1 : max(0, min(1, progress ?? 0)) }
+    private var clamped: Double {
+        (isComplete || savedToday) ? 1 : max(0, min(1, progress ?? 0))
+    }
 
     var body: some View {
         let diameter = Self.ringDiameter(size: size, ringWidth: ringWidth, gap: gap)
@@ -200,16 +207,7 @@ struct GoalRingAvatar<Avatar: View>: View {
                 .inset(by: ringWidth / 2)
                 .trim(from: 0, to: clamped)
                 .stroke(
-                    isComplete
-                        ? AnyShapeStyle(Color.green)
-                        : AnyShapeStyle(
-                            AngularGradient(
-                                colors: [Color.orange.opacity(0.55), .orange, Color.orange.opacity(0.85)],
-                                center: .center,
-                                startAngle: .degrees(0),
-                                endAngle: .degrees(360)
-                            )
-                        ),
+                    ringStyle,
                     style: StrokeStyle(lineWidth: ringWidth, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
@@ -220,6 +218,22 @@ struct GoalRingAvatar<Avatar: View>: View {
         }
         .frame(width: diameter, height: diameter)
     }
+
+    /// Done → green. Saved → the token blue. Otherwise the in-progress
+    /// orange sweep. Saved is checked FIRST only when the day isn't actually
+    /// complete: a covered day the user then ran is a green day.
+    private var ringStyle: AnyShapeStyle {
+        if isComplete { return AnyShapeStyle(Color.green) }
+        if savedToday { return AnyShapeStyle(SavedDayStyle.tint) }
+        return AnyShapeStyle(
+            AngularGradient(
+                colors: [Color.orange.opacity(0.55), .orange, Color.orange.opacity(0.85)],
+                center: .center,
+                startAngle: .degrees(0),
+                endAngle: .degrees(360)
+            )
+        )
+    }
 }
 
 /// "88% TO GOAL" / "GOAL DONE" — the chip tucked under the ring. Nothing when
@@ -227,10 +241,16 @@ struct GoalRingAvatar<Avatar: View>: View {
 struct GoalRingLabel: View {
     let progress: Double?
     let isComplete: Bool
+    /// The day a token is carrying. Its chip REPLACES the percentage rather
+    /// than sitting beside it: "0% TO GOAL" over a streak that just went up
+    /// is the contradiction this whole state exists to remove.
+    var savedToday: CoveredDate? = nil
 
     var body: some View {
         if isComplete {
             chip("GOAL DONE", icon: "checkmark", color: .green)
+        } else if let savedToday {
+            SavedDayStyle.todayChip(for: savedToday)
         } else if let progress {
             let percent = Int((max(0, min(1, progress)) * 100).rounded(.down))
             chip("\(percent)% TO GOAL", icon: nil, color: .orange)
@@ -345,6 +365,9 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
     var milestoneThresholds: [Double] = []
     let goalProgress: Double?
     let goalComplete: Bool
+    /// A streak token is carrying today — the ring and its chip say so
+    /// instead of drawing an untouched day beside a streak that just grew.
+    var goalSavedToday: CoveredDate? = nil
     /// Extra banner height above the top bar — the status bar when the banner
     /// runs under it (own profile). Zero when a navigation bar sits above.
     var topInset: CGFloat = 0
@@ -381,7 +404,12 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
             Button {
                 onTapAvatar?()
             } label: {
-                GoalRingAvatar(progress: goalProgress, isComplete: goalComplete, size: avatarSize) {
+                GoalRingAvatar(
+                    progress: goalProgress,
+                    isComplete: goalComplete,
+                    savedToday: goalSavedToday != nil,
+                    size: avatarSize
+                ) {
                     avatar()
                 }
                 .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
@@ -390,8 +418,12 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
             .accessibilityLabel("Profile photo")
             .allowsHitTesting(onTapAvatar != nil)
             .overlay(alignment: .bottom) {
-                GoalRingLabel(progress: goalProgress, isComplete: goalComplete)
-                    .offset(y: 8)
+                GoalRingLabel(
+                    progress: goalProgress,
+                    isComplete: goalComplete,
+                    savedToday: goalSavedToday
+                )
+                .offset(y: 8)
             }
             .padding(.leading, gutter)
             .padding(.bottom, labelReserve)
@@ -467,6 +499,10 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
     /// Today's mile is in: the streak tile turns green (the dashboard's
     /// done-colour) instead of the brand red it wears while the day is open.
     var streakDoneToday: Bool = false
+    /// A token is carrying today. The tile wears SavedDayStyle's blue and a
+    /// shield — never green, which would claim miles that weren't run, and
+    /// never the open-day red, which would contradict the number above it.
+    var streakSavedToday: CoveredDate? = nil
     @ViewBuilder var friendsDestination: () -> FriendsDestination
 
     var body: some View {
@@ -474,8 +510,8 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
             tile(
                 label: "STREAK",
                 value: "\(streak)",
-                accent: streakDoneToday ? .green : MADTheme.Colors.madRed,
-                trailingIcon: streakDoneToday ? "checkmark.circle.fill" : nil
+                accent: streakAccent,
+                trailingIcon: streakIcon
             )
             tile(label: DistanceUnits.current.plural.uppercased(), value: milesText, accent: nil)
             NavigationLink(destination: friendsDestination()) {
@@ -489,6 +525,20 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
             .buttonStyle(.plain)
         }
         .animation(.easeInOut(duration: 0.2), value: friendCount)
+    }
+
+    /// Done outranks saved: a covered day the owner then ran is a green day,
+    /// and the server has already handed the token back by the time we draw.
+    private var streakAccent: Color {
+        if streakDoneToday { return .green }
+        if streakSavedToday != nil { return SavedDayStyle.tint }
+        return MADTheme.Colors.madRed
+    }
+
+    private var streakIcon: String? {
+        if streakDoneToday { return "checkmark.circle.fill" }
+        if let saved = streakSavedToday { return SavedDayStyle.icon(for: saved.kind) }
+        return nil
     }
 
     private func tile(

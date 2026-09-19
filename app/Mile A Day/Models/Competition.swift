@@ -1385,9 +1385,17 @@ struct NudgeStatusResponse: Codable, Equatable {
     var has_nudged_today: Bool? = nil
     /// The sender's role bypasses the once-per-friend-per-day nudge limit.
     var unlimited_nudges: Bool? = nil
+    /// A streak token is already holding this friend's day (usually an Assist
+    /// banked in the morning). Absent on older backends and null for almost
+    /// everyone — but without it the row paints a covered day as
+    /// "0.00 / 1 mi · 0%" beside a Nudge button, which is the app reporting
+    /// that a rescue the viewer may have paid for did nothing.
+    var today_covered: CoveredDate? = nil
 
     /// Display truth for "already nudged today" across backend versions.
     var nudgedToday: Bool { has_nudged_today ?? already_nudged_today }
+    /// The day is safe even though the miles aren't in.
+    var savedToday: Bool { today_covered != nil }
     var unlimitedNudges: Bool { unlimited_nudges ?? false }
 }
 
