@@ -149,6 +149,25 @@ async function main() {
     fs.renameSync(path.join(parked, f), path.join(DIR, f));
   fs.rmSync(parked, { recursive: true, force: true });
 
+  // Dry run FIRST: it must name what it found and change nothing, or the
+  // inventory that decides whether a snapshot restore is worth attempting
+  // would itself destroy the pointers that restore needs.
+  process.env.MEDIA_REPAIR_DRY_RUN = "1";
+  await repairSweptMedia();
+  delete process.env.MEDIA_REPAIR_DRY_RUN;
+  check(
+    "a dry run reports but writes NOTHING",
+    (await db.query(`SELECT media_url FROM post_coauthors WHERE post_id = $1 AND user_id = $2`,
+      [postId, CREW]))[0].media_url,
+    gone,
+  );
+  check(
+    "...including the highlight cover",
+    (await db.query(`SELECT cover_image_url FROM post_highlights WHERE highlight_id = $1`,
+      [hl]))[0].cover_image_url,
+    gone,
+  );
+
   await repairSweptMedia();
   check(
     "a crew slide whose file is gone stops claiming a photo",

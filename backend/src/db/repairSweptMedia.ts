@@ -37,6 +37,13 @@ import path from "path";
  * Idempotent and cheap on every later boot: once the swept rows are cleared
  * there is nothing left whose file is missing, so it stats a bounded set and
  * writes nothing. `MEDIA_REPAIR_DISABLED=1` turns it off entirely.
+ *
+ * Every reference it clears is LOGGED with its path first. Clearing the column
+ * is what makes the card read honestly, but it also discards the only record
+ * of which file belonged to which slide — so if the uploads volume is ever
+ * restored from a snapshot, that log is what the files can be matched back
+ * against. Set the kill switch before the first deploy if a restore is being
+ * attempted, and let this run once the recovery is settled.
  */
 
 /** Sampled from posts.media_url — never swept, so a proxy for "disk is here". */
@@ -101,6 +108,11 @@ async function diskLooksHealthy(client: Client): Promise<boolean> {
 
 export async function repairSweptMedia(): Promise<void> {
   if (process.env.MEDIA_REPAIR_DISABLED === "1") return;
+  // Inventory without consequences. The kill switch alone is all-or-nothing —
+  // it leaves the pointers intact but tells you nothing, so "how much did we
+  // lose, and is a snapshot restore worth it" stays unanswerable on a box with
+  // no shell. This logs exactly what the repair WOULD clear and writes nothing.
+  const dryRun = process.env.MEDIA_REPAIR_DRY_RUN === "1";
 
   // A dedicated connection for the same reason backfillFeedRoles takes one:
   // the shared pool's 30s timeouts are right for requests and wrong for a
@@ -129,12 +141,22 @@ export async function repairSweptMedia(): Promise<void> {
       // photo_added_at goes with it: it is the timestamp OF the photo being
       // cleared, and leaving it behind describes a slide that isn't there.
       // The caption stays — those are their words, not the picture.
+      // Printed BEFORE the write, one line per reference, because this log is
+      // the only remaining record of which file each row pointed at. The file
+      // is already gone; the path is what a restore from a volume snapshot has
+      // to be matched back against, and nulling the column without recording
+      // it first would turn a recoverable loss into a permanent one.
+      console.log(
+        `[media-repair]${dryRun ? " [dry-run]" : ""} crew slide ` +
+          `post=${row.post_id} user=${row.user_id} lost=${row.media_url}`,
+      );
+      clearedSlides += 1;
+      if (dryRun) continue;
       await client.query(
         `UPDATE post_coauthors SET media_url = NULL, photo_added_at = NULL
           WHERE post_id = $1 AND user_id = $2`,
         [row.post_id, row.user_id],
       );
-      clearedSlides += 1;
     }
 
     let clearedCovers = 0;
@@ -150,18 +172,24 @@ export async function repairSweptMedia(): Promise<void> {
       // Clearing it is exactly what the editor's "use a photo from inside"
       // does, so the rail falls back to a member's photo instead of a blank
       // circle — and the highlight keeps working while they re-pick a cover.
+      console.log(
+        `[media-repair]${dryRun ? " [dry-run]" : ""} highlight cover ` +
+          `highlight=${row.highlight_id} lost=${row.cover_image_url}`,
+      );
+      clearedCovers += 1;
+      if (dryRun) continue;
       await client.query(
         `UPDATE post_highlights SET cover_image_url = NULL, updated_at = NOW()
           WHERE highlight_id = $1`,
         [row.highlight_id],
       );
-      clearedCovers += 1;
     }
 
     if (clearedSlides || clearedCovers)
       console.log(
-        `[media-repair] cleared ${clearedSlides} crew slide(s) and ` +
-          `${clearedCovers} highlight cover(s) whose files were swept.`,
+        `[media-repair] ${dryRun ? "WOULD clear" : "cleared"} ${clearedSlides} ` +
+          `crew slide(s) and ${clearedCovers} highlight cover(s) whose files ` +
+          `were swept.${dryRun ? " Nothing was written." : ""}`,
       );
   } catch (error: any) {
     // Never fail a boot over this: the rows are already wrong, and a retry
