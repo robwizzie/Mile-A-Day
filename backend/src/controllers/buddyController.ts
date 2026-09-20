@@ -36,6 +36,7 @@ import {
   setReady,
   getBuddyPartners,
   startSession,
+  startSessionNow,
   updateSession,
 } from "../services/buddySessionService.js";
 import {
@@ -541,6 +542,19 @@ export async function startSessionController(
     res.json(await startSession(req.params.sessionId, req.userId!));
   } catch (error) {
     handleError(res, error, "starting buddy session");
+  }
+}
+
+/** Host-only: pull `started_at` to now, ending the countdown for everyone. */
+export async function startSessionNowController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    res.json(await startSessionNow(req.params.sessionId, req.userId!));
+  } catch (error) {
+    handleError(res, error, "starting buddy session now");
   }
 }
 

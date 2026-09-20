@@ -1852,14 +1852,17 @@ struct WorkoutTrackingView: View {
                 goBack(to: {}, from: { buddyFlowEntry = nil })
             },
             onStart: { session in
-                // Cleared here as well as in `clearPreStartSteps`: the guards
-                // in `startBuddyWorkoutIfReady` can decline the hand-off (a
-                // workout is already running), and the lobby must still come
-                // down — it has already latched `hasHandedOff`.
-                buddyFlowEntry = nil
                 adoptedBuddySessionId = session.id
                 onBuddySessionAdopted?(session.id)
-                startBuddyWorkoutIfReady()
+                // A declined hand-off still has to leave this wizard. Every
+                // guard in `startBuddyWorkoutIfReady` means "a workout is
+                // already running", and the lobby has latched `hasHandedOff`
+                // either way, so the questions behind it are answered no
+                // matter which way it went — leaving them mounted dropped the
+                // walker back on "What are you doing?" the moment the lobby
+                // came down, which reads as the app having forgotten the walk
+                // it just started. The success path clears them itself.
+                if !startBuddyWorkoutIfReady() { clearPreStartSteps() }
             }
         )
     }

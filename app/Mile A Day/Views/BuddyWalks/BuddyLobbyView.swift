@@ -301,11 +301,13 @@ struct BuddyLobbyView: View {
     /// up until `started_at` passes, and both of which the flow's own back
     /// chevron still offers while this is on screen.
     ///
-    /// The other thing that happens in this window is that you are already
-    /// walking. Eight seconds of staring at a number is the whole cost of a
-    /// synced start, and it is only worth paying when there is somebody to sync
-    /// WITH — so "Start now" spends it, for this phone. See `startNow`.
+    /// The other thing that happens in this window is that the host has decided
+    /// to go. Eight seconds of staring at a number is the whole cost of a
+    /// synced start, and only the host can decide it isn't worth paying — so
+    /// "Start now" is theirs, and it ends the countdown for EVERYONE. See
+    /// `startNow`.
     private func countdown(remaining: TimeInterval, session: BuddySessionState) -> some View {
+        let isHost = session.isHost(buddy.currentUserId)
         // Anyone else actually in the walk. Solo there is nobody for the
         // caption below to be about, and it would read as a bug.
         let others = session.activeParticipants.contains { $0.userId != buddy.currentUserId }
@@ -330,19 +332,26 @@ struct BuddyLobbyView: View {
             Spacer(minLength: 0)
 
             VStack(spacing: MADTheme.Spacing.sm) {
-                WizardPrimaryButton(title: "Start now") { startNow(session) }
+                // HOST ONLY. Skipping the wait is a decision about the whole
+                // group, and a guest tapping it was the bug: it handed this
+                // one phone to the tracker while `started_at` stood still, so
+                // they walked alone out of a screen titled "Starting together"
+                // — and when the tracker declined the hand-off it dropped them
+                // back onto the wizard's first question, which reads as the
+                // app forgetting the walk exists. Everyone else waits out the
+                // eight seconds they are already watching.
+                if isHost {
+                    WizardPrimaryButton(title: "Start now") { startNow() }
 
-                // Says what the button does NOT do. It moves this phone only —
-                // `started_at` is untouched — so under a heading that reads
-                // "Starting together" the label alone would promise the whole
-                // group, and the walk would look broken to the person who
-                // tapped it and then watched nobody else appear.
-                if others {
-                    Text("Everyone else starts when it hits zero.")
-                        .font(MADTheme.Typography.small)
-                        .foregroundStyle(Color.white.opacity(0.6))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, MADTheme.Spacing.lg)
+                    // Says what the button DOES, because the label alone
+                    // sounds like it might only move the person tapping it.
+                    if others {
+                        Text("Starts everyone right away.")
+                            .font(MADTheme.Typography.small)
+                            .foregroundStyle(Color.white.opacity(0.6))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, MADTheme.Spacing.lg)
+                    }
                 }
 
                 exitButton(session)
@@ -1126,33 +1135,42 @@ struct BuddyLobbyView: View {
         performHandOff(session)
     }
 
-    /// Skip the wait, for this phone only.
+    /// End the countdown for the whole group — the host's call.
     ///
-    /// Safe to hand off before `started_at`, because the countdown is the only
-    /// thing still in the future: `activateSession` already flipped the session
-    /// AND every lobby participant to `active` when Start was pressed, so the
-    /// server accepts this user's progress immediately — `recordProgress` even
-    /// clamps its speed ceiling with a `GREATEST(..., 1)` written for exactly
-    /// this case, "the pre-start countdown, when started_at is still in the
-    /// future". Nothing downstream needs the clock to have run out either: the
-    /// tracker's `startBuddyWorkoutIfReady` keys off the session id alone, the
-    /// race-time progress bar floors elapsed at 0, and sync reconciliation
-    /// matches on the workout's END date, which only moves later.
+    /// This used to hand the session to THIS phone's tracker and leave
+    /// `started_at` alone, which made "Start now" mean something different
+    /// from what it says on a screen headed "Starting together": the tapper
+    /// walked, everybody else kept counting. So it is a server write now
+    /// (`POST /buddy/sessions/:id/start-now`, host-only, which also moves a
+    /// race's `ends_at`), and the hand-off is left to the ordinary elapsed
+    /// check — the response carries a `started_at` in the past, `apply` lands
+    /// it, and the next 0.1s tick starts this phone by the same rule the
+    /// others start by when their poll catches up. One clock, no head start.
     ///
-    /// It does NOT move `started_at`, so it starts nobody else — that would be
-    /// a server change, and at a 5s poll it would still leave the others most
-    /// of the countdown. The caption says so rather than letting the button
-    /// imply it.
-    private func startNow(_ session: BuddySessionState) {
-        // No tap haptic — `performHandOff` fires .success() either way, and
-        // back-to-back buzzes on one press read as a stutter.
-        performHandOff(session)
+    /// A failure is reported rather than swallowed, and deliberately does NOT
+    /// fall back to starting this phone alone: the worst case is that the
+    /// countdown everybody is already watching runs its last few seconds.
+    private func startNow() {
+        MADHaptics.emphasis()
+        Task {
+            do {
+                try await buddy.startNow()
+            } catch {
+                // The flow owns the only alert on these screens — a step with
+                // no presentation context of its own can't raise one, which is
+                // how invite failures used to be silent.
+                buddy.errorMessage =
+                    (error as? LocalizedError)?.errorDescription
+                    ?? "Couldn't start everyone just yet — hang on a moment."
+            }
+        }
     }
 
-    /// The one place the lobby ever hands a session to the tracker. Both the
-    /// countdown elapsing and an explicit "Start now" come through here so the
-    /// once-only latch and the never-restart-a-finished-walk guard can't be
-    /// written twice and drift.
+    /// The one place the lobby ever hands a session to the tracker — reached
+    /// only by the countdown elapsing, for every phone alike. "Start now" no
+    /// longer shortcuts it: it moves the group's `started_at` into the past
+    /// and lets this same check fire, so the host cannot start by a different
+    /// rule than the people they are walking with.
     private func performHandOff(_ session: BuddySessionState) {
         guard !hasHandedOff, session.status == .active else { return }
         guard session.me(buddy.currentUserId)?.status != .finished else { return }
