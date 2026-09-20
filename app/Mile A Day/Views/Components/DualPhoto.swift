@@ -130,6 +130,59 @@ struct DualPhotoView: View {
     }
 }
 
+/// One captured photo, drawn as ONE picture — the pair composed when there is
+/// a pair, the single frame otherwise. Fills the frame it is given, like
+/// `.resizable().scaledToFill()`, so it drops into an existing thumbnail or
+/// card without changing its layout.
+///
+/// Exists so every surface that shows a stashed snap shows the SAME thing:
+/// before this, a mid-walk front-and-back looked like an ordinary photo of
+/// whichever way the phone was pointing right up until it was published, and
+/// the second frame appeared out of nowhere on the card.
+struct DualPhotoFill: View {
+    let big: UIImage
+    let small: UIImage?
+
+    @ViewBuilder
+    var body: some View {
+        if let small {
+            DualPhotoView(big: big, small: small)
+        } else {
+            Image(uiImage: big)
+                .resizable()
+                .scaledToFill()
+        }
+    }
+}
+
+/// Flatten a pair into ONE picture, outside the post composer.
+///
+/// The composer bakes its own composite through `PostCanvas` because the
+/// sticker has to land in the same render. This is for the places that have
+/// two frames and no canvas — the camera roll copy of a mid-walk snap, which
+/// is the user's own keepsake of a photo they took in one press and would
+/// otherwise arrive as either half of it or two separate pictures.
+///
+/// Uses the same `DualPhotoView` as everything else, so the corner it lands in
+/// is the corner the feed card taps.
+enum DualPhotoComposite {
+    @MainActor
+    static func render(big: UIImage, small: UIImage, maxWidth: CGFloat = 1440) -> UIImage? {
+        guard big.size.width > 0, big.size.height > 0 else { return nil }
+        // The primary's OWN aspect, not the feed's 4:5: this is a copy of the
+        // photograph they took, and re-cropping someone's keepsake to a shape
+        // they never chose is a worse outcome than a tall picture.
+        let width = min(maxWidth, max(1, big.size.width))
+        let height = width * (big.size.height / big.size.width)
+        let renderer = ImageRenderer(
+            content: DualPhotoView(big: big, small: small)
+                .frame(width: width, height: height)
+        )
+        renderer.scale = 1
+        return renderer.uiImage
+    }
+}
+
 /// Tap the small picture to swap which one is large.
 ///
 /// The inset is BAKED into the photograph, so this is a hit area laid over a

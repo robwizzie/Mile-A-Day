@@ -121,6 +121,9 @@ struct WorkoutTrackingView: View {
     /// Cheap downsampled thumb of the newest snap for the tray chip.
     @State private var lastSnapThumb: UIImage?
     @State private var showSnapSavedToast = false
+    /// Whether the snap the toast is about was a FRONT & BACK press, so the
+    /// toast can say so. Set on the way in, read only while it's on screen.
+    @State private var lastSnapWasDual = false
     /// Import a photo taken on THIS walk from the library (time-windowed).
     @State private var showLibraryImport = false
     /// Transient result banner for a library import (message, success?).
@@ -1096,37 +1099,89 @@ struct WorkoutTrackingView: View {
         .fullScreenCover(isPresented: $showMidRunCamera) {
             // Camera-roll save is handled below, keyed to the stash id, so the
             // review gallery can show "Saved" and never duplicate the shot.
-            MADCameraView(image: $midRunImage, autoSaveToPhotos: false)
+            //
+            // FRONT & BACK is offered HERE too now. It was withheld on the
+            // grounds that this camera exists to catch a moment in one tap
+            // while you're still moving — which is exactly right about the
+            // DEFAULT and wrong about the choice: the mode rail opens on
+            // PHOTO, the shutter behaves as it always did, and the second
+            // frame only happens for someone who asked for it. Mid-walk is
+            // also where the shot most worth having both halves of is (the
+            // view, and your face looking at it), and the composer's camera
+            // is usually reached once the walk is already over.
+            MADCameraView(
+                image: $midRunImage,
+                autoSaveToPhotos: false,
+                allowsDual: true,
+                onDualCapture: { capture in
+                    stashSnap(
+                        capture.primary,
+                        secondary: capture.secondary,
+                        primaryWasFront: capture.primaryWasFront
+                    )
+                }
+            )
         }
         .onChange(of: midRunImage) { _, newImage in
             guard let image = newImage else { return }
             midRunImage = nil
-            // Downscale + JPEG-encode off the main thread — doing it inline
-            // stutters the camera dismissal animation on big sensor images.
-            Task.detached(priority: .utility) {
-                let entry = MidRunPhotoStash.add(image)
-                let count = MidRunPhotoStash.count
-                let thumb = MidRunPhotoStash.latestThumbnail()
-                await MainActor.run {
-                    // Keep the user's own full-res copy in the camera roll no
-                    // matter what (the camera no longer auto-saves this path).
-                    // When it made it into the stash, key the save to that snap
-                    // so the gallery shows "Saved" instead of a duplicate.
-                    if let entry {
-                        PhotoRollSaver.save(image, ledgerKey: entry.id)
-                    } else {
-                        PhotoRollSaver.save(image)
-                    }
-                    guard entry != nil else { return }
-                    midRunSnapCount = count
-                    lastSnapThumb = thumb
-                    MADHaptics.success()
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        showSnapSavedToast = true
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                        withAnimation(.easeOut(duration: 0.25)) { showSnapSavedToast = false }
-                    }
+            stashSnap(image)
+        }
+    }
+
+    /// Put a mid-walk shot in the stash, save the user's own copy, and say so.
+    ///
+    /// ONE path for both shapes of capture. A FRONT & BACK press arrives with
+    /// its second frame and is stored as a pair — one snap, counted once,
+    /// deleted once — so the composer can restore the arrangement later and
+    /// publish the flip. An ordinary press passes nil and nothing about it
+    /// changes.
+    private func stashSnap(
+        _ image: UIImage,
+        secondary: UIImage? = nil,
+        primaryWasFront: Bool = false
+    ) {
+        lastSnapWasDual = secondary != nil
+        // Downscale + JPEG-encode off the main thread — doing it inline
+        // stutters the camera dismissal animation on big sensor images.
+        Task.detached(priority: .utility) {
+            let entry = MidRunPhotoStash.add(
+                image, secondary: secondary, primaryWasFront: primaryWasFront)
+            let count = MidRunPhotoStash.count
+            let thumb = MidRunPhotoStash.latestThumbnail()
+            await MainActor.run {
+                // The camera roll gets ONE picture for one press: the pair
+                // flattened the way the feed will draw it. Saving only the
+                // frame they aimed would quietly drop the other half out of
+                // their own library, and saving both would put two photos in
+                // the roll for a single shutter tap.
+                //
+                // Composed HERE rather than before the detached work, even
+                // though it costs a main-thread render either way:
+                // `ImageRenderer` is main-actor only, and by this point the
+                // camera cover is already on its way out, so the frame it
+                // takes lands in the dismissal rather than in front of it.
+                let rollImage: UIImage = secondary.flatMap {
+                    DualPhotoComposite.render(big: image, small: $0)
+                } ?? image
+                // Keep the user's own full-res copy in the camera roll no
+                // matter what (the camera no longer auto-saves this path).
+                // When it made it into the stash, key the save to that snap
+                // so the gallery shows "Saved" instead of a duplicate.
+                if let entry {
+                    PhotoRollSaver.save(rollImage, ledgerKey: entry.id)
+                } else {
+                    PhotoRollSaver.save(rollImage)
+                }
+                guard entry != nil else { return }
+                midRunSnapCount = count
+                lastSnapThumb = thumb
+                MADHaptics.success()
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    showSnapSavedToast = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                    withAnimation(.easeOut(duration: 0.25)) { showSnapSavedToast = false }
                 }
             }
         }
@@ -1139,9 +1194,16 @@ struct WorkoutTrackingView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(.green)
+                // Names the pair once, at the moment it happens. A second
+                // frame the user asked for should still be ACKNOWLEDGED —
+                // the shutter fired twice and the tray count went up by one,
+                // and those two facts need reconciling on the spot rather
+                // than in the composer.
                 Text(midRunSnapCount >= MidRunPhotoStash.maxPhotos
                      ? "Saved — that's the max, oldest gets replaced"
-                     : "Saved for your post")
+                     : (lastSnapWasDual
+                        ? "Both sides saved as one photo"
+                        : "Saved for your post"))
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
             }

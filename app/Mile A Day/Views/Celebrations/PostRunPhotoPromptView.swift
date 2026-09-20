@@ -30,7 +30,7 @@ struct PostRunPhotoPromptView: View {
     /// "Use this photo" chosen INSIDE the gallery — the composer presents
     /// after the gallery cover fully dismisses (two covers in one transaction
     /// race and drop, see .claude/rules/ios.md).
-    @State private var pendingUseImage: UIImage?
+    @State private var pendingUse: ComposerLaunch?
     /// Import a photo taken on this walk/run from the library (time-windowed).
     @State private var showLibraryImport = false
     @State private var importError: String?
@@ -66,15 +66,15 @@ struct PostRunPhotoPromptView: View {
                     // inside the gallery presents the composer only now, after
                     // this cover is fully gone (same-transaction covers race).
                     midRunSnaps = MidRunPhotoStash.entries()
-                    if let image = pendingUseImage {
-                        pendingUseImage = nil
-                        composerLaunch = ComposerLaunch(image: image)
+                    if let launch = pendingUse {
+                        pendingUse = nil
+                        composerLaunch = launch
                     }
                 }) {
                     SnapGalleryView(
                         title: "Your snaps",
                         initialIndex: galleryStartIndex,
-                        onUse: { pendingUseImage = $0.image },
+                        onUse: { pendingUse = ComposerLaunch(entry: $0) },
                         onStashChanged: { midRunSnaps = MidRunPhotoStash.entries() }
                     )
                 }
@@ -176,9 +176,9 @@ struct PostRunPhotoPromptView: View {
             .fullScreenCover(isPresented: $showLibraryImport, onDismiss: {
                 // Launch the composer only AFTER this cover is gone — a second
                 // cover in the same dismiss transaction races and drops.
-                if let image = pendingUseImage {
-                    pendingUseImage = nil
-                    composerLaunch = ComposerLaunch(image: image)
+                if let launch = pendingUse {
+                    pendingUse = nil
+                    composerLaunch = launch
                 }
             }) {
                 WorkoutPhotoImportPicker(
@@ -223,6 +223,8 @@ struct PostRunPhotoPromptView: View {
                 // fresh capture launches the camera.
                 autoOpenCamera: launch.image == nil,
                 initialImage: launch.image,
+                initialSecondary: launch.secondary,
+                initialPrimaryWasFront: launch.primaryWasFront,
                 // Leaving returns to this prompt with the snaps intact —
                 // "‹ Back", not "Cancel", so nobody fears losing photos.
                 backNavigation: true
@@ -366,11 +368,12 @@ struct PostRunPhotoPromptView: View {
     private func snapCard(index: Int, entry: MidRunPhotoStash.Entry) -> some View {
         Button {
             MADHaptics.action()
-            composerLaunch = ComposerLaunch(image: entry.image)
+            composerLaunch = ComposerLaunch(entry: entry)
         } label: {
-            Image(uiImage: entry.image)
-                .resizable()
-                .scaledToFill()
+            // Drawn as ONE photo, second frame inset — a front-and-back snap
+            // that looks like an ordinary picture until it's published is a
+            // surprise on the card, not a feature.
+            DualPhotoFill(big: entry.image, small: entry.secondary)
                 .frame(width: snapCardSize.width, height: snapCardSize.height)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(
@@ -451,7 +454,7 @@ struct PostRunPhotoPromptView: View {
         case .accepted(let image):
             // Deferred to the import cover's onDismiss (composer is a second
             // cover — presenting it now would race this one's dismissal).
-            pendingUseImage = image
+            pendingUse = ComposerLaunch(image: image)
         case .failed:
             importError = "Couldn't load that photo. Try another one."
         case .cancelled:
@@ -480,4 +483,22 @@ private struct ComposerLaunch: Identifiable {
     let id = UUID()
     /// The chosen mid-run snap; nil means open the live camera for a fresh shot.
     let image: UIImage?
+    /// The other lens, when the chosen snap was a FRONT & BACK press. Carried
+    /// all the way to the composer or the pair is lost between the gallery
+    /// and the canvas — the post would publish whichever frame was showing
+    /// and silently drop the other.
+    let secondary: UIImage?
+    let primaryWasFront: Bool
+
+    init(image: UIImage?) {
+        self.image = image
+        self.secondary = nil
+        self.primaryWasFront = false
+    }
+
+    init(entry: MidRunPhotoStash.Entry) {
+        self.image = entry.image
+        self.secondary = entry.secondary
+        self.primaryWasFront = entry.primaryWasFront
+    }
 }

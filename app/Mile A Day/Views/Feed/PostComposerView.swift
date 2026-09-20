@@ -338,7 +338,12 @@ final class PostComposerViewModel: ObservableObject {
         if !config.isOn(.competition) { config.enabled.append(.competition) }
     }
 
-    init(stats: RunStatsInput, initialImage: UIImage? = nil) {
+    init(
+        stats: RunStatsInput,
+        initialImage: UIImage? = nil,
+        initialSecondary: UIImage? = nil,
+        initialPrimaryWasFront: Bool = false
+    ) {
         self.stats = stats
         var cfg = StickerConfig.load()
         // Drop any remembered stats that aren't available today, and make sure
@@ -355,6 +360,13 @@ final class PostComposerViewModel: ObservableObject {
         // Seed a pre-chosen photo (mid-run snap) AFTER all stored properties
         // are initialized — the @Published setter touches self.
         self.pickedImage = initialImage
+        // A mid-walk FRONT & BACK press arrives as a PAIR and has to be
+        // restored as one, or the walk's best shot publishes as whichever
+        // frame happened to be large and quietly drops the other half.
+        if initialImage != nil, let initialSecondary {
+            self.dualSecondary = initialSecondary
+            self.dualPrimaryWasFront = initialPrimaryWasFront
+        }
         // A mid-run snap was shot DURING the walk and is already in the camera
         // roll, so it's the library tier, not a live capture. Labelling it
         // `.camera` would let the ten-minute countdown reject a photo whose
@@ -1119,6 +1131,10 @@ struct PostComposerView: View {
         stats: RunStatsInput,
         autoOpenCamera: Bool = false,
         initialImage: UIImage? = nil,
+        /// The other lens of a FRONT & BACK snap chosen before the composer
+        /// opened (the post-run prompt's cards and its gallery).
+        initialSecondary: UIImage? = nil,
+        initialPrimaryWasFront: Bool = false,
         backNavigation: Bool = false,
         // Buddy Walk recap: credit everyone who finished the session.
         buddyCoauthorIds: [String] = [],
@@ -1129,7 +1145,12 @@ struct PostComposerView: View {
         crewPhotoPostId: String? = nil,
         onFinished: @escaping (PostComposeOutcome) -> Void
     ) {
-        let model = PostComposerViewModel(stats: stats, initialImage: initialImage)
+        let model = PostComposerViewModel(
+            stats: stats,
+            initialImage: initialImage,
+            initialSecondary: initialSecondary,
+            initialPrimaryWasFront: initialPrimaryWasFront
+        )
         model.buddyCoauthorIds = buddyCoauthorIds
         model.buddySessionId = buddySessionId
         model.buddyCrewNames = buddyCrewNames
@@ -1870,7 +1891,14 @@ struct PostComposerView: View {
                     title: "Your snaps",
                     onUse: { entry in
                         vm.pickedImage = entry.image
+                        // Restore the pair, or drop whatever was on the canvas
+                        // before — never inherit the previous shot's other
+                        // half, which would publish a flip to somewhere else.
                         vm.clearDual()
+                        if let second = entry.secondary {
+                            vm.dualSecondary = second
+                            vm.dualPrimaryWasFront = entry.primaryWasFront
+                        }
                         vm.photoSource = .library
                         vm.errorMessage = nil
                         showSnapGallery = false

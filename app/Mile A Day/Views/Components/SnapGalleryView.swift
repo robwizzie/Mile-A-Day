@@ -39,9 +39,7 @@ struct SnapGalleryView: View {
                 } else {
                     TabView(selection: $selectedId) {
                         ForEach(entries) { entry in
-                            Image(uiImage: entry.image)
-                                .resizable()
-                                .scaledToFit()
+                            page(entry)
                                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                                 .padding(.horizontal, MADTheme.Spacing.md)
                                 .tag(Optional(entry.id))
@@ -70,6 +68,32 @@ struct SnapGalleryView: View {
                 selectedId = entries.first?.id
             }
             withAnimation(.easeOut(duration: 0.25)) { appeared = true }
+        }
+    }
+
+    /// One snap, fitted. A FRONT & BACK press is drawn as the ONE photo it
+    /// is, second frame inset in the corner it will occupy on the card —
+    /// reviewing a pair as a single frame and meeting the other half after
+    /// publishing is the surprise this feature can least afford.
+    ///
+    /// Swapping which frame leads is deliberately NOT offered here: the files
+    /// keep the arrangement, so a swap made in a review gallery would have to
+    /// be written back or silently disagree with itself the next time this
+    /// opens. The composer's editor owns that gesture, where the consequence
+    /// is the post.
+    @ViewBuilder
+    private func page(_ entry: MidRunPhotoStash.Entry) -> some View {
+        if let second = entry.secondary, entry.image.size.height > 0 {
+            Color.clear
+                .aspectRatio(
+                    entry.image.size.width / entry.image.size.height,
+                    contentMode: .fit
+                )
+                .overlay(DualPhotoView(big: entry.image, small: second))
+        } else {
+            Image(uiImage: entry.image)
+                .resizable()
+                .scaledToFit()
         }
     }
 
@@ -130,7 +154,13 @@ struct SnapGalleryView: View {
                 tint: saved ? .green : .white
             ) {
                 guard let current, !saved else { return }
-                PhotoRollSaver.save(current.image, ledgerKey: current.id) { ok in
+                // The pair as one picture, matching what the mid-walk save
+                // already put in the roll — a "Save" that dropped half the
+                // photo would be the same bug from a different button.
+                let toSave = current.secondary.flatMap {
+                    DualPhotoComposite.render(big: current.image, small: $0)
+                } ?? current.image
+                PhotoRollSaver.save(toSave, ledgerKey: current.id) { ok in
                     guard ok else { return }
                     MADHaptics.success()
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
