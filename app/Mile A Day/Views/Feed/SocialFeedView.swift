@@ -30,13 +30,6 @@ private struct WorkoutCommentsTarget: Identifiable {
     var id: String { entry.id }
 }
 
-private struct FeedSection: Identifiable {
-    let title: String
-    let items: [FeedEntry]
-
-    var id: String { title }
-}
-
 /// The single social surface inside the Friends tab: a stories rail, an optional
 /// "On this day" memories card, then one unified, infinitely-scrollable feed of
 /// photo posts AND raw walk/run activity. Posting and viewing friends' stories
@@ -60,6 +53,9 @@ struct SocialFeedView: View {
     @StateObject private var freshWindow = FreshPostWindowManager.shared
 
     @State private var feed: [FeedEntry] = []
+    /// Entry id → the day header drawn above that entry. See
+    /// `rebuildFeedSectionHeaders`.
+    @State private var sectionHeaderBefore: [String: String] = [:]
     @State private var stories: [StoryGroup] = []
     @State private var memories: [MemoryItem] = []
     @State private var nextBefore: String?
@@ -305,11 +301,23 @@ struct SocialFeedView: View {
 
     /// Feed rows grouped into familiar social time buckets. This is display
     /// only; the backend's keyset order stays exactly as received.
-    private var groupedFeedSections: [FeedSection] {
+    /// The date header to draw ABOVE a given entry, keyed by entry id. Empty
+    /// for every entry that isn't the first of its day-bucket.
+    ///
+    /// Cached rather than computed in `body`, and this is not a micro-
+    /// optimisation: building it parses `sort_ts` with an ISO8601 formatter
+    /// once per entry, and as a computed property that ran on EVERY body pass
+    /// — which, during a scroll, is most frames — over the whole loaded feed.
+    /// Membership only changes when a page loads, so it is rebuilt exactly
+    /// there. The in-place entry edits (a comment count, a caption, a coauthor
+    /// switch) keep both the ids and the order, so they can't invalidate it.
+    private func rebuildFeedSectionHeaders() {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
         let titles = ["Today", "Yesterday", "Earlier this week", "Older"]
-        var buckets: [Int: [FeedEntry]] = [:]
+
+        var headers: [String: String] = [:]
+        var lastBucket: Int? = nil
 
         for entry in feed {
             let bucket: Int
@@ -331,13 +339,13 @@ struct SocialFeedView: View {
             } else {
                 bucket = 3
             }
-            buckets[bucket, default: []].append(entry)
-        }
 
-        return titles.enumerated().compactMap { index, title in
-            guard let items = buckets[index], !items.isEmpty else { return nil }
-            return FeedSection(title: title, items: items)
+            if bucket != lastBucket {
+                headers[entry.id] = titles[bucket]
+                lastBucket = bucket
+            }
         }
+        sectionHeaderBefore = headers
     }
 
     /// Out of hypes today (never true for unlimited roles) — dims unspent
@@ -377,9 +385,7 @@ struct SocialFeedView: View {
             ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: MADTheme.Spacing.md) {
-                    if isLoading && stories.isEmpty {
-                        StoriesRailSkeletonView()
-                    } else {
+                    Group {
                         StoriesRailView(
                             groups: stories,
                             currentUserId: currentUserId,
@@ -414,40 +420,51 @@ struct SocialFeedView: View {
                         .id(feedTopAnchorId)
 
                     if isLoading && feed.isEmpty {
-                        FeedLoadingSkeletonView()
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
+                            .padding(.vertical, MADTheme.Spacing.xxl)
                     } else if feed.isEmpty {
                         emptyState
                     } else {
-                        ForEach(groupedFeedSections) { section in
-                            VStack(alignment: .leading, spacing: 10) {
-                                feedSectionHeader(section.title)
+                        // FLAT. The date headers and the cards are both direct
+                        // children of the LazyVStack, which is the only way it
+                        // can be lazy: it materialises its own children on
+                        // demand, but a child it does build is built WHOLE.
+                        // Grouping the cards into per-day sections put them
+                        // inside a plain `VStack` one level down, so opening
+                        // the feed built every card in a section at once —
+                        // "Older" is usually the entire history — with their
+                        // images, route art and map snapshots. That is the
+                        // scroll stutter; the grouping itself is fine and
+                        // stays, it just can't own a container.
+                        ForEach(feed) { entry in
+                            if let title = sectionHeaderBefore[entry.id] {
+                                feedSectionHeader(title)
                                     .padding(.horizontal, MADTheme.Spacing.md)
-                                VStack(spacing: MADTheme.Spacing.md) {
-                                    ForEach(section.items) { entry in
-                                        feedCard(entry)
-                                            // Deep-link landing ring — fades once seen.
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                                                    .strokeBorder(
-                                                        Color.orange.opacity(highlightedEntryId == entry.id ? 0.75 : 0),
-                                                        lineWidth: 2
-                                                    )
-                                                    .allowsHitTesting(false)
-                                            )
-                                            .animation(.easeInOut(duration: 0.35), value: highlightedEntryId)
-                                            // Prefetch a few cards early (not just on the
-                                            // very last row) so the next page is usually
-                                            // there before the user reaches the bottom.
-                                            .onAppear {
-                                                if feed.suffix(3).contains(where: { $0.id == entry.id }) {
-                                                    Task { await loadMore() }
-                                                }
-                                            }
-                                            .padding(.horizontal, MADTheme.Spacing.md)
-                                            .id(entry.id)
+                                    .padding(.top, 6)
+                            }
+
+                            feedCard(entry)
+                                // Deep-link landing ring — fades once seen.
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                                        .strokeBorder(
+                                            Color.orange.opacity(highlightedEntryId == entry.id ? 0.75 : 0),
+                                            lineWidth: 2
+                                        )
+                                        .allowsHitTesting(false)
+                                )
+                                .animation(.easeInOut(duration: 0.35), value: highlightedEntryId)
+                                // Prefetch a few cards early (not just on the
+                                // very last row) so the next page is usually
+                                // there before the user reaches the bottom.
+                                .onAppear {
+                                    if feed.suffix(3).contains(where: { $0.id == entry.id }) {
+                                        Task { await loadMore() }
                                     }
                                 }
-                            }
+                                .padding(.horizontal, MADTheme.Spacing.md)
+                                .id(entry.id)
                         }
                         if isLoadingMore {
                             ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
@@ -1161,6 +1178,7 @@ struct SocialFeedView: View {
                     }
                 }
                 feed = feedResponse.items
+                rebuildFeedSectionHeaders()
                 nextBefore = feedResponse.next_before
                 loadMoreFailed = false
                 lastFeedRefreshAt = Date()
@@ -1224,6 +1242,7 @@ struct SocialFeedView: View {
                 let existing = Set(feed.map(\.id))
                 let fresh = response.items.filter { !existing.contains($0.id) }
                 feed.append(contentsOf: fresh)
+                rebuildFeedSectionHeaders()
                 nextBefore = response.next_before
                 return !fresh.isEmpty
             }
@@ -1383,7 +1402,10 @@ struct SocialFeedView: View {
     private func block(_ entry: FeedEntry) async {
         do {
             try await BlockService.block(userId: entry.user_id)
-            await MainActor.run { feed.removeAll { $0.user_id == entry.user_id } }
+            await MainActor.run {
+                feed.removeAll { $0.user_id == entry.user_id }
+                rebuildFeedSectionHeaders()
+            }
             await refresh()
         } catch {}
     }
@@ -1393,6 +1415,7 @@ struct SocialFeedView: View {
             try await PostService.deletePost(postId: entry.entryId)
             await MainActor.run {
                 feed.removeAll { $0.id == entry.id }
+                rebuildFeedSectionHeaders()
                 // Deleting a share frees that run's slot — drop any optimistic
                 // lock so the composer can re-open for it, and the persisted
                 // record with it, or the buddy recap would keep reading
@@ -1504,99 +1527,3 @@ struct SocialFeedView: View {
     }
 }
 
-private struct StoriesRailSkeletonView: View {
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
-                ForEach(0..<6, id: \.self) { i in
-                    VStack(spacing: 6) {
-                        Circle()
-                            .fill(Color.white.opacity(i == 0 ? 0.1 : 0.07))
-                            .frame(width: 70, height: 70)
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 2.5)
-                            )
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .fill(Color.white.opacity(0.08))
-                            .frame(width: i == 0 ? 48 : 42, height: 8)
-                    }
-                    .frame(width: 76)
-                }
-            }
-            .padding(.horizontal, MADTheme.Spacing.md)
-            .padding(.vertical, MADTheme.Spacing.sm)
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-}
-
-private struct FeedLoadingSkeletonView: View {
-    var body: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
-            ForEach(0..<3, id: \.self) { i in
-                FeedSkeletonCardView(imageHeight: i == 1 ? 190 : 260)
-            }
-        }
-        .padding(.horizontal, MADTheme.Spacing.md)
-        .padding(.top, MADTheme.Spacing.sm)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-}
-
-private struct FeedSkeletonCardView: View {
-    let imageHeight: CGFloat
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(Color.white.opacity(0.09))
-                    .frame(width: 42, height: 42)
-                VStack(alignment: .leading, spacing: 7) {
-                    skeletonLine(width: 110, height: 10)
-                    skeletonLine(width: 70, height: 8, opacity: 0.06)
-                }
-                Spacer()
-            }
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-                .frame(height: imageHeight)
-                .overlay(alignment: .bottomLeading) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        skeletonLine(width: 150, height: 12, opacity: 0.1)
-                        HStack(spacing: 8) {
-                            skeletonLine(width: 74, height: 22, opacity: 0.08)
-                            skeletonLine(width: 64, height: 22, opacity: 0.08)
-                        }
-                    }
-                    .padding(14)
-                }
-            HStack(spacing: 10) {
-                skeletonLine(width: 76, height: 12)
-                skeletonLine(width: 62, height: 12, opacity: 0.06)
-                Spacer()
-                Circle()
-                    .fill(Color.white.opacity(0.07))
-                    .frame(width: 28, height: 28)
-            }
-        }
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                )
-        )
-    }
-
-    private func skeletonLine(width: CGFloat, height: CGFloat, opacity: Double = 0.08) -> some View {
-        RoundedRectangle(cornerRadius: height / 2, style: .continuous)
-            .fill(Color.white.opacity(opacity))
-            .frame(width: width, height: height)
-    }
-}

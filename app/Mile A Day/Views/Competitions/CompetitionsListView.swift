@@ -63,7 +63,7 @@ struct CompetitionsListView: View {
                     ),
                     .init(
                         id: .record,
-                        title: "Record",
+                        title: "History",
                         systemImage: "trophy.fill",
                         badgeCount: 0
                     )
@@ -333,10 +333,10 @@ struct CompetitionsListView: View {
         .padding(MADTheme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                .fill(.ultraThinMaterial)
+                .fill(CompeteDesign.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+                        .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                 )
         )
     }
@@ -421,7 +421,7 @@ struct InlineConfirmBanner: View {
         .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
+                .fill(CompeteDesign.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                         .fill(Color.black.opacity(0.2))

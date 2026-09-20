@@ -50,7 +50,7 @@ struct CompetitionTypeCard: View {
             .background(
                 ZStack {
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .fill(.ultraThinMaterial)
+                        .fill(CompeteDesign.surface)
 
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                         .stroke(
@@ -120,7 +120,7 @@ struct CompetitionCard: View {
             .padding(MADTheme.Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
                     .overlay(
                         // Subtle type-tinted color wash so the card reads as
                         // "this kind of competition" at a glance without the
@@ -139,17 +139,7 @@ struct CompetitionCard: View {
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [
-                                        Color(hex: competition.type.gradient[0]).opacity(0.35),
-                                        Color.white.opacity(0.06)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
+                            .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
         }
@@ -170,13 +160,7 @@ struct CompetitionCard: View {
                         .fill(Color(hex: competition.type.gradient[0]).opacity(0.14))
                         .overlay(
                             Circle()
-                                .strokeBorder(
-                                    LinearGradient(
-                                        colors: competition.type.gradient.map { Color(hex: $0).opacity(0.55) },
-                                        startPoint: .top, endPoint: .bottom
-                                    ),
-                                    lineWidth: 1.5
-                                )
+                                .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                         )
                 )
 
@@ -514,8 +498,7 @@ struct CompetitionCard: View {
 
     private var winnerName: String? {
         guard competition.status == .finished else { return nil }
-        let accepted = competition.users.filter { $0.invite_status == .accepted }
-        guard let winner = accepted.sorted(by: { ($0.score ?? 0) > ($1.score ?? 0) }).first,
+        guard let winner = competition.acceptedRanked.first,
               (winner.score ?? 0) > 0 else { return nil }
         return winner.displayName
     }
@@ -853,7 +836,7 @@ struct InviteCard: View {
                         .padding(.vertical, 12)
                         .background(
                             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                .fill(MADTheme.Colors.primaryGradient)
+                                .fill(MADTheme.Colors.madRed)
                         )
                     }
                     .buttonStyle(ScaleButtonStyle())
@@ -864,10 +847,10 @@ struct InviteCard: View {
         }
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
+                .fill(CompeteDesign.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(CompeteDesign.hairline, lineWidth: 1)
                 )
         )
     }
@@ -1292,7 +1275,7 @@ struct ManualWorkoutsInfoSheet: View {
                 .fill(Color.white.opacity(0.04))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                        .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                 )
         )
     }

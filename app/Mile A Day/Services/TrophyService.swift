@@ -39,25 +39,38 @@ class TrophyService: ObservableObject {
         trophies = competitions
             .filter { $0.status == .finished }
             .compactMap { competition -> CompetitionTrophy? in
-                let rankedUsers = competition.users
-                    .filter { $0.invite_status == .accepted }
-                    .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
-
-                guard let myIndex = rankedUsers.firstIndex(where: { $0.user_id == currentUserId }) else {
+                // `standing(for:)` is the one place a place is decided — on a
+                // team competition it is the TEAM's place, which is what the
+                // competition was actually scored on, and on a tie it is the
+                // JOINT place the finished screen prints. Deriving it from an
+                // array index here handed the Trophy Case a silver for a result
+                // the end screen and the server both called a shared 2nd.
+                let rankedUsers = competition.acceptedRanked
+                guard let myUser = rankedUsers.first(where: { $0.user_id == currentUserId }),
+                      let standing = currentUserId.flatMap({ competition.standing(for: $0) }) else {
                     return nil
                 }
-                let myUser = rankedUsers[myIndex]
 
-                // Use authoritative winner field for 1st place accuracy
                 let placement: Int
                 if let winnerId = competition.winner, winnerId == currentUserId {
+                    // The stored winner is authoritative for 1st.
                     placement = 1
-                } else if competition.winner != nil && competition.winner != currentUserId && myIndex == 0 {
-                    // Backend says someone else won, but score sort puts us first (tie scenario)
-                    // Trust backend winner — we're at least 2nd
+                } else if standing.isTeam {
+                    // A TEAM competition: every member of the winning team
+                    // shares 1st, which is exactly what the server stores for
+                    // them (`teamAwareOutcome` hands the team's placement to
+                    // each member) and what the finished screen prints. The
+                    // stored `winner` names only the team's biggest
+                    // contributor, so testing it here handed silver to every
+                    // other member of the team that won.
+                    placement = standing.place
+                } else if competition.winner != nil && standing.place == 1 {
+                    // Individual competition, and the server says someone else
+                    // won while our own read puts us first — trust the server;
+                    // we are at least 2nd.
                     placement = 2
                 } else {
-                    placement = myIndex + 1
+                    placement = standing.place
                 }
 
                 return CompetitionTrophy(
@@ -66,9 +79,10 @@ class TrophyService: ObservableObject {
                     competitionType: competition.type,
                     placement: placement,
                     score: myUser.score ?? 0,
-                    totalParticipants: rankedUsers.count,
+                    totalParticipants: standing.of,
                     completedDate: competition.end_date ?? "",
-                    unit: competition.options.unit
+                    unit: competition.options.unit,
+                    placedAmongTeams: standing.isTeam
                 )
             }
     }

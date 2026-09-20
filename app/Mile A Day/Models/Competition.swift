@@ -148,21 +148,28 @@ struct Competition: Codable, Identifiable {
         return owner == currentUserId
     }
 
-    /// Whether the current user won this competition (1st place)
+    /// Whether the current user won this competition.
+    ///
+    /// On a TEAM competition that means THEIR TEAM won — every member of it
+    /// won, which is what the server stores as their placement. The stored
+    /// `winner` is a single user id by API contract (the winning team's
+    /// biggest contributor), so testing it directly told everyone else on the
+    /// winning team they had not won: their history row read "Finished".
     var isWinner: Bool {
         guard status == .finished,
               let currentUserId = UserDefaults.standard.string(forKey: "backendUserId") else {
             return false
+        }
+        if hasTeams {
+            guard let myTeam = team(for: currentUserId) else { return false }
+            return rankedTeamStandings.first(where: { $0.team.id == myTeam.id })?.place == 1
         }
         // Use authoritative winner field from backend if available
         if let winnerId = winner {
             return winnerId == currentUserId
         }
         // Fallback: compute from scores
-        let ranked = users
-            .filter { $0.invite_status == .accepted }
-            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
-        return ranked.first?.user_id == currentUserId
+        return acceptedRanked.first?.user_id == currentUserId
     }
 
     var currentUserInviteStatus: InviteStatus? {
@@ -233,6 +240,7 @@ struct Competition: Codable, Identifiable {
         let myTeam = hasTeams ? userId.flatMap({ team(for: $0) }) : nil
         if hasTeams {
             return Self.podium(
+                rankedTeamStandings.map { $0.place },
                 rankedTeams.map { team in
                     CompetitionStickerData.Row(
                         // The team's OWN name, never prefixed. Teams created
@@ -248,8 +256,10 @@ struct Competition: Codable, Identifiable {
                 }
             )
         }
+        let standings = rankedStandings
         return Self.podium(
-            acceptedRanked.map {
+            standings.map { $0.place },
+            standings.map { $0.user }.map {
                 CompetitionStickerData.Row(
                     name: CompetitionStickerData.capped($0.displayName),
                     score: scoreLabel($0.score ?? 0),
@@ -295,37 +305,135 @@ struct Competition: Codable, Identifiable {
     /// whose team was winning. Nil when they aren't on the board yet, which is
     /// a real state on day one.
     func standing(for userId: String) -> (place: Int, of: Int, isTeam: Bool)? {
+        // Reads the PLACE the standings print, never the array index. Those
+        // differ the moment two competitors are genuinely level: the board
+        // shows them sharing 4th while an index would call the second one 5th,
+        // and this figure appears on the dashboard banner and the post sticker
+        // — i.e. next to the board it would be contradicting.
         if hasTeams, let myTeam = team(for: userId) {
-            let teams = rankedTeams
-            guard let index = teams.firstIndex(where: { $0.id == myTeam.id }) else { return nil }
-            return (index + 1, teams.count, true)
+            let teams = rankedTeamStandings
+            guard let row = teams.first(where: { $0.team.id == myTeam.id }) else { return nil }
+            return (row.place, teams.count, true)
         }
-        let ranked = acceptedRanked
-        guard let index = ranked.firstIndex(where: { $0.user_id == userId }) else { return nil }
-        return (index + 1, ranked.count, false)
+        let ranked = rankedStandings
+        guard let row = ranked.first(where: { $0.user.user_id == userId }) else { return nil }
+        return (row.place, ranked.count, false)
     }
 
-    /// Accepted members, best score first — the individual leaderboard.
-    private var acceptedRanked: [CompetitionUser] {
-        users
-            .filter { $0.invite_status == .accepted }
-            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+    // MARK: Ranking
+
+    /// Accepted members, best first — THE individual leaderboard, and the only
+    /// construction allowed to decide who is 4th.
+    ///
+    /// Ties are broken deliberately rather than left to the sort. Swift's
+    /// `sorted` is an introsort, i.e. NOT stable, so `{ $0.score > $1.score }`
+    /// leaves level competitors in whatever order the partitioning happened to
+    /// leave them — an order that matches nothing on screen and need not even
+    /// hold between two renders of the same array. Eighteen surfaces each wrote
+    /// that comparator out, so three players level on 0 points drew as 4th/5th/
+    /// 6th in an order unrelated to anything they had done, and the finished
+    /// screen, the standings tab and the widget could each pick a different one.
+    ///
+    /// The chain is `rankValue` (the score this competition is played for),
+    /// then DISTANCE COVERED, then user id. Distance is the tiebreak
+    /// because it is already printed under the name on every row — a board that
+    /// puts 7.5 mi above 14.9 mi at the same points reads as broken whatever
+    /// the rule behind it was — and the id link exists so the answer is total:
+    /// two competitors level on both still can't swap places between renders.
+    var acceptedRanked: [CompetitionUser] {
+        Self.ranked(users.filter { $0.invite_status == .accepted })
+    }
+
+    /// Rank any set of competitors by the one chain. Takes the members' own
+    /// `score` unless `by` says otherwise — inside a team the number being
+    /// ranked is the CONTRIBUTION, not the member's individual score.
+    static func ranked(
+        _ competitors: [CompetitionUser],
+        by rankValue: (CompetitionUser) -> Double = { $0.score ?? 0 }
+    ) -> [CompetitionUser] {
+        competitors.sorted { a, b in
+            let (lhs, rhs) = (rankValue(a), rankValue(b))
+            if lhs != rhs { return lhs > rhs }
+            if a.totalIntervalDistance != b.totalIntervalDistance {
+                return a.totalIntervalDistance > b.totalIntervalDistance
+            }
+            // Straight to the id, exactly as the server's `rankCompetitors`
+            // does. A name link here sorted a genuine tie differently from the
+            // server, so `standings.first` could name a winner the server had
+            // not recorded — on a board that then showed them as joint anyway.
+            return a.user_id < b.user_id
+        }
+    }
+
+    /// The place to PRINT beside a ranked row, 1-based.
+    ///
+    /// Joint only when the chain above ran all the way out — two competitors
+    /// level on score AND on distance are genuinely level, and numbering them
+    /// 4 and 5 would invent a difference. Everyone else gets their own number,
+    /// which is what makes a tie on points readable: the miles under the names
+    /// say why one sits above the other.
+    static func places(_ ranked: [CompetitionUser], by rankValue: (CompetitionUser) -> Double = { $0.score ?? 0 }) -> [Int] {
+        var places: [Int] = []
+        places.reserveCapacity(ranked.count)
+        var place = 1
+        for (index, user) in ranked.enumerated() {
+            if index > 0 {
+                let previous = ranked[index - 1]
+                let level = rankValue(user) == rankValue(previous)
+                    && user.totalIntervalDistance == previous.totalIntervalDistance
+                if !level { place = index + 1 }
+            }
+            places.append(place)
+        }
+        return places
+    }
+
+    /// Accepted members in ranked order, each paired with the place to print.
+    /// The pair every standings surface draws, so a row's number and its
+    /// position can never come from two different rules.
+    var rankedStandings: [(place: Int, user: CompetitionUser)] {
+        let ranked = acceptedRanked
+        return Array(zip(Self.places(ranked), ranked)).map { (place: $0.0, user: $0.1) }
+    }
+
+    /// Everyone ranked by what they CONTRIBUTED — the people board a team
+    /// competition is allowed to draw.
+    ///
+    /// Ranking them by `score` there ranks them on individual scoring, which
+    /// is not the rule this competition was played under: the list can put
+    /// somebody from the losing team on top, and the points beside each name
+    /// don't add up to any team's total. Distance does add up, and it is the
+    /// same figure the team rows above are built from.
+    var rankedByContribution: [(place: Int, user: CompetitionUser)] {
+        let accepted = users.filter { $0.invite_status == .accepted }
+        let ranked = Self.ranked(accepted, by: { $0.contributionValue })
+        let places = Self.places(ranked, by: { $0.contributionValue })
+        return Array(zip(places, ranked)).map { (place: $0.0, user: $0.1) }
     }
 
     /// The leaderboard's top three with the viewer always on it: outside the
     /// top three their row replaces the third, so the sticker can never show a
     /// podium the poster isn't on. `truncated` is what draws the gap.
-    private static func podium(_ ranked: [CompetitionStickerData.Row]) -> [CompetitionStickerData.Row] {
+    /// `places` is the number to PRINT for each row, parallel to `ranked` —
+    /// passed in rather than derived from the index here, so a sticker and the
+    /// standings screen behind it can't number a tie differently.
+    private static func podium(
+        _ places: [Int],
+        _ ranked: [CompetitionStickerData.Row]
+    ) -> [CompetitionStickerData.Row] {
+        func place(_ index: Int) -> Int {
+            index < places.count ? places[index] : index + 1
+        }
         var rows = Array(ranked.prefix(3).enumerated().map { index, row in
             var placed = row
-            placed.place = index + 1
+            placed.place = place(index)
             return placed
         })
         guard !rows.contains(where: { $0.isMe }),
               let meIndex = ranked.firstIndex(where: { $0.isMe }),
               !rows.isEmpty else { return rows }
         var me = ranked[meIndex]
-        me.place = meIndex + 1
+        me.place = place(meIndex)
         me.truncated = true
         rows[rows.count - 1] = me
         return rows
@@ -360,10 +468,49 @@ struct Competition: Codable, Identifiable {
     }
 
     /// Teams ranked by their score as a competitor (computed server-side from
-    /// the members' combined miles), stable on the configured order for
-    /// ties/pre-start.
+    /// the members' combined miles).
+    ///
+    /// Same rule as `acceptedRanked`, for the same reason: this used to claim
+    /// in a comment that it was "stable on the configured order for ties" and
+    /// it was not — `sorted` is not a stable sort, so before a team comp starts
+    /// (every team on 0) the running order was arbitrary and could change on
+    /// any redraw. Combined distance breaks a tie on score, then the order the
+    /// teams were configured in, which is the only thing left that a reader
+    /// could have seen before.
     var rankedTeams: [CompetitionTeam] {
-        (teams?.teams ?? []).sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        let configured = teams?.teams ?? []
+        // `uniqueKeysWithValues` TRAPS on a duplicate key, and these ids come
+        // from a server jsonb column — a malformed one would crash the app
+        // rather than mis-order a list. Keep the first occurrence.
+        let order = Dictionary(
+            configured.enumerated().map { ($1.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return configured.sorted { a, b in
+            let (lhs, rhs) = (a.score ?? 0, b.score ?? 0)
+            if lhs != rhs { return lhs > rhs }
+            let (lq, rq) = (a.quantity ?? 0, b.quantity ?? 0)
+            if lq != rq { return lq > rq }
+            return (order[a.id] ?? 0) < (order[b.id] ?? 0)
+        }
+    }
+
+    /// Ranked teams paired with the place to print. Joint when two teams are
+    /// level on score AND combined distance — see `places(_:)`.
+    var rankedTeamStandings: [(place: Int, team: CompetitionTeam)] {
+        let ranked = rankedTeams
+        var rows: [(place: Int, team: CompetitionTeam)] = []
+        var place = 1
+        for (index, team) in ranked.enumerated() {
+            if index > 0 {
+                let previous = ranked[index - 1]
+                let level = (team.score ?? 0) == (previous.score ?? 0)
+                    && (team.quantity ?? 0) == (previous.quantity ?? 0)
+                if !level { place = index + 1 }
+            }
+            rows.append((place: place, team: team))
+        }
+        return rows
     }
 
     /// Score label for a whole team, matching the individual leaderboard's units.
@@ -405,9 +552,10 @@ struct Competition: Codable, Identifiable {
     /// the team. Falls back to score on older servers, which send no
     /// contribution.
     func members(of teamId: String) -> [CompetitionUser] {
-        users
-            .filter { $0.invite_status == .accepted && $0.team_id == teamId }
-            .sorted { ($0.teamRankValue ?? $0.score ?? 0) > ($1.teamRankValue ?? $1.score ?? 0) }
+        Self.ranked(
+            users.filter { $0.invite_status == .accepted && $0.team_id == teamId },
+            by: { $0.teamRankValue ?? $0.score ?? 0 }
+        )
     }
 
     /// A team's COMBINED quantity for one interval — the number the server
@@ -612,9 +760,7 @@ struct Competition: Codable, Identifiable {
             return dailyHint
         }
 
-        let ranked = users
-            .filter { $0.invite_status == .accepted }
-            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        let ranked = acceptedRanked
         guard ranked.count >= 2 else { return nil }
         guard let myIndex = ranked.firstIndex(where: { $0.user_id == currentUserId }) else { return nil }
         guard myIndex > 0 else { return nil } // already leading
@@ -1175,6 +1321,17 @@ struct CompetitionUser: Codable, Identifiable {
     /// servers, and competitions without teams) so callers fall back to `score`.
     var teamRankValue: Double? { team_contribution }
 
+    /// What this person put into a TEAM competition, in its unit.
+    ///
+    /// The only per-person figure that means anything once teams are the
+    /// competitors. Their `score` is computed under INDIVIDUAL scoring — it
+    /// does not sum to their team's, and it routinely disagrees with it: a
+    /// member can hold more points than anyone on the winning side, or fewer
+    /// points than a teammate they out-walked. `team_contribution` is nil for
+    /// anyone not on a team (the server only stamps members), so an
+    /// unassigned competitor falls back to their own total.
+    var contributionValue: Double { team_contribution ?? totalIntervalDistance }
+
     /// True when the backend sent the per-activity daily breakdown.
     var hasDailyActivity: Bool {
         !(daily_activity?.isEmpty ?? true)
@@ -1550,6 +1707,11 @@ struct CompetitionTrophy: Codable, Identifiable {
     let totalParticipants: Int
     let completedDate: String
     let unit: CompetitionUnit
+    /// True when `placement`/`totalParticipants` count TEAMS rather than
+    /// people — the place a team competition is decided on. Without it a
+    /// 6-person, 2-team competition renders "1st of 2 competitors".
+    /// Optional because this is a persisted Codable blob.
+    var placedAmongTeams: Bool? = nil
 
     var medal: TrophyMedal? {
         switch placement {

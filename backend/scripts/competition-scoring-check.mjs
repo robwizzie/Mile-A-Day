@@ -27,6 +27,7 @@ import { PostgresService } from "../dist/services/DbService.js";
 import {
   getCompetition,
   getUserScores,
+  resolveCompetitionIfComplete,
 } from "../dist/services/competitionService.js";
 import { updateWorkout } from "../dist/services/workoutService.js";
 
@@ -39,7 +40,8 @@ const DAVE = "cs-dave";
 const ALL = [ALICE, BOB, CAROL, DAVE];
 const LIVE = "cs-comp-live";
 const OLD = "cs-comp-old";
-const COMPS = [LIVE, OLD];
+const TIED = "cs-comp-tied";
+const COMPS = [LIVE, OLD, TIED];
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -58,6 +60,28 @@ const ET_DAY = new Intl.DateTimeFormat("en-CA", {
 });
 const dayOffset = (n) => ET_DAY.format(new Date(Date.now() - n * 86_400_000));
 
+/**
+ * Resolving a competition fires its `competition_finished` pushes WITHOUT
+ * awaiting them, and `in_app_notifications.user_id` has no ON DELETE CASCADE —
+ * so a row landing between the notification delete and the user delete fails
+ * the run on a foreign key. Retry the pair rather than sleeping on a guess.
+ */
+async function deleteUsersWithNotifications(ids) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await db.query(
+      `DELETE FROM in_app_notifications WHERE user_id = ANY($1::text[])`,
+      [ids],
+    );
+    try {
+      await db.query(`DELETE FROM users WHERE user_id = ANY($1::text[])`, [ids]);
+      return;
+    } catch (err) {
+      if (err.code !== "23503" || attempt === 4) throw err;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+}
+
 async function cleanup() {
   await db.query(
     `DELETE FROM competition_users WHERE competition_id = ANY($1::text[])`,
@@ -67,7 +91,9 @@ async function cleanup() {
     COMPS,
   ]);
   await db.query(`DELETE FROM workouts WHERE user_id = ANY($1::text[])`, [ALL]);
-  await db.query(`DELETE FROM users WHERE user_id = ANY($1::text[])`, [ALL]);
+  // Resolving a competition notifies its players, and those rows hold the
+  // users down.
+  await deleteUsersWithNotifications(ALL);
 }
 
 let w = 0;
@@ -156,6 +182,30 @@ async function seed() {
   await comp(LIVE, dayOffset(5), null, false);
   await comp(OLD, dayOffset(20), dayOffset(15), true);
 
+  // --- A finished competition where everyone scores the SAME -----------
+  // Three people level on points, each having covered a different distance.
+  // This is the shape that produced the reported bug: with score as the only
+  // ordering key, the placements stored here and the order the app drew were
+  // decided by two different accidents.
+  // One qualifying day each — so a Targets competition scores them all at
+  // exactly 1 point — but three different distances on that day.
+  //
+  // The distances run OPPOSITE to seed order deliberately. `Array.sort` is
+  // stable, so a score-only sort returns these three in the order the scores
+  // object was built (Alice first) — which is also the answer the distance
+  // tiebreak gives if Alice walked furthest. Ordered this way the two rules
+  // disagree, and the assertions below can tell them apart.
+  await addWorkout(ALICE, 12, 1.0);
+  await addWorkout(BOB, 12, 2.0);
+  await addWorkout(CAROL, 12, 3.0);
+  await db.query(
+    `INSERT INTO competitions (id, competition_name, start_date, end_date, workouts, type,
+                               options, ended, owner)
+     VALUES ($1, $1, $2::date, $3::date, '["walking"]'::jsonb, 'targets',
+             '{"interval":"day","goal":1}'::jsonb, FALSE, $4)`,
+    [TIED, dayOffset(13), dayOffset(9), ALICE],
+  );
+
   for (const id of COMPS) {
     for (const user of ALL) {
       await db.query(
@@ -243,6 +293,61 @@ async function run() {
     "ended-before-cutoff: edited distance still counts",
     round2(oldScores[CAROL].score),
     9,
+  );
+
+  // --- Ties are broken by distance, not by luck -------------------------
+  // The stored `placement` is what the Record screen prints; the app derives
+  // its own order from the same rule (`Competition.ranked`). If these two
+  // disagree, a finished screen saying 5th sits next to a record card saying
+  // 4th — which is what shipped.
+  // Only the seeded competition — the cron's `resolveExpiredCompetitions()`
+  // walks every unresolved competition in the database, which in CI's shared
+  // one means mutating other scripts' fixtures.
+  await resolveCompetitionIfComplete(TIED);
+  const placements = Object.fromEntries(
+    (
+      await db.query(
+        `SELECT user_id, placement FROM competition_users WHERE competition_id = $1`,
+        [TIED],
+      )
+    ).map((r) => [r.user_id, r.placement]),
+  );
+  const tiedScores = await getUserScores(await getCompetition(TIED));
+  check(
+    "tie: everyone really is level on score",
+    [ALICE, BOB, CAROL].map((u) => round2(tiedScores[u].score)).join(","),
+    "1,1,1",
+  );
+  check(
+    "tie: ...on three different distances",
+    [ALICE, BOB, CAROL]
+      .map((u) =>
+        round2(
+          Object.values(tiedScores[u].intervals).reduce((a, b) => a + b, 0),
+        ),
+      )
+      .join(","),
+    "1,2,3",
+  );
+  check("tie: furthest covered places 1st", placements[CAROL], 1);
+  check("tie: next furthest places 2nd", placements[BOB], 2);
+  check("tie: least far places 3rd", placements[ALICE], 3);
+  check(
+    "tie: someone who did nothing still places last",
+    placements[DAVE],
+    4,
+  );
+  // The stored `winner` and the stored `placement` are written by two
+  // different sorts. Picking the winner on score alone while placements break
+  // ties by distance crowns the person recorded as runner-up.
+  const [tiedComp] = await db.query(
+    `SELECT winner FROM competitions WHERE id = $1`,
+    [TIED],
+  );
+  check(
+    "tie: the recorded winner is the one placed 1st",
+    tiedComp.winner,
+    CAROL,
   );
 
   await cleanup();

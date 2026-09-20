@@ -52,8 +52,10 @@ struct CompetitionTeamIntervalView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             Text(title)
-                .font(MADTheme.Typography.title3)
-                .foregroundColor(.white)
+                .font(CompeteDesign.eyebrow)
+                .tracking(CompeteDesign.eyebrowTracking)
+                .textCase(.uppercase)
+                .foregroundColor(CompeteDesign.inkFaint)
                 .padding(.horizontal, MADTheme.Spacing.sm)
 
             VStack(spacing: MADTheme.Spacing.sm) {
@@ -68,17 +70,10 @@ struct CompetitionTeamIntervalView: View {
             .padding(MADTheme.Spacing.lg)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(
-                                LinearGradient(
-                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) } + [Color.clear],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
+                            .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
         }

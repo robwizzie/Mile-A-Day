@@ -82,145 +82,101 @@ struct TrophyCaseView: View {
     }
 
     // MARK: - Stats Header
+
+    /// The count, said once, big. Was a 50pt gold trophy inside a 120pt red
+    /// radial glow, over the same number — two decorations announcing a figure
+    /// that is perfectly able to announce itself, on a screen whose entire
+    /// subject is already trophies.
     private var statsHeader: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
-            // Big trophy icon
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                MADTheme.Colors.madRed.opacity(0.3),
-                                Color.clear
-                            ],
-                            center: .center,
-                            startRadius: 20,
-                            endRadius: 60
-                        )
-                    )
-                    .frame(width: 120, height: 120)
-
-                Image(systemName: "trophy.fill")
-                    .font(.system(size: 50))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.yellow, .orange],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .scaleEffect(animateIn ? 1.0 : 0.5)
-                    .opacity(animateIn ? 1.0 : 0.0)
-            }
-
+        VStack(alignment: .leading, spacing: 2) {
             Text("\(trophyService.totalCompetitions)")
-                .font(.system(size: 36, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
+                .font(.system(size: 46, weight: .heavy, design: .rounded))
+                .foregroundColor(CompeteDesign.ink)
+                .monospacedDigit()
 
-            Text(trophyService.totalCompetitions == 1 ? "Competition Completed" : "Competitions Completed")
-                .font(MADTheme.Typography.callout)
-                .foregroundColor(.white.opacity(0.6))
+            Text(trophyService.totalCompetitions == 1 ? "COMPETITION COMPLETED" : "COMPETITIONS COMPLETED")
+                .font(CompeteDesign.eyebrow)
+                .tracking(CompeteDesign.eyebrowTracking)
+                .foregroundColor(CompeteDesign.inkFaint)
         }
-        .padding(.top, MADTheme.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 2)
     }
 
     // MARK: - Medal Summary
+
+    /// Gold / silver / bronze as one rail of figures. Three 52pt gradient
+    /// discs with coloured drop shadows were the loudest thing on a screen
+    /// where the DIFFERENCE between the three numbers is the whole point.
     private var medalSummary: some View {
-        HStack(spacing: MADTheme.Spacing.md) {
-            medalCard(
-                medal: .gold,
-                count: trophyService.goldCount,
-                delay: 0.1
-            )
-            medalCard(
-                medal: .silver,
-                count: trophyService.silverCount,
-                delay: 0.2
-            )
-            medalCard(
-                medal: .bronze,
-                count: trophyService.bronzeCount,
-                delay: 0.3
-            )
+        CompeteSurface {
+            HStack(spacing: 0) {
+                medalColumn(.gold, count: trophyService.goldCount)
+                railDivider
+                medalColumn(.silver, count: trophyService.silverCount)
+                railDivider
+                medalColumn(.bronze, count: trophyService.bronzeCount)
+            }
         }
     }
 
-    private func medalCard(medal: TrophyMedal, count: Int, delay: Double) -> some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            ZStack {
+    private var railDivider: some View {
+        Rectangle()
+            .fill(CompeteDesign.rowRule)
+            .frame(width: 1, height: 30)
+            .padding(.horizontal, 10)
+            .accessibilityHidden(true)
+    }
+
+    private func medalColumn(_ medal: TrophyMedal, count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
                 Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: medal.gradient,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 52, height: 52)
-                    .shadow(color: medal.color.opacity(0.4), radius: 8, y: 4)
-
-                Image(systemName: "medal.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(.white)
+                    .fill(medal.color)
+                    .frame(width: 8, height: 8)
+                    .accessibilityHidden(true)
+                Text("\(count)")
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .foregroundColor(CompeteDesign.ink)
+                    .monospacedDigit()
+                    .lineLimit(1)
             }
-            .scaleEffect(animateIn ? 1.0 : 0.3)
-            .opacity(animateIn ? 1.0 : 0.0)
-            .animation(.spring(response: 0.5, dampingFraction: 0.7).delay(delay), value: animateIn)
-
-            Text("\(count)")
-                .font(.system(size: 22, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-
-            Text(medal.displayName)
-                .font(MADTheme.Typography.caption)
-                .foregroundColor(.white.opacity(0.5))
+            Text(medal.displayName.uppercased())
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .tracking(0.8)
+                .foregroundColor(CompeteDesign.inkFaint)
+                .lineLimit(1)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(count) \(medal.displayName)")
     }
 
     // MARK: - Win Rate
     private var winRateSection: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Win Rate")
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(.white.opacity(0.5))
-                Text(ProgressCalculator.formatWholePercent(trophyService.winRate))
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-            }
-
-            Spacer()
-
-            // Win rate bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.white.opacity(0.1))
-
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(
-                            LinearGradient(
-                                colors: [.yellow, .orange],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: animateIn ? geo.size.width * CGFloat(trophyService.winRate / 100.0) : 0)
+        CompeteSurface {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("WIN RATE")
+                        .font(CompeteDesign.eyebrow)
+                        .tracking(CompeteDesign.eyebrowTracking)
+                        .foregroundColor(CompeteDesign.inkFaint)
+                    Spacer()
+                    Text(ProgressCalculator.formatWholePercent(trophyService.winRate))
+                        .font(.system(size: 26, weight: .heavy, design: .rounded))
+                        .foregroundColor(CompeteDesign.ink)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .fixedSize()
                 }
+
+                CompeteBar(
+                    fraction: animateIn ? trophyService.winRate / 100.0 : 0,
+                    color: CompeteDesign.medal(1) ?? .yellow,
+                    height: 6
+                )
             }
-            .frame(width: 120, height: 12)
         }
-        .padding(MADTheme.Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
-        )
     }
 
     // MARK: - Empty State
@@ -269,103 +225,67 @@ struct TrophyCaseView: View {
     }
 
     private func trophyRow(_ trophy: CompetitionTrophy) -> some View {
-        let medalColors: [Color] = trophy.medal?.gradient ?? [Color.white.opacity(0.4), Color.white.opacity(0.2)]
-        let accentColor = trophy.medal?.color ?? Color.white.opacity(0.4)
+        let accentColor = trophy.medal?.color ?? CompeteDesign.inkFaint
 
-        return HStack(spacing: MADTheme.Spacing.md) {
-            // Placement badge
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: medalColors,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 48, height: 48)
-                    .shadow(color: accentColor.opacity(0.4), radius: 6, y: 2)
+        return HStack(spacing: 11) {
+            // The same rank chip as every board in the app. A 48pt gradient
+            // disc with a coloured drop shadow said "medal" a second time on a
+            // screen called Trophy Case.
+            CompeteRankBadge(place: trophy.placement, size: 30)
 
-                if trophy.medal != nil {
-                    Image(systemName: "medal.fill")
-                        .font(.system(size: 22))
-                        .foregroundColor(.white)
-                } else {
-                    Text("#\(trophy.placement)")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                }
-            }
-
-            // Info
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(trophy.competitionName)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
+                    .font(CompeteDesign.nameSmall)
+                    .foregroundColor(CompeteDesign.ink)
                     .lineLimit(1)
+                    .truncationMode(.tail)
 
-                HStack(spacing: 6) {
-                    // Type pill
-                    HStack(spacing: 4) {
-                        Image(systemName: trophy.competitionType.icon)
-                            .font(.system(size: 9))
-                        Text(trophy.competitionType.displayName)
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundColor(Color(hex: trophy.competitionType.gradient[0]))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule()
-                            .fill(Color(hex: trophy.competitionType.gradient[0]).opacity(0.15))
-                    )
-
+                HStack(spacing: 5) {
+                    Text(trophy.competitionType.displayName.uppercased())
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .tracking(0.9)
+                        .foregroundColor(Color(hex: trophy.competitionType.gradient[0]))
+                    Text("·").foregroundColor(CompeteDesign.inkGhost)
+                    Text(placementText(trophy))
+                        .font(CompeteDesign.caption)
+                        .foregroundColor(accentColor)
+                    Text("·").foregroundColor(CompeteDesign.inkGhost)
                     Text(formattedDate(trophy.completedDate))
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.4))
+                        .font(CompeteDesign.caption)
+                        .foregroundColor(CompeteDesign.inkFaint)
                 }
-
-                // Placement text
-                Text(placementText(trophy))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(accentColor)
+                .lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer()
-
-            // Score + chevron
-            HStack(spacing: MADTheme.Spacing.sm) {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(formatScore(trophy))
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-
-                    Text(scoreUnitLabel(trophy))
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.4))
-                }
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.3))
+            VStack(alignment: .trailing, spacing: 0) {
+                Text(formatScore(trophy))
+                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    .foregroundColor(CompeteDesign.ink)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                Text(scoreUnitLabel(trophy).uppercased())
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .tracking(0.6)
+                    .foregroundColor(CompeteDesign.inkFaint)
+                    .lineLimit(1)
             }
+            .fixedSize()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(CompeteDesign.inkGhost)
+                .accessibilityHidden(true)
         }
-        .padding(MADTheme.Spacing.md)
-        .padding(.vertical, 2)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 12)
         .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .stroke(
-                            LinearGradient(
-                                colors: [accentColor.opacity(0.2), Color.clear],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                )
+            RoundedRectangle(cornerRadius: CompeteDesign.radius, style: .continuous)
+                .fill(CompeteDesign.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: CompeteDesign.radius, style: .continuous)
+                .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
         )
     }
 
@@ -400,7 +320,10 @@ struct TrophyCaseView: View {
         case 3: ordinal = "3rd"
         default: ordinal = "\(trophy.placement)th"
         }
-        return "\(ordinal) of \(trophy.totalParticipants) competitors"
+        let field = trophy.placedAmongTeams == true
+            ? (trophy.totalParticipants == 1 ? "team" : "teams")
+            : (trophy.totalParticipants == 1 ? "competitor" : "competitors")
+        return "\(ordinal) of \(trophy.totalParticipants) \(field)"
     }
 
     private func scoreUnitLabel(_ trophy: CompetitionTrophy) -> String {

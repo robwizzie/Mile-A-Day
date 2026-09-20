@@ -3001,6 +3001,21 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
      ON CONFLICT (workout_id) DO NOTHING`,
     ["ci-lastweek-walk", WK, 1.5, midWeek],
   );
+  // ...carrying a real mile split, because TWO of the twelve rotation entries
+  // measure SPLITS (`personal_best`, `speed_week`) and a walk with none scores
+  // ZERO on them. Without this the assertion below depends on which week the
+  // suite happens to run in: it passed for months and went red the Sunday
+  // `speed_week` became last week's challenge, failing every merge for a week
+  // over nothing to do with the code under test. Pace sits inside the
+  // plausible band (>= MIN_PLAUSIBLE_MILE_SECONDS) and under Speed Week's 600s
+  // bar, and the distance clears DAILY_GOAL_TOLERANCE so the PB filter counts
+  // it too — so every active rotation entry now measures > 0.
+  await db.query(
+    `INSERT INTO workout_splits (workout_id, split_number, split_duration, split_distance, split_pace)
+     VALUES ($1,1,540,1.0,540)
+     ON CONFLICT (workout_id, split_number) DO NOTHING`,
+    ["ci-lastweek-walk"],
+  );
 
   const missed = (await getWeeklyChallengeForUser(WK)).last_week;
   assert.equal(missed.week_start, prevStart, "last_week is the week BEFORE this one");

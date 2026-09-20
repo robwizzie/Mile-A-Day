@@ -1,66 +1,69 @@
 import SwiftUI
 
 // MARK: - Info Row
+
+/// One rule of the competition: label left, value right.
+///
+/// Was an icon column + stacked label/value. A red glyph beside every rule
+/// turned the settings card into a column of red, and the icons carried no
+/// information the label didn't — "Goal", "Interval", "Lives" are already the
+/// shortest possible statement of themselves.
 struct InfoRow: View {
     let icon: String
     let title: String
     let value: String
 
     var body: some View {
-        HStack(spacing: MADTheme.Spacing.md) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundColor(MADTheme.Colors.madRed)
-                .frame(width: 30)
+        HStack(alignment: .firstTextBaseline, spacing: MADTheme.Spacing.md) {
+            Text(title)
+                .font(CompeteDesign.detail)
+                .foregroundColor(CompeteDesign.inkFaint)
+                .lineLimit(1)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(.white.opacity(0.7))
+            Spacer(minLength: MADTheme.Spacing.sm)
 
-                Text(value)
-                    .font(MADTheme.Typography.callout)
-                    .foregroundColor(.white)
-            }
-
-            Spacer()
+            Text(value)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundColor(CompeteDesign.ink)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
         }
     }
 }
 
 // MARK: - Activities Info Row
+
+/// Which activities count. Same grammar as `InfoRow` — label left, answer
+/// right — so the settings card reads as one table instead of a table with an
+/// odd row on the end.
 struct ActivitiesInfoRow: View {
     let activities: [CompetitionActivity]
 
     var body: some View {
-        HStack(spacing: MADTheme.Spacing.md) {
-            Image(systemName: "figure.run")
-                .font(.title3)
-                .foregroundColor(MADTheme.Colors.madRed)
-                .frame(width: 30)
+        HStack(alignment: .firstTextBaseline, spacing: MADTheme.Spacing.md) {
+            Text("Activities")
+                .font(CompeteDesign.detail)
+                .foregroundColor(CompeteDesign.inkFaint)
+                .lineLimit(1)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Activities")
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(.white.opacity(0.7))
+            Spacer(minLength: MADTheme.Spacing.sm)
 
-                HStack(spacing: 6) {
-                    ForEach(activities, id: \.self) { activity in
-                        HStack(spacing: 4) {
-                            Image(systemName: activity.icon)
-                                .font(.system(size: 10))
-                            Text(activity.displayName)
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                        }
-                        .foregroundColor(activity.color)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(activity.backgroundColor))
+            HStack(spacing: 5) {
+                ForEach(activities, id: \.self) { activity in
+                    HStack(spacing: 4) {
+                        Image(systemName: activity.icon)
+                            .font(.system(size: 9, weight: .bold))
+                            .accessibilityHidden(true)
+                        Text(activity.displayName)
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .lineLimit(1)
                     }
+                    .foregroundColor(activity.color)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(activity.color.opacity(0.14)))
                 }
             }
-
-            Spacer()
         }
     }
 }
@@ -110,7 +113,7 @@ struct InviteFriendView: View {
                     .padding(MADTheme.Spacing.md)
                     .background(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .fill(.ultraThinMaterial)
+                            .fill(CompeteDesign.surface)
                     )
                     .padding(MADTheme.Spacing.md)
 
@@ -227,7 +230,7 @@ struct FriendInviteRow: View {
                     .padding(.vertical, MADTheme.Spacing.sm)
                     .background(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.pill)
-                            .fill(MADTheme.Colors.primaryGradient)
+                            .fill(MADTheme.Colors.madRed)
                     )
             }
             .buttonStyle(ScaleButtonStyle())
@@ -235,7 +238,7 @@ struct FriendInviteRow: View {
         .padding(MADTheme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(.ultraThinMaterial)
+                .fill(CompeteDesign.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                         .stroke(Color.white.opacity(0.2), lineWidth: 1)
@@ -597,10 +600,10 @@ struct EditCompetitionSettingsView: View {
         .padding(MADTheme.Spacing.lg)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
+                .fill(CompeteDesign.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        .stroke(CompeteDesign.hairline, lineWidth: 1)
                 )
         )
     }

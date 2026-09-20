@@ -82,7 +82,7 @@ struct FriendSelectRow: View {
             .padding(MADTheme.Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                             .stroke(
@@ -105,7 +105,7 @@ struct MADTextFieldStyle: TextFieldStyle {
             .padding(MADTheme.Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
