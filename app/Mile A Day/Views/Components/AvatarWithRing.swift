@@ -30,6 +30,11 @@ struct AvatarWithRing: View {
 
     enum Badge {
         case check        // green checkmark — goal completed
+        /// A streak token is holding this day. Its own hue (SavedDayStyle's
+        /// blue) because it is a FOURTH state, not a shade of done: the
+        /// streak is safe, the miles are not in, and painting it green would
+        /// claim a run that didn't happen.
+        case saved
         case live         // pulsing red dot — workout in progress
         /// Two bars — the walker has stopped ON PURPOSE. Distinct from the
         /// dimmed-to-a-hairline treatment a host uses for someone who has gone
@@ -37,6 +42,13 @@ struct AvatarWithRing: View {
         /// them", and drawing the same thing for both is what makes a break
         /// look like a crash.
         case paused
+        /// We haven't heard from them. The counterpart the comment above
+        /// describes, and it needs a MARK of its own: dimming alone says
+        /// something is different without saying what, which on a roster
+        /// reads as the app losing somebody rather than as a phone out of
+        /// signal. Deliberately NOT the pause amber — a break is a choice,
+        /// this is weather.
+        case outOfRange
     }
 
     private var clamped: Double { max(0, min(1, progress)) }
@@ -93,12 +105,26 @@ struct AvatarWithRing: View {
                 .frame(width: size * 0.32, height: size * 0.32)
                 .background(Circle().fill(Color.green))
                 .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1.5))
+        case .saved:
+            Image(systemName: "shield.fill")
+                .font(.system(size: size * 0.18, weight: .black))
+                .foregroundColor(.white)
+                .frame(width: size * 0.32, height: size * 0.32)
+                .background(Circle().fill(SavedDayStyle.tint))
+                .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1.5))
         case .paused:
             Image(systemName: "pause.fill")
                 .font(.system(size: size * 0.20, weight: .black))
                 .foregroundColor(.white)
                 .frame(width: size * 0.32, height: size * 0.32)
                 .background(Circle().fill(MADTheme.Colors.warning))
+                .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1.5))
+        case .outOfRange:
+            Image(systemName: "antenna.radiowaves.left.and.right.slash")
+                .font(.system(size: size * 0.17, weight: .bold))
+                .foregroundColor(.white.opacity(0.9))
+                .frame(width: size * 0.32, height: size * 0.32)
+                .background(Circle().fill(Color(white: 0.28)))
                 .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1.5))
         case .live:
             ZStack {

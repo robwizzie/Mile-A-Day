@@ -726,6 +726,19 @@ struct NotificationInboxView: View {
         case "streak_assist_accepted":
             // Your donated mile landed on their streak — go look at them.
             openActorProfileOrFriends(notification)
+        case "streak_saved", "streak_double_down", "streak_assisted",
+             "streak_token_returned":
+            // All four are about the caller's OWN tokens — the shelf that
+            // holds them lives on the Dashboard, and the row is only useful
+            // if the meter it refers to is fresh when they get there.
+            switchTab(0)
+            Task { await StreakTokensState.shared.refreshStatus() }
+        case "streak_assist_returned":
+            // Their mile came back because the friend ran it themselves.
+            // Refresh the budget first (it is what the donate CTA reads),
+            // then show the person it was about.
+            Task { await StreakTokensState.shared.refreshStatus() }
+            openActorProfileOrFriends(notification)
         case "buddy_invite", "buddy_joined", "buddy_started", "buddy_finished",
              "buddy_join_request":
             // The walk itself, via the same parked intent the push tap uses —
@@ -1009,6 +1022,15 @@ struct NotificationInboxView: View {
         case "competition_milestone": return "MILESTONE"
         case "streak_broken": return "STREAK"
         case "streak_lost": return "STREAK ENDED"
+        case "streak_saved": return "STREAK SAVED"
+        case "streak_double_down": return "DOUBLE DOWN"
+        case "streak_assisted": return "STREAK SAVED"
+        case "streak_assist_offer", "streak_assist_request",
+             "streak_assist_available": return "STREAK ASSIST"
+        case "streak_assist_accepted": return "YOUR MILE LANDED"
+        // "You ran it anyway" — the token came back.
+        case "streak_token_returned", "streak_assist_returned":
+            return "TOKEN RETURNED"
         case "goal_reached": return "GOAL DONE"
         case "personal_best": return "PERSONAL BEST"
         case "badge_earned": return "BADGE"
@@ -1056,6 +1078,11 @@ struct NotificationInboxView: View {
             return ("hand.raised.fill", .red)
         case "streak_assisted", "streak_assist_accepted":
             return ("checkmark.seal.fill", .green)
+        case "streak_saved": return ("shield.fill", SavedDayStyle.tint)
+        case "streak_double_down": return ("bolt.fill", .orange)
+        // A token coming BACK is the opposite arrow to one being spent.
+        case "streak_token_returned", "streak_assist_returned":
+            return ("arrow.uturn.backward.circle.fill", SavedDayStyle.tint)
         case "goal_reached": return ("checkmark.seal.fill", .green)
         case "personal_best": return ("medal.fill", .yellow)
         case "lead_change": return ("arrow.up.right", .green)

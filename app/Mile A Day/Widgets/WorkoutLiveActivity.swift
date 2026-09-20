@@ -119,7 +119,10 @@ private extension WorkoutActivityAttributes.ContentState {
 /// the last pushed static value when no anchor is available.
 private struct LiveTimerText: View {
     let state: WorkoutActivityAttributes.ContentState
-    var font: Font
+    /// Base point size. The view steps it down itself once the clock gains an
+    /// hours field — see `resolvedSize`.
+    var size: CGFloat
+    var weight: Font.Weight = .semibold
     var alignment: TextAlignment = .trailing
 
     var body: some View {
@@ -135,15 +138,42 @@ private struct LiveTimerText: View {
                 Text(staticTime)
             }
         }
-        .font(font)
+        .font(.system(size: resolvedSize, weight: weight, design: .rounded))
         .monospacedDigit()
+        // Belt AND braces, because neither alone is enough. `Text(timerInterval:)`
+        // is rendered by the SYSTEM: this side never sees the string, so it
+        // cannot measure it, and a width that fits "58:12" silently truncated
+        // an hour-long walk to "1:03:…" on the lock screen. The step-down
+        // below handles the predictable case; the scale factor catches the
+        // minute between crossing the hour and the next content push.
+        .lineLimit(1)
+        .minimumScaleFactor(0.5)
         .multilineTextAlignment(alignment)
     }
 
+    /// "58:12" is five glyphs, "1:03:45" is seven — about 40% wider, at the
+    /// one boundary every long walk crosses.
+    private var resolvedSize: CGFloat { isOverAnHour ? size * 0.76 : size }
+
+    private var isOverAnHour: Bool {
+        if let start = state.timerStartDate, !state.showsManualPause {
+            return Date().timeIntervalSince(start) >= 3600
+        }
+        return state.elapsedTime >= 3600
+    }
+
+    /// The frozen value a paused walk falls back to, in the SAME shape the
+    /// system's live clock uses. It was minutes:seconds with no hours field,
+    /// so pausing an hour-long walk changed "1:03:12" into "63:12" — the same
+    /// workout, two different-looking times, on the same line.
     private var staticTime: String {
-        let minutes = Int(state.elapsedTime) / 60
-        let seconds = Int(state.elapsedTime) % 60
-        return String(format: "%d:%02d", minutes, seconds)
+        let total = Int(state.elapsedTime)
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
+            : String(format: "%d:%02d", minutes, seconds)
     }
 }
 
@@ -196,12 +226,8 @@ struct WorkoutLiveActivity: Widget {
                                 .font(.caption2)
                                 .foregroundColor(.white.opacity(0.6))
 
-                            LiveTimerText(
-                                state: context.state,
-                                font: .system(size: 20, weight: .semibold, design: .rounded)
-                            )
-                            .foregroundColor(.white)
-                            .frame(maxWidth: 70, alignment: .trailing)
+                            LiveTimerText(state: context.state, size: 20)
+                                .foregroundColor(.white)
 
                             if context.state.showsManualPause {
                                 Text("PAUSED")
@@ -416,13 +442,18 @@ struct WorkoutLiveActivityView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.system(size: 11, weight: .bold))
+                                .accessibilityHidden(true)
                             Text("TRACKING INTERRUPTED")
                                 .font(.system(size: 12, weight: .heavy, design: .rounded))
                         }
                         .foregroundColor(.yellow)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         Text("Open Mile A Day to resume")
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.85))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                 } else {
                 VStack(alignment: .trailing, spacing: 2) {
@@ -430,12 +461,8 @@ struct WorkoutLiveActivityView: View {
                         .font(.caption2)
                         .foregroundColor(.white.opacity(0.6))
 
-                    LiveTimerText(
-                        state: context.state,
-                        font: .system(size: 24, weight: .semibold, design: .rounded)
-                    )
-                    .foregroundColor(.white)
-                    .frame(maxWidth: 90, alignment: .trailing)
+                    LiveTimerText(state: context.state, size: 24)
+                        .foregroundColor(.white)
 
                     if context.state.showsManualPause {
                         HStack(spacing: 4) {
@@ -472,6 +499,7 @@ struct WorkoutLiveActivityView: View {
                             .font(.system(size: 11, weight: .heavy, design: .rounded))
                             .foregroundColor(.orange)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                 }
                 }

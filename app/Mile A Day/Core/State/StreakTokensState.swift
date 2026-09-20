@@ -212,6 +212,7 @@ final class StreakTokensState: ObservableObject {
                 streak_save: save,
                 streak_assist: assist,
                 frozen_dates: status.frozen_dates ?? [],
+                today_covered: status.today_covered,
                 natural_streak: status.natural_streak ?? true,
                 streak_at_risk: status.streak_at_risk ?? false,
                 my_savable_day: status.my_savable_day,
@@ -252,6 +253,7 @@ final class StreakTokensState: ObservableObject {
                 progress: 30, target: 30, held: true, last_used: nil
             ),
             frozen_dates: [],
+            today_covered: nil,
             natural_streak: true,
             streak_at_risk: true,
             my_savable_day: SavableDay(

@@ -161,6 +161,7 @@ async function loadParticipants(
     workout_id: string | null;
     location_type: BuddyLocationType | null;
     is_paused: boolean;
+    last_heard_seconds: number | null;
   }>(
     // Staleness means "was reporting, then stopped" — NOT "hasn't reported
     // yet". A participant's first progress report is up to 5s out, so falling
@@ -173,6 +174,24 @@ async function loadParticipants(
              AND COALESCE(p.last_progress_at, s.started_at, NOW())
                    < NOW() - ($2 || ' seconds')::interval
             ) AS is_stale,
+            -- HOW LONG since we last heard from them, in whole seconds.
+            --
+            -- Served as an AGE rather than the timestamp itself, deliberately:
+            -- a timestamptz would cross the wire with fractional seconds (the
+            -- decoder trap) and, worse, would make the client subtract a
+            -- server clock from a device clock — so a phone a minute off would
+            -- report a friend as out of range, or as heard from in the future.
+            -- An integer computed HERE has neither problem.
+            --
+            -- NULL for anyone not active, and for a walker who has reported
+            -- normally: the client only ever draws it when is_stale is true,
+            -- and sending it always would invite a surface to start
+            -- second-guessing the flag.
+            CASE WHEN p.status = 'active' AND p.last_progress_at IS NOT NULL
+                 THEN GREATEST(0, FLOOR(
+                        EXTRACT(EPOCH FROM (NOW() - p.last_progress_at))
+                      ))::int
+            END AS last_heard_seconds,
             -- Only a walker still ON the walk can be paused: a finished row
             -- keeps whatever flag its last report carried, and rendering that
             -- would put a pause badge on someone who is done.
@@ -200,6 +219,10 @@ async function loadParticipants(
     distance_miles: Number(r.distance_miles) || 0,
     duration_seconds: Number(r.duration_seconds) || 0,
     is_stale: r.is_stale === true,
+    last_heard_seconds:
+      r.last_heard_seconds === null || r.last_heard_seconds === undefined
+        ? null
+        : Number(r.last_heard_seconds),
     is_paused: r.is_paused === true,
     is_host: r.user_id === hostUserId,
     place: r.place,

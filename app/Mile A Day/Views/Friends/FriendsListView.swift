@@ -1099,7 +1099,14 @@ struct FriendsListView: View {
         let canRenudge = status?.unlimitedNudges ?? false
         let todayMiles = status?.today_miles ?? 0
         let goalMiles: Double = 1.0
-        let progress = min(todayMiles / goalMiles, 1.0)
+        // A token holding their day. Suppressed once the miles are actually
+        // in — the server refunds the coverage on that upload, so a finished
+        // day is a green day, not a saved one.
+        let savedToday = isCompleted ? nil : status?.today_covered
+        // A covered day fills the ring: the streak is safe, and a 0% arc
+        // beside a streak a friend's mile just rescued reads as the rescue
+        // having failed.
+        let progress = savedToday != nil ? 1.0 : min(todayMiles / goalMiles, 1.0)
 
         // Two sibling buttons in a single HStack — NOT nested. Previously
         // the Nudge button lived inside the row's outer Button label, which
@@ -1117,7 +1124,8 @@ struct FriendsListView: View {
                     status: status,
                     todayMiles: todayMiles,
                     goalMiles: goalMiles,
-                    progress: progress
+                    progress: progress,
+                    savedToday: savedToday
                 )
             }
             .buttonStyle(.plain)
@@ -1173,7 +1181,7 @@ struct FriendsListView: View {
     /// chevron-when-completed. Nudge button is rendered separately as a
     /// sibling so it doesn't compete with the row's open-profile tap.
     @ViewBuilder
-    private func tappableRowContent(friend: BackendUser, isCompleted: Bool, status: NudgeStatusResponse?, todayMiles: Double, goalMiles: Double, progress: Double) -> some View {
+    private func tappableRowContent(friend: BackendUser, isCompleted: Bool, status: NudgeStatusResponse?, todayMiles: Double, goalMiles: Double, progress: Double, savedToday: CoveredDate? = nil) -> some View {
         HStack(spacing: MADTheme.Spacing.md) {
             AvatarWithRing(
                 name: friend.displayName,
@@ -1181,8 +1189,8 @@ struct FriendsListView: View {
                 progress: progress,
                 size: 52,
                 ringWidth: 3,
-                accent: .orange,
-                badge: isCompleted ? .check : nil
+                accent: savedToday != nil ? SavedDayStyle.tint : .orange,
+                badge: isCompleted ? .check : (savedToday != nil ? .saved : nil)
             )
 
             VStack(alignment: .leading, spacing: 2) {
@@ -1196,10 +1204,16 @@ struct FriendsListView: View {
                     }
                 }
 
-                Text(rowSubtitle(isCompleted: isCompleted, todayMiles: todayMiles, goal: goalMiles))
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.5))
-                    .lineLimit(1)
+                Text(rowSubtitle(
+                    isCompleted: isCompleted,
+                    todayMiles: todayMiles,
+                    goal: goalMiles,
+                    savedToday: savedToday
+                ))
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundColor(savedToday != nil ? SavedDayStyle.tint : .white.opacity(0.5))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
             }
 
             Spacer(minLength: 4)
@@ -1219,9 +1233,21 @@ struct FriendsListView: View {
         .contentShape(Rectangle())
     }
 
-    private func rowSubtitle(isCompleted: Bool, todayMiles: Double, goal: Double) -> String {
+    private func rowSubtitle(
+        isCompleted: Bool,
+        todayMiles: Double,
+        goal: Double,
+        savedToday: CoveredDate? = nil
+    ) -> String {
         if isCompleted {
             return String(format: "Goal complete · %.2f mi today", todayMiles)
+        }
+        // A covered day leads with WHO is holding it, not with how far short
+        // the miles are. "0.00 / 1 mi · 0%" beside a streak that went up is
+        // the app reporting that the rescue did nothing — and on this screen
+        // the reader is often the person who paid for it.
+        if let savedToday {
+            return "\(SavedDayStyle.credit(for: savedToday)) · streak safe today"
         }
         let percent = ProgressCalculator.formatProgress(min(todayMiles / goal, 1.0))
         return "\(String(format: "%.2f / %.0f mi", todayMiles, goal)) · \(percent)"
@@ -1527,7 +1553,11 @@ struct FriendsListView: View {
                         today_miles: existing?.today_miles,
                         current_streak: existing?.current_streak,
                         has_nudged_today: true,
-                        unlimited_nudges: existing?.unlimited_nudges
+                        unlimited_nudges: existing?.unlimited_nudges,
+                        // Nudging doesn't un-cover their day — carry it, or
+                        // the row snaps back to "0.00 / 1 mi · 0%" the
+                        // instant the bell is tapped.
+                        today_covered: existing?.today_covered
                     )
                     MADHaptics.success()
                     showNudgeFeedback(NudgeFeedback(

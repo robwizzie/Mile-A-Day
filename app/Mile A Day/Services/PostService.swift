@@ -98,6 +98,10 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     /// for anyone who hasn't added one. Blanked to "" when the earn-to-view
     /// gate withheld it, exactly like the author's `media_url`.
     let media_url: String?
+    /// FRONT & BACK: their slide's swapped arrangement. Nil for a single shot
+    /// and on older servers, and nulled outright by the earn-to-view gate —
+    /// it is the same withheld photo from the other camera.
+    var dual_media_url: String? = nil
     /// Their own words under their own slide. Nil until they write one, and
     /// on older servers — the card falls back to showing nothing under a
     /// crew slide rather than the author's caption, which isn't theirs.
@@ -155,6 +159,15 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     var mediaURL: URL? {
         guard let media_url, !media_url.isEmpty else { return nil }
         return ProfileImageService.fullImageURL(for: media_url)
+    }
+
+    /// The other side of their FRONT & BACK, when there is one. Gated on the
+    /// primary surviving too: a withheld photo blanks `media_url` to "" while
+    /// the twin is nulled, and offering a flip from a lock would hand over the
+    /// picture the gate just took away.
+    var dualMediaURL: URL? {
+        guard mediaURL != nil, let dual_media_url, !dual_media_url.isEmpty else { return nil }
+        return ProfileImageService.fullImageURL(for: dual_media_url)
     }
 
     /// Set only when the server withheld a photo this person HAD added — an
@@ -218,6 +231,15 @@ struct PostItem: Codable, Identifiable {
     let last_name: String?
     let profile_image_url: String?
     let media_url: String
+    /// FRONT & BACK: the swapped arrangement of the same two frames — the
+    /// selfie large with the scene inset, where `media_url` is the other way
+    /// round. Nil on every ordinary post and from every older server.
+    ///
+    /// NOT a second half of the photo: both urls are finished 4:5 pictures
+    /// with the inset already baked in, so anything that only reads
+    /// `media_url` still shows a complete front-and-back shot. This is what
+    /// lets the card offer the tap-to-swap.
+    var dual_media_url: String? = nil
     var caption: String?
     let workout_id: String?
     /// Linked workout's feed role — display framing only: "extra" renders
@@ -387,6 +409,14 @@ struct PostItem: Codable, Identifiable {
 
     var mediaURL: URL? { ProfileImageService.fullImageURL(for: media_url) }
 
+    /// The FRONT & BACK twin, when this post has one. Withheld alongside the
+    /// primary: the earn-to-view gate blanks `media_url` to "" and nulls this,
+    /// and a flip offered from a lock would serve the very photo being held.
+    var dualMediaURL: URL? {
+        guard !media_url.isEmpty, let dual_media_url, !dual_media_url.isEmpty else { return nil }
+        return ProfileImageService.fullImageURL(for: dual_media_url)
+    }
+
     /// The run's story photo when present and distinct from the post media.
     var storyPhotoURL: URL? {
         guard let story_photo_url, story_photo_url != media_url else { return nil }
@@ -460,6 +490,9 @@ struct FeedEntry: Codable, Identifiable {
     let profile_image_url: String?
     // post-only
     let media_url: String?
+    /// FRONT & BACK's swapped arrangement — see `PostItem.dual_media_url`.
+    /// Needs a CodingKeys case below like every other field here.
+    let dual_media_url: String?
     var caption: String?
     let stats_snapshot: PostStats?
     /// The run's story-only photo, when one exists — powers the photo/route
@@ -570,7 +603,7 @@ struct FeedEntry: Codable, Identifiable {
         case kind
         case entryId = "id"
         case sort_ts, user_id, username, first_name, last_name, profile_image_url
-        case media_url, caption, stats_snapshot, story_photo_url, is_auto
+        case media_url, dual_media_url, caption, stats_snapshot, story_photo_url, is_auto
         case include_route
         // With an explicit CodingKeys enum, EVERY stored property must be
         // listed (or defaulted) — a new field left out kills Codable
@@ -617,7 +650,8 @@ struct FeedEntry: Codable, Identifiable {
         return PostItem(
             post_id: entryId, user_id: user_id, username: username,
             first_name: first_name, last_name: last_name,
-            profile_image_url: profile_image_url, media_url: media, caption: caption,
+            profile_image_url: profile_image_url, media_url: media,
+            dual_media_url: dual_media_url, caption: caption,
             workout_id: workout_id, feed_role: feed_role,
             stats_snapshot: stats_snapshot, local_date: nil,
             share_to_feed: true, share_to_story: nil, story_expires_at: nil,
@@ -856,6 +890,11 @@ enum PostService {
     /// delete the old one to post again).
     static func createPost(
         mediaUrl: String,
+        /// FRONT & BACK: the swapped arrangement of the same two frames.
+        /// Absent on every ordinary post, and an older server ignores the key
+        /// entirely — in which case the post is simply the primary, which is
+        /// already a complete picture with the inset baked into it.
+        dualMediaUrl: String? = nil,
         caption: String?,
         workoutId: String?,
         shareToFeed: Bool,
@@ -883,6 +922,7 @@ enum PostService {
     ) async throws -> PostItem {
         struct Body: Encodable {
             let media_url: String
+            let dual_media_url: String?
             let caption: String?
             let workout_id: String?
             let share_to_feed: Bool
@@ -899,6 +939,7 @@ enum PostService {
         let bodyData = try JSONEncoder().encode(
             Body(
                 media_url: mediaUrl,
+                dual_media_url: dualMediaUrl,
                 caption: caption,
                 workout_id: workoutId,
                 share_to_feed: shareToFeed,
@@ -935,15 +976,25 @@ enum PostService {
         postId: String,
         mediaUrl: String,
         caption: String? = nil,
-        photoSource: PostPhotoSource?
+        photoSource: PostPhotoSource?,
+        /// FRONT & BACK's other frame for THIS slide — same contract as the
+        /// author's, and re-sending without one drops it, because replacing
+        /// your picture replaces the whole of it.
+        dualMediaUrl: String? = nil
     ) async throws {
         struct Body: Encodable {
             let media_url: String
             let caption: String?
             let photo_source: String?
+            let dual_media_url: String?
         }
         let bodyData = try JSONEncoder().encode(
-            Body(media_url: mediaUrl, caption: caption, photo_source: photoSource?.rawValue)
+            Body(
+                media_url: mediaUrl,
+                caption: caption,
+                photo_source: photoSource?.rawValue,
+                dual_media_url: dualMediaUrl
+            )
         )
         _ = try await APIClient.fancyFetch(
             endpoint: "/posts/\(postId)/crew-photo",

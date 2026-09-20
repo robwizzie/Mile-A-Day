@@ -222,6 +222,14 @@ export type NotificationType =
   | "streak_assist_request"
   | "streak_assist_accepted"
   | "streak_assisted"
+  // "You ran it anyway" — a token whose day the user has since earned for
+  // real is handed back (`streak_token_returned` to the spender,
+  // `streak_assist_returned` to the donor whose mile is free again). Each is
+  // about the recipient's OWN account and fires at most once per covered
+  // day, so both are cap-exempt below for the same reason the rest of the
+  // exchange is.
+  | "streak_token_returned"
+  | "streak_assist_returned"
   // Buddy Walks & Runs (gated by BUDDY_SESSIONS + per-user buddy_enrolled_at).
   // Only buddy_invite is high-priority — the rest are follow-ups about a
   // session the user is already in, so quiet hours and the daily cap apply.
@@ -498,6 +506,8 @@ const CAP_EXEMPT_TYPES: NotificationType[] = [
   "streak_assist_request",
   "streak_assist_accepted",
   "streak_assisted",
+  "streak_token_returned",
+  "streak_assist_returned",
   // The overnight Head-to-Head verdict: at most one a day, by construction.
   //
   // Deliberately WITHOUT badge_earned / personal_best, which look like the

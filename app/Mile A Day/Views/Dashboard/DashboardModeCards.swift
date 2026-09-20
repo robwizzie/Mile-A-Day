@@ -382,11 +382,26 @@ private struct ModernHeroCard: View {
         )
     }
 
+    /// A streak token is carrying today (almost always an Assist a friend's
+    /// mile paid for). The hero must not go on saying "Streak at risk" about
+    /// a day that is already safe — that is the same contradiction the
+    /// friends row had, on the screen the owner looks at most. Suppressed
+    /// once the mile is genuinely in: the server refunds the coverage on that
+    /// upload, and a finished day is a done day.
+    private var savedToday: CoveredDate? {
+        guard !trustedDone else { return nil }
+        return tokensState.payload?.today_covered
+    }
+
     private var statusColor: Color {
         // Nothing about a paused streak is urgent: it can't break today, so the
         // at-risk red (and the amber "running out of day") would be lying.
         if injuryPause.isPaused { return MADTheme.Colors.warning }
         if trustedDone { return .green }
+        // Neither is a covered day. The mile is still worth running (it hands
+        // the token back), so this stays a live colour rather than going
+        // green — but it is not RED.
+        if savedToday != nil { return SavedDayStyle.tint }
         if userManager.currentUser.isStreakAtRisk { return MADTheme.Colors.madRed }
         return .orange
     }
@@ -480,7 +495,7 @@ private struct ModernHeroCard: View {
 
     private var statusPill: some View {
         HStack(spacing: 6) {
-            Image(systemName: trustedDone ? "checkmark.circle.fill" : userManager.currentUser.isStreakAtRisk ? "exclamationmark.triangle.fill" : "flame.fill")
+            Image(systemName: statusGlyph(atRisk: "exclamationmark.triangle.fill"))
                 .font(.system(size: 12, weight: .bold))
             Text(statusText)
                 .font(.system(size: 12, weight: .heavy, design: .rounded))
@@ -522,9 +537,19 @@ private struct ModernHeroCard: View {
         return [payload.double_down.held, payload.streak_save.held, payload.streak_assist.held].filter { $0 }.count
     }
 
+    /// Matches `statusText` case for case, so the glyph can never describe a
+    /// different state than the words beside it.
+    private func statusGlyph(atRisk: String) -> String {
+        if trustedDone { return "checkmark.circle.fill" }
+        if let saved = savedToday { return SavedDayStyle.icon(for: saved.kind) }
+        if userManager.currentUser.isStreakAtRisk { return atRisk }
+        return "flame.fill"
+    }
+
     private var statusText: String {
         if injuryPause.isPaused { return "Paused for injury" }
         if trustedDone { return "Done today" }
+        if savedToday != nil { return "Covered today" }
         if !distanceIsFresh { return "Syncing today" }
         if userManager.currentUser.isStreakAtRisk { return "Streak at risk" }
         return timeRemainingText.isEmpty ? "Today's mile" : "\(formattedTimeOnly) left"
@@ -1306,11 +1331,26 @@ private struct FlameBuddyHeroCard: View {
         )
     }
 
+    /// A streak token is carrying today (almost always an Assist a friend's
+    /// mile paid for). The hero must not go on saying "Streak at risk" about
+    /// a day that is already safe — that is the same contradiction the
+    /// friends row had, on the screen the owner looks at most. Suppressed
+    /// once the mile is genuinely in: the server refunds the coverage on that
+    /// upload, and a finished day is a done day.
+    private var savedToday: CoveredDate? {
+        guard !trustedDone else { return nil }
+        return tokensState.payload?.today_covered
+    }
+
     private var statusColor: Color {
         // Nothing about a paused streak is urgent: it can't break today, so the
         // at-risk red (and the amber "running out of day") would be lying.
         if injuryPause.isPaused { return MADTheme.Colors.warning }
         if trustedDone { return .green }
+        // Neither is a covered day. The mile is still worth running (it hands
+        // the token back), so this stays a live colour rather than going
+        // green — but it is not RED.
+        if savedToday != nil { return SavedDayStyle.tint }
         if userManager.currentUser.isStreakAtRisk { return MADTheme.Colors.madRed }
         return .orange
     }
@@ -1634,7 +1674,7 @@ private struct FlameBuddyHeroCard: View {
 
     private var statusBadge: some View {
         HStack(spacing: 6) {
-            Image(systemName: trustedDone ? "checkmark.circle.fill" : userManager.currentUser.isStreakAtRisk ? "exclamationmark.circle.fill" : "flame.fill")
+            Image(systemName: statusGlyph(atRisk: "exclamationmark.circle.fill"))
                 .font(.system(size: 12, weight: .bold))
             Text(statusText)
                 .font(.system(size: 12, weight: .heavy, design: .rounded))
@@ -1646,9 +1686,19 @@ private struct FlameBuddyHeroCard: View {
         .overlay(Capsule().strokeBorder(statusColor.opacity(0.26), lineWidth: 1))
     }
 
+    /// Matches `statusText` case for case, so the glyph can never describe a
+    /// different state than the words beside it.
+    private func statusGlyph(atRisk: String) -> String {
+        if trustedDone { return "checkmark.circle.fill" }
+        if let saved = savedToday { return SavedDayStyle.icon(for: saved.kind) }
+        if userManager.currentUser.isStreakAtRisk { return atRisk }
+        return "flame.fill"
+    }
+
     private var statusText: String {
         if injuryPause.isPaused { return "Paused for injury" }
         if trustedDone { return "Streak safe" }
+        if savedToday != nil { return "Covered today" }
         if !distanceIsFresh { return "Syncing" }
         if userManager.currentUser.isStreakAtRisk { return "Streak at risk" }
         return "Keep it alive"

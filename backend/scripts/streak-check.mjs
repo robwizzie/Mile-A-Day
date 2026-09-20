@@ -18,6 +18,8 @@ const { getActiveStreak, getStreakErasForUser } =
 const { refreshCurrentStreak, reconcileStaleStreaks } =
   await import("../dist/services/leaderboardService.js");
 const { getFriends } = await import("../dist/services/friendshipService.js");
+const { refundEarnedCoverage } =
+  await import("../dist/services/streakFeatureService.js");
 
 const db = PostgresService.getInstance();
 
@@ -32,6 +34,17 @@ const plus = (n) => core.dateStrPlus(TODAY, n);
 async function cleanup() {
   await db.query(
     `DELETE FROM friendships WHERE user_id LIKE 'sc-%' OR friend_id LIKE 'sc-%'`,
+  );
+  // The refund path sends pushes, which write inbox rows that hold a FK on
+  // users — so they have to go before the users do.
+  await db.query(
+    `DELETE FROM in_app_notifications WHERE user_id LIKE 'sc-%'`,
+  );
+  await db.query(
+    `DELETE FROM streak_coverage_refunds WHERE user_id LIKE 'sc-%'`,
+  );
+  await db.query(
+    `DELETE FROM streak_assist_offers WHERE donor_id LIKE 'sc-%' OR recipient_id LIKE 'sc-%'`,
   );
   await db.query(`DELETE FROM streak_coverage WHERE user_id LIKE 'sc-%'`);
   await db.query(`DELETE FROM streak_pauses WHERE user_id LIKE 'sc-%'`);
@@ -291,6 +304,185 @@ ok(
   (await getStreakErasForUser("sc-cov")).eras.map((e) => e.length),
   [10],
 );
+
+// ── G2. "I ran it anyway": the token comes back ────────────────────────────
+//
+// A token buys a day you did NOT run. The moment the miles land, the rescue
+// turns out not to have been needed — so the coverage row goes, the meter
+// stamp rolls back to whatever it read before the spend, and (for an Assist)
+// the donor's mile is freed. Every one of those is silent when it breaks:
+// the day still counts either way, so the only visible symptom is a blue
+// "saved" chip on a day the user walked and a streak that reads non-natural
+// forever. Pinned here rather than read off the SQL.
+console.log("G2. coverage refunds");
+{
+  const SPENT = ago(1); // the day the token was spent on
+  const PRIOR = ago(40); // what the meter read before that spend
+
+  // (1) A Streak Save on a day that later gets run → row gone, stamp back.
+  await mkUser("sc-refund", { enrolled: true });
+  await seedRange("sc-refund", 9, 2);
+  await db.query(
+    `UPDATE users SET streak_save_last_used = $2::date WHERE user_id = $1`,
+    ["sc-refund", SPENT],
+  );
+  await db.query(
+    `INSERT INTO streak_coverage
+       (user_id, local_date, kind, trigger_date, prior_last_used, spent_stamp)
+     VALUES ($1, $2::date, 'streak_save', $3::date, $4::date, $3::date)`,
+    ["sc-refund", ago(1), SPENT, PRIOR],
+  );
+  ok(
+    "before the run: nothing to refund",
+    (await refundEarnedCoverage("sc-refund")).length,
+    0,
+  );
+  // 8 earned days (ago 9..2) bridged onto the covered day.
+  const streakWhileCovered = await refreshCurrentStreak("sc-refund");
+  ok("the coverage bridges the run", streakWhileCovered, 9);
+  await seedWorkout("sc-refund", ago(1), 1.4);
+  const refunded = await refundEarnedCoverage("sc-refund");
+  ok("the covered day is refunded once", refunded.length, 1);
+  ok("…naming the day and the token", [refunded[0].local_date, refunded[0].kind], [
+    ago(1),
+    "streak_save",
+  ]);
+  ok(
+    "coverage row is gone",
+    (
+      await db.query(
+        `SELECT 1 FROM streak_coverage WHERE user_id = 'sc-refund'`,
+      )
+    ).length,
+    0,
+  );
+  ok(
+    "meter stamp rolled back to the pre-spend value",
+    (
+      await db.query(
+        `SELECT to_char(streak_save_last_used,'YYYY-MM-DD') AS d FROM users WHERE user_id = 'sc-refund'`,
+      )
+    )[0].d,
+    PRIOR,
+  );
+  ok(
+    "an audit row records the return",
+    (
+      await db.query(
+        `SELECT kind FROM streak_coverage_refunds WHERE user_id = 'sc-refund'`,
+      )
+    ).map((r) => r.kind),
+    ["streak_save"],
+  );
+  ok("re-running it is a no-op", (await refundEarnedCoverage("sc-refund")).length, 0);
+  // The whole point: the day still counts, so the number must not move.
+  ok(
+    "the streak is unchanged — the day is earned now, not covered",
+    await refreshCurrentStreak("sc-refund"),
+    streakWhileCovered,
+  );
+
+  // (2) A LATER spend of the same token must not be rolled back over. The
+  // guard is `spent_stamp`, not "the newest row wins".
+  await mkUser("sc-refund-later", { enrolled: true });
+  await seedRange("sc-refund-later", 9, 0);
+  await db.query(
+    `UPDATE users SET streak_save_last_used = $2::date WHERE user_id = $1`,
+    ["sc-refund-later", TODAY],
+  );
+  await db.query(
+    `INSERT INTO streak_coverage
+       (user_id, local_date, kind, trigger_date, prior_last_used, spent_stamp)
+     VALUES ($1, $2::date, 'streak_save', $3::date, $4::date, $3::date)`,
+    ["sc-refund-later", ago(2), ago(2), PRIOR],
+  );
+  await refundEarnedCoverage("sc-refund-later");
+  ok(
+    "a token spent again since keeps the newer stamp",
+    (
+      await db.query(
+        `SELECT to_char(streak_save_last_used,'YYYY-MM-DD') AS d FROM users WHERE user_id = 'sc-refund-later'`,
+      )
+    )[0].d,
+    TODAY,
+  );
+
+  // (3) An Assist hands the DONOR's mile back too — closing the offer is what
+  // drops it out of getDonationBudget's `used`.
+  await mkUser("sc-refund-donor", { enrolled: true });
+  await mkUser("sc-refund-recip", { enrolled: true });
+  await seedRange("sc-refund-recip", 9, 2);
+  const offer = (
+    await db.query(
+      `INSERT INTO streak_assist_offers
+         (donor_id, recipient_id, initiator, donor_date, target_date, status, resolved_at)
+       VALUES ($1, $2, 'donor', $3::date, $4::date, 'accepted', NOW())
+       RETURNING id::text AS id`,
+      ["sc-refund-donor", "sc-refund-recip", TODAY, ago(1)],
+    )
+  )[0].id;
+  await db.query(
+    `UPDATE users SET streak_assist_last_used = $2::date WHERE user_id = $1`,
+    ["sc-refund-recip", TODAY],
+  );
+  await db.query(
+    `INSERT INTO streak_coverage
+       (user_id, local_date, kind, trigger_date, source_user,
+        prior_last_used, spent_stamp, offer_id)
+     VALUES ($1, $2::date, 'streak_assist', $3::date, $4, NULL, $3::date, $5::uuid)`,
+    ["sc-refund-recip", ago(1), TODAY, "sc-refund-donor", offer],
+  );
+  await seedWorkout("sc-refund-recip", ago(1), 1.1);
+  ok(
+    "the assist is refunded",
+    (await refundEarnedCoverage("sc-refund-recip")).map((r) => r.kind),
+    ["streak_assist"],
+  );
+  ok(
+    "the donor's offer is released",
+    (
+      await db.query(
+        `SELECT status FROM streak_assist_offers WHERE id = $1::uuid`,
+        [offer],
+      )
+    )[0].status,
+    "refunded",
+  );
+  ok(
+    "a never-used assist meter restores to NULL, not to the spend day",
+    (
+      await db.query(
+        `SELECT streak_assist_last_used FROM users WHERE user_id = 'sc-refund-recip'`,
+      )
+    )[0].streak_assist_last_used,
+    null,
+  );
+
+  // (4) A row with no recorded pre-spend stamp (written before the refund
+  // feature) is LEFT ALONE — dropping it without restoring the meter would
+  // take the day and the token.
+  await mkUser("sc-refund-legacy", { enrolled: true });
+  await seedRange("sc-refund-legacy", 9, 0);
+  await db.query(
+    `INSERT INTO streak_coverage (user_id, local_date, kind, trigger_date)
+     VALUES ($1, $2::date, 'streak_save', $3::date)`,
+    ["sc-refund-legacy", ago(2), ago(2)],
+  );
+  ok(
+    "a pre-feature coverage row is not refunded",
+    (await refundEarnedCoverage("sc-refund-legacy")).length,
+    0,
+  );
+
+  // (5) Un-enrolled / kill switch: no refunds, same gate as everything else.
+  process.env.STREAK_FEATURES_DISABLED = "true";
+  ok(
+    "kill switch freezes refunds",
+    (await refundEarnedCoverage("sc-refund-recip")).length,
+    0,
+  );
+  delete process.env.STREAK_FEATURES_DISABLED;
+}
 
 // ── H. Reads decay without a recompute ─────────────────────────────────────
 console.log("H. decay");

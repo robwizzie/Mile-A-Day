@@ -163,6 +163,59 @@ export async function fetchCoveredDays(
 }
 
 /**
+ * "Is a token carrying TODAY for these users?" — batched, one row per user
+ * who is covered, keyed by user id.
+ *
+ * Exists because the friends LIST is the one surface with no per-user stats
+ * payload to read `frozen_dates` off, and it is also the surface where the
+ * bug is loudest: a friend whose day a mile you donated is already holding
+ * still rendered "0.00 / 1 mi · 0%" with a Nudge button, i.e. the app telling
+ * you the rescue you just paid for did nothing.
+ *
+ * Each user's "today" is resolved from their OWN last device offset, the same
+ * derivation `getUserLocalToday` and the sweep use — a shared CURRENT_DATE
+ * would read the wrong day for anyone a timezone away.
+ *
+ * Coverage is only reported for users it is ACTIVE for (enrolled, kill switch
+ * off), matching `fetchCoveredDays`.
+ */
+export async function fetchTodayCoverage(
+  userIds: string[],
+): Promise<Record<string, CoveredDay>> {
+  if (!streakFeaturesGloballyEnabled() || userIds.length === 0) return {};
+  const rows = await db.query<CoveredDay & { user_id: string }>(
+    `SELECT sc.user_id,
+            to_char(sc.local_date, 'YYYY-MM-DD') AS local_date,
+            sc.kind,
+            su.username AS source_username
+       FROM users u
+       CROSS JOIN LATERAL (
+         SELECT (NOW() + (COALESCE(
+           (SELECT w.timezone_offset FROM workouts w
+             WHERE w.user_id = u.user_id
+             ORDER BY w.device_end_date DESC LIMIT 1),
+           0
+         ) || ' minutes')::interval)::date AS d
+       ) t
+       JOIN streak_coverage sc
+         ON sc.user_id = u.user_id AND sc.local_date = t.d
+       LEFT JOIN users su ON su.user_id = sc.source_user
+      WHERE u.user_id = ANY($1::text[])
+        AND u.streak_features_at IS NOT NULL`,
+    [userIds],
+  );
+  const byUser: Record<string, CoveredDay> = {};
+  for (const r of rows) {
+    byUser[r.user_id] = {
+      local_date: r.local_date,
+      kind: r.kind,
+      source_username: r.source_username,
+    };
+  }
+  return byUser;
+}
+
+/**
  * One injury pause, as a HALF-OPEN local-date interval: paused = [started_on,
  * resumed_on), so the day a user resumes is immediately a running day again.
  * An ACTIVE pause has resumed_on === null and extends to today.

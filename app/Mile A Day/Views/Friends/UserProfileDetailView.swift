@@ -39,6 +39,25 @@ struct UserProfileDetailView: View {
     /// than on `userStats` because that is a locally-built view model, not the
     /// decoded response.
     @State private var friendCoveredDays: [CoveredDate]?
+
+    /// A token holding THEIR day today.
+    ///
+    /// Two sources, in that order: the nudge status (batched, serves the
+    /// friend's own local day resolved server-side) and, as a fallback, the
+    /// covered-day list from their stats keyed on the viewer's calendar. The
+    /// second is only right when the two of them share a day — which is the
+    /// common case, and better than drawing an untouched ring over a streak
+    /// that just went up. Suppressed once their mile is genuinely in.
+    private var friendSavedToday: CoveredDate? {
+        // Either completion signal settles it — the two arrive from different
+        // fetches and can disagree for a second, and a covered chip drawn
+        // over a finished day is the one direction that reads as a bug.
+        guard userStats?.hasCompletedGoalToday != true,
+              nudgeStatus?.has_completed_mile != true
+        else { return nil }
+        if let covered = nudgeStatus?.today_covered { return covered }
+        return CoveredDateIndex(friendCoveredDays).today
+    }
     @State private var isLoadingStats = false
     @State private var isPrivate = false
     @State private var actionInProgress = false
@@ -428,7 +447,8 @@ struct UserProfileDetailView: View {
             // The catalog's mile-medal rungs, once the Badges fetch lands.
             milestoneThresholds: MileMilestones.thresholds(from: catalogBadges),
             goalProgress: progress,
-            goalComplete: userStats?.hasCompletedGoalToday ?? false
+            goalComplete: userStats?.hasCompletedGoalToday ?? false,
+            goalSavedToday: friendSavedToday
         ) {
             AvatarView(
                 name: user.displayName,
@@ -456,7 +476,8 @@ struct UserProfileDetailView: View {
             streak: userStats?.streak ?? 0,
             totalMiles: userStats?.totalMiles ?? 0,
             friendCount: friendCount,
-            streakDoneToday: userStats?.hasCompletedGoalToday ?? false
+            streakDoneToday: userStats?.hasCompletedGoalToday ?? false,
+            streakSavedToday: friendSavedToday
         ) {
             UserFriendsListView(
                 userId: user.user_id,
@@ -481,6 +502,13 @@ struct UserProfileDetailView: View {
             VStack(spacing: MADTheme.Spacing.sm) {
                 if !isCurrentUser(), friendService.isFriend(user) {
                     friendTodayProgressCard
+                    // Why their streak stands on a day with no miles on it.
+                    // Part of the TODAY group, directly under the ring it
+                    // explains — and worth saying in full to a VIEWER, who
+                    // may well be the person whose mile paid for it.
+                    if let saved = friendSavedToday {
+                        SavedTodayBanner(day: saved, isSelf: false)
+                    }
                 }
                 if let today = friendTodayChallenge {
                     FriendTodayChallengeRow(
@@ -690,8 +718,12 @@ struct UserProfileDetailView: View {
         if let status = nudgeStatus {
             let today = status.today_miles ?? 0
             let goal: Double = 1.0
-            let progress = min(today / goal, 1.0)
             let isComplete = status.has_completed_mile
+            let saved = friendSavedToday
+            // A covered day reads as FULL: the streak is safe, which is what
+            // this ring is about. Drawing a 0% arc beside a streak a friend's
+            // mile just rescued is what made the rescue look like it failed.
+            let progress = saved != nil ? 1.0 : min(today / goal, 1.0)
             let streak = status.current_streak ?? 0
             let remaining = max(0, goal - today)
 
@@ -704,7 +736,9 @@ struct UserProfileDetailView: View {
                     Circle()
                         .trim(from: 0, to: progress)
                         .stroke(
-                            isComplete ? Color.green : Color.orange,
+                            isComplete
+                                ? Color.green
+                                : (saved != nil ? SavedDayStyle.tint : Color.orange),
                             style: StrokeStyle(lineWidth: 5, lineCap: .round)
                         )
                         .rotationEffect(.degrees(-90))
@@ -726,18 +760,16 @@ struct UserProfileDetailView: View {
                         .foregroundColor(.white.opacity(0.5))
 
                     HStack(spacing: 6) {
-                        Text(isComplete ? "Goal complete" : String(format: "%.2f mi to go", remaining))
+                        Text(todayCardHeadline(isComplete: isComplete, saved: saved, remaining: remaining))
                             .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundColor(isComplete ? .green : .white)
+                            .foregroundColor(isComplete ? .green : (saved != nil ? SavedDayStyle.tint : .white))
                             .lineLimit(1)
-                        if isComplete {
+                        if isComplete || saved != nil {
                             StreakFlameChip(streak: streak)
                         }
                     }
 
-                    Text(isComplete
-                        ? String(format: "%.2f mi · Goal 1 mi", today)
-                        : "\(ProgressCalculator.formatProgress(progress)) of today's mile")
+                    Text(todayCardSubline(isComplete: isComplete, saved: saved, today: today, goal: goal))
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.5))
                 }
@@ -751,7 +783,11 @@ struct UserProfileDetailView: View {
                     .overlay(
                         RoundedRectangle(cornerRadius: 14)
                             .strokeBorder(
-                                isComplete ? Color.green.opacity(0.3) : Color.white.opacity(0.08),
+                                isComplete
+                                    ? Color.green.opacity(0.3)
+                                    : (saved != nil
+                                        ? SavedDayStyle.tint.opacity(0.28)
+                                        : Color.white.opacity(0.08)),
                                 lineWidth: 1
                             )
                     )
@@ -782,6 +818,21 @@ struct UserProfileDetailView: View {
                     )
             )
         }
+    }
+
+    /// "Goal complete" / "Today's covered" / "0.43 mi to go". A covered day
+    /// must never print a distance countdown as its headline — the streak is
+    /// settled, which is the thing this line is read for.
+    private func todayCardHeadline(isComplete: Bool, saved: CoveredDate?, remaining: Double) -> String {
+        if isComplete { return "Goal complete" }
+        if let saved { return SavedDayStyle.todayHeadline(for: saved) }
+        return String(format: "%.2f mi to go", remaining)
+    }
+
+    private func todayCardSubline(isComplete: Bool, saved: CoveredDate?, today: Double, goal: Double) -> String {
+        if isComplete { return String(format: "%.2f mi · Goal 1 mi", today) }
+        if let saved { return SavedDayStyle.credit(for: saved) }
+        return "\(ProgressCalculator.formatProgress(min(today / goal, 1.0))) of today's mile"
     }
 
     // MARK: - Nudge Button
@@ -902,7 +953,11 @@ struct UserProfileDetailView: View {
                         today_miles: nudgeStatus?.today_miles,
                         current_streak: nudgeStatus?.current_streak,
                         has_nudged_today: true,
-                        unlimited_nudges: nudgeStatus?.unlimited_nudges
+                        unlimited_nudges: nudgeStatus?.unlimited_nudges,
+                        // Sending a nudge doesn't change whether a token is
+                        // holding their day — carry it, or the banner blinks
+                        // out the moment the bell is tapped.
+                        today_covered: nudgeStatus?.today_covered
                     )
                     MADHaptics.success()
                     showProfileNudgeFeedback(NudgeFeedback(

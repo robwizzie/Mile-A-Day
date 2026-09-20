@@ -75,13 +75,20 @@ async function main() {
   const canaries = [1, 2, 3].map((n) => writeStale(`swp-author-canary${n}.jpg`));
   const cover = writeStale("swp-author-cover.jpg");
   const crewSlide = writeStale("swp-crew-slide.jpg");
+  // FRONT & BACK stores a SECOND finished picture per photo, on both tables.
+  // Each is an ordinary upload in the same folder, so each is an orphan to
+  // any query that doesn't name its column — and losing one is the loudest
+  // failure of the set: the card keeps offering the flip and the tap lands
+  // on a deleted file.
+  const dualPhoto = writeStale("swp-author-dual.jpg");
+  const crewDual = writeStale("swp-crew-dual.jpg");
   const orphan = writeStale("swp-author-orphan.jpg");
 
   const postId = (
     await db.query(
-      `INSERT INTO posts (user_id, media_url, local_date, share_to_feed)
-       VALUES ($1, $2, CURRENT_DATE, TRUE) RETURNING post_id`,
-      [AUTHOR, postPhoto],
+      `INSERT INTO posts (user_id, media_url, dual_media_url, local_date, share_to_feed)
+       VALUES ($1, $2, $3, CURRENT_DATE, TRUE) RETURNING post_id`,
+      [AUTHOR, postPhoto, dualPhoto],
     )
   )[0].post_id;
   for (const c of canaries)
@@ -107,9 +114,9 @@ async function main() {
     [hl, postId],
   );
   await db.query(
-    `INSERT INTO post_coauthors (post_id, user_id, status, media_url)
-     VALUES ($1, $2, 'accepted', $3)`,
-    [postId, CREW, crewSlide],
+    `INSERT INTO post_coauthors (post_id, user_id, status, media_url, dual_media_url)
+     VALUES ($1, $2, 'accepted', $3, $4)`,
+    [postId, CREW, crewSlide, crewDual],
   );
 
   await sweepOrphanedMedia();
@@ -118,6 +125,8 @@ async function main() {
   check("a post's own photo survives", alive(postPhoto), true);
   check("a Story Highlight's custom cover survives", alive(cover), true);
   check("a crew member's slide on a buddy walk survives", alive(crewSlide), true);
+  check("a post's FRONT & BACK second frame survives", alive(dualPhoto), true);
+  check("a crew slide's FRONT & BACK second frame survives", alive(crewDual), true);
   check("a genuinely unreferenced upload is still swept", alive(orphan), false);
 
   // ── The repair, for rows the sweep already broke ───────────────────────
