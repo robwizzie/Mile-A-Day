@@ -1959,6 +1959,10 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             for renderer in authorSegmentRenderers.values { renderer.alpha = 0 }
         }
         followed = index
+        // The cached closing frame belonged to the PREVIOUS rider. Anything
+        // that reads it now — a switch made mid-outro, or the standings — has
+        // to rebuild against the person the camera is about to be on.
+        outroTarget = nil
         // New highlight catches up to the shared clock — at THIS rider's
         // place on it.
         let arc = arcFraction(of: followed, clock: currentFraction)
@@ -1979,11 +1983,23 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
                    fraction: currentFraction,
                    standings: finishedNotified ? cachedStandings : [])
             if displayLink?.isPaused ?? true {
-                mapView?.camera = finishedNotified
+                // Picking a walker RECENTRES on their route. Nothing else
+                // moves the camera while the flight is paused or landed, so
+                // without this the selection changed the trail, the odometer
+                // and the standings while the map went on showing whatever
+                // was framed before — which on a crew who walked in different
+                // places is a view with the chosen route nowhere near the
+                // middle of it, or off the screen entirely.
+                //
+                // Animated, not snapped: the map is the thing that just
+                // changed subject, and a jump cut leaves no clue that it is
+                // the same map.
+                let target = finishedNotified
                     ? fittedOverviewCamera()
                     : cruiseCamera(fraction: arc,
                                    heading: track.bearing(atFraction: arc,
                                                           lookaheadMeters: lookaheadMeters))
+                mapView?.setCamera(target, animated: true)
             }
         }
     }
@@ -2055,8 +2071,10 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             currentFraction = 1
             let s = smoothstep(outroT / outroDuration)
             let end = cruiseCamera(fraction: 1, heading: smoothedHeading)
-            // The closing overhead FITS everyone's path — resolved once, on the
-            // first outro frame, so the blend has a fixed target to walk to.
+            // The closing overhead FITS the followed rider's path — resolved
+            // once, on the first outro frame, so the blend has a fixed target
+            // to walk to. Cleared by `setFollowed`, since a switch mid-outro
+            // makes it the previous rider's frame.
             if outroTarget == nil {
                 outroTarget = fittedOverviewCamera()
                 cachedStandings = finalStandings()
@@ -2252,11 +2270,28 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
 
     // MARK: Cameras
 
+    /// The coordinates a camera should FRAME.
+    ///
+    /// The followed rider's own track, not the crew's combined extent. A
+    /// flyover is always about ONE person — the HUD names them, the odometer
+    /// counts their miles, the bright trail is theirs — and framing everyone
+    /// only looks the same as framing them when the crew walked together. On
+    /// a walk where they didn't, the combined box is a county: the closing
+    /// frame pulled out until two people eighteen miles apart both fitted,
+    /// and the route anyone had selected became a thread across a map of
+    /// southern New Jersey. Everyone else's line is still drawn — it just
+    /// isn't what the camera is for.
+    private var framedCoordinates: [CLLocationCoordinate2D] {
+        let own = followedTrack?.coordinates ?? []
+        return own.count >= 2 ? own : allCoordinates
+    }
+
     private var boundingCenter: CLLocationCoordinate2D {
-        guard let first = allCoordinates.first else { return CLLocationCoordinate2D() }
+        let coords = framedCoordinates
+        guard let first = coords.first else { return CLLocationCoordinate2D() }
         var minLat = first.latitude, maxLat = first.latitude
         var minLon = first.longitude, maxLon = first.longitude
-        for c in allCoordinates {
+        for c in coords {
             minLat = min(minLat, c.latitude); maxLat = max(maxLat, c.latitude)
             minLon = min(minLon, c.longitude); maxLon = max(maxLon, c.longitude)
         }
@@ -2265,10 +2300,11 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     }
 
     private var boundingDiagonalMeters: Double {
-        guard let first = allCoordinates.first else { return 0 }
+        let coords = framedCoordinates
+        guard let first = coords.first else { return 0 }
         var minLat = first.latitude, maxLat = first.latitude
         var minLon = first.longitude, maxLon = first.longitude
-        for c in allCoordinates {
+        for c in coords {
             minLat = min(minLat, c.latitude); maxLat = max(maxLat, c.latitude)
             minLon = min(minLon, c.longitude); maxLon = max(maxLon, c.longitude)
         }
@@ -2283,11 +2319,12 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
                     heading: smoothedHeading)
     }
 
-    /// The whole crew's path as a map rect — the thing the closing overhead has
-    /// to FIT, not merely be centred on.
+    /// The FOLLOWED path as a map rect — the thing the closing overhead has to
+    /// FIT, not merely be centred on. See `framedCoordinates` for why it is
+    /// one person's and not the crew's.
     private var routeMapRect: MKMapRect {
         var rect = MKMapRect.null
-        for coordinate in allCoordinates {
+        for coordinate in framedCoordinates {
             rect = rect.union(MKMapRect(origin: MKMapPoint(coordinate),
                                         size: MKMapSize(width: 0.1, height: 0.1)))
         }
