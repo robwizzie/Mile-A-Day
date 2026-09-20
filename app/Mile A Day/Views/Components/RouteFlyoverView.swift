@@ -369,10 +369,9 @@ struct FlyoverTrack {
     var pieces: [Piece] {
         RouteGaps.pieces(count: coordinates.count, breaks: breaks).compactMap { range -> Piece? in
             guard range.count >= 2, totalMapLength > 0 else { return nil }
-            return Piece(
-                range: (cumulativeMap[range.lowerBound] / totalMapLength)
-                    ...(cumulativeMap[range.upperBound] / totalMapLength),
-                coordinates: Array(coordinates[range]))
+            let from = cumulativeMap[range.lowerBound] / totalMapLength
+            let to = cumulativeMap[range.upperBound] / totalMapLength
+            return Piece(range: from...to, coordinates: Array(coordinates[range]))
         }
     }
 
