@@ -941,9 +941,13 @@ struct WorkoutTrackingView: View {
                     .strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
             )
             .overlay(alignment: .topTrailing) {
-                Text("\(midRunSnapCount)")
+                // Capped for WIDTH, not for truth — the tray holds as many
+                // as were taken. An 18pt disc fits two digits.
+                Text(midRunSnapCount > 99 ? "99+" : "\(midRunSnapCount)")
                     .font(.system(size: 11, weight: .heavy, design: .rounded))
                     .monospacedDigit()
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
                     .foregroundColor(.white)
                     .frame(width: 18, height: 18)
                     .background(Circle().fill(Color.orange))
@@ -1199,11 +1203,12 @@ struct WorkoutTrackingView: View {
                 // the shutter fired twice and the tray count went up by one,
                 // and those two facts need reconciling on the spot rather
                 // than in the composer.
-                Text(midRunSnapCount >= MidRunPhotoStash.maxPhotos
-                     ? "Saved — that's the max, oldest gets replaced"
-                     : (lastSnapWasDual
-                        ? "Both sides saved as one photo"
-                        : "Saved for your post"))
+                //
+                // There is no "that's the max" any more: nothing is dropped,
+                // so nothing has to be warned about.
+                Text(lastSnapWasDual
+                     ? "Both sides saved as one photo"
+                     : "Saved for your post")
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
             }

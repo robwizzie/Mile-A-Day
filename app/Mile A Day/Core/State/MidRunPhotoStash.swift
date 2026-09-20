@@ -7,12 +7,33 @@ import UIKit
 /// it is deliberately ephemeral:
 /// - Files live in the app sandbox only — never the user's photo library,
 ///   preserving the camera-only authenticity of posts.
-/// - Capped at `maxPhotos` (oldest dropped) so a snap-happy run can't balloon.
+/// - NOT capped by count. It used to drop the oldest beyond five, which
+///   silently deleted a photo somebody took — and the shot they'd want back
+///   is exactly the one the cap eats, since the fifth snap of a walk is
+///   rarely the best one. The full-size original is in their camera roll
+///   either way, so the cap was protecting sandbox space at the cost of the
+///   user's own pictures. What bounds this is TIME, not count: cleared when
+///   a new workout starts, cleared when the post-run prompt resolves, and
+///   pruned past 24h. Reads are bounded instead — see `entries()`.
 /// - Cleared when a new workout starts and when the post-run prompt resolves;
 ///   anything older than 24h is pruned on read as a crash backstop.
 enum MidRunPhotoStash {
-    static let maxPhotos = 5
     private static let maxAge: TimeInterval = 24 * 60 * 60
+
+    /// Longest edge the LIST surfaces decode a stashed snap at.
+    ///
+    /// With no count cap, what has to stay bounded is memory: a snap is
+    /// written at 2160px, and `entries()` hands back every one of today's at
+    /// once, so thirty of them decoded full-size is hundreds of megabytes of
+    /// bitmap to draw a strip of cards. 900px covers the largest place a
+    /// stashed snap is ever DISPLAYED (a 216pt card at 3×) and costs about
+    /// 3MB each.
+    ///
+    /// It is deliberately NOT what gets posted. Anything handing a snap to
+    /// the composer reads the original back through `fullImage(for:)` — the
+    /// published photo is flattened at ~1080px wide and must not inherit a
+    /// thumbnail's resolution.
+    private static let displayMaxPixel: CGFloat = 900
 
     private static var directory: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -155,6 +176,7 @@ enum MidRunPhotoStash {
     /// would burn sandbox space for nothing. Returns the created `Entry`
     /// (nil on failure) so callers can correlate a camera-roll save with this
     /// snap's stable id.
+    ///
     /// `secondary` is the other lens from a FRONT & BACK press. It rides with
     /// the primary as one snap: written under the same timestamp, deleted
     /// with it, counted as one photo everywhere.
@@ -196,13 +218,9 @@ enum MidRunPhotoStash {
             }
         }
 
-        // Enforce the cap: drop the oldest beyond maxPhotos, pairs and all.
-        let files = fileURLs()
-        if files.count > maxPhotos {
-            for old in files.prefix(files.count - maxPhotos) {
-                deleteSnap(old)
-            }
-        }
+        // No count cap. The walk ends, the prompt resolves or the day turns,
+        // and the whole directory goes — that is what keeps this bounded.
+        // Deleting somebody's sixth photo to save sandbox space is not.
         return Entry(
             url: url,
             image: sized,
@@ -234,14 +252,16 @@ enum MidRunPhotoStash {
 
     /// Today's stashed snaps with identities, oldest first. Scoped to today so
     /// the post-run prompt never offers a photo from a previous day's mile.
+    /// Decoded at `displayMaxPixel`, not full size. Nothing that consumes
+    /// these needs more — the composer publishes at ~1080px wide — and with
+    /// the count cap gone this is the thing standing between a thirty-photo
+    /// walk and a jetsam. `fullImage(for:)` reads the original when one is
+    /// genuinely wanted.
     static func entries() -> [Entry] {
         todayURLs().compactMap { url in
-            guard let data = try? Data(contentsOf: url), let img = UIImage(data: data) else {
-                return nil
-            }
+            guard let img = decoded(url, maxPixel: displayMaxPixel) else { return nil }
             guard let pair = companion(of: url),
-                  let secondData = try? Data(contentsOf: pair.url),
-                  let second = UIImage(data: secondData)
+                  let second = decoded(pair.url, maxPixel: displayMaxPixel)
             else { return Entry(url: url, image: img) }
             return Entry(
                 url: url,
@@ -250,6 +270,40 @@ enum MidRunPhotoStash {
                 primaryWasFront: pair.kind.primaryWasFront
             )
         }
+    }
+
+    /// The snap exactly as written, for the one job that wants every pixel:
+    /// putting a copy in the user's own photo library. Returns the pair when
+    /// there is one, so a FRONT & BACK saves as the photo it is.
+    static func fullImage(for entry: Entry) -> (primary: UIImage, secondary: UIImage?)? {
+        guard let data = try? Data(contentsOf: entry.url),
+              let primary = UIImage(data: data) else { return nil }
+        guard let pair = companion(of: entry.url),
+              let secondData = try? Data(contentsOf: pair.url),
+              let second = UIImage(data: secondData)
+        else { return (primary, nil) }
+        return (primary, second)
+    }
+
+    /// Downsample at DECODE time (ImageIO), never by drawing a full bitmap
+    /// into a smaller one — the whole point is that the full-size image is
+    /// never resident.
+    private static func decoded(_ url: URL, maxPixel: CGFloat) -> UIImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: false,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else {
+            // A file ImageIO won't thumbnail is still worth trying whole
+            // rather than dropping a photo out of the user's own walk.
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return UIImage(data: data)
+        }
+        return UIImage(cgImage: cg)
     }
 
     /// Drop one snap (mid-run "actually, not that one").

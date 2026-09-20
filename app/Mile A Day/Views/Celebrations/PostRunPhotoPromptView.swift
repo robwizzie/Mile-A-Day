@@ -335,7 +335,11 @@ struct PostRunPhotoPromptView: View {
     // MARK: - Mid-run snaps
 
     /// The run's snaps as big tappable cards. One or two fit centered on any
-    /// screen; three-plus scroll horizontally so five never overflow.
+    /// screen; three-plus scroll horizontally.
+    ///
+    /// LAZY, now that nothing caps how many there can be: an eager `HStack`
+    /// builds — and draws — every card at once, and a thirty-photo walk
+    /// would decode thirty images to show three.
     @ViewBuilder
     private var midRunSnapStrip: some View {
         if midRunSnaps.count <= 2 {
@@ -346,7 +350,7 @@ struct PostRunPhotoPromptView: View {
             }
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: MADTheme.Spacing.sm) {
+                LazyHStack(spacing: MADTheme.Spacing.sm) {
                     ForEach(Array(midRunSnaps.enumerated()), id: \.element.id) { index, entry in
                         snapCard(index: index, entry: entry)
                     }
@@ -496,9 +500,14 @@ private struct ComposerLaunch: Identifiable {
         self.primaryWasFront = false
     }
 
+    /// Reads the ORIGINAL off disk, not the entry's display copy: `entries()`
+    /// decodes at a thumbnail size so an uncapped walk's worth of snaps can
+    /// be listed, and that is exactly the resolution a post must not inherit.
+    /// Falls back to what's in hand if the file can't be re-read.
     init(entry: MidRunPhotoStash.Entry) {
-        self.image = entry.image
-        self.secondary = entry.secondary
+        let full = MidRunPhotoStash.fullImage(for: entry)
+        self.image = full?.primary ?? entry.image
+        self.secondary = full?.secondary ?? entry.secondary
         self.primaryWasFront = entry.primaryWasFront
     }
 }

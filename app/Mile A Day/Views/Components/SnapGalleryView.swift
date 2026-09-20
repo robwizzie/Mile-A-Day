@@ -156,10 +156,16 @@ struct SnapGalleryView: View {
                 guard let current, !saved else { return }
                 // The pair as one picture, matching what the mid-walk save
                 // already put in the roll — a "Save" that dropped half the
-                // photo would be the same bug from a different button.
-                let toSave = current.secondary.flatMap {
-                    DualPhotoComposite.render(big: current.image, small: $0)
-                } ?? current.image
+                // photo would be the same bug from a different button. Read
+                // FULL-SIZE off disk: this is the archival copy, and the
+                // entry in hand is a thumbnail so the list can hold an
+                // uncapped walk's worth of them.
+                let full = MidRunPhotoStash.fullImage(for: current)
+                let primary = full?.primary ?? current.image
+                let second = full?.secondary ?? current.secondary
+                let toSave = second.flatMap {
+                    DualPhotoComposite.render(big: primary, small: $0)
+                } ?? primary
                 PhotoRollSaver.save(toSave, ledgerKey: current.id) { ok in
                     guard ok else { return }
                     MADHaptics.success()

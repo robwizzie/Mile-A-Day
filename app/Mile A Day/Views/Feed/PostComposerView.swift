@@ -1979,12 +1979,16 @@ struct PostComposerView: View {
                 SnapGalleryView(
                     title: "Your snaps",
                     onUse: { entry in
-                        vm.pickedImage = entry.image
+                        // The ORIGINAL off disk — `entries()` decodes at a
+                        // thumbnail size so an uncapped walk can be listed,
+                        // and a post must not inherit that resolution.
+                        let full = MidRunPhotoStash.fullImage(for: entry)
+                        vm.pickedImage = full?.primary ?? entry.image
                         // Restore the pair, or drop whatever was on the canvas
                         // before — never inherit the previous shot's other
                         // half, which would publish a flip to somewhere else.
                         vm.clearDual()
-                        if let second = entry.secondary {
+                        if let second = full?.secondary ?? entry.secondary {
                             vm.dualSecondary = second
                             vm.dualPrimaryWasFront = entry.primaryWasFront
                         }
