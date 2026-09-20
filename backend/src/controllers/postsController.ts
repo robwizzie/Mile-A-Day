@@ -168,6 +168,23 @@ function normalizeDualMediaUrl(
   return bare;
 }
 
+/**
+ * Which corner the inset was baked into.
+ *
+ * Four values or nothing. Unlike the url beside it this is never worth a 400:
+ * an unrecognised corner is a client bug, and refusing the whole post over it
+ * would lose a photo to protect a tap target. NULL reads as top-trailing
+ * everywhere, which is where every photo posted before the inset could be
+ * moved already sits.
+ */
+function normalizeDualInsetCorner(raw: unknown): string | null {
+  return typeof raw === "string" && DUAL_INSET_CORNERS.includes(raw)
+    ? raw
+    : null;
+}
+
+const DUAL_INSET_CORNERS = ["tr", "tl", "bl", "br"];
+
 export async function createPostController(
   req: AuthenticatedRequest,
   res: Response,
@@ -189,6 +206,7 @@ export async function createPostController(
     photo_source,
     competition_id,
     dual_media_url,
+    dual_inset_corner,
   } = req.body ?? {};
 
   try {
@@ -228,6 +246,8 @@ export async function createPostController(
         .status(400)
         .json({ error: "dual_media_url must reference your own upload" });
     }
+    // Never a 400: an unknown corner costs a tap target, not a photo.
+    const dualInsetCorner = normalizeDualInsetCorner(dual_inset_corner);
 
     const shareToFeed = share_to_feed !== false; // default true
     const shareToStory = share_to_story === true; // default false
@@ -382,6 +402,7 @@ export async function createPostController(
       userId,
       mediaUrl,
       dualMediaUrl,
+      dualInsetCorner,
       caption: typeof caption === "string" ? caption.trim() || null : null,
       workoutId,
       localDate: goal.localDate,
@@ -1050,7 +1071,8 @@ export async function addCrewPhotoController(
 ) {
   const userId = req.userId!;
   const postId = req.params.postId;
-  const { media_url, photo_source, caption, dual_media_url } = req.body ?? {};
+  const { media_url, photo_source, caption, dual_media_url, dual_inset_corner } =
+    req.body ?? {};
   if (
     caption != null &&
     (typeof caption !== "string" || caption.length > MAX_CAPTION)
@@ -1094,6 +1116,7 @@ export async function addCrewPhotoController(
         .status(400)
         .json({ error: "dual_media_url must reference your own upload" });
     }
+    const dualInsetCorner = normalizeDualInsetCorner(dual_inset_corner);
 
     // Adding your slide is posting a photo, so it answers to the same window.
     // Which tier applies is the client's declared source, same split as
@@ -1128,6 +1151,7 @@ export async function addCrewPhotoController(
       mediaUrl,
       typeof caption === "string" ? caption.trim() || null : null,
       dualMediaUrl,
+      dualInsetCorner,
     );
     if (!ok) return res.status(404).json({ error: "Post not found" });
     // Fire-and-forget: everyone else on the walk hears about it, and a push

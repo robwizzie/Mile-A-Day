@@ -483,11 +483,22 @@ struct PostCardView: View {
     /// Each carries its own FRONT & BACK twin, and the STORY photo never has
     /// one: it is a different picture entirely, so pairing it with the post's
     /// swapped frame would offer a flip between two unrelated shots.
-    private var photoURLs: [(url: URL, flip: URL?)] {
-        var result: [(url: URL, flip: URL?)] = []
-        if let storyPhotoURL { result.append((url: storyPhotoURL, flip: nil)) }
+    private var photoURLs: [(url: URL, flip: URL?, corner: DualInsetCorner)] {
+        var result: [(url: URL, flip: URL?, corner: DualInsetCorner)] = []
+        if let storyPhotoURL {
+            result.append((url: storyPhotoURL, flip: nil, corner: .topTrailing))
+        }
         if let media = post.mediaURL {
-            result.append((url: media, flip: post.dualMediaURL))
+            // The corner the poster left the inset in. It travels with the
+            // post because the inset is BAKED into the picture and this card
+            // only lays an invisible target over it — guess it and the tap
+            // lands on nothing. `parse` falls back to top-trailing, which is
+            // where every photo posted before it could be moved sits.
+            result.append((
+                url: media,
+                flip: post.dualMediaURL,
+                corner: DualInsetCorner.parse(post.dual_inset_corner)
+            ))
         }
         return result
     }
@@ -559,11 +570,11 @@ struct PostCardView: View {
         /// Stands in for the photo(s) the server withheld.
         case locked
         /// `flip` is FRONT & BACK's other arrangement, nil on a single shot.
-        case photo(url: URL, flip: URL?, badged: Bool)
+        case photo(url: URL, flip: URL?, corner: DualInsetCorner, badged: Bool)
         /// A crew member's own photo on a buddy walk's shared post — captioned
         /// with their name, because on a card with four pictures on it "whose
         /// is this" is the question every slide raises.
-        case crewPhoto(url: URL, flip: URL?, userId: String, name: String, username: String?, caption: String?)
+        case crewPhoto(url: URL, flip: URL?, corner: DualInsetCorner, userId: String, name: String, username: String?, caption: String?)
         case route(coords: [CLLocationCoordinate2D])
         case statsCard(stats: PostStats)
     }
@@ -575,6 +586,7 @@ struct PostCardView: View {
         post.acceptedCoauthors.compactMap { coauthor -> MediaSlide? in
             guard let url = coauthor.mediaURL else { return nil }
             return .crewPhoto(url: url, flip: coauthor.dualMediaURL,
+                              corner: DualInsetCorner.parse(coauthor.dual_inset_corner),
                               userId: coauthor.user_id,
                               name: coauthor.displayName,
                               username: coauthor.username, caption: coauthor.caption)
@@ -594,7 +606,7 @@ struct PostCardView: View {
         for photo in photoURLs {
             // Badge an auto route/stats card that trails a photo (or its lock)
             // so the swipe reads "photo → stats".
-            slides.append(.photo(url: photo.url, flip: photo.flip,
+            slides.append(.photo(url: photo.url, flip: photo.flip, corner: photo.corner,
                                  badged: !slides.isEmpty && post.is_auto == true))
         }
         // The crew's photos ride BEHIND the author's: a buddy walk reads "their
@@ -623,7 +635,7 @@ struct PostCardView: View {
               let mine = post.acceptedCoauthors.first(where: { $0.user_id == me }),
               let myURL = mine.mediaURL,
               let index = slides.firstIndex(where: {
-                  if case .crewPhoto(let url, _, _, _, _, _) = $0 { return url == myURL }
+                  if case .crewPhoto(let url, _, _, _, _, _, _) = $0 { return url == myURL }
                   return false
               })
         else { return slides }
@@ -680,17 +692,19 @@ struct PostCardView: View {
         switch slide {
         case .locked:
             lockedMediaCard
-        case .photo(let url, let flip, let badged):
+        case .photo(let url, let flip, let corner, let badged):
             ZoomablePhotoSlide(
                 url: url,
                 flipURL: flip,
+                flipCorner: corner,
                 badge: badged ? ("Stats", "chart.bar.fill") : nil,
                 onDoubleTap: doubleTapHype
             )
-        case .crewPhoto(let url, let flip, _, let name, _, _):
+        case .crewPhoto(let url, let flip, let corner, _, let name, _, _):
             ZoomablePhotoSlide(
                 url: url,
                 flipURL: flip,
+                flipCorner: corner,
                 badge: (name, "person.fill"),
                 onDoubleTap: doubleTapHype
             )
@@ -1481,7 +1495,7 @@ struct PostCardView: View {
     private var currentCaption: (id: String, name: String, username: String?, text: String)? {
         let pages = mediaPages
         if mediaPage < pages.count,
-           case .crewPhoto(_, _, let userId, let name, let username, let caption) = pages[mediaPage] {
+           case .crewPhoto(_, _, _, let userId, let name, let username, let caption) = pages[mediaPage] {
             guard let caption, !caption.isEmpty else { return nil }
             return (userId, name, username, caption)
         }
@@ -1660,6 +1674,9 @@ struct ZoomablePhotoSlide: View {
     /// has to know where the inset is in order to DRAW it, only where to put
     /// the tap (`DualPhotoLayout`, the one definition of that rectangle).
     var flipURL: URL? = nil
+    /// Which corner the flip's inset was baked into, so the tap target lands
+    /// on the small picture rather than where it used to be.
+    var flipCorner: DualInsetCorner = .topTrailing
     var badge: (text: String, icon: String)? = nil
     var onDoubleTap: (() -> Void)? = nil
 
@@ -1699,7 +1716,7 @@ struct ZoomablePhotoSlide: View {
         .overlay {
             if flipURL != nil {
                 GeometryReader { geo in
-                    DualSwapTapTarget(canvas: geo.size) {
+                    DualSwapTapTarget(canvas: geo.size, corner: flipCorner) {
                         MADHaptics.tap()
                         withAnimation(.easeInOut(duration: 0.22)) { flipped.toggle() }
                     }

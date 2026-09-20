@@ -170,6 +170,10 @@ final class PostComposerViewModel: ObservableObject {
     /// canvas names what is actually in the corner right now, so the effect
     /// of the tap is legible before anyone makes it.
     @Published var dualPrimaryWasFront = false
+    /// Which corner the inset is baked into. The poster drags it there, and
+    /// it rides the post so the feed card can put its tap target on the
+    /// picture rather than where the picture used to be.
+    @Published var dualInsetCorner: DualInsetCorner = .topTrailing
     /// How `pickedImage` was obtained, so publish can declare it. Set by
     /// whichever affordance produced the photo; seeded to `.camera` for an
     /// `initialImage`, which is always a mid-run snap taken with our camera.
@@ -461,9 +465,8 @@ final class PostComposerViewModel: ObservableObject {
     /// longer draws a ⇄ disc on the inset, so this sentence — on your own
     /// photo, before you post — is where the tap is learned.
     var dualHint: String {
-        dualPrimaryWasFront
-            ? "The view's in the corner · tap it to swap"
-            : "You're in the corner · tap it to swap"
+        let who = dualPrimaryWasFront ? "The view's" : "You're"
+        return "\(who) in the corner · tap to swap, drag to move"
     }
 
     /// Which camera the BIG frame came from, as a plain statement for the
@@ -494,6 +497,9 @@ final class PostComposerViewModel: ObservableObject {
     func clearDual() {
         dualSecondary = nil
         dualPrimaryWasFront = false
+        // The corner belongs to the pair, not to the canvas: a fresh single
+        // that later becomes a pair starts where every other post's does.
+        dualInsetCorner = .topTrailing
     }
 
     /// Render the on-screen canvas (photo + sticker) to a flat JPEG-ready image
@@ -515,6 +521,7 @@ final class PostComposerViewModel: ObservableObject {
         let canvas = PostCanvas(
             image: big,
             secondary: small,
+            dualCorner: dualInsetCorner,
             showSticker: stickerEnabled,
             stickerPos: stickerPos,
             stickerScale: stickerScale,
@@ -604,7 +611,10 @@ final class PostComposerViewModel: ObservableObject {
                     caption: caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         ? nil : caption,
                     photoSource: photoSource,
-                    dualMediaUrl: dualMediaUrl
+                    dualMediaUrl: dualMediaUrl,
+                    // Only when there IS a pair: the corner describes an
+                    // inset, and a single photo has none.
+                    dualInsetCorner: dualMediaUrl == nil ? nil : dualInsetCorner.rawValue
                 )
                 // The run's photo moment is spent either way — the picture is
                 // on the feed. Retire the prompt so it can't surface later
@@ -619,6 +629,7 @@ final class PostComposerViewModel: ObservableObject {
             _ = try await PostService.createPost(
                 mediaUrl: mediaUrl,
                 dualMediaUrl: dualMediaUrl,
+                dualInsetCorner: dualMediaUrl == nil ? nil : dualInsetCorner.rawValue,
                 caption: caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : caption,
                 workoutId: stats.workoutId,
                 shareToFeed: destination.toFeed,
@@ -814,6 +825,11 @@ struct PostCanvas: View {
     /// ordinary single photo, and this view is then byte-identical to what it
     /// always rendered.
     var secondary: UIImage? = nil
+    /// Which corner the inset sits in — baked, so it has to match what the
+    /// post will carry.
+    var dualCorner: DualInsetCorner = .topTrailing
+    /// Live drag only, never set by `flatten`.
+    var dualDragOffset: CGSize = .zero
     let showSticker: Bool
     let stickerPos: CGPoint
     let stickerScale: CGFloat
@@ -831,8 +847,13 @@ struct PostCanvas: View {
                     // affordance drawn live by whoever offers the tap, and
                     // baking it into somebody's photograph forever would be a
                     // watermark nobody asked for.
-                    DualPhotoView(big: image, small: secondary)
-                        .frame(width: geo.size.width, height: geo.size.height)
+                    DualPhotoView(
+                        big: image,
+                        small: secondary,
+                        corner: dualCorner,
+                        offset: dualDragOffset
+                    )
+                    .frame(width: geo.size.width, height: geo.size.height)
                 } else {
                     Image(uiImage: image)
                         .resizable()
@@ -1110,6 +1131,10 @@ struct PostComposerView: View {
     @State private var showLibraryImport = false
     /// The walk's own snaps, offered right here. See `snapsFromThisWalkButton`.
     @State private var showSnapGallery = false
+    /// Live translation while the inset is being dragged. Lives on the VIEW,
+    /// not the model: it is a gesture in progress, and nothing that renders
+    /// for upload may ever see it.
+    @State private var dualDrag: CGSize = .zero
     /// Whether the stash HAS anything, cached. `hasEntriesToday()` enumerates
     /// the sandbox directory, which is not something to do from a `body` —
     /// the dashboard's photo-waiting banner caches it for the same reason.
@@ -1629,6 +1654,8 @@ struct PostComposerView: View {
                         PostCanvas(
                             image: image,
                             secondary: vm.dualSecondary,
+                            dualCorner: vm.dualInsetCorner,
+                            dualDragOffset: dualDrag,
                             showSticker: false,
                             stickerPos: vm.stickerPos,
                             stickerScale: vm.stickerScale,
@@ -1657,12 +1684,27 @@ struct PostComposerView: View {
                         // swallow the one tap that corner is for, and the
                         // sticker stays draggable everywhere else.
                         if vm.isDualPhoto {
-                            DualSwapTapTarget(canvas: CGSize(width: width, height: height)) {
-                                MADHaptics.tap()
-                                withAnimation(.easeInOut(duration: 0.22)) {
-                                    vm.swapDualFrames()
+                            DualInsetMover(
+                                canvas: CGSize(width: width, height: height),
+                                corner: vm.dualInsetCorner,
+                                onSwap: {
+                                    MADHaptics.tap()
+                                    withAnimation(.easeInOut(duration: 0.22)) {
+                                        vm.swapDualFrames()
+                                    }
+                                },
+                                // Live, unanimated: the inset has to sit
+                                // under the finger, and a spring on every
+                                // drag frame lags behind it.
+                                onDragChanged: { dualDrag = $0 },
+                                onDrop: { landed in
+                                    guard landed != vm.dualInsetCorner else { return }
+                                    MADHaptics.tap()
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
+                                        vm.dualInsetCorner = landed
+                                    }
                                 }
-                            }
+                            )
                         }
                     }
                     .frame(width: width, height: height)
