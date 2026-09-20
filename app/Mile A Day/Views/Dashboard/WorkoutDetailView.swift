@@ -20,6 +20,10 @@ struct WorkoutDetailView: View {
     @State private var isLoadingSplits = false
     @State private var showEditSheet = false
     @State private var routeCoordinates: [CLLocationCoordinate2D]?
+    /// Seconds since the first fix, one per coordinate — what tells a
+    /// straight mile of road from the drive between two halves of a paused
+    /// walk (`RouteGaps`).
+    @State private var routeTimes: [Double]?
     /// Retained map snapshot so the route map's pinch-zoom can compose its
     /// floating copy on demand (same mechanism as the feed cards).
     @State private var routeSnapshot: RouteMapSnapshot?
@@ -958,12 +962,14 @@ struct WorkoutDetailView: View {
                         WorkoutRouteMapView(
                             coordinates: routeCoordinates,
                             routeColor: workoutColor,
+                            pointTimes: routeTimes,
                             onSnapshot: { routeSnapshot = $0 }
                         )
                     } else {
                         RouteArtView(
                             coordinates: routeCoordinates,
                             routeColor: workoutColor,
+                            pointTimes: routeTimes,
                             authorAvatar: ownerAvatar,
                             // Same region + size as the map face's snapshot, so
                             // ONE cached value serves both faces' zooms.
@@ -1055,7 +1061,10 @@ struct WorkoutDetailView: View {
                 },
                 // The tracker's receipt-floored figure — what every other
                 // surface shows for this workout.
-                officialDistanceMiles: distanceMiles
+                officialDistanceMiles: distanceMiles,
+                // The walk's own clock: real-time replay, and the one thing
+                // that can spot a pause spent travelling (`RouteGaps`).
+                pointTimes: routeTimes
             )
         }
     }
@@ -1201,6 +1210,9 @@ struct WorkoutDetailView: View {
         isLoadingRoute = true
         let locations = await healthManager.fetchAllRouteLocations(for: workout)
         routeCoordinates = locations.isEmpty ? nil : locations.map { $0.coordinate }
+        routeTimes = locations.first.map { first in
+            locations.map { $0.timestamp.timeIntervalSince(first.timestamp) }
+        }
         isLoadingRoute = false
     }
 

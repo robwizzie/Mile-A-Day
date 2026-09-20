@@ -262,6 +262,7 @@ struct ActivityCardView: View {
         RouteArtView(
             coordinates: coords,
             routeColor: accent,
+            pointTimes: entry.route_times,
             authorAvatar: RouteArtAvatar(name: entry.displayName, imageURL: entry.profile_image_url),
             onSnapshot: { routeArtSnapshot = $0 },
             paletteDate: RelativeTime.date(from: entry.sort_ts)

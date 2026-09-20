@@ -985,7 +985,8 @@ struct PostCardView: View {
             return CompanionRoute(
                 id: coauthor.user_id,
                 coordinates: coords,
-                color: color
+                color: color,
+                pointTimes: coauthor.route_times
             )
         }
     }
@@ -1175,6 +1176,7 @@ struct PostCardView: View {
         RouteArtView(
             coordinates: coords,
             routeColor: ActivityCardView.color(post.workout_type),
+            pointTimes: post.route_times,
             companionRoutes: companionRoutes,
             authorAvatar: RouteArtAvatar(name: post.displayName, imageURL: post.profile_image_url),
             companionAvatars: companionRouteAvatars,
