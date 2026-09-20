@@ -456,10 +456,26 @@ final class PostComposerViewModel: ObservableObject {
 
     /// The line under the editor canvas. Names the SMALL frame, because that
     /// is the one you tap and the one about to become large.
+    ///
+    /// It also carries more weight than it used to: the published card no
+    /// longer draws a ⇄ disc on the inset, so this sentence — on your own
+    /// photo, before you post — is where the tap is learned.
     var dualHint: String {
         dualPrimaryWasFront
             ? "The view's in the corner · tap it to swap"
             : "You're in the corner · tap it to swap"
+    }
+
+    /// Which camera the BIG frame came from, as a plain statement for the
+    /// picker under the canvas.
+    var dualLeadIsFront: Bool { dualPrimaryWasFront }
+
+    /// Put a specific camera in the big frame. Idempotent on purpose: the
+    /// picker's chips are a STATE, so tapping the one already chosen has to
+    /// do nothing rather than toggle it away.
+    func setDualLead(front: Bool) {
+        guard isDualPhoto, front != dualPrimaryWasFront else { return }
+        swapDualFrames()
     }
 
     /// Swap which frame is large. Called from the editor's inset tap, and it
@@ -1216,6 +1232,8 @@ struct PostComposerView: View {
                                     }
                                 }
                             }
+                        // Directly under the photo it decides the shape of.
+                        dualLeadPicker
                         // A photo snapped DURING this walk/run is a valid post,
                         // not just a fresh camera shot — mirrors the post-run
                         // prompt's "Choose from this walk". Only offered when the
@@ -1522,6 +1540,77 @@ struct PostComposerView: View {
     private func presentGateIfNeeded() {
         guard termsState == .needsAcceptance, !showCamera, !showTermsGate else { return }
         showTermsGate = true
+    }
+
+    // MARK: - FRONT & BACK
+
+    /// Which camera leads, as the choice it actually is.
+    ///
+    /// Tapping the inset already swaps, and the hint line says so — but that
+    /// is a GESTURE, and the arrangement is a DECISION the poster is making
+    /// about their own photo. A decision deserves a control that states the
+    /// current answer without being operated: this row says which camera is
+    /// big right now and puts the other one a single tap away, which is also
+    /// the only form in which "I want the selfie to be the big one" is
+    /// answerable by someone who never discovers the tap.
+    ///
+    /// Below the canvas rather than on it. The bottom of the photo already
+    /// holds the hint, the sticker is draggable anywhere, and a control that
+    /// changes what gets published should not be competing with either.
+    @ViewBuilder
+    private var dualLeadPicker: some View {
+        if vm.isDualPhoto {
+            HStack(spacing: 10) {
+                Text("BIG PHOTO")
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.45))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+
+                HStack(spacing: 4) {
+                    dualLeadChip(
+                        title: "Back", icon: "camera.fill", front: false)
+                    dualLeadChip(
+                        title: "Front", icon: "person.fill", front: true)
+                }
+                .padding(4)
+                .background(Capsule().fill(Color.white.opacity(0.08)))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 2)
+            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: vm.dualLeadIsFront)
+        }
+    }
+
+    private func dualLeadChip(title: String, icon: String, front: Bool) -> some View {
+        let selected = vm.dualLeadIsFront == front
+        return Button {
+            guard !selected else { return }
+            MADHaptics.tap()
+            withAnimation(.easeInOut(duration: 0.22)) { vm.setDualLead(front: front) }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .black))
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.system(size: 12, weight: .black, design: .rounded))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .foregroundColor(selected ? .black : .white.opacity(0.7))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                Capsule().fill(selected ? Color.white : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title) camera as the big photo")
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
     // MARK: - Canvas

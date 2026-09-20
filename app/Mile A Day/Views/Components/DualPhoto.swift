@@ -72,16 +72,6 @@ enum DualPhotoLayout {
         max(1.5, width * 0.022)
     }
 
-    static func swapGlyphDiameter(in size: CGSize) -> CGFloat {
-        max(20, insetRect(in: size).width * 0.30)
-    }
-
-    /// The ⇄ disc straddles the inset's bottom-outer corner, so it reads as
-    /// belonging to the small picture without covering any of it.
-    static func swapGlyphCenter(in size: CGSize) -> CGPoint {
-        let rect = insetRect(in: size)
-        return CGPoint(x: rect.minX, y: rect.maxY)
-    }
 }
 
 // MARK: - The composed picture
@@ -190,6 +180,15 @@ enum DualPhotoComposite {
 /// rectangle lives in `DualPhotoLayout` and nowhere else. Used by the
 /// composer's editor and by the feed card, so the gesture is learned once, on
 /// your own photo, before anyone meets it on someone else's.
+///
+/// NOTHING IS DRAWN. It carried a ⇄ disc straddling the inset's corner, on
+/// the theory that a tap target nobody can see is a tap target nobody finds
+/// — but the inset is already the universal "tap me" of this kind of photo,
+/// the disc sat ON somebody's picture in every feed, and it had to be kept
+/// out of the baked upload, so the one badge in the app that could never be
+/// part of the image was also the most prominent thing on it. The affordance
+/// is the small picture. The composer teaches the gesture in words, and
+/// gives the poster a labelled control besides.
 struct DualSwapTapTarget: View {
     /// The 4:5 box the photo is drawn in.
     let canvas: CGSize
@@ -197,12 +196,8 @@ struct DualSwapTapTarget: View {
 
     var body: some View {
         let tap = DualPhotoLayout.tapRect(in: canvas)
-        let glyphCenter = DualPhotoLayout.swapGlyphCenter(in: canvas)
         ZStack {
             Color.clear
-            DualSwapGlyph(diameter: DualPhotoLayout.swapGlyphDiameter(in: canvas))
-                .position(glyphCenter)
-                .allowsHitTesting(false)
             Button(action: action) {
                 Color.clear
                     .frame(width: tap.width, height: tap.height)
@@ -213,25 +208,5 @@ struct DualSwapTapTarget: View {
             .accessibilityLabel("Swap front and back photo")
         }
         .frame(width: canvas.width, height: canvas.height)
-    }
-}
-
-/// The little ⇄ disc that says the inset is tappable.
-///
-/// Never baked into an upload — it is an affordance, not part of the picture,
-/// and a swap arrow frozen into someone's photo forever would be the kind of
-/// watermark nobody asked for. Drawn live by the editor and by the feed card.
-struct DualSwapGlyph: View {
-    var diameter: CGFloat = 26
-
-    var body: some View {
-        Image(systemName: "arrow.triangle.2.circlepath")
-            .font(.system(size: diameter * 0.52, weight: .black))
-            .foregroundColor(.black.opacity(0.85))
-            .frame(width: diameter, height: diameter)
-            .background(Circle().fill(Color.white.opacity(0.95)))
-            .overlay(Circle().strokeBorder(Color.black.opacity(0.12), lineWidth: 1))
-            .shadow(color: .black.opacity(0.35), radius: diameter * 0.12, y: 1)
-            .accessibilityHidden(true)
     }
 }
