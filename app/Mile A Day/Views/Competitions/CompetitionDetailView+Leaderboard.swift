@@ -5,276 +5,116 @@ import HealthKit
 
 extension CompetitionDetailView {
 
-    // MARK: - Enhanced Leaderboard
-    /// Unified leaderboard list — no separate podium block. The top three rows get
-    /// a medal-colored rank badge and accent stripe inline so they still stand out
-    /// without being disconnected from the rest of the rankings. Tap any row to
-    /// expand a daily activity strip showing per-day progress.
+    // MARK: - Standings (individual)
+    /// The board a non-team competition is scored on.
+    ///
+    /// One flat table: eyebrow, rows, rule between them, activity calendar
+    /// under it. No podium block — a podium above a list that starts at 4th
+    /// splits one ranking into two objects and leaves the reader stitching
+    /// them back together; the top three are marked by their rank chips in
+    /// place. Order and the numbers beside it both come from
+    /// `competition.rankedStandings`, so a row can never be labelled 5th while
+    /// sitting in the 4th position.
     var enhancedLeaderboard: some View {
         let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
-        let rankedUsers = competition.users
-            .filter { $0.invite_status == .accepted }
-            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
-        let gradientColors = competition.type.gradient.map { Color(hex: $0) }
+        let standings = competition.rankedStandings
+        let accent = CompeteDesign.accent(competition.type)
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            // Section header
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: "trophy.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(
-                        LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
-                    )
-                Text("Leaderboard")
-                    .font(MADTheme.Typography.title3)
-                    .foregroundColor(.white)
-
-                Spacer()
-
-                Text("\(rankedUsers.count) competing")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.35))
-            }
-            .padding(.horizontal, MADTheme.Spacing.sm)
-
-            if rankedUsers.isEmpty {
-                Text("No participants yet")
-                    .font(MADTheme.Typography.callout)
-                    .foregroundColor(.white.opacity(0.5))
-                    .padding(MADTheme.Spacing.lg)
-            } else {
-                VStack(spacing: MADTheme.Spacing.md) {
-                    // Unified rows — every competitor in one connected list
-                    VStack(spacing: 6) {
-                        ForEach(Array(rankedUsers.enumerated()), id: \.element.id) { index, user in
-                            let isMe = user.user_id == currentUserId
-                            let rank = index + 1
-
-                            leaderboardEntry(
-                                rank: rank,
-                                user: user,
-                                isMe: isMe,
-                                isExpanded: false
-                            )
-                            .opacity(leaderboardAnimated ? 1 : 0)
-                            .offset(y: leaderboardAnimated ? 0 : 15)
-                            .animation(
-                                .spring(response: 0.5, dampingFraction: 0.8)
-                                    .delay(0.1 + Double(index) * 0.05),
-                                value: leaderboardAnimated
-                            )
-                        }
-                    }
-
-                    // Comp-wide activity calendar — defaults to "viewing all", tap
-                    // any leaderboard row to focus on that competitor, "Show all"
-                    // pill on the calendar returns to aggregate. For streaks, the
-                    // focused-user view also overlays life-loss / elimination cues
-                    // so it doubles as the streak status calendar.
-                    DailyActivityCalendar(
-                        allUsers: rankedUsers,
-                        competition: competition,
-                        accent: gradientColors.first ?? MADTheme.Colors.madRed,
-                        focusedUserId: $expandedLeaderboardUserId
-                    )
-                }
-                .padding(MADTheme.Spacing.md)
-                .background(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                                .stroke(
-                                    LinearGradient(
-                                        colors: gradientColors.map { $0.opacity(0.3) } + [Color.clear],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
-                                )
-                        )
-                )
-            }
-        }
-        .onAppear {
-            leaderboardAnimated = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                    leaderboardAnimated = true
-                }
-            }
-        }
-    }
-
-    /// One leaderboard row. Tapping it focuses the shared calendar on that
-    /// competitor. Tapping the same row again clears focus (back to "all"). A
-    /// medal-colored left rail runs through every row — wider when the row is
-    /// the focused one, so the active selection is unmistakable.
-    @ViewBuilder
-    func leaderboardEntry(rank: Int, user: CompetitionUser, isMe: Bool, isExpanded: Bool) -> some View {
-        let isFocused = expandedLeaderboardUserId == user.user_id
-
-        Button {
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
-                if isFocused {
-                    expandedLeaderboardUserId = nil
-                } else {
-                    expandedLeaderboardUserId = user.user_id
-                }
-            }
-        } label: {
-            HStack(spacing: 0) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(
-                        LinearGradient(
-                            colors: medalRankGradient(rank),
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(width: isFocused ? 5 : 3)
-                    .padding(.vertical, 8)
-                    .shadow(color: isFocused ? (medalRankGradient(rank).first ?? .white).opacity(0.5) : .clear, radius: 4)
-
-                CompetitionLeaderboardRow(
-                    rank: rank,
-                    user: user,
-                    competitionType: competition.type,
-                    unit: competition.options.unit,
-                    isCurrentUser: isMe,
-                    totalLives: competition.type == .streaks ? competition.streakLives : 0
-                )
-            }
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                    .fill(isFocused ? Color.white.opacity(0.05) : Color.clear)
+            CompeteHeader(
+                eyebrow: "Standings",
+                trailingText: "\(standings.count) competing"
             )
-        }
-        .buttonStyle(.plain)
-    }
+            .padding(.horizontal, 2)
 
-    func medalRankGradient(_ rank: Int) -> [Color] {
-        switch rank {
-        case 1: return [.yellow, .orange]
-        case 2: return [Color(white: 0.85), Color(white: 0.6)]
-        case 3: return [Color(red: 0.85, green: 0.55, blue: 0.25), Color(red: 0.6, green: 0.35, blue: 0.15)]
-        default: return [Color.white.opacity(0.22), Color.white.opacity(0.08)]
-        }
-    }
+            if standings.isEmpty {
+                CompeteSurface {
+                    Text("No one has joined yet.")
+                        .font(CompeteDesign.detail)
+                        .foregroundColor(CompeteDesign.inkFaint)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                CompeteSurface {
+                    VStack(spacing: 0) {
+                        standingsTable(standings: standings, currentUserId: currentUserId)
 
-    // MARK: - Enhanced Podium
-    func enhancedPodium(rankedUsers: [CompetitionUser], gradientColors: [Color], currentUserId: String?) -> some View {
-        let medalColors: [[Color]] = [
-            [.yellow, .orange],
-            [Color(white: 0.85), Color(white: 0.6)],
-            [.brown, Color(red: 0.7, green: 0.4, blue: 0.2)]
-        ]
+                        CompeteRowRule()
+                            .padding(.vertical, 12)
 
-        return HStack(alignment: .bottom, spacing: MADTheme.Spacing.md) {
-            // 2nd place
-            if rankedUsers.count > 1 {
-                enhancedPodiumSlot(user: rankedUsers[1], rank: 2, colors: medalColors[1], height: 44, avatarSize: 36, isCurrentUser: rankedUsers[1].user_id == currentUserId)
-            }
-
-            // 1st place with glow
-            ZStack {
-                // Radial glow behind 1st place
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [medalColors[0][0].opacity(0.25), Color.clear],
-                            center: .center,
-                            startRadius: 10,
-                            endRadius: 50
+                        DailyActivityCalendar(
+                            allUsers: standings.map { $0.user },
+                            competition: competition,
+                            accent: accent,
+                            focusedUserId: $expandedLeaderboardUserId
                         )
-                    )
-                    .frame(width: 100, height: 100)
-                    .offset(y: -20)
-                    .opacity(podiumAnimated ? 1 : 0)
-                    .scaleEffect(podiumAnimated ? 1.0 : 0.5)
-
-                enhancedPodiumSlot(user: rankedUsers[0], rank: 1, colors: medalColors[0], height: 56, avatarSize: 44, isCurrentUser: rankedUsers[0].user_id == currentUserId)
-            }
-
-            // 3rd place
-            if rankedUsers.count > 2 {
-                enhancedPodiumSlot(user: rankedUsers[2], rank: 3, colors: medalColors[2], height: 36, avatarSize: 36, isCurrentUser: rankedUsers[2].user_id == currentUserId)
-            }
-        }
-        .padding(.vertical, MADTheme.Spacing.sm)
-    }
-
-    func enhancedPodiumSlot(user: CompetitionUser, rank: Int, colors: [Color], height: CGFloat, avatarSize: CGFloat, isCurrentUser: Bool) -> some View {
-        VStack(spacing: 3) {
-            // Crown for 1st
-            if rank == 1 {
-                Image(systemName: "crown.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(
-                        LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
-                    )
-                    .shadow(color: .yellow.opacity(0.4), radius: 4)
-            }
-
-            // Medal icon
-            Image(systemName: "medal.fill")
-                .font(.system(size: rank == 1 ? 16 : 13))
-                .foregroundStyle(
-                    LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom)
-                )
-
-            // Avatar with YOU badge below (fixed height container)
-            VStack(spacing: 2) {
-                AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: avatarSize)
-                    .overlay(
-                        Circle()
-                            .stroke(
-                                LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
-                                lineWidth: rank == 1 ? 2.5 : 2
-                            )
-                    )
-
-                if isCurrentUser {
-                    Text("YOU")
-                        .font(.system(size: 7, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(MADTheme.Colors.madRed))
-                } else {
-                    // Invisible spacer to keep layout consistent
-                    Color.clear.frame(height: 12)
+                    }
                 }
             }
-
-            Text(user.displayName)
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.7))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: avatarSize + 20)
-
-            Text(leaderboardScoreLabel(for: user))
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
-
-            // Pedestal
-            RoundedRectangle(cornerRadius: 6)
-                .fill(
-                    LinearGradient(
-                        colors: colors.map { $0.opacity(0.2) },
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(height: podiumAnimated ? height : 0)
-                .overlay(
-                    Text("\(rank)")
-                        .font(.system(size: height * 0.45, weight: .bold, design: .rounded))
-                        .foregroundColor(colors[0].opacity(0.25))
-                )
         }
-        .frame(maxWidth: .infinity)
+    }
+
+    /// The rows themselves, hairline-separated. Shared by the live standings
+    /// and the finished screen so the two can't drift.
+    @ViewBuilder
+    func standingsTable(
+        standings: [(place: Int, user: CompetitionUser)],
+        currentUserId: String?,
+        metric: CompeteStandingsMetric = .score
+    ) -> some View {
+        let leaderScore = standings.first.map {
+            metric == .contribution ? $0.user.contributionValue : ($0.user.score ?? 0)
+        } ?? 0
+
+        VStack(spacing: 0) {
+            ForEach(Array(standings.enumerated()), id: \.element.user.id) { index, entry in
+                if index > 0 {
+                    CompeteRowRule(inset: 49)
+                }
+
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                        expandedLeaderboardUserId =
+                            expandedLeaderboardUserId == entry.user.user_id ? nil : entry.user.user_id
+                    }
+                } label: {
+                    CompeteStandingsRow(
+                        place: entry.place,
+                        user: entry.user,
+                        competition: competition,
+                        isCurrentUser: entry.user.user_id == currentUserId,
+                        metric: metric,
+                        leaderScore: leaderScore,
+                        isTied: standings.filter { $0.place == entry.place }.count > 1,
+                        isFocused: expandedLeaderboardUserId == entry.user.user_id
+                    )
+                }
+                .buttonStyle(.plain)
+                .opacity(leaderboardAnimated ? 1 : 0)
+                .offset(y: leaderboardAnimated ? 0 : 10)
+                .animation(
+                    .spring(response: 0.45, dampingFraction: 0.85)
+                        .delay(min(Double(index) * 0.04, 0.4)),
+                    value: leaderboardAnimated
+                )
+            }
+        }
+        // The reveal is armed HERE, by the table, not by one of its hosts.
+        // `enhancedLeaderboard` used to own it — and the finished screen draws
+        // this same table without that view ever existing, so every row stayed
+        // at opacity 0 and Final Standings rendered as an empty card.
+        .onAppear(perform: armStandingsReveal)
+    }
+
+    /// Fades the standings in once per appearance. Idempotent, so switching
+    /// tabs back and forth doesn't replay it.
+    func armStandingsReveal() {
+        guard !leaderboardAnimated else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
+                leaderboardAnimated = true
+            }
+        }
     }
 
     // MARK: - Interval Navigator
@@ -341,10 +181,10 @@ extension CompetitionDetailView {
         .padding(.vertical, MADTheme.Spacing.sm)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(.ultraThinMaterial)
+                .fill(CompeteDesign.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        .stroke(CompeteDesign.hairline, lineWidth: 1)
                 )
         )
     }
@@ -370,214 +210,192 @@ extension CompetitionDetailView {
         }
     }
 
-    // MARK: - Clash Interval View
-    func clashIntervalView(key: String, users: [CompetitionUser], currentUserId: String?) -> some View {
-        let sortedUsers = users.sorted {
-            ($0.intervals?[key] ?? 0) > ($1.intervals?[key] ?? 0)
+    // MARK: - Interval views
+    //
+    // What happened in ONE interval — today's race, or a day you've paged back
+    // to. All three modes are the same list of people against one measure, so
+    // they are the same row (`intervalRow`) under different headings; they used
+    // to be three hand-built rows with three different rank treatments (a
+    // crown, a bare numeral, a target glyph) and three different ideas of what
+    // the number on the right meant.
+    //
+    // Ordering uses `intervalRanked`, not a bare sort on the interval's
+    // quantity: the same instability that scrambled the standings scrambles a
+    // list where everyone is on 0.00 first thing in the morning.
+
+    /// People ordered by what they did in ONE interval, ties broken the same
+    /// way the standings break them.
+    func intervalRanked(_ users: [CompetitionUser], key: String) -> [CompetitionUser] {
+        users.sorted { a, b in
+            let (lhs, rhs) = (a.intervals?[key] ?? 0, b.intervals?[key] ?? 0)
+            if lhs != rhs { return lhs > rhs }
+            let (an, bn) = (a.displayName.lowercased(), b.displayName.lowercased())
+            if an != bn { return an < bn }
+            return a.user_id < b.user_id
         }
+    }
 
-        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Matchup")
-                .font(MADTheme.Typography.title3)
-                .foregroundColor(.white)
-                .padding(.horizontal, MADTheme.Spacing.sm)
+    /// One person's interval. `goal` non-nil turns the bar into progress
+    /// toward a target rather than a share of the leader's distance.
+    @ViewBuilder
+    func intervalRow(
+        place: Int,
+        user: CompetitionUser,
+        distance: Double,
+        leaderDistance: Double,
+        goal: Double?,
+        isCurrentUser: Bool
+    ) -> some View {
+        let accent = CompeteDesign.accent(competition.type)
+        let hitTarget = goal.map { distance >= $0 } ?? false
+        let fraction: Double = {
+            if let goal { return min(distance / max(goal, 0.001), 1) }
+            return leaderDistance > 0 ? distance / leaderDistance : 0
+        }()
 
-            VStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(Array(sortedUsers.enumerated()), id: \.element.id) { index, user in
-                    let distance = user.intervals?[key] ?? 0
-                    let isLeading = index == 0 && distance > 0
+        HStack(spacing: 11) {
+            if goal == nil {
+                CompeteRankBadge(place: place)
+            } else {
+                Image(systemName: hitTarget ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(hitTarget ? MADTheme.Colors.success : CompeteDesign.inkGhost)
+                    .frame(width: 26, height: 26)
+                    .accessibilityLabel(hitTarget ? "Target met" : "Target not met")
+            }
 
-                    HStack(spacing: MADTheme.Spacing.md) {
-                        if isLeading {
-                            Image(systemName: "crown.fill")
-                                .font(.caption)
-                                .foregroundColor(.yellow)
-                                .frame(width: 24)
-                        } else {
-                            Text("\(index + 1)")
-                                .font(MADTheme.Typography.caption)
-                                .foregroundColor(.white.opacity(0.5))
-                                .frame(width: 24)
-                        }
-
-                        AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 36)
-
-                        Text(user.displayName)
-                            .font(MADTheme.Typography.callout)
-                            .foregroundColor(.white)
-
-                        Spacer()
-
-                        Text(competition.options.formatQuantityWithUnit(distance))
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundColor(isLeading ? .green : .white.opacity(0.8))
-                    }
-                    .padding(MADTheme.Spacing.md)
-                    .background(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .fill(Color.white.opacity(user.user_id == currentUserId ? 0.1 : (isLeading ? 0.05 : 0)))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                    .stroke(user.user_id == currentUserId ? MADTheme.Colors.primary : Color.clear, lineWidth: 1)
-                            )
+            AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 34)
+                .overlay(
+                    Circle().strokeBorder(
+                        isCurrentUser ? accent.opacity(0.9) : CompeteDesign.hairline,
+                        lineWidth: isCurrentUser ? 2 : 1
                     )
+                )
+
+            // Matches the standings row's rhythm: at 5pt the bar reads as an
+            // underline on the name rather than as a measure of its own.
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 5) {
+                    Text(user.displayName)
+                        .font(CompeteDesign.name)
+                        .foregroundColor(CompeteDesign.ink)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if isCurrentUser { CompeteTag(text: "YOU", color: accent) }
+                }
+
+                CompeteBar(
+                    fraction: fraction,
+                    color: hitTarget ? MADTheme.Colors.success : (place == 1 && goal == nil ? accent : accent.opacity(0.55)),
+                    isEmpty: distance <= 0
+                )
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(competition.options.formatQuantityWithUnit(distance))
+                    .font(CompeteDesign.score)
+                    .foregroundColor(hitTarget ? MADTheme.Colors.success : CompeteDesign.ink)
+                    .monospacedDigit()
+                    .lineLimit(1)
+
+                if let goal, hitTarget, distance > goal {
+                    Text("+\(competition.options.formatQuantity(distance - goal)) over")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundColor(MADTheme.Colors.success.opacity(0.75))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                } else if goal != nil, !hitTarget {
+                    Text("of \(competition.options.goalFormatted)")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundColor(CompeteDesign.inkFaint)
+                        .monospacedDigit()
+                        .lineLimit(1)
                 }
             }
-            .padding(MADTheme.Spacing.lg)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(
-                                LinearGradient(
-                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) } + [Color.clear],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
-                    )
-            )
+            .fixedSize()
+        }
+        .padding(.vertical, 9)
+        .padding(.horizontal, 4)
+    }
+
+    /// The card the three interval views share.
+    @ViewBuilder
+    func intervalCard<Rows: View>(title: String, @ViewBuilder rows: () -> Rows) -> some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            CompeteHeader(eyebrow: title)
+                .padding(.horizontal, 2)
+            CompeteSurface {
+                VStack(spacing: 0) { rows() }
+            }
+        }
+    }
+
+    // MARK: - Clash Interval View
+    func clashIntervalView(key: String, users: [CompetitionUser], currentUserId: String?) -> some View {
+        let ranked = intervalRanked(users, key: key)
+        let leader = ranked.first?.intervals?[key] ?? 0
+
+        return intervalCard(title: "Matchup") {
+            ForEach(Array(ranked.enumerated()), id: \.element.id) { index, user in
+                if index > 0 { CompeteRowRule(inset: 45) }
+                intervalRow(
+                    place: index + 1,
+                    user: user,
+                    distance: user.intervals?[key] ?? 0,
+                    leaderDistance: leader,
+                    goal: nil,
+                    isCurrentUser: user.user_id == currentUserId
+                )
+            }
         }
     }
 
     // MARK: - Apex Interval View
     func apexIntervalView(key: String, users: [CompetitionUser], currentUserId: String?) -> some View {
-        let sortedUsers = users.sorted {
-            ($0.intervals?[key] ?? 0) > ($1.intervals?[key] ?? 0)
-        }
-        let intervalLabel = competition.options.interval == .week ? "Weekly" : (competition.options.interval == .month ? "Monthly" : (Calendar.current.isDateInToday(selectedIntervalDate) ? "Today's" : "Daily"))
+        let ranked = intervalRanked(users, key: key)
+        let leader = ranked.first?.intervals?[key] ?? 0
+        let intervalLabel = competition.options.interval == .week
+            ? "This week"
+            : (competition.options.interval == .month
+                ? "This month"
+                : (Calendar.current.isDateInToday(selectedIntervalDate) ? "Today" : "That day"))
 
-        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("\(intervalLabel) Activity")
-                .font(MADTheme.Typography.title3)
-                .foregroundColor(.white)
-                .padding(.horizontal, MADTheme.Spacing.sm)
-
-            VStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(sortedUsers, id: \.id) { user in
-                    let distance = user.intervals?[key] ?? 0
-
-                    HStack(spacing: MADTheme.Spacing.md) {
-                        AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 36)
-
-                        Text(user.displayName)
-                            .font(MADTheme.Typography.callout)
-                            .foregroundColor(.white)
-
-                        Spacer()
-
-                        Text(competition.options.formatQuantityWithUnit(distance))
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                    }
-                    .padding(MADTheme.Spacing.md)
-                    .background(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .fill(Color.white.opacity(user.user_id == currentUserId ? 0.1 : 0))
-                    )
-                }
+        return intervalCard(title: intervalLabel) {
+            ForEach(Array(ranked.enumerated()), id: \.element.id) { index, user in
+                if index > 0 { CompeteRowRule(inset: 45) }
+                intervalRow(
+                    place: index + 1,
+                    user: user,
+                    distance: user.intervals?[key] ?? 0,
+                    leaderDistance: leader,
+                    goal: nil,
+                    isCurrentUser: user.user_id == currentUserId
+                )
             }
-            .padding(MADTheme.Spacing.lg)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(
-                                LinearGradient(
-                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) } + [Color.clear],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
-                    )
-            )
         }
     }
 
     // MARK: - Targets Interval View
     func targetsIntervalView(key: String, users: [CompetitionUser], currentUserId: String?) -> some View {
         let goal = competition.options.goal
-        let intervalLabel = competition.options.interval == .week ? "Weekly" : (competition.options.interval == .month ? "Monthly" : "Daily")
+        let ranked = intervalRanked(users, key: key)
+        let intervalLabel = competition.options.interval == .week
+            ? "This week's target"
+            : (competition.options.interval == .month ? "This month's target" : "Today's target")
 
-        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("\(intervalLabel) Targets")
-                .font(MADTheme.Typography.title3)
-                .foregroundColor(.white)
-                .padding(.horizontal, MADTheme.Spacing.sm)
-
-            VStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(users, id: \.id) { user in
-                    let distance = user.intervals?[key] ?? 0
-                    let hitTarget = distance >= goal
-                    let progress = min(distance / max(goal, 0.1), 1.0)
-
-                    VStack(spacing: MADTheme.Spacing.sm) {
-                        HStack(spacing: MADTheme.Spacing.md) {
-                            Image(systemName: hitTarget ? "target" : "circle")
-                                .font(.title3)
-                                .foregroundColor(hitTarget ? .green : .white.opacity(0.4))
-                                .frame(width: 28)
-
-                            AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 36)
-
-                            Text(user.displayName)
-                                .font(MADTheme.Typography.callout)
-                                .foregroundColor(.white)
-
-                            Spacer()
-
-                            VStack(alignment: .trailing, spacing: 1) {
-                                Text("\(competition.options.formatQuantity(distance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
-                                    .font(MADTheme.Typography.callout)
-                                    .foregroundColor(hitTarget ? .green : .white.opacity(0.7))
-                                if hitTarget && distance > goal {
-                                    Text("+\(competition.options.formatQuantity(distance - goal)) over")
-                                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                                        .foregroundColor(.green.opacity(0.7))
-                                }
-                            }
-                        }
-
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color.white.opacity(0.08))
-                                    .frame(height: 6)
-
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(hitTarget ? Color.green : MADTheme.Colors.madRed)
-                                    .frame(width: geo.size.width * progress, height: 6)
-                            }
-                        }
-                        .frame(height: 6)
-                    }
-                    .padding(MADTheme.Spacing.md)
-                    .background(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .fill(Color.white.opacity(user.user_id == currentUserId ? 0.1 : 0))
-                    )
-                }
+        return intervalCard(title: intervalLabel) {
+            ForEach(Array(ranked.enumerated()), id: \.element.id) { index, user in
+                if index > 0 { CompeteRowRule(inset: 45) }
+                intervalRow(
+                    place: index + 1,
+                    user: user,
+                    distance: user.intervals?[key] ?? 0,
+                    leaderDistance: 0,
+                    goal: goal,
+                    isCurrentUser: user.user_id == currentUserId
+                )
             }
-            .padding(MADTheme.Spacing.lg)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(
-                                LinearGradient(
-                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) } + [Color.clear],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
-                    )
-            )
         }
     }
 
@@ -585,16 +403,16 @@ extension CompetitionDetailView {
     var raceProgressView: some View {
         let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
         let goal = competition.options.goal
-        let sortedUsers = competition.users
-            .filter { $0.invite_status == .accepted }
-            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        let sortedUsers = competition.acceptedRanked
         let gradientColors = competition.type.gradient.map { Color(hex: $0) }
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack {
                 Text("Race Progress")
-                    .font(MADTheme.Typography.title3)
-                    .foregroundColor(.white)
+                    .font(CompeteDesign.eyebrow)
+                    .tracking(CompeteDesign.eyebrowTracking)
+                    .textCase(.uppercase)
+                    .foregroundColor(CompeteDesign.inkFaint)
 
                 Spacer()
 
@@ -728,17 +546,10 @@ extension CompetitionDetailView {
             .padding(MADTheme.Spacing.lg)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(
-                                LinearGradient(
-                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) } + [Color.clear],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
+                            .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
         }
@@ -1281,7 +1092,7 @@ struct DailyActivityCalendar: View {
                 .fill(Color.white.opacity(0.03))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                        .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                 )
         )
     }
@@ -1839,7 +1650,7 @@ private struct DailyCalendarCell: View {
                 Circle().fill(DailyActivityCalendar.streakEliminatedColor.opacity(0.92))
             case .postElimination:
                 Circle().fill(Color.white.opacity(0.05))
-                    .overlay(Circle().strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+                    .overlay(Circle().strokeBorder(CompeteDesign.hairline, lineWidth: 1))
             }
 
             // Today ring (only when not selected) — also doubles as the "in

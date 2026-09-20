@@ -710,9 +710,7 @@ struct MainTabView: View {
 
         let focus = TodayFocus.compute(for: top, currentUserId: userId)
 
-        let ranked = top.users
-            .filter { $0.invite_status == .accepted }
-            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        let ranked = top.acceptedRanked
         // On a team competition the TEAM is the competitor, so the widget
         // ranks teams and names mine — a member's own rank among people is a
         // fact about a leaderboard the competition isn't scored on.

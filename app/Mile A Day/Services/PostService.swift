@@ -1525,8 +1525,31 @@ enum RelativeTime {
         return f
     }()
 
+    /// Parsed timestamps, keyed by the string they came from.
+    ///
+    /// `NSCache` because this is read from view bodies on the main thread and
+    /// from the odd background helper, and it evicts itself under memory
+    /// pressure — an unbounded dictionary of every timestamp the feed has ever
+    /// loaded is not worth the milliseconds.
+    private static let cache: NSCache<NSString, NSDate> = {
+        let c = NSCache<NSString, NSDate>()
+        c.countLimit = 2_000
+        return c
+    }()
+
+    /// An `ISO8601DateFormatter` parse is not cheap, and the feed asks for the
+    /// same answer over and over: `PostCardView` parses `created_at` three
+    /// times per card and `ActivityCardView` parses `sort_ts` four times, on
+    /// every body evaluation, for every card on screen. Memoised, because the
+    /// same string always yields the same date.
     static func date(from iso: String) -> Date? {
-        parser.date(from: iso) ?? parserNoFrac.date(from: iso)
+        let key = iso as NSString
+        if let hit = cache.object(forKey: key) { return hit as Date }
+        guard let parsed = parser.date(from: iso) ?? parserNoFrac.date(from: iso) else {
+            return nil
+        }
+        cache.setObject(parsed as NSDate, forKey: key)
+        return parsed
     }
 
     /// "now", "5m", "2h", "3d" — compact age for feed/story headers.

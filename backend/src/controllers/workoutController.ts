@@ -199,8 +199,13 @@ export async function uploadWorkouts(req: Request, res: Response) {
         // Same 0.95 tolerance as streak counting — a GPS 0.98-mile day that
         // extends the streak must also fire the mile-completed notification.
         if (todayMiles >= DAILY_GOAL_TOLERANCE) {
+          // The walks this upload carried: the one that completed the day is
+          // among them, and its own pre-goal announcement — queued by an
+          // earlier sync, when the day was still short — is superseded by the
+          // mile. A walk from some OTHER upload keeps its announcement.
           const milestoneFired = await notifyFriendsOfMileCompletion(
             userId,
+            [...recentWorkoutIds],
           ).catch((err) => {
             console.error("Error notifying friends:", err.message);
             return false;

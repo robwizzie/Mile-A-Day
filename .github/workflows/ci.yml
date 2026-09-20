@@ -212,6 +212,15 @@ jobs:
       # row direction is a plausible push nobody can tell is wrong.
       - name: Win-back reminder check
         run: node scripts/win-back-check.mjs
+      # ONE walk is ONE announcement to friends. Both friend workout pushes are
+      # BUILT at sync and DELIVERED ten minutes later, and which of the two is
+      # right depends on whether the day's mile is complete — a question the
+      # sync path answers with an if/else, i.e. correctly for exactly one
+      # request. Anything completing the day inside that window (a recap
+      # distance correction, a re-sync revising the distance up) raised the
+      # mile announcement beside the walk's own and the cron drained both.
+      - name: Friend notification dedupe check
+        run: node scripts/friend-notification-dedupe-check.mjs
 
   website:
     name: Website (lint + build)

@@ -507,38 +507,63 @@ function teamAwareOutcome(
       // Ordered so entities[0].members[0] is the member the stored `winner`
       // points at: the biggest contributor, which is the honest answer to "who
       // won it for them" once the team is what's being scored.
+      // Deterministic all the way down: the stored `winner` is this list's
+      // head, so two members level on contribution must not be able to swap
+      // which of them the competition records as having won it.
       const members = (membersByTeam.get(t.id) ?? [])
         .slice()
-        .sort((a, b) =>
-          derived
+        .sort((a, b) => {
+          const rank = derived
             ? (derived.contribution.get(b) ?? 0) -
               (derived.contribution.get(a) ?? 0)
-            : (scores[b]?.score ?? 0) - (scores[a]?.score ?? 0),
-        );
+            : (scores[b]?.score ?? 0) - (scores[a]?.score ?? 0);
+          if (rank !== 0) return rank;
+          const covered = coveredQuantity(scores[b]) - coveredQuantity(scores[a]);
+          if (covered !== 0) return covered;
+          return a < b ? -1 : a > b ? 1 : 0;
+        });
+      const entity = derived ? derived.entities[t.id] : undefined;
       return {
         members,
         score: derived
-          ? (derived.entities[t.id]?.score ?? 0)
+          ? (entity?.score ?? 0)
           : members.reduce((sum, m) => sum + (scores[m]?.score ?? 0), 0),
+        // The team's combined distance — the tiebreak between two teams level
+        // on score, matching `Competition.rankedTeams` on iOS. `Array.sort` is
+        // stable, so without it two teams on 0 kept the order the teams were
+        // configured in while the app (whose `sorted` is NOT stable) put them
+        // in any order at all.
+        quantity: entity
+          ? Object.values(entity.intervals).reduce((sum, q) => sum + q, 0)
+          : members.reduce((sum, m) => sum + coveredQuantity(scores[m]), 0),
       };
     })
     .filter((e) => e.members.length > 0)
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => b.score - a.score || b.quantity - a.quantity);
   if (entities.length === 0) return null;
 
   const placements = new Map<string, number>();
   let placement = 1;
   entities.forEach((entity, i) => {
-    if (i > 0 && entity.score < entities[i - 1].score) placement = i + 1;
+    const previous = entities[i - 1];
+    if (
+      i > 0 &&
+      !(entity.score === previous.score && entity.quantity === previous.quantity)
+    ) {
+      placement = i + 1;
+    }
     for (const member of entity.members) placements.set(member, placement);
   });
-  // Unassigned participants follow every team, ranked by their own score.
-  const solo = Object.keys(scores)
-    .filter((id) => !assigned.has(id))
-    .sort((a, b) => (scores[b]?.score ?? 0) - (scores[a]?.score ?? 0));
+  // Unassigned participants follow every team, ranked among themselves by the
+  // same chain as everybody else (`rankCompetitors`).
+  const solo = rankCompetitors(
+    Object.fromEntries(
+      Object.entries(scores).filter(([id]) => !assigned.has(id)),
+    ),
+  ).map(([id]) => id);
   let soloPlacement = entities.length + 1;
   solo.forEach((id, i) => {
-    if (i > 0 && (scores[id]?.score ?? 0) < (scores[solo[i - 1]]?.score ?? 0)) {
+    if (i > 0 && !levelWith(scores[id], scores[solo[i - 1]])) {
       soloPlacement = entities.length + i + 1;
     }
     placements.set(id, soloPlacement);
@@ -1659,6 +1684,31 @@ export async function checkRaceCompletions(userId: string): Promise<void> {
   }
 }
 
+/**
+ * Resolve ONE competition if it is complete — the same path the cron takes,
+ * for a single id.
+ *
+ * Exists so a check script can drive the real resolution of its own seed
+ * without calling `resolveExpiredCompetitions`, which walks every unresolved
+ * competition in the database and would mutate other scripts' fixtures in a
+ * shared CI database.
+ */
+export async function resolveCompetitionIfComplete(
+  competitionId: string,
+): Promise<void> {
+  const [competition] = await db.query<Competition & { id: string }>(
+    `SELECT c.*, ${USERS_AGG_SQL}
+		FROM competitions c
+		LEFT JOIN competition_users cu ON cu.competition_id = c.id
+		LEFT JOIN users u ON u.user_id = cu.user_id
+		WHERE c.id = $1
+		GROUP BY c.id`,
+    [competitionId],
+  );
+  if (!competition) return;
+  await resolveIfComplete(competition, new Date(), getTodayET());
+}
+
 export async function resolveExpiredCompetitions(): Promise<void> {
   const now = new Date();
   const todayStr = getTodayET();
@@ -1854,9 +1904,11 @@ async function resolveIfComplete(
   const finalScores = await getUserScores(competition, {
     excludeCurrentInterval: true,
   });
-  const sortedUsers = Object.entries(finalScores).sort(
-    ([, a], [, b]) => b.score - a.score,
-  );
+  // The SAME chain the placements are resolved with. Picking the winner on
+  // score alone while `resolveCompetitionPlacements` breaks ties by distance
+  // means a tie resolves to a `winner` who is stored as placement 2 — the
+  // banner crowns one person and the trophy goes to another.
+  const sortedUsers = rankCompetitors(finalScores);
 
   if (sortedUsers.length === 0) return;
 
@@ -1926,14 +1978,12 @@ async function resolveCompetitionPlacements(
     return;
   }
 
-  const sorted = Object.entries(scores).sort(
-    ([, a], [, b]) => b.score - a.score,
-  );
+  const sorted = rankCompetitors(scores);
 
   let currentPlacement = 1;
   for (let i = 0; i < sorted.length; i++) {
     const [userId, data] = sorted[i];
-    if (i > 0 && data.score < sorted[i - 1][1].score) {
+    if (i > 0 && !levelWith(data, sorted[i - 1][1])) {
       currentPlacement = i + 1;
     }
     await db.query(
@@ -1941,4 +1991,52 @@ async function resolveCompetitionPlacements(
       [currentPlacement, competitionId, userId],
     );
   }
+}
+
+/**
+ * How far a competitor actually went across the competition — the tiebreak
+ * when two of them finish level on score.
+ */
+function coveredQuantity(entry: UserData[string] | undefined): number {
+  if (!entry?.intervals) return 0;
+  let total = 0;
+  for (const quantity of Object.values(entry.intervals)) total += quantity;
+  return total;
+}
+
+/**
+ * THE ordering for a competition's standings, mirrored exactly by
+ * `Competition.ranked` on iOS: score, then distance covered, then user id.
+ *
+ * The tiebreak is not decoration. Both sides used to order on score alone —
+ * here `Array.sort` (stable, so ties came out in whatever order the scores
+ * object was built in) and on the client `sorted` (NOT stable, so ties came
+ * out differently between renders of the same data). Three competitors level
+ * on 0 points therefore got placements 4/4/4 stored here while the app drew
+ * them 4/5/6 in an order that matched nothing, and the Record screen printed
+ * the server's number next to a finished screen showing the client's.
+ *
+ * Distance is the tiebreak because it is the figure both the standings row and
+ * the activity calendar already show, so the resulting order is one the reader
+ * can check. The user id is the last link, so the answer is total.
+ */
+function rankCompetitors(scores: UserData): [string, UserData[string]][] {
+  return Object.entries(scores).sort(([aId, a], [bId, b]) => {
+    if (a.score !== b.score) return b.score - a.score;
+    const covered = coveredQuantity(b) - coveredQuantity(a);
+    if (covered !== 0) return covered;
+    return aId < bId ? -1 : aId > bId ? 1 : 0;
+  });
+}
+
+/** Genuinely level — the chain in `rankCompetitors` ran out. Only then is a
+ * placement shared. */
+function levelWith(
+  a: UserData[string] | undefined,
+  b: UserData[string] | undefined,
+): boolean {
+  return (
+    (a?.score ?? 0) === (b?.score ?? 0) &&
+    coveredQuantity(a) === coveredQuantity(b)
+  );
 }

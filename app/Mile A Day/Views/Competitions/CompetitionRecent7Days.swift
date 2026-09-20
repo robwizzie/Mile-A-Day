@@ -139,7 +139,7 @@ struct CompetitionDayDetailSheet: View {
                 .fill(Color.white.opacity(0.04))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                        .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                 )
         )
     }

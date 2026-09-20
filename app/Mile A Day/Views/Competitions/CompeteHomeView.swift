@@ -71,7 +71,7 @@ struct CompeteHomeView: View {
 
     /// Wrapped within the last week. A competition you were watching shouldn't
     /// vanish from the tab the moment it ends — the full history lives in
-    /// Record.
+    /// the History segment.
     private var recentlyFinished: [Competition] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
         return competitionService.competitions
