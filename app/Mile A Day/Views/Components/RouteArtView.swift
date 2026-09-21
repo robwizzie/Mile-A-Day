@@ -151,6 +151,11 @@ struct GhostMapUnderlay: View {
 struct RouteArtView: View {
     let coordinates: [CLLocationCoordinate2D]
     let routeColor: Color
+    /// The author's route clock (`workout_routes.times`), when there is one.
+    /// Only the clock can tell a straight mile of road from the drive between
+    /// two halves of a paused walk — see `RouteGaps`. Absent ⇒ drawn exactly
+    /// as before.
+    var pointTimes: [Double]? = nil
     /// Everyone else on this walk who shared a route — same contract as
     /// `WorkoutRouteMapView.companionRoutes` (colours assigned by the caller
     /// via `CrewRoutePalette` so the legend can't disagree with the lines).
@@ -193,6 +198,7 @@ struct RouteArtView: View {
         GeometryReader { geo in
             let layout = RouteArtLayout(
                 coordinates: coordinates,
+                pointTimes: pointTimes,
                 companionRoutes: companionRoutes,
                 size: geo.size,
                 snapshot: snapshot
@@ -314,6 +320,7 @@ struct RouteArtView: View {
     static func still(
         coordinates: [CLLocationCoordinate2D],
         routeColor: Color,
+        pointTimes: [Double]? = nil,
         companionRoutes: [CompanionRoute] = [],
         authorAvatar: RouteArtAvatar? = nil,
         companionAvatars: [String: RouteArtAvatar] = [:],
@@ -326,6 +333,7 @@ struct RouteArtView: View {
     ) -> some View {
         let layout = RouteArtLayout(
             coordinates: coordinates,
+            pointTimes: pointTimes,
             companionRoutes: companionRoutes,
             size: size,
             snapshot: underlay
@@ -423,8 +431,14 @@ private struct RouteArtLayout {
     /// lines. Riders and end dots follow these same points, never the raw
     /// projection, so a badge sits on the line it belongs to.
     let companionPoints: [String: [CGPoint]]
+    /// Per line, the steps that are NOT walked ground (`RouteGaps`) — the
+    /// author's under `authorId`, everyone else's under their own id.
+    let breaksById: [String: Set<Int>]
 
-    init(coordinates: [CLLocationCoordinate2D], companionRoutes: [CompanionRoute],
+    static let authorId = "author"
+
+    init(coordinates: [CLLocationCoordinate2D], pointTimes: [Double]?,
+         companionRoutes: [CompanionRoute],
          size: CGSize, snapshot: RouteMapSnapshot?) {
         // Framing covers EVERY trace — same rule as the map view's region:
         // framing on the author alone runs a buddy off the edge. (The
@@ -438,8 +452,12 @@ private struct RouteArtLayout {
             projector = projection.point(for:)
         }
         project = projector
+        var breaks: [String: Set<Int>] = [:]
+        let authorBreaks = RouteGaps.breakIndices(coordinates: coordinates, times: pointTimes)
+        breaks[Self.authorId] = authorBreaks
         if coordinates.count >= 2 {
-            let metrics = RouteArtMetrics(coordinates: coordinates, project: projector)
+            let metrics = RouteArtMetrics(coordinates: coordinates, project: projector,
+                                          breaks: authorBreaks)
             authorMetrics = metrics.isDrawable ? metrics : nil
         } else {
             // A crew card whose author walked indoors (or shares no maps)
@@ -453,15 +471,22 @@ private struct RouteArtLayout {
         let laneUnit = max(3, size.width / 72)
         for (index, companion) in companionRoutes.enumerated()
         where companion.coordinates.count >= 2 {
-            let raw = RouteArtMetrics(coordinates: companion.coordinates, project: projector)
+            let theirBreaks = RouteGaps.breakIndices(
+                coordinates: companion.coordinates, times: companion.pointTimes)
+            breaks[companion.id] = theirBreaks
+            let raw = RouteArtMetrics(coordinates: companion.coordinates, project: projector,
+                                      breaks: theirBreaks)
             guard raw.isDrawable else { continue }
+            // Laning shifts every point sideways and drops none, so the break
+            // indices carry over to the laned copy unchanged.
             let laned = RouteLaneOffset.offset(
                 raw.points, by: RouteLaneOffset.lane(index: index, unit: laneUnit))
-            byId[companion.id] = RouteArtMetrics(points: laned)
+            byId[companion.id] = RouteArtMetrics(points: laned, breaks: theirBreaks)
             pointsById[companion.id] = laned
         }
         companionMetrics = byId
         companionPoints = pointsById
+        breaksById = breaks
     }
 }
 
@@ -492,7 +517,7 @@ private struct RouteArtStage: View {
     /// See `RouteArtView.highlightedRouteId`.
     var highlightedRouteId: String? = nil
 
-    private static let authorId = "author"
+    private static let authorId = RouteArtLayout.authorId
 
     private func lineAnimation(_ index: Int) -> Animation? {
         animationsEnabled ? RouteDrawTiming.lineAnimation(index: index) : nil
@@ -530,7 +555,8 @@ private struct RouteArtStage: View {
                     trimProgress: trimProgress,
                     cometOpacity: cometOpacity,
                     showStartMarker: showStartMarkers,
-                    showEndMarker: showEndMarkers && authorAvatar == nil
+                    showEndMarker: showEndMarkers && authorAvatar == nil,
+                    breaks: layout.breaksById[Self.authorId] ?? []
                 )
                 .opacity(emphasis(Self.authorId))
                 .animation(lineAnimation(0), value: trimProgress)
@@ -581,7 +607,8 @@ private struct RouteArtStage: View {
                 cometOpacity: cometOpacity,
                 showStartMarker: false,
                 showEndMarker: showEndMarkers && rider(for: companion) == nil,
-                overridePoints: points
+                overridePoints: points,
+                breaks: layout.breaksById[companion.id] ?? []
             )
             .opacity(emphasis(companion.id))
             .animation(lineAnimation(index + 1), value: trimProgress)

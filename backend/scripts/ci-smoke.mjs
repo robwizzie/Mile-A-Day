@@ -1198,6 +1198,7 @@ const dualGated = lockUnearnedPhotos(
   [
     row({
       dual_media_url: "/uploads/posts/ci-bob-dual.jpg",
+      dual_inset_corner: "br",
       coauthors: [
         { user_id: CARL, media_url: "/uploads/posts/ci-carl.jpg",
           dual_media_url: "/uploads/posts/ci-carl-dual.jpg" },
@@ -1214,6 +1215,11 @@ assert.equal(
   dualGated.dual_media_url,
   null,
   "its FRONT & BACK twin is withheld too — it is the same photo",
+);
+assert.equal(
+  dualGated.dual_inset_corner,
+  null,
+  "...and the corner with it — there is no inset left to point at",
 );
 assert.equal(
   dualGated.coauthors[0].dual_media_url,
@@ -1238,6 +1244,7 @@ assert.equal(
     userId: BOB,
     mediaUrl: "/uploads/posts/ci-bob-dual-primary.jpg",
     dualMediaUrl: "/uploads/posts/ci-bob-dual-swapped.jpg",
+    dualInsetCorner: "bl",
     caption: "front and back",
     workoutId: null,
     localDate,
@@ -1263,6 +1270,15 @@ assert.equal(
     "/uploads/posts/ci-bob-dual-swapped.jpg",
     "POST_SELECT serves the twin (profile grid, memories, a tapped push)",
   );
+  // The corner rides every projection the twin does. The card lays an
+  // invisible tap target over a region of a photograph it did not draw, so a
+  // projection that serves the url without the corner puts that target in
+  // the wrong place — and nothing about that is visible from the server.
+  assert.equal(
+    viaGrid?.dual_inset_corner,
+    "bl",
+    "POST_SELECT serves the corner the inset was baked into",
+  );
 
   // FEED_ENTRY_PROJECTION — the unified feed and a single post opened from a
   // push. A DIFFERENT column list; adding the column to one and missing the
@@ -1276,9 +1292,19 @@ assert.equal(
     "the unified feed serves it too",
   );
   assert.equal(
+    viaFeed?.dual_inset_corner,
+    "bl",
+    "...the feed serves the corner too",
+  );
+  assert.equal(
     (await getFeedEntryForPost(ALICE, dualPost.post_id))?.dual_media_url,
     "/uploads/posts/ci-bob-dual-swapped.jpg",
     "...and so does a single post opened by id",
+  );
+  assert.equal(
+    (await getFeedEntryForPost(ALICE, dualPost.post_id))?.dual_inset_corner,
+    "bl",
+    "...corner included",
   );
 
   // A crew slide's twin, through the real write path.
@@ -1293,6 +1319,7 @@ assert.equal(
       "/uploads/posts/ci-carl-primary.jpg",
       null,
       "/uploads/posts/ci-carl-swapped.jpg",
+      "tl",
     ),
     "addCrewPhoto accepts a FRONT & BACK slide",
   );
@@ -1302,6 +1329,11 @@ assert.equal(
     carlSlide?.dual_media_url,
     "/uploads/posts/ci-carl-swapped.jpg",
     "a crew member's slide carries its own twin",
+  );
+  assert.equal(
+    carlSlide?.dual_inset_corner,
+    "tl",
+    "...and its own corner — each slide is its own photo",
   );
 
   // Re-adding a SINGLE must drop the old swapped frame with the photo it
@@ -1326,6 +1358,11 @@ assert.equal(
     replaced?.dual_media_url,
     null,
     "...and a single replacing a dual takes the swapped frame with it",
+  );
+  assert.equal(
+    replaced?.dual_inset_corner,
+    null,
+    "...the corner goes with it, or the tap target outlives its inset",
   );
 
   await db.query(`DELETE FROM post_coauthors WHERE post_id = $1`, [

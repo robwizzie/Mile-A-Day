@@ -121,6 +121,9 @@ struct WorkoutTrackingView: View {
     /// Cheap downsampled thumb of the newest snap for the tray chip.
     @State private var lastSnapThumb: UIImage?
     @State private var showSnapSavedToast = false
+    /// Whether the snap the toast is about was a FRONT & BACK press, so the
+    /// toast can say so. Set on the way in, read only while it's on screen.
+    @State private var lastSnapWasDual = false
     /// Import a photo taken on THIS walk from the library (time-windowed).
     @State private var showLibraryImport = false
     /// Transient result banner for a library import (message, success?).
@@ -938,9 +941,13 @@ struct WorkoutTrackingView: View {
                     .strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
             )
             .overlay(alignment: .topTrailing) {
-                Text("\(midRunSnapCount)")
+                // Capped for WIDTH, not for truth — the tray holds as many
+                // as were taken. An 18pt disc fits two digits.
+                Text(midRunSnapCount > 99 ? "99+" : "\(midRunSnapCount)")
                     .font(.system(size: 11, weight: .heavy, design: .rounded))
                     .monospacedDigit()
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
                     .foregroundColor(.white)
                     .frame(width: 18, height: 18)
                     .background(Circle().fill(Color.orange))
@@ -1096,37 +1103,89 @@ struct WorkoutTrackingView: View {
         .fullScreenCover(isPresented: $showMidRunCamera) {
             // Camera-roll save is handled below, keyed to the stash id, so the
             // review gallery can show "Saved" and never duplicate the shot.
-            MADCameraView(image: $midRunImage, autoSaveToPhotos: false)
+            //
+            // FRONT & BACK is offered HERE too now. It was withheld on the
+            // grounds that this camera exists to catch a moment in one tap
+            // while you're still moving — which is exactly right about the
+            // DEFAULT and wrong about the choice: the mode rail opens on
+            // PHOTO, the shutter behaves as it always did, and the second
+            // frame only happens for someone who asked for it. Mid-walk is
+            // also where the shot most worth having both halves of is (the
+            // view, and your face looking at it), and the composer's camera
+            // is usually reached once the walk is already over.
+            MADCameraView(
+                image: $midRunImage,
+                autoSaveToPhotos: false,
+                allowsDual: true,
+                onDualCapture: { capture in
+                    stashSnap(
+                        capture.primary,
+                        secondary: capture.secondary,
+                        primaryWasFront: capture.primaryWasFront
+                    )
+                }
+            )
         }
         .onChange(of: midRunImage) { _, newImage in
             guard let image = newImage else { return }
             midRunImage = nil
-            // Downscale + JPEG-encode off the main thread — doing it inline
-            // stutters the camera dismissal animation on big sensor images.
-            Task.detached(priority: .utility) {
-                let entry = MidRunPhotoStash.add(image)
-                let count = MidRunPhotoStash.count
-                let thumb = MidRunPhotoStash.latestThumbnail()
-                await MainActor.run {
-                    // Keep the user's own full-res copy in the camera roll no
-                    // matter what (the camera no longer auto-saves this path).
-                    // When it made it into the stash, key the save to that snap
-                    // so the gallery shows "Saved" instead of a duplicate.
-                    if let entry {
-                        PhotoRollSaver.save(image, ledgerKey: entry.id)
-                    } else {
-                        PhotoRollSaver.save(image)
-                    }
-                    guard entry != nil else { return }
-                    midRunSnapCount = count
-                    lastSnapThumb = thumb
-                    MADHaptics.success()
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        showSnapSavedToast = true
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                        withAnimation(.easeOut(duration: 0.25)) { showSnapSavedToast = false }
-                    }
+            stashSnap(image)
+        }
+    }
+
+    /// Put a mid-walk shot in the stash, save the user's own copy, and say so.
+    ///
+    /// ONE path for both shapes of capture. A FRONT & BACK press arrives with
+    /// its second frame and is stored as a pair — one snap, counted once,
+    /// deleted once — so the composer can restore the arrangement later and
+    /// publish the flip. An ordinary press passes nil and nothing about it
+    /// changes.
+    private func stashSnap(
+        _ image: UIImage,
+        secondary: UIImage? = nil,
+        primaryWasFront: Bool = false
+    ) {
+        lastSnapWasDual = secondary != nil
+        // Downscale + JPEG-encode off the main thread — doing it inline
+        // stutters the camera dismissal animation on big sensor images.
+        Task.detached(priority: .utility) {
+            let entry = MidRunPhotoStash.add(
+                image, secondary: secondary, primaryWasFront: primaryWasFront)
+            let count = MidRunPhotoStash.count
+            let thumb = MidRunPhotoStash.latestThumbnail()
+            await MainActor.run {
+                // The camera roll gets ONE picture for one press: the pair
+                // flattened the way the feed will draw it. Saving only the
+                // frame they aimed would quietly drop the other half out of
+                // their own library, and saving both would put two photos in
+                // the roll for a single shutter tap.
+                //
+                // Composed HERE rather than before the detached work, even
+                // though it costs a main-thread render either way:
+                // `ImageRenderer` is main-actor only, and by this point the
+                // camera cover is already on its way out, so the frame it
+                // takes lands in the dismissal rather than in front of it.
+                let rollImage: UIImage = secondary.flatMap {
+                    DualPhotoComposite.render(big: image, small: $0)
+                } ?? image
+                // Keep the user's own full-res copy in the camera roll no
+                // matter what (the camera no longer auto-saves this path).
+                // When it made it into the stash, key the save to that snap
+                // so the gallery shows "Saved" instead of a duplicate.
+                if let entry {
+                    PhotoRollSaver.save(rollImage, ledgerKey: entry.id)
+                } else {
+                    PhotoRollSaver.save(rollImage)
+                }
+                guard entry != nil else { return }
+                midRunSnapCount = count
+                lastSnapThumb = thumb
+                MADHaptics.success()
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    showSnapSavedToast = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                    withAnimation(.easeOut(duration: 0.25)) { showSnapSavedToast = false }
                 }
             }
         }
@@ -1139,8 +1198,16 @@ struct WorkoutTrackingView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(.green)
-                Text(midRunSnapCount >= MidRunPhotoStash.maxPhotos
-                     ? "Saved — that's the max, oldest gets replaced"
+                // Names the pair once, at the moment it happens. A second
+                // frame the user asked for should still be ACKNOWLEDGED —
+                // the shutter fired twice and the tray count went up by one,
+                // and those two facts need reconciling on the spot rather
+                // than in the composer.
+                //
+                // There is no "that's the max" any more: nothing is dropped,
+                // so nothing has to be warned about.
+                Text(lastSnapWasDual
+                     ? "Both sides saved as one photo"
                      : "Saved for your post")
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
@@ -1465,6 +1532,13 @@ struct WorkoutTrackingView: View {
         .animation(.easeInOut(duration: 0.25), value: coach.lastLine)
     }
 
+    /// Muted reads as muted; on a call reads as a call, because the coach is
+    /// silent for two different reasons and only one of them is the user's.
+    private var coachIconName: String {
+        guard coachEnabled else { return "speaker.slash.fill" }
+        return coach.isOnCall ? "phone.fill" : "speaker.wave.2.fill"
+    }
+
     /// The coach's last line, and the only way to shut it up mid-walk.
     ///
     /// The coach speaks on EVERY workout — splits, the interval call, halfway,
@@ -1486,7 +1560,7 @@ struct WorkoutTrackingView: View {
                 // just muted.
                 if !coachEnabled { GhostCoach.shared.silenceCurrentLine() }
             } label: {
-                Image(systemName: coachEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                Image(systemName: coachIconName)
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(coachEnabled ? .white.opacity(0.7) : .orange)
                     .frame(width: 26, height: 26)
@@ -1508,18 +1582,16 @@ struct WorkoutTrackingView: View {
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
                     .id(line)
-                // The voice is as good as code can make it; the rest is a
-                // download the app cannot start and Settings cannot deep-link
-                // to. This hint lived only on the settings page — a screen
-                // nobody opens mid-walk — so "it sounds robotic" went
-                // unanswered at the one moment the answer would land: while
-                // the robot is talking.
-                if coachEnabled, GhostCoach.usingBasicVoice {
-                    Text("Basic voice. A natural one is a free download: Settings › Accessibility › Spoken Content › Voices.")
+                // A coach that has gone silent mid-walk reads as broken, so
+                // the one time it deliberately does, it says why. (What used
+                // to sit here was "your voice is basic, go download a better
+                // one" — an errand nobody can run mid-stride, for a voice that
+                // is no longer the robotic one.)
+                if coachEnabled, coach.isOnCall {
+                    Text("On a call — buzzing instead of speaking.")
                         .font(.system(size: 10, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.45))
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
             }
         }
@@ -1852,14 +1924,17 @@ struct WorkoutTrackingView: View {
                 goBack(to: {}, from: { buddyFlowEntry = nil })
             },
             onStart: { session in
-                // Cleared here as well as in `clearPreStartSteps`: the guards
-                // in `startBuddyWorkoutIfReady` can decline the hand-off (a
-                // workout is already running), and the lobby must still come
-                // down — it has already latched `hasHandedOff`.
-                buddyFlowEntry = nil
                 adoptedBuddySessionId = session.id
                 onBuddySessionAdopted?(session.id)
-                startBuddyWorkoutIfReady()
+                // A declined hand-off still has to leave this wizard. Every
+                // guard in `startBuddyWorkoutIfReady` means "a workout is
+                // already running", and the lobby has latched `hasHandedOff`
+                // either way, so the questions behind it are answered no
+                // matter which way it went — leaving them mounted dropped the
+                // walker back on "What are you doing?" the moment the lobby
+                // came down, which reads as the app having forgotten the walk
+                // it just started. The success path clears them itself.
+                if !startBuddyWorkoutIfReady() { clearPreStartSteps() }
             }
         )
     }

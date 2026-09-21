@@ -926,6 +926,83 @@ export async function startSession(
   return buildState(fresh);
 }
 
+/**
+ * Collapse the shared countdown — host only.
+ *
+ * `startSession` stamps `started_at` a few seconds out so every phone reaches
+ * zero on the same wall-clock instant. That wait is worth paying when there is
+ * somebody to sync with and pure cost when the host has decided to go NOW, so
+ * the countdown screen offers them this.
+ *
+ * It moves the GROUP's clock, which is the whole point and the reason it has
+ * to be a server call: the old client-side "Start now" handed the session to
+ * the tracker on that one phone and left `started_at` alone, so the host was
+ * walking while everyone else watched a number they had no say in. And it is
+ * the host's alone, for the same reason Start is — a guest pulling the start
+ * time forward would begin a walk the host hasn't begun.
+ *
+ * Idempotent by the same trick `activateSession` uses: the window is in the
+ * UPDATE's own WHERE, so a second tap, or a tap that races the countdown
+ * elapsing, matches nothing and returns the state as it stands rather than
+ * erroring at somebody whose walk is already starting.
+ */
+export async function startSessionNow(
+  sessionId: string,
+  userId: string,
+): Promise<BuddySessionState> {
+  const session = await getSessionRow(sessionId);
+  if (!session) throw new BadRequestError("session_not_found");
+  if (session.host_user_id !== userId) throw new BadRequestError("not_host");
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+      `buddy_session:${sessionId}`,
+    ]);
+    const pulled = await client.query<{ id: string }>(
+      // `ends_at` MUST move with it: a race_time walk's deadline was stamped
+      // as the old start plus the goal, so leaving it alone would hand the
+      // group the countdown's seconds back as extra race time.
+      `UPDATE buddy_sessions
+          SET started_at = NOW(),
+              ends_at = CASE
+                WHEN mode = 'race_time' AND goal_value IS NOT NULL
+                  THEN NOW() + (goal_value || ' minutes')::interval
+                ELSE ends_at
+              END,
+              state_version = state_version + 1
+        WHERE id = $1 AND status = 'active' AND started_at > NOW()
+        RETURNING id`,
+      [sessionId],
+    );
+    if (pulled.rows.length > 0) {
+      // Anyone who landed in the room between Start and now. `activateSession`
+      // lifted the roster it could see; a join that arrived during the
+      // countdown is already 'active' by `joinSession`'s own rule, but a
+      // stranded 'joined'/'ready' row is worth nothing and can report nothing
+      // (see `buddy_session_participants.status`), so lift it here too rather
+      // than leaving it for `recordProgress` to rescue.
+      await client.query(
+        `UPDATE buddy_session_participants
+            SET status = 'active'
+          WHERE session_id = $1 AND status IN ('joined', 'ready')`,
+        [sessionId],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  const fresh = await getSessionRow(sessionId);
+  if (!fresh) throw new BadRequestError("session_not_found");
+  return buildState(fresh);
+}
+
 export interface UpdateSessionInput {
   mode?: BuddyMode;
   goalValue?: number | null;

@@ -106,6 +106,10 @@ struct CompanionRoute: Identifiable {
     let id: String
     let coordinates: [CLLocationCoordinate2D]
     let color: Color
+    /// Their route clock (`workout_routes.times`), when the server sent one —
+    /// the only thing that can tell a straight mile of road from a drive
+    /// between two halves of a paused walk. See `RouteGaps`.
+    var pointTimes: [Double]? = nil
 }
 
 /// Colours for the crew's lines on a combined route map.
@@ -229,6 +233,8 @@ enum RouteDrawTiming {
 struct WorkoutRouteMapView: View {
     let coordinates: [CLLocationCoordinate2D]
     let routeColor: Color
+    /// The author's route clock — see `CompanionRoute.pointTimes`.
+    var pointTimes: [Double]? = nil
     /// Everyone else who was on this walk and shared their route.
     ///
     /// Drawn onto the SAME snapshot, and — the part that matters — folded into
@@ -303,6 +309,11 @@ struct WorkoutRouteMapView: View {
         return MKCoordinateRegion(center: center, span: span)
     }
 
+    /// Steps the author's line must not be drawn across — see `RouteGaps`.
+    private var authorBreaks: Set<Int> {
+        RouteGaps.breakIndices(coordinates: coordinates, times: pointTimes)
+    }
+
     /// Framed over EVERY trace on the map. Framing on the author's alone left
     /// a buddy who looped the other way half off the card.
     private var region: MKCoordinateRegion {
@@ -323,6 +334,7 @@ struct WorkoutRouteMapView: View {
         // otherwise pinching a buddy walk's route quietly deletes everyone but
         // the poster from it.
         companionRoutes: [CompanionRoute] = [],
+        pointTimes: [Double]? = nil,
         size: CGSize,
         @ViewBuilder overlay: () -> Overlay
     ) -> UIImage? {
@@ -338,7 +350,10 @@ struct WorkoutRouteMapView: View {
                     project: { snapshot.point(for: $0, in: size) },
                     routeColor: companion.color,
                     trimProgress: 1,
-                    showEndMarker: true
+                    showEndMarker: true,
+                    breaks: RouteGaps.breakIndices(
+                        coordinates: companion.coordinates,
+                        times: companion.pointTimes)
                 )
             }
             RouteOverlay(
@@ -347,7 +362,8 @@ struct WorkoutRouteMapView: View {
                 routeColor: routeColor,
                 trimProgress: 1,
                 showStartMarker: true,
-                showEndMarker: true
+                showEndMarker: true,
+                breaks: RouteGaps.breakIndices(coordinates: coordinates, times: pointTimes)
             )
             overlay()
         }
@@ -397,7 +413,10 @@ struct WorkoutRouteMapView: View {
                             trimProgress: trimProgress,
                             cometOpacity: cometVisible ? cometOpacity : 0,
                             showStartMarker: false,
-                            showEndMarker: showEndMarkers
+                            showEndMarker: showEndMarkers,
+                            breaks: RouteGaps.breakIndices(
+                                coordinates: companion.coordinates,
+                                times: companion.pointTimes)
                         )
                         // The stagger, applied where it actually works. Index 0
                         // here is the FIRST COMPANION; the author leaves first
@@ -413,7 +432,8 @@ struct WorkoutRouteMapView: View {
                         trimProgress: trimProgress,
                         cometOpacity: cometVisible ? cometOpacity : 0,
                         showStartMarker: showStartMarkers,
-                        showEndMarker: showEndMarkers
+                        showEndMarker: showEndMarkers,
+                        breaks: authorBreaks
                     )
                     .animation(Self.lineAnimation(index: 0), value: trimProgress)
                 } else {
@@ -524,6 +544,10 @@ struct RouteOverlay: View {
     /// Pre-projected (and possibly LANED — see `RouteLaneOffset`) points. When
     /// set, `coordinates`/`project` are ignored for the line itself.
     var overridePoints: [CGPoint]? = nil
+    /// Steps this line must NOT draw across — a walk paused in one place and
+    /// resumed in another (`RouteGaps`). Index-aligned with the coordinates,
+    /// which is also what `overridePoints` preserves.
+    var breaks: Set<Int> = []
 
     private var points: [CGPoint] {
         overridePoints ?? coordinates.map(project)
@@ -540,7 +564,7 @@ struct RouteOverlay: View {
         return ZStack {
             if points.count >= 2 {
                 // Glow
-                RoutePath(points: points)
+                RoutePath(points: points, breaks: breaks)
                     .trim(from: 0, to: trimProgress)
                     .stroke(routeColor.opacity(0.3), style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
                     .blur(radius: 3)
@@ -551,12 +575,12 @@ struct RouteOverlay: View {
                 // changes colour. A hairline of map-dark on either side is what
                 // keeps them legible as separate people — the same trick every
                 // transit map uses, and it costs one stroke.
-                RoutePath(points: points)
+                RoutePath(points: points, breaks: breaks)
                     .trim(from: 0, to: trimProgress)
                     .stroke(Color.black.opacity(0.45), style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
 
                 // Main line
-                RoutePath(points: points)
+                RoutePath(points: points, breaks: breaks)
                     .trim(from: 0, to: trimProgress)
                     .stroke(routeColor, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
 
@@ -567,7 +591,7 @@ struct RouteOverlay: View {
                 // alternative (a cumulative arc-length table sampled per frame)
                 // is a second answer to a question `Path.trim` has already
                 // answered, and one that could disagree with the line under it.
-                RoutePath(points: points)
+                RoutePath(points: points, breaks: breaks)
                     .trim(from: max(0, trimProgress - Self.cometLength), to: trimProgress)
                     .stroke(Color.white, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
                     .shadow(color: routeColor, radius: 6)
@@ -604,9 +628,11 @@ struct RouteOverlay: View {
 
 struct RoutePath: Shape {
     let points: [CGPoint]
+    /// See `RoutePolyline.path(through:breakingAfter:)`.
+    var breaks: Set<Int> = []
 
     func path(in rect: CGRect) -> Path {
         // Drawn identically to the baked auto-post image (RunPostService).
-        Path(RoutePolyline.path(through: points))
+        Path(RoutePolyline.path(through: points, breakingAfter: breaks))
     }
 }

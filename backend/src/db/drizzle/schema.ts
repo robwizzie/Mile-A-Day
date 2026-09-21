@@ -1809,6 +1809,7 @@ export const posts = pgTable(
     // picture staying put while the big one changes (iOS `DualPhotoLayout` is
     // the single definition of that rectangle).
     dualMediaUrl: text("dual_media_url"),
+    dualInsetCorner: text("dual_inset_corner"),
     caption: text(),
     workoutId: varchar("workout_id", { length: 255 }),
     // Denormalized {distance, pace, duration, streak, date} captured at post time
@@ -2587,6 +2588,7 @@ export const postCoauthors = pgTable(
     // null for everyone who shot a single. See that column for why two
     // finished pictures rather than two raw frames.
     dualMediaUrl: text("dual_media_url"),
+    dualInsetCorner: text("dual_inset_corner"),
     photoAddedAt: timestamp("photo_added_at", {
       withTimezone: true,
       mode: "string",

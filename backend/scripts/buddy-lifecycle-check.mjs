@@ -16,6 +16,7 @@ import {
   createSession,
   updateSession,
   startSession,
+  startSessionNow,
   joinSession,
   finishParticipation,
   recordProgress,
@@ -249,6 +250,61 @@ try {
     try { await recordProgress(s.id, A, 0.1, 60); } catch (e) { err = e.message; }
     check("a stranded joiner's first progress report is accepted", err, null);
     check("…and lifts them to active", (await participant(s.id, A)).status, "active");
+  }
+
+  // ── 12. "Start now" ends the countdown for EVERYONE, and only the host ─
+  //
+  // The countdown stamps `started_at` a few seconds out so every phone hits
+  // zero together. Skipping it used to be a CLIENT-side shortcut anyone could
+  // take, which meant the tapper walked while the rest of the crew watched a
+  // number — on a screen headed "Starting together". These assert the rule as
+  // the server now holds it, because nothing about the old behaviour errored.
+  {
+    const s = await createSession(H, { mode: "together", activityType: "walking", inviteUserIds: [A] });
+    await joinSession(A, { sessionId: s.id });
+    await startSession(s.id, H);
+    const counting = await sessionRow(s.id);
+    check("a fresh start is still counting down", counting.started_at > new Date(), true);
+
+    let err = null;
+    try { await startSessionNow(s.id, A); } catch (e) { err = e.message; }
+    check("a guest cannot pull the group's start forward", err, "not_host");
+    check("…so the countdown is untouched", (await sessionRow(s.id)).started_at.getTime(), counting.started_at.getTime());
+
+    await startSessionNow(s.id, H);
+    const pulled = await sessionRow(s.id);
+    check("the host ends the countdown", pulled.started_at <= new Date(), true);
+    // The whole point: it is the SESSION's clock, so the guest's next poll
+    // starts them too. A per-phone shortcut could never assert this.
+    // Epoch ms, not the raw value: a timestamptz comes back from raw SQL as a
+    // Date and JSON.stringify prints it identically to the ISO string, so a
+    // `===` on the values fails while the log shows two lines that match.
+    check("…which is the same clock the guest reads", new Date((await getSessionState(s.id, A)).started_at).getTime(), pulled.started_at.getTime());
+    check("…and both are active", (await participant(s.id, A)).status, "active");
+
+    // Idempotent: a second tap, or one that races the countdown elapsing,
+    // must not error at somebody whose walk is already starting.
+    let twice = null;
+    try { await startSessionNow(s.id, H); } catch (e) { twice = e.message; }
+    check("a second tap is a no-op, not an error", twice, null);
+    check("…and does not move the start again", (await sessionRow(s.id)).started_at.getTime(), pulled.started_at.getTime());
+  }
+
+  // ── 12b. A race's deadline moves with its start ───────────────────────
+  //
+  // `ends_at` was stamped as the old start plus the goal. Leaving it alone
+  // would hand the group the countdown's seconds back as extra race time —
+  // silently, and only on the walks being scored to the second.
+  {
+    const s = await createSession(H, { mode: "race_time", goalValue: 30, activityType: "walking", inviteUserIds: [A] });
+    await joinSession(A, { sessionId: s.id });
+    await startSession(s.id, H);
+    const before = await sessionRow(s.id);
+    await startSessionNow(s.id, H);
+    const after = await sessionRow(s.id);
+    check("pulling the start forward pulls the race's end with it", after.ends_at < before.ends_at, true);
+    const minutes = (after.ends_at - after.started_at) / 60000;
+    check("…leaving exactly the goal's minutes to run", Math.round(minutes), 30);
   }
 
   // ── 13. getMySessions prefers the walk I'm in over a lobby I booked ───

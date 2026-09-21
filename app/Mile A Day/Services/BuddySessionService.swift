@@ -694,6 +694,32 @@ final class BuddySessionService: ObservableObject {
             ))
     }
 
+    /// End the shared countdown for EVERYONE — host only, server-side.
+    ///
+    /// The countdown exists so every phone reaches zero on the same wall-clock
+    /// instant. "Start now" used to be a local shortcut past it: it handed the
+    /// session to this phone's tracker and left `started_at` alone, so the
+    /// person who tapped it was walking while the rest of the crew watched a
+    /// number tick down. That is the one thing a walk *together* must not do,
+    /// and it is why this moves the group's clock instead.
+    ///
+    /// Nothing here hands off. The response carries the new `started_at`, in
+    /// the past, and the lobby's own elapsed check fires on the next tick —
+    /// for the host exactly as for everyone else's poll, so one rule starts
+    /// every phone and the host can't get a private head start.
+    ///
+    /// Throws so the caller can report it: a start that silently did nothing
+    /// is worse than a walk that begins eight seconds later.
+    func startNow() async throws {
+        guard let id = session?.id else { return }
+        apply(
+            try await request(
+                "/buddy/sessions/\(id)/start-now",
+                method: .POST,
+                responseType: BuddySessionState.self
+            ))
+    }
+
     /// Step out of the walk. Valid in every phase — waiting in the lobby, mid
     /// countdown, or a mile into a walk you'd rather finish on your own.
     ///

@@ -102,6 +102,10 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     /// and on older servers, and nulled outright by the earn-to-view gate —
     /// it is the same withheld photo from the other camera.
     var dual_media_url: String? = nil
+    /// Which corner the inset was BAKED into — "tr"/"tl"/"bl"/"br".
+    /// nil on every post made before the inset could be moved, and on
+    /// every older server, which is exactly top-trailing.
+    var dual_inset_corner: String? = nil
     /// Their own words under their own slide. Nil until they write one, and
     /// on older servers — the card falls back to showing nothing under a
     /// crew slide rather than the author's caption, which isn't theirs.
@@ -240,6 +244,10 @@ struct PostItem: Codable, Identifiable {
     /// `media_url` still shows a complete front-and-back shot. This is what
     /// lets the card offer the tap-to-swap.
     var dual_media_url: String? = nil
+    /// Which corner the inset was BAKED into — "tr"/"tl"/"bl"/"br".
+    /// nil on every post made before the inset could be moved, and on
+    /// every older server, which is exactly top-trailing.
+    var dual_inset_corner: String? = nil
     var caption: String?
     let workout_id: String?
     /// Linked workout's feed role — display framing only: "extra" renders
@@ -493,6 +501,8 @@ struct FeedEntry: Codable, Identifiable {
     /// FRONT & BACK's swapped arrangement — see `PostItem.dual_media_url`.
     /// Needs a CodingKeys case below like every other field here.
     let dual_media_url: String?
+    /// Which corner the inset was baked into. CodingKeys case too.
+    let dual_inset_corner: String?
     var caption: String?
     let stats_snapshot: PostStats?
     /// The run's story-only photo, when one exists — powers the photo/route
@@ -603,7 +613,8 @@ struct FeedEntry: Codable, Identifiable {
         case kind
         case entryId = "id"
         case sort_ts, user_id, username, first_name, last_name, profile_image_url
-        case media_url, dual_media_url, caption, stats_snapshot, story_photo_url, is_auto
+        case media_url, dual_media_url, dual_inset_corner
+        case caption, stats_snapshot, story_photo_url, is_auto
         case include_route
         // With an explicit CodingKeys enum, EVERY stored property must be
         // listed (or defaulted) — a new field left out kills Codable
@@ -651,7 +662,8 @@ struct FeedEntry: Codable, Identifiable {
             post_id: entryId, user_id: user_id, username: username,
             first_name: first_name, last_name: last_name,
             profile_image_url: profile_image_url, media_url: media,
-            dual_media_url: dual_media_url, caption: caption,
+            dual_media_url: dual_media_url, dual_inset_corner: dual_inset_corner,
+            caption: caption,
             workout_id: workout_id, feed_role: feed_role,
             stats_snapshot: stats_snapshot, local_date: nil,
             share_to_feed: true, share_to_story: nil, story_expires_at: nil,
@@ -895,6 +907,11 @@ enum PostService {
         /// entirely — in which case the post is simply the primary, which is
         /// already a complete picture with the inset baked into it.
         dualMediaUrl: String? = nil,
+        /// Which corner the inset was BAKED into ("tr"/"tl"/"bl"/"br"). The
+        /// feed card lays its swap target over a region of a photograph it
+        /// did not draw, so it has to be told where the poster left it.
+        /// Absent means the original top-trailing.
+        dualInsetCorner: String? = nil,
         caption: String?,
         workoutId: String?,
         shareToFeed: Bool,
@@ -923,6 +940,7 @@ enum PostService {
         struct Body: Encodable {
             let media_url: String
             let dual_media_url: String?
+            let dual_inset_corner: String?
             let caption: String?
             let workout_id: String?
             let share_to_feed: Bool
@@ -940,6 +958,7 @@ enum PostService {
             Body(
                 media_url: mediaUrl,
                 dual_media_url: dualMediaUrl,
+                dual_inset_corner: dualInsetCorner,
                 caption: caption,
                 workout_id: workoutId,
                 share_to_feed: shareToFeed,
@@ -980,20 +999,24 @@ enum PostService {
         /// FRONT & BACK's other frame for THIS slide — same contract as the
         /// author's, and re-sending without one drops it, because replacing
         /// your picture replaces the whole of it.
-        dualMediaUrl: String? = nil
+        dualMediaUrl: String? = nil,
+        /// Which corner this slide's inset was baked into.
+        dualInsetCorner: String? = nil
     ) async throws {
         struct Body: Encodable {
             let media_url: String
             let caption: String?
             let photo_source: String?
             let dual_media_url: String?
+            let dual_inset_corner: String?
         }
         let bodyData = try JSONEncoder().encode(
             Body(
                 media_url: mediaUrl,
                 caption: caption,
                 photo_source: photoSource?.rawValue,
-                dual_media_url: dualMediaUrl
+                dual_media_url: dualMediaUrl,
+                dual_inset_corner: dualInsetCorner
             )
         )
         _ = try await APIClient.fancyFetch(

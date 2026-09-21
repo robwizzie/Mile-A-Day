@@ -79,21 +79,28 @@ struct RouteArtMetrics {
     private let cumulativeMeters: [Double]
     let totalProjected: CGFloat
     let totalMeters: Double
+    /// Steps that are not walked ground (`RouteGaps`). They contribute
+    /// nothing to either total, so the rider crosses one instantly and the
+    /// mile ticks count only ground the walker covered — the same rule the
+    /// flyover's `FlyoverTrack` applies to its own arc lengths.
+    let breaks: Set<Int>
 
     /// A line worth drawing at all — two distinct points with some length.
     var isDrawable: Bool { points.count >= 2 && totalProjected > 0.5 }
 
     var totalMiles: Double { totalMeters / 1609.344 }
 
-    init(coordinates: [CLLocationCoordinate2D], projection: RouteArtProjection) {
-        self.init(coordinates: coordinates, project: projection.point(for:))
+    init(coordinates: [CLLocationCoordinate2D], projection: RouteArtProjection,
+         breaks: Set<Int> = []) {
+        self.init(coordinates: coordinates, project: projection.point(for:), breaks: breaks)
     }
 
     /// Projector-agnostic form: the art canvas passes its own aspect-fit
     /// projection, the ghost-map underlay passes the SNAPSHOT's projection
     /// (streets behind the line ⇒ the line must land on those streets — the
     /// ios.md snapshot-projection rule).
-    init(coordinates: [CLLocationCoordinate2D], project: (CLLocationCoordinate2D) -> CGPoint) {
+    init(coordinates: [CLLocationCoordinate2D], project: (CLLocationCoordinate2D) -> CGPoint,
+         breaks: Set<Int> = []) {
         let projected = coordinates.map(project)
         var cumProj: [CGFloat] = []
         var cumMeters: [Double] = []
@@ -102,7 +109,7 @@ struct RouteArtMetrics {
         var proj: CGFloat = 0
         var meters: Double = 0
         for (i, p) in projected.enumerated() {
-            if i > 0 {
+            if i > 0, !breaks.contains(i - 1) {
                 let prev = projected[i - 1]
                 proj += hypot(p.x - prev.x, p.y - prev.y)
                 // Inline haversine, not CLLocation.distance: this init runs
@@ -115,6 +122,7 @@ struct RouteArtMetrics {
             cumMeters.append(meters)
         }
         points = projected
+        self.breaks = breaks
         cumulativeProjected = cumProj
         cumulativeMeters = cumMeters
         totalProjected = proj
@@ -124,12 +132,13 @@ struct RouteArtMetrics {
     /// Synthetic-polyline variant (no geography) — the indoor track card's
     /// stadium is a plain point loop, but its rider runs through the same
     /// arc-length machinery as a real route's.
-    init(points canvasPoints: [CGPoint]) {
+    init(points canvasPoints: [CGPoint], breaks: Set<Int> = []) {
+        self.breaks = breaks
         var cumProj: [CGFloat] = []
         cumProj.reserveCapacity(canvasPoints.count)
         var proj: CGFloat = 0
         for (i, p) in canvasPoints.enumerated() {
-            if i > 0 {
+            if i > 0, !breaks.contains(i - 1) {
                 let prev = canvasPoints[i - 1]
                 proj += hypot(p.x - prev.x, p.y - prev.y)
             }

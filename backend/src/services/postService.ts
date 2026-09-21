@@ -364,6 +364,11 @@ const POST_COLUMNS = `
 	-- shows media_url, which already has the inset baked in and is a complete
 	-- picture on its own.
 	p.dual_media_url,
+	-- Which corner that inset was BAKED into ('tr'/'tl'/'bl'/'br'). The card
+	-- lays an invisible swap target over a region of a photograph it did not
+	-- draw, so it has to be told where the poster left it. NULL = the
+	-- original top-trailing, which is every post made before it could move.
+	p.dual_inset_corner,
 	p.caption,
 	p.workout_id,
 	-- The ONE competition the poster stickered, or NULL. Additive and inert for
@@ -804,6 +809,7 @@ const MULTI_COAUTHORS_JSON = `(
 		'media_url', pca.media_url,
 		-- Their slide's FRONT & BACK twin, same contract as the author's.
 		'dual_media_url', pca.dual_media_url,
+		'dual_inset_corner', pca.dual_inset_corner,
 		-- Their own words under their own slide (additive; NULL until set).
 		'caption', pca.caption,
 		'route', ${CREW_ROUTE_SQL},
@@ -1132,6 +1138,8 @@ export interface CreatePostInput {
    * media url visible to the whole circle, so the same ownership test applies.
    */
   dualMediaUrl?: string | null;
+  /** Which corner the inset was baked into: 'tr' | 'tl' | 'bl' | 'br'. */
+  dualInsetCorner?: string | null;
   caption?: string | null;
   workoutId?: string | null;
   localDate: string;
@@ -1509,7 +1517,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 				local_date, share_to_feed, share_to_story, story_expires_at,
 				is_auto, include_route, coauthor_user_id, coauthor_status,
 				coauthor_workout_id, posted_fresh, buddy_session_id,
-				competition_id, dual_media_url
+				competition_id, dual_media_url, dual_inset_corner
 			)
 			VALUES (
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
@@ -1546,7 +1554,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 						AND cu.user_id = $1
 						AND cu.invite_status = 'accepted'
 				),
-				$15
+				$15, $16
 			)
 				ON CONFLICT ${conflictTarget}
 				DO UPDATE SET
@@ -1556,6 +1564,10 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 					-- the old swapped frame with it, or the card would offer a
 					-- flip to somebody's previous shot.
 					dual_media_url = EXCLUDED.dual_media_url,
+					-- Wholesale for the same reason: the corner describes THAT
+					-- pair's inset, and keeping an old one would point the tap
+					-- target at a place the new picture has nothing in.
+					dual_inset_corner = EXCLUDED.dual_inset_corner,
 					caption = COALESCE(EXCLUDED.caption, posts.caption),
 					stats_snapshot = COALESCE(EXCLUDED.stats_snapshot, posts.stats_snapshot),
 					share_to_feed = EXCLUDED.share_to_feed,
@@ -1611,6 +1623,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       // accepted membership and stores NULL if they aren't in it.
       input.competitionId ?? null,
       input.dualMediaUrl ?? null,
+      input.dualInsetCorner ?? null,
     ],
   );
   if (rows[0]) {
@@ -2445,12 +2458,14 @@ export function lockUnearnedPhotos<
     is_auto?: boolean | null;
     media_url?: string | null;
     dual_media_url?: string | null;
+    dual_inset_corner?: string | null;
     story_photo_url?: string | null;
     photo_locked?: boolean;
     coauthors?: {
       user_id: string;
       media_url?: string | null;
       dual_media_url?: string | null;
+      dual_inset_corner?: string | null;
     }[] | null;
   },
 >(rows: T[], viewerId: string, gate: ViewerGoalGate): T[] {
@@ -2474,6 +2489,7 @@ export function lockUnearnedPhotos<
     // absent already means "no second frame" to every client.
     if (r.is_auto !== true && r.dual_media_url) {
       r.dual_media_url = null;
+      r.dual_inset_corner = null;
       withheld = true;
     }
     // A buddy post carries the whole crew's photos, so gating only the
@@ -2484,6 +2500,7 @@ export function lockUnearnedPhotos<
       if (c.user_id === viewerId) continue;
       if (c.dual_media_url) {
         c.dual_media_url = null;
+        c.dual_inset_corner = null;
         withheld = true;
       }
       if (!c.media_url) continue;
@@ -2694,7 +2711,7 @@ const FEED_ENTRY_PROJECTION = `
 			page.sort_ts,
 			page.owner_id AS user_id,
 			u.username, u.first_name, u.last_name, u.profile_image_url,
-			p.media_url, p.dual_media_url, p.caption,
+			p.media_url, p.dual_media_url, p.dual_inset_corner, p.caption,
 			-- A photo post on the day's anchor speaks for the whole mile, so its
 			-- baked snapshot is restated in the rollup's terms. Without this a
 			-- 3 x 0.33 day whose anchor carries a post would read "0.33 mi" — the
@@ -4294,11 +4311,13 @@ export async function addCrewPhoto(
    * take the swapped frame with it rather than leave a flip to the old photo.
    */
   dualMediaUrl: string | null = null,
+  /** Which corner this slide's inset was baked into; same wholesale rule. */
+  dualInsetCorner: string | null = null,
 ): Promise<boolean> {
   const rows = await db.query<{ post_id: string }>(
     `UPDATE post_coauthors
 				SET media_url = $3, photo_added_at = NOW(), caption = $4,
-					dual_media_url = $5
+					dual_media_url = $5, dual_inset_corner = $6
 			WHERE post_id = $1 AND user_id = $2 AND status = 'accepted'
 				AND EXISTS (
 					SELECT 1 FROM posts p
@@ -4311,6 +4330,7 @@ export async function addCrewPhoto(
       stripMediaQuery(mediaUrl),
       caption,
       dualMediaUrl ? stripMediaQuery(dualMediaUrl) : null,
+      dualInsetCorner,
     ],
   );
   return rows.length > 0;

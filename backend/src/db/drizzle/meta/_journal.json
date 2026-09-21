@@ -512,6 +512,13 @@
       "when": 1789840338292,
       "tag": "0072_colorful_captain_cross",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1789944209189,
+      "tag": "0073_mighty_the_spike",
+      "breakpoints": true
     }
   ]
 }

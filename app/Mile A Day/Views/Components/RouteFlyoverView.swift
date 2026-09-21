@@ -166,7 +166,7 @@ struct FlyoverPersonInfo: Identifiable {
 extension FlyoverLaunch {
     var flyablePeople: [FlyoverPersonInfo] {
         var out: [FlyoverPersonInfo] = []
-        if FlyoverTrack(coordinates: coordinates).isFlyable {
+        if FlyoverTrack(coordinates: coordinates, times: pointTimes).isFlyable {
             out.append(FlyoverPersonInfo(
                 id: "author",
                 name: author?.name ?? "Author",
@@ -175,7 +175,7 @@ extension FlyoverLaunch {
             ))
         }
         for companion in companions
-        where FlyoverTrack(coordinates: companion.coordinates).isFlyable {
+        where FlyoverTrack(coordinates: companion.coordinates, times: companion.pointTimes).isFlyable {
             out.append(FlyoverPersonInfo(
                 id: companion.id,
                 name: companion.avatar?.name ?? "a friend",
@@ -238,7 +238,8 @@ struct WeeklyFlyoverPlayerView: View {
     /// accumulated, so stepping backwards stays honest.
     private func baseMiles(before index: Int) -> Double {
         launches.prefix(index).reduce(0) { sum, leg in
-            sum + (leg.officialDistanceMiles ?? FlyoverTrack(coordinates: leg.coordinates).totalMiles)
+            sum + (leg.officialDistanceMiles ?? FlyoverTrack(coordinates: leg.coordinates,
+                                                              times: leg.pointTimes).totalMiles)
         }
     }
 
@@ -346,11 +347,36 @@ struct FlyoverTrack {
     private let cumulativeMeters: [Double]
     let totalMapLength: Double
     let totalMeters: Double
+    /// Indices `i` where the step to `i + 1` is not walked ground — a walk
+    /// paused in one place and resumed in another (see `RouteGaps`). Empty
+    /// for essentially every route, and always empty without a clock.
+    let breaks: Set<Int>
 
+    var hasBreaks: Bool { !breaks.isEmpty }
     var isFlyable: Bool { coordinates.count >= 2 && totalMeters > 30 }
     var totalMiles: Double { totalMeters / 1609.344 }
 
-    init(coordinates: [CLLocationCoordinate2D]) {
+    /// One contiguous stretch of drawn line: the coordinates, and the window
+    /// of the shared 0...1 fraction clock it occupies. A route with no
+    /// breaks is a single piece spanning the whole clock, which is what
+    /// keeps the gap machinery free for everyone else.
+    struct Piece {
+        let range: ClosedRange<Double>
+        let coordinates: [CLLocationCoordinate2D]
+    }
+
+    /// The stretches worth drawing (two points or more), in order.
+    var pieces: [Piece] {
+        RouteGaps.pieces(count: coordinates.count, breaks: breaks).compactMap { range -> Piece? in
+            guard range.count >= 2, totalMapLength > 0 else { return nil }
+            let from = cumulativeMap[range.lowerBound] / totalMapLength
+            let to = cumulativeMap[range.upperBound] / totalMapLength
+            return Piece(range: from...to, coordinates: Array(coordinates[range]))
+        }
+    }
+
+    init(coordinates: [CLLocationCoordinate2D], times: [Double]? = nil) {
+        let breaks = RouteGaps.breakIndices(coordinates: coordinates, times: times)
         let pts = coordinates.map(MKMapPoint.init)
         var cumMap: [Double] = []
         var cumMeters: [Double] = []
@@ -359,7 +385,11 @@ struct FlyoverTrack {
         var mapDist = 0.0
         var meters = 0.0
         for (i, p) in pts.enumerated() {
-            if i > 0 {
+            // A gap contributes NOTHING to either length. That is what makes
+            // the odometer count only walked ground, keeps the calibration
+            // ratio honest, and turns the camera's crossing into a jump-cut
+            // instead of eighteen miles flown at walking pace.
+            if i > 0, !breaks.contains(i - 1) {
                 mapDist += hypot(p.x - pts[i - 1].x, p.y - pts[i - 1].y)
                 meters += pts[i - 1].distance(to: p)
             }
@@ -367,6 +397,7 @@ struct FlyoverTrack {
             cumMeters.append(meters)
         }
         self.coordinates = coordinates
+        self.breaks = breaks
         mapPoints = pts
         cumulativeMap = cumMap
         cumulativeMeters = cumMeters
@@ -464,11 +495,27 @@ struct FlyoverTrack {
         return cumulativeMeters[i - 1] + (cumulativeMeters[i] - cumulativeMeters[i - 1]) * t
     }
 
+    /// The fraction at which the piece containing `fraction` ends — 1 when
+    /// nothing breaks ahead of it.
+    private func nextBreakFraction(after fraction: Double) -> Double {
+        guard hasBreaks, totalMapLength > 0 else { return 1 }
+        let here = min(max(fraction, 0), 1) * totalMapLength
+        for i in breaks.sorted() where cumulativeMap[i] >= here {
+            return min(1, cumulativeMap[i] / totalMapLength)
+        }
+        return 1
+    }
+
     /// Compass bearing (degrees) of travel at `fraction`, looking
     /// `lookaheadMeters` further along the line.
     func bearing(atFraction fraction: Double, lookaheadMeters: Double) -> Double {
         guard totalMeters > 0 else { return 0 }
-        let aheadFraction = min(1, fraction + lookaheadMeters / totalMeters)
+        // Looking ahead ACROSS a gap reads the next piece's opening stretch,
+        // which points wherever the errand ended up — the camera swung round
+        // to face it a second before the jump-cut. Stop the lookahead at the
+        // break instead.
+        let aheadFraction = min(nextBreakFraction(after: fraction),
+                                fraction + lookaheadMeters / totalMeters)
         var a = mapPoint(atFraction: fraction)
         var b = mapPoint(atFraction: max(aheadFraction, fraction + 0.0005))
         if fraction >= 0.999 {
@@ -1479,8 +1526,8 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     private enum OverlayRole {
         case casing
         case fullLine(UIColor)
-        case glow(personIndex: Int, UIColor)
-        case trail(personIndex: Int, UIColor)
+        case glow(PieceKey, UIColor)
+        case trail(PieceKey, UIColor)
         /// One whole-mile slice of the AUTHOR's trail, tinted by that mile's
         /// pace (fast = brighter) — the run's effort made visible as it draws.
         case trailSegment(segment: Int, UIColor)
@@ -1523,9 +1570,21 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     /// the knob resumes only if the user hadn't paused.
     private var userPaused = false
 
+    /// A line is drawn once per contiguous PIECE of somebody's route — one
+    /// piece for a walk with no gap in it, which is everybody's.
+    private struct PieceKey: Hashable {
+        let person: Int
+        let piece: Int
+    }
+
     private var overlayRoles: [ObjectIdentifier: OverlayRole] = [:]
-    private var glowRenderers: [Int: MKPolylineRenderer] = [:]
-    private var trailRenderers: [Int: MKPolylineRenderer] = [:]
+    private var glowRenderers: [PieceKey: MKPolylineRenderer] = [:]
+    private var trailRenderers: [PieceKey: MKPolylineRenderer] = [:]
+    /// Per person, the shared-clock fraction window each piece covers, so a
+    /// piece fills over its own share exactly like an author pace slice.
+    private var pieceRanges: [Int: [ClosedRange<Double>]] = [:]
+    /// `framedCoordinates` memo — see there.
+    private var framedCache: (person: Int, coordinates: [CLLocationCoordinate2D])?
     /// Pace-tinted author trail: fraction range + renderer per whole-mile
     /// slice (plus a base-accent remainder). Empty = author draws the plain
     /// single trail like everyone else.
@@ -1606,14 +1665,14 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             let startedAt: Double?
         }
         var riders: [Rider] = []
-        if FlyoverTrack(coordinates: launch.coordinates).isFlyable {
+        if FlyoverTrack(coordinates: launch.coordinates, times: launch.pointTimes).isFlyable {
             riders.append(Rider(
                 coordinates: launch.coordinates, color: accent, avatar: launch.author,
                 officialMiles: launch.officialDistanceMiles,
                 times: launch.pointTimes, startedAt: launch.startedAt))
         }
         for companion in launch.companions {
-            let raw = FlyoverTrack(coordinates: companion.coordinates)
+            let raw = FlyoverTrack(coordinates: companion.coordinates, times: companion.pointTimes)
             guard raw.isFlyable else { continue }
             riders.append(Rider(
                 coordinates: companion.coordinates, color: UIColor(companion.color),
@@ -1634,9 +1693,15 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         }
         if !riders.isEmpty, aligned {
             let earliest = riders.compactMap(\.startedAt).min() ?? 0
-            clocks = riders.map { rider in
-                FlyoverPersonClock(
-                    times: rider.times ?? [],
+            clocks = riders.map { rider -> FlyoverPersonClock? in
+                // The clock gets the gaps taken OUT of it (the track drops
+                // them from its lengths for the same reason): the shared
+                // fraction is the walk's duration, so an errand left inside
+                // it spends the flight on a rider standing still.
+                let raw = rider.times ?? []
+                let breaks = RouteGaps.breakIndices(coordinates: rider.coordinates, times: raw)
+                return FlyoverPersonClock(
+                    times: RouteGaps.collapsingGaps(times: raw, breaks: breaks),
                     offset: riders.count == 1 ? 0 : max(0, (rider.startedAt ?? earliest) - earliest))
             }
             walkDuration = clocks.compactMap { $0?.endsAt }.max() ?? 0
@@ -1647,7 +1712,7 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         var built: [Person] = []
         for (index, rider) in riders.enumerated() {
             built.append(Self.person(
-                coordinates: rider.coordinates,
+                coordinates: rider.coordinates, times: rider.times,
                 color: rider.color, avatar: rider.avatar, laneIndex: built.count,
                 officialMiles: rider.officialMiles, clock: clocks[index]))
         }
@@ -1691,6 +1756,7 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
 
     private static func person(
         coordinates: [CLLocationCoordinate2D],
+        times: [Double]?,
         color: UIColor,
         avatar: RouteArtAvatar?,
         laneIndex: Int,
@@ -1702,7 +1768,7 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         let magnitude = Double((laneIndex + 1) / 2) * 3.0
         let offset = laneIndex == 0 ? 0 : (laneIndex % 2 == 1 ? magnitude : -magnitude)
         let laned = FlyoverTrack.laneOffset(coordinates, meters: offset)
-        let track = FlyoverTrack(coordinates: laned)
+        let track = FlyoverTrack(coordinates: laned, times: times)
         // Calibrate to the recorded number, sanity-banded to the 1–3%
         // shortfall route simplification actually causes (plus GPS-vs-
         // pedometer slack). Deliberately TIGHT: an out-of-band ratio means
@@ -1797,20 +1863,32 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
         // Every person's full line (casing under colour), then the
         // progressive pairs — one per person, only the followed one visible.
         // The AUTHOR's trail is per-mile pace-tinted slices when splits exist.
-        let paceSegments = buildAuthorPaceSegments()
+        // A pace slice is a whole-mile window of the clock, and on a gapped
+        // walk a mile straddles the break — sampling one would draw the very
+        // line the pieces exist to avoid. The plain trail is the fallback.
+        let paceSegments = people[0].track.hasBreaks ? [] : buildAuthorPaceSegments()
         for (index, person) in people.enumerated() {
-            let coords = person.track.coordinates
-            let casing = MKPolyline(coordinates: coords, count: coords.count)
-            overlayRoles[ObjectIdentifier(casing)] = .casing
-            map.addOverlay(casing, level: .aboveLabels)
-            let line = MKPolyline(coordinates: coords, count: coords.count)
-            overlayRoles[ObjectIdentifier(line)] = .fullLine(person.color)
-            map.addOverlay(line, level: .aboveLabels)
-            let glow = MKPolyline(coordinates: coords, count: coords.count)
-            overlayRoles[ObjectIdentifier(glow)] = .glow(personIndex: index, person.color)
-            map.addOverlay(glow, level: .aboveLabels)
+            let pieces = person.track.pieces
+            pieceRanges[index] = pieces.map(\.range)
+            for (pieceIndex, piece) in pieces.enumerated() {
+                let coords = piece.coordinates
+                let key = PieceKey(person: index, piece: pieceIndex)
+                let casing = MKPolyline(coordinates: coords, count: coords.count)
+                overlayRoles[ObjectIdentifier(casing)] = .casing
+                map.addOverlay(casing, level: .aboveLabels)
+                let line = MKPolyline(coordinates: coords, count: coords.count)
+                overlayRoles[ObjectIdentifier(line)] = .fullLine(person.color)
+                map.addOverlay(line, level: .aboveLabels)
+                let glow = MKPolyline(coordinates: coords, count: coords.count)
+                overlayRoles[ObjectIdentifier(glow)] = .glow(key, person.color)
+                map.addOverlay(glow, level: .aboveLabels)
+                guard !(index == 0 && !paceSegments.isEmpty) else { continue }
+                let trail = MKPolyline(coordinates: coords, count: coords.count)
+                overlayRoles[ObjectIdentifier(trail)] = .trail(key, person.color)
+                map.addOverlay(trail, level: .aboveLabels)
+            }
             if index == 0, !paceSegments.isEmpty {
-                for (segIndex, segment) in paceSegments.enumerated() {
+                for segment in paceSegments {
                     let coords = person.track.sampledCoordinates(
                         fromFraction: segment.range.lowerBound,
                         toFraction: segment.range.upperBound)
@@ -1820,12 +1898,7 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
                     overlayRoles[ObjectIdentifier(poly)] = .trailSegment(
                         segment: authorSegmentRanges.count - 1, segment.color)
                     map.addOverlay(poly, level: .aboveLabels)
-                    _ = segIndex
                 }
-            } else {
-                let trail = MKPolyline(coordinates: coords, count: coords.count)
-                overlayRoles[ObjectIdentifier(trail)] = .trail(personIndex: index, person.color)
-                map.addOverlay(trail, level: .aboveLabels)
             }
         }
 
@@ -1953,19 +2026,21 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     func setFollowed(_ index: Int) {
         guard index != followed, people.indices.contains(index) else { return }
         // Old highlight off.
-        glowRenderers[followed]?.alpha = 0
-        trailRenderers[followed]?.alpha = 0
+        setHighlightVisible(followed, false)
         if followed == 0 {
             for renderer in authorSegmentRenderers.values { renderer.alpha = 0 }
         }
         followed = index
+        // The cached closing frame belonged to the PREVIOUS rider. Anything
+        // that reads it now — a switch made mid-outro, or the standings — has
+        // to rebuild against the person the camera is about to be on.
+        outroTarget = nil
         // New highlight catches up to the shared clock — at THIS rider's
         // place on it.
         let arc = arcFraction(of: followed, clock: currentFraction)
         lastStrokeFraction = -1
         setStroke(arc)
-        glowRenderers[followed]?.alpha = 1
-        trailRenderers[followed]?.alpha = 1
+        setHighlightVisible(followed, true)
         if followed == 0 {
             for renderer in authorSegmentRenderers.values { renderer.alpha = 1 }
         }
@@ -1979,11 +2054,23 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
                    fraction: currentFraction,
                    standings: finishedNotified ? cachedStandings : [])
             if displayLink?.isPaused ?? true {
-                mapView?.camera = finishedNotified
+                // Picking a walker RECENTRES on their route. Nothing else
+                // moves the camera while the flight is paused or landed, so
+                // without this the selection changed the trail, the odometer
+                // and the standings while the map went on showing whatever
+                // was framed before — which on a crew who walked in different
+                // places is a view with the chosen route nowhere near the
+                // middle of it, or off the screen entirely.
+                //
+                // Animated, not snapped: the map is the thing that just
+                // changed subject, and a jump cut leaves no clue that it is
+                // the same map.
+                let target = finishedNotified
                     ? fittedOverviewCamera()
                     : cruiseCamera(fraction: arc,
                                    heading: track.bearing(atFraction: arc,
                                                           lookaheadMeters: lookaheadMeters))
+                mapView?.setCamera(target, animated: true)
             }
         }
     }
@@ -2055,8 +2142,10 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             currentFraction = 1
             let s = smoothstep(outroT / outroDuration)
             let end = cruiseCamera(fraction: 1, heading: smoothedHeading)
-            // The closing overhead FITS everyone's path — resolved once, on the
-            // first outro frame, so the blend has a fixed target to walk to.
+            // The closing overhead FITS the followed rider's path — resolved
+            // once, on the first outro frame, so the blend has a fixed target
+            // to walk to. Cleared by `setFollowed`, since a switch mid-outro
+            // makes it the previous rider's frame.
             if outroTarget == nil {
                 outroTarget = fittedOverviewCamera()
                 cachedStandings = finalStandings()
@@ -2154,21 +2243,51 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             // seams stay welded to the shared clock.
             for (index, range) in authorSegmentRanges.enumerated() {
                 guard let renderer = authorSegmentRenderers[index] else { continue }
-                let span = range.upperBound - range.lowerBound
-                let local = span > 0 ? (clamped - range.lowerBound) / span : 1
-                let next = CGFloat(min(max(local, 0), 1))
-                if renderer.strokeEnd != next {
-                    renderer.strokeEnd = next
-                    invalidate(renderer, whole: endpoint)
-                }
+                fillPiece(renderer, to: clamped, over: range, endpoint: endpoint)
             }
-        } else if let renderer = trailRenderers[followed] {
-            renderer.strokeEnd = CGFloat(clamped)
-            invalidate(renderer, whole: endpoint)
+        } else {
+            forEachPiece(of: followed, in: trailRenderers) { renderer, range in
+                fillPiece(renderer, to: clamped, over: range, endpoint: endpoint)
+            }
         }
-        if let renderer = glowRenderers[followed] {
-            renderer.strokeEnd = CGFloat(clamped)
-            invalidate(renderer, whole: endpoint)
+        forEachPiece(of: followed, in: glowRenderers) { renderer, range in
+            fillPiece(renderer, to: clamped, over: range, endpoint: endpoint)
+        }
+    }
+
+    /// A piece (or a pace slice) fills over its OWN window of the shared
+    /// clock: before it, empty; after it, whole. That is what lets a route
+    /// drawn as several polylines still advance as one line.
+    private func fillPiece(_ renderer: MKPolylineRenderer,
+                           to fraction: Double,
+                           over range: ClosedRange<Double>,
+                           endpoint: Bool) {
+        let span = range.upperBound - range.lowerBound
+        let local = span > 0
+            ? (fraction - range.lowerBound) / span
+            : (fraction >= range.upperBound ? 1 : 0)
+        let next = CGFloat(min(max(local, 0), 1))
+        guard renderer.strokeEnd != next else { return }
+        renderer.strokeEnd = next
+        invalidate(renderer, whole: endpoint)
+    }
+
+    private func forEachPiece(of person: Int,
+                              in renderers: [PieceKey: MKPolylineRenderer],
+                              _ body: (MKPolylineRenderer, ClosedRange<Double>) -> Void) {
+        for (piece, range) in (pieceRanges[person] ?? []).enumerated() {
+            guard let renderer = renderers[PieceKey(person: person, piece: piece)] else { continue }
+            body(renderer, range)
+        }
+    }
+
+    /// Show or hide a person's progressive pair — every piece of it.
+    private func setHighlightVisible(_ person: Int, _ visible: Bool) {
+        let alpha: CGFloat = visible ? 1 : 0
+        for piece in (pieceRanges[person] ?? []).indices {
+            let key = PieceKey(person: person, piece: piece)
+            glowRenderers[key]?.alpha = alpha
+            trailRenderers[key]?.alpha = alpha
         }
     }
 
@@ -2252,11 +2371,52 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
 
     // MARK: Cameras
 
+    /// The coordinates a camera should FRAME.
+    ///
+    /// The followed rider's own track, not the crew's combined extent. A
+    /// flyover is always about ONE person — the HUD names them, the odometer
+    /// counts their miles, the bright trail is theirs — and framing everyone
+    /// only looks the same as framing them when the crew walked together. On
+    /// a walk where they didn't, the combined box is a county: the closing
+    /// frame pulled out until two people eighteen miles apart both fitted,
+    /// and the route anyone had selected became a thread across a map of
+    /// southern New Jersey. Everyone else's line is still drawn — it just
+    /// isn't what the camera is for.
+    ///
+    /// And their LONGEST contiguous stretch when the walk has a gap in it,
+    /// for the same reason one step further in: a mile walked either side of
+    /// a drive across the state has a bounding box of the state, and framing
+    /// that shows two specks. The flight still visits both — it jump-cuts
+    /// between them — and the camera is aimed at the one there is most to
+    /// see.
+    ///
+    /// Cached per followed rider: `boundingDiagonalMeters` reads this every
+    /// frame (through `cruiseAltitude`), and slicing the pieces out per frame
+    /// would allocate the whole route sixty times a second.
+    private var framedCoordinates: [CLLocationCoordinate2D] {
+        if let framedCache, framedCache.person == followed { return framedCache.coordinates }
+        let coords = computeFramedCoordinates()
+        framedCache = (followed, coords)
+        return coords
+    }
+
+    private func computeFramedCoordinates() -> [CLLocationCoordinate2D] {
+        guard let track = followedTrack, track.coordinates.count >= 2 else {
+            return allCoordinates
+        }
+        guard track.hasBreaks else { return track.coordinates }
+        let longest = track.pieces.max { a, b in
+            a.range.upperBound - a.range.lowerBound < b.range.upperBound - b.range.lowerBound
+        }
+        return longest?.coordinates ?? track.coordinates
+    }
+
     private var boundingCenter: CLLocationCoordinate2D {
-        guard let first = allCoordinates.first else { return CLLocationCoordinate2D() }
+        let coords = framedCoordinates
+        guard let first = coords.first else { return CLLocationCoordinate2D() }
         var minLat = first.latitude, maxLat = first.latitude
         var minLon = first.longitude, maxLon = first.longitude
-        for c in allCoordinates {
+        for c in coords {
             minLat = min(minLat, c.latitude); maxLat = max(maxLat, c.latitude)
             minLon = min(minLon, c.longitude); maxLon = max(maxLon, c.longitude)
         }
@@ -2265,10 +2425,11 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
     }
 
     private var boundingDiagonalMeters: Double {
-        guard let first = allCoordinates.first else { return 0 }
+        let coords = framedCoordinates
+        guard let first = coords.first else { return 0 }
         var minLat = first.latitude, maxLat = first.latitude
         var minLon = first.longitude, maxLon = first.longitude
-        for c in allCoordinates {
+        for c in coords {
             minLat = min(minLat, c.latitude); maxLat = max(maxLat, c.latitude)
             minLon = min(minLon, c.longitude); maxLon = max(maxLon, c.longitude)
         }
@@ -2283,11 +2444,12 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
                     heading: smoothedHeading)
     }
 
-    /// The whole crew's path as a map rect — the thing the closing overhead has
-    /// to FIT, not merely be centred on.
+    /// The FOLLOWED path as a map rect — the thing the closing overhead has to
+    /// FIT, not merely be centred on. See `framedCoordinates` for why it is
+    /// one person's and not the crew's.
     private var routeMapRect: MKMapRect {
         var rect = MKMapRect.null
-        for coordinate in allCoordinates {
+        for coordinate in framedCoordinates {
             rect = rect.union(MKMapRect(origin: MKMapPoint(coordinate),
                                         size: MKMapSize(width: 0.1, height: 0.1)))
         }
@@ -2553,18 +2715,18 @@ private final class FlyoverEngine: NSObject, MKMapViewDelegate {
             // frame; the trail below only BRIGHTENS it.
             renderer.strokeColor = color.withAlphaComponent(0.55)
             renderer.lineWidth = 4
-        case .glow(let personIndex, let color):
+        case .glow(let key, let color):
             renderer.strokeColor = color.withAlphaComponent(0.4)
             renderer.lineWidth = 12
             renderer.strokeEnd = 0
-            renderer.alpha = personIndex == followed ? 1 : 0
-            glowRenderers[personIndex] = renderer
-        case .trail(let personIndex, let color):
+            renderer.alpha = key.person == followed ? 1 : 0
+            glowRenderers[key] = renderer
+        case .trail(let key, let color):
             renderer.strokeColor = color
             renderer.lineWidth = 5.5
             renderer.strokeEnd = 0
-            renderer.alpha = personIndex == followed ? 1 : 0
-            trailRenderers[personIndex] = renderer
+            renderer.alpha = key.person == followed ? 1 : 0
+            trailRenderers[key] = renderer
         case .trailSegment(let segment, let color):
             renderer.strokeColor = color
             renderer.lineWidth = 5.5

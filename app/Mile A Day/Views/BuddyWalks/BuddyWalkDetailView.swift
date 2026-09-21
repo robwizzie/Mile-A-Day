@@ -298,7 +298,9 @@ struct BuddyWalkDetailView: View {
     private var companionRoutes: [CompanionRoute] {
         companionParticipants.enumerated().compactMap { pair in
             guard let coords = routes[pair.element.userId], coords.count >= 2 else { return nil }
-            return CompanionRoute(id: pair.element.userId, coordinates: coords, color: companionColors[pair.offset])
+            return CompanionRoute(id: pair.element.userId, coordinates: coords,
+                                  color: companionColors[pair.offset],
+                                  pointTimes: routeClocks[pair.element.userId]?.times)
         }
     }
 
@@ -322,6 +324,7 @@ struct BuddyWalkDetailView: View {
                         RouteArtView(
                             coordinates: leadCoordinates,
                             routeColor: accent,
+                            pointTimes: routeClocks[lead.userId]?.times,
                             companionRoutes: companionRoutes,
                             authorAvatar: RouteArtAvatar(name: lead.displayName, imageURL: lead.profileImageUrl),
                             companionAvatars: Dictionary(

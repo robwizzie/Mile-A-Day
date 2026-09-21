@@ -20,10 +20,12 @@ struct MADCameraView: View {
     /// snap's stash id instead (see SavedPhotoLibraryLedger).
     var autoSaveToPhotos: Bool = true
     /// Offer FRONT & BACK — one shutter press, both cameras. Opt-in per
-    /// caller and OFF by default: the mid-run camera exists to catch a moment
-    /// in one tap while you are still moving, and a two-shot sequence that
-    /// asks you to stop and pose is the opposite of that. The post composer
-    /// turns it on, which is where someone is standing still and composing.
+    /// caller and OFF by default, because it changes what the shutter does
+    /// and no caller should get that by accident. The post composer and the
+    /// mid-walk camera both turn it on; within the camera it is still a
+    /// CHOICE, and the rail opens on PHOTO, so one tap mid-stride behaves
+    /// exactly as it always has for anyone who doesn't ask for the second
+    /// frame.
     var allowsDual: Bool = false
     /// Delivered instead of `image` when a FRONT & BACK capture completes.
     /// Required for `allowsDual` to do anything.

@@ -940,6 +940,9 @@ private struct StoryGroupPlayerView: View {
                 // on the way would turn a flip into a plain picture for no
                 // reason the user could see.
                 dualMediaUrl: post.dual_media_url,
+                // …and the corner it was baked into with it, or the new
+                // post's tap target would look for the inset where it isn't.
+                dualInsetCorner: post.dual_inset_corner,
                 caption: post.caption,
                 workoutId: post.workout_id,
                 shareToFeed: true,

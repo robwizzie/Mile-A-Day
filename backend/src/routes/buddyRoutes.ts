@@ -17,6 +17,7 @@ import {
   recapController,
   sessionStateController,
   startSessionController,
+  startSessionNowController,
   createRoutineController,
   deleteRoutineController,
   historyController,
@@ -57,6 +58,11 @@ router.post("/sessions/:sessionId/decline", declineSessionController);
 router.post("/sessions/:sessionId/leave", leaveSessionController);
 router.post("/sessions/:sessionId/ready", readyController);
 router.post("/sessions/:sessionId/start", startSessionController);
+// Host-only: end the shared countdown for EVERYONE. Separate from /start
+// because it answers a different question — /start decides that the walk is
+// happening, this one decides it is happening right now — and because a walk
+// already counting down is not in the `status = 'lobby'` window /start needs.
+router.post("/sessions/:sessionId/start-now", startSessionNowController);
 // Host-only: call the walk off entirely, while it's still a lobby or still in
 // the shared countdown. The exit that didn't exist — Leave abandoned a room
 // that then sat open for hours, still invited, still due to auto-start.
