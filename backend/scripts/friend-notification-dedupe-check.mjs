@@ -23,6 +23,7 @@
 
 import { PostgresService } from "../dist/services/DbService.js";
 import {
+  notifyFriendsOfMileCompletion,
   notifyFriendsOfWorkout,
   refreshWorkoutEditNotifications,
 } from "../dist/services/notificationService.js";
@@ -208,6 +209,100 @@ async function run() {
   );
   check("the edited walk's own announcement is retired", rows[WORKOUT], "expired");
   check("...and the OTHER walk's still stands", rows[LATER], "pending");
+
+  // --- The mile was announced by someone ELSE's call --------------------
+  //
+  // The reported screenshot: "goose completed a walk · 2.33 mi · 54:46 · best
+  // pace 20:13/mi · 2.33 mi today" directly above "goose got their mile in! ·
+  // 2.33 mi · 54:46 · best pace 20:13/mi". One walk, two pushes, the same
+  // numbers in both.
+  //
+  // Superseding the walk's own row used to be reachable only THROUGH the call
+  // that announced the mile — so when the mile had already been announced
+  // (an earlier upload, an earlier edit) every path that could have retired
+  // the row skipped it: notifyFriendsOfMileCompletion returns early on its
+  // per-day claim, and the edit path only calls it when nothing had announced
+  // yet. The row then sat pending while the edit restated its body from the
+  // now-complete day, which is what put the same stat line on both.
+  await cleanup();
+  await seed();
+
+  await notifyFriendsOfWorkout(RUNNER, WORKOUT);
+  check(
+    "the short walk is announced as itself",
+    (await pending("workout")).join(","),
+    "pending",
+  );
+
+  // The day completes and the mile is announced WITHOUT naming this walk —
+  // this is the sync that didn't carry it, or a duplicate resolution.
+  await updateWorkout(RUNNER, WORKOUT, { distance: 2.33, source: "edited" });
+  await notifyFriendsOfMileCompletion(RUNNER, []);
+  check(
+    "the mile is queued for friends",
+    (await pending("mile_completed")).join(","),
+    "pending",
+  );
+
+  // Now the walk is touched again — a re-sync, a recap correction. This is
+  // where the restate happens, and where the duplicate used to be sealed in.
+  await refreshWorkoutEditNotifications(RUNNER, WORKOUT);
+  check(
+    "the walk's own announcement is retired by a mile it didn't raise",
+    (await pending("workout")).join(","),
+    "expired",
+  );
+  const [{ count: afterEdit }] = await db.query(
+    `SELECT COUNT(*)::int AS count FROM pending_friend_notifications
+     WHERE user_id = $1 AND status = 'pending' AND local_date = $2::date`,
+    [RUNNER, today()],
+  );
+  check("one walk, one push to friends", afterEdit, 1);
+
+  // --- The pre-goal row that arrives AFTER the mile ---------------------
+  //
+  // The other order, and the one no supersede can fix: two syncs of the same
+  // walk interleave, the first reading a short day and queueing its pre-goal
+  // row after the second has already claimed the mile and swept. The sweep
+  // cannot expire a row that does not exist yet, so the insert has to decline.
+  await cleanup();
+  await seed();
+
+  await updateWorkout(RUNNER, WORKOUT, { distance: 2.33, source: "edited" });
+  await notifyFriendsOfMileCompletion(RUNNER, []);
+  await notifyFriendsOfWorkout(RUNNER, WORKOUT);
+  check(
+    "a pre-goal announcement is not queued once the mile is going out",
+    (await pending("workout")).length,
+    0,
+  );
+
+  // --- An 'ask' mile must not retire anything ---------------------------
+  //
+  // The confirm card sits in the sender's own inbox with a NULL send_after_at
+  // and may never be tapped. Retiring the walk's announcement in favour of it
+  // once left a runner telling their friends nothing at all, so the gate is
+  // "is the mile REACHING friends", never "does a mile row exist".
+  await cleanup();
+  await seed();
+
+  const askSet = await setAudienceSetting(
+    RUNNER,
+    "outgoing",
+    "mile_completed",
+    "",
+    "ask",
+  );
+  if (askSet?.validationError) throw new Error(askSet.validationError);
+
+  await notifyFriendsOfWorkout(RUNNER, WORKOUT);
+  await updateWorkout(RUNNER, WORKOUT, { distance: 2.33, source: "edited" });
+  await refreshWorkoutEditNotifications(RUNNER, WORKOUT);
+  check(
+    "an unconfirmed mile leaves the walk's announcement to send",
+    (await pending("workout")).join(","),
+    "pending",
+  );
 
   await cleanup();
   console.log(failures === 0 ? "\nall ok" : `\n${failures} FAILED`);
