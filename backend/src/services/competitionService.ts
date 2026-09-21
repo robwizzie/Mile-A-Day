@@ -1267,7 +1267,7 @@ export async function getCompetitionTeamStats(competition: Competition) {
  * and stays that way after it ends because its `end_date` is on or after the
  * cutoff.
  */
-const DEVICE_MEASURED_SCORING_FROM = "2026-09-06";
+export const DEVICE_MEASURED_SCORING_FROM = "2026-09-06";
 
 /**
  * Does this competition score device-measured miles only (see
