@@ -1532,6 +1532,13 @@ struct WorkoutTrackingView: View {
         .animation(.easeInOut(duration: 0.25), value: coach.lastLine)
     }
 
+    /// Muted reads as muted; on a call reads as a call, because the coach is
+    /// silent for two different reasons and only one of them is the user's.
+    private var coachIconName: String {
+        guard coachEnabled else { return "speaker.slash.fill" }
+        return coach.isOnCall ? "phone.fill" : "speaker.wave.2.fill"
+    }
+
     /// The coach's last line, and the only way to shut it up mid-walk.
     ///
     /// The coach speaks on EVERY workout — splits, the interval call, halfway,
@@ -1553,7 +1560,7 @@ struct WorkoutTrackingView: View {
                 // just muted.
                 if !coachEnabled { GhostCoach.shared.silenceCurrentLine() }
             } label: {
-                Image(systemName: coachEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                Image(systemName: coachIconName)
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(coachEnabled ? .white.opacity(0.7) : .orange)
                     .frame(width: 26, height: 26)
@@ -1575,18 +1582,16 @@ struct WorkoutTrackingView: View {
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
                     .id(line)
-                // The voice is as good as code can make it; the rest is a
-                // download the app cannot start and Settings cannot deep-link
-                // to. This hint lived only on the settings page — a screen
-                // nobody opens mid-walk — so "it sounds robotic" went
-                // unanswered at the one moment the answer would land: while
-                // the robot is talking.
-                if coachEnabled, GhostCoach.usingBasicVoice {
-                    Text("Basic voice. A natural one is a free download: Settings › Accessibility › Spoken Content › Voices.")
+                // A coach that has gone silent mid-walk reads as broken, so
+                // the one time it deliberately does, it says why. (What used
+                // to sit here was "your voice is basic, go download a better
+                // one" — an errand nobody can run mid-stride, for a voice that
+                // is no longer the robotic one.)
+                if coachEnabled, coach.isOnCall {
+                    Text("On a call — buzzing instead of speaking.")
                         .font(.system(size: 10, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.45))
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
             }
         }

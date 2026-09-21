@@ -1,4 +1,6 @@
 import AVFoundation
+import AudioToolbox
+import CallKit
 import Foundation
 
 /// The voice in your ear during a workout.
@@ -28,7 +30,8 @@ import Foundation
 /// crossed). Folding them together is what used to make the coach go silent at
 /// exactly one mile — the split, pace and interval lines below all belong to
 /// the workout, so mile 2, 3 and 4 keep getting called.
-final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
+final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate,
+                       CXCallObserverDelegate {
     static let shared = GhostCoach()
 
     /// User preference. Default ON — most people want it, and it announces
@@ -63,7 +66,19 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     /// The most recent line, for the on-screen echo. Cleared by `stop()`.
     @Published private(set) var lastLine: String?
 
+    /// Whether a call is up right now, for the tracking screen's echo — so a
+    /// coach that has gone quiet reads as "buzzing instead" rather than
+    /// broken. Mirrors `callIsUp`, which is what `say` actually asks.
+    @Published private(set) var isOnCall = false
+
     private let synthesizer = AVSpeechSynthesizer()
+
+    /// Observing calls needs no entitlement and reveals no numbers — just
+    /// whether one is up. It covers the phone app, FaceTime and every VoIP
+    /// app that routes through CallKit (WhatsApp, Messenger, Signal); an app
+    /// that doesn't is invisible to it, and the coach will talk over that one
+    /// exactly as it does today.
+    private let callObserver = CXCallObserver()
 
     /// How much a line is worth interrupting for.
     ///
@@ -137,6 +152,22 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     private override init() {
         super.init()
         synthesizer.delegate = self
+        // The delegate only reports CHANGES, so a coach started during a call
+        // would never hear about it — seed from the current list.
+        callObserver.setDelegate(self, queue: .main)
+        let up = callIsUp
+        DispatchQueue.main.async { self.isOnCall = up }
+    }
+
+    /// A call is "up" from the first ring, not from the moment it connects:
+    /// talking over someone's ringtone while they decide whether to answer is
+    /// the same intrusion, a second earlier.
+    private var callIsUp: Bool {
+        callObserver.calls.contains { !$0.hasEnded }
+    }
+
+    func callObserver(_ observer: CXCallObserver, callChanged call: CXCall) {
+        isOnCall = observer.calls.contains { !$0.hasEnded }
     }
 
     // MARK: - Lifecycle
@@ -689,6 +720,18 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         // off mid-walk and have no way to turn it back on.
         guard Self.isEnabled else { return true }
 
+        // On a call, buzz instead of talking. Reported by a user and
+        // obviously right: the coach's whole audio path is a `.playback`
+        // session with `.duckOthers`, so speaking a split does not just talk
+        // over the conversation, it DUCKS the person on the other end for the
+        // length of the sentence. Counts as delivered — the line is on screen
+        // and the floor advances — so nothing is queued up to be shouted the
+        // moment they hang up.
+        if callIsUp {
+            Self.buzz(urgency)
+            return true
+        }
+
         activateSession()
         let utterance = AVSpeechUtterance(string: Self.spokenForm(line))
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
@@ -780,6 +823,30 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         deactivateSession()
     }
 
+    /// The silent form of a line.
+    ///
+    /// `AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)`, not
+    /// `MADHaptics`: `UIFeedbackGenerator` only fires for a FOREGROUND-active
+    /// app, and this fires during a call with the phone in a pocket and the
+    /// screen off — which is every time it will ever be used. The system
+    /// vibration works from the background for a running app (ours is kept
+    /// alive by the `location` background mode), needs no audio session, and
+    /// so cannot duck the call it is being polite about.
+    ///
+    /// Two buzzes for the lines worth breaking stride for, one otherwise —
+    /// chained on the completion rather than a guessed delay, so the pair
+    /// reads as a pair on every device.
+    private static func buzz(_ urgency: Urgency) {
+        switch urgency {
+        case .normal:
+            AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+        case .high:
+            AudioServicesPlaySystemSoundWithCompletion(kSystemSoundID_Vibrate) {
+                AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+            }
+        }
+    }
+
     // MARK: - Voice
 
     /// The best voice actually installed for the user's language.
@@ -805,6 +872,34 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
     /// have it picked as their coach — and so is Personal Voice, which is
     /// authorization-gated and far too personal to conscript by surprise.
     ///
+    /// ## And that STILL shipped the Stephen Hawking voice
+    ///
+    /// Enhanced and premium voices are a ~100MB download from Settings that
+    /// no API can start, and Siri's voices are not available to third-party
+    /// apps at all — so on a stock iPhone EVERY candidate here is
+    /// `.default` quality and the quality ranking above decides nothing. The
+    /// whole choice fell through to the tie-break, which took the lowest
+    /// identifier, and the identifier namespace sorts worst-first:
+    ///
+    ///     com.apple.eloquence.en-US.Eddy          ← picked
+    ///     com.apple.speech.synthesis.voice.Fred
+    ///     com.apple.ttsbundle.Samantha-compact
+    ///     com.apple.voice.compact.en-US.Samantha
+    ///
+    /// Eloquence IS the DECtalk-lineage formant synth — the actual Stephen
+    /// Hawking instrument, shipped on iOS 17+ as an accessibility voice, not
+    /// flagged novelty, and therefore sailing through every filter above to
+    /// win on the letter "e". MacinTalk's Fred is the same story one letter
+    /// later. Meanwhile Samantha and Daniel — the modern voices that are
+    /// preinstalled, sound fine, and cost nobody a download — sort last and
+    /// could never be reached.
+    ///
+    /// So the FAMILY is ranked under quality: a downloaded enhanced voice
+    /// still wins, but among the default-quality voices everyone actually
+    /// has, the modern synthesizer beats the formant one. The legacy families
+    /// are ranked to the bottom rather than filtered out, so a language whose
+    /// only voice is one of them still gets read to.
+    ///
     /// Computed once per process: the list doesn't change while the app runs
     /// unless the user leaves to download a voice, and `speechVoices()` is too
     /// heavy to call on every line.
@@ -823,6 +918,30 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
             }
         }
 
+        /// Which synthesizer built it — see the note above. Only consulted
+        /// when two voices are the same quality, which on a stock device is
+        /// all of them.
+        func family(_ voice: AVSpeechSynthesisVoice) -> Int {
+            let id = voice.identifier
+            // The two legacy formant engines. Bottom of the pile: these are
+            // what "robotic" means, and one of them was winning outright.
+            if id.hasPrefix("com.apple.eloquence.") { return 0 }
+            if id.hasPrefix("com.apple.speech.synthesis.voice.") { return 0 }
+            // Siri-styled compacts. Genuinely good, but Apple withholds Siri
+            // voices from third-party apps and these are the ones that go
+            // missing when it does — usable, never preferred.
+            if id.contains(".siri_") { return 1 }
+            // The modern preinstalled voices: Samantha, Daniel, Karen, Moira
+            // and the rest. This is the tier that makes the coach acceptable
+            // with nothing downloaded, which is the whole point.
+            if id.hasPrefix("com.apple.voice.") { return 3 }
+            if id.hasPrefix("com.apple.ttsbundle.") { return 3 }
+            // Something we don't recognise — a future family, or a
+            // third-party synthesizer the user installed. Above the formant
+            // engines, below the ones we've actually heard.
+            return 2
+        }
+
         let usable = AVSpeechSynthesisVoice.speechVoices().filter {
             !$0.voiceTraits.contains(.isNoveltyVoice)
                 && !$0.voiceTraits.contains(.isPersonalVoice)
@@ -834,8 +953,9 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         func best(_ matching: (AVSpeechSynthesisVoice) -> Bool) -> AVSpeechSynthesisVoice? {
             usable.filter(matching).max { a, b in
                 if rank(a) != rank(b) { return rank(a) < rank(b) }
-                // Equal quality: the lowest identifier wins, so the coach
-                // keeps the same voice from launch to launch.
+                if family(a) != family(b) { return family(a) < family(b) }
+                // Same quality and same synthesizer: the lowest identifier
+                // wins, so the coach keeps the same voice launch to launch.
                 return a.identifier > b.identifier
             }
         }
@@ -846,10 +966,14 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate 
         return AVSpeechSynthesisVoice(language: "en-US")
     }()
 
-    /// True when the OS only has the small built-in voice for this user — i.e.
-    /// when the coach is as good as code can make it and the rest is a
-    /// download. Settings uses this to say where that download lives instead
-    /// of leaving "it sounds robotic" as an unanswerable complaint.
+    /// True when nothing better than a preinstalled voice is available.
+    ///
+    /// This is an OFFER, not a defect: since the family ranking above, a
+    /// default-quality voice is Samantha or Daniel rather than a formant
+    /// synth, and the coach sounds fine with nothing downloaded. Settings
+    /// mentions the free upgrade; nowhere tells anyone the feature needs one,
+    /// and the tracking screen — where you cannot act on it anyway — no
+    /// longer says anything at all.
     static var usingBasicVoice: Bool {
         guard let voice = preferredVoice else { return true }
         return voice.quality == .default

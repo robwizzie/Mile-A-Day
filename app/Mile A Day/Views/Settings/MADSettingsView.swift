@@ -290,11 +290,13 @@ struct MADSettingsView: View {
                     if !on { GhostCoach.shared.silenceCurrentLine() }
                 }
 
-                // The rest of "it sounds robotic" is a download we cannot make
-                // for them: enhanced and premium voices ship from Settings,
-                // not in the app. Saying where beats leaving it unanswerable.
+                // An OFFER, not a defect notice. The coach picks a modern
+                // preinstalled voice now, so it sounds fine out of the box;
+                // enhanced voices are a ~100MB download only the user can
+                // start, and the copy must not imply the feature is waiting
+                // on it.
                 if coachEnabled, GhostCoach.usingBasicVoice {
-                    Text("Sounds robotic? Only the basic system voice is installed. Settings → Accessibility → Spoken Content → Voices adds a natural one, and the coach picks it up on its own.")
+                    Text("Want a richer voice? Settings → Accessibility → Spoken Content → Voices has free downloads, and the coach picks one up on its own. It works fine without.")
                         .font(.system(size: 11, design: .rounded))
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
