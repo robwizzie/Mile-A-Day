@@ -25,6 +25,7 @@
 
 import { PostgresService } from "../dist/services/DbService.js";
 import {
+  DEVICE_MEASURED_SCORING_FROM,
   getCompetition,
   getUserScores,
   resolveCompetitionIfComplete,
@@ -59,6 +60,36 @@ const ET_DAY = new Intl.DateTimeFormat("en-CA", {
   day: "2-digit",
 });
 const dayOffset = (n) => ET_DAY.format(new Date(Date.now() - n * 86_400_000));
+
+/**
+ * A calendar date `n` days before the device-measured cutoff.
+ *
+ * The "ended before the cutoff" competition has to be seeded relative to the
+ * CUTOFF, never to today: `dayOffset(15)` walks forward one day at a time
+ * while `DEVICE_MEASURED_SCORING_FROM` stands still, so it passed every day
+ * until the two met — on 2026-09-21 the comp's end_date landed exactly ON the
+ * cutoff, the `end_date < cutoff` test went false, and a competition the check
+ * calls "old" started being scored under the new rule. From that day it fails
+ * permanently, and the failure says nothing about the code it is testing.
+ *
+ * Midday UTC so subtracting whole days can't cross a DST boundary into the
+ * previous calendar date in ET.
+ */
+const beforeCutoff = (n) =>
+  ET_DAY.format(
+    new Date(
+      Date.parse(`${DEVICE_MEASURED_SCORING_FROM}T12:00:00Z`) -
+        n * 86_400_000,
+    ),
+  );
+
+/** Whole days between today and an absolute `YYYY-MM-DD`, for `created_at`. */
+const daysAgoOf = (date) =>
+  Math.round(
+    (Date.parse(`${dayOffset(0)}T12:00:00Z`) -
+      Date.parse(`${date}T12:00:00Z`)) /
+      86_400_000,
+  );
 
 /**
  * Resolving a competition fires its `competition_finished` pushes WITHOUT
@@ -98,8 +129,12 @@ async function cleanup() {
 
 let w = 0;
 /** Returns the workout_id, so an edit below can name it without counting. */
-async function addWorkout(userId, daysAgo, distance, extra = {}) {
+async function addWorkout(userId, when, distance, extra = {}) {
   const id = `cs-w-${++w}`;
+  // `when` is a days-ago count, or an absolute 'YYYY-MM-DD' for a workout
+  // that has to sit on a specific calendar day (see `beforeCutoff`).
+  const localDate = typeof when === "string" ? when : dayOffset(when);
+  const daysAgo = typeof when === "string" ? daysAgoOf(when) : when;
   await db.query(
     `INSERT INTO workouts (workout_id, user_id, distance, original_distance, local_date, date,
                            timezone_offset, workout_type, device_end_date, calories,
@@ -112,7 +147,7 @@ async function addWorkout(userId, daysAgo, distance, extra = {}) {
       userId,
       distance,
       extra.original ?? null,
-      dayOffset(daysAgo),
+      localDate,
       daysAgo,
       extra.source ?? "healthkit",
     ],
@@ -167,9 +202,12 @@ async function seed() {
 
   // --- The old competition's window (days 20..15 ago) ------------------
   // The same three shapes, so the cutoff is the only difference.
-  await addWorkout(ALICE, 17, 2.0);
-  await addWorkout(BOB, 17, 5.0, { source: "manual" });
-  await addWorkout(CAROL, 17, 9.0, { source: "edited", original: 1.5 });
+  await addWorkout(ALICE, beforeCutoff(3), 2.0);
+  await addWorkout(BOB, beforeCutoff(3), 5.0, { source: "manual" });
+  await addWorkout(CAROL, beforeCutoff(3), 9.0, {
+    source: "edited",
+    original: 1.5,
+  });
 
   const comp = (id, start, end, ended) =>
     db.query(
@@ -180,7 +218,8 @@ async function seed() {
       [id, start, end, ended, ALICE],
     );
   await comp(LIVE, dayOffset(5), null, false);
-  await comp(OLD, dayOffset(20), dayOffset(15), true);
+  // Genuinely over before the rule shipped, whatever day the suite runs.
+  await comp(OLD, beforeCutoff(6), beforeCutoff(1), true);
 
   // --- A finished competition where everyone scores the SAME -----------
   // Three people level on points, each having covered a different distance.
