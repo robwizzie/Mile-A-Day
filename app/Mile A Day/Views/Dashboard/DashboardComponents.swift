@@ -184,7 +184,7 @@ struct DayProgressView: View {
                         .frame(width: 36, height: 36)
 
                     Image(systemName: "figure.run")
-                        .font(.system(size: 14))
+                        .madFont(size: 14, maxScale: 1.3)
                         .fontWeight(.bold)
                         .foregroundColor(.white)
                 } else if hasActivity {
@@ -209,12 +209,12 @@ struct DayProgressView: View {
             // Step goal indicator (like calendar)
             if reachedStepGoal {
                 Image(systemName: "shoeprints.fill")
-                    .font(.system(size: 8))
+                    .madFont(size: 8)
                     .foregroundColor(.blue)
             } else {
                 // Placeholder to maintain spacing
                 Image(systemName: "shoeprints.fill")
-                    .font(.system(size: 8))
+                    .madFont(size: 8)
                     .foregroundColor(.clear)
             }
 
@@ -321,7 +321,7 @@ struct BadgesPreviewCard: View {
                 HStack(spacing: 12) {
                     // Trophy icon
                     Image(systemName: "trophy.fill")
-                        .font(.system(size: 20))
+                        .madFont(size: 20)
                         .foregroundStyle(
                             LinearGradient(
                                 colors: [.yellow, .orange],
@@ -332,11 +332,11 @@ struct BadgesPreviewCard: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Medals")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .madFont(size: 16, weight: .bold, design: .rounded)
                             .foregroundColor(.primary)
 
                         Text("\(earnedCount) of \(totalCount) unlocked")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .madFont(size: 12, weight: .medium, design: .rounded)
                             .foregroundColor(.secondary)
                     }
 
@@ -344,7 +344,7 @@ struct BadgesPreviewCard: View {
 
                     // Progress pill
                     Text(ProgressCalculator.formatProgress(progress))
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
                         .foregroundColor(.orange)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
@@ -354,7 +354,7 @@ struct BadgesPreviewCard: View {
                         )
 
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
+                        .madFont(size: 12, weight: .semibold)
                         .foregroundColor(.secondary)
                 }
 
@@ -363,10 +363,10 @@ struct BadgesPreviewCard: View {
                         Spacer()
                         VStack(spacing: 6) {
                             Image(systemName: "trophy")
-                                .font(.system(size: 24))
+                                .madFont(size: 24)
                                 .foregroundColor(.secondary.opacity(0.4))
                             Text("Start running to earn medals!")
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .madFont(size: 12, weight: .medium, design: .rounded)
                                 .foregroundColor(.secondary)
                         }
                         .padding(.vertical, 8)
@@ -393,10 +393,10 @@ struct BadgesPreviewCard: View {
 
                         HStack(spacing: 4) {
                             Image(systemName: hasTracked ? "pin.fill" : "arrow.up.circle.fill")
-                                .font(.system(size: 10))
+                                .madFont(size: 10)
                                 .foregroundColor(hasTracked ? .cyan.opacity(0.8) : .orange.opacity(0.8))
                             Text(hasTracked ? "Tracked" : "Next Up")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .madFont(size: 11, weight: .bold, design: .rounded)
                                 .foregroundColor(hasTracked ? .cyan.opacity(0.8) : .orange.opacity(0.8))
                             Spacer()
                         }
@@ -405,7 +405,7 @@ struct BadgesPreviewCard: View {
                             HStack(spacing: 10) {
                                 // Badge name
                                 Text(item.badge.name)
-                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                    .madFont(size: 12, weight: .semibold, design: .rounded)
                                     .foregroundColor(.primary)
                                     .lineLimit(1)
 
@@ -433,8 +433,10 @@ struct BadgesPreviewCard: View {
 
                                 // Percentage
                                 Text(ProgressCalculator.formatProgress(item.progress))
-                                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                                    .madFont(size: 11, weight: .bold, design: .rounded)
                                     .foregroundColor(hasTracked ? .cyan : .orange)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.6)
                                     .frame(width: 36, alignment: .trailing)
                             }
                         }
@@ -468,7 +470,7 @@ struct HomeBadgeItem: View {
 
             // Badge name
             Text(badge.name)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .madFont(size: 11, weight: .bold, design: .rounded)
                 .foregroundColor(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -527,7 +529,7 @@ struct CalendarPreviewCard: View {
 
                     // Icon
                     Image(systemName: "shoeprints.fill")
-                        .font(.system(size: 20))
+                        .madFont(size: 20)
                         .foregroundStyle(
                             LinearGradient(
                                 colors: [.blue, .cyan],
@@ -541,24 +543,24 @@ struct CalendarPreviewCard: View {
                 // Text content
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Steps")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .madFont(size: 13, weight: .semibold, design: .rounded)
                         .foregroundColor(.secondary)
 
                     Text("\(todaysSteps)")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .madFont(size: 28, weight: .bold, design: .rounded)
                         .foregroundColor(.primary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
 
                     Text("\(ProgressCalculator.formatProgress(stepProgress)) of 10k goal")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(stepColor)
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .madFont(size: 12, weight: .semibold)
                     .foregroundColor(.secondary)
             }
             .padding(16)
@@ -630,23 +632,23 @@ struct DailyChallengeCard: View {
                     .fill(Color.white.opacity(0.08))
                     .frame(width: 54, height: 54)
                 Image(systemName: "trophy.fill")
-                    .font(.system(size: 21, weight: .semibold))
+                    .madFont(size: 21, weight: .semibold, maxScale: 1.3)
                     .foregroundColor(MADTheme.Colors.madRed.opacity(0.7))
             }
             VStack(alignment: .leading, spacing: 7) {
                 Text("Daily Challenge")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(MADTheme.Colors.madRed)
                 Text("Loading today's challenge…")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .madFont(size: 16, weight: .bold, design: .rounded)
                     .foregroundColor(.primary)
                 Text("Tap to see what's in store")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .madFont(size: 12, weight: .medium, design: .rounded)
                     .foregroundColor(.secondary)
             }
             Spacer(minLength: 0)
             Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .bold))
+                .madFont(size: 13, weight: .bold)
                 .foregroundColor(.secondary)
         }
         .padding(16)
@@ -664,15 +666,15 @@ struct DailyChallengeCard: View {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
                         Text("Daily Challenge")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .madFont(size: 12, weight: .semibold, design: .rounded)
                             .foregroundColor(accentColor)
 
                         if challengeStreak >= 2 {
                             HStack(spacing: 2) {
                                 Image(systemName: "flame.fill")
-                                    .font(.system(size: 8, weight: .bold))
+                                    .madFont(size: 8, weight: .bold)
                                 Text("\(challengeStreak)")
-                                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                                    .madFont(size: 11, weight: .heavy, design: .rounded)
                             }
                             .foregroundColor(.orange)
                             .padding(.horizontal, 5)
@@ -687,26 +689,26 @@ struct DailyChallengeCard: View {
                         if isCompleted {
                             HStack(spacing: 3) {
                                 Image(systemName: "checkmark.seal.fill")
-                                    .font(.system(size: 12, weight: .bold))
+                                    .madFont(size: 12, weight: .bold)
                                 Text("\(challengesCompletedCount)")
-                                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                                    .madFont(size: 12, weight: .heavy, design: .rounded)
                             }
                             .foregroundColor(.green)
                         } else {
                             Image(systemName: "chevron.right")
-                                .font(.system(size: 17, weight: .bold))
+                                .madFont(size: 17, weight: .bold)
                                 .foregroundColor(.secondary)
                         }
                     }
 
                     Text(isCompleted ? "\(challenge.title) — Complete!" : challenge.title)
-                        .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        .madFont(size: 18, weight: .heavy, design: .rounded)
                         .foregroundColor(.primary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
 
                     Text(challenge.description)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .madFont(size: 13, weight: .semibold, design: .rounded)
                         .foregroundColor(.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -767,7 +769,7 @@ struct DailyChallengeCard: View {
                 )
 
             Image(systemName: isCompleted ? "checkmark" : challenge.icon)
-                .font(.system(size: 19, weight: .bold))
+                .madFont(size: 19, weight: .bold)
                 .foregroundColor(.white)
         }
     }
@@ -796,11 +798,11 @@ struct DailyChallengeCard: View {
             .frame(height: 8)
             HStack {
                 Text(isCompleted ? "Locked in" : progressLabel(progress))
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .madFont(size: 12, weight: .bold, design: .rounded)
                     .foregroundColor(accentColor)
                 Spacer()
                 Text(ProgressCalculator.formatProgress(min(progress, 1.0)))
-                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .madFont(size: 12, weight: .heavy, design: .rounded)
                     .foregroundColor(.primary.opacity(0.7))
                     .contentTransition(.numericText())
             }
@@ -814,16 +816,16 @@ struct DailyChallengeCard: View {
         if let tomorrow = tomorrowsChallenge {
             HStack(spacing: 8) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.secondary)
                 Text("Tomorrow:")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.secondary)
                 HStack(spacing: 5) {
                     Image(systemName: tomorrow.icon)
-                        .font(.system(size: 11, weight: .bold))
+                        .madFont(size: 11, weight: .bold)
                     Text(tomorrow.title)
-                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .madFont(size: 12, weight: .heavy, design: .rounded)
                         .lineLimit(1)
                 }
                 .foregroundColor(tomorrow.gradient.first ?? .primary)
@@ -835,7 +837,7 @@ struct DailyChallengeCard: View {
                 Spacer(minLength: 0)
                 if isCompleted {
                     Image(systemName: "sparkles")
-                        .font(.system(size: 11, weight: .bold))
+                        .madFont(size: 11, weight: .bold)
                         .foregroundColor(.yellow)
                 }
             }
@@ -843,14 +845,14 @@ struct DailyChallengeCard: View {
         } else if isCompleted {
             HStack(spacing: 8) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.yellow)
                 Text("Nice work — \(challengesCompletedCount) total completion\(challengesCompletedCount == 1 ? "" : "s")")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.primary.opacity(0.8))
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.secondary)
             }
             .padding(.top, 2)
@@ -983,10 +985,10 @@ struct ChallengersStrip: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "eye.fill")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold)
                     .foregroundColor(.purple)
                 Text(headline)
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
                     .foregroundColor(.primary.opacity(0.85))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -1010,13 +1012,15 @@ struct ChallengersStrip: View {
                                 )
                             )
                             Text(challenger.displayName)
-                                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                .madFont(size: 9, weight: .semibold, design: .rounded)
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
                             Text(challenger.miles.milesText)
-                                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                .madFont(size: 10, weight: .heavy, design: .rounded)
                                 .foregroundColor(ahead ? .orange : .primary.opacity(0.6))
                                 .monospacedDigit()
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
                         }
                         .frame(width: 52)
                     }
@@ -1027,7 +1031,7 @@ struct ChallengersStrip: View {
             // Says the quiet part out loud so nobody thinks they need to beat
             // five people to complete the challenge.
             Text("Just for fun — only your matchup above counts")
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .madFont(size: 9, weight: .semibold, design: .rounded)
                 .foregroundColor(.secondary.opacity(0.8))
         }
         .padding(.vertical, 10)
@@ -1092,10 +1096,10 @@ struct HeadToHeadStrip: View {
 
                 VStack(spacing: 2) {
                     Text("VS")
-                        .font(.system(size: 13, weight: .black, design: .rounded))
+                        .madFont(size: 13, weight: .black, design: .rounded)
                         .foregroundColor(.primary.opacity(0.6))
                     Text(statusText)
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .madFont(size: 9, weight: .bold, design: .rounded)
                         .foregroundColor(statusColor)
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
@@ -1112,7 +1116,7 @@ struct HeadToHeadStrip: View {
             Text(opponent.mutual
                  ? "\(rivalName) got the same matchup · winner decided at day's end"
                  : "Winner decided at day's end")
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .madFont(size: 9, weight: .semibold, design: .rounded)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .lineLimit(1)
@@ -1137,11 +1141,11 @@ struct HeadToHeadStrip: View {
                     Circle().strokeBorder(highlight ? color : .clear, lineWidth: 2)
                 )
             Text(name)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .madFont(size: 11, weight: .bold, design: .rounded)
                 .foregroundColor(.primary)
                 .lineLimit(1)
             Text("\(miles.milesText) mi")
-                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                .madFont(size: 13, weight: .heavy, design: .rounded)
                 .foregroundColor(highlight ? color : .primary.opacity(0.75))
                 .monospacedDigit()
         }
@@ -1173,11 +1177,11 @@ struct FriendActivityStripView: View {
                     // Header
                     HStack(spacing: 8) {
                         Image(systemName: "person.2.fill")
-                            .font(.system(size: 13, weight: .semibold))
+                            .madFont(size: 13, weight: .semibold)
                             .foregroundColor(.cyan)
 
                         Text("\(completedCount) of \(totalCount) friends ran today")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .madFont(size: 13, weight: .semibold, design: .rounded)
                             .foregroundColor(.primary)
 
                         Spacer()
@@ -1253,7 +1257,7 @@ struct FriendActivityStripView: View {
                 // Checkmark for completed
                 if friend.completed_today {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14))
+                        .madFont(size: 14, maxScale: 1.3)
                         .foregroundColor(.green)
                         .background(Circle().fill(Color.black).frame(width: 12, height: 12))
                         .offset(x: 16, y: 16)
@@ -1261,7 +1265,8 @@ struct FriendActivityStripView: View {
             }
 
             Text(friend.displayName)
-                .font(.system(size: 10, weight: .medium, design: .rounded))
+                // A 50pt column: grows a little, then truncates.
+                .madFont(size: 10, weight: .medium, design: .rounded, maxScale: 1.4)
                 .foregroundColor(friend.completed_today ? .primary : .secondary)
                 .lineLimit(1)
                 .frame(width: 50)
@@ -1317,24 +1322,24 @@ struct CompetitionInviteBanner: View {
                     .frame(width: 36, height: 36)
 
                 Image(systemName: "trophy.fill")
-                    .font(.system(size: 16, weight: .semibold))
+                    .madFont(size: 16, weight: .semibold, maxScale: 1.3)
                     .foregroundColor(.white)
             }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Competition \(inviteCount == 1 ? "Invite" : "Invites")")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.primary)
 
                 Text("You have \(inviteCount) pending \(inviteCount == 1 ? "invitation" : "invitations")")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .madFont(size: 12, weight: .medium, design: .rounded)
                     .foregroundColor(.secondary)
             }
 
             Spacer()
 
             Text("View")
-                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .madFont(size: 13, weight: .bold, design: .rounded)
                 .foregroundColor(MADTheme.Colors.madRed)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
@@ -1460,19 +1465,19 @@ struct ActiveCompetitionBannerCard: View {
                     .frame(width: 40, height: 40)
 
                 Image(systemName: competition.type.icon)
-                    .font(.system(size: 18, weight: .semibold))
+                    .madFont(size: 18, weight: .semibold, maxScale: 1.3)
                     .foregroundColor(.white)
             }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(competition.competition_name)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .madFont(size: 15, weight: .bold, design: .rounded)
                     .foregroundColor(.primary)
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
                     Text(competition.type.displayName.uppercased())
-                        .font(.system(size: 9, weight: .black, design: .rounded))
+                        .madFont(size: 9, weight: .black, design: .rounded)
                         .tracking(0.8)
                         .foregroundColor(typeGradientColors.first ?? .green)
 
@@ -1480,7 +1485,7 @@ struct ActiveCompetitionBannerCard: View {
                         Text("·")
                             .foregroundColor(.secondary.opacity(0.5))
                         Text(interval.displayName)
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .madFont(size: 10, weight: .semibold, design: .rounded)
                             .foregroundColor(.secondary)
                     }
 
@@ -1493,7 +1498,7 @@ struct ActiveCompetitionBannerCard: View {
                         Text(standing.isTeam
                              ? "\(rankOrdinal(standing.place)) of \(standing.of) teams"
                              : "\(rankOrdinal(standing.place)) of \(standing.of)")
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .madFont(size: 10, weight: .semibold, design: .rounded)
                             .foregroundColor(standing.place == 1 ? .yellow : .secondary)
                     }
                 }
@@ -1508,9 +1513,9 @@ struct ActiveCompetitionBannerCard: View {
     private var urgencyPill: some View {
         HStack(spacing: 4) {
             Image(systemName: focus.pillIcon)
-                .font(.system(size: 9, weight: .heavy))
+                .madFont(size: 9, weight: .heavy)
             Text(focus.pill)
-                .font(.system(size: 9, weight: .black, design: .rounded))
+                .madFont(size: 9, weight: .black, design: .rounded)
                 .tracking(0.7)
         }
         .foregroundColor(focus.level.color)
@@ -1528,12 +1533,12 @@ struct ActiveCompetitionBannerCard: View {
     private var bottomRow: some View {
         HStack(spacing: 8) {
             Image(systemName: focus.level.iconBackground)
-                .font(.system(size: 13, weight: .bold))
+                .madFont(size: 13, weight: .bold, maxScale: 1.3)
                 .foregroundColor(focus.level.color)
                 .frame(width: 18)
 
             Text(focus.detail)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .madFont(size: 12, weight: .semibold, design: .rounded)
                 .foregroundColor(.primary.opacity(0.85))
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1541,7 +1546,7 @@ struct ActiveCompetitionBannerCard: View {
             Spacer(minLength: 4)
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .heavy))
+                .madFont(size: 11, weight: .heavy)
                 .foregroundColor(.secondary)
         }
     }
@@ -1779,17 +1784,17 @@ struct GettingStartedChecklistCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "checklist")
-                    .font(.system(size: 16, weight: .bold))
+                    .madFont(size: 16, weight: .bold)
                     .foregroundStyle(
                         LinearGradient(colors: [MADTheme.Colors.madRed, .orange], startPoint: .top, endPoint: .bottom)
                     )
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Getting Started")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .madFont(size: 15, weight: .bold, design: .rounded)
                         .foregroundColor(.primary)
                     Text("\(completedCount) of \(items.count) done")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .madFont(size: 11, weight: .medium, design: .rounded)
                         .foregroundColor(.secondary)
                 }
 
@@ -1797,7 +1802,7 @@ struct GettingStartedChecklistCard: View {
 
                 Button(action: onDismiss) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .bold))
+                        .madFont(size: 11, weight: .bold)
                         .foregroundColor(.secondary)
                         .padding(6)
                         .background(Circle().fill(Color.white.opacity(0.08)))
@@ -1810,21 +1815,21 @@ struct GettingStartedChecklistCard: View {
                     Button(action: item.action) {
                         HStack(spacing: 12) {
                             Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 20))
+                                .madFont(size: 20)
                                 .foregroundColor(item.isDone ? .green : .secondary.opacity(0.5))
 
                             Image(systemName: item.icon)
-                                .font(.system(size: 14, weight: .semibold))
+                                .madFont(size: 14, weight: .semibold, maxScale: 1.3)
                                 .foregroundColor(item.isDone ? .secondary : MADTheme.Colors.madRed)
                                 .frame(width: 22)
 
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(item.title)
-                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                    .madFont(size: 14, weight: .semibold, design: .rounded)
                                     .foregroundColor(.primary)
                                     .strikethrough(item.isDone, color: .secondary)
                                 Text(item.subtitle)
-                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .madFont(size: 11, weight: .medium, design: .rounded)
                                     .foregroundColor(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -1833,7 +1838,7 @@ struct GettingStartedChecklistCard: View {
 
                             if !item.isDone {
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .madFont(size: 11, weight: .semibold)
                                     .foregroundColor(.secondary)
                             }
                         }
@@ -1882,11 +1887,11 @@ struct DashboardCollapsibleSection<Content: View>: View {
     private var headerRow: some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
+                .madFont(size: 14, weight: .semibold)
                 .foregroundColor(.secondary)
 
             Text(title)
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .madFont(size: 15, weight: .semibold, design: .rounded)
                 .foregroundColor(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
@@ -1895,7 +1900,7 @@ struct DashboardCollapsibleSection<Content: View>: View {
 
             if let accessoryText {
                 Text(accessoryText)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .foregroundColor(accessoryColor)
                     .lineLimit(1)
                     .padding(.horizontal, 8)
@@ -1904,7 +1909,7 @@ struct DashboardCollapsibleSection<Content: View>: View {
             }
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
+                .madFont(size: 12, weight: .semibold)
                 .foregroundColor(.secondary)
                 .rotationEffect(.degrees(isCollapsed ? 0 : 90))
         }
@@ -2072,7 +2077,7 @@ struct WeeklyTrendCard: View {
             // Fair comparison note
             if daysElapsed < 7 {
                 Text("Comparing first \(daysElapsed) day\(daysElapsed == 1 ? "" : "s") of each week")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .madFont(size: 10, weight: .medium, design: .rounded)
                     .foregroundColor(.secondary)
             }
 
@@ -2127,23 +2132,23 @@ struct WeeklyTrendCard: View {
     private func trendColumn(label: String, miles: Double, days: Int, totalDays: Int = 7, isCurrent: Bool) -> some View {
         VStack(spacing: 10) {
             Text(label)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .madFont(size: 12, weight: .semibold, design: .rounded)
                 .foregroundColor(.secondary)
 
             Text(String(format: "%.1f", miles))
-                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .madFont(size: 28, weight: .bold, design: .rounded)
                 .foregroundColor(isCurrent ? .primary : .secondary)
 
             Text("miles")
-                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .madFont(size: 11, weight: .medium, design: .rounded)
                 .foregroundColor(.secondary)
 
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 10))
+                    .madFont(size: 10)
                     .foregroundColor(.green)
                 Text("\(days)/\(totalDays) days")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(isCurrent ? .primary : .secondary)
             }
         }
@@ -2153,22 +2158,22 @@ struct WeeklyTrendCard: View {
     private func changeIndicator(label: String, value: Double, isPercentage: Bool, isPositive: Bool) -> some View {
         HStack(spacing: 6) {
             Image(systemName: value == 0 ? "minus" : (isPositive ? "arrow.up.right" : "arrow.down.right"))
-                .font(.system(size: 11, weight: .bold))
+                .madFont(size: 11, weight: .bold)
                 .foregroundColor(value == 0 ? .secondary : (isPositive ? .green : .red))
 
             if isPercentage {
                 Text(ProgressCalculator.formatSignedWholePercent(value))
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .madFont(size: 13, weight: .bold, design: .rounded)
                     .foregroundColor(value == 0 ? .secondary : (isPositive ? .green : .red))
             } else {
                 let intVal = Int(value)
                 Text("\(intVal >= 0 ? "+" : "")\(intVal)")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .madFont(size: 13, weight: .bold, design: .rounded)
                     .foregroundColor(value == 0 ? .secondary : (isPositive ? .green : .red))
             }
 
             Text(label)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .madFont(size: 12, weight: .medium, design: .rounded)
                 .foregroundColor(.secondary)
         }
         .padding(.horizontal, 12)
@@ -2268,10 +2273,10 @@ struct HeroShareButton: View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 12, weight: .bold))
+                    .madFont(size: 12, weight: .bold)
                     .accessibilityHidden(true)
                 Text("Share")
-                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .madFont(size: 12, weight: .heavy, design: .rounded)
             }
             // Filled light, not another outlined chip. Beside the savers
             // readout the outlined version read as its twin — two pills of

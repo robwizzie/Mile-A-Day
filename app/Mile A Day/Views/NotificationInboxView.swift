@@ -14,6 +14,7 @@ struct NotificationInboxView: View {
     /// MainTabView, and stacking it under a sheet that's still up would either
     /// drop the presentation or bury it.
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var notifications: [InAppNotification] = []
     @State private var unreadCount = 0
@@ -86,7 +87,7 @@ struct NotificationInboxView: View {
                         .scaleEffect(1.2)
                         .tint(MADTheme.Colors.madRed)
                     Text("Loading notifications...")
-                        .font(.system(size: 13, design: .rounded))
+                        .madFont(size: 13, design: .rounded)
                         .foregroundColor(.white.opacity(0.4))
                 }
             } else if notifications.isEmpty {
@@ -95,6 +96,9 @@ struct NotificationInboxView: View {
                 feedScrollView
             }
         }
+        // Dynamic Type: rows of text that wrap. Above the sheet and the
+        // toast so neither inherits it.
+        .madTypeCap(.madCardCap)
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.large)
         .toolbarColorScheme(.dark, for: .navigationBar)
@@ -120,7 +124,7 @@ struct NotificationInboxView: View {
         .overlay(alignment: .top) {
             if let msg = toast {
                 Text(msg)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .madFont(size: 13, weight: .semibold, design: .rounded)
                     .foregroundColor(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
@@ -139,7 +143,7 @@ struct NotificationInboxView: View {
     private var emptyState: some View {
         VStack(spacing: MADTheme.Spacing.md) {
             Image(systemName: "bell.badge.fill")
-                .font(.system(size: 28, weight: .bold))
+                .madFont(size: 28, weight: .bold, maxScale: 1.3)
                 .foregroundStyle(
                     LinearGradient(colors: [.white.opacity(0.35), .white.opacity(0.15)], startPoint: .top, endPoint: .bottom)
                 )
@@ -148,10 +152,10 @@ struct NotificationInboxView: View {
 
             VStack(spacing: 4) {
                 Text("No notifications yet")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .madFont(size: 15, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.7))
                 Text("Friend activity, competition updates, and badge wins will land here")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .madFont(size: 12, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.4))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, MADTheme.Spacing.xl)
@@ -230,14 +234,14 @@ struct NotificationInboxView: View {
         } label: {
             HStack(spacing: 7) {
                 Image(systemName: f.icon)
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                 Text(f.title)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .madFont(size: 13, weight: .bold, design: .rounded)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                 if count > 0 {
                     Text("\(count)")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .foregroundColor(isSelected ? .white : .white.opacity(0.55))
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
@@ -277,15 +281,15 @@ struct NotificationInboxView: View {
     private var filteredEmptyState: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
             Image(systemName: filter.icon)
-                .font(.system(size: 22, weight: .bold))
+                .madFont(size: 22, weight: .bold, maxScale: 1.3)
                 .foregroundColor(.white.opacity(0.25))
                 .frame(width: 50, height: 50)
                 .background(Circle().fill(Color.white.opacity(0.04)))
             Text("No \(filter.title.lowercased()) notifications")
-                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .madFont(size: 14, weight: .bold, design: .rounded)
                 .foregroundColor(.white.opacity(0.6))
             Button("Show all") { filter = .all }
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .madFont(size: 12, weight: .bold, design: .rounded)
                 .foregroundColor(MADTheme.Colors.madRed)
                 .padding(.top, 4)
         }
@@ -298,7 +302,7 @@ struct NotificationInboxView: View {
     private func feedSectionHeader(_ title: String) -> some View {
         HStack(spacing: 10) {
             Text(title.uppercased())
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .madFont(size: 10, weight: .heavy, design: .rounded)
                 .tracking(1.4)
                 .foregroundColor(.white.opacity(0.4))
             Rectangle()
@@ -798,28 +802,34 @@ struct NotificationInboxView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     // Type label + time — small caption row that makes
                     // "what kind of event is this" instantly readable.
-                    HStack(spacing: 6) {
-                        Text(typeLabel(for: notification.type))
-                            .font(.system(size: 10, weight: .heavy, design: .rounded))
-                            .tracking(0.6)
-                            .foregroundColor(accent)
-                        Text("·")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.white.opacity(0.25))
-                        Text(relativeTime(notification.created_at))
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.45))
+                    // One line, else label over time — a squeezed HStack
+                    // would wrap the label's own letters at large sizes.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) {
+                            notificationTypeLabel(notification, accent: accent)
+                            Text("·")
+                                .madFont(size: 10, weight: .bold)
+                                .foregroundColor(.white.opacity(0.25))
+                            notificationTimeLabel(notification)
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            notificationTypeLabel(notification, accent: accent)
+                            notificationTimeLabel(notification)
+                        }
                     }
 
                     Text(emphasized(notification.title, name: notification.actor?.displayName))
-                        .font(.system(size: 14, weight: isUnread ? .heavy : .semibold, design: .rounded))
+                        .madFont(size: 14, weight: isUnread ? .heavy : .semibold, design: .rounded)
                         .foregroundColor(.white)
                         .multilineTextAlignment(.leading)
 
                     Text(emphasized(notification.body, name: notification.actor?.displayName))
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.6))
-                        .lineLimit(3)
+                        // Three lines of accessibility-size text in a column
+                        // beside an avatar and a thumbnail is a sentence
+                        // fragment; give it room there, keep 3 everywhere else.
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 6 : 3)
                         .multilineTextAlignment(.leading)
 
                     friendRequestActions(notification)
@@ -876,6 +886,19 @@ struct NotificationInboxView: View {
         .buttonStyle(.plain)
     }
 
+    private func notificationTypeLabel(_ notification: InAppNotification, accent: Color) -> some View {
+        Text(typeLabel(for: notification.type))
+            .madFont(size: 10, weight: .heavy, design: .rounded)
+            .tracking(0.6)
+            .foregroundColor(accent)
+    }
+
+    private func notificationTimeLabel(_ notification: InAppNotification) -> some View {
+        Text(relativeTime(notification.created_at))
+            .madFont(size: 10, weight: .semibold, design: .rounded)
+            .foregroundColor(.white.opacity(0.45))
+    }
+
     /// Row identity, Instagram-style: WHO it's about (their avatar) with a
     /// small type badge for the "what kind of event" color signal the old
     /// icon disc carried. Rows with no actor — reminders, competition
@@ -910,7 +933,7 @@ struct NotificationInboxView: View {
                     .frame(width: 44, height: 44)
                     .overlay(Circle().strokeBorder(accent.opacity(0.35), lineWidth: 1))
                 notificationIcon(for: notification.type)
-                    .font(.system(size: 18, weight: .bold))
+                    .madFont(size: 18, weight: .bold, maxScale: 1.3)
                     .foregroundColor(accent)
             }
         }
@@ -949,9 +972,9 @@ struct NotificationInboxView: View {
             if acceptedRequestIds.contains(actor.user_id) {
                 HStack(spacing: 5) {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .heavy))
+                        .madFont(size: 10, weight: .heavy)
                     Text("Friends")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
                 }
                 .foregroundColor(.green)
                 .padding(.horizontal, 12)
@@ -963,7 +986,7 @@ struct NotificationInboxView: View {
                     acceptRequest(notification)
                 } label: {
                     Text("Accept")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .madFont(size: 12, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
