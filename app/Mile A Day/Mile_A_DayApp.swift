@@ -13,6 +13,18 @@ struct Mile_A_DayApp: App {
     
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
+    init() {
+        // The Start My Mile intent (Siri / Shortcuts / Action Button / Control
+        // Center) performs in this process but is compiled into the widget
+        // extension too, so it can't name DeepLinkRouter itself — it hands off
+        // through this hook. Installed in init, i.e. before an
+        // `openAppWhenRun` launch performs the intent; an earlier request is
+        // parked and delivered here.
+        StartMileLaunch.handler = { request in
+            DeepLinkRouter.shared.requestOpenTracker(activity: request.activity)
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -93,11 +105,13 @@ struct Mile_A_DayApp: App {
                         )
                     case "workout":
                         // Covers mileaday://workout (Live Activity tap) and
-                        // mileaday://workout/start (widget Start Mile button)
-                        NotificationCenter.default.post(
-                            name: NSNotification.Name("MAD_OpenWorkoutFromLiveActivity"),
-                            object: nil
-                        )
+                        // mileaday://workout/start (widget Start Mile button).
+                        // Parked on the router rather than posted: a cold
+                        // launch from a widget has no Dashboard yet, and a
+                        // bare notification was dropped. The consumer reopens
+                        // a workout in progress, so the Live Activity tap
+                        // lands exactly where it always did.
+                        DeepLinkRouter.shared.requestOpenTracker()
                     case "buddy":
                         // mileaday://buddy/<CODE> — a shared join code. Switch to
                         // the dashboard first, since that's where the buddy flow

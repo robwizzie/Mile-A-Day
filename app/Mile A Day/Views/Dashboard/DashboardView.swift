@@ -59,6 +59,9 @@ struct DashboardView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// Controls presentation of the in‑progress workout tracking UI.
     @State private var showWorkoutView = false
+    /// Walk/run pre-answered for the tracker's wizard by a Start My Mile
+    /// request (TrackerLaunchModifier). Cleared when the cover dismisses.
+    @State private var trackerPreselectedActivity: HKWorkoutActivityType?
     // Buddy Walks. `activeBuddySessionId` is what turns the SAME tracker into a
     // buddy session — see WorkoutTrackingView.buddySessionId. It is deliberately
     // a plain String? passed to the one existing initializer rather than a
@@ -664,6 +667,7 @@ struct DashboardView: View {
                 let hasActive = InProgressWorkoutStore.load()?.isActive == true
                 hasActiveWorkout = hasActive
                 showInProgressBanner = hasActive
+                trackerPreselectedActivity = nil
 
                 // Buddy Walk just ended — show the group result. Only when the
                 // workout is genuinely over: dismissing the tracker mid-walk to
@@ -706,7 +710,8 @@ struct DashboardView: View {
                     // the dismiss handler above offer the group recap, and on
                     // the next render the tracker's own buddySessionId arrives
                     // non-nil — one path from then on.
-                    onBuddySessionAdopted: { activeBuddySessionId = $0 }
+                    onBuddySessionAdopted: { activeBuddySessionId = $0 },
+                    preselectedActivity: trackerPreselectedActivity
                 )
             }
             // Buddy Walks flow: pill → setup steps → lobby (synced countdown)
@@ -721,6 +726,16 @@ struct DashboardView: View {
                     deepLinkRouter: deepLinkRouter,
                     linkError: $buddyLinkError,
                     onPendingLink: consumePendingBuddyLink
+                )
+            )
+            // Start My Mile (Siri / Shortcuts / Action Button / Control
+            // Center / widget Start buttons) — reopens a workout in progress,
+            // else opens the tracker.
+            .modifier(
+                TrackerLaunchModifier(
+                    router: deepLinkRouter,
+                    showWorkoutView: $showWorkoutView,
+                    preselectedActivity: $trackerPreselectedActivity
                 )
             )
             .onAppear {
