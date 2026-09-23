@@ -519,6 +519,13 @@
       "when": 1789944209189,
       "tag": "0073_mighty_the_spike",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1790183942074,
+      "tag": "0074_client_diagnostics",
+      "breakpoints": true
     }
   ]
 }

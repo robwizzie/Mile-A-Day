@@ -221,6 +221,12 @@ jobs:
       # mile announcement beside the walk's own and the cron drained both.
       - name: Friend notification dedupe check
         run: node scripts/friend-notification-dedupe-check.mjs
+      # MetricKit crash/hang upload: the app's only crash reporter. A row
+      # that never lands, an untrimmed megabyte payload, a looping client
+      # past the daily cap, a retry stored twice or a signature that stops
+      # grouping are all silent — pinned over real HTTP + auth middleware.
+      - name: MetricKit diagnostics check
+        run: node scripts/diagnostics-check.mjs
 
   website:
     name: Website (lint + build)

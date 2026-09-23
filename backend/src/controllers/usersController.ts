@@ -218,6 +218,7 @@ export async function deleteUser(req: Request, res: Response) {
 			query: 'DELETE FROM flex_log WHERE sender_id = $1 OR target_id = $1',
 			params: p
 		},
+		{ query: 'DELETE FROM client_diagnostics WHERE user_id = $1', params: p },
 		{ query: 'DELETE FROM users WHERE user_id = $1', params: p }
 	]);
 
