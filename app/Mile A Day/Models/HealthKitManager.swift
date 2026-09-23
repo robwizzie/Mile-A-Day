@@ -790,8 +790,19 @@ class HealthKitManager: ObservableObject {
     
     // Fetch today's running/walking distance from workouts only
     // Updated to use location-aware day calculation
-    func fetchTodaysDistance() {
-        guard isAuthorized else { return }
+    ///
+    /// `completion` (main queue) answers ONE question: did HealthKit actually
+    /// answer? `false` = not authorized or the query errored — on a LOCKED
+    /// device HealthKit's store is protected and every read fails, and that is
+    /// exactly when a Watch walk lands and wakes us in the background. The
+    /// published `todaysDistance` is then still whatever was cached earlier,
+    /// so anything that WRITES from it (the widget store, the reminder) must
+    /// wait for `true` — see MADBackgroundService.
+    func fetchTodaysDistance(completion: ((Bool) -> Void)? = nil) {
+        guard isAuthorized else {
+            if let completion { DispatchQueue.main.async { completion(false) } }
+            return
+        }
         
         let now = Date()
         let fetchDayStamp = Self.localDayStamp(for: now)
@@ -827,6 +838,7 @@ class HealthKitManager: ObservableObject {
                         self.hasTodaysDistanceLoaded = true
                         self.checkInitialDataReady()
                     }
+                    completion?(false)
                 }
                 return
             }
@@ -866,12 +878,13 @@ class HealthKitManager: ObservableObject {
                         self.hasTodaysDistanceLoaded = true
                         self.checkInitialDataReady()
                     }
+                    completion?(true)
                 }
                 return
             }
 
             let todaysWorkouts = self.filterWorkoutsByDeviceToday(workouts: workouts)
-            self.processTodaysWorkouts(todaysWorkouts, dayStamp: fetchDayStamp)
+            self.processTodaysWorkouts(todaysWorkouts, dayStamp: fetchDayStamp, completion: completion)
         }
         
         healthStore.execute(query)
@@ -1110,7 +1123,7 @@ class HealthKitManager: ObservableObject {
     }
     
     /// Processes today's filtered workouts to calculate distance and update UI
-    func processTodaysWorkouts(_ todaysWorkouts: [HKWorkout], dayStamp: String? = nil) {
+    func processTodaysWorkouts(_ todaysWorkouts: [HKWorkout], dayStamp: String? = nil, completion: ((Bool) -> Void)? = nil) {
         // Approve whatever was already writing before this build, once. Done
         // here rather than at launch because HealthKit answers nothing on a
         // locked device, and grandfathering an empty list would make every real
@@ -1167,6 +1180,7 @@ class HealthKitManager: ObservableObject {
                 self.hasTodaysDistanceLoaded = true
                 self.checkInitialDataReady()
             }
+            completion?(true)
         }
     }
     

@@ -3,6 +3,7 @@ import HealthKit
 import BackgroundTasks
 import WidgetKit
 import UserNotifications
+import UIKit
 
 /// Service that handles background processing and HealthKit background delivery
 /// Enables live tracking when the app is closed/backgrounded
@@ -32,11 +33,31 @@ final class MADBackgroundService: NSObject, ObservableObject {
     // Background task identifier
     private static let backgroundTaskIdentifier = "com.mileaday.background-refresh"
     
+    /// A background pass that ran while HealthKit's store was locked, so it
+    /// could not read today's miles and deliberately wrote nothing. The next
+    /// unlock re-runs it (`protectedDataDidBecomeAvailable`) — otherwise the
+    /// widget keeps whatever it last knew until the app is opened.
+    private var todayRefreshPendingUnlock = false
+
     private override init() {
         super.init()
         // Only set up HealthKit background delivery if user is authenticated
         if UserDefaults.standard.bool(forKey: "MAD_IsAuthenticated") {
             setupBackgroundDelivery()
+        }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(protectedDataDidBecomeAvailable),
+            name: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil
+        )
+    }
+
+    @objc private func protectedDataDidBecomeAvailable() {
+        guard todayRefreshPendingUnlock else { return }
+        todayRefreshPendingUnlock = false
+        Task { @MainActor in
+            await self.performBackgroundSync(reason: .protectedDataAvailable)
         }
     }
     
@@ -152,18 +173,52 @@ final class MADBackgroundService: NSObject, ObservableObject {
     
     @MainActor
     private func performBackgroundWork() async {
-        // Fetch latest workout data
+        // Today's miles FIRST, and wait for HealthKit's actual answer.
+        //
+        // This used to read `healthManager.todaysDistance` as soon as
+        // `hasLoadedInitialData` was true — but that flag latches once per
+        // process and ALSO flips when a query errors. A Watch walk syncs to
+        // the phone while it is in a pocket, locked; HealthKit wakes us, every
+        // read fails on the locked store, and `todaysDistance` is still the
+        // value cached hours earlier. Writing it stamped that stale number as
+        // TODAY's in the widget store — "0 mi, 4 hr left, streak at risk" on
+        // the home screen for a mile already walked — and re-armed the
+        // "you haven't walked yet" reminder on the same stale reading. Nothing
+        // corrected it until the app was opened.
+        let todayAnswered = await refreshTodaysDistance()
+
+        // Streak / lifetime data (the existing bounded wait).
         let success = await fetchLatestWorkoutData()
 
-        if success {
+        if todayAnswered {
             // Check if user completed their mile goal
             checkForMileCompletion()
+            updateTodayWidget()
+        } else {
+            // Locked: say nothing rather than something wrong, and come back
+            // for it — at the next unlock if we are still alive, else at the
+            // next background refresh.
+            todayRefreshPendingUnlock = true
+            scheduleBackgroundRefresh()
+        }
 
-            // Update widgets
-            updateWidgets()
+        if success {
+            WidgetDataStore.save(streak: userManager.currentUser.streak)
 
             // Sync workouts to backend (background mode)
             await syncWorkoutsInBackground()
+        }
+    }
+
+    /// One real answer from HealthKit about today's miles: `true` only when the
+    /// query SUCCEEDED (an empty day included), `false` when it could not be
+    /// asked or failed — a locked device, above all.
+    @MainActor
+    private func refreshTodaysDistance() async -> Bool {
+        await withCheckedContinuation { continuation in
+            healthManager.fetchTodaysDistance { answered in
+                continuation.resume(returning: answered)
+            }
         }
     }
 
@@ -202,6 +257,7 @@ final class MADBackgroundService: NSObject, ObservableObject {
         case bgAppRefreshTask
         case silentPush
         case backgroundLaunch
+        case protectedDataAvailable
     }
 
     /// Sync workouts to backend in background (limited batch size)
@@ -346,14 +402,12 @@ final class MADBackgroundService: NSObject, ObservableObject {
         }
     }
     
-    private func updateWidgets() {
-        // Update widget data store
-        let user = userManager.currentUser
-        let miles = healthManager.todaysDistance
-        
-        // Update widget data
-        WidgetDataStore.save(todayMiles: miles, goal: user.goalMiles)
-        WidgetDataStore.save(streak: user.streak)
+    /// Only ever called with a FRESH `todaysDistance` (see performBackgroundWork).
+    private func updateTodayWidget() {
+        WidgetDataStore.save(
+            todayMiles: healthManager.todaysDistance,
+            goal: userManager.currentUser.goalMiles
+        )
     }
 }
 

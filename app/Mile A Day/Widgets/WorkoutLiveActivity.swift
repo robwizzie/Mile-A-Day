@@ -532,7 +532,15 @@ struct WorkoutLiveActivityView: View {
                 }
             }
         }
+        // Fill the WHOLE lock-screen card. The gradient used to be a
+        // background on the content alone, so it only covered the content's
+        // own height; the system's card is taller, and with a `.clear` tint
+        // the rest showed through as dark translucent bands above and below.
+        // The frame stretches the content (and the gradient under it) to the
+        // card's height, and the tint is the card's own colour in case the
+        // system ever draws a sliver the view doesn't reach.
         .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             LinearGradient(
                 colors: [
@@ -544,7 +552,7 @@ struct WorkoutLiveActivityView: View {
                 endPoint: .bottomTrailing
             )
         )
-        .activityBackgroundTint(Color.clear)
+        .activityBackgroundTint(Color(red: 0.7, green: 0.2, blue: 0.3))
         .activitySystemActionForegroundColor(.white)
         // Tapping the Live Activity should always take the user back to their
         // in‑progress workout inside the main app.
