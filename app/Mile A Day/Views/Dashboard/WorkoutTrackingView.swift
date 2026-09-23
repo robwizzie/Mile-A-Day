@@ -31,6 +31,11 @@ struct WorkoutTrackingView: View {
     /// arrives non-nil, making the adopted and handed-in paths
     /// indistinguishable from then on.
     var onBuddySessionAdopted: ((String) -> Void)? = nil
+    /// Walk/run already answered by a Start My Mile request (Siri, Shortcuts,
+    /// the Action Button, Control Center). Skips ONLY the activity step of a
+    /// fresh wizard — never touches a recovered workout or a buddy hand-off,
+    /// and indoor/outdoor is still asked (it picks the instrument).
+    var preselectedActivity: HKWorkoutActivityType? = nil
     @Environment(\.dismiss) var dismiss
 
     // Shared singleton — tracking keeps running when this view is dismissed
@@ -2116,7 +2121,10 @@ struct WorkoutTrackingView: View {
             // would fail the lock anyway.
             if startBuddyWorkoutIfReady() { return }
 
-            guard let saved = InProgressWorkoutStore.load(), saved.isActive else { return }
+            guard let saved = InProgressWorkoutStore.load(), saved.isActive else {
+                applyPreselectedActivity()
+                return
+            }
 
             // Buddy walk: the room rides the persisted workout. Re-adopt it
             // before anything below starts reporting, and ask the server for
@@ -2353,6 +2361,23 @@ struct WorkoutTrackingView: View {
             from()
             to()
         }
+    }
+
+    /// A Start My Mile request's walk/run, applied once to a FRESH wizard.
+    /// `onAppear` re-fires whenever a sheet over this cover dismisses, so it
+    /// only acts while the wizard is still on its first step with nothing
+    /// chosen — Back to the activity step keeps `selectedActivityType`, so it
+    /// can't bounce the user forward again.
+    private func applyPreselectedActivity() {
+        guard let preselectedActivity,
+              effectiveBuddySessionId == nil,
+              !isTracking, !showCountdown,
+              showActivitySelection,
+              selectedActivityType == nil
+        else { return }
+        selectedActivityType = preselectedActivity
+        showActivitySelection = false
+        showLocationTypeSelection = true
     }
 
     private func selectActivity(_ activityType: HKWorkoutActivityType) {
@@ -2636,6 +2661,8 @@ struct WorkoutTrackingView: View {
             buddySessionId: effectiveBuddySessionId
         )
         InProgressWorkoutStore.save(initialState)
+        // What Start My Mile pre-answers next time.
+        TrackerLaunchPreference.record(selectedActivityType)
 
         // Start location/pedometer tracking (fresh workout, initialDistance = 0)
         locationManager.startTracking(locationType: selectedLocationType, initialDistance: 0)

@@ -1,5 +1,6 @@
 import Foundation
 import WidgetKit
+import AppIntents
 
 struct WidgetDataStore {
     private static let suiteName = "group.mileaday.shared"
@@ -84,6 +85,16 @@ struct WidgetDataStore {
         let progress = defaults.double(forKey: "current_progress")
 
         return (miles, goal, streakCompleted, progress)
+    }
+
+    /// True only when today's progress snapshot was written TODAY. `load()`
+    /// answers a stale (or never-written) day with zeros, which is right for a
+    /// ring but wrong for a sentence: "you're at 0.00 today" is a claim, and
+    /// the "How far today?" intent must say "open the app to refresh" instead
+    /// of making it.
+    static func hasProgressForToday() -> Bool {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return false }
+        return defaults.string(forKey: dataDayKey) == dayStamp()
     }
 
     // MARK: - Streak helpers
@@ -449,5 +460,100 @@ struct WidgetDataStore {
             rows: rows,
             isStale: defaults.string(forKey: leaderboardStampKey) != dayStamp()
         )
+    }
+}
+
+// MARK: - Start My Mile (shared by the app AND the widget extension)
+//
+// This lives in this file on purpose: it is the one source file that is
+// already a member of BOTH the app and the widget extension, and a control
+// that opens the app (the Control Center "Start My Mile" button) needs its
+// intent compiled into both — the extension to declare it, the app to run it
+// (`openAppWhenRun` intents perform in the APP's process). A new file would
+// join the app target only; extension membership is a pbxproj edit. Keep this
+// block dependency-free (Foundation + AppIntents): the extension can't see
+// anything else in the app.
+
+/// Walk or run, as Siri, Shortcuts and the Action Button name it.
+enum MileActivityOption: String, AppEnum {
+    case walk
+    case run
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation {
+        TypeDisplayRepresentation(name: "Activity")
+    }
+
+    static var caseDisplayRepresentations: [MileActivityOption: DisplayRepresentation] {
+        [
+            .walk: DisplayRepresentation(title: "Walk"),
+            .run: DisplayRepresentation(title: "Run")
+        ]
+    }
+}
+
+/// The hand-off from the intent to the app's own routing. The intent can't
+/// reach `DeepLinkRouter` (the extension compiles this file too), so the app
+/// installs `handler` at launch; a request that arrives before that is parked
+/// and delivered on install.
+@MainActor
+enum StartMileLaunch {
+    struct Request {
+        let activity: MileActivityOption?
+    }
+
+    private static var parked: Request?
+
+    static var handler: ((Request) -> Void)? {
+        didSet {
+            guard let handler, let request = parked else { return }
+            parked = nil
+            handler(request)
+        }
+    }
+
+    static func request(activity: MileActivityOption?) {
+        let request = Request(activity: activity)
+        if let handler {
+            handler(request)
+        } else {
+            parked = request
+        }
+    }
+}
+
+/// "Start my mile": opens the app on the workout tracker. It never starts a
+/// second workout — the app reopens one already in progress instead (see
+/// `DeepLinkRouter.requestOpenTracker`).
+struct StartMileIntent: AppIntent {
+    static var title: LocalizedStringResource { "Start My Mile" }
+
+    static var description: IntentDescription {
+        IntentDescription(
+            "Opens Mile A Day to the workout tracker. If a workout is already in progress, it reopens that workout instead of starting another."
+        )
+    }
+
+    static var openAppWhenRun: Bool { true }
+
+    @Parameter(
+        title: "Activity",
+        description: "Walk or run. Leave empty to use the one you last tracked."
+    )
+    var activity: MileActivityOption?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Start my mile as a \(\.$activity)")
+    }
+
+    init() {}
+
+    init(activity: MileActivityOption?) {
+        self.activity = activity
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        StartMileLaunch.request(activity: activity)
+        return .result()
     }
 }
