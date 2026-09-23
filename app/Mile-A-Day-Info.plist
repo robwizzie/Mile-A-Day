@@ -17,20 +17,21 @@
 	</array>
 	<!-- Instagram story sharing. `canOpenURL` answers false for any scheme not
 	     declared here however installed the app is, so without this the
-	     "Instagram Stories" button hides itself permanently. -->
+	     direct story handoff can never be taken even once MADFacebookAppID
+	     is filled in. -->
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>instagram-stories</string>
-		<!-- The fallback path when no Meta App ID is configured: save the card
-		     and open Instagram's story camera. `canOpenURL` answers false for
-		     any scheme not listed here however installed Instagram is, so
-		     without it the fallback can't tell installed from missing. -->
+		<!-- Instagram's own scheme, kept declared so `canOpenURL` can tell an
+		     installed Instagram from a missing one. -->
 		<string>instagram</string>
 	</array>
 	<!-- Meta App ID for the story handoff's `source_application`. Register a
-	     Meta app (developers.facebook.com) and paste the ID here — until then
-	     `InstagramStoryShare.isAvailable` is false and sharing falls back to
-	     the system share sheet, which is a working feature, just one more tap.
+	     Meta app (developers.facebook.com, with this app's iOS bundle id) and
+	     paste the numeric App ID into the <string> below — that alone lights
+	     up the Share Studio's direct Instagram Stories handoff. Until then
+	     `InstagramStoryShare.isAvailable` is false and the button opens the
+	     system share sheet, which works, just one more tap.
 	     Deliberately NOT a guessed bundle id: Instagram accepts the open and
 	     then shows an empty composer, which reads as broken. -->
 	<key>MADFacebookAppID</key>
