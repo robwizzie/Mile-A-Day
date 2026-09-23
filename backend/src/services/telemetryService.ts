@@ -18,15 +18,38 @@ export const SHARE_INSTAGRAM_FEATURE = "share_instagram";
 export const SHARE_SHEET_FEATURE = "share_sheet";
 export const SHARE_SAVED_FEATURE = "share_saved";
 
+/// Share Studio v2's other destinations and the card FAMILY that was shared.
+/// A fixed set on purpose: a template id interpolated into a key would turn
+/// this allowlist into a free-text sink one new template at a time.
+export const SHARE_DESTINATION_FEATURES = [
+  "share_instagram_feed",
+  "share_messages",
+  "share_link",
+] as const;
+export const SHARE_FAMILY_FEATURES = [
+  "share_family_picture",
+  "share_family_route",
+  "share_family_streak",
+  "share_family_flamey",
+  "share_family_stats",
+  "share_family_week",
+] as const;
+export const WEEKLY_RECAP_OPENED_FEATURE = "weekly_recap_opened";
+export const WEEKLY_RECAP_SHARED_FEATURE = "weekly_recap_shared";
+
 /// Features a client may record. An off-list value is DROPPED, not stored —
 /// the table must stay a set of known, chartable signals, never a free-text
 /// sink (the referral_detail lesson).
-export const TRACKED_FEATURES = new Set([
+export const TRACKED_FEATURES = new Set<string>([
   FLYOVER_PLAY_FEATURE,
   SHARE_OPENED_FEATURE,
   SHARE_INSTAGRAM_FEATURE,
   SHARE_SHEET_FEATURE,
   SHARE_SAVED_FEATURE,
+  ...SHARE_DESTINATION_FEATURES,
+  ...SHARE_FAMILY_FEATURES,
+  WEEKLY_RECAP_OPENED_FEATURE,
+  WEEKLY_RECAP_SHARED_FEATURE,
 ]);
 
 export async function recordFeatureEvent(
