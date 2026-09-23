@@ -156,7 +156,6 @@ struct MileADayShortcuts: AppShortcutsProvider {
                 "Start my mile in \(.applicationName)",
                 "Start my mile with \(.applicationName)",
                 "Track my mile with \(.applicationName)",
-                "Log my mile with \(.applicationName)",
                 "Start a \(\.$activity) in \(.applicationName)"
             ],
             shortTitle: "Start My Mile",
