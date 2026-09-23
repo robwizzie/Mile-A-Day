@@ -102,8 +102,18 @@ enum ClientFeatures {
     /// competitions list.
     static let activityDigestV1 = "activity_digest_v1"
 
+    /// This build has the Weekly Recap screen (`GET /users/:id/weekly-recap`)
+    /// and routes the `weekly_recap` push to it — the banner, the cold-launch
+    /// path and the inbox row all open the week it names (`data.week_start`).
+    ///
+    /// Older builds have no route for the type, so the server must keep them
+    /// on whatever they got before rather than send a banner that opens
+    /// nothing.
+    static let weeklyRecapV1 = "weekly_recap_v1"
+
     static let supported: [String] = [
         friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
         weeklyChallengeV1, buddyGroupPostV1, buddyJoinRequestV1, activityDigestV1,
+        weeklyRecapV1,
     ]
 }

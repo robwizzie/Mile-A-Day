@@ -63,6 +63,10 @@ struct MainTabView: View {
     /// here rather than inside a tab so it works from wherever the user is and
     /// survives a cold launch (the link may arrive before any tab is mounted).
     @StateObject private var postDeepLink = PostDeepLink.shared
+    /// "Your week" — opened by the `weekly_recap` push (warm and cold), the
+    /// inbox row and the dashboard's week card. Presented HERE, at root, so a
+    /// request from any tab (or before the Dashboard exists) still lands.
+    @StateObject private var weeklyRecapLink = WeeklyRecapLink.shared
     /// One-shot: stamped by the sheet's own Save (never on display), so a
     /// crash mid-sheet re-asks instead of silently applying nothing.
     @State private var showPrivacyOnboarding =
@@ -208,6 +212,12 @@ struct MainTabView: View {
                let compId = data["competition_id"], !compId.isEmpty {
                 DeepLinkRouter.shared.requestOpenCompetition(id: compId)
                 selectedTab = 1
+                Task { await refreshUnreadCount() }
+                return
+            }
+            // The Saturday "your week" recap opens the week it names.
+            if type == "weekly_recap" {
+                weeklyRecapLink.open(weekStart: data["week_start"])
                 Task { await refreshUnreadCount() }
                 return
             }
@@ -481,6 +491,9 @@ struct MainTabView: View {
         ) {
             DonateMileSheet()
         }
+        .sheet(item: $weeklyRecapLink.pending) { request in
+            WeeklyRecapView(weekStart: request.weekStart)
+        }
         .sheet(
             isPresented: Binding(
                 get: { postDeepLink.pendingPostId != nil },
@@ -627,6 +640,12 @@ struct MainTabView: View {
                 // — with no inbox sheet covering it.
                 selectedTab = 0
                 notificationService.pendingNotificationType = nil
+            case "weekly_recap":
+                // Mirrors the live handler: the week it names, over whatever
+                // tab this launch lands on. The payload survives a cold launch.
+                let week = notificationService.pendingNotificationData["week_start"]
+                notificationService.pendingNotificationType = nil
+                weeklyRecapLink.open(weekStart: week)
             default:
                 notificationService.pendingNotificationType = nil
             }
