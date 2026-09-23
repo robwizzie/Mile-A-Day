@@ -81,6 +81,10 @@ struct MADSettingsView: View {
             }
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.vertical, MADTheme.Spacing.md)
+            // Dynamic Type: a list of text, so it grows as far as a list
+            // holds. Inside the ScrollView, i.e. below every sheet this page
+            // presents, so none of them inherits the cap.
+            .madTypeCap(.madListCap)
         }
         .background(MADTheme.Colors.appBackgroundGradient)
         .navigationTitle("Settings")
@@ -259,21 +263,20 @@ struct MADSettingsView: View {
                             .fill(MADTheme.Colors.walkBlue.opacity(0.15))
                             .frame(width: 36, height: 36)
                         Image(systemName: coachEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                            .font(.system(size: 15, weight: .medium))
+                            .madFont(size: 15, weight: .medium, maxScale: 1.3)
                             .foregroundColor(MADTheme.Colors.walkBlue)
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Voice Coach")
-                            .font(MADTheme.Typography.body)
-                            .fontWeight(.medium)
+                            .madFont(size: 17, weight: .medium, design: .rounded)
                             .foregroundColor(.primary)
                         Text(
                             coachEnabled
                                 ? "Calls your splits, halfway and your goal out loud"
                                 : "Silent — its lines still show on the tracking screen"
                         )
-                        .font(MADTheme.Typography.caption)
+                        .madFont(size: 12, weight: .regular, design: .rounded)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     }
@@ -297,7 +300,7 @@ struct MADSettingsView: View {
                 // on it.
                 if coachEnabled, GhostCoach.usingBasicVoice {
                     Text("Want a richer voice? Settings → Accessibility → Spoken Content → Voices has free downloads, and the coach picks one up on its own. It works fine without.")
-                        .font(.system(size: 11, design: .rounded))
+                        .madFont(size: 11, design: .rounded)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -329,7 +332,7 @@ struct MADSettingsView: View {
                 .pickerStyle(.segmented)
                 .onChange(of: routeDefaultRaw) { _, _ in MADHaptics.tap() }
                 Text("This controls new post visibility only. If outdoor walks are missing maps entirely, check Health Access and make sure Route is on.")
-                    .font(.system(size: 11, design: .rounded))
+                    .madFont(size: 11, design: .rounded)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -602,10 +605,10 @@ struct MADSettingsView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
+                    .madFont(size: 12, weight: .semibold)
                     .foregroundColor(iconColor)
                 Text(LocalizedStringKey(title))
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
                     .tracking(1.2)
                     .foregroundColor(.secondary)
                 Spacer()
@@ -634,7 +637,7 @@ struct MADSettingsView: View {
 
     private var versionFooter: some View {
         Text(versionString)
-            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .madFont(size: 11, weight: .medium, design: .rounded)
             .foregroundColor(.secondary.opacity(0.7))
             .frame(maxWidth: .infinity)
             .padding(.top, MADTheme.Spacing.sm)

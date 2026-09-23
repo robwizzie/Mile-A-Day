@@ -1084,8 +1084,9 @@ struct MADSettingsRow: View {
                     .fill(iconColor.opacity(0.15))
                     .frame(width: 36, height: 36)
 
+                // A 36pt disc: the glyph grows a little, the disc doesn't.
                 Image(systemName: icon)
-                    .font(.system(size: 15, weight: .medium))
+                    .madFont(size: 15, weight: .medium, maxScale: 1.3)
                     .foregroundColor(iconColor)
             }
 
@@ -1094,20 +1095,22 @@ struct MADSettingsRow: View {
                 // verbatim; wrapping in a key looks each up in the String
                 // Catalog and falls back to the text itself when it isn't
                 // there (computed subtitles like "1.0 mi per day").
+                //
+                // MADTheme.Typography.body / .caption, scaled (Dynamic Type):
+                // same size, weight and design at the default text size.
                 Text(LocalizedStringKey(title))
-                    .font(MADTheme.Typography.body)
-                    .fontWeight(.medium)
+                    .madFont(size: 17, weight: .medium, design: .rounded)
                     .foregroundColor(.primary)
 
                 Text(LocalizedStringKey(subtitle))
-                    .font(MADTheme.Typography.caption)
+                    .madFont(size: 12, weight: .regular, design: .rounded)
                     .foregroundColor(.secondary)
             }
 
             Spacer()
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .medium))
+                .madFont(size: 12, weight: .medium, maxScale: 1.5)
                 .foregroundColor(.secondary)
         }
         .padding(.vertical, MADTheme.Spacing.xs)
