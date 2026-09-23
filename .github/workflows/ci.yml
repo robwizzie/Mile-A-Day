@@ -221,6 +221,13 @@ jobs:
       # mile announcement beside the walk's own and the cron drained both.
       - name: Friend notification dedupe check
         run: node scripts/friend-notification-dedupe-check.mjs
+      # HTTP rate limits. The failures that matter are the silent ones for
+      # real users: a proxy or Cloudflare edge address used as the key (one
+      # bucket locks out everyone), and a 429 from /auth/refresh, which signs
+      # every shipped build out — so refresh must stay its own, generous
+      # bucket. Also pins per-user upload buckets and the kill switch.
+      - name: Rate limit check
+        run: node scripts/rate-limit-check.mjs
 
   website:
     name: Website (lint + build)

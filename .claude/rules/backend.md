@@ -36,6 +36,8 @@ globs: backend/**
 
 - Profile banner: `users.profile_banner_url` (written ONLY by `POST /users/:id/banner/upload` — multer + sharp 1500×500 cover, file under `uploads/profile-banners/`) and `users.profile_banner_style` (one of `BANNER_STYLES` in usersController, or null). `PATCH /users/:id` accepts the style and can only CLEAR the url (`null`/`""`) — accepting a path there would let a profile point at someone else's file. Both nullable, no default; `GET /users/:id` is `SELECT *` so they ride along for free.
 
+- Rate limits (`middleware/rateLimit.ts`, `express-rate-limit`, in-memory) key on `clientIp()`, never raw `req.ip`: prod is Cloudflare → Coolify proxy → Express, so `req.ip` is a Cloudflare edge or a private proxy address shared by thousands. `trust proxy` is a HOP COUNT (`TRUST_PROXY_HOPS`, default 1, never `true` — the client writes XFF's left side); CF-Connecting-IP is honoured only when that trusted peer is Cloudflare or private, and a private/loopback/Cloudflare result is NO key, so the IP limiter SKIPS rather than pooling everyone into one bucket. `/auth/refresh` is its own generous bucket because EVERY shipped build signs the user out on any non-200 from refresh. A 429's `error` is shown to users verbatim (a sentence, never a code) and every body value is a string. Kill switch `RATE_LIMITS_DISABLED=1`, per-limiter `RATE_LIMIT_<NAME>_MAX`. Pinned by `scripts/rate-limit-check.mjs`.
+
 ## Architecture: Routes -> Controllers -> Services
 - `routes/` - Express Router definitions. Thin: just wire HTTP verbs to controller functions + middleware.
 - `controllers/` - Request/response handling. Parse params/body, call services, format responses.

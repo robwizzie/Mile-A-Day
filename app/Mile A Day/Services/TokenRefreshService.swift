@@ -51,6 +51,14 @@ class TokenRefreshService {
                 throw TokenRefreshError.invalidRefreshToken
             }
 
+            // 429 means the server never looked at the token (the rate limiter
+            // runs before the refresh handler), so the session is intact and
+            // the same refresh token is still valid. Distinct from a server
+            // error so callers can retry later instead of signing out.
+            if httpResponse.statusCode == 429 {
+                throw TokenRefreshError.rateLimited
+            }
+
             throw TokenRefreshError.serverError(httpResponse.statusCode)
         }
 
@@ -106,6 +114,8 @@ enum TokenRefreshError: LocalizedError {
     case serverError(Int)
     case decodingError
     case networkError(String)
+    /// HTTP 429 — transient; the refresh token was not consumed.
+    case rateLimited
 
     var errorDescription: String? {
         switch self {
@@ -121,6 +131,8 @@ enum TokenRefreshError: LocalizedError {
             return "Failed to decode response"
         case .networkError(let message):
             return "Network error: \(message)"
+        case .rateLimited:
+            return "Too many requests. Please try again in a moment."
         }
     }
 }
