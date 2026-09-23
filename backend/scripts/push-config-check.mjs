@@ -175,6 +175,9 @@ for (const type of [
   "challenge_won",
   "crew_photo",
   "buddy_finished",
+  // Your own week, once a week, claimed per user+week — bounded by
+  // construction, and a capped one would land in the NEXT week's digest.
+  "weekly_recap",
 ]) {
   assert.equal(
     isCapExempt(type),

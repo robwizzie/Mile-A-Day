@@ -221,6 +221,12 @@ jobs:
       # mile announcement beside the walk's own and the cron drained both.
       - name: Friend notification dedupe check
         run: node scripts/friend-notification-dedupe-check.mjs
+      # The Weekly Recap: the week's counted numbers (a Strava twin must not
+      # count, a 0.96 day meets the goal), the Saturday-19:00-local push hour
+      # across timezones, the per-device gate, the switch and the once-a-week
+      # claim — all of which fail as a plausible number or a missing push.
+      - name: Weekly recap check
+        run: node scripts/weekly-recap-check.mjs
 
   website:
     name: Website (lint + build)
