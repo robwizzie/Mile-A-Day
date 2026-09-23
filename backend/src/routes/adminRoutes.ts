@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { signInLimiter } from "../middleware/rateLimit.js";
 import {
   verifyAppleWeb,
   overview,
@@ -41,7 +42,7 @@ import {
 // Public: Sign in with Apple (web) exchange -> admin access token.
 // Mounted BEFORE authenticateToken in server.ts.
 export const adminAuthRouter = Router();
-adminAuthRouter.post("/apple", verifyAppleWeb);
+adminAuthRouter.post("/apple", signInLimiter, verifyAppleWeb);
 
 // Protected: mounted AFTER authenticateToken + requireAdmin in server.ts.
 const adminRouter = Router();

@@ -14,7 +14,7 @@ Gamified fitness app: run a mile every day, build streaks, compete with friends.
 - Dev: `npm run dev` (tsx watch with hot reload)
 - Build: `npm run build` (tsc)
 - Start: `npm run start`
-- No test runner configured
+- Check: `npm run check -- --ephemeral-db` — the whole backend CI job locally (build → drizzle check → migrator ×2 → ci-smoke → every `*-check.mjs`), step list parsed from `.github/workflows/ci.yml` so it can't drift. Throwaway Homebrew Postgres (`--port N`, default 54329), torn down after; runs in UTC like CI. `--only <id>[,<id>]`, `--from <id>`, `--list`, `--bail`, `--no-build`. Without `--ephemeral-db` it uses `$DATABASE_URL` and refuses non-localhost (checks DELETE rows). A new check = a `run: node scripts/x-check.mjs` step in ci.yml, nothing else.
 
 ### Website (`cd website`)
 - Dev: `npm run dev`

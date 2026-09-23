@@ -110,6 +110,13 @@ class APIClient {
             let (newAccessToken, newRefreshToken) = try await TokenRefreshService.refreshAccessToken(refreshToken: refreshToken)
             updateTokens(accessToken: newAccessToken, refreshToken: newRefreshToken)
             return newAccessToken
+        } catch TokenRefreshError.rateLimited {
+            // Rate limited, NOT rejected: the server never read the refresh
+            // token, so the session is fine and the next call retries. Signing
+            // out here (what every earlier build does on any refresh failure)
+            // would turn a busy minute into a forced re-login.
+            print("[APIClient] ⏳ Token refresh rate limited — keeping session, will retry")
+            throw APIError.rateLimited("Too many requests. Please try again in a moment.")
         } catch {
             print("[APIClient] ❌ Token refresh failed, signing out: \(error)")
             signOutUser()

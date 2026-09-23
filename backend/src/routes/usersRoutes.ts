@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { uploadLimiter } from "../middleware/rateLimit.js";
 import multer from "multer";
 import {
   deleteUser,
@@ -77,6 +78,7 @@ router.patch(
 router.post(
   "/:userId/profile-image/upload",
   requireSelfAccess("userId"),
+  uploadLimiter,
   upload.single("image"),
   uploadProfileImage,
 );
@@ -86,6 +88,7 @@ router.post(
 router.post(
   "/:userId/banner/upload",
   requireSelfAccess("userId"),
+  uploadLimiter,
   upload.single("image"),
   uploadProfileBanner,
 );

@@ -32,6 +32,10 @@ import {
   AuthenticatedRequest,
 } from "./middleware/auth.js";
 import { logError } from "./services/errorLogService.js";
+import {
+  configureTrustProxy,
+  globalUserLimiter,
+} from "./middleware/rateLimit.js";
 import adminRoutes, { adminAuthRouter } from "./routes/adminRoutes.js";
 import { startCompetitionCron } from "./cron/competitionCron.js";
 import { startNotificationCron } from "./cron/notificationCron.js";
@@ -73,6 +77,10 @@ import { webcrypto } from "node:crypto";
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? "3000");
+// Hop count, never `true` (a client-written X-Forwarded-For would pick its own
+// rate-limit bucket). Default 1 = Coolify's reverse proxy; Cloudflare in front
+// of it is resolved via CF-Connecting-IP in middleware/rateLimit.ts.
+configureTrustProxy(app);
 
 app.use(compression());
 // 2mb (default is 100kb): a workout-sync batch can now carry GPS route traces
@@ -325,6 +333,8 @@ app.use("/public", publicRoutes);
 app.use("/admin/auth", adminAuthRouter);
 
 app.use(authenticateToken);
+// Per-user backstop, far above any real client (see RATE_LIMIT_SPECS.global).
+app.use(globalUserLimiter);
 // Admin dashboard data — authenticated AND role=admin.
 app.use("/admin", requireAdmin, adminRoutes);
 app.use("/users", userRoutes);
