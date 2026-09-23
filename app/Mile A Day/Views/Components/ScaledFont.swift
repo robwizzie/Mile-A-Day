@@ -6,15 +6,30 @@
 //
 
 import SwiftUI
+import UIKit
 
-/// The text style a fixed design size scales WITH.
+// MARK: - Scaling
+
+/// Scales a fixed design size the way `@ScaledMetric` does, but against a
+/// Dynamic Type size that honours `madTypeCap`.
 ///
-/// Apple's text styles grow at different rates — `.caption2` roughly doubles
-/// by `.accessibility5` while `.largeTitle` gains far less — so a 10pt label
-/// and a 34pt number must not be multiplied by the same factor. Deriving the
-/// style from the size means a converted call site scales like the system
-/// style it most resembles without anyone having to pick one.
-enum MADTextStyleMapping {
+/// Why not `@ScaledMetric` directly: its only ceiling is
+/// `.dynamicTypeSize(...X)`, and that REWRITES the environment for the whole
+/// subtree — every `.font(.body)` label inside (which scales to AX5 today) and
+/// every sheet the subtree presents (sheets inherit the environment) would be
+/// capped along with the one dense row that needed it. `madTypeCap` only
+/// limits text that opted in through `madFont`/`MADScaledMetric`, so capping a
+/// fixed-geometry hero can never take scaling away from anything else.
+///
+/// At the DEFAULT size (`.large`) `UIFontMetrics` returns the base value
+/// exactly, so every conversion is pixel-identical for anyone who never
+/// touched the setting — the invariant the whole rollout rests on.
+enum MADTypeScale {
+    /// The text style a fixed design size scales WITH. Apple's styles grow at
+    /// different rates (`.caption2` more than doubles by AX5, `.largeTitle`
+    /// gains far less), so a 10pt label and a 34pt number must not share one
+    /// factor. Deriving it from the size means a converted call site scales
+    /// like the system style it most resembles without anyone picking one.
     static func style(forDesignSize size: CGFloat) -> Font.TextStyle {
         switch size {
         case ..<11.5: return .caption2
@@ -29,59 +44,112 @@ enum MADTextStyleMapping {
         default: return .largeTitle
         }
     }
+
+    static func scaled(
+        _ base: CGFloat,
+        relativeTo style: Font.TextStyle,
+        size: DynamicTypeSize,
+        cap: DynamicTypeSize
+    ) -> CGFloat {
+        let effective = min(size, cap)
+        guard effective != .large else { return base }
+        let traits = UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(effective))
+        return UIFontMetrics(forTextStyle: uiStyle(style)).scaledValue(for: base, compatibleWith: traits)
+    }
+
+    private static func uiStyle(_ style: Font.TextStyle) -> UIFont.TextStyle {
+        switch style {
+        case .largeTitle: return .largeTitle
+        case .title: return .title1
+        case .title2: return .title2
+        case .title3: return .title3
+        case .headline: return .headline
+        case .subheadline: return .subheadline
+        case .callout: return .callout
+        case .footnote: return .footnote
+        case .caption: return .caption1
+        case .caption2: return .caption2
+        default: return .body
+        }
+    }
 }
+
+// MARK: - Surface caps
+
+private struct MADTypeCapKey: EnvironmentKey {
+    static let defaultValue: DynamicTypeSize = .accessibility5
+}
+
+extension EnvironmentValues {
+    /// The largest Dynamic Type size `madFont` text in this subtree will
+    /// follow. Only ever tightened (see `madTypeCap(_:)`).
+    var madTypeCap: DynamicTypeSize {
+        get { self[MADTypeCapKey.self] }
+        set { self[MADTypeCapKey.self] = newValue }
+    }
+}
+
+/// Named ceilings, so every surface states its cap the same way and a later
+/// tuning pass can grep for them.
+extension DynamicTypeSize {
+    /// Fixed-geometry chrome: the dashboard heroes' stat frames, half-width
+    /// tiles, the tracker's control bar. Text grows ~15–35% at most.
+    static let madFixedChromeCap: DynamicTypeSize = .xxLarge
+    /// Cards whose rows wrap or re-arrange (feed cards, dashboard cards below
+    /// the hero, inbox rows). Text grows up to ~1.8x at the small end.
+    static let madCardCap: DynamicTypeSize = .accessibility2
+    /// Plain lists of text (Settings): grows as far as a list honestly holds.
+    static let madListCap: DynamicTypeSize = .accessibility3
+}
+
+extension View {
+    /// Caps how far `madFont` text in this subtree grows. Nested caps take
+    /// the tighter one. Leaves system text styles and presented sheets alone
+    /// (unlike `.dynamicTypeSize(...)`) — but a sheet whose own text uses
+    /// `madFont` DOES inherit the cap, so attach it BELOW any `.sheet` /
+    /// `.fullScreenCover` on the same node where you can.
+    func madTypeCap(_ cap: DynamicTypeSize) -> some View {
+        transformEnvironment(\.madTypeCap) { current in
+            current = min(current, cap)
+        }
+    }
+}
+
+// MARK: - Font
 
 /// `.font(.system(size:weight:design:))`, but the size follows the user's
 /// Dynamic Type setting.
 ///
-/// At the DEFAULT text size (`.large`) `@ScaledMetric` returns its base value
-/// exactly, so converting a call site is pixel-identical for everyone who
-/// never touched the setting — that is the invariant every conversion rests on.
+/// Two ceilings, and they compose: `maxScale` caps THIS text at
+/// `size * maxScale` (a glyph inside a fixed circle, a number in a
+/// fixed-height tile), and `madTypeCap` caps a whole surface.
 ///
-/// Two ceilings, and they compose:
-/// - `maxScale` caps THIS text at `size * maxScale` — for a glyph inside a
-///   fixed circle, or a number in a fixed-height tile.
-/// - `.dynamicTypeSize(...DynamicTypeSize.xxxLarge)` on a CONTAINER caps
-///   everything inside it (the scaled metric reads the environment), which is
-///   the right tool for a dense surface with fixed geometry (the dashboard
-///   heroes' 258pt stat frame, the 168pt tiles).
-///
-/// Never shrinks below the design size (`minScale` 1): the design sizes are
-/// already small (9–11pt labels are common) and the smaller settings would
-/// take them past legible.
+/// Never shrinks below the design size: the design sizes are already small
+/// (9–11pt labels are common) and the smaller settings would take them past
+/// legible.
 ///
 /// NEVER use this on anything rendered into an image (`ImageRenderer`, share
 /// cards, the baked route card): a picture must not depend on the poster's
 /// text-size setting. Those keep `.font(.system(size:))`.
 struct MADScaledFont: ViewModifier {
-    @ScaledMetric private var scaled: CGFloat
-    private let base: CGFloat
-    private let weight: Font.Weight?
-    private let design: Font.Design?
-    private let maxScale: CGFloat
-    private let monospacedDigit: Bool
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.madTypeCap) private var cap
 
-    init(
-        size: CGFloat,
-        weight: Font.Weight?,
-        design: Font.Design?,
-        relativeTo textStyle: Font.TextStyle?,
-        maxScale: CGFloat,
-        monospacedDigit: Bool
-    ) {
-        _scaled = ScaledMetric(
-            wrappedValue: size,
-            relativeTo: textStyle ?? MADTextStyleMapping.style(forDesignSize: size)
-        )
-        self.base = size
-        self.weight = weight
-        self.design = design
-        self.maxScale = maxScale
-        self.monospacedDigit = monospacedDigit
-    }
+    let size: CGFloat
+    let weight: Font.Weight?
+    let design: Font.Design?
+    let textStyle: Font.TextStyle?
+    let maxScale: CGFloat
+    let monospacedDigit: Bool
 
     private var resolvedSize: CGFloat {
-        min(max(scaled, base), base * max(maxScale, 1))
+        let scaled = MADTypeScale.scaled(
+            size,
+            relativeTo: textStyle ?? MADTypeScale.style(forDesignSize: size),
+            size: dynamicTypeSize,
+            cap: cap
+        )
+        return min(max(scaled, size), size * max(maxScale, 1))
     }
 
     func body(content: Content) -> some View {
@@ -107,22 +175,32 @@ extension View {
             size: size,
             weight: weight,
             design: design,
-            relativeTo: textStyle,
+            textStyle: textStyle,
             maxScale: maxScale,
             monospacedDigit: monospacedDigit
         ))
     }
 }
 
-/// Named Dynamic Type ceilings, so every surface states its cap the same way
-/// and a later tuning pass can grep for them.
-extension DynamicTypeSize {
-    /// Fixed-geometry chrome: hero stat frames, fixed-height tiles, pills,
-    /// the tracker's control bar. Grows ~30% at most.
-    static let madFixedChromeCap: DynamicTypeSize = .xxLarge
-    /// Dense cards whose rows can wrap or re-arrange (feed cards, dashboard
-    /// cards below the hero, inbox rows).
-    static let madCardCap: DynamicTypeSize = .accessibility1
-    /// Plain lists of text (Settings): grows as far as a list honestly holds.
-    static let madListCap: DynamicTypeSize = .accessibility3
+// MARK: - Metric
+
+/// `@ScaledMetric` that honours `madTypeCap` — for a FRAME that has to grow
+/// with the `madFont` text inside it (a fixed-height tile, a hero's stat
+/// frame). Base value exactly at the default size; never below it.
+@propertyWrapper
+struct MADScaledMetric: DynamicProperty {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.madTypeCap) private var cap
+
+    private let base: CGFloat
+    private let textStyle: Font.TextStyle
+
+    init(wrappedValue: CGFloat, relativeTo textStyle: Font.TextStyle = .body) {
+        self.base = wrappedValue
+        self.textStyle = textStyle
+    }
+
+    var wrappedValue: CGFloat {
+        max(base, MADTypeScale.scaled(base, relativeTo: textStyle, size: dynamicTypeSize, cap: cap))
+    }
 }

@@ -591,6 +591,10 @@ struct DashboardView: View {
                     dashboardExperienceSection
                         .frame(maxWidth: .infinity)
                 }
+                // Dynamic Type: the banners and cards here are rows that wrap,
+                // so they grow to the card cap; the heroes and tiles tighten
+                // it further inside their bodies (DashboardModeCards).
+                .madTypeCap(.madCardCap)
                 // A style switch made from the Customize sheet reflows the
                 // whole page under it; keep the row that opened the sheet in
                 // view so closing it lands where the user was.
@@ -1412,21 +1416,21 @@ struct DashboardView: View {
         } label: {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 16, weight: .bold))
+                    .madFont(size: 16, weight: .bold)
                     .foregroundStyle(
                         LinearGradient(colors: [.yellow, MADTheme.Colors.madRed], startPoint: .top, endPoint: .bottom)
                     )
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Replay today's celebration")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text("Re-watch or share your mile-a-day moment")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .madFont(size: 11, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.white.opacity(0.4))
             }
             .padding(MADTheme.Spacing.md)
@@ -1456,21 +1460,21 @@ struct DashboardView: View {
         } label: {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "camera.badge.clock")
-                    .font(.system(size: 16, weight: .bold))
+                    .madFont(size: 16, weight: .bold)
                     .foregroundStyle(
                         LinearGradient(colors: [.white, MADTheme.Colors.walkBlue], startPoint: .top, endPoint: .bottom)
                     )
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Photo waiting")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text("Finish today's mile to share it")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .madFont(size: 11, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.white.opacity(0.4))
             }
             .padding(MADTheme.Spacing.md)
@@ -1558,16 +1562,16 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "heart.text.square.fill")
-                    .font(.system(size: 22, weight: .bold))
+                    .madFont(size: 22, weight: .bold)
                     .foregroundStyle(
                         LinearGradient(colors: [.red, .pink], startPoint: .top, endPoint: .bottom)
                     )
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Enable Apple Health")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .madFont(size: 15, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text("Turn it on and runs from your Apple Watch, treadmill, and other apps count automatically.")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                         .lineLimit(3)
                 }
@@ -1579,7 +1583,7 @@ struct DashboardView: View {
                     healthManager.requestAuthorization { _ in }
                 } label: {
                     Text("Continue")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
@@ -1593,7 +1597,7 @@ struct DashboardView: View {
                     }
                 } label: {
                     Text("Open Settings")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .madFont(size: 13, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.75))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -1792,20 +1796,20 @@ struct DashboardView: View {
                 // iOS 17, where symbols added after SF Symbols 5 render as a
                 // blank box rather than falling back.
                 Image(systemName: "person.crop.circle.badge.plus")
-                    .font(.system(size: 16, weight: .bold))
+                    .madFont(size: 16, weight: .bold)
                     .foregroundColor(MADTheme.Colors.madRed)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text(subtitle)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .madFont(size: 11, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                         .lineLimit(1)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.white.opacity(0.4))
             }
             .padding(MADTheme.Spacing.md)
@@ -1833,7 +1837,7 @@ struct DashboardView: View {
         } label: {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "trophy.fill")
-                    .font(.system(size: 16, weight: .bold))
+                    .madFont(size: 16, weight: .bold)
                     .foregroundStyle(
                         LinearGradient(colors: [.yellow, MADTheme.Colors.madRed], startPoint: .top, endPoint: .bottom)
                     )
@@ -1841,15 +1845,15 @@ struct DashboardView: View {
                     Text(competitionService.invites.count == 1
                          ? "Competition invite"
                          : "\(competitionService.invites.count) competition invites")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text("A friend wants to race you — tap to respond")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .madFont(size: 11, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.white.opacity(0.4))
             }
             .padding(MADTheme.Spacing.md)

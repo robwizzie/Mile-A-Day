@@ -16,12 +16,12 @@ struct DashboardStartMileButton: View {
                         .fill(Color.white.opacity(0.10))
                         .frame(width: 32, height: 32)
                     Image(systemName: hasActiveWorkout ? "play.circle.fill" : "play.fill")
-                        .font(.system(size: 14, weight: .black))
+                        .madFont(size: 14, weight: .black, maxScale: 1.3)
                         .offset(x: hasActiveWorkout ? 0 : 1)
                 }
 
                 Text(buttonTitle)
-                    .font(.system(size: prominent ? 17 : 16, weight: .black, design: .rounded))
+                    .madFont(size: prominent ? 17 : 16, weight: .black, design: .rounded)
                     .tracking(prominent ? 1.2 : 0)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -29,7 +29,7 @@ struct DashboardStartMileButton: View {
                 Spacer(minLength: 0)
 
                 Image(systemName: prominent ? "chevron.right" : "arrow.right")
-                    .font(.system(size: prominent ? 18 : 14, weight: .bold))
+                    .madFont(size: prominent ? 18 : 14, weight: .bold)
                     .foregroundColor(.white.opacity(0.72))
             }
             .foregroundColor(.white)
@@ -87,16 +87,17 @@ struct DashboardMilestoneBar: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 6) {
                     Image(systemName: "flame.fill")
-                        .font(.system(size: 10, weight: .bold))
+                        .madFont(size: 10, weight: .bold)
                         .foregroundColor(.orange)
                     Text(title.uppercased())
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .madFont(size: 10, weight: .heavy, design: .rounded)
                         .tracking(1.0)
                         .foregroundColor(.white.opacity(0.56))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Spacer(minLength: 0)
                     Text("Day \(streak) of \(milestone.value)")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
-                        .monospacedDigit()
+                        .madFont(size: 11, weight: .heavy, design: .rounded, monospacedDigit: true)
                         .foregroundColor(.white.opacity(0.70))
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
@@ -125,7 +126,7 @@ struct DashboardMilestoneBar: View {
                         .foregroundColor(.white.opacity(0.42))
                     Spacer(minLength: 0)
                 }
-                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .madFont(size: 9, weight: .heavy, design: .rounded)
                 .tracking(0.6)
                 .monospacedDigit()
             }
@@ -168,12 +169,11 @@ struct WeekMileDaysRow: View {
             if showLabels {
                 HStack {
                     Text("Mile days")
-                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .madFont(size: 14, weight: .heavy, design: .rounded)
                         .foregroundColor(.white)
                     Spacer()
                     Text("\(completedCount) of 7 this week")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .monospacedDigit()
+                        .madFont(size: 12, weight: .bold, design: .rounded, monospacedDigit: true)
                         .foregroundColor(.white.opacity(0.58))
                 }
             }
@@ -187,7 +187,7 @@ struct WeekMileDaysRow: View {
 
                     VStack(spacing: 6) {
                         Text(Self.narrowDayFormatter.string(from: date))
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .madFont(size: 11, weight: .bold, design: .rounded)
                             .foregroundColor(.white.opacity(0.46))
 
                         ZStack {
@@ -198,7 +198,7 @@ struct WeekMileDaysRow: View {
 
                             if completed {
                                 Image(systemName: "checkmark")
-                                    .font(.system(size: 15, weight: .black))
+                                    .madFont(size: 15, weight: .black, maxScale: 1.3)
                                     .foregroundColor(.white)
                             }
 
@@ -248,6 +248,9 @@ struct ModernDashboardBody: View {
                 distanceIsFresh: healthManager.hasFreshTodaysDistance,
                 showWorkoutView: $showWorkoutView
             )
+            // Fixed flame box beside a ~130pt stat column: the hero's text
+            // grows only as far as that column honestly holds.
+            .madTypeCap(.madFixedChromeCap)
 
             DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
 
@@ -257,6 +260,9 @@ struct ModernDashboardBody: View {
                 ModernStepsTile(healthManager: healthManager, userManager: userManager)
                 ModernBadgesTile(userManager: userManager, healthManager: healthManager)
             }
+            // Half-width tiles: their height scales (tileHeight), their width
+            // can't.
+            .madTypeCap(.madFixedChromeCap)
 
             // Everything below the day's cards is the user's to arrange
             // (DashboardCards): default here is just the daily challenge.
@@ -269,6 +275,8 @@ struct ModernDashboardBody: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
+        // Everything else on the dashboard is cards whose rows wrap.
+        .madTypeCap(.madCardCap)
     }
 }
 
@@ -303,6 +311,9 @@ struct FunDashboardBody: View {
                 distanceIsFresh: healthManager.hasFreshTodaysDistance,
                 showWorkoutView: $showWorkoutView
             )
+            // The stat frame grows with its text (statFrameHeight), but the
+            // column beside Flamey is ~155pt wide, so it caps here.
+            .madTypeCap(.madFixedChromeCap)
 
             FunStartCard(
                 trustedDone: state.completed && healthManager.hasFreshTodaysDistance,
@@ -314,6 +325,9 @@ struct FunDashboardBody: View {
                 ModernStepsTile(healthManager: healthManager, userManager: userManager)
                 ModernBadgesTile(userManager: userManager, healthManager: healthManager)
             }
+            // Half-width tiles: their height scales (tileHeight), their width
+            // can't.
+            .madTypeCap(.madFixedChromeCap)
 
             // Everything below the day's cards is the user's to arrange
             // (DashboardCards): default here is Streak Tokens, the daily
@@ -327,6 +341,8 @@ struct FunDashboardBody: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
+        // Everything else on the dashboard is cards whose rows wrap.
+        .madTypeCap(.madCardCap)
     }
 
     private var statusColor: Color {
@@ -433,14 +449,13 @@ private struct ModernHeroCard: View {
 
                     VStack(spacing: 0) {
                         Text("\(heroStreakValue)")
-                            .font(.system(size: 34, weight: .black, design: .rounded))
-                            .monospacedDigit()
+                            .madFont(size: 34, weight: .black, design: .rounded, monospacedDigit: true)
                             .foregroundColor(.white)
                             .shadow(color: .black.opacity(0.72), radius: 5, x: 0, y: 2)
                             .lineLimit(1)
                             .minimumScaleFactor(0.60)
                         Text(injuryPause.isPaused ? "DAYS · PAUSED" : "DAYS")
-                            .font(.system(size: 8, weight: .black, design: .rounded))
+                            .madFont(size: 8, weight: .black, design: .rounded)
                             .tracking(1.1)
                             .foregroundColor(injuryPause.isPaused
                                              ? MADTheme.Colors.warning
@@ -496,9 +511,9 @@ private struct ModernHeroCard: View {
     private var statusPill: some View {
         HStack(spacing: 6) {
             Image(systemName: statusGlyph(atRisk: "exclamationmark.triangle.fill"))
-                .font(.system(size: 12, weight: .bold))
+                .madFont(size: 12, weight: .bold)
             Text(statusText)
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .madFont(size: 12, weight: .heavy, design: .rounded)
                 .lineLimit(1)
         }
         .foregroundColor(statusColor)
@@ -515,12 +530,11 @@ private struct ModernHeroCard: View {
             HStack(spacing: 6) {
                 Image(systemName: "shield.lefthalf.filled")
                     .accessibilityLabel("Streak savers")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                 Text("\(readyTokens)")
-                    .font(.system(size: 12, weight: .black, design: .rounded))
-                    .monospacedDigit()
+                    .madFont(size: 12, weight: .black, design: .rounded, monospacedDigit: true)
                 Text(readyTokens == 1 ? "saver" : "savers")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
             }
             .foregroundColor(.white.opacity(0.88))
             .padding(.horizontal, 11)
@@ -647,9 +661,9 @@ private struct RecordGhostRow: View {
             // stats instead of competing with them.
             HStack(spacing: 5) {
                 Image(systemName: "crown.fill")
-                    .font(.system(size: 9, weight: .black))
+                    .madFont(size: 9, weight: .black)
                 Text("ALL-TIME BEST")
-                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .madFont(size: 10, weight: .black, design: .rounded)
                     .tracking(0.8)
             }
             .foregroundColor(gold)
@@ -661,9 +675,9 @@ private struct RecordGhostRow: View {
             // of them winning.
             HStack(spacing: 5) {
                 Image(systemName: "flame")
-                    .font(.system(size: 9, weight: .bold))
+                    .madFont(size: 9, weight: .bold)
                 Text("BEST \(longest) · \(longest - streak) TO GO")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .madFont(size: 10, weight: .heavy, design: .rounded)
                     .tracking(0.4)
                     .monospacedDigit()
             }
@@ -691,7 +705,7 @@ private struct ModernHeroStatLine: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .bold))
+                .madFont(size: 14, weight: .bold, maxScale: 1.3)
                 .foregroundColor(tint)
                 .frame(width: 28, height: 28)
                 .background(Circle().fill(tint.opacity(0.13)))
@@ -699,22 +713,23 @@ private struct ModernHeroStatLine: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(value)
-                        .font(.system(size: 20, weight: .black, design: .rounded))
-                        .monospacedDigit()
+                        .madFont(size: 20, weight: .black, design: .rounded, monospacedDigit: true)
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.60)
                     Text(unit)
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .madFont(size: 10, weight: .heavy, design: .rounded)
                         .foregroundColor(.white.opacity(0.62))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
 
                 Text(label)
-                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .madFont(size: 10, weight: .black, design: .rounded)
                     .textCase(.uppercase)
                     .foregroundColor(.white.opacity(0.42))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
 
             Spacer(minLength: 0)
@@ -810,17 +825,16 @@ private struct ModernMetricPill: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .bold))
+                .madFont(size: 13, weight: .bold, maxScale: 1.25)
                 .foregroundColor(tint)
                 .frame(width: 24, height: 24)
                 .background(Circle().fill(tint.opacity(0.15)))
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .madFont(size: 10, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.42))
                 Text(value)
-                    .font(.system(size: 15, weight: .heavy, design: .rounded))
-                    .monospacedDigit()
+                    .madFont(size: 15, weight: .heavy, design: .rounded, monospacedDigit: true)
                     .foregroundColor(.white.opacity(0.92))
             }
             Spacer(minLength: 0)
@@ -838,6 +852,11 @@ private struct ModernMetricPill: View {
 private struct ModernStepsTile: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
+    /// The tile's fixed height, grown with the text inside it. 168 exactly
+    /// at the default text size; `.title2` because that's the style of the
+    /// value that dominates the tile. BOTH tiles declare it identically so the
+    /// pair in the dashboard's HStack stays level.
+    @MADScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 168
 
     private var steps: Int { healthManager.todaysSteps }
     private var progress: Double { min(Double(steps) / 10000.0, 1) }
@@ -859,7 +878,7 @@ private struct ModernStepsTile: View {
                         }
                     }
             }
-            .frame(height: 168, alignment: .topLeading)
+            .frame(height: tileHeight, alignment: .topLeading)
         }
         .buttonStyle(.plain)
     }
@@ -868,6 +887,11 @@ private struct ModernStepsTile: View {
 private struct ModernBadgesTile: View {
     @ObservedObject var userManager: UserManager
     @ObservedObject var healthManager: HealthKitManager
+    /// The tile's fixed height, grown with the text inside it. 168 exactly
+    /// at the default text size; `.title2` because that's the style of the
+    /// value that dominates the tile. BOTH tiles declare it identically so the
+    /// pair in the dashboard's HStack stays level.
+    @MADScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 168
 
     private var earned: Int {
         userManager.currentUser.badges.filter { !$0.isLocked }.count
@@ -902,22 +926,21 @@ private struct ModernBadgesTile: View {
                     medalPreviewStrip
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
+                        .madFont(size: 10, weight: .bold)
                         .foregroundColor(.white.opacity(0.28))
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Medals")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded)
                         .foregroundColor(.white.opacity(0.48))
                     Text("\(earned)/\(total)")
-                        .font(.system(size: 25, weight: .black, design: .rounded))
-                        .monospacedDigit()
+                        .madFont(size: 25, weight: .black, design: .rounded, monospacedDigit: true)
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                     Text("\(ProgressCalculator.formatProgress(progress)) unlocked")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .foregroundColor(.yellow)
                         .lineLimit(1)
                 }
@@ -944,13 +967,13 @@ private struct ModernBadgesTile: View {
                     .frame(height: 6)
 
                     Text(remaining == 0 ? "Collection complete" : "\(remaining) left to collect")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .madFont(size: 10, weight: .bold, design: .rounded)
                         .foregroundColor(.white.opacity(0.46))
                     .lineLimit(1)
                 }
             }
             .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 168, maxHeight: 168, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: tileHeight, maxHeight: tileHeight, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(Color(red: 0.075, green: 0.075, blue: 0.085))
@@ -1003,32 +1026,36 @@ private struct ModernTile<Accessory: View>: View {
     let subtitle: String
     let tint: Color
     @ViewBuilder let accessory: () -> Accessory
+    /// The tile's fixed height, grown with the text inside it. 168 exactly
+    /// at the default text size; `.title2` because that's the style of the
+    /// value that dominates the tile. BOTH tiles declare it identically so the
+    /// pair in the dashboard's HStack stays level.
+    @MADScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 168
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: icon)
-                    .font(.system(size: 15, weight: .bold))
+                    .madFont(size: 15, weight: .bold, maxScale: 1.3)
                     .foregroundColor(tint)
                     .frame(width: 30, height: 30)
                     .background(Circle().fill(tint.opacity(0.15)))
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold)
                     .foregroundColor(.white.opacity(0.28))
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.48))
                 Text(value)
-                    .font(.system(size: 23, weight: .black, design: .rounded))
-                    .monospacedDigit()
+                    .madFont(size: 23, weight: .black, design: .rounded, monospacedDigit: true)
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                 Text(subtitle)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
                     .foregroundColor(tint)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -1036,7 +1063,7 @@ private struct ModernTile<Accessory: View>: View {
             accessory()
         }
         .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 168, maxHeight: 168, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: tileHeight, maxHeight: tileHeight, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color(red: 0.075, green: 0.075, blue: 0.085))
@@ -1090,17 +1117,17 @@ struct ModernChallengeRow: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Daily Challenge")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded)
                         .foregroundColor(accentColor)
 
                     Text(isCompleted ? "\(challenge.title) complete" : challenge.title)
-                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                        .madFont(size: 17, weight: .heavy, design: .rounded)
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.82)
 
                     Text(challenge.description)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.54))
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1109,7 +1136,7 @@ struct ModernChallengeRow: View {
                 Spacer(minLength: 0)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
+                    .madFont(size: 12, weight: .bold)
                     .foregroundColor(.white.opacity(0.30))
             }
 
@@ -1132,24 +1159,24 @@ struct ModernChallengeRow: View {
     private var placeholderRow: some View {
         HStack(spacing: 12) {
             Image(systemName: "flag.fill")
-                .font(.system(size: 15, weight: .bold))
+                .madFont(size: 15, weight: .bold, maxScale: 1.3)
                 .foregroundColor(.green)
                 .frame(width: 34, height: 34)
                 .background(Circle().fill(Color.green.opacity(0.13)))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("Daily Challenge")
-                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .madFont(size: 15, weight: .heavy, design: .rounded)
                     .foregroundColor(.white)
                 Text("Loading today's challenge")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.48))
             }
 
             Spacer()
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .bold))
+                .madFont(size: 11, weight: .bold)
                 .foregroundColor(.white.opacity(0.30))
         }
         .padding(14)
@@ -1158,7 +1185,7 @@ struct ModernChallengeRow: View {
 
     private func challengeIcon(_ challenge: DailyChallenge) -> some View {
         Image(systemName: isCompleted ? "checkmark" : challenge.icon)
-            .font(.system(size: 16, weight: .bold))
+            .madFont(size: 16, weight: .bold, maxScale: 1.3)
             .foregroundColor(accentColor)
             .frame(width: 38, height: 38)
             .background(Circle().fill(accentColor.opacity(0.14)))
@@ -1181,12 +1208,11 @@ struct ModernChallengeRow: View {
 
             HStack {
                 Text(isCompleted ? "Locked in" : progressLabel(progress))
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .foregroundColor(accentColor)
                 Spacer()
                 Text(ProgressCalculator.formatProgress(progress))
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
-                    .monospacedDigit()
+                    .madFont(size: 11, weight: .heavy, design: .rounded, monospacedDigit: true)
                     .foregroundColor(.white.opacity(0.58))
             }
         }
@@ -1197,16 +1223,16 @@ struct ModernChallengeRow: View {
         if let tomorrow = tomorrowsChallenge {
             HStack(spacing: 7) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.white.opacity(0.42))
                 Text("Tomorrow")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.48))
                 HStack(spacing: 5) {
                     Image(systemName: tomorrow.icon)
-                        .font(.system(size: 10, weight: .bold))
+                        .madFont(size: 10, weight: .bold)
                     Text(tomorrow.title)
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .lineLimit(1)
                 }
                 .foregroundColor(tomorrow.gradient.first ?? .orange)
@@ -1260,6 +1286,13 @@ private struct FlameBuddyHeroCard: View {
     /// Distance from the hero's top edge to the ground the buddy stands on.
     /// Held constant so the art keeps its footing when the card's height moves.
     private static let groundBaseline: CGFloat = 196
+
+    /// The stat frame's height: 258 exactly at the default text size, grown
+    /// with the column's text (`.largeTitle` grows ~6% at xLarge and ~12% at
+    /// xxLarge, which is about what the column's content measures out to).
+    /// The buddy and its ground are anchored to the TOP and stay put, so the
+    /// extra height lands under the stats, where the text needs it.
+    @MADScaledMetric(relativeTo: .largeTitle) private var statFrameHeight: CGFloat = 258
 
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
@@ -1404,7 +1437,7 @@ private struct FlameBuddyHeroCard: View {
                         .frame(width: rightWidth, height: geo.size.height, alignment: .top)
                 }
             }
-            .frame(height: 258)
+            .frame(height: statFrameHeight)
 
             DashboardMilestoneBar(streak: userManager.currentUser.streak)
                 .padding(.horizontal, 2)
@@ -1493,8 +1526,7 @@ private struct FlameBuddyHeroCard: View {
 
         return HStack(alignment: .center, spacing: 8) {
             Text("\(heroStreakValue)")
-                .font(.system(size: 35, weight: .black, design: .rounded))
-                .monospacedDigit()
+                .madFont(size: 35, weight: .black, design: .rounded, monospacedDigit: true)
                 .foregroundColor(.white)
                 .shadow(color: .black.opacity(0.40), radius: 4, x: 0, y: 2)
                 .lineLimit(1)
@@ -1506,7 +1538,7 @@ private struct FlameBuddyHeroCard: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Day Streak")
-                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .madFont(size: 9, weight: .black, design: .rounded)
                     .tracking(1.1)
                     .textCase(.uppercase)
                     .foregroundColor(.white.opacity(0.75))
@@ -1522,9 +1554,9 @@ private struct FlameBuddyHeroCard: View {
                 if atAllTimeBest && !statusIsUrgent {
                     HStack(spacing: 3) {
                         Image(systemName: "crown.fill")
-                            .font(.system(size: 8, weight: .black))
+                            .madFont(size: 8, weight: .black)
                         Text("Best ever")
-                            .font(.system(size: 9, weight: .black, design: .rounded))
+                            .madFont(size: 9, weight: .black, design: .rounded)
                             .tracking(0.9)
                             .textCase(.uppercase)
                     }
@@ -1533,7 +1565,7 @@ private struct FlameBuddyHeroCard: View {
                     .minimumScaleFactor(0.6)
                 } else {
                     Text(statusText)
-                        .font(.system(size: 9, weight: .black, design: .rounded))
+                        .madFont(size: 9, weight: .black, design: .rounded)
                         .tracking(0.5)
                         .textCase(.uppercase)
                         .foregroundColor(statusColor)
@@ -1562,12 +1594,11 @@ private struct FlameBuddyHeroCard: View {
             HStack(spacing: 6) {
                 Image(systemName: "shield.lefthalf.filled")
                     .accessibilityLabel("Streak savers")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                 Text("\(readyTokens)")
-                    .font(.system(size: 12, weight: .black, design: .rounded))
-                    .monospacedDigit()
+                    .madFont(size: 12, weight: .black, design: .rounded, monospacedDigit: true)
                 Text(readyTokens == 1 ? "saver" : "savers")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
             }
             .foregroundColor(.white.opacity(0.90))
             .padding(.horizontal, 11)
@@ -1592,13 +1623,12 @@ private struct FlameBuddyHeroCard: View {
 
             VStack(spacing: 2) {
                 Text("\(userManager.currentUser.streak)")
-                    .font(.system(size: 70, weight: .black, design: .rounded))
-                    .monospacedDigit()
+                    .madFont(size: 70, weight: .black, design: .rounded, monospacedDigit: true)
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.50)
                 Text("Day Streak")
-                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .madFont(size: 15, weight: .heavy, design: .rounded)
                     .tracking(4)
                     .foregroundColor(statusColor)
                     .lineLimit(1)
@@ -1627,7 +1657,7 @@ private struct FlameBuddyHeroCard: View {
                 HStack(spacing: 4) {
                     InjuryStatusChip(compact: true)
                     Text("Paused \(active.paused_days) \(active.paused_days == 1 ? "day" : "days")")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded)
                         .foregroundColor(MADTheme.Colors.warning)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
@@ -1675,9 +1705,9 @@ private struct FlameBuddyHeroCard: View {
     private var statusBadge: some View {
         HStack(spacing: 6) {
             Image(systemName: statusGlyph(atRisk: "exclamationmark.circle.fill"))
-                .font(.system(size: 12, weight: .bold))
+                .madFont(size: 12, weight: .bold)
             Text(statusText)
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .madFont(size: 12, weight: .heavy, design: .rounded)
         }
         .foregroundColor(statusColor)
         .padding(.horizontal, 11)
