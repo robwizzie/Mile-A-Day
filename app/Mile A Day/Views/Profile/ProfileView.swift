@@ -25,6 +25,10 @@ struct ProfileView: View {
     @State private var isRecalibratingStreak = false
     @State private var recalibrateResultMessage: String?
     @State private var showingShareProfile = false
+    /// The Share Studio on the day — streak, Flamey, stats — from the one
+    /// screen that is ABOUT your streak. The QR button beside it shares the
+    /// PROFILE (a way to add you), which is a different thing.
+    @State private var showingShareStudio = false
     @State private var showingSettings = false
     @State private var showingRouteHeatmap = false
     /// Daily goal editor, reachable from the Activity tab's goal row — the
@@ -660,6 +664,10 @@ struct ProfileView: View {
                 ProfileWordmark()
                 Spacer()
                 HStack(spacing: 8) {
+                    ProfileBannerButton(systemImage: "square.and.arrow.up", accessibilityLabel: "Share your streak") {
+                        MADHaptics.action()
+                        showingShareStudio = true
+                    }
                     ProfileBannerButton(systemImage: "qrcode", accessibilityLabel: "Share profile") {
                         showingShareProfile = true
                     }
@@ -674,6 +682,16 @@ struct ProfileView: View {
         }
         .onAppear {
             loadProfileImage()
+        }
+        .sheet(isPresented: $showingShareStudio) {
+            EnhancedShareView(
+                user: userManager.currentUser,
+                currentDistance: healthManager.todaysDistance,
+                progress: progress ?? 0,
+                isGoalCompleted: complete,
+                fastestPace: 0,
+                mostMiles: 0
+            )
         }
     }
 

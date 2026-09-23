@@ -625,8 +625,17 @@ struct FlameyMileShareCard: View {
 
     private var streak: Int { content.streak ?? 0 }
 
+    /// The caller's answer, else the distance's: a card with no verdict is
+    /// a single walk, and it did the mile when it covered one (the app's
+    /// 0.95 tolerance, `ProgressCalculator`).
+    private var mileDone: Bool {
+        if let met = content.goalMet { return met }
+        guard let d = content.distanceMiles else { return true }
+        return ProgressCalculator.isGoalCompleted(current: d, goal: 1)
+    }
+
     private var headline: String {
-        if content.goalMet != false { return "Mile done." }
+        if mileDone { return "Mile done." }
         if (content.distanceMiles ?? 0) > 0 { return "Got moving." }
         return streak > 0 ? "Still lit." : "Let's walk."
     }
@@ -643,7 +652,7 @@ struct FlameyMileShareCard: View {
             ShareGround(glow: MADTheme.Colors.warning, center: UnitPoint(x: 0.5, y: 0.42), strength: 0.42)
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
-                ShareFlamey(size: 220, mood: content.goalMet == false ? nil : .done, streak: streak)
+                ShareFlamey(size: 220, mood: mileDone ? .done : nil, streak: streak)
                 Text(headline)
                     .font(.system(size: 52, weight: .black, design: .rounded))
                     .foregroundColor(.white)

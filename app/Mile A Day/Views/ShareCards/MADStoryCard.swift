@@ -159,8 +159,8 @@ struct MADStoryContent: Identifiable {
     /// health claim.
     var calories: Double? = nil
     /// Did this walk (or day) bank the goal? Decides "Mile done." against a
-    /// softer line on the Flamey card. nil = unknown ⇒ treated as done, since
-    /// every caller that can't say is sharing a finished walk.
+    /// softer line on the Flamey card. nil = unknown ⇒ judged from the
+    /// distance (a single walk that covered a mile did the mile).
     var goalMet: Bool? = nil
     /// A week's recap — its presence turns the studio into the WEEK studio.
     var week: WeeklyRecap? = nil
@@ -613,7 +613,7 @@ extension GoalCompletionStats {
     /// a Watch target member: a dependency added there compiles on iPhone and
     /// fails the Watch with "Cannot find 'MADStoryContent' in scope".
     var storyContent: MADStoryContent {
-        MADStoryContent(
+        var content = MADStoryContent(
             distanceMiles: todaysDistance,
             // `todaysAveragePace` is MINUTES per mile; every consumer that
             // wants seconds multiplies by 60 (RunPostService, SocialFeedView).
@@ -623,5 +623,24 @@ extension GoalCompletionStats {
             totalMiles: totalLifetimeMiles,
             date: Date()
         )
+        // A goal celebration only ever fires on a banked goal.
+        content.goalMet = true
+        content.calories = todaysCalories >= 1 ? todaysCalories : nil
+        return content
+    }
+
+    /// Where the studio opens from a goal celebration — the Duolingo moment.
+    /// A milestone day (the app's own `StreakMilestone` days) opens on the
+    /// milestone card; any other day on the flame the user's dashboard draws
+    /// (Flamey on Fun, the streak on Modern).
+    var shareTemplate: ShareTemplate {
+        if streakMilestone != nil || ShareMilestone.isMilestone(currentStreak) { return .streakMilestone }
+        return DashboardStylePreference.current == .fun ? .flameyMile : .streakFlame
+    }
+
+    /// The celebration's share CTA. "Share your streak" on a milestone, where
+    /// the number IS the achievement.
+    var shareTitle: String {
+        (streakMilestone != nil || ShareMilestone.isMilestone(currentStreak)) ? "Share your streak" : "Share your mile"
     }
 }

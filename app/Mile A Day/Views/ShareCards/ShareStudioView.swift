@@ -135,6 +135,11 @@ struct ShareStudioView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 14)
                     .padding(.bottom, 8)
+                    // Its own node: two presentations on one view race.
+                    .sheet(item: $messageItem) { item in
+                        MessageComposeSheet(image: item.image, link: link) { messageItem = nil }
+                            .ignoresSafeArea()
+                    }
             }
 
             if let toast {
@@ -161,10 +166,6 @@ struct ShareStudioView: View {
         }
         .sheet(item: $shareItems) { items in
             ActivityViewController(activityItems: items.items)
-        }
-        .sheet(item: $messageItem) { item in
-            MessageComposeSheet(image: item.image, link: link) { messageItem = nil }
-                .ignoresSafeArea()
         }
     }
 
@@ -236,6 +237,8 @@ struct ShareStudioView: View {
             let pageHeight = geo.size.height
             let pageWidth = max(120, min(geo.size.width * 0.78, pageHeight * 9.0 / 16.0))
             let margin = max(0, (geo.size.width - pageWidth) / 2)
+            // Captured: the transition closure is nonisolated.
+            let neighbourScale: CGFloat = reduceMotion ? 1 : 0.88
 
             ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
@@ -245,7 +248,7 @@ struct ShareStudioView: View {
                             .frame(width: pageWidth, height: pageWidth * 16.0 / 9.0)
                             .scrollTransition(.interactive, axis: .horizontal) { view, phase in
                                 view
-                                    .scaleEffect(phase.isIdentity || reduceMotion ? 1 : 0.88)
+                                    .scaleEffect(phase.isIdentity ? 1 : neighbourScale)
                                     .opacity(phase.isIdentity ? 1 : 0.5)
                             }
                             .onTapGesture {
