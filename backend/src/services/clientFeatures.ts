@@ -162,6 +162,8 @@ export const CLIENT_FEATURES = {
    * iPad each get the push they can handle, under one claim per user-week.
    */
   weeklyRecapV1: "weekly_recap_v1",
+
+  /**
    * The build handles the `widget_refresh` SILENT push: it declares the
    * `remote-notification` background mode, so APNs actually wakes it, and its
    * AppDelegate refreshes the one widget snapshot the push names (competition
@@ -176,7 +178,6 @@ export const CLIENT_FEATURES = {
    * has the affected widget on its home screen (widgetRefreshService).
    */
   widgetRefreshPushV1: "widget_refresh_push_v1",
-
 } as const;
 
 export type ClientFeature =
