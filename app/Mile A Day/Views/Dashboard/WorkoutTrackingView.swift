@@ -702,7 +702,8 @@ struct WorkoutTrackingView: View {
                 cancelCountdown()
             } label: {
                 Text("Cancel")
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    // A 52pt capsule: grows, but stays inside it.
+                    .madFont(size: 17, weight: .semibold, design: .rounded, maxScale: 1.5)
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
@@ -864,6 +865,12 @@ struct WorkoutTrackingView: View {
         // fullScreenCover, which sits on top of MainTabView's InAppBanner
         // overlay — a hype toast anywhere else is invisible mid-workout.
         .overlay(alignment: .top) { hypeReceivedToast }
+        // Dynamic Type: the labels, banners, chips and toasts here grow; the
+        // live numbers (distance, ring %, time) stay fixed on purpose — they
+        // are already the largest text on the phone and the metric column is
+        // sized from the screen height. The column scrolls and the controls
+        // are pinned, so the labels can take the card cap.
+        .madTypeCap(.madCardCap)
         .onChange(of: livePresence.sessionHypes.count) { oldCount, newCount in
             guard newCount > oldCount, let latest = livePresence.sessionHypes.last else { return }
             MADHaptics.action()
@@ -886,10 +893,10 @@ struct WorkoutTrackingView: View {
         if let text = hypeToast {
             HStack(spacing: 8) {
                 Image(systemName: "flame.fill")
-                    .font(.system(size: 15, weight: .bold))
+                    .madFont(size: 15, weight: .bold)
                     .foregroundColor(.orange)
                 Text(text)
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -1064,16 +1071,16 @@ struct WorkoutTrackingView: View {
     private var activityCaption: some View {
         HStack(spacing: 5) {
             Image(systemName: selectedActivityType == .running ? "figure.run" : "figure.walk")
-                .font(.system(size: 11, weight: .bold))
+                .madFont(size: 11, weight: .bold)
                 .accessibilityHidden(true)
             Text(selectedActivityType == .running ? "RUN" : "WALK")
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .tracking(1.5)
             Text("·")
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .opacity(0.5)
             Text(selectedLocationType == .indoor ? "INDOOR" : "OUTDOOR")
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .tracking(1.5)
                 .opacity(0.75)
         }
@@ -1196,7 +1203,7 @@ struct WorkoutTrackingView: View {
         if showSnapSavedToast {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 15, weight: .bold))
+                    .madFont(size: 15, weight: .bold)
                     .foregroundColor(.green)
                 // Names the pair once, at the moment it happens. A second
                 // frame the user asked for should still be ACKNOWLEDGED —
@@ -1209,7 +1216,7 @@ struct WorkoutTrackingView: View {
                 Text(lastSnapWasDual
                      ? "Both sides saved as one photo"
                      : "Saved for your post")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
             }
             .padding(.horizontal, 16)
@@ -1230,10 +1237,10 @@ struct WorkoutTrackingView: View {
         if let toast = importToast {
             HStack(spacing: 8) {
                 Image(systemName: toast.ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    .font(.system(size: 15, weight: .bold))
+                    .madFont(size: 15, weight: .bold)
                     .foregroundColor(toast.ok ? .green : .orange)
                 Text(toast.text)
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
             }
@@ -1259,10 +1266,10 @@ struct WorkoutTrackingView: View {
         if showSaveFallbackToast {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 15, weight: .bold))
+                    .madFont(size: 15, weight: .bold)
                     .foregroundColor(.green)
                 Text("Your mile still counts — it'll sync on your next update.")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
             }
@@ -1427,19 +1434,19 @@ struct WorkoutTrackingView: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: issue.icon)
-                        .font(.system(size: 18, weight: .bold))
+                        .madFont(size: 18, weight: .bold)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(issue.title)
-                            .font(.system(size: 14, weight: .heavy, design: .rounded))
+                            .madFont(size: 14, weight: .heavy, design: .rounded)
                         Text(issue.detail)
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .madFont(size: 12, weight: .medium, design: .rounded)
                             .opacity(0.85)
                             .multilineTextAlignment(.leading)
                     }
                     Spacer(minLength: 0)
                     if issue.showsSettings {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .bold))
+                            .madFont(size: 12, weight: .bold)
                             .opacity(0.7)
                     }
                 }
@@ -1479,9 +1486,9 @@ struct WorkoutTrackingView: View {
             if locationManager.isPaused {
                 HStack(spacing: 5) {
                     Image(systemName: "pause.fill")
-                        .font(.system(size: 9, weight: .bold))
+                        .madFont(size: 9, weight: .bold)
                     Text("PAUSED")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .tracking(1.0)
                 }
                 .foregroundColor(.orange)
@@ -1497,9 +1504,9 @@ struct WorkoutTrackingView: View {
             if locationManager.isAutoPaused, !locationManager.isPaused {
                 HStack(spacing: 5) {
                     Image(systemName: "pause.fill")
-                        .font(.system(size: 9, weight: .bold))
+                        .madFont(size: 9, weight: .bold)
                     Text("AUTO-PAUSED")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .tracking(1.0)
                 }
                 .foregroundColor(.orange)
@@ -1561,7 +1568,7 @@ struct WorkoutTrackingView: View {
                 if !coachEnabled { GhostCoach.shared.silenceCurrentLine() }
             } label: {
                 Image(systemName: coachIconName)
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold, maxScale: 1.3)
                     .foregroundColor(coachEnabled ? .white.opacity(0.7) : .orange)
                     .frame(width: 26, height: 26)
                     .background(
@@ -1577,7 +1584,7 @@ struct WorkoutTrackingView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(line)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(coachEnabled ? 0.75 : 0.5))
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
@@ -1589,7 +1596,7 @@ struct WorkoutTrackingView: View {
                 // is no longer the robotic one.)
                 if coachEnabled, coach.isOnCall {
                     Text("On a call — buzzing instead of speaking.")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .madFont(size: 10, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.45))
                         .lineLimit(1)
                 }
@@ -1622,7 +1629,7 @@ struct WorkoutTrackingView: View {
             // then the ghost is beside the point.
             if frozen {
                 Image(systemName: ahead ? "trophy.fill" : "flag.checkered")
-                    .font(.system(size: 9, weight: .bold))
+                    .madFont(size: 9, weight: .bold)
             } else {
                 GhostSprite(
                     size: 11,
@@ -1632,7 +1639,7 @@ struct WorkoutTrackingView: View {
                 )
             }
             Text(text)
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .tracking(0.4)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -2446,12 +2453,12 @@ struct WorkoutTrackingView: View {
                 }
 
                 Text("Share that you're out?")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .madFont(size: 30, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
 
                 Text("While you track a walk or run, friends who are also out see \u{201C}you're out right now\u{201D} — and their hypes land on your Live Activity mid-walk. Never your location, only that you're moving. You'll see them too either way.")
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .madFont(size: 15, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.82))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -2465,7 +2472,7 @@ struct WorkoutTrackingView: View {
                     resolvePresenceConsent(share: true)
                 } label: {
                     Text("Share when I'm out")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .madFont(size: 18, weight: .bold, design: .rounded)
                         .foregroundColor(Color(red: 0.5, green: 0.15, blue: 0.2))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
@@ -2480,7 +2487,7 @@ struct WorkoutTrackingView: View {
                     resolvePresenceConsent(share: false)
                 } label: {
                     Text("Not now")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .madFont(size: 16, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.85))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
@@ -2495,12 +2502,15 @@ struct WorkoutTrackingView: View {
                 .buttonStyle(.plain)
 
                 Text("Change any time in notification settings.")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .madFont(size: 12, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.55))
             }
             .padding(.horizontal, 32)
             .padding(.bottom, 48)
         }
+        // No scroll view here, and two fixed-height buttons: the copy grows,
+        // but only as far as one screen holds.
+        .madTypeCap(.madFixedChromeCap)
     }
 
     /// The 3-2-1. Retained in `countdownTimer` so Cancel can actually stop it:
