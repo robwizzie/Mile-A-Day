@@ -118,6 +118,9 @@ struct FlameMoodLayer: View {
     let scale: CGFloat
     /// Reduce Motion / still frames: the first bubble, props at rest.
     var still: Bool = false
+    /// The speech bubble. OFF for a share card: a bubble baked into a picture
+    /// somebody posts reads as a caption nobody wrote — the props stay.
+    var showsBubble: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Flipped once on appear; every moving prop animates off it.
@@ -147,7 +150,9 @@ struct FlameMoodLayer: View {
             default:
                 EmptyView()
             }
-            bubble
+            if showsBubble {
+                bubble
+            }
         }
         .onAppear {
             guard !still, !reduceMotion else { return }
@@ -402,13 +407,17 @@ struct FlameMoodLayer: View {
             Color(red: 0.35, green: 0.85, blue: 0.95), Color(red: 1.0, green: 0.9, blue: 0.45),
         ]
         let fall = bottom - topY + size * 0.15
+        // A still frame (a share card, Reduce Motion) parks each piece part
+        // way down its own fall, so the shower reads as confetti in the air
+        // rather than eight pieces lined up on the start row.
+        let parked = still || reduceMotion
         return ForEach(0..<seeds.count, id: \.self) { index in
             let seed = seeds[index]
             RoundedRectangle(cornerRadius: 1)
                 .fill(colors[seed.hue])
                 .frame(width: size * 0.035, height: size * 0.02)
                 .rotationEffect(.degrees(moving ? 360 + Double(index) * 40 : Double(index) * 40))
-                .offset(y: moving ? fall : 0)
+                .offset(y: moving ? fall : (parked ? fall * CGFloat(seed.delay / 3.2) * 0.8 : 0))
                 .animation(moving
                     ? .linear(duration: seed.period).repeatForever(autoreverses: false).delay(seed.delay)
                     : nil, value: moving)
