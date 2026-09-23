@@ -205,6 +205,8 @@ export type NotificationType =
   // hours defer this to the morning flush, when "one mile starts the next
   // one" is actionable.
   | "streak_lost"
+  // Saturday-evening "your week" (weeklyRecapService). Gated per device on
+  // weekly_recap_v1 at the candidate query — no shipped build routes it.
   | "weekly_recap"
   // Streak tokens (gated by per-user enrollment + the STREAK_FEATURES_DISABLED
   // kill switch; none are high-priority, so quiet hours apply automatically).
@@ -526,6 +528,11 @@ const CAP_EXEMPT_TYPES: NotificationType[] = [
   "buddy_join_refused",
   "crew_photo",
   "crew_photo_nudge",
+  // Your own week, once a week (weeklyRecapService, claimed per user+week in
+  // weekly_recap_log): bounded by construction, about nobody's account but
+  // yours. A capped one would be parked for the next morning's digest — i.e.
+  // delivered in a week it isn't about.
+  "weekly_recap",
 ];
 
 /** Single source of truth for "the daily cap does not apply to this type". */
@@ -614,11 +621,51 @@ export async function isUserInQuietHours(userId: string): Promise<boolean> {
 
 // ─── Public API ──────────────────────────────────────────────────────
 
+/**
+ * The device tokens `sendPush` rings: all of the user's, or only those that
+ * do / do NOT declare a client feature. The two filtered classes partition
+ * the user's devices (a NULL feature list counts as "does not"), which is
+ * what lets a per-device-variant push reach every device exactly once.
+ * Exported so a check can pin that partition without a live APNs.
+ */
+export async function selectPushTokens(
+  userId: string,
+  deviceFeature?: { feature: string; supported: boolean },
+): Promise<{ device_token: string; environment: string | null }[]> {
+  return deviceFeature
+    ? db.query(
+        `SELECT device_token, environment FROM device_tokens
+         WHERE user_id = $1
+           AND ($2::text = ANY(COALESCE(client_features, '{}'::text[]))) = $3::boolean`,
+        [userId, deviceFeature.feature, deviceFeature.supported],
+      )
+    : db.query(
+        "SELECT device_token, environment FROM device_tokens WHERE user_id = $1",
+        [userId],
+      );
+}
+
 export async function sendPush(
   userId: string,
   payload: PushPayload,
-  opts: { bypassDailyCap?: boolean; inboxOnly?: boolean } = {},
+  opts: {
+    bypassDailyCap?: boolean;
+    inboxOnly?: boolean;
+    /**
+     * Ring only this user's devices that do (`supported: true`) or do NOT
+     * (`false`) declare `feature` — for a push whose payload differs by build
+     * (weeklyRecapService sends one variant per device class).
+     */
+    deviceFeature?: { feature: string; supported: boolean };
+    /**
+     * Ring devices without writing an inbox row: the second half of a
+     * per-device-variant send, whose first half already wrote the one row.
+     */
+    skipInbox?: boolean;
+  } = {},
 ): Promise<void> {
+  const storeInbox = (): Promise<void> =>
+    opts.skipInbox ? Promise.resolve() : storeInAppNotification(userId, payload);
   // Record it, don't ring. For an event the user has already been told about
   // — a re-hype of something they were pushed about before — the history is
   // still worth keeping and the phone is not worth buzzing. Deliberately the
@@ -656,7 +703,7 @@ export async function sendPush(
       );
       if (chargesBudget) await logNotificationSent(userId, payload.type);
       // Still store in inbox so user can see it later
-      storeInAppNotification(userId, payload).catch((err) =>
+      storeInbox().catch((err) =>
         console.error("[Push] Error storing in-app notification:", err.message),
       );
       return;
@@ -684,24 +731,19 @@ export async function sendPush(
       );
       if (chargesBudget) await logNotificationSent(userId, payload.type);
       // Still store in inbox
-      storeInAppNotification(userId, payload).catch((err) =>
+      storeInbox().catch((err) =>
         console.error("[Push] Error storing in-app notification:", err.message),
       );
       return;
     }
   }
 
-  const tokens = await db.query<{
-    device_token: string;
-    environment: string | null;
-  }>("SELECT device_token, environment FROM device_tokens WHERE user_id = $1", [
-    userId,
-  ]);
+  const tokens = await selectPushTokens(userId, opts.deviceFeature);
 
   if (tokens.length === 0) {
     console.log(`[Push] No device tokens found for user ${userId}`);
     // Still store in inbox even without device tokens
-    storeInAppNotification(userId, payload).catch((err) =>
+    storeInbox().catch((err) =>
       console.error("[Push] Error storing in-app notification:", err.message),
     );
     return;
@@ -727,7 +769,7 @@ export async function sendPush(
   }
 
   // Always store in-app notification regardless of push delivery
-  storeInAppNotification(userId, payload).catch((err) =>
+  storeInbox().catch((err) =>
     console.error("[Push] Error storing in-app notification:", err.message),
   );
 }

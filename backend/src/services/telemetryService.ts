@@ -18,6 +18,12 @@ export const SHARE_INSTAGRAM_FEATURE = "share_instagram";
 export const SHARE_SHEET_FEATURE = "share_sheet";
 export const SHARE_SAVED_FEATURE = "share_saved";
 
+/// The Weekly Recap screen (iOS), opened from the Saturday-evening push or
+/// in-app, and shared from. Together they answer whether the recap is read
+/// and whether it travels — the reason it was built.
+export const WEEKLY_RECAP_OPENED_FEATURE = "weekly_recap_opened";
+export const WEEKLY_RECAP_SHARED_FEATURE = "weekly_recap_shared";
+
 /// Features a client may record. An off-list value is DROPPED, not stored —
 /// the table must stay a set of known, chartable signals, never a free-text
 /// sink (the referral_detail lesson).
@@ -27,6 +33,8 @@ export const TRACKED_FEATURES = new Set([
   SHARE_INSTAGRAM_FEATURE,
   SHARE_SHEET_FEATURE,
   SHARE_SAVED_FEATURE,
+  WEEKLY_RECAP_OPENED_FEATURE,
+  WEEKLY_RECAP_SHARED_FEATURE,
 ]);
 
 export async function recordFeatureEvent(

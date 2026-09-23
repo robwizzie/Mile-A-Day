@@ -149,6 +149,19 @@ export const CLIENT_FEATURES = {
    */
   activityDigestV1: "activity_digest_v1",
 
+  /**
+   * The build renders the server-built Weekly Recap
+   * (`GET /users/:id/weekly-recap`) and routes the `weekly_recap` push to it,
+   * opening the week named in `data.week_start`.
+   *
+   * `weekly_recap` is NOT a new type string — shipped builds already receive
+   * it (title "Your week in review", no data) and keep receiving exactly that
+   * on devices that don't declare this string. A device that does gets the
+   * new variant carrying `data.week_start`. Chosen per DEVICE, not per user
+   * (`planWeeklyRecapSends` + `selectPushTokens`): a new phone and an old
+   * iPad each get the push they can handle, under one claim per user-week.
+   */
+  weeklyRecapV1: "weekly_recap_v1",
 } as const;
 
 export type ClientFeature =

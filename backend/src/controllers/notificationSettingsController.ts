@@ -20,13 +20,28 @@ import {
   WORKOUT_VISIBILITY_VALUES,
 } from "../services/visibilityService.js";
 
+/**
+ * The Weekly Recap switch under both names: `weekly_recap_enabled` (the
+ * column, what shipped Settings screens already read and write) and
+ * `weekly_recap` (the recap feature's contract name). One column, so the two
+ * can never disagree.
+ */
+function withRecapAlias<T extends { weekly_recap_enabled: boolean }>(
+  prefs: T,
+): T & { weekly_recap: boolean } {
+  return { ...prefs, weekly_recap: prefs.weekly_recap_enabled };
+}
+
 export async function getPreferences(req: AuthenticatedRequest, res: Response) {
   try {
     const prefs = await getNotificationPreferences(req.userId!);
     // Stealth is composed HERE, not in getNotificationPreferences: that
     // function runs per push inside shouldSendNotification and must stay a
     // single row read.
-    res.status(200).json({ ...prefs, ...(await stealthStatus(req.userId!)) });
+    res.status(200).json({
+      ...withRecapAlias(prefs),
+      ...(await stealthStatus(req.userId!)),
+    });
   } catch (error: any) {
     console.error("Error getting notification preferences:", error.message);
     res.status(500).json({ error: "Error getting notification preferences" });
@@ -160,10 +175,20 @@ export async function updatePreferences(
       await closeWindow(req.userId!);
     }
 
-    const updated = await updateNotificationPreferences(req.userId!, req.body);
-    res
-      .status(200)
-      .json({ ...updated, ...(await stealthStatus(req.userId!)) });
+    // `weekly_recap` is an alias for the `weekly_recap_enabled` column the
+    // Settings toggle has always written; the explicit column name wins.
+    const body = { ...req.body };
+    if (
+      body.weekly_recap_enabled === undefined &&
+      typeof body.weekly_recap === "boolean"
+    ) {
+      body.weekly_recap_enabled = body.weekly_recap;
+    }
+    const updated = await updateNotificationPreferences(req.userId!, body);
+    res.status(200).json({
+      ...withRecapAlias(updated),
+      ...(await stealthStatus(req.userId!)),
+    });
   } catch (error: any) {
     console.error("Error updating notification preferences:", error.message);
     res.status(500).json({ error: "Error updating notification preferences" });
