@@ -105,6 +105,8 @@ globs: app/**
 - Two people on ONE Apple account cannot have two MAD accounts — `/auth/signin` resolves the user by EMAIL alone (`apple_sub` is written at creation, never used for lookup), and `getCredentialState` returns `.authorized` on both phones, so nothing device-side can tell their sessions apart. Tell users to use separate Apple IDs (Family Sharing keeps purchases shared).
 - `AppStateManager.isAuthenticated` is a UserDefaults bool, not proof of credentials — it's gated on `TokenStore.hasTokens` in memory only. Never persist that downgrade: tokens are `kSecAttrAccessibleAfterFirstUnlock`, so a pre-first-unlock background launch reads nil on a perfectly good session. Same reason `MADWatchBridge` withholds `authToken`/`backendUserId` when `SessionIdentity.isMismatched` — the watch has no refresh, no sign-out and no auth UI, so a bad pair wedges it permanently.
 
+- `APIClient.fancyFetch` SIGNS THE USER OUT when it finds no access token, so any background / fire-and-forget caller (e.g. `DiagnosticsReporter`'s MetricKit upload, which can run pre-login or on a pre-first-unlock launch where the Keychain reads nil) must gate on `TokenStore.hasTokens` first and simply defer — a crash report must never cost someone their session.
+
 ## Do NOT
 - Add a capability by hand-editing a `.entitlements` file (e.g. `com.apple.developer.associated-domains`) WITHOUT enabling it in Signing & Capabilities / on the App ID — the app builds and installs, then gets killed by AMFI at launch (`Thread 1: abort with payload or reason`, `__abort_with_payload`, generic reason). A successful build is not proof the entitlement is provisioned; the kill is at launch.
 - Change the API base URL without coordinating both client and server.

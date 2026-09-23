@@ -22,6 +22,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // HealthKit step-count observer — start after UIApplication is ready.
         DailyStepsSyncService.shared.start()
 
+        // MetricKit crash/hang reports. Subscribe early so a payload iOS
+        // delivers on this launch isn't missed; the upload itself is deferred
+        // off-main and never blocks launch.
+        DiagnosticsReporter.shared.start()
+
         // If iOS launched us in the background (no UI scene), kick off a sync immediately.
         // For UI launches, the scene lifecycle in Mile_A_DayApp handles the sync.
         if application.applicationState == .background {
