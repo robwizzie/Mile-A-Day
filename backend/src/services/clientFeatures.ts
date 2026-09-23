@@ -149,6 +149,19 @@ export const CLIENT_FEATURES = {
    */
   activityDigestV1: "activity_digest_v1",
 
+  /**
+   * The build renders the server-built Weekly Recap
+   * (`GET /users/:id/weekly-recap`) and routes the `weekly_recap` push to it,
+   * opening the week named in `data.week_start`.
+   *
+   * `weekly_recap` is NOT a new type string — an earlier cron sent it to every
+   * device, and no shipped build routes it, so the tap opened the app on
+   * whatever tab it was last on under copy promising a recap. That is the
+   * dead-tap this file exists to prevent, so the push now goes ONLY to users
+   * holding a device that declares this string; everyone else gets nothing
+   * rather than a banner that points nowhere.
+   */
+  weeklyRecapV1: "weekly_recap_v1",
 } as const;
 
 export type ClientFeature =

@@ -205,6 +205,8 @@ export type NotificationType =
   // hours defer this to the morning flush, when "one mile starts the next
   // one" is actionable.
   | "streak_lost"
+  // Saturday-evening "your week" (weeklyRecapService). Gated per device on
+  // weekly_recap_v1 at the candidate query — no shipped build routes it.
   | "weekly_recap"
   // Streak tokens (gated by per-user enrollment + the STREAK_FEATURES_DISABLED
   // kill switch; none are high-priority, so quiet hours apply automatically).
@@ -526,6 +528,11 @@ const CAP_EXEMPT_TYPES: NotificationType[] = [
   "buddy_join_refused",
   "crew_photo",
   "crew_photo_nudge",
+  // Your own week, once a week (weeklyRecapService, claimed per user+week in
+  // weekly_recap_log): bounded by construction, about nobody's account but
+  // yours. A capped one would be parked for the next morning's digest — i.e.
+  // delivered in a week it isn't about.
+  "weekly_recap",
 ];
 
 /** Single source of truth for "the daily cap does not apply to this type". */
