@@ -102,8 +102,17 @@ enum ClientFeatures {
     /// competitions list.
     static let activityDigestV1 = "activity_digest_v1"
 
+    /// This build handles the `widget_refresh` SILENT push: it declares the
+    /// `remote-notification` background mode (so APNs actually wakes it) and
+    /// `AppDelegate` refreshes the competition / friends-leaderboard widget
+    /// snapshot the push names (`WidgetLiveRefresh`). Paired with the
+    /// `widget_kinds` it reports beside this list — the server only pushes a
+    /// device that has the affected widget installed.
+    static let widgetRefreshPushV1 = "widget_refresh_push_v1"
+
     static let supported: [String] = [
         friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
         weeklyChallengeV1, buddyGroupPostV1, buddyJoinRequestV1, activityDigestV1,
+        widgetRefreshPushV1,
     ]
 }

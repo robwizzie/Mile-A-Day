@@ -694,90 +694,24 @@ struct MainTabView: View {
     }
 
     /// Mirror the most urgent active competition into the App Group for the
-    /// Competition widget — same focus/sort logic as the dashboard cards.
+    /// Competition widget. The builder is shared with the silent-push refresh
+    /// (`WidgetLiveRefresh`), which runs without this view.
     private func syncCompetitionWidget(_ competitions: [Competition]) {
-        let active = competitions.filter { $0.status == .active }
-        guard !active.isEmpty else {
-            WidgetDataStore.clearCompetitionSummary()
-            return
-        }
-
-        let userId = UserDefaults.standard.string(forKey: "backendUserId")
-        guard let top = active.min(by: { a, b in
-            TodayFocus.compute(for: a, currentUserId: userId).level.sortKey
-                < TodayFocus.compute(for: b, currentUserId: userId).level.sortKey
-        }) else { return }
-
-        let focus = TodayFocus.compute(for: top, currentUserId: userId)
-
-        let ranked = top.acceptedRanked
-        // On a team competition the TEAM is the competitor, so the widget
-        // ranks teams and names mine — a member's own rank among people is a
-        // fact about a leaderboard the competition isn't scored on.
-        let myTeam: CompetitionTeam? = userId.flatMap { top.hasTeams ? top.team(for: $0) : nil }
-        let rankedTeams = top.rankedTeams
-        var rankText = ""
-        if let myTeam, let index = rankedTeams.firstIndex(where: { $0.id == myTeam.id }) {
-            rankText = "\(myTeam.teamLabel) · \(ActiveCompetitionRow.ordinal(index + 1)) of \(rankedTeams.count)"
-        } else if let uid = userId, let index = ranked.firstIndex(where: { $0.user_id == uid }) {
-            rankText = "\(ActiveCompetitionRow.ordinal(index + 1)) of \(ranked.count)"
-        }
-
-        let urgency: String
-        switch focus.level {
-        case .urgent: urgency = "urgent"
-        case .behind: urgency = "behind"
-        case .neutral: urgency = "neutral"
-        case .winning: urgency = "winning"
-        }
-
-        // Top players (me always included) as a mini-leaderboard for the
-        // widget. Same summary the post sticker draws (`stickerSummary`), so
-        // the place a photo claims and the place the widget shows can't drift
-        // apart — they were separate arithmetic that happened to agree.
-        let standings: [WidgetDataStore.StandingRow] = top.standingsPodium(for: userId)
-            .map { WidgetDataStore.StandingRow(name: $0.name, valueText: $0.score, isMe: $0.isMe) }
-
-        WidgetDataStore.save(
-            competitionId: top.competition_id,
-            competitionName: top.competition_name,
-            pill: focus.pill,
-            detail: focus.detail,
-            rankText: rankText,
-            urgency: urgency,
-            standings: standings
-        )
+        WidgetLiveRefresh.saveCompetitionSnapshot(competitions)
     }
 
     /// Mirror today's friends leaderboard into the App Group for the Daily
-    /// Leaderboard widget — the same standings the post-mile celebration
-    /// shows. Failed fetches keep the last good snapshot.
+    /// Leaderboard widget. Failed fetches keep the last good snapshot.
     private func syncLeaderboardWidget() async {
-        let myId = UserDefaults.standard.string(forKey: "backendUserId")
-        guard myId != nil else { return }
+        guard UserDefaults.standard.string(forKey: "backendUserId") != nil else { return }
         guard let items = try? await friendService.fetchFriendsActivityToday() else { return }
-
-        var rows: [WidgetDataStore.LeaderboardRow] = items
-            .filter { $0.user_id != myId }
-            .map {
-                WidgetDataStore.LeaderboardRow(
-                    name: $0.displayName,
-                    miles: $0.today_miles,
-                    isMe: false,
-                    completed: $0.completed_today
-                )
-            }
         let user = userManager.currentUser
-        rows.append(WidgetDataStore.LeaderboardRow(
-            name: user.username ?? user.name,
-            miles: healthManager.todaysDistance,
-            isMe: true,
-            completed: ProgressCalculator.isGoalCompleted(
-                current: healthManager.todaysDistance, goal: user.goalMiles
-            )
-        ))
-        rows.sort { $0.miles > $1.miles }
-        WidgetDataStore.save(leaderboardRows: rows)
+        WidgetLiveRefresh.saveLeaderboardSnapshot(
+            friends: items,
+            myName: user.username ?? user.name,
+            myMiles: healthManager.todaysDistance,
+            myGoal: user.goalMiles
+        )
     }
 }
 

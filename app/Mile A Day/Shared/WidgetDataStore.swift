@@ -335,6 +335,8 @@ struct WidgetDataStore {
         var standings: [StandingRow] = []
     }
 
+    /// Returns whether anything was written (and the widget reloaded).
+    @discardableResult
     static func save(
         competitionId: String,
         competitionName: String,
@@ -343,8 +345,8 @@ struct WidgetDataStore {
         rankText: String,
         urgency: String,
         standings: [StandingRow] = []
-    ) {
-        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+    ) -> Bool {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return false }
         let stamp = dayStamp()
         let standingsData = (try? JSONEncoder().encode(standings)) ?? Data()
         if defaults.string(forKey: compIdKey) == competitionId,
@@ -354,7 +356,7 @@ struct WidgetDataStore {
            defaults.string(forKey: compRankKey) == rankText,
            defaults.data(forKey: compStandingsKey) == standingsData,
            defaults.string(forKey: compStampKey) == stamp {
-            return
+            return false
         }
         defaults.set(competitionId, forKey: compIdKey)
         defaults.set(competitionName, forKey: compNameKey)
@@ -367,11 +369,13 @@ struct WidgetDataStore {
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "CompetitionWidget")
         }
+        return true
     }
 
-    static func clearCompetitionSummary() {
+    @discardableResult
+    static func clearCompetitionSummary() -> Bool {
         guard let defaults = UserDefaults(suiteName: suiteName),
-              defaults.string(forKey: compNameKey) != nil else { return }
+              defaults.string(forKey: compNameKey) != nil else { return false }
         defaults.removeObject(forKey: compIdKey)
         defaults.removeObject(forKey: compNameKey)
         defaults.removeObject(forKey: compPillKey)
@@ -383,6 +387,7 @@ struct WidgetDataStore {
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "CompetitionWidget")
         }
+        return true
     }
 
     static func loadCompetitionSummary() -> CompetitionSummary? {
@@ -423,19 +428,22 @@ struct WidgetDataStore {
     }
 
     /// Saves today's friends leaderboard for the Daily Leaderboard widget.
-    static func save(leaderboardRows: [LeaderboardRow]) {
+    /// Returns whether anything was written (and the widget reloaded).
+    @discardableResult
+    static func save(leaderboardRows: [LeaderboardRow]) -> Bool {
         guard let defaults = UserDefaults(suiteName: suiteName),
-              let data = try? JSONEncoder().encode(leaderboardRows) else { return }
+              let data = try? JSONEncoder().encode(leaderboardRows) else { return false }
         let stamp = dayStamp()
         if defaults.data(forKey: leaderboardRowsKey) == data,
            defaults.string(forKey: leaderboardStampKey) == stamp {
-            return
+            return false
         }
         defaults.set(data, forKey: leaderboardRowsKey)
         defaults.set(stamp, forKey: leaderboardStampKey)
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "DailyLeaderboardWidget")
         }
+        return true
     }
 
     static func loadLeaderboard() -> LeaderboardSnapshot? {
