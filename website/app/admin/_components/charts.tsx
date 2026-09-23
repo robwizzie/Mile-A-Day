@@ -130,11 +130,16 @@ export function StackedDayBars<K extends string>({
   series,
   label,
   hint,
+  windowDays = 30,
+  emptyText,
 }: {
   data: (Record<K, number> & { date: string })[];
   series: { key: K; label: string; color: string }[];
   label: string;
   hint?: string;
+  /** The window the bars cover, for the "N in X days" total. */
+  windowDays?: number;
+  emptyText?: string;
 }) {
   const [hover, setHover] = useState<string | null>(null);
 
@@ -166,14 +171,14 @@ export function StackedDayBars<K extends string>({
               .join(", ") || "none"}
           </span>
         ) : (
-          <span className="text-xs text-white/40">{grandTotal} in 30 days</span>
+          <span className="text-xs text-white/40">{grandTotal} in {windowDays} days</span>
         )}
       </div>
       {hint && <p className="mb-2 text-xs text-white/40">{hint}</p>}
 
       {grandTotal === 0 ? (
         <p className="py-8 text-sm text-white/40">
-          Nothing spent in the last 30 days.
+          {emptyText ?? `Nothing spent in the last ${windowDays} days.`}
         </p>
       ) : (
         <svg
