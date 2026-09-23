@@ -31,18 +31,26 @@ struct WidgetDataStore {
         let safeGoal = goal > 0 ? goal : 1.0
         let stamp = dayStamp()
 
+        // The server's DAILY_GOAL_TOLERANCE, restated because this file is
+        // compiled into the widget extension, which can't see
+        // ProgressCalculator. A raw `>=` drew "streak at risk" on the home
+        // screen for a 0.97 mi day the app and the server both count as done.
+        let isCompleted = todayMiles >= safeGoal * 0.95
+
         // Skip no-op writes: every save triggers widget timeline reloads, and
         // iOS rations those per day — burning the budget on unchanged values
-        // means real updates later in the day get silently dropped.
+        // means real updates later in the day get silently dropped. The
+        // completed flag is part of the comparison so a stored day whose miles
+        // didn't move still picks up a change in how it is judged.
         if defaults.double(forKey: milesKey) == todayMiles,
            defaults.double(forKey: goalKey) == safeGoal,
+           defaults.bool(forKey: "streak_completed_today") == isCompleted,
            defaults.string(forKey: dataDayKey) == stamp {
             return
         }
 
         // Calculate progress and cap at 100%
         let progress = min(todayMiles / safeGoal, 1.0)
-        let isCompleted = todayMiles >= safeGoal
 
         // Save all values with proper synchronization
         defaults.set(todayMiles, forKey: milesKey)
