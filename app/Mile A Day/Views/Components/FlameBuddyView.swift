@@ -38,6 +38,10 @@ struct FlameBuddyView: View {
     /// from a caller — it is a read-only environment value — which is why this
     /// is a parameter and not `.environment(...)` at the call site.
     var still: Bool = false
+    /// Draw the mood's speech bubble. A share card passes false and keeps the
+    /// props (shades, party hat): the bubble is live-dashboard dressing, and
+    /// baked into a picture it reads as a caption nobody wrote.
+    var showsMoodBubble: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The house pattern: an explicit still OR the system setting.
@@ -155,7 +159,8 @@ struct FlameBuddyView: View {
             if let mood {
                 // No clock of its own (see FlameMoodLayer). Shares the
                 // container's bob/hop/pace below, so props ride with him.
-                FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: currentVigor(at: Date())))
+                FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: currentVigor(at: Date())),
+                               showsBubble: showsMoodBubble)
             }
         }
         .scaleEffect(x: 1, y: pokeSquash, anchor: .bottom)
@@ -202,7 +207,8 @@ struct FlameBuddyView: View {
             }
             figure(vigor: vigorNow, flicker: 0, blink: false, gaze: .zero)
             if let mood {
-                FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: vigorNow), still: true)
+                FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: vigorNow), still: true,
+                               showsBubble: showsMoodBubble)
             }
         }
     }

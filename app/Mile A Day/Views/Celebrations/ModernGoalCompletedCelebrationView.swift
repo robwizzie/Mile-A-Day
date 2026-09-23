@@ -315,7 +315,7 @@ struct ModernGoalCompletedCelebrationView: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "square.and.arrow.up")
-                    Text("Share Achievement")
+                    Text(stats.shareTitle)
                 }
                 .font(.system(size: 17, weight: .heavy, design: .rounded))
                 .foregroundColor(.white)
@@ -325,7 +325,7 @@ struct ModernGoalCompletedCelebrationView: View {
             }
             .buttonStyle(.plain)
             .sheet(item: $storyShare) { content in
-                ShareStudioView(content: content)
+                ShareStudioView(content: content, initialTemplate: stats.shareTemplate)
             }
 
             Button {

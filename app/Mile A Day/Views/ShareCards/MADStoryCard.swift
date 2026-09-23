@@ -154,6 +154,20 @@ struct MADStoryContent: Identifiable {
     /// stretched to 360×640 with high interpolation is a smooth gradient by
     /// construction — no effect for the renderer to drop.
     var photoWash: UIImage?
+    /// Active energy for the walk, when the caller has it (HealthKit's own, or
+    /// the app's estimate). Only ever shown as a plain number — never as a
+    /// health claim.
+    var calories: Double? = nil
+    /// Did this walk (or day) bank the goal? Decides "Mile done." against a
+    /// softer line on the Flamey card. nil = unknown ⇒ judged from the
+    /// distance (a single walk that covered a mile did the mile).
+    var goalMet: Bool? = nil
+    /// A week's recap — its presence turns the studio into the WEEK studio.
+    var week: WeeklyRecap? = nil
+    /// The dark map snapshot behind the "On the map" route card, resolved by
+    /// the studio BEFORE rendering (ImageRenderer can't await a snapshotter).
+    /// Generated at exactly `MapRouteShareCard.artSize`.
+    var mapUnderlay: RouteMapSnapshot? = nil
 
     var hasRoute: Bool { coordinates.count >= 2 }
     var hasPhoto: Bool { photo != nil }
@@ -182,6 +196,8 @@ struct MADStoryCard: View {
     let content: MADStoryContent
     let design: MADStoryDesign
     var format: MADStoryFormat = .story
+    /// The Share Studio's stat toggle. nil = this card's own default rail.
+    var statKinds: [ShareStatKind]? = nil
 
     var body: some View {
         ZStack {
@@ -429,83 +445,21 @@ struct MADStoryCard: View {
     /// a picture somebody posts. It has to be a parameter: Reduce Motion, which
     /// the flames already branch on, is a READ-ONLY environment value and
     /// cannot be forced from a caller.
-    @ViewBuilder
+    /// The SAME flame the user's own dashboard draws — see `ShareStyleFlame`.
     private var heroFlame: some View {
-        switch DashboardStylePreference.current {
-        case .fun:
-            // Flamey himself, face and all. No `mood`: the hero's props and
-            // speech bubble are dressing for a live dashboard, and a bubble
-            // baked into a shared picture reads as a caption nobody wrote.
-            FlameBuddyView(health: .blazing, size: flameSize,
-                           phase: .blazing, coalWarmth: 1, still: true)
-        case .modern:
-            // The Modern dashboard's own flame: the same figure with no face,
-            // ungrounded so it stays framed. `.blazing` also means no countdown
-            // ring — a still has no countdown to draw.
-            ProfessionalFlameView(phase: .blazing, health: .blazing,
-                                  size: flameSize, coalWarmth: 1, still: true)
-        }
+        ShareStyleFlame(size: flameSize)
     }
 
     /// Equal columns under one hairline, split by hairlines. An `HStack` with
     /// fixed spacing let the columns drift with their content, which is what
     /// made the old stat row read as three loose labels rather than a rail.
     private var statRail: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(stats.enumerated()), id: \.element.label) { index, stat in
-                if index > 0 {
-                    // An explicit height, not a flexible one: a `Rectangle` with
-                    // only a width has no ideal height, and the enclosing
-                    // `fixedSize(vertical:)` then has nothing to measure it by.
-                    Rectangle()
-                        .fill(Color.white.opacity(0.13))
-                        .frame(width: 1, height: format == .story ? 36 : 31)
-                        .padding(.trailing, 14)
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(stat.value)
-                        .font(.system(size: format == .story ? 21 : 18,
-                                      weight: .black, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundColor(stat.tint)
-                    Text(stat.label)
-                        .font(.system(size: format == .story ? 10 : 9,
-                                      weight: .black, design: .rounded))
-                        .tracking(1.7)
-                        .foregroundColor(.white.opacity(0.4))
-                }
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.top, 14)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Color.white.opacity(0.13))
-                .frame(height: 1)
-        }
+        ShareStatRail(stats: stats, format: format)
     }
 
     /// The download driver, and the card's only brand lockup.
     private var footer: some View {
-        HStack(spacing: 0) {
-            MADLogoMark(size: format == .story ? 22 : 19, shadow: false)
-            Text("MILE A DAY")
-                .font(.system(size: format == .story ? 11.5 : 10,
-                              weight: .black, design: .rounded))
-                .tracking(2)
-                .foregroundColor(.white)
-                .padding(.leading, 8)
-            Spacer(minLength: 8)
-            Text("mileaday.run")
-                .font(.system(size: format == .story ? 12 : 10.5,
-                              weight: .heavy, design: .rounded))
-                .foregroundColor(.white.opacity(0.45))
-        }
-        .lineLimit(1)
-        .padding(.top, format == .story ? 20 : 16)
+        ShareLockup(format: format)
     }
 
     // MARK: Values
@@ -522,7 +476,12 @@ struct MADStoryCard: View {
     /// Capped at the format's column count, so a sticker never squeezes three
     /// values into 320pt.
     private var stats: [MADStoryStat] {
-        Array(allStats.prefix(format.maxStats))
+        if let statKinds {
+            return ShareStatKind.rail(statKinds, content: content,
+                                      hero: design == .streak ? .streak : .distance,
+                                      limit: format.maxStats)
+        }
+        return Array(allStats.prefix(format.maxStats))
     }
 
     private var allStats: [MADStoryStat] {
@@ -579,7 +538,7 @@ struct MADStoryCard: View {
 /// A `ViewModifier` rather than two copies: the photo and the route drifting
 /// apart on corner radius or border is exactly the kind of near-copy this file
 /// has already been burned by.
-private struct ArtFrame: ViewModifier {
+struct ArtFrame: ViewModifier {
     let cornerRadius: CGFloat
 
     func body(content: Content) -> some View {
@@ -654,7 +613,7 @@ extension GoalCompletionStats {
     /// a Watch target member: a dependency added there compiles on iPhone and
     /// fails the Watch with "Cannot find 'MADStoryContent' in scope".
     var storyContent: MADStoryContent {
-        MADStoryContent(
+        var content = MADStoryContent(
             distanceMiles: todaysDistance,
             // `todaysAveragePace` is MINUTES per mile; every consumer that
             // wants seconds multiplies by 60 (RunPostService, SocialFeedView).
@@ -664,5 +623,24 @@ extension GoalCompletionStats {
             totalMiles: totalLifetimeMiles,
             date: Date()
         )
+        // A goal celebration only ever fires on a banked goal.
+        content.goalMet = true
+        content.calories = todaysCalories >= 1 ? todaysCalories : nil
+        return content
+    }
+
+    /// Where the studio opens from a goal celebration — the Duolingo moment.
+    /// A milestone day (the app's own `StreakMilestone` days) opens on the
+    /// milestone card; any other day on the flame the user's dashboard draws
+    /// (Flamey on Fun, the streak on Modern).
+    var shareTemplate: ShareTemplate {
+        if streakMilestone != nil || ShareMilestone.isMilestone(currentStreak) { return .streakMilestone }
+        return DashboardStylePreference.current == .fun ? .flameyMile : .streakFlame
+    }
+
+    /// The celebration's share CTA. "Share your streak" on a milestone, where
+    /// the number IS the achievement.
+    var shareTitle: String {
+        (streakMilestone != nil || ShareMilestone.isMilestone(currentStreak)) ? "Share your streak" : "Share your mile"
     }
 }

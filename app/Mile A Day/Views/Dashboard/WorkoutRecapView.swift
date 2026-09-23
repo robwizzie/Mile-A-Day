@@ -365,23 +365,23 @@ struct WorkoutRecapView: View {
                 TelemetryService.record(ShareTelemetry.opened)
                 storyShare = shareContent()
             } label: {
+                // The PRIMARY action — Strava's "share your activity" moment.
+                // It was a grey outline beside a big Done, i.e. the button
+                // nobody pressed at the one time people most want to post.
                 HStack(spacing: 8) {
                     Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(size: 17, weight: .bold))
                         .accessibilityHidden(true)
-                    Text("Share")
-                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    Text("Share your \(activityName.lowercased())")
+                        .font(.system(size: 18, weight: .heavy, design: .rounded))
                 }
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
+                .padding(.vertical, 18)
                 .background(
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(Color.white.opacity(0.13))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                        .fill(MADTheme.Colors.redGradient)
+                        .shadow(color: MADTheme.Colors.madRed.opacity(0.4), radius: 14, x: 0, y: 6)
                 )
             }
             .buttonStyle(PlainButtonStyle())
@@ -410,6 +410,10 @@ struct WorkoutRecapView: View {
             avatar: RouteArtAvatar(
                 name: UserManager.shared.currentUser.name,
                 imageURL: UserManager.shared.currentUser.profileImageUrl
+            ),
+            goalMet: ProgressCalculator.isGoalCompleted(
+                current: healthManager.todaysDistance,
+                goal: max(UserManager.shared.currentUser.goalMiles, 0.01)
             )
         )
     }
@@ -422,6 +426,9 @@ struct WorkoutRecapView: View {
         guard routeCoordinates.isEmpty, let workoutId else { return }
         let pool = healthManager.cachedWorkouts + healthManager.recentWorkouts
         guard let workout = pool.first(where: { $0.uuid.uuidString == workoutId }) else { return }
+        // A stealth walk's trace never leaves the phone — a share card is a
+        // picture of it (ios.md, Stealth Mode).
+        guard !StealthModeStore.shared.isStealth(workout) else { return }
         let locations = await healthManager.fetchAllRouteLocations(for: workout)
         guard !locations.isEmpty else { return }
         routeCoordinates = locations.map(\.coordinate)

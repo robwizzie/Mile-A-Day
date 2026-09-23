@@ -659,6 +659,11 @@ struct NotificationInboxView: View {
             )
             switchTab(2)
             NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
+        case "weekly_recap":
+            // The week it's about, opened over the tab bar once this sheet
+            // is gone (two presentations in one transaction drop one).
+            dismiss()
+            WeeklyRecapLink.shared.openAfterDismiss(weekStart: notification.data?["week_start"])
         case "friend_request", "friend_request_reminder":
             // Ask the Friends tab to open the requests sheet. Switching tabs
             // alone dropped the user on the friends list with the sheet closed
@@ -1066,6 +1071,7 @@ struct NotificationInboxView: View {
         case "buddy_started": return "WALK STARTED"
         case "buddy_finished": return "WALK DONE"
         case "activity_digest": return "CATCH UP"
+        case "weekly_recap": return "YOUR WEEK"
         default: return "UPDATE"
         }
     }
@@ -1126,6 +1132,7 @@ struct NotificationInboxView: View {
         // The catch-up. Its own row IS the summary, so it points at the tray
         // it's a summary of — the rows below it are the thing.
         case "activity_digest": return ("tray.full.fill", .white.opacity(0.6))
+        case "weekly_recap": return ("calendar", MADTheme.Colors.madRed)
         default: return ("bell.fill", .white.opacity(0.5))
         }
     }

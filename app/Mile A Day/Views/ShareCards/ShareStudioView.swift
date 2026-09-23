@@ -2,120 +2,181 @@ import SwiftUI
 
 // MARK: - Share Studio
 //
-// ONE share sheet for a walk, from every surface that shows one.
+// THE share surface — walks, the day, the streak and the week all open it.
 //
-// The sheet asks TWO questions and says so on screen: what the card shows
-// (Photo / Route / Streak) and what shape it arrives in (Full story / Sticker).
-// It used to ask them as ONE four-way rail — Photo | Route | Streak | Sticker —
-// which is two axes crushed into one control: choosing "Sticker" threw away the
-// design and choosing a design threw away the sticker, so neither choice ever
-// stuck and there was no model of it to learn. Splitting them is the fix; both
-// rows are labelled, and every combination renders.
+// What it is, and why (the Strava / Duolingo lesson): a CAROUSEL of finished
+// cards, one page per template, each a live preview of exactly what will
+// post. You swipe to the one you like and tap where it goes. The old studio
+// was two rows of labelled controls over one preview, which made the walker
+// assemble the card in their head from the labels; the carousel shows every
+// option at once, and "what will this look like?" is never a question.
 //
-// TWO actions, not three. Instagram Stories, More… and Save sat side by side
-// once, which is a menu on a screen whose job is a decision. Save went first and
-// cost nothing — the system share sheet behind the second button carries Save
-// Image itself, so it was a second door to a room already on the way.
+// Layout, top to bottom:
+//   * family chips (Picture · Route · Streak · Flamey · Sticker, or Week) —
+//     one tap jumps the carousel to that family; they also say at a glance
+//     what kinds of card this walk can make;
+//   * the carousel — paged, the focused card full size and its neighbours
+//     peeking smaller and dimmer, with page dots and the card's name under it;
+//   * options for the FOCUSED card only, and only where they mean something:
+//     Story vs Sticker for a card that renders both, and a Strava-style stat
+//     toggle for a card with a stat rail;
+//   * destinations — a big "Instagram Stories" button, then Instagram,
+//     Messages, Save, Copy link, More.
 //
-// The Instagram button is ALWAYS offered. It used to be gated on
-// `InstagramStoryShare.isAvailable`, which requires a Meta App ID that has never
-// been filled in — so the marquee action of the whole feature rendered for
-// nobody. Without that ID the direct pasteboard handoff is impossible (Meta
-// requires `source_application`), so the button opens the SYSTEM SHARE SHEET,
-// where Instagram's own extension takes the image into its story composer. That
-// needs no App ID. It used to save the card and open Instagram's camera, which
-// left the walker hunting their camera roll for a picture we were holding.
+// Preview == render. Every page draws the real `ShareCardView` (scaled), and
+// the exported image is `ImageRenderer` of the same view — never an
+// approximation. The card's asynchronous inputs (the avatar picture, the
+// photo wash, the dark map snapshot) are resolved HERE before anything bakes,
+// because `ImageRenderer` runs no view lifecycle: anything a card fetched for
+// itself would bake as its fallback.
 //
-// The preview is the real `MADStoryCard`, scaled — not an approximation of it —
-// so what you tap Share on is what lands in the story. It carries the card's
-// asynchronous inputs (`cardContent`) because `ImageRenderer` runs no view
-// lifecycle: anything a subview would fetch for itself bakes as its fallback.
+// Performance: only the focused page and its two neighbours are live views;
+// a page further away shows the image it was last rendered as (cached when
+// it was focused) or a quiet placeholder. The pages are big composited
+// views — flame figures, route art, photos — and a dozen of them live at
+// once is a dozen of the dashboard hero.
+//
+// Instagram: with a Meta App ID in `MADFacebookAppID` (Mile-A-Day-Info.plist)
+// the big button hands the card straight to Instagram's story composer
+// (`InstagramStoryShare` — a full frame as `backgroundImage`, a sticker as
+// `stickerImage` over this sheet's own gradient). Without one that handoff is
+// impossible (Meta requires `source_application`), so the button opens the
+// system share sheet, where Instagram's own extension takes the image into
+// its composer. Filling the ID lights the direct path with no code change.
 
 struct ShareStudioView: View {
     let content: MADStoryContent
-    /// The post's permalink, when it has one. Offered under "More" so a link
-    /// share is still one tap away — it just isn't the same button as an image.
+    /// The post's permalink, when it has one. Rides with the image to
+    /// Messages and the share sheet, and backs "Copy link".
     var link: URL? = nil
+    /// Where the carousel opens (a milestone celebration opens on the
+    /// milestone). Falls back to a sibling in the same family, then the best
+    /// available.
+    var initialTemplate: ShareTemplate? = nil
 
     @Environment(\.dismiss) private var dismiss
-    @State private var design: MADStoryDesign
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let templates: [ShareTemplate]
+    @State private var selection: ShareTemplate?
     @State private var format: MADStoryFormat = .story
-    @State private var shareItems: ShareStudioItems?
-    /// Resolved once, before anything renders — see the `.task` in `body`.
+    @State private var statKinds: [ShareStatKind] = ShareStatKind.defaultSelection
+
+    // Resolved once, before anything renders — see `resolveAssets`.
     @State private var avatarImage: UIImage?
     @State private var photoWash: UIImage?
+    @State private var mapUnderlay: RouteMapSnapshot?
+    /// Bumped whenever an asynchronous input lands, so a cached render of a
+    /// page made before it arrived is never reused.
+    @State private var assetsVersion = 0
 
-    init(content: MADStoryContent, link: URL? = nil) {
+    @State private var renderCache: [String: UIImage] = [:]
+    @State private var shareItems: ShareStudioItems?
+    @State private var messageItem: ShareMessageItem?
+    @State private var toast: String?
+    @State private var busy = false
+
+    init(content: MADStoryContent, link: URL? = nil, initialTemplate: ShareTemplate? = nil) {
         self.content = content
         self.link = link
-        _design = State(initialValue: content.defaultDesign)
+        self.initialTemplate = initialTemplate
+        let available = ShareTemplate.available(for: content)
+        self.templates = available
+        let start = ShareTemplate.preferred(initialTemplate, in: available)
+        _selection = State(initialValue: start)
+        _format = State(initialValue: start.formats.first ?? .story)
     }
 
-    private var designs: [MADStoryDesign] { content.availableDesigns }
+    private var current: ShareTemplate { selection ?? templates.first ?? .flameyMile }
+    private var currentIndex: Int { templates.firstIndex(of: current) ?? 0 }
 
-    /// The content the card actually draws: whatever the caller handed us, plus
-    /// the two things that can only be resolved asynchronously. Both are set on
-    /// a copy rather than fetched inside the card, because the card is rendered
-    /// by `ImageRenderer` for the real share and that runs no view lifecycle.
+    private func effectiveFormat(_ template: ShareTemplate) -> MADStoryFormat {
+        template.formats.contains(format) ? format : (template.formats.first ?? .story)
+    }
+
+    /// The content the cards actually draw: the caller's, plus what could
+    /// only be resolved asynchronously.
     private var cardContent: MADStoryContent {
         var resolved = content
         resolved.avatarImage = avatarImage
         resolved.photoWash = photoWash
+        resolved.mapUnderlay = mapUnderlay
         return resolved
     }
 
-    private func loadAvatar() async {
-        guard avatarImage == nil,
-              let key = content.avatar?.imageURL, !key.isEmpty else { return }
-        avatarImage = await RouteAvatarImageLoader.loadImage(for: key)
+    private var availableStats: [ShareStatKind] { ShareStatKind.available(in: content) }
+
+    private var families: [ShareTemplateFamily] {
+        var seen: [ShareTemplateFamily] = []
+        for template in templates where !seen.contains(template.family) { seen.append(template.family) }
+        return seen
     }
 
-    private func buildWash() {
-        guard photoWash == nil, let photo = content.photo else { return }
-        photoWash = MADStoryCard.wash(from: photo)
-    }
+    // MARK: Body
 
     var body: some View {
-        // No NavigationStack: its bar wanted an opaque background of its own,
-        // which put a black slab across the top of a card screen whose whole
-        // point is one continuous ground. The header below is 44pt of the same
-        // gradient with a real close button in it.
         ZStack {
             MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 header
-                preview
-                controls
-                actions
+                if families.count > 1 {
+                    familyChips
+                        .padding(.top, 2)
+                }
+                carousel
+                    .padding(.top, 10)
+                pageCaption
+                    .padding(.top, 10)
+                options
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                destinations
+                    .padding(.horizontal, 20)
+                    .padding(.top, 14)
+                    .padding(.bottom, 8)
+                    // Its own node: two presentations on one view race.
+                    .sheet(item: $messageItem) { item in
+                        MessageComposeSheet(image: item.image, link: link) { messageItem = nil }
+                            .ignoresSafeArea()
+                    }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 8)
+
+            if let toast {
+                VStack {
+                    Text(toast)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Capsule().fill(Color.black.opacity(0.8)))
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+                        .padding(.top, 54)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .allowsHitTesting(false)
+            }
         }
         .preferredColorScheme(.dark)
-        .task {
-            // Both of these have to exist BEFORE the first render: ImageRenderer
-            // runs no view lifecycle, so anything a subview would fetch for
-            // itself bakes as its fallback (initials, in the avatar's case).
-            await loadAvatar()
-            buildWash()
+        .task { await resolveAssets() }
+        .onChange(of: selection) { _, newValue in
+            MADHaptics.tap()
+            if let newValue { cacheRender(of: newValue) }
         }
         .sheet(item: $shareItems) { items in
             ActivityViewController(activityItems: items.items)
         }
     }
 
+    // MARK: Header
+
     private var header: some View {
         ZStack {
-            Text("Share your walk")
+            Text(content.week != nil ? "Share your week" : "Share")
                 .font(.system(size: 16, weight: .heavy, design: .rounded))
                 .foregroundColor(.white)
             HStack {
-                // A 28pt disc inside a 44pt target. It was a 34pt disc carrying
-                // a black-weight glyph at 90% white — heavy enough to read as
-                // the most emphatic thing in the header, next to a title it is
-                // supposed to sit quietly beside, and still under the 44pt
-                // minimum. Lighter glyph, smaller disc, bigger tap area.
                 Button {
                     dismiss()
                 } label: {
@@ -124,9 +185,6 @@ struct ShareStudioView: View {
                         .foregroundColor(.white.opacity(0.62))
                         .frame(width: 28, height: 28)
                         .background(Circle().fill(Color.white.opacity(0.13)))
-                        // Leading, so the disc lines up with the content margin
-                        // the preview and controls share; the extra tap area
-                        // grows inward where there is nothing to hit.
                         .frame(width: 44, height: 44, alignment: .leading)
                         .contentShape(Rectangle())
                 }
@@ -134,123 +192,251 @@ struct ShareStudioView: View {
                 .accessibilityLabel("Close")
                 Spacer()
             }
+            .padding(.horizontal, 20)
         }
         .frame(height: 44)
     }
 
-    // MARK: Preview
-
-    /// The real card, scaled to fit. `.scaleEffect` over a frame of the scaled
-    /// size, so the layout is the design's and only the pixels shrink —
-    /// re-laying the card out at preview size would let it diverge from the
-    /// image that actually gets shared.
-    private var preview: some View {
-        GeometryReader { geo in
-            // Every format previews inside a 9:16 frame, the sticker included —
-            // it is going onto a story, so showing it at its own aspect would
-            // preview it at a size nobody will ever see it at.
-            let frameHeight = geo.size.height
-            let frameWidth = min(geo.size.width, frameHeight * 9.0 / 16.0)
-            let card = format.size
-            // A sticker sits at ~80% of the story's width, roughly where a
-            // thumb drops it. It previewed at 72%, which on top of a loud
-            // backdrop left it looking like a small thing lost on a big one.
-            let target = format == .sticker ? frameWidth * 0.80 : frameWidth
-            let scale = target / card.width
-
-            ZStack {
-                if format == .sticker {
-                    // Instagram puts a sticker on a gradient of our choosing, so
-                    // the preview stands it on the same one rather than on a
-                    // neutral the user will never see.
-                    LinearGradient(
-                        colors: [stickerTop, stickerBottom],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    )
+    private var familyChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(families) { family in
+                    let selected = current.family == family
+                    Button {
+                        guard let first = templates.first(where: { $0.family == family }) else { return }
+                        withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
+                            selection = first
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: family.icon)
+                                .font(.system(size: 11, weight: .bold))
+                                .accessibilityHidden(true)
+                            Text(family.title)
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                        .foregroundColor(selected ? .black : .white.opacity(0.75))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(Capsule().fill(selected ? Color.white : Color.white.opacity(0.1)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
-                MADStoryCard(content: cardContent, design: design, format: format)
-                    .scaleEffect(scale)
-                    .frame(width: card.width * scale, height: card.height * scale)
             }
-            .frame(width: frameWidth, height: frameHeight)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            // The card SWAPS, it does not cross-fade. `artZone` is a switch, so
-            // each design is a different view identity — animating the change
-            // dissolves one into the other, and a screenshot taken during it
-            // shows the streak's flame and day count ghosting through a photo.
-            .id("\(design.rawValue)-\(format.rawValue)")
-            .transition(.identity)
-            .shadow(color: .black.opacity(0.6), radius: 24, x: 0, y: 14)
-            .frame(width: geo.size.width, height: geo.size.height)
+            .padding(.horizontal, 20)
+        }
+    }
+
+    // MARK: Carousel
+
+    private var carousel: some View {
+        GeometryReader { geo in
+            let pageHeight = geo.size.height
+            let pageWidth = max(120, min(geo.size.width * 0.78, pageHeight * 9.0 / 16.0))
+            let margin = max(0, (geo.size.width - pageWidth) / 2)
+            // Captured: the transition closure is nonisolated.
+            let neighbourScale: CGFloat = reduceMotion ? 1 : 0.88
+
+            ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 14) {
+                    ForEach(Array(templates.enumerated()), id: \.element) { index, template in
+                        page(template, index: index, width: pageWidth)
+                            .frame(width: pageWidth, height: pageWidth * 16.0 / 9.0)
+                            .scrollTransition(.interactive, axis: .horizontal) { view, phase in
+                                view
+                                    .scaleEffect(phase.isIdentity ? 1 : neighbourScale)
+                                    .opacity(phase.isIdentity ? 1 : 0.5)
+                            }
+                            .onTapGesture {
+                                guard template != current else { return }
+                                withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.86)) {
+                                    selection = template
+                                }
+                            }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(template.title)
+                            .accessibilityAddTraits(template == current ? [.isSelected, .isImage] : [.isButton])
+                    }
+                }
+                .scrollTargetLayout()
+                .frame(height: pageHeight)
+            }
+            .contentMargins(.horizontal, margin, for: .scrollContent)
+            .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: $selection)
+            .onAppear {
+                // `scrollPosition(id:)` doesn't reliably honour its INITIAL
+                // value on a lazy stack — open on the requested card
+                // explicitly (a milestone celebration opens on the milestone).
+                proxy.scrollTo(current, anchor: .center)
+            }
+            }
         }
         .frame(maxHeight: .infinity)
     }
 
-    // MARK: Controls
+    @ViewBuilder
+    private func page(_ template: ShareTemplate, index: Int, width: CGFloat) -> some View {
+        let live = abs(index - currentIndex) <= 1
+        let pageFormat = effectiveFormat(template)
+        ZStack {
+            if live {
+                preview(template, format: pageFormat, width: width)
+            } else if let cached = renderCache[cacheKey(template, format: pageFormat)] {
+                cachedPreview(cached, format: pageFormat, template: template, width: width)
+            } else {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.white.opacity(template == current ? 0.16 : 0.06), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.55), radius: 22, x: 0, y: 12)
+    }
 
-    private var controls: some View {
-        VStack(spacing: 12) {
-            // Only worth a row when there's a real choice — a walk with one
-            // drawable design shouldn't be handed a picker of one.
-            if designs.count > 1 {
-                labelledRow("SHOW") {
-                    HStack(spacing: 8) {
-                        ForEach(designs) { option in
-                            segment(
-                                title: option.title,
-                                icon: option.icon,
-                                selected: option == design
-                            ) { design = option }
+    /// The real card, scaled — layout is the card's own; only pixels shrink.
+    private func preview(_ template: ShareTemplate, format: MADStoryFormat, width: CGFloat) -> some View {
+        let card = format.size
+        let target = format == .sticker ? width * 0.80 : width
+        let scale = target / card.width
+        return ZStack {
+            if format == .sticker { stickerBackdrop(for: template) }
+            ShareCardView(template: template, content: cardContent, format: format, stats: statKinds)
+                .frame(width: card.width, height: card.height)
+                .scaleEffect(scale)
+                .frame(width: card.width * scale, height: card.height * scale)
+        }
+        .frame(width: width, height: width * 16.0 / 9.0)
+        // A format or stat change SWAPS the card rather than cross-fading two
+        // identities (ios.md: the flame ghosting through a photo).
+        .id("\(template.rawValue)-\(format.rawValue)-\(statKey)-\(assetsVersion)")
+        .transition(.identity)
+    }
+
+    private func cachedPreview(_ image: UIImage, format: MADStoryFormat,
+                               template: ShareTemplate, width: CGFloat) -> some View {
+        let target = format == .sticker ? width * 0.80 : width
+        return ZStack {
+            if format == .sticker { stickerBackdrop(for: template) }
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(width: target)
+        }
+        .frame(width: width, height: width * 16.0 / 9.0)
+    }
+
+    /// A sticker previews on the gradient it will land on in Instagram — the
+    /// same two colours ride the story payload.
+    private func stickerBackdrop(for template: ShareTemplate) -> some View {
+        LinearGradient(colors: [stickerTop(template), stickerBottom],
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    private var pageCaption: some View {
+        VStack(spacing: 8) {
+            if templates.count > 1 {
+                HStack(spacing: 5) {
+                    ForEach(templates) { template in
+                        Capsule()
+                            .fill(Color.white.opacity(template == current ? 0.9 : 0.22))
+                            .frame(width: template == current ? 16 : 6, height: 6)
+                    }
+                }
+                .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.8), value: current)
+                .accessibilityHidden(true)
+            }
+            Text(current.title)
+                .font(.system(size: 14, weight: .heavy, design: .rounded))
+                .foregroundColor(.white.opacity(0.85))
+                .lineLimit(1)
+                .id(current)
+                .transition(.opacity)
+        }
+    }
+
+    // MARK: Options
+
+    @ViewBuilder
+    private var options: some View {
+        let showsShape = current.formats.count > 1
+        let showsStats = current.usesStatToggle && availableStats.count > 1
+        VStack(spacing: 10) {
+            if showsShape {
+                HStack(spacing: 8) {
+                    ForEach(current.formats) { option in
+                        segment(title: option.title, icon: option.icon,
+                                selected: option == effectiveFormat(current)) {
+                            format = option
+                            cacheRender(of: current)
                         }
                     }
                 }
             }
-            labelledRow("SHAPE") {
-                HStack(spacing: 8) {
-                    ForEach(MADStoryFormat.allCases) { option in
-                        segment(
-                            title: option.title,
-                            icon: option.icon,
-                            selected: option == format
-                        ) { format = option }
+            if showsStats {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(availableStats) { kind in
+                            statChip(kind)
+                        }
                     }
                 }
             }
-            // "Sticker" is the one word here nobody can infer — it names a
-            // FILE PROPERTY (a transparent edge), not something visible in a
-            // preview that necessarily shows it standing on some background.
-            // So the sheet says what the selected shape actually does.
-            Text(format.explainer)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.45))
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if effectiveFormat(current) == .sticker {
+                // "Sticker" names a FILE property (a see-through edge) no
+                // preview can show — so the sheet says what it does.
+                Text(MADStoryFormat.sticker.explainer)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.45))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .padding(.top, 4)
     }
 
-    private func labelledRow<Row: View>(
-        _ title: String,
-        @ViewBuilder row: () -> Row
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 10, weight: .black, design: .rounded))
-                .tracking(1.6)
-                .foregroundColor(.white.opacity(0.4))
-            row()
+    private func statChip(_ kind: ShareStatKind) -> some View {
+        let on = statKinds.contains(kind)
+        return Button {
+            if on {
+                // Never an empty rail: the last one stays.
+                guard statKinds.count > 1 else { return }
+                statKinds.removeAll { $0 == kind }
+            } else {
+                statKinds.append(kind)
+            }
+            MADHaptics.tap()
+            cacheRender(of: current)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: on ? "checkmark" : "plus")
+                    .font(.system(size: 10, weight: .black))
+                    .accessibilityHidden(true)
+                Text(kind.title)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .foregroundColor(on ? .white : .white.opacity(0.55))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(on ? Color.white.opacity(0.18) : Color.clear))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(on ? 0.28 : 0.14), lineWidth: 1))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(kind.title) \(on ? "shown" : "hidden")")
     }
 
-    private func segment(
-        title: String,
-        icon: String,
-        selected: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
+    private func segment(title: String, icon: String, selected: Bool,
+                         action: @escaping () -> Void) -> some View {
         Button {
-            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) { action() }
+            withAnimation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.86)) { action() }
             MADHaptics.tap()
         } label: {
             HStack(spacing: 6) {
@@ -262,86 +448,225 @@ struct ShareStudioView: View {
             }
             .foregroundColor(selected ? .black : .white.opacity(0.75))
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .background(
-                Capsule().fill(selected ? Color.white : Color.white.opacity(0.1))
-            )
+            .padding(.vertical, 9)
+            .background(Capsule().fill(selected ? Color.white : Color.white.opacity(0.1)))
             .lineLimit(1)
             .minimumScaleFactor(0.8)
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    // MARK: Actions
+    // MARK: Destinations
 
-    /// ONE primary action and one way out of it.
-    ///
-    /// There were three side by side — Instagram Stories, More…, Save — which
-    /// is two too many for a screen whose job is "post this". Save was the
-    /// first to go and cost nothing: the system share sheet behind "Other apps"
-    /// carries Save Image itself, so the button was a second door to a room
-    /// that was already on the way. What's left reads as a decision (post it)
-    /// and an escape hatch (everything else), not a menu.
-    private var actions: some View {
-        VStack(spacing: 2) {
-            Button(action: shareToInstagram) {
+    private var destinationButtons: [ShareDestination] {
+        var out: [ShareDestination] = [.instagramFeed]
+        if MessageComposeSheet.canSend { out.append(.messages) }
+        out.append(.save)
+        if link != nil { out.append(.copyLink) }
+        out.append(.more)
+        return out
+    }
+
+    private var destinations: some View {
+        VStack(spacing: 14) {
+            Button(action: shareToInstagramStories) {
                 HStack(spacing: 8) {
-                    Image(systemName: "camera.fill")
+                    Image(systemName: "plus.square.on.square")
                         .font(.system(size: 15, weight: .bold))
                         .accessibilityHidden(true)
-                    Text("Share to Instagram")
-                        .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    Text("Instagram Stories")
+                        .font(.system(size: 17, weight: .heavy, design: .rounded))
                 }
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
                 .background(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color(red: 0.76, green: 0.23, blue: 0.55),
-                                         Color(red: 0.96, green: 0.42, blue: 0.20)],
-                                startPoint: .leading, endPoint: .trailing
-                            )
-                        )
+                        .fill(LinearGradient(
+                            colors: [Color(red: 0.51, green: 0.23, blue: 0.71),
+                                     Color(red: 0.87, green: 0.20, blue: 0.47),
+                                     Color(red: 0.97, green: 0.52, blue: 0.20)],
+                            startPoint: .leading, endPoint: .trailing))
                 )
             }
             .buttonStyle(.plain)
+            .disabled(busy)
 
-            Button(action: shareElsewhere) {
-                Text("Other apps, or save…")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.62))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .contentShape(Rectangle())
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(destinationButtons) { destination in
+                    Button {
+                        perform(destination)
+                    } label: {
+                        VStack(spacing: 6) {
+                            Image(systemName: destination.icon)
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 50, height: 50)
+                                .background(Circle().fill(Color.white.opacity(0.1)))
+                                .overlay(Circle().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                            Text(destination.title)
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundColor(.white.opacity(0.7))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(busy)
+                }
             }
-            .buttonStyle(.plain)
         }
-        .padding(.top, 14)
     }
 
     // MARK: Doing the thing
 
-    /// The gradient a sticker stands on — in the preview AND, because these two
-    /// colours ride the Instagram payload, in the story it lands in.
-    ///
-    /// The top was `content.routeColor` at full strength, which is an accent
-    /// colour asked to cover a whole 9:16 frame: walk blue became a bright slab
-    /// that was the loudest thing on the screen, made the sticker look small and
-    /// lost on it, and ran through muddy purple on its way to a maroon floor.
-    /// Taken deep it does the opposite job — it reads as a ground, and the
-    /// sticker is the thing you see.
-    private var stickerTop: Color {
-        Self.deepened(content.routeColor, amount: 0.65)
+    private var statKey: String { statKinds.map(\.rawValue).joined(separator: ",") }
+
+    private func cacheKey(_ template: ShareTemplate, format: MADStoryFormat) -> String {
+        "\(template.rawValue)|\(format.rawValue)|\(statKey)|\(assetsVersion)"
     }
 
-    /// Near-black, a shade warm, so the gradient lands on the app's own floor
-    /// rather than on a second colour competing with the top.
+    /// The image for the focused card, from the cache when it's current.
+    private func renderCurrent() -> UIImage? {
+        let pageFormat = effectiveFormat(current)
+        let key = cacheKey(current, format: pageFormat)
+        if let cached = renderCache[key] { return cached }
+        let image = ShareCardView.render(template: current, content: cardContent,
+                                         format: pageFormat, stats: statKinds)
+        if let image { renderCache[key] = image }
+        return image
+    }
+
+    /// Render a page once it has SETTLED as the focus, so a far-away page can
+    /// later show its picture instead of a live view. Deferred a beat: a
+    /// fling past six cards must not bake six of them.
+    private func cacheRender(of template: ShareTemplate) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            guard selection == template else { return }
+            let pageFormat = effectiveFormat(template)
+            let key = cacheKey(template, format: pageFormat)
+            guard renderCache[key] == nil else { return }
+            if let image = ShareCardView.render(template: template, content: cardContent,
+                                                format: pageFormat, stats: statKinds) {
+                renderCache[key] = image
+            }
+        }
+    }
+
+    private func recordShare(_ destinationKey: String) {
+        TelemetryService.record(destinationKey)
+        TelemetryService.record(current.family.telemetryKey)
+        if current.family == .week { TelemetryService.record(ShareTelemetry.weeklyRecapShared) }
+    }
+
+    private func shareToInstagramStories() {
+        guard let image = renderCurrent() else { return }
+        MADHaptics.action()
+        recordShare(ShareTelemetry.instagram)
+        if InstagramStoryShare.isAvailable {
+            let payload: InstagramStoryShare.Payload = effectiveFormat(current).isTransparent
+                ? .sticker(image, top: UIColor(stickerTop(current)), bottom: UIColor(stickerBottom))
+                : .background(image)
+            if InstagramStoryShare.share(payload) { return }
+        }
+        // No Meta App ID yet (or Instagram declined the open): the system share
+        // sheet, where Instagram's own extension takes the image into its
+        // story composer — no App ID needed, and no hunting the camera roll.
+        shareItems = ShareStudioItems(items: [image])
+    }
+
+    private func perform(_ destination: ShareDestination) {
+        switch destination {
+        case .instagramFeed:
+            guard let image = renderCurrent() else { return }
+            MADHaptics.action()
+            recordShare(ShareTelemetry.instagramFeed)
+            // Instagram's share extension offers Feed / Story / Message.
+            shareItems = ShareStudioItems(items: [image])
+        case .messages:
+            guard let image = renderCurrent() else { return }
+            MADHaptics.action()
+            recordShare(ShareTelemetry.messages)
+            messageItem = ShareMessageItem(image: image)
+        case .save:
+            guard let image = renderCurrent() else { return }
+            busy = true
+            Task {
+                let outcome = await SharePhotoSaver.save(image)
+                busy = false
+                switch outcome {
+                case .saved:
+                    MADHaptics.success()
+                    recordShare(ShareTelemetry.saved)
+                    showToast("Saved to Photos")
+                case .denied:
+                    showToast("Allow Photos access in Settings to save")
+                case .failed:
+                    showToast("Couldn't save — try More")
+                }
+            }
+        case .copyLink:
+            guard let link else { return }
+            UIPasteboard.general.url = link
+            MADHaptics.success()
+            recordShare(ShareTelemetry.link)
+            showToast("Link copied")
+        case .more:
+            guard let image = renderCurrent() else { return }
+            recordShare(ShareTelemetry.sheet)
+            // The image leads and the link rides with it: a picture is what
+            // gets posted, but the link is what a friend can actually open.
+            var items: [Any] = [image]
+            if let link { items.append(link) }
+            shareItems = ShareStudioItems(items: items)
+        }
+    }
+
+    private func showToast(_ text: String) {
+        withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85)) { toast = text }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            guard toast == text else { return }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { toast = nil }
+        }
+    }
+
+    // MARK: Assets
+
+    private func resolveAssets() async {
+        if avatarImage == nil, let key = content.avatar?.imageURL, !key.isEmpty {
+            avatarImage = await RouteAvatarImageLoader.loadImage(for: key)
+            if avatarImage != nil { assetsVersion += 1 }
+        }
+        if photoWash == nil, let photo = content.photo {
+            photoWash = MADStoryCard.wash(from: photo)
+            assetsVersion += 1
+        }
+        if mapUnderlay == nil, templates.contains(.routeMap) {
+            mapUnderlay = await RouteMapSnapshot.generate(coordinates: content.coordinates,
+                                                          size: MapRouteShareCard.artSize)
+            if mapUnderlay != nil { assetsVersion += 1 }
+        }
+        cacheRender(of: current)
+    }
+
+    // MARK: Sticker gradient
+
+    /// The gradient a sticker stands on — in the preview AND, because these
+    /// two colours ride the Instagram payload, in the story it lands in.
+    /// The accent taken DEEP so it reads as a ground and the sticker is the
+    /// thing you see (full strength it was the loudest thing on screen).
+    private func stickerTop(_ template: ShareTemplate) -> Color {
+        let accent: Color = template.family == .week || template.family == .streak
+            ? MADTheme.Colors.madRed : content.routeColor
+        return Self.deepened(accent, amount: 0.65)
+    }
+
+    /// Near-black, a shade warm — the app's own floor.
     private var stickerBottom: Color { Color(red: 0.055, green: 0.031, blue: 0.043) }
 
-    /// Mix a colour toward the card's dark ground. Keeps the hue, drops the
-    /// brightness — a darkened accent still says "walk", a flat one doesn't.
     private static func deepened(_ color: Color, amount: CGFloat) -> Color {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         guard UIColor(color).getRed(&r, green: &g, blue: &b, alpha: &a) else { return color }
@@ -353,50 +678,6 @@ struct ShareStudioView: View {
             opacity: Double(a)
         )
     }
-
-    private func render() -> UIImage? {
-        MADStoryCard.render(content: cardContent, design: design, format: format)
-    }
-
-    private func shareToInstagram() {
-        guard let image = render() else { return }
-
-        if InstagramStoryShare.isAvailable {
-            let payload: InstagramStoryShare.Payload = format.isTransparent
-                ? .sticker(image, top: UIColor(stickerTop), bottom: UIColor(stickerBottom))
-                : .background(image)
-            if InstagramStoryShare.share(payload) {
-                MADHaptics.action()
-                TelemetryService.record(ShareTelemetry.instagram)
-                return
-            }
-        }
-
-        // No direct handoff — `isAvailable` needs a Meta App ID in
-        // `MADFacebookAppID` and there isn't one yet.
-        //
-        // The SYSTEM SHARE SHEET is the best path that exists without it, and
-        // it needs no App ID at all: Instagram ships a share extension that
-        // appears there and takes the image straight into its own story
-        // composer. What this used to do was save the card to Photos and open
-        // Instagram's CAMERA, which leaves the walker hunting their own camera
-        // roll for a picture the app was already holding — the longest version
-        // of the shortest job on this screen.
-        MADHaptics.action()
-        TelemetryService.record(ShareTelemetry.instagram)
-        shareItems = ShareStudioItems(items: [image])
-    }
-
-    private func shareElsewhere() {
-        guard let image = render() else { return }
-        // The image leads and the link rides with it: a picture is what gets
-        // posted, but the link is what a friend in Messages can actually open.
-        var items: [Any] = [image]
-        if let link { items.append(link) }
-        shareItems = ShareStudioItems(items: items)
-        TelemetryService.record(ShareTelemetry.sheet)
-    }
-
 }
 
 /// `.sheet(item:)` needs identity, and `[Any]` has none.
@@ -406,11 +687,25 @@ struct ShareStudioItems: Identifiable {
 }
 
 /// The feature keys the share flow reports. Mirrors the backend's
-/// `TRACKED_FEATURES` allowlist — an off-list key is dropped server-side, so
-/// these two lists must move together.
+/// `TRACKED_FEATURES` allowlist (telemetryService.ts) — an off-list key is
+/// dropped server-side, so these two lists must move together. A FIXED set:
+/// never interpolate a template id into a key.
 enum ShareTelemetry {
     static let opened = "share_opened"
     static let instagram = "share_instagram"
     static let sheet = "share_sheet"
     static let saved = "share_saved"
+    static let instagramFeed = "share_instagram_feed"
+    static let messages = "share_messages"
+    static let link = "share_link"
+
+    static let familyPicture = "share_family_picture"
+    static let familyRoute = "share_family_route"
+    static let familyStreak = "share_family_streak"
+    static let familyFlamey = "share_family_flamey"
+    static let familyStats = "share_family_stats"
+    static let familyWeek = "share_family_week"
+
+    static let weeklyRecapOpened = "weekly_recap_opened"
+    static let weeklyRecapShared = "weekly_recap_shared"
 }

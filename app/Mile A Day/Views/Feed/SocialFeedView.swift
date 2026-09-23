@@ -704,11 +704,13 @@ struct SocialFeedView: View {
 
     // MARK: - Weekly Recap teaser
 
-    /// The recap teaser only surfaces at the week boundary (Sunday/Monday),
-    /// and respects the "Weekly recap" preference toggle.
+    /// The recap teaser only surfaces at the week boundary — Saturday (the
+    /// recap push lands that evening) and Sunday — and respects the "Weekly
+    /// recap" preference toggle. The week runs Sunday→Saturday, the weekly
+    /// challenge's week, so Monday is already a day into the next one.
     private var isWeeklyRecapDay: Bool {
         let weekday = Calendar.current.component(.weekday, from: Date())
-        return (weekday == 1 || weekday == 2) && NotificationPreferences.load().weeklyRecapEnabled
+        return (weekday == 7 || weekday == 1) && NotificationPreferences.load().weeklyRecapEnabled
     }
 
     /// Compact "Your week in miles" card — styled like MemoriesCardView.

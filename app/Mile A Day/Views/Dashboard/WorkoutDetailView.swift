@@ -787,7 +787,10 @@ struct WorkoutDetailView: View {
             routeColor: MADTheme.workoutColor(
                 workoutTypeString == "Walk" ? "walking" : "running"
             ),
-            avatar: ownerAvatar
+            avatar: ownerAvatar,
+            // The figure the post cards and Well Earned print (HealthKit's
+            // own, else the tracker's estimate) — offered by the stat toggle.
+            calories: RunPostService.workoutCalories(workout)
         )
     }
 
