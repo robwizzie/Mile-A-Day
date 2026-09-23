@@ -3,6 +3,7 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { generateAccessToken } from "../services/tokenService.js";
 import { logError } from "../services/errorLogService.js";
 import { getCronStatus } from "../cron/cronRunner.js";
+import { getDiagnosticsOverview } from "../services/diagnosticsService.js";
 import {
   getUserByAppleSub,
   getOverview,
@@ -259,6 +260,11 @@ export async function errors(req: Request, res: Response) {
 /** Every scheduled job's last run since this process booted (cronRunner). */
 export async function cronStatus(_req: Request, res: Response) {
   res.json(getCronStatus());
+}
+
+/** GET /admin/diagnostics — MetricKit crashes/hangs, last 14 days. */
+export async function diagnostics(_req: Request, res: Response) {
+  res.json(await getDiagnosticsOverview());
 }
 
 export async function errorSummary(_req: Request, res: Response) {

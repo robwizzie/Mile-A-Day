@@ -23,6 +23,7 @@ import leaderboardRoutes from "./routes/leaderboardRoutes.js";
 import liveTrackingRoutes from "./routes/liveTrackingRoutes.js";
 import ghostRoutes from "./routes/ghostRoutes.js";
 import telemetryRoutes from "./routes/telemetryRoutes.js";
+import diagnosticsRoutes from "./routes/diagnosticsRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
 import buddyRoutes from "./routes/buddyRoutes.js";
 import injuryPauseRoutes from "./routes/injuryPauseRoutes.js";
@@ -48,6 +49,7 @@ import { startWeeklyChallengeCron } from "./cron/weeklyChallengeCron.js";
 import { startH2hChallengeCron } from "./cron/h2hChallengeCron.js";
 import { startStreakFeaturesCron } from "./cron/streakFeaturesCron.js";
 import { startLastCallCron } from "./cron/lastCallCron.js";
+import { startDiagnosticsCron } from "./cron/diagnosticsCron.js";
 import { healUncomputedStreaks } from "./services/streakFeatureCore.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
@@ -356,6 +358,7 @@ app.use("/streak", injuryPauseRoutes);
 app.use("/live", liveTrackingRoutes);
 app.use("/ghosts", ghostRoutes);
 app.use("/telemetry", telemetryRoutes);
+app.use("/diagnostics", diagnosticsRoutes);
 
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   console.error("Error:", err.message);
@@ -441,6 +444,7 @@ function startCrons() {
   startBuddySessionCron();
   startWeeklyChallengeCron();
   startLastCallCron();
+  startDiagnosticsCron();
   // Idempotently ensure the v2 social/app-function badges exist in the catalog.
   seedExtraBadges();
   // Idempotently ensure the v2 daily challenges (5K/10K/social) exist.

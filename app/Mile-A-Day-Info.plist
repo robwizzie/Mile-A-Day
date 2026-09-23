@@ -64,6 +64,13 @@
 		     silenced the moment the screen locks, which is most of a real
 		     run — the coach would only ever work while you're watching it. -->
 		<string>audio</string>
+		<!-- Silent (content-available) pushes: the server wakes the app when a
+		     friend passes you in a competition or today's head-to-head so the
+		     Competition / Daily Leaderboard widgets can refetch and redraw
+		     (widget_refresh), and for the scheduled background_sync. An
+		     Info.plist key, not an entitlement: aps-environment is already
+		     provisioned for the app's visible pushes. -->
+		<string>remote-notification</string>
 	</array>
 </dict>
 </plist>

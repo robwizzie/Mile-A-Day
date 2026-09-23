@@ -93,6 +93,61 @@ export const featureEvents = pgTable(
   ],
 );
 
+// MetricKit diagnostics from the iOS app (crashes, hangs, CPU / disk-write
+// exceptions, and the daily metrics summary) — the app ships no third-party
+// crash SDK, so this table IS the crash reporter. Written only by
+// POST /diagnostics/metrickit, which trims each payload, derives `signature`
+// (a stable hash of kind + exception + top frames, for grouping) and caps a
+// user at a fixed number of rows per rolling day. `client_id` makes the
+// client's retry-on-next-launch idempotent. Pruned past 90 days by
+// `diagnostics.prune` (diagnosticsCron). No FK to users, like the other
+// *_log tables: account deletion removes the rows explicitly.
+export const clientDiagnostics = pgTable(
+  "client_diagnostics",
+  {
+    id: bigserial({ mode: "number" }).primaryKey().notNull(),
+    userId: varchar("user_id", { length: 255 }).notNull(),
+    clientId: varchar("client_id", { length: 64 }),
+    kind: varchar({ length: 32 }).notNull(),
+    appVersion: varchar("app_version", { length: 32 }),
+    build: varchar({ length: 32 }),
+    osVersion: varchar("os_version", { length: 64 }),
+    deviceModel: varchar("device_model", { length: 64 }),
+    signature: varchar({ length: 32 }).notNull(),
+    summary: varchar({ length: 300 }),
+    payload: jsonb().notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    occurredAt: timestamp("occurred_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+  },
+  (table) => [
+    index("idx_client_diagnostics_kind_received").using(
+      "btree",
+      table.kind.asc().nullsLast(),
+      table.receivedAt.asc().nullsLast(),
+    ),
+    index("idx_client_diagnostics_signature").using(
+      "btree",
+      table.signature.asc().nullsLast(),
+      table.receivedAt.desc().nullsFirst(),
+    ),
+    index("idx_client_diagnostics_user_received").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.receivedAt.desc().nullsFirst(),
+    ),
+    uniqueIndex("uq_client_diagnostics_user_client").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.clientId.asc().nullsLast(),
+    ),
+  ],
+);
+
 export const workoutSplits = pgTable(
   "workout_splits",
   {
@@ -782,6 +837,12 @@ export const deviceTokens = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
+    // Which home-screen widget kinds this install has placed, self-reported at
+    // registration (WidgetCenter.getCurrentConfigurations). NULL = the build
+    // predates the field or couldn't say — never pushed a widget refresh,
+    // which is the safe direction. No default on purpose: a DEFAULT would
+    // read back on every existing row as "has these widgets".
+    widgetKinds: text("widget_kinds").array(),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "string",
@@ -3103,5 +3164,28 @@ export const referralAliases = pgTable(
       name: "referral_aliases_user_id_fkey",
     }).onDelete("cascade"),
     index("idx_referral_aliases_user").on(table.userId),
+  ],
+);
+
+// Coalescing claim for widget-refresh silent pushes (widgetRefreshService):
+// one row per user, `last_sent_at` is when the last one went out. A NEW table,
+// so no pre-existing rows can read back a DDL-time default — and the column
+// has none anyway: it is only ever written by the claim itself.
+export const widgetRefreshPushes = pgTable(
+  "widget_refresh_pushes",
+  {
+    userId: text("user_id").primaryKey().notNull(),
+    lastSentAt: timestamp("last_sent_at", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
+    lastReason: text("last_reason"),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "widget_refresh_pushes_user_id_fkey",
+    }).onDelete("cascade"),
   ],
 );

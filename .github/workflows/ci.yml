@@ -234,6 +234,18 @@ jobs:
       # claim — all of which fail as a plausible number or a missing push.
       - name: Weekly recap check
         run: node scripts/weekly-recap-check.mjs
+      # MetricKit crash/hang upload: the app's only crash reporter. A row
+      # that never lands, an untrimmed megabyte payload, a looping client
+      # past the daily cap, a retry stored twice or a signature that stops
+      # grouping are all silent — pinned over real HTTP + auth middleware.
+      - name: MetricKit diagnostics check
+        run: node scripts/diagnostics-check.mjs
+      # Widget refresh silent pushes: only devices declaring the capability
+      # AND reporting the affected widget kind, one per user per coalescing
+      # window, never an inbox row, and a background/priority-5 APNs request.
+      # A silent push renders nothing, so every failure here is invisible.
+      - name: Widget refresh push check
+        run: node scripts/widget-refresh-check.mjs
 
   website:
     name: Website (lint + build)

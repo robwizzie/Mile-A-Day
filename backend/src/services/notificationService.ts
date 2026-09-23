@@ -1,3 +1,4 @@
+import { requestWidgetRefresh } from "./widgetRefreshService.js";
 import { PostgresService } from "./DbService.js";
 import {
   sendPush,
@@ -1509,6 +1510,21 @@ export async function checkLeadChanges(
 						WHERE competition_id = $3 AND user_id = $4`,
             [rank, score, comp.id, uid],
           );
+        }
+
+        // ── Widgets: everyone whose place in this competition just MOVED
+        // (passed, or carried up by a teammate) gets their Competition widget
+        // woken — the banner above, when there is one, can't wake the app.
+        // A NULL prior is "never indexed", not a move. The uploader is
+        // excluded: their own app is the one syncing. Fire-and-forget,
+        // coalesced and capability/widget-gated inside.
+        const moved: string[] = [];
+        for (const [uid, rank] of newRankByUser.entries()) {
+          const prior = previousRank.get(uid);
+          if (prior != null && prior !== rank) moved.push(uid);
+        }
+        if (moved.length > 0) {
+          void requestWidgetRefresh(moved, "competition", userId);
         }
       } catch (err: any) {
         console.error(

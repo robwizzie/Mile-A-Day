@@ -1,3 +1,4 @@
+import { requestWidgetRefresh } from "./widgetRefreshService.js";
 import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
 import {
@@ -716,7 +717,7 @@ export async function notifyH2hLeadChanges(actorId: string): Promise<void> {
 
   for (const row of rows) {
     try {
-      await notifyOneLeadChange(row);
+      await notifyOneLeadChange(row, actorId);
     } catch (e: any) {
       console.error(
         `[H2H] Lead-change notify failed for ${row.user_id} @ ${row.local_date}:`,
@@ -731,7 +732,7 @@ async function notifyOneLeadChange(row: {
   user_id: string;
   rival_id: string;
   lead_notified_state: string | null;
-}): Promise<void> {
+}, actorId: string): Promise<void> {
   // The duel only exists for a user whose rotation actually landed on it —
   // the pin is written on the first read of the day and survives an
   // eligibility flip that moved them onto a different challenge.
@@ -759,6 +760,14 @@ async function notifyOneLeadChange(row: {
     [row.local_date, row.user_id, state, row.lead_notified_state],
   );
   if (claimed.length === 0) return;
+
+  // The standing FLIPPED for this user — whether or not it's worth a banner
+  // below (a tie is never announced), the friends leaderboard widget that
+  // prints their rival's miles against theirs is now wrong. Wake it. The
+  // actor is excluded: their own app is the one syncing.
+  if (row.user_id !== actorId) {
+    void requestWidgetRefresh([row.user_id], "h2h", actorId);
+  }
 
   // What's worth interrupting someone for:
   //  - BEHIND is always news. Someone just went past you and there are still

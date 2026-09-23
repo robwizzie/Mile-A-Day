@@ -37,6 +37,7 @@ import {
   activation,
   atRisk,
   referralAlias,
+  diagnostics,
 } from "../controllers/adminController.js";
 
 // Public: Sign in with Apple (web) exchange -> admin access token.
@@ -96,6 +97,10 @@ adminRouter.get("/errors/by-user", errorsByUser);
 adminRouter.get("/errors/timeseries", errorTimeseries);
 // Scheduled-job health: last run, duration and error per job since boot.
 adminRouter.get("/cron", cronStatus);
+// MetricKit crashes/hangs from the iOS app: per-version counts and top
+// signatures. One signature's rows open through /drilldown
+// (kind=diagnostic_signature).
+adminRouter.get("/diagnostics", diagnostics);
 // Support tooling: post rows incl. soft-deleted + on-disk file checks, and
 // soft-delete undo — for "my photo disappeared" investigations.
 adminRouter.get("/posts/:userId/forensics", postForensics);
