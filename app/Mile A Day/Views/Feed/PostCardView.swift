@@ -116,6 +116,12 @@ struct PostCardView: View {
         return post.acceptedCoauthors.first { $0.user_id == me }
     }
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// The caption / comment-preview size. It is a SIZE, not a `madFont`,
+    /// because the name and @mention runs carry their own font inside the
+    /// AttributedString and have to be handed the same scaled value.
+    @MADScaledMetric(relativeTo: .subheadline) private var captionSize: CGFloat = 14
+
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             header
@@ -158,6 +164,12 @@ struct PostCardView: View {
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
                 .fill(Color.white.opacity(0.04))
         )
+        // Dynamic Type: the card's chrome (header, controls, footer, captions,
+        // comments) scales; the MEDIA does not — its faces carry no madFont
+        // text, and the indoor card is also baked by ImageRenderer for zoom.
+        // Applied above the presentations so the flyover and the share studio
+        // don't inherit it.
+        .madTypeCap(.madCardCap)
         .fullScreenCover(item: $flyoverLaunch) { launch in
             RouteFlyoverPlayerView(launch: launch)
         }
@@ -175,12 +187,15 @@ struct PostCardView: View {
     private var subtitleLine: some View {
         HStack(spacing: 4) {
             Image(systemName: ActivityCardView.icon(post.workout_type, paceSecondsPerMile: post.stats_snapshot?.pace))
-                .font(.system(size: 10, weight: .bold))
+                .madFont(size: 10, weight: .bold)
                 .foregroundColor(ActivityCardView.color(post.workout_type))
             Text(headerSubtitle)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .madFont(size: 12, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.5))
-                .lineLimit(1)
+                // "Walk · 1.08 mi · 2d" beside a 40pt avatar: at accessibility
+                // sizes one line truncates away the distance, so it may wrap
+                // there. One line at every size it always fitted in.
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
         }
     }
 
@@ -208,7 +223,7 @@ struct PostCardView: View {
     /// Name style shared by the header's tappable name segments.
     private func nameText(_ name: String) -> some View {
         Text(name)
-            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .madFont(size: 15, weight: .bold, design: .rounded)
             .foregroundColor(.white)
             .lineLimit(1)
     }
@@ -223,8 +238,7 @@ struct PostCardView: View {
         HStack(spacing: 4) {
             GhostSprite(size: 11, color: .white, floats: false)
             Text("−\(max(1, Int(margin.rounded())))s")
-                .font(.system(size: 10, weight: .black, design: .rounded))
-                .monospacedDigit()
+                .madFont(size: 10, weight: .black, design: .rounded, monospacedDigit: true)
         }
         .foregroundColor(.white)
         .padding(.horizontal, 7)
@@ -338,7 +352,7 @@ struct PostCardView: View {
                             .buttonStyle(.plain)
                             .allowsHitTesting(onTapAuthor != nil)
                         Text(" & ")
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .madFont(size: 15, weight: .bold, design: .rounded)
                             .foregroundColor(.white.opacity(0.6))
                         Button { onTapCoauthor?() } label: { nameText(post.coauthorDisplayName) }
                             .buttonStyle(.plain)
@@ -455,7 +469,7 @@ struct PostCardView: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 16, weight: .bold))
+                    .madFont(size: 16, weight: .bold, maxScale: 1.3)
                     .foregroundColor(.white.opacity(0.6))
                     .padding(6)
                     .contentShape(Rectangle())
@@ -869,7 +883,7 @@ struct PostCardView: View {
             }
         } label: {
             Text(title)
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .madFont(size: 10, weight: .heavy, design: .rounded)
                 .tracking(0.5)
                 .foregroundColor(selected ? .black : .white.opacity(0.85))
                 // "PHOTO" and "MAP"/"STATS" are constants, so this can't
@@ -1046,9 +1060,9 @@ struct PostCardView: View {
         if let group = post.buddy_group, group.crew_size > 1, group.distance_miles > 0 {
             HStack(spacing: 6) {
                 Image(systemName: "figure.2")
-                    .font(.system(size: 12, weight: .bold))
+                    .madFont(size: 12, weight: .bold)
                 Text("\(group.distance_miles.milesText) mi between the \(group.crew_size) of you")
-                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .madFont(size: 13, weight: .heavy, design: .rounded)
             }
             .foregroundColor(ActivityCardView.color(post.workout_type))
             .padding(.horizontal, 10)
@@ -1257,21 +1271,21 @@ struct PostCardView: View {
     private var coauthorInviteBanner: some View {
         HStack(spacing: 10) {
             Image(systemName: "person.2.fill")
-                .font(.system(size: 14, weight: .bold))
+                .madFont(size: 14, weight: .bold)
                 .foregroundColor(MADTheme.Colors.madRed)
             Text("\(post.displayName) added you to this post")
-                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .madFont(size: 13, weight: .bold, design: .rounded)
                 .foregroundColor(.white)
                 .lineLimit(2)
             Spacer()
             Button("Accept") { onRespondCoauthor?(true) }
-                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .madFont(size: 13, weight: .bold, design: .rounded)
                 .foregroundColor(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(Capsule().fill(MADTheme.Colors.redGradient))
             Button("Decline") { onRespondCoauthor?(false) }
-                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .madFont(size: 13, weight: .bold, design: .rounded)
                 .foregroundColor(.white.opacity(0.7))
         }
         .padding(10)
@@ -1283,26 +1297,23 @@ struct PostCardView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center, spacing: 14) {
-                hypeControl
-                footerIconButton(
-                    icon: "bubble.right",
-                    label: commentActionLabel,
-                    accessibilityLabel: "Comments",
-                    action: { onOpenComments?() }
-                )
-                .disabled(onOpenComments == nil)
-                if isMine || (onShare != nil && post.share_to_feed != false) {
-                    footerIconButton(
-                        icon: "paperplane",
-                        label: nil,
-                        accessibilityLabel: "Share",
-                        action: sharePostOrRoute
-                    )
+            // One line, else the streak chip drops under the actions. The chip
+            // is `.fixedSize()`, so at large text sizes a single row would
+            // publish more width than the card has and push the page gutter
+            // out (the WorkoutSourceChip overflow). Candidates differ in
+            // ARRANGEMENT only; both draw `footerActions` + `footerStreak`.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 14) {
+                    footerActions
+                    Spacer(minLength: 0)
+                    footerStreak
                 }
-                Spacer(minLength: 0)
-                if let streak = post.stats_snapshot?.streak, streak > 0 {
-                    streakChip(streak)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .center, spacing: 14) {
+                        footerActions
+                        Spacer(minLength: 0)
+                    }
+                    footerStreak
                 }
             }
             if let competition = tappableCompetition {
@@ -1312,7 +1323,7 @@ struct PostCardView: View {
             commentPreview
             if let timestamp = absoluteTimestamp {
                 Text(timestamp)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .madFont(size: 11, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.46))
                     .textCase(.uppercase)
                     .lineLimit(1)
@@ -1322,6 +1333,33 @@ struct PostCardView: View {
         }
         .padding(.horizontal, 2)
         .padding(.bottom, 2)
+    }
+
+    @ViewBuilder
+    private var footerActions: some View {
+        hypeControl
+        footerIconButton(
+            icon: "bubble.right",
+            label: commentActionLabel,
+            accessibilityLabel: "Comments",
+            action: { onOpenComments?() }
+        )
+        .disabled(onOpenComments == nil)
+        if isMine || (onShare != nil && post.share_to_feed != false) {
+            footerIconButton(
+                icon: "paperplane",
+                label: nil,
+                accessibilityLabel: "Share",
+                action: sharePostOrRoute
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var footerStreak: some View {
+        if let streak = post.stats_snapshot?.streak, streak > 0 {
+            streakChip(streak)
+        }
     }
 
     /// Clap + count. The clap hypes — your own post too — and the count opens
@@ -1341,8 +1379,7 @@ struct PostCardView: View {
                     onTapHypeCount?()
                 } label: {
                     Text("\(count)")
-                        .font(.system(size: 14, weight: .heavy, design: .rounded))
-                        .monospacedDigit()
+                        .madFont(size: 14, weight: .heavy, design: .rounded, monospacedDigit: true)
                         .foregroundColor(.white.opacity(0.92))
                         .frame(minHeight: 40)
                         .contentShape(Rectangle())
@@ -1389,14 +1426,14 @@ struct PostCardView: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "trophy.fill")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold)
                     .accessibilityHidden(true)
                 Text(competition.displayName)
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 8, weight: .black))
+                    .madFont(size: 8, weight: .black)
                     .opacity(0.7)
                     .accessibilityHidden(true)
             }
@@ -1428,9 +1465,9 @@ struct PostCardView: View {
     private func streakChip(_ streak: Int) -> some View {
         HStack(spacing: 4) {
             Image(systemName: "flame.fill")
-                .font(.system(size: 10, weight: .bold))
+                .madFont(size: 10, weight: .bold)
             Text("\(streak) DAY STREAK")
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .madFont(size: 10, weight: .heavy, design: .rounded)
                 .tracking(0.6)
                 .monospacedDigit()
         }
@@ -1555,11 +1592,11 @@ struct PostCardView: View {
     /// what lets a comment-preview row stay one tap target for the thread while
     /// the name inside it still reaches the profile.
     private func captionRow(name: String, username: String?, text: String) -> some View {
-        var line = MentionText.nameLink(name, username: username)
+        var line = MentionText.nameLink(name, username: username, size: captionSize)
         line += AttributedString(" ")
-        line += MentionText.attributed(text)
+        line += MentionText.attributed(text, size: captionSize)
         return Text(line)
-            .font(.system(size: 14, weight: .medium, design: .rounded))
+            .font(.system(size: captionSize, weight: .medium, design: .rounded))
             .foregroundColor(.white.opacity(0.9))
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1597,7 +1634,7 @@ struct PostCardView: View {
                         onOpenComments?()
                     } label: {
                         Text("View all \(count) comments")
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .madFont(size: 13, weight: .semibold, design: .rounded)
                             .foregroundColor(.white.opacity(0.5))
                     }
                     .buttonStyle(.plain)
@@ -1628,11 +1665,12 @@ struct PostCardView: View {
         Button(action: action) {
             HStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 22, weight: .medium))
+                    // A 36x40 touch target that grows with it, but the glyph
+                    // is already the largest thing in the row.
+                    .madFont(size: 22, weight: .medium, maxScale: 1.4)
                 if let label {
                     Text(label)
-                        .font(.system(size: 14, weight: .heavy, design: .rounded))
-                        .monospacedDigit()
+                        .madFont(size: 14, weight: .heavy, design: .rounded, monospacedDigit: true)
                 }
             }
             .foregroundColor(.white.opacity(0.92))
@@ -1784,7 +1822,7 @@ struct PostCrewSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .madFont(size: 15, weight: .bold, design: .rounded)
                 }
             }
         }
@@ -1816,12 +1854,12 @@ struct PostCrewSheet: View {
                 Spacer(minLength: MADTheme.Spacing.xs)
                 if hasPhoto {
                     Image(systemName: "photo.fill")
-                        .font(.system(size: 12, weight: .semibold))
+                        .madFont(size: 12, weight: .semibold)
                         .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.45))
                         .accessibilityHidden(true)
                 }
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.35))
                     .accessibilityHidden(true)
             }

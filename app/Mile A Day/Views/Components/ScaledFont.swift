@@ -194,13 +194,19 @@ struct MADScaledMetric: DynamicProperty {
 
     private let base: CGFloat
     private let textStyle: Font.TextStyle
+    private let maxScale: CGFloat
 
-    init(wrappedValue: CGFloat, relativeTo textStyle: Font.TextStyle = .body) {
+    /// Note the cap is read from the environment the DECLARING view sits in,
+    /// so a `madTypeCap` applied inside that view's own body doesn't reach
+    /// it — `maxScale` (default 2, matching `madFont`) is the backstop.
+    init(wrappedValue: CGFloat, relativeTo textStyle: Font.TextStyle = .body, maxScale: CGFloat = 2) {
         self.base = wrappedValue
         self.textStyle = textStyle
+        self.maxScale = maxScale
     }
 
     var wrappedValue: CGFloat {
-        max(base, MADTypeScale.scaled(base, relativeTo: textStyle, size: dynamicTypeSize, cap: cap))
+        let scaled = MADTypeScale.scaled(base, relativeTo: textStyle, size: dynamicTypeSize, cap: cap)
+        return min(max(base, scaled), base * max(maxScale, 1))
     }
 }

@@ -162,9 +162,11 @@ enum MentionText {
     ///
     /// No username (an older payload, or a name we can't resolve) means no
     /// link, never a link that goes nowhere.
-    static func nameLink(_ name: String, username: String?) -> AttributedString {
+    /// `size` is the row's (possibly Dynamic-Type-scaled) text size: this run
+    /// carries its own font, so it can't inherit the row's.
+    static func nameLink(_ name: String, username: String?, size: CGFloat = 14) -> AttributedString {
         var out = AttributedString(name)
-        out.font = .system(size: 14, weight: .heavy, design: .rounded)
+        out.font = .system(size: size, weight: .heavy, design: .rounded)
         // Set explicitly: a run carrying `.link` otherwise renders in the
         // accent colour, and a caption's own name is not an accent.
         out.foregroundColor = .white
@@ -175,14 +177,14 @@ enum MentionText {
         return out
     }
 
-    static func attributed(_ text: String) -> AttributedString {
+    static func attributed(_ text: String, size: CGFloat = 14) -> AttributedString {
         var out = AttributedString()
         var rest = Substring(text)
         while let match = rest.firstMatch(of: mentionRegex) {
             out += AttributedString(String(rest[rest.startIndex..<match.range.lowerBound]))
             var mention = AttributedString(String(match.output))
             mention.foregroundColor = MADTheme.Colors.madRed
-            mention.font = .system(size: 14, weight: .bold, design: .rounded)
+            mention.font = .system(size: size, weight: .bold, design: .rounded)
             // Same token rule as the backend: trailing dots aren't part of the
             // username ("nice one @rob." mentions rob). Lowercased — usernames
             // resolve case-insensitively server-side.

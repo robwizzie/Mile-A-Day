@@ -97,6 +97,8 @@ struct ActivityCardView: View {
         return f
     }()
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             header
@@ -125,6 +127,9 @@ struct ActivityCardView: View {
         )
         // Card-level so the burst plays centered over the whole card.
         .overlay(HypeBurstView(trigger: hypeBurst))
+        // Same rule as PostCardView: chrome scales, media doesn't; above the
+        // presentations so the flyover and share studio don't inherit it.
+        .madTypeCap(.madCardCap)
         .fullScreenCover(item: $flyoverLaunch) { launch in
             RouteFlyoverPlayerView(launch: launch)
         }
@@ -154,12 +159,13 @@ struct ActivityCardView: View {
     private var subtitleLine: some View {
         HStack(spacing: 4) {
             Image(systemName: Self.icon(entry.workout_type, paceSecondsPerMile: pace))
-                .font(.system(size: 10, weight: .bold))
+                .madFont(size: 10, weight: .bold)
                 .foregroundColor(accent)
             Text(headerSubtitle)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .madFont(size: 12, weight: .medium, design: .rounded)
                 .foregroundColor(.white.opacity(0.5))
-                .lineLimit(1)
+                // Wraps only at accessibility sizes — see PostCardView.
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
         }
     }
 
@@ -183,7 +189,7 @@ struct ActivityCardView: View {
                     AvatarView(name: entry.displayName, imageURL: entry.profile_image_url, size: 40)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(entry.displayName)
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .madFont(size: 15, weight: .bold, design: .rounded)
                             .foregroundColor(.white)
                             .lineLimit(1)
                         subtitleLine
@@ -200,7 +206,7 @@ struct ActivityCardView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(.system(size: 16, weight: .bold))
+                        .madFont(size: 16, weight: .bold, maxScale: 1.3)
                         .foregroundColor(.white.opacity(0.6))
                         .padding(6)
                         .contentShape(Rectangle())
@@ -409,8 +415,7 @@ struct ActivityCardView: View {
                     onTapHypeCount?()
                 } label: {
                     Text("\(count)")
-                        .font(.system(size: 14, weight: .heavy, design: .rounded))
-                        .monospacedDigit()
+                        .madFont(size: 14, weight: .heavy, design: .rounded, monospacedDigit: true)
                         .foregroundColor(.white.opacity(0.92))
                         .frame(minHeight: 40)
                         .contentShape(Rectangle())
@@ -455,11 +460,10 @@ struct ActivityCardView: View {
         Button(action: action) {
             HStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 22, weight: .medium))
+                    .madFont(size: 22, weight: .medium, maxScale: 1.4)
                 if let label {
                     Text(label)
-                        .font(.system(size: 14, weight: .heavy, design: .rounded))
-                        .monospacedDigit()
+                        .madFont(size: 14, weight: .heavy, design: .rounded, monospacedDigit: true)
                 }
             }
             .foregroundColor(.white.opacity(0.92))
