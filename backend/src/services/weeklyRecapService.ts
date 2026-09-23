@@ -12,10 +12,7 @@ import {
 import { readStoredStreak, streakEndingAt } from "./streakFeatureCore.js";
 import { getBlockedIds } from "./moderationService.js";
 import { isUserInQuietHours, sendPush } from "./pushNotificationService.js";
-import {
-  CLIENT_FEATURES,
-  supportsClientFeatureSql,
-} from "./clientFeatures.js";
+import { CLIENT_FEATURES } from "./clientFeatures.js";
 
 const db = PostgresService.getInstance();
 
@@ -504,8 +501,10 @@ export interface WeeklyRecapCandidate {
  * Local clock on the week's LAST day (Saturday) at 19:00 — 20:00 when the
  * daily reminder is set to 19, since one hour carries one push — for users:
  *  - with the `weekly_recap_enabled` switch on (NULL = on);
- *  - holding a device that declared `weekly_recap_v1` (no fallback push: a
- *    build that can't open the recap would get a banner that goes nowhere);
+ *  - holding ANY registered device — each device then gets the variant it
+ *    supports (`planWeeklyRecapSends`): the new push on `weekly_recap_v1`
+ *    devices, the legacy push every shipped build already receives on the
+ *    rest;
  *  - with at least one COUNTED workout in the week (a "0 miles" recap is not
  *    sent; a lapse is the win-back reminder's job);
  *  - not already claimed for that week in `weekly_recap_log`.
@@ -529,7 +528,7 @@ export async function weeklyRecapCandidates(
 			FROM users u
 			LEFT JOIN notification_settings ns ON ns.user_id = u.user_id
 			WHERE COALESCE(ns.weekly_recap_enabled, TRUE) = TRUE
-				AND ${supportsClientFeatureSql("u.user_id", CLIENT_FEATURES.weeklyRecapV1)}
+				AND EXISTS (SELECT 1 FROM device_tokens dt WHERE dt.user_id = u.user_id)
 		),
 		local AS (
 			SELECT b.*,
@@ -581,6 +580,117 @@ export function weeklyRecapCopy(recap: WeeklyRecap): {
 }
 
 /**
+ * The recap push older builds have always received, byte-for-byte in shape:
+ * title "Your week in review", "X.X mi · N workouts[ · best pace m:ss]" body,
+ * type `weekly_recap`, NO data. Those builds keep exactly this until they
+ * update; only its schedule and claim moved (one per user-week, shared with
+ * the new variant). `bestPaceMinPerMile` is the old cron's figure: the best
+ * whole-workout pace over counted workouts of ≥ 0.95 mi.
+ */
+export function legacyWeeklyRecapCopy(
+  recap: Pick<WeeklyRecap, "total_miles" | "workouts">,
+  bestPaceMinPerMile: number | null,
+): { title: string; body: string } {
+  const parts = [
+    `${recap.total_miles.toFixed(1)} mi`,
+    `${recap.workouts} workout${recap.workouts === 1 ? "" : "s"}`,
+  ];
+  if (bestPaceMinPerMile) {
+    const total = Math.round(bestPaceMinPerMile * 60);
+    parts.push(
+      `best pace ${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`,
+    );
+  }
+  return {
+    title: "Your week in review",
+    body: `${parts.join(" · ")} — tap to see your recap and share it.`,
+  };
+}
+
+async function legacyBestPace(
+  userId: string,
+  weekStart: string,
+): Promise<number | null> {
+  const rows = await db.query<{ p: string | number | null }>(
+    `SELECT MIN((w.total_duration / 60.0) / w.distance) AS p
+		FROM workouts w
+		WHERE w.user_id = $1::text
+			AND w.local_date BETWEEN $2::date AND ($2::date + 6)
+			AND ${countedWorkoutSql("w")}
+			AND w.distance >= ${DAILY_GOAL_TOLERANCE} AND w.total_duration > 0`,
+    [userId, weekStart],
+  );
+  const p = rows[0]?.p;
+  return p === null || p === undefined ? null : Number(p);
+}
+
+export interface WeeklyRecapSend {
+  variant: "v1" | "legacy";
+  payload: {
+    title: string;
+    body: string;
+    type: "weekly_recap";
+    data?: Record<string, string>;
+  };
+  opts: {
+    deviceFeature: { feature: string; supported: boolean };
+    skipInbox: boolean;
+  };
+}
+
+/**
+ * One send per device CLASS the user actually has: `weekly_recap_v1` devices
+ * get the new push (it opens the recap for `data.week_start`), every other
+ * device gets the legacy push. The classes partition the user's devices
+ * (`selectPushTokens`), so no device is rung twice, and exactly ONE inbox row
+ * is written — the v1 payload when any device can open it, the legacy one
+ * otherwise (a legacy-only user's inbox is then identical to before).
+ */
+export async function planWeeklyRecapSends(
+  userId: string,
+  recap: WeeklyRecap,
+): Promise<WeeklyRecapSend[]> {
+  const feature = CLIENT_FEATURES.weeklyRecapV1;
+  const [counts] = await db.query<{ capable: number; legacy: number }>(
+    `SELECT
+			COUNT(*) FILTER (WHERE $2::text = ANY(COALESCE(client_features, '{}'::text[])))::int AS capable,
+			COUNT(*) FILTER (WHERE NOT ($2::text = ANY(COALESCE(client_features, '{}'::text[]))))::int AS legacy
+		FROM device_tokens WHERE user_id = $1::text`,
+    [userId, feature],
+  );
+  const plan: WeeklyRecapSend[] = [];
+  if ((counts?.capable ?? 0) > 0) {
+    plan.push({
+      variant: "v1",
+      payload: {
+        ...weeklyRecapCopy(recap),
+        type: "weekly_recap",
+        // Strings only: shipped inboxes decode `data` as [String: String].
+        data: { week_start: recap.week_start },
+      },
+      opts: { deviceFeature: { feature, supported: true }, skipInbox: false },
+    });
+  }
+  if ((counts?.legacy ?? 0) > 0) {
+    plan.push({
+      variant: "legacy",
+      payload: {
+        ...legacyWeeklyRecapCopy(
+          recap,
+          await legacyBestPace(userId, recap.week_start),
+        ),
+        type: "weekly_recap",
+      },
+      opts: {
+        deviceFeature: { feature, supported: false },
+        skipInbox: plan.length > 0,
+      },
+    });
+  }
+  return plan;
+}
+
+/**
  * Sends every recap due at `at`. Returns how many went out.
  *
  * Quiet hours are honoured by SKIPPING, never queueing: a recap parked for the
@@ -609,12 +719,9 @@ export async function sendWeeklyRecaps(at: Date = new Date()): Promise<number> {
       );
       if (claimed.length === 0) continue;
 
-      await sendPush(c.user_id, {
-        ...weeklyRecapCopy(recap),
-        type: "weekly_recap",
-        // Strings only: shipped inboxes decode `data` as [String: String].
-        data: { week_start: recap.week_start },
-      });
+      for (const s of await planWeeklyRecapSends(c.user_id, recap)) {
+        await sendPush(c.user_id, s.payload, s.opts);
+      }
       sent++;
     } catch (err: any) {
       console.error(

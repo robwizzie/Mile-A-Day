@@ -154,12 +154,12 @@ export const CLIENT_FEATURES = {
    * (`GET /users/:id/weekly-recap`) and routes the `weekly_recap` push to it,
    * opening the week named in `data.week_start`.
    *
-   * `weekly_recap` is NOT a new type string — an earlier cron sent it to every
-   * device, and no shipped build routes it, so the tap opened the app on
-   * whatever tab it was last on under copy promising a recap. That is the
-   * dead-tap this file exists to prevent, so the push now goes ONLY to users
-   * holding a device that declares this string; everyone else gets nothing
-   * rather than a banner that points nowhere.
+   * `weekly_recap` is NOT a new type string — shipped builds already receive
+   * it (title "Your week in review", no data) and keep receiving exactly that
+   * on devices that don't declare this string. A device that does gets the
+   * new variant carrying `data.week_start`. Chosen per DEVICE, not per user
+   * (`planWeeklyRecapSends` + `selectPushTokens`): a new phone and an old
+   * iPad each get the push they can handle, under one claim per user-week.
    */
   weeklyRecapV1: "weekly_recap_v1",
 } as const;

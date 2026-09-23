@@ -27,7 +27,8 @@ import {
 } from "../dist/services/weeklyRecapService.js";
 import { seedWeeklyChallenges } from "../dist/services/weeklyChallengeService.js";
 import { CLIENT_FEATURES } from "../dist/services/clientFeatures.js";
-import { isCapExempt } from "../dist/services/pushNotificationService.js";
+import { isCapExempt, selectPushTokens } from "../dist/services/pushNotificationService.js";
+import { planWeeklyRecapSends } from "../dist/services/weeklyRecapService.js";
 import { TRACKED_FEATURES } from "../dist/services/telemetryService.js";
 
 const db = PostgresService.getInstance();
@@ -54,10 +55,11 @@ const B = "wr-b"; // LA, 7 for 7
 const C = "wr-c"; // Tokyo
 const D = "wr-d"; // A's friend, walked nothing, no device
 const E = "wr-e"; // A's friend, blocked — must not appear on A's board
-const OLD = "wr-old"; // NY, device WITHOUT weekly_recap_v1
+const OLD = "wr-old"; // NY, a shipped build: device WITHOUT weekly_recap_v1
+const MIX = "wr-mix"; // NY, one new phone + one old iPad
 const OFF = "wr-off"; // NY, weekly recap switched off
 const IDLE = "wr-idle"; // NY, device + switch on, no workouts this week
-const ALL = [A, A19, B, C, D, E, OLD, OFF, IDLE];
+const ALL = [A, A19, B, C, D, E, OLD, MIX, OFF, IDLE];
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -170,6 +172,13 @@ async function seed() {
   await walk(C, addDays(S, 2), 5.0, TOKYO);
   await walk(E, addDays(S, 1), 12.0, NY);
   await walk(OLD, S, 1.0, NY);
+  await user(MIX, { tz: NY, features: RECAP });
+  await db.query(
+    `INSERT INTO device_tokens (user_id, device_token, environment, client_features)
+     VALUES ($1, $2, 'sandbox', '{}')`,
+    [MIX, `wr-token-${MIX}-ipad`],
+  );
+  await walk(MIX, S, 1.0, NY);
   await walk(OFF, S, 1.0, NY);
   await walk(IDLE, addDays(S, -3), 1.0, NY); // last week, not this one
 
@@ -267,16 +276,57 @@ try {
   // ── Who is due, and when ─────────────────────────────────────────────
   const dueAt = async (at) => (await weeklyRecapCandidates(at)).map((c) => c.user_id).filter((id) => ALL.includes(id)).sort();
   // E is NY, capable and active too — blocked by A, which is A's business.
-  check("due at NY Sat 19:30", await dueAt(AT), [A, E]);
+  // OLD (a shipped build) and MIX are due as well: nobody loses the recap.
+  check("due at NY Sat 19:30", await dueAt(AT), [A, E, MIX, OLD].sort());
   const a = (await weeklyRecapCandidates(AT)).find((c) => c.user_id === A);
   check("candidate carries the week", a && [a.week_start, a.local_date], [S, SAT]);
   check("an hour later: the reminder-at-19 user's turn, not A's again", await dueAt(new Date(AT.getTime() + HOUR)), [A19]);
   check("three hours later: Los Angeles", await dueAt(new Date(AT.getTime() + 3 * HOUR)), [B]);
   check("thirteen hours earlier: Tokyo", await dueAt(new Date(AT.getTime() - 13 * HOUR)), [C]);
-  check("never: device without weekly_recap_v1", (await weeklyRecapCandidates(AT)).some((c) => c.user_id === OLD), false);
   check("never: recap switched off", (await weeklyRecapCandidates(AT)).some((c) => c.user_id === OFF), false);
   check("never: no counted workout this week", (await weeklyRecapCandidates(AT)).some((c) => c.user_id === IDLE), false);
   check("a day early (Fri 19:30 NY) nobody", await dueAt(new Date(AT.getTime() - DAY)), []);
+
+  // ── One variant per device ───────────────────────────────────────────
+  const FEATURE = CLIENT_FEATURES.weeklyRecapV1;
+  const shape = (plan) =>
+    plan.map((s) => ({
+      variant: s.variant,
+      supported: s.opts.deviceFeature.supported,
+      skipInbox: s.opts.skipInbox,
+      title: s.payload.title,
+      data: s.payload.data ?? null,
+    }));
+  const planA = await planWeeklyRecapSends(A, r);
+  check("capable-only user: the new push, with its week", shape(planA), [
+    { variant: "v1", supported: true, skipInbox: false, title: "Your week: 7.1 mi, 5 of 7 days", data: { week_start: S } },
+  ]);
+  const old = await getWeeklyRecap(OLD, S, AT);
+  const planOld = await planWeeklyRecapSends(OLD, old);
+  check("legacy-only user: exactly the push shipped builds get today (no data)", planOld.map((s) => ({ ...s.payload, supported: s.opts.deviceFeature.supported, skipInbox: s.opts.skipInbox })), [
+    {
+      title: "Your week in review",
+      body: "1.0 mi · 1 workout · best pace 15:00 — tap to see your recap and share it.",
+      type: "weekly_recap",
+      supported: false,
+      skipInbox: false,
+    },
+  ]);
+  const planMix = await planWeeklyRecapSends(MIX, await getWeeklyRecap(MIX, S, AT));
+  check("mixed devices: new to the new device, legacy to the old, ONE inbox row", planMix.map((s) => [s.variant, s.opts.deviceFeature.supported, s.opts.skipInbox]), [
+    ["v1", true, false],
+    ["legacy", false, true],
+  ]);
+  const tokens = async (id, supported) =>
+    (await selectPushTokens(id, { feature: FEATURE, supported })).map((t) => t.device_token).sort();
+  const mixNew = await tokens(MIX, true);
+  const mixOld = await tokens(MIX, false);
+  const mixAll = (await selectPushTokens(MIX)).map((t) => t.device_token).sort();
+  check("mixed: the new push rings only the capable device", mixNew, [`wr-token-${MIX}`]);
+  check("mixed: the legacy push rings only the old device (no features)", mixOld, [`wr-token-${MIX}-ipad`]);
+  check("never both to one device, and every device once", [mixNew.filter((t) => mixOld.includes(t)).length, [...mixNew, ...mixOld].sort()], [0, mixAll]);
+  check("legacy class holds a device with OTHER features", await tokens(OLD, false), [`wr-token-${OLD}`]);
+  check("…and the capable class none of it", await tokens(OLD, true), []);
 
   // ── The send ─────────────────────────────────────────────────────────
   const inbox = async (id) =>
@@ -291,8 +341,15 @@ try {
   check("A is no longer a candidate once claimed", (await weeklyRecapCandidates(AT)).some((c) => c.user_id === A), false);
   await sendWeeklyRecaps(AT);
   await new Promise((res) => setTimeout(res, 300));
-  check("a second pass sends nothing more", (await inbox(A)).length, 1);
-  for (const id of [OLD, OFF, IDLE, A19, B, C]) {
+  check("a second pass sends nothing more", [(await inbox(A)).length, (await inbox(OLD)).length, (await inbox(MIX)).length], [1, 1, 1]);
+  const rowsOld = await inbox(OLD);
+  check("legacy-only user still gets the legacy recap", rowsOld.map((x) => [x.title, x.data]), [["Your week in review", {}]]);
+  const rowsMix = await inbox(MIX);
+  check("mixed user: one inbox row, the new variant", rowsMix.map((x) => [x.title, x.data]), [["Your week: 1.0 mi, 1 of 7 days", { week_start: S }]]);
+  const claims = async (id) =>
+    (await db.query(`SELECT 1 FROM weekly_recap_log WHERE user_id = $1 AND week_start = $2::date`, [id, S])).length;
+  check("one claim per user-week (legacy, mixed)", [await claims(OLD), await claims(MIX)], [1, 1]);
+  for (const id of [OFF, IDLE, A19, B, C]) {
     check(`${id} got nothing at NY 19:30`, (await inbox(id)).length, 0);
   }
 
