@@ -149,6 +149,22 @@ export const CLIENT_FEATURES = {
    */
   activityDigestV1: "activity_digest_v1",
 
+  /**
+   * The build handles the `widget_refresh` SILENT push: it declares the
+   * `remote-notification` background mode, so APNs actually wakes it, and its
+   * AppDelegate refreshes the one widget snapshot the push names (competition
+   * standings, or today's friends leaderboard) inside a hard time budget and
+   * reloads only that widget kind.
+   *
+   * Gated because a shipped build has neither half: without the background
+   * mode the push is never delivered to a backgrounded app at all, so sending
+   * it is pure APNs budget spent for nothing — and it rides a per-app silent
+   * push allowance the existing `background_sync` fan-out also draws on.
+   * Paired with `device_tokens.widget_kinds`: a device is pushed only when it
+   * has the affected widget on its home screen (widgetRefreshService).
+   */
+  widgetRefreshPushV1: "widget_refresh_push_v1",
+
 } as const;
 
 export type ClientFeature =

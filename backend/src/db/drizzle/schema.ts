@@ -837,6 +837,12 @@ export const deviceTokens = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
+    // Which home-screen widget kinds this install has placed, self-reported at
+    // registration (WidgetCenter.getCurrentConfigurations). NULL = the build
+    // predates the field or couldn't say — never pushed a widget refresh,
+    // which is the safe direction. No default on purpose: a DEFAULT would
+    // read back on every existing row as "has these widgets".
+    widgetKinds: text("widget_kinds").array(),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "string",
@@ -3158,5 +3164,28 @@ export const referralAliases = pgTable(
       name: "referral_aliases_user_id_fkey",
     }).onDelete("cascade"),
     index("idx_referral_aliases_user").on(table.userId),
+  ],
+);
+
+// Coalescing claim for widget-refresh silent pushes (widgetRefreshService):
+// one row per user, `last_sent_at` is when the last one went out. A NEW table,
+// so no pre-existing rows can read back a DDL-time default — and the column
+// has none anyway: it is only ever written by the claim itself.
+export const widgetRefreshPushes = pgTable(
+  "widget_refresh_pushes",
+  {
+    userId: text("user_id").primaryKey().notNull(),
+    lastSentAt: timestamp("last_sent_at", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
+    lastReason: text("last_reason"),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "widget_refresh_pushes_user_id_fkey",
+    }).onDelete("cascade"),
   ],
 );

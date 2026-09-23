@@ -526,6 +526,13 @@
       "when": 1790183942074,
       "tag": "0074_client_diagnostics",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1790184958535,
+      "tag": "0075_smooth_molly_hayes",
+      "breakpoints": true
     }
   ]
 }

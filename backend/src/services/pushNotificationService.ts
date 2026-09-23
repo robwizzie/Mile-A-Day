@@ -17,6 +17,7 @@ import {
   userSupports,
 } from "./clientFeatures.js";
 import { logError } from "./errorLogService.js";
+import { normalizeWidgetKinds } from "./widgetKinds.js";
 import { START_OF_TODAY_ET_SQL } from "./dailyResetTime.js";
 import fs from "fs";
 import path from "path";
@@ -765,20 +766,26 @@ export async function registerDeviceToken(
   deviceToken: string,
   environment?: string | null,
   clientFeatures?: unknown,
+  widgetKinds?: unknown,
 ): Promise<void> {
   const tokenEnvironment = normalizeTokenEnvironment(environment);
   // Overwritten on every registration, never merged: capabilities belong to
   // the build currently installed, and a downgrade (or a reinstall of an
   // older TestFlight build) has to be able to take them away again.
   const features = normalizeClientFeatures(clientFeatures);
+  // Same rule for installed widgets — overwritten, so removing a widget stops
+  // its refresh pushes at the next registration. Absent ⇒ NULL (a build that
+  // predates the field), which widgetRefreshService never pushes.
+  const kinds = normalizeWidgetKinds(widgetKinds);
   await db.query(
-    `INSERT INTO device_tokens (user_id, device_token, environment, client_features)
-		VALUES ($1, $2, $3, $4)
+    `INSERT INTO device_tokens (user_id, device_token, environment, client_features, widget_kinds)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (user_id, device_token)
 		DO UPDATE SET environment = EXCLUDED.environment,
 			client_features = EXCLUDED.client_features,
+			widget_kinds = EXCLUDED.widget_kinds,
 			updated_at = NOW()`,
-    [userId, deviceToken, tokenEnvironment, features],
+    [userId, deviceToken, tokenEnvironment, features, kinds],
   );
 }
 
@@ -795,6 +802,60 @@ export async function unregisterDeviceToken(
 // ─── Silent (background) pushes ─────────────────────────────────────
 
 /**
+ * The exact APNs request a silent push makes — headers and body — as a PURE
+ * function, so `scripts/widget-refresh-check.mjs` can pin the shape without a
+ * network. The shape is the whole contract: `apns-push-type: background` with
+ * priority 5 is the ONLY combination APNs accepts for a content-available push
+ * (priority 10 on a background push is rejected on watchOS and throttled on
+ * iOS), and the aps dict must carry NOTHING but `content-available` — an
+ * `alert`, `sound` or `badge` beside it turns a wake-up into a banner.
+ */
+export function buildSilentPushRequest(
+  deviceToken: string,
+  type: string,
+  data: Record<string, string>,
+  topic: string,
+  bearer: string,
+): { headers: Record<string, string>; body: string } {
+  return {
+    headers: {
+      ":method": "POST",
+      ":path": `/3/device/${deviceToken}`,
+      authorization: `bearer ${bearer}`,
+      "apns-topic": topic,
+      "apns-push-type": "background",
+      "apns-priority": "5",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      aps: { "content-available": 1 },
+      type,
+      data,
+    }),
+  };
+}
+
+type SilentPushTransport = (
+  deviceToken: string,
+  type: string,
+  data: Record<string, string>,
+  environment: DeviceTokenEnvironment,
+) => Promise<boolean>;
+
+let silentPushTransportOverride: SilentPushTransport | null = null;
+
+/**
+ * Test seam: route every silent push through `transport` instead of APNs.
+ * Only the check scripts call it (there is no APNs key in CI, and a real send
+ * would need one); pass null to restore the real sender.
+ */
+export function setSilentPushTransportForTesting(
+  transport: SilentPushTransport | null,
+): void {
+  silentPushTransportOverride = transport;
+}
+
+/**
  * APNs silent push. Wakes the app to do background work; renders nothing.
  * Do not call directly — use sendSilentPushToUser.
  */
@@ -804,6 +865,9 @@ function sendSilentPushToDevice(
   data: Record<string, string> = {},
   environment: DeviceTokenEnvironment = defaultTokenEnvironment(),
 ): Promise<boolean> {
+  if (silentPushTransportOverride) {
+    return silentPushTransportOverride(deviceToken, type, data, environment);
+  }
   return new Promise((resolve) => {
     const token = getApnsToken();
     if (!token || !APNS_BUNDLE_ID) {
@@ -812,11 +876,13 @@ function sendSilentPushToDevice(
       return;
     }
 
-    const apnsPayload = JSON.stringify({
-      aps: { "content-available": 1 },
+    const { headers, body: apnsPayload } = buildSilentPushRequest(
+      deviceToken,
       type,
       data,
-    });
+      APNS_BUNDLE_ID,
+      token,
+    );
 
     const client = http2.connect(apnsHostForEnvironment(environment));
 
@@ -826,15 +892,7 @@ function sendSilentPushToDevice(
       resolve(false);
     });
 
-    const req = client.request({
-      ":method": "POST",
-      ":path": `/3/device/${deviceToken}`,
-      authorization: `bearer ${token}`,
-      "apns-topic": APNS_BUNDLE_ID,
-      "apns-push-type": "background",
-      "apns-priority": "5",
-      "content-type": "application/json",
-    });
+    const req = client.request(headers);
 
     let responseData = "";
     let statusCode = 0;
@@ -871,6 +929,29 @@ function sendSilentPushToDevice(
     req.write(apnsPayload);
     req.end();
   });
+}
+
+/**
+ * Silent push to an explicit list of devices (already selected by the caller,
+ * e.g. only the ones declaring a capability). Same no-inbox, no-log, no-cap
+ * contract as sendSilentPushToUser. Returns how many APNs accepted.
+ */
+export async function sendSilentPushToDevices(
+  devices: { device_token: string; environment: string | null }[],
+  type: string,
+  data: Record<string, string> = {},
+): Promise<number> {
+  const results = await Promise.all(
+    devices.map(({ device_token, environment }) =>
+      sendSilentPushToDevice(
+        device_token,
+        type,
+        data,
+        normalizeTokenEnvironment(environment),
+      ),
+    ),
+  );
+  return results.filter(Boolean).length;
 }
 
 /**

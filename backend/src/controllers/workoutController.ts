@@ -1,3 +1,4 @@
+import { refreshFriendsLeaderboardWidgets } from "../services/widgetRefreshService.js";
 import { Request, Response } from "express";
 import { AuthenticatedRequest } from "../middleware/auth.js";
 import { PostgresService } from "../services/DbService.js";
@@ -160,6 +161,12 @@ export async function uploadWorkouts(req: Request, res: Response) {
       notifyH2hLeadChanges(userId).catch((err) =>
         console.error("Error notifying H2H lead change:", err.message),
       );
+      // Today's miles moved, so every friend's Daily Leaderboard widget did
+      // too. Only friends with that widget on a device that can take the
+      // silent push are woken, each at most once per coalescing window
+      // (widgetRefreshService). Same gate as the duel: a history backfill
+      // doesn't change today.
+      void refreshFriendsLeaderboardWidgets(userId);
     }
 
     try {
