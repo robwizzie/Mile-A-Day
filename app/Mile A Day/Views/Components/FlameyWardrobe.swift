@@ -694,7 +694,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
     /// surfaces, where he stands on the ground like everyone else.
     var hoverLift: CGFloat {
         switch self {
-        case .rocketBoots: return 0.07
+        case .rocketBoots: return 0.10
         case .wingedSandals: return 0.08
         default: return 0
         }

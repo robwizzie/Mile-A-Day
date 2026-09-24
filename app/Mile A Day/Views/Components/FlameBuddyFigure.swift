@@ -96,6 +96,18 @@ struct FlameBuddyFigure: View {
     /// `size`. The body lifts; the ground shadow stays on the floor and
     /// shrinks. Zero is byte-identical.
     var lift: CGFloat = 0
+    /// His legs, in body units: stubby flame legs under him, drawn only
+    /// when he wears shoes (`FlameyLook.standLift`). `lift` already raises
+    /// the body by this much; the legs fill the gap down to his feet, and
+    /// the ground shadow treats them as standing, not hovering. Drawn HERE,
+    /// under the body and over the glow, so they burn in his exact colours
+    /// (the day's burn-down included) and a stuffed belly overlaps them.
+    /// Zero — every caller that isn't dressing him — is byte-identical.
+    var legLength: CGFloat = 0
+
+    /// Where each leg meets the floor, ±x from his centre, in body units.
+    /// The wardrobe plants the shoes on this.
+    static let legSpread: CGFloat = 0.11
 
     private var activePalette: FlameyPalette? { health == .dead ? nil : palette }
 
@@ -103,6 +115,7 @@ struct FlameBuddyFigure: View {
         ZStack {
             glowLayer
             groundLayer
+            legsLayer
 
             ZStack {
                 FlameBuddyOuterShape(wobble: wobble, bellyBulge: bellyBulge)
@@ -309,6 +322,46 @@ struct FlameBuddyFigure: View {
         }
     }
 
+    /// The part of `lift` that is a real hover (legs stand on the floor).
+    private var hoverLift: CGFloat { max(0, lift - legLength * effectiveBodyScale) }
+
+    @ViewBuilder
+    private var legsLayer: some View {
+        if legLength > 0, health != .dead {
+            let colors = activePalette?.outer ?? outerColors
+            let upper = colors[max(0, colors.count - 2)], lower = colors[colors.count - 1]
+            let rim = activePalette?.rim ?? Color.white.opacity(0.28)
+            Canvas { ctx, canvas in
+                let u = size * effectiveBodyScale
+                let cx = canvas.width / 2
+                let bottom = canvas.height - lift * size
+                let top = bottom - 0.10 * u
+                let ankle = bottom + legLength * u - 0.06 * u
+                let thick = 0.10 * u
+                let spread = Self.legSpread
+                for side in [-1.0, 1.0] as [CGFloat] {
+                    let hip = CGPoint(x: cx + side * (spread - 0.025) * u, y: top)
+                    let foot = CGPoint(x: cx + side * spread * u, y: ankle)
+                    let knee = CGPoint(x: cx + side * (spread + 0.02) * u, y: (top + ankle) / 2)
+                    var p = Path()
+                    p.move(to: hip)
+                    p.addQuadCurve(to: foot, control: knee)
+                    ctx.stroke(p, with: .color(rim), style: StrokeStyle(lineWidth: thick + max(1.5, size * 0.012) * 2, lineCap: .round))
+                    ctx.stroke(p, with: .linearGradient(Gradient(colors: [upper, lower]), startPoint: CGPoint(x: 0, y: top),
+                                                        endPoint: CGPoint(x: 0, y: ankle)),
+                               style: StrokeStyle(lineWidth: thick, lineCap: .round))
+                    // Lit from the top-left: a soft highlight down the left.
+                    var hl = Path()
+                    hl.move(to: CGPoint(x: knee.x - thick * 0.28 - side * thick * 0.08, y: bottom + 0.02 * u))
+                    hl.addLine(to: CGPoint(x: foot.x - thick * 0.26, y: foot.y - thick * 0.2))
+                    ctx.stroke(hl, with: .color(.white.opacity(0.32)), style: StrokeStyle(lineWidth: thick * 0.18, lineCap: .round))
+                }
+            }
+            .frame(width: size, height: size)
+            .opacity(activePalette?.bodyOpacity ?? 1)
+        }
+    }
+
     @ViewBuilder
     private var groundLayer: some View {
         if grounded {
@@ -316,8 +369,8 @@ struct FlameBuddyFigure: View {
                 Spacer()
                 Ellipse()
                     .fill(Color.black.opacity(0.24))
-                    .frame(width: size * 0.78 * lightSpread * (1 - min(lift, 0.3) * 1.6),
-                           height: size * 0.16 * lightSpread * (1 - min(lift, 0.3) * 1.6))
+                    .frame(width: size * 0.78 * lightSpread * (1 - min(hoverLift, 0.3) * 1.6),
+                           height: size * 0.16 * lightSpread * (1 - min(hoverLift, 0.3) * 1.6))
                     .blur(radius: 3)
                     .offset(y: size * 0.02)
             }

@@ -193,6 +193,7 @@ struct FlameBuddyView: View {
 
             reactionProps(scale: figureScale(vigor: currentVigor(at: Date())))
         }
+        .scaleEffect(standFit, anchor: .bottom)
         .rotationEffect(.degrees(wiggle), anchor: .bottom)
         .scaleEffect(x: 1, y: pokeSquash, anchor: .bottom)
         .offset(x: paceOffset, y: hopOffset + bobOffset + startleOffset)
@@ -318,6 +319,15 @@ struct FlameBuddyView: View {
         withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) { bobPhase = true }
     }
 
+    /// On a tight surface (the hero's column) his legs would stand him —
+    /// and his hat — a leg's length taller than the card was fitted for, so
+    /// there he is drawn that much smaller instead: same height as ever,
+    /// legs and all. Elsewhere he simply stands taller.
+    private var standFit: CGFloat {
+        guard let look, look.standLift > 0, FlameyArt.isTight(wardrobeReach) else { return 1 }
+        return 1 / (1 + look.standLift)
+    }
+
     private var staticFlame: some View {
         let vigorNow = currentVigor(at: Date())
         return ZStack {
@@ -339,6 +349,7 @@ struct FlameBuddyView: View {
                                bubbleStyle: look?.bubble ?? .classicBubble, lift: liftFraction)
             }
         }
+        .scaleEffect(standFit, anchor: .bottom)
     }
 
     /// The scale the FIGURE actually draws at (FlameBuddyFigure's
@@ -365,14 +376,16 @@ struct FlameBuddyView: View {
             asleep: mood?.eyesShut ?? false,
             grounded: grounded,
             palette: look.flatMap { FlameyPalette.palette(for: $0.color) },
-            lift: liftFraction
+            lift: liftFraction,
+            legLength: look?.standLift ?? 0
         )
     }
 
-    /// His hover, as a fraction of `size` (the look's lift is in body units).
+    /// How far his body is raised — legs when he wears shoes, plus any
+    /// hover — as a fraction of `size` (the look's lift is in body units).
     private var liftFraction: CGFloat {
         guard let look else { return 0 }
-        return look.hoverLift * figureScale(vigor: currentVigor(at: Date()))
+        return look.bodyLift * figureScale(vigor: currentVigor(at: Date()))
     }
 
     // MARK: - Mood: face (content clock — discrete, cheap)

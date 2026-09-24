@@ -310,8 +310,9 @@ struct FriendFlameyCard: View {
             FlameBuddyView(health: FriendFlameyDay.health(for: kind), size: size, mood: mood, look: look)
                 .frame(width: size, height: size)
         }
-        // Headroom for the bubble, which draws above his tip.
-        .frame(width: size * 1.3, height: size + 62, alignment: .bottom)
+        // Headroom for the bubble, which draws above his tip — and for his
+        // legs, which stand him taller when he wears shoes.
+        .frame(width: size * 1.3, height: size + 62 + look.standLift * size, alignment: .bottom)
         .padding(.bottom, 10)
         .contentShape(Rectangle())
         .onTapGesture { poke(kind: kind) }
