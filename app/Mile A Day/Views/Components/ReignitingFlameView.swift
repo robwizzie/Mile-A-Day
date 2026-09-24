@@ -143,8 +143,13 @@ struct ReignitingFlameView: View {
             // keeps it the whole way through — same as the reignite path.
             showsFace: showsFace,
             vigor: vigor,
-            blaze: blaze
+            blaze: blaze,
+            // The Fun celebration is the mascot: arms up, on his legs. The
+            // faceless Modern flame has neither.
+            limbs: showsFace ? .cheer : nil
         )
+        // Legs are extra height the celebration wasn't laid out for.
+        .scaleEffect(showsFace ? 1 / (1 + FlameBuddyFigure.mascotLegLength) : 1, anchor: .bottom)
     }
 
     /// How far up the flame climbs into place. A reignited flame rises out of

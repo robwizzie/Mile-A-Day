@@ -57,7 +57,8 @@ struct DashboardStyleChooserView: View {
                         .fill(style == .fun ? Color(red: 0.18, green: 0.05, blue: 0.06) : Color(red: 0.09, green: 0.09, blue: 0.10))
                         .frame(height: 132)
                     if style == .fun {
-                        FlameBuddyView(health: .healthy, size: 106)
+                        // The Fun mascot as the dashboard draws him: arms and legs.
+                        FlameBuddyView(health: .healthy, size: 106, look: .plain)
                     } else {
                         ZStack {
                             Circle()

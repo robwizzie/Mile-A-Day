@@ -245,8 +245,12 @@ private struct TrackCheerleader: View {
                 blink: false,
                 size: 38,
                 showsFace: true,
-                grounded: true
+                grounded: true,
+                // The Fun mascot, both arms up cheering — scaled so his
+                // legs keep the trackside spot the height it always was.
+                limbs: .cheer
             )
+            .scaleEffect(1 / (1 + FlameBuddyFigure.mascotLegLength), anchor: .bottom)
             .rotationEffect(.degrees(hop ? 4 : -4))
             .offset(y: hop ? -3 : 0)
         }
