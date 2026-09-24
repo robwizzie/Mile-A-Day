@@ -769,7 +769,7 @@ struct FlameyClosetTileArt: View {
         case .head: return (96, 0, 30)
         case .eyes: return (118, 0, 18)
         case .chest: return (120, 0, -30)
-        case .feet: return (112, 0, -46)
+        case .feet: return (110, 0, -32)
         case .costume: return (64, 0, 2)
         case .back: return (58, 0, 4)
         case .held: return (74, 16, -2)
