@@ -21,7 +21,8 @@ struct FriendFlameyFacts: Equatable {
     /// (holidays) and the longest streak imply — plus anything their Closet
     /// choice names, which the server only serves when it is owned.
     let owned: Set<FlameyItem>
-    /// Their Closet choice (`look`, the wire `{slot: id|null}`); absent = auto.
+    /// Their Closet choice (`look`, the wire `{slot: id}`); absent = basic —
+    /// a friend's Flamey wears exactly what THEY picked.
     let choice: FlameyLookChoice
 
     init?(block: FlameyProfileBlock?, ownerName: String) {
@@ -36,9 +37,7 @@ struct FriendFlameyFacts: Equatable {
         var owned = FlameyWardrobe.owned(
             earnedBadgeIds: earnedBadgeIds.union(FlameyWardrobe.impliedBadgeIds(longestStreak: longestStreak)))
         owned.formUnion((block.owned_item_ids ?? []).compactMap(FlameyItem.init(rawValue:)))
-        for slot in FlameySlot.allCases {
-            if case .item(let item) = choice[slot] { owned.insert(item) }
-        }
+        owned.formUnion(choice.items)
         self.owned = owned
     }
 
@@ -522,7 +521,9 @@ struct FriendFlameyWardrobeSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .fullScreenCover(item: $ownCloset) { request in
-            FlameyClosetScreen(request: request)
+            // Presented over a friend's sheet: "where to earn it" can't leave
+            // for another tab from here, so locked cards say where instead.
+            FlameyClosetScreen(request: request, canRoute: false)
         }
     }
 

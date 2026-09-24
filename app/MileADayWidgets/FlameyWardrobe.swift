@@ -17,9 +17,10 @@ import SwiftUI
 //   - OWNING an item is DERIVED from earned badge ids (+ `always`). Nothing
 //     about ownership is stored, so it is retroactive by construction and no
 //     style switch, reinstall or sign-out can take anything away.
-//   - The user's CHOICE (`FlameyLookChoice`) — per slot auto / bare / an item.
-//     Missing = auto, so everyone sees their best owned items before they ever
-//     open the Closet.
+//   - The user's CHOICE (`FlameyLookChoice`) — per slot, an item or nothing.
+//     Nothing chosen = BASIC: he looks exactly as he did before the wardrobe
+//     existed until the user picks something in the Closet. Owning an item
+//     never puts it on him.
 //   - The resolved `FlameyLook` — a pure value, one item per slot, what every
 //     renderer draws.
 
@@ -518,14 +519,10 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
 
     var isHolidayOutfit: Bool { !holidays.isEmpty }
 
-    /// Worn for the whole month when that slot is on AUTO (the Santa hat all
-    /// December). A month never outranks a choice — only the day itself does.
-    var autoMonth: Int? { self == .santaHat ? 12 : nil }
-
-    /// Picked by AUTO when owned. Holiday outfits are the calendar's to put
-    /// on, costumes hide what you chose for other slots, and Phantom is a
-    /// spooky special rather than a rung on the streak ladder — all three
-    /// only ever go on because you (or the day) chose them.
+    /// Picked by the Closet's "Best look" action when owned. Holiday outfits
+    /// are the calendar's to put on, costumes hide everything else, and
+    /// Phantom is a spooky special rather than a rung on the streak ladder —
+    /// all three only ever go on because you (or the day) chose them.
     var autoEligible: Bool {
         if isMoodProp || isHolidayOutfit { return false }
         switch slot {
@@ -534,7 +531,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         }
     }
 
-    /// Order WITHIN a slot: AUTO wears the highest tier owned. It is the
+    /// Order WITHIN a slot ("Best look" takes the highest owned). It is the
     /// difficulty of the medal behind it, so across families in one slot
     /// (a beret from five stories vs a beanie from 100 miles) the harder one
     /// wins.
@@ -949,7 +946,8 @@ enum FlameyWardrobe {
         return ids
     }
 
-    /// The best owned item AUTO puts in `slot` (highest tier), or nil.
+    /// The best owned item in `slot` (highest tier) — what the Closet's "Best
+    /// look" action picks. Never applied on its own: nothing chosen is basic.
     static func best(in slot: FlameySlot, owned: Set<FlameyItem>) -> FlameyItem? {
         owned.filter { $0.slot == slot && $0.autoEligible }
             .max { ($0.tier, $0.rawValue) < ($1.tier, $1.rawValue) }
@@ -963,64 +961,53 @@ enum FlameyWardrobe {
 
 // MARK: - The user's choice (wire format)
 
-/// One slot of the Closet: follow the best owned item, wear nothing, or wear
-/// this.
-enum FlameySlotChoice: Hashable {
-    case auto
-    case bare
-    case item(FlameyItem)
-}
-
-/// What the user picked in the Closet. The WIRE FORMAT is the backend's
-/// `users.flamey_look`: `{ "<slot>": "<itemId>" | null }` — a missing slot is
-/// AUTO, `null` is BARE. An id this build doesn't know (a newer catalog) or
-/// one filed under the wrong slot decodes as AUTO for that slot, never a
-/// failure; mood dressing never goes on the wire.
+/// What the user picked in the Closet: at most one item per slot. A slot with
+/// nothing picked is BASIC — the bare figure (Classic colour, the classic
+/// bubble, nothing worn) — and so is the whole look before the Closet is ever
+/// opened. Owning something never dresses him in it.
+///
+/// The WIRE FORMAT is the backend's `users.flamey_look`: `{ "<slot>":
+/// "<itemId>" }`. A missing slot and an explicit `null` (written by builds
+/// that had an "auto" setting) both mean nothing; an id this build doesn't
+/// know (a newer catalog) or one filed under the wrong slot is dropped, never
+/// a failure; mood dressing never goes on the wire.
 struct FlameyLookChoice: Hashable, Codable {
-    private(set) var slots: [FlameySlot: FlameySlotChoice] = [:]
+    private(set) var slots: [FlameySlot: FlameyItem] = [:]
 
-    static let auto = FlameyLookChoice()
+    /// Nothing picked anywhere — how everyone starts.
+    static let basic = FlameyLookChoice()
 
     init() {}
 
-    subscript(slot: FlameySlot) -> FlameySlotChoice {
-        get { slots[slot] ?? .auto }
+    subscript(slot: FlameySlot) -> FlameyItem? {
+        get { slots[slot] }
         set {
-            switch newValue {
-            case .auto: slots[slot] = nil
-            case .bare: slots[slot] = .bare
-            case .item(let item):
-                slots[slot] = (item.slot == slot && !item.isMoodProp) ? .item(item) : nil
+            if let item = newValue, item.slot == slot, !item.isMoodProp {
+                slots[slot] = item
+            } else {
+                slots[slot] = nil
             }
         }
     }
 
-    var isAllAuto: Bool { slots.isEmpty }
+    var isBasic: Bool { slots.isEmpty }
+
+    /// Every picked item, in slot order.
+    var items: [FlameyItem] { FlameySlot.allCases.compactMap { slots[$0] } }
 
     /// From the wire dictionary (`[slot: id-or-nil]`).
     init(wire: [String: String?]) {
         for (key, value) in wire {
-            guard let slot = FlameySlot(rawValue: key) else { continue }
-            if let raw = value {
-                if let item = FlameyItem(rawValue: raw), item.slot == slot, !item.isMoodProp {
-                    slots[slot] = .item(item)
-                }
-            } else {
-                slots[slot] = .bare
-            }
+            guard let slot = FlameySlot(rawValue: key), let raw = value,
+                  let item = FlameyItem(rawValue: raw), item.slot == slot, !item.isMoodProp else { continue }
+            slots[slot] = item
         }
     }
 
-    /// To the wire dictionary: AUTO slots are absent.
+    /// To the wire dictionary: only picked slots.
     var wire: [String: String?] {
         var out: [String: String?] = [:]
-        for (slot, choice) in slots {
-            switch choice {
-            case .auto: continue
-            case .bare: out[slot.rawValue] = .some(nil)
-            case .item(let item): out[slot.rawValue] = .some(item.rawValue)
-            }
-        }
+        for (slot, item) in slots { out[slot.rawValue] = .some(item.rawValue) }
         return out
     }
 
@@ -1032,14 +1019,12 @@ struct FlameyLookChoice: Hashable, Codable {
     }
 
     init(from decoder: Decoder) throws {
-        // `null` (or anything but an object) for the whole look is all-auto,
+        // `null` (or anything but an object) for the whole look is basic,
         // like an empty object — never a failure.
         var wire: [String: String?] = [:]
         if let c = try? decoder.container(keyedBy: Key.self) {
             for key in c.allKeys {
-                if (try? c.decodeNil(forKey: key)) == true {
-                    wire[key.stringValue] = .some(nil)
-                } else if let raw = try? c.decode(String.self, forKey: key) {
+                if let raw = try? c.decode(String.self, forKey: key) {
                     wire[key.stringValue] = .some(raw)
                 }
             }
@@ -1050,12 +1035,8 @@ struct FlameyLookChoice: Hashable, Codable {
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
         for slot in FlameySlot.allCases {
-            guard let choice = slots[slot] else { continue }
-            switch choice {
-            case .auto: continue
-            case .bare: try c.encodeNil(forKey: Key(stringValue: slot.rawValue))
-            case .item(let item): try c.encode(item.rawValue, forKey: Key(stringValue: slot.rawValue))
-            }
+            guard let item = slots[slot] else { continue }
+            try c.encode(item.rawValue, forKey: Key(stringValue: slot.rawValue))
         }
     }
 }
@@ -1065,9 +1046,9 @@ struct FlameyLookChoice: Hashable, Codable {
 /// Which ONE halo-class effect is on him. Only one at a time, or a legendary
 /// colour + golden wings + an aura stack into noise.
 ///
-/// Precedence: an aura you CHOSE > golden wings > a legendary colour's own
-/// halo/embers > an aura AUTO picked. The loser isn't gone — the colour still
-/// colours him, the wings still draw — only its glow is withheld.
+/// Precedence: an aura you chose > golden wings > a legendary colour's own
+/// halo/embers. The loser isn't gone — the colour still colours him, the
+/// wings still draw — only its glow is withheld.
 enum FlameyGlow: Hashable {
     case none
     case aura(FlameyItem)
@@ -1131,16 +1112,15 @@ struct FlameyLook: Equatable, Hashable, Codable {
     ///   2. Mood dressing — HEAD only (nightcap at bedtime, party hat on a
     ///      milestone), and only when no costume is worn. The done-shades
     ///      only fill EYES when nothing is there.
-    ///   3. Your choice — an owned item or bare. An item you no longer own
-    ///      reads as auto.
-    ///   4. Auto — the best owned item in the slot (highest tier), plus the
-    ///      Santa hat all December on an auto head.
+    ///   3. Your choice — an owned item. An item you no longer own, and every
+    ///      slot you never picked, is simply empty: nothing is worn that
+    ///      wasn't chosen (or put on by the day or the mood).
     /// Colour is never overridden by a mood or a holiday. Then what worn
     /// items `hides` / clash with comes off, and a compact surface drops the
     /// slots it can't carry.
     static func resolve(
         owned: Set<FlameyItem>,
-        choice: FlameyLookChoice = .auto,
+        choice: FlameyLookChoice = .basic,
         date: Date = Date(),
         mood: [FlameyItem] = [],
         signupDate: Date? = nil,
@@ -1155,24 +1135,11 @@ struct FlameyLook: Equatable, Hashable, Codable {
         } ?? false
         look.holiday = holiday
         look.isAnniversary = anniversary
-        let month = HolidayCalendar.components(of: date, timeZone: timeZone).month
         let owned = owned.union(FlameyItem.allCases.filter { $0.unlock == .always })
 
-        // 3 + 4. Choice, else auto.
-        var autoSlots = Set<FlameySlot>()
-        for slot in FlameySlot.allCases {
-            switch choice[slot] {
-            case .bare:
-                continue
-            case .item(let item) where owned.contains(item) && item.slot == slot:
-                look.wear(item)
-            default:
-                autoSlots.insert(slot)
-                if let best = FlameyWardrobe.best(in: slot, owned: owned) { look.wear(best) }
-                if let monthly = FlameyItem.allCases.first(where: { $0.slot == slot && $0.autoMonth == month }) {
-                    look.wear(monthly)
-                }
-            }
+        // 3. The choice.
+        for item in choice.items where owned.contains(item) {
+            look.wear(item)
         }
 
         // 2. Mood: head only (and only uncostumed); shades only on bare eyes.
@@ -1215,16 +1182,15 @@ struct FlameyLook: Equatable, Hashable, Codable {
             for slot in FlameySlot.allCases where !slot.survivesCompact { look.takeOff(slot) }
         }
 
-        look.glow = glow(for: look, auraWasAuto: autoSlots.contains(.aura))
+        look.glow = glow(for: look)
         return look
     }
 
-    private static func glow(for look: FlameyLook, auraWasAuto: Bool) -> FlameyGlow {
+    private static func glow(for look: FlameyLook) -> FlameyGlow {
         let colorHalo = FlameyPalette.palette(for: look.color)?.hasHalo ?? false
-        if let aura = look[.aura], !auraWasAuto { return .aura(aura) }
+        if let aura = look[.aura] { return .aura(aura) }
         if look.wears(.goldenWings) { return .wings }
         if colorHalo { return .colorHalo }
-        if let aura = look[.aura] { return .aura(aura) }
         return .none
     }
 
@@ -1250,7 +1216,7 @@ struct FlameyLook: Equatable, Hashable, Codable {
            let parsed = FlameyRenderDetail(rawValue: rawDetail) {
             detail = parsed
         }
-        glow = Self.glow(for: self, auraWasAuto: true)
+        glow = Self.glow(for: self)
     }
 
     func encode(to encoder: Encoder) throws {

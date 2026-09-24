@@ -2,8 +2,9 @@ import SwiftUI
 
 /// "New for Flamey": the moment a medal unlocks something he can wear.
 ///
-/// ONE item: he's already WEARING it on the stage (the medal is the cause,
-/// the item is the reward), with Wear it / Later. SEVERAL at once (a
+/// ONE item: the stage PREVIEWS him in it (the medal is the cause, the item is
+/// the reward) — "New for Flamey: Rocket Boots, from your Speed Demon medal" —
+/// with Wear it / Later. Nothing goes on him unless they tap Wear it. SEVERAL at once (a
 /// retroactive sweep, a Recalibrate): ONE card — "Flamey unlocked 7 new
 /// items" — showing him in the best of them and a strip of what's new, with
 /// Open the Closet / Later; the Closet opens with those items marked New.
@@ -14,8 +15,10 @@ struct FlameyUnlockView: View {
     let items: [FlameyItem]
     let owned: Set<FlameyItem>
     let choice: FlameyLookChoice
-    /// The medal behind a single unlock ("Sub-7 Mile"), when known.
+    /// The medal behind a single unlock ("Speed Demon"), when known.
     var medalName: String? = nil
+    /// Its icon and rarity, when known (drawn as a medal over the name).
+    var medal: FlameyMedalInfo? = nil
     var date: Date = Date()
     /// A still frame (the harness; ImageRenderer drives no lifecycle).
     var still: Bool = false
@@ -41,7 +44,7 @@ struct FlameyUnlockView: View {
         }
         // A costume covers what's under it — show it only when it IS the news.
         if bestPerSlot.count > 1 { bestPerSlot[.costume] = nil }
-        for (slot, item) in bestPerSlot { choice[slot] = .item(item) }
+        for (slot, item) in bestPerSlot { choice[slot] = item }
         return FlameyLook.resolve(owned: owned.union(items), choice: choice, date: date, detail: .full)
     }
 
@@ -111,7 +114,10 @@ struct FlameyUnlockView: View {
     @ViewBuilder
     private var header: some View {
         if let medalName {
-            VStack(spacing: 4) {
+            VStack(spacing: 6) {
+                if let medal {
+                    FlameyMedalDisc(medal: medal, size: 44)
+                }
                 Text("Medal earned")
                     .madFont(size: 11, weight: .black, design: .rounded, maxScale: 1.4)
                     .tracking(1.6)
@@ -123,6 +129,7 @@ struct FlameyUnlockView: View {
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
             }
+            .accessibilityElement(children: .combine)
         } else {
             Color.clear.frame(height: 1)
         }
@@ -131,7 +138,7 @@ struct FlameyUnlockView: View {
     private var stage: some View {
         let size: CGFloat = 190
         var mood = FlameMood(kind: .ready, streak: 0)
-        mood.pokeQuip = single != nil ? "Ooh, new!" : "So much new stuff!"
+        mood.pokeQuip = single != nil ? "Ooh, can I?" : "So much new stuff!"
         return ZStack(alignment: .bottom) {
             Ellipse()
                 .fill(RadialGradient(colors: [glow.opacity(0.45), .clear], center: .center, startRadius: 1, endRadius: size * 0.8))
@@ -143,7 +150,7 @@ struct FlameyUnlockView: View {
         }
         .frame(height: size * 1.55, alignment: .bottom)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Flamey, wearing " + look.items.filter { items.contains($0) }.map(\.displayName).joined(separator: ", "))
+        .accessibilityLabel("Preview of Flamey in " + look.items.filter { items.contains($0) }.map(\.displayName).joined(separator: ", "))
     }
 
     private var titleBlock: some View {
@@ -171,11 +178,13 @@ struct FlameyUnlockView: View {
 
     private var subtitle: String {
         if let item = single {
-            if let holiday = FlameyClosetCopy.holidayLine(item) { return "\(item.slot.closetLabel) · \(holiday)" }
-            return "\(item.slot.closetLabel) · " + Self.flavor(item.slot)
+            if let medalName { return "From your \(medalName) medal — " + Self.flavor(item.slot) }
+            if let holiday = FlameyClosetCopy.holidayLine(item) { return holiday }
+            return item.slot.shortLabel + " · " + Self.flavor(item.slot)
         }
         let slots = Set(items.map(\.slot)).count
-        return slots == 1 ? "All ready in his closet" : "Across \(slots) parts of his closet"
+        return slots == 1 ? "Waiting in his closet — you pick what he wears"
+                          : "Across \(slots) parts of his closet — you pick what he wears"
     }
 
     static func flavor(_ slot: FlameySlot) -> String {
@@ -200,7 +209,7 @@ struct FlameyUnlockView: View {
         let shown = Array(items.sorted { ($0.slot.sortIndex, -$0.tier) < ($1.slot.sortIndex, -$1.tier) }.prefix(6))
         return HStack(spacing: 8) {
             ForEach(shown, id: \.self) { item in
-                FlameyClosetTileArt(kind: .item(item), slot: item.slot, color: look.color, scale: 0.55)
+                FlameyItemArt(item: item, color: look.color)
                     .frame(width: 46, height: 46)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.07)))
@@ -247,7 +256,7 @@ struct FlameyUnlockView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityHint(single != nil ? "Keeps it in Flamey's Closet" : "They'll be marked New in Flamey's Closet")
+            .accessibilityHint(single != nil ? "Keeps it in Flamey's Closet without putting it on" : "They'll be marked New in Flamey's Closet")
         }
     }
 }

@@ -22,15 +22,18 @@ final class FlameyClosetLink: ObservableObject {
         var highlight: Set<FlameyItem> = []
         /// Where to open (the first highlighted item's tab and slot).
         var focus: FlameyItem? = nil
+        /// Open on the "what you've unlocked" walkthrough even if it has been
+        /// taken before (it always opens on the FIRST visit).
+        var journey: Bool = false
     }
 
     @Published var pending: Request?
 
     private init() {}
 
-    func open(highlighting items: Set<FlameyItem> = [], focus: FlameyItem? = nil) {
+    func open(highlighting items: Set<FlameyItem> = [], focus: FlameyItem? = nil, journey: Bool = false) {
         guard DashboardStylePreference.current == .fun else { return }
-        pending = Request(highlight: items, focus: focus)
+        pending = Request(highlight: items, focus: focus, journey: journey)
     }
 
     /// The same, raised only AFTER a sheet has finished dismissing — a
@@ -142,7 +145,7 @@ enum FlameyClosetSync {
         pushTask = Task { @MainActor in await push() }
     }
 
-    /// `{"look": {...}}`, or `{"look": null}` for all-auto — the key must
+    /// `{"look": {...}}`, or `{"look": null}` for basic — the key must
     /// be PRESENT (synthesized Encodable would omit a nil, and the server
     /// answers a missing `look` with 400).
     private struct Body: Encodable {
@@ -162,7 +165,7 @@ enum FlameyClosetSync {
         // `fancyFetch` SIGNS THE USER OUT with no token — defer instead.
         guard TokenStore.hasTokens, let userId, isDirty else { return }
         let choice = FlameyFacts.choice
-        guard let body = try? JSONEncoder().encode(Body(look: choice.isAllAuto ? nil : choice)) else { return }
+        guard let body = try? JSONEncoder().encode(Body(look: choice.isBasic ? nil : choice)) else { return }
         do {
             let saved = try await APIClient.fancyFetch(endpoint: "/users/\(userId)/flamey-look", method: .PUT,
                                                        body: body, responseType: Closet.self)
@@ -202,31 +205,197 @@ enum FlameyClosetSync {
         storeServerOwned(closet.owned_item_ids)
         // A local change made while this was in flight wins.
         guard force || !isDirty else { return }
-        FlameyFacts.applyServerChoice(closet.look ?? .auto)
+        FlameyFacts.applyServerChoice(closet.look ?? .basic)
         FlameyClosetLink.shared.objectWillChange.send()
+    }
+}
+
+// MARK: - First-run walkthrough
+
+/// Whether this account has taken (or skipped) the Closet's "what you've
+/// unlocked" walkthrough. Stamped when it ENDS, never when it shows — the
+/// celebration rule: a walkthrough torn down mid-page is offered again.
+enum FlameyJourneyLedger {
+    private static let prefix = "flameyJourneySeenV1|"
+
+    private static var key: String? {
+        guard let me = UserDefaults.standard.string(forKey: "backendUserId"), !me.isEmpty else { return nil }
+        return prefix + me
+    }
+
+    static var seen: Bool {
+        guard let key else { return true }
+        return UserDefaults.standard.bool(forKey: key)
+    }
+
+    static func markSeen() {
+        guard let key else { return }
+        UserDefaults.standard.set(true, forKey: key)
+    }
+}
+
+// MARK: - Medals, from the app's badge catalog
+
+/// Builds the Closet's medal facts from what the app already knows: the
+/// user's earned badges (name + the day they earned it), the catalog's names
+/// for the ones they haven't (fetched once, remembered), and the Badges
+/// screen's own icon + rarity rules (`iconName(for:)`, `Badge.rarity`), so a
+/// medal looks the same in the Closet as on the Badges shelf.
+@MainActor
+enum FlameyMedalCatalog {
+    private static let namesKey = "flameyMedalNamesV1"
+    private static var fetchedThisLaunch = false
+
+    private static var cachedNames: [String: String] {
+        (UserDefaults.standard.dictionary(forKey: namesKey) as? [String: String]) ?? [:]
+    }
+
+    static func medals() -> [String: FlameyMedalInfo] {
+        let earned = Dictionary(UserManager.shared.currentUser.badges.filter { !$0.isLocked }.map { ($0.id, $0) },
+                                uniquingKeysWith: { first, _ in first })
+        let names = cachedNames
+        var out: [String: FlameyMedalInfo] = [:]
+        for id in FlameyWardrobe.catalogBadgeIds {
+            let badge = earned[id] ?? Badge(id: id, name: names[id] ?? "", description: "")
+            let name = earned[id]?.name ?? names[id] ?? HolidayKey(badgeId: id)?.medalName
+            let rarity: FlameyMedalRarity
+            switch badge.rarity {
+            case .common: rarity = .common
+            case .rare: rarity = .rare
+            case .legendary: rarity = .legendary
+            }
+            out[id] = FlameyMedalInfo(badgeId: id, name: name, icon: iconName(for: badge), rarity: rarity,
+                                      earnedAt: earned[id]?.dateAwarded, isEarned: earned[id] != nil)
+        }
+        return out
+    }
+
+    /// The catalog's names for medals not yet earned — once per launch, then
+    /// remembered for offline opens. Calls back only when something changed.
+    static func refreshNames(_ onChange: @escaping () -> Void) {
+        guard !fetchedThisLaunch, TokenStore.hasTokens else { return }
+        fetchedThisLaunch = true
+        Task { @MainActor in
+            guard let catalog = try? await BadgeAPIService.fetchCatalog() else {
+                fetchedThisLaunch = false
+                return
+            }
+            let wanted = FlameyWardrobe.catalogBadgeIds
+            var names = cachedNames
+            for dto in catalog where wanted.contains(dto.badgeId) { names[dto.badgeId] = dto.name }
+            guard names != cachedNames else { return }
+            UserDefaults.standard.set(names, forKey: namesKey)
+            onChange()
+        }
+    }
+}
+
+// MARK: - "Where to earn it"
+
+/// Carries out a `FlameyEarnRoute` once the Closet has gone: each one lands on
+/// the real screen where that medal is earned, through the same doors the rest
+/// of the app uses (`DeepLinkRouter`, `MAD_SwitchTab`, `.madStartBuddyWalk`).
+/// Raised AFTER the dismissal (the `openAfterDismiss` delay) — a presentation
+/// raised in a dismissal's own transaction is the one SwiftUI drops.
+@MainActor
+enum FlameyEarnRouter {
+    static func go(_ route: FlameyEarnRoute) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { perform(route) }
+    }
+
+    private static func switchTab(_ tab: Int) {
+        NotificationCenter.default.post(name: NSNotification.Name("MAD_SwitchTab"), object: nil, userInfo: ["tab": tab])
+    }
+
+    private static func perform(_ route: FlameyEarnRoute) {
+        switch route {
+        case .startWalk:
+            DeepLinkRouter.shared.requestOpenTracker(activity: nil)
+        case .startRun:
+            DeepLinkRouter.shared.requestOpenTracker(activity: .run)
+        case .ghostRace:
+            // Ghost Race is the tracker wizard's own step ("Ghost Race" on the
+            // race question) — opening the wizard is the one door to it.
+            DeepLinkRouter.shared.requestOpenTracker(activity: nil)
+        case .buddyWalk:
+            switchTab(0)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                NotificationCenter.default.post(name: .madStartBuddyWalk, object: nil)
+            }
+        case .compete:
+            switchTab(1)
+        case .createCompetition:
+            DeepLinkRouter.shared.pendingCompeteAction = .createCompetition
+            switchTab(1)
+        case .weeklyChallenge:
+            DeepLinkRouter.shared.pendingCompeteAction = .weeklyChallenge
+            switchTab(1)
+        case .dailyChallenge:
+            switchTab(0)
+        case .postStory, .hypeFriends:
+            switchTab(2)
+        case .nudgeFriends:
+            switchTab(3)
+        case .holiday:
+            break
+        }
     }
 }
 
 // MARK: - The screen, live
 
 /// FlameyClosetView fed from the account's facts and saving through
-/// `FlameyClosetSync`. What the host presents.
+/// `FlameyClosetSync` — opening on the first-run walkthrough the first time.
+/// What the hosts present.
 struct FlameyClosetScreen: View {
     let request: FlameyClosetLink.Request
+    /// False when presented over a friend's sheet: leaving for another tab
+    /// from there would land behind that sheet, so locked cards say WHERE
+    /// instead of offering a button.
+    var canRoute: Bool = true
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model: FlameyClosetModel
+    @State private var showingJourney: Bool
 
-    init(request: FlameyClosetLink.Request) {
+    init(request: FlameyClosetLink.Request, canRoute: Bool = true) {
         self.request = request
+        self.canRoute = canRoute
         _model = State(initialValue: Self.makeModel(request))
+        _showingJourney = State(initialValue: request.journey || !FlameyJourneyLedger.seen)
     }
 
     var body: some View {
-        FlameyClosetView(model: model, onDone: { dismiss() })
-            .onDisappear {
-                FlameySeenLedger.markSeen(model.owned)
-                FlameyClosetSync.flush()
+        ZStack {
+            if showingJourney {
+                FlameyJourneyView(model: model, onFinish: finishJourney)
+                    .transition(.opacity)
+            } else {
+                FlameyClosetView(model: model, onDone: { dismiss() }, onShowJourney: {
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { showingJourney = true }
+                })
+                .transition(.opacity)
             }
+        }
+        .onAppear {
+            if canRoute {
+                model.onEarn = { route in
+                    model.detail = nil
+                    dismiss()
+                    FlameyEarnRouter.go(route)
+                }
+            }
+            FlameyMedalCatalog.refreshNames { model.medals = FlameyMedalCatalog.medals() }
+        }
+        .onDisappear {
+            FlameySeenLedger.markSeen(model.owned)
+            FlameyClosetSync.flush()
+        }
+    }
+
+    private func finishJourney() {
+        FlameyJourneyLedger.markSeen()
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { showingJourney = false }
     }
 
     @MainActor
@@ -244,6 +413,7 @@ struct FlameyClosetScreen: View {
         )
         let fresh = FlameySeenLedger.unseen(in: owned).union(request.highlight.intersection(owned))
         let model = FlameyClosetModel(owned: owned, choice: FlameyFacts.choice, newItems: fresh, facts: facts,
+                                      medals: FlameyMedalCatalog.medals(),
                                       signupDate: FlameyFacts.signupDate, focus: request.focus)
         model.onChoiceChange = { FlameyClosetSync.choiceChanged($0) }
         return model
@@ -297,9 +467,9 @@ struct FlameyUnlockCelebrationHost: View {
     }
 
     /// The medal behind a single unlock, from the badge list.
-    private var medalName: String? {
+    private var medal: FlameyMedalInfo? {
         guard items.count == 1, let id = items[0].badgeId else { return nil }
-        return UserManager.shared.currentUser.badges.first { $0.id == id }?.name
+        return FlameyMedalCatalog.medals()[id]
     }
 
     var body: some View {
@@ -308,10 +478,11 @@ struct FlameyUnlockCelebrationHost: View {
                 items: items,
                 owned: FlameyFacts.ownedItems,
                 choice: FlameyFacts.choice,
-                medalName: medalName,
+                medalName: medal?.name,
+                medal: medal,
                 onWear: { item in
                     var choice = FlameyFacts.choice
-                    choice[item.slot] = .item(item)
+                    choice[item.slot] = item
                     FlameyClosetSync.choiceChanged(choice)
                     FlameySeenLedger.markSeen([item])
                     celebrations.dismissCurrentCelebration()
@@ -355,17 +526,28 @@ extension View {
 // MARK: - Entry points
 
 /// The Fun hero's way into the Closet: a labelled capsule under Flamey (the
-/// top-left corner is his; the top-right holds savers + Share).
+/// top-left corner is his; the top-right holds savers + Share). Wears a dot
+/// while there is something to see — the walkthrough not yet taken, or items
+/// unlocked since the last visit — which is how the Closet is discovered
+/// instead of ambushing anyone at launch.
 struct HeroClosetButton: View {
+    /// Redraws when the Closet closes (the ledgers live in UserDefaults).
+    @ObservedObject private var link = FlameyClosetLink.shared
+
+    private var hasNews: Bool {
+        !FlameyJourneyLedger.seen
+            || !FlameySeenLedger.unseen(in: FlameyFacts.ownedItems.union(FlameyClosetSync.serverOwned)).isEmpty
+    }
+
     var body: some View {
-        FlameyClosetPill {
+        FlameyClosetPill(hasNews: hasNews) {
             MADHaptics.action()
             FlameyClosetLink.shared.open()
         }
     }
 }
 
-/// "Customize Flamey" on your own profile (Fun only).
+/// "Flamey's Closet" on your own profile (Fun only).
 struct FlameyClosetProfileRow: View {
     @AppStorage(DashboardStylePreference.key) private var styleRaw = DashboardStyle.modern.rawValue
     /// Re-reads the look when the Closet closes (the choice lives in
@@ -379,7 +561,8 @@ struct FlameyClosetProfileRow: View {
                 look: look,
                 unlocked: owned.filter { $0.unlock != .always && !$0.isMoodProp }.count,
                 total: FlameyItem.closet.filter { $0.unlock != .always }.count,
-                fresh: FlameySeenLedger.unseen(in: owned).count
+                fresh: FlameySeenLedger.unseen(in: owned).count,
+                firstVisit: !FlameyJourneyLedger.seen
             ) {
                 MADHaptics.action()
                 FlameyClosetLink.shared.open()

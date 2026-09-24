@@ -52,6 +52,18 @@ final class DeepLinkRouter: ObservableObject {
 
     @Published var pendingTrackerLaunch: TrackerLaunchRequest?
 
+    /// Something to open ON the Compete tab (not a specific competition) —
+    /// Flamey's Closet's "Where to earn it" for the organiser and weekly
+    /// medals. Parked for the usual reason (`CompetitionsListView` exists only
+    /// once the tab has been visited) and consumed in BOTH `.task` and
+    /// `.onReceive`. Callers also switch to the tab (`MAD_SwitchTab`, 1).
+    enum CompeteAction: Equatable {
+        case createCompetition
+        case weeklyChallenge
+    }
+
+    @Published var pendingCompeteAction: CompeteAction?
+
     private init() {}
 
     /// Asks the Dashboard to open the tracker, switching to it first.

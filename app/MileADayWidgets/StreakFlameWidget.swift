@@ -83,7 +83,7 @@ struct StreakFlameProvider: TimelineProvider {
         let isFun: Bool
         var flameyBadges: Set<String> = []
         var signupDate: Date? = nil
-        var flameyChoice: FlameyLookChoice = .auto
+        var flameyChoice: FlameyLookChoice = .basic
     }
 
     func placeholder(in context: Context) -> StreakFlameEntry {

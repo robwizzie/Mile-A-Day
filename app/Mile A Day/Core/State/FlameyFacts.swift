@@ -83,17 +83,19 @@ enum FlameyFacts {
 
     // MARK: The Closet choice
 
-    /// "<userId>" → the wire JSON (`{slot: id|null}`), keyed by account so a
-    /// second account on this phone starts on auto.
+    /// "<userId>" → the wire JSON (`{slot: id}`), keyed by account so a
+    /// second account on this phone starts basic.
     private static let choiceKeyPrefix = "flameyLookChoiceV1|"
 
-    /// What this user picked in the Closet. Absent = all AUTO, which is what
-    /// everyone sees until they open it: their best owned items.
+    /// What this user picked in the Closet. Absent = BASIC: he looks exactly
+    /// as he did before the wardrobe existed until they pick something. A
+    /// blob written by a build that had "auto" slots decodes with its picked
+    /// items kept and every auto/none slot empty.
     @MainActor
     static var choice: FlameyLookChoice {
         guard let me = currentUserId,
               let data = UserDefaults.standard.data(forKey: choiceKeyPrefix + me),
-              let decoded = try? JSONDecoder().decode(FlameyLookChoice.self, from: data) else { return .auto }
+              let decoded = try? JSONDecoder().decode(FlameyLookChoice.self, from: data) else { return .basic }
         return decoded
     }
 

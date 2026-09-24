@@ -300,7 +300,7 @@ struct WidgetDataStore {
     static func loadFlameyChoice() -> FlameyLookChoice {
         guard let defaults = UserDefaults(suiteName: suiteName),
               let data = defaults.data(forKey: flameyChoiceKey),
-              let choice = try? JSONDecoder().decode(FlameyLookChoice.self, from: data) else { return .auto }
+              let choice = try? JSONDecoder().decode(FlameyLookChoice.self, from: data) else { return .basic }
         return choice
     }
 

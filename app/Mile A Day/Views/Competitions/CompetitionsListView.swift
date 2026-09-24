@@ -184,7 +184,14 @@ struct CompetitionsListView: View {
         // A competition asked for by id (feed chip, competition push) — in
         // BOTH lifecycles, since whichever of the tab and the request came
         // first decides which one fires.
-        .task { await consumePendingCompetition() }
+        .task {
+            await consumePendingCompetition()
+            consumePendingCompeteAction()
+        }
+        .onReceive(DeepLinkRouter.shared.$pendingCompeteAction) { action in
+            guard action != nil else { return }
+            consumePendingCompeteAction()
+        }
         .onReceive(DeepLinkRouter.shared.$pendingCompetitionId) { id in
             guard id != nil else { return }
             Task { await consumePendingCompetition() }
@@ -233,6 +240,22 @@ struct CompetitionsListView: View {
         }
         await competitionService.refreshAllData()
         if let found = find() { selectedCompetition = found }
+    }
+
+    /// "Start a competition" / "Open the weekly challenge" asked for from
+    /// elsewhere (Flamey's Closet). Opens the same sheets this screen's own
+    /// buttons do.
+    private func consumePendingCompeteAction() {
+        let router = DeepLinkRouter.shared
+        guard let action = router.pendingCompeteAction else { return }
+        router.pendingCompeteAction = nil
+        selectedSegment = .compete
+        switch action {
+        case .createCompetition:
+            createRequest = CreateRequest()
+        case .weeklyChallenge:
+            if weeklyService.current != nil { showingWeeklyChallenge = true }
+        }
     }
 
     /// Put the invites section on screen. The Invites segment no longer
