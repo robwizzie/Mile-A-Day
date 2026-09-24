@@ -11,24 +11,40 @@ import SwiftUI
 
 enum FlameyArt {
     struct Anchors {
-        /// His base (lifted when he hovers).
+        /// His base (raised by his legs when he wears shoes, lifted again
+        /// when he hovers).
         let bottom: CGFloat
         /// The floor — where companions stand and jets land.
         let ground: CGFloat
         let faceY: CGFloat
         let eyeX: CGFloat
         let topY: CGFloat
+        /// Where his soles are: the floor, or above it when he hovers.
+        var feet: CGFloat = 0
     }
 
-    static func anchors(size: CGFloat, scale: CGFloat, lift: CGFloat = 0) -> Anchors {
+    /// `lift` is the hover (jets, wings), `stand` his legs — both in body
+    /// units. The body sits on top of both; the feet only rise by the hover.
+    static func anchors(size: CGFloat, scale: CGFloat, lift: CGFloat = 0, stand: CGFloat = 0) -> Anchors {
         let u = size * scale
-        let bottom = size / 2 - lift * u
+        let bottom = size / 2 - (lift + stand) * u
         return Anchors(bottom: bottom,
                        ground: size / 2,
                        faceY: bottom - 0.32 * u,
                        eyeX: 0.145 * u,
-                       topY: bottom - 0.98 * u)
+                       topY: bottom - 0.98 * u,
+                       feet: size / 2 - lift * u)
     }
+
+    // MARK: - Legs
+
+    /// How far his legs raise him when he wears shoes, in body units. Bare,
+    /// he has no legs at all and sits on the ground exactly as he always
+    /// has; shoes are the only thing that stands him up.
+    static let legLength: CGFloat = 0.15
+
+    /// Where each leg meets the floor (the figure draws the legs).
+    static var legSpread: CGFloat { FlameBuddyFigure.legSpread }
 
     /// His body's rectangle (the figure's 0.82 × 1 frame, scaled about its
     /// base) — for anything that must clip to his outline.
@@ -99,7 +115,7 @@ enum FlameyArt {
         return p
     }
 
-    private static func hx(_ v: UInt32, _ o: Double = 1) -> Color { FlameyPalette.hex(v, o) }
+    static func hx(_ v: UInt32, _ o: Double = 1) -> Color { FlameyPalette.hex(v, o) }
 
     // MARK: - Tight surfaces (the dashboard hero's column)
 
@@ -198,7 +214,9 @@ enum FlameyArt {
         let L = lw(u)
         let ink = self.ink
         for side in [-1.0, 1.0] as [CGFloat] {
-            var g = placed(ctx, side * 0.16 * u, a.bottom - h * 0.35)
+            // Planted on his feet (the leg enters the heel opening, which
+            // sits at -0.2w in shoe space; toes point outward).
+            var g = placed(ctx, side * (legSpread + 0.05) * u, a.feet - h * 0.46)
             g.scaleBy(x: side, y: 1)
             switch item {
             case .canvasSneakers:
@@ -274,7 +292,12 @@ enum FlameyArt {
                 if jets {
                     // Jets first, so the boot sits over their roots. They
                     // reach down to the floor under the hover.
-                    let reach = max(1.2, (a.ground - a.bottom) / h + 1.1)
+                    // Down to the floor and no further: the jets end where
+                    // he would land, washing the floor with a warm glow.
+                    let floorY = a.ground - a.feet + h * 0.46
+                    let reach = max(0.7, (floorY - h * 0.45) / h + 0.05)
+                    var puff = g; puff.addFilter(.blur(radius: h * 0.30))
+                    puff.fill(ellipse(-w * 0.11, floorY, w * 0.42, h * 0.20), with: .color(hx(0xFF9A2E, 0.55)))
                     for (dx, sc) in [(-w * 0.28, 1.0), (w * 0.06, 0.82)] as [(CGFloat, CGFloat)] {
                         var flame = Path()
                         let len = h * reach * sc
@@ -380,8 +403,8 @@ enum FlameyArt {
             sc.stroke(stripe, with: .color(hx(0xE8384F)), lineWidth: h * 0.28)
             g.stroke(shape, with: .color(ink.opacity(0.55)), lineWidth: L * 0.8)
         case .ballCap:
-            let g = placed(ctx, -0.01 * u, top + 0.15 * u, -6)
-            let w = 0.34 * u, h = 0.19 * u
+            let g = placed(ctx, -0.005 * u, top + 0.18 * u, -6)
+            let w = 0.37 * u, h = 0.21 * u
             var dome = Path()
             dome.move(to: pt(-w / 2, 0)); dome.addCurve(to: pt(w / 2, 0), control1: pt(-w / 2, -h * 1.25), control2: pt(w / 2, -h * 1.25)); dome.closeSubpath()
             var brim = Path()
@@ -396,19 +419,7 @@ enum FlameyArt {
             g.fill(brim, with: .color(hx(0xB3152F)))
             g.stroke(brim, with: .color(ink), lineWidth: L)
             g.fill(ellipse(0, -h * 0.93, h * 0.09, h * 0.05), with: .color(hx(0xB3152F)))
-        case .visor:
-            let g = placed(ctx, 0, top + 0.20 * u, -4)
-            let w = 0.36 * u, h = 0.07 * u
-            var brim = Path()
-            brim.move(to: pt(-w * 0.1, 0)); brim.addQuadCurve(to: pt(w * 0.92, h * 0.9), control: pt(w * 0.6, -h * 1.6))
-            brim.addQuadCurve(to: pt(w * 0.05, h * 1.2), control: pt(w * 0.6, h * 2.2)); brim.closeSubpath()
-            let b = band(w: w, h: h, sag: 0.6)
-            g.fill(b, with: .color(.white))
-            g.stroke(b, with: .color(ink), lineWidth: L)
-            g.fill(brim, with: lin([hx(0x2EE6C8), hx(0x0FA38F)], pt(0, -h), pt(0, h * 1.5)))
-            g.stroke(brim, with: .color(ink), lineWidth: L)
-            var st = Path(); st.move(to: pt(w * 0.12, h * 0.9)); st.addQuadCurve(to: pt(w * 0.78, h * 0.72), control: pt(w * 0.5, h * 1.5))
-            g.stroke(st, with: .color(.white.opacity(0.7)), style: StrokeStyle(lineWidth: L * 0.8, dash: [L * 2, L * 1.5]))
+        case .visor: visor(&ctx, a, u)
         case .beanie:
             let g = placed(ctx, 0, top + 0.19 * u, -3)
             let w = 0.34 * u, h = 0.24 * u
@@ -433,24 +444,7 @@ enum FlameyArt {
                 g.fill(circle(dx * h * 0.25, -h * 1.0 + dy * h * 0.25, h * 0.14), with: .color(.white))
             }
             g.stroke(circle(0, -h * 1.0, h * 0.2), with: .color(hx(0xC9D6F2)), lineWidth: L * 0.7)
-        case .bucketHat:
-            let g = placed(ctx, 0, top + 0.18 * u, -3)
-            let w = 0.28 * u, h = 0.16 * u
-            var brim = Path()
-            brim.move(to: pt(-w * 0.52, -h * 0.05)); brim.addLine(to: pt(w * 0.52, -h * 0.05))
-            brim.addQuadCurve(to: pt(w * 0.78, h * 0.42), control: pt(w * 0.72, h * 0.1))
-            brim.addQuadCurve(to: pt(-w * 0.78, h * 0.42), control: pt(0, h * 0.62))
-            brim.addQuadCurve(to: pt(-w * 0.52, -h * 0.05), control: pt(-w * 0.72, h * 0.1)); brim.closeSubpath()
-            var crown = Path()
-            crown.move(to: pt(-w * 0.5, 0)); crown.addLine(to: pt(-w * 0.38, -h * 0.95))
-            crown.addQuadCurve(to: pt(w * 0.38, -h * 0.95), control: pt(0, -h * 1.12)); crown.addLine(to: pt(w * 0.5, 0)); crown.closeSubpath()
-            g.fill(crown, with: lin([hx(0xA3B86C), hx(0x7E9448)], pt(0, -h), pt(0, 0)))
-            g.stroke(crown, with: .color(ink), lineWidth: L)
-            g.fill(Path(CGRect(x: -w * 0.49, y: -h * 0.28, width: w * 0.98, height: h * 0.22)), with: .color(hx(0x5E6E33)))
-            g.fill(brim, with: .color(hx(0x93A85C)))
-            var stitch = Path(); stitch.move(to: pt(-w * 0.66, h * 0.3)); stitch.addQuadCurve(to: pt(w * 0.66, h * 0.3), control: pt(0, h * 0.5))
-            g.stroke(stitch, with: .color(hx(0x5E6E33)), style: StrokeStyle(lineWidth: L * 0.7, dash: [L * 1.8, L * 1.2]))
-            g.stroke(brim, with: .color(ink), lineWidth: L)
+        case .bucketHat: bucketHat(&ctx, a, u)
         case .safariHat:
             let g = placed(ctx, 0, top + 0.17 * u, -4)
             let w = 0.30 * u, h = 0.18 * u
@@ -484,26 +478,7 @@ enum FlameyArt {
             g.fill(circle(w * 0.18, -h * 0.17, h * 0.08), with: .color(hx(0xDDE3EA)))
             g.fill(brim, with: lin([hx(0xB87A3E), hx(0x8A5226)], pt(0, -h * 0.3), pt(0, h * 0.3)))
             g.stroke(brim, with: .color(ink), lineWidth: L)
-        case .aviatorCap:
-            let g = placed(ctx, 0, top + 0.19 * u, -3)
-            let w = 0.34 * u, h = 0.24 * u
-            var dome = Path()
-            dome.move(to: pt(-w / 2, h * 0.05)); dome.addCurve(to: pt(w / 2, h * 0.05), control1: pt(-w / 2, -h * 1.2), control2: pt(w / 2, -h * 1.2)); dome.closeSubpath()
-            g.fill(dome, with: lin([hx(0x9A6038), hx(0x6B3E20)], pt(-w * 0.3, -h), pt(w * 0.3, 0)))
-            var seam = Path(); seam.move(to: pt(0, -h * 0.86)); seam.addLine(to: pt(0, h * 0.02))
-            g.stroke(seam, with: .color(hx(0x4A2A14)), style: StrokeStyle(lineWidth: L * 0.8, dash: [L * 1.5, L]))
-            g.stroke(dome, with: .color(ink), lineWidth: L)
-            g.fill(rrect(-w * 0.55, -h * 0.02, w * 1.1, h * 0.18, h * 0.09), with: .color(hx(0xF3E6CF)))
-            let gy = -h * 0.42
-            var strap = Path(); strap.move(to: pt(-w * 0.5, gy + h * 0.02)); strap.addQuadCurve(to: pt(w * 0.5, gy + h * 0.02), control: pt(0, gy + h * 0.12))
-            g.stroke(strap, with: .color(hx(0x2B2B33)), lineWidth: h * 0.1)
-            for sx in [-1.0, 1.0] as [CGFloat] {
-                let c = pt(sx * w * 0.2, gy)
-                g.fill(circle(c.x, c.y, h * 0.2), with: .color(hx(0xC9953A)))
-                g.stroke(circle(c.x, c.y, h * 0.2), with: .color(ink), lineWidth: L)
-                g.fill(circle(c.x, c.y, h * 0.14), with: lin([hx(0x9FE3FF), hx(0x3A7BD5)], pt(c.x - h * 0.14, c.y - h * 0.14), pt(c.x + h * 0.14, c.y + h * 0.14)))
-                g.fill(circle(c.x - h * 0.05, c.y - h * 0.05, h * 0.04), with: .color(.white.opacity(0.9)))
-            }
+        case .aviatorCap: aviatorCap(&ctx, a, u)
         case .headlampHelmet:
             let g = placed(ctx, 0, top + 0.19 * u, -3)
             let w = 0.36 * u, h = 0.23 * u
@@ -570,19 +545,7 @@ enum FlameyArt {
             g.fill(rim, with: .color(hx(0xC89B3C)))
             g.stroke(rim, with: .color(ink), lineWidth: L)
             for i in 0..<5 { g.fill(circle(-w * 0.4 + CGFloat(i) * w * 0.2, -h * 0.02, h * 0.035), with: .color(hx(0xFFE9A8))) }
-        case .directorsBeret:
-            let g = placed(ctx, 0.02 * u, top + 0.15 * u, -12)
-            let w = 0.40 * u, h = 0.13 * u
-            var b = Path()
-            b.move(to: pt(-w * 0.42, h * 0.3))
-            b.addCurve(to: pt(w * 0.55, h * 0.1), control1: pt(-w * 0.62, -h * 1.1), control2: pt(w * 0.62, -h * 1.0))
-            b.addQuadCurve(to: pt(-w * 0.42, h * 0.3), control: pt(w * 0.1, h * 0.7))
-            b.closeSubpath()
-            g.fill(b, with: lin([hx(0x3A3A48), hx(0x14141C)], pt(0, -h), pt(0, h)))
-            g.stroke(b, with: .color(ink), lineWidth: L)
-            g.fill(rrect(-w * 0.03, -h * 0.95, w * 0.06, h * 0.3, w * 0.03), with: .color(hx(0x14141C)))
-            var bandPath = Path(); bandPath.move(to: pt(-w * 0.4, h * 0.26)); bandPath.addQuadCurve(to: pt(w * 0.2, h * 0.36), control: pt(-w * 0.1, h * 0.6))
-            g.stroke(bandPath, with: .color(hx(0xE8384F)), lineWidth: L * 1.4)
+        case .directorsBeret: beret(&ctx, a, u)
         case .santaHat: santaHat(&ctx, a, u)
         case .leprechaunHat: leprechaunHat(&ctx, a, u)
         case .bunnyEars: bunnyEars(&ctx, a, u)
@@ -594,6 +557,210 @@ enum FlameyArt {
         default: break
         }
     }
+
+    // MARK: Hats that SIT on him
+    //
+    // A hat sits where his head is as wide as its band — ~0.36u across,
+    // 0.18–0.24u under his tip — and its crown covers the tip, so nothing
+    // floats and no flame pokes through a hat that should hide it. Light
+    // from the top-left: a sheen on the upper-left, shade low-right.
+
+    /// A soft top-left sheen clipped to `shape`.
+    static func sheen(_ g: GraphicsContext, _ shape: Path, _ r: CGRect, _ o: Double = 0.30) {
+        var c = g
+        c.clip(to: shape)
+        let center = pt(r.minX + r.width * 0.32, r.minY + r.height * 0.28)
+        c.fill(ellipse(center.x, center.y, r.width * 0.30, r.height * 0.22),
+               with: .radialGradient(Gradient(colors: [.white.opacity(o), .white.opacity(0)]),
+                                     center: center, startRadius: 0, endRadius: r.width * 0.32))
+    }
+
+    /// Open-topped sports visor: a terry band round his head (his flame
+    /// pokes out of the top, as a visor's should) and a brim out front.
+    static func visor(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
+        let L = lw(u), ink = self.ink
+        let g = placed(ctx, 0.005 * u, a.topY + 0.25 * u, -3)
+        let w = 0.43 * u, h = 0.075 * u
+        let bandShape = band(w: w, h: h, sag: 0.55)
+        // Brim first: a wide crescent jutting toward us under the band.
+        var brim = Path()
+        brim.move(to: pt(-w * 0.50, h * 0.30))
+        brim.addQuadCurve(to: pt(w * 0.50, h * 0.30), control: pt(0, h * 1.3))
+        brim.addQuadCurve(to: pt(-w * 0.50, h * 0.30), control: pt(0, h * 4.4))
+        brim.closeSubpath()
+        var drop = g
+        drop.addFilter(.shadow(color: .black.opacity(0.35), radius: 0.015 * u, y: 0.012 * u))
+        drop.fill(brim, with: lin([hx(0x3CF0D2), hx(0x0E9C88)], pt(0, h * 0.4), pt(0, h * 2.6)))
+        var bs = g
+        bs.clip(to: brim)
+        bs.fill(ellipse(-w * 0.16, h * 1.2, w * 0.2, h * 0.34), with: .color(.white.opacity(0.28)))
+        var st = Path()
+        st.move(to: pt(-w * 0.40, h * 0.95))
+        st.addQuadCurve(to: pt(w * 0.40, h * 0.95), control: pt(0, h * 3.3))
+        bs.stroke(st, with: .color(.white.opacity(0.7)), style: StrokeStyle(lineWidth: L * 0.8, dash: [L * 2, L * 1.5]))
+        g.stroke(brim, with: .color(ink), lineWidth: L)
+        g.fill(bandShape, with: lin([.white, hx(0xDDE3EA)], pt(0, -h / 2), pt(0, h)))
+        var stripe = g
+        stripe.clip(to: bandShape)
+        var line = Path()
+        line.move(to: pt(-w / 2, 0))
+        line.addQuadCurve(to: pt(w / 2, 0), control: pt(0, h * 1.1))
+        stripe.stroke(line, with: .color(hx(0x14B8A0)), lineWidth: h * 0.26)
+        g.stroke(bandShape, with: .color(ink), lineWidth: L)
+    }
+
+    /// The director's beret: a big soft disc slouched over his tip, a rolled
+    /// edge hugging his head, a little stalk on top.
+    static func beret(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
+        let L = lw(u), ink = self.ink
+        let g = placed(ctx, 0.02 * u, a.topY + 0.13 * u, -10)
+        let rx = 0.265 * u, ry = 0.115 * u
+        var disc = Path()
+        disc.move(to: pt(-rx * 0.72, ry * 0.62))
+        disc.addCurve(to: pt(rx * 1.02, ry * 0.30), control1: pt(-rx * 1.25, -ry * 1.1), control2: pt(rx * 0.85, -ry * 1.45))
+        disc.addQuadCurve(to: pt(-rx * 0.72, ry * 0.62), control: pt(rx * 0.30, ry * 1.25))
+        disc.closeSubpath()
+        g.fill(disc, with: lin([hx(0x4A4A5C), hx(0x1A1A24)], pt(-rx, -ry), pt(rx, ry)))
+        sheen(g, disc, CGRect(x: -rx, y: -ry * 1.2, width: rx * 2, height: ry * 2), 0.22)
+        g.stroke(disc, with: .color(ink), lineWidth: L)
+        // The rolled edge round his head, with a red piping.
+        var edge = Path()
+        edge.move(to: pt(-rx * 0.70, ry * 0.52))
+        edge.addQuadCurve(to: pt(rx * 0.62, ry * 0.62), control: pt(-rx * 0.02, ry * 1.25))
+        g.stroke(edge, with: .color(ink), style: StrokeStyle(lineWidth: 0.045 * u + L * 2, lineCap: .round))
+        g.stroke(edge, with: .color(hx(0x24242E)), style: StrokeStyle(lineWidth: 0.045 * u, lineCap: .round))
+        g.stroke(edge, with: .color(hx(0xE8384F)), style: StrokeStyle(lineWidth: L * 1.3, lineCap: .round))
+        var stalk = Path()
+        stalk.move(to: pt(rx * 0.05, -ry * 0.78))
+        stalk.addQuadCurve(to: pt(rx * 0.16, -ry * 1.28), control: pt(rx * 0.02, -ry * 1.15))
+        g.stroke(stalk, with: .color(hx(0x1A1A24)), style: StrokeStyle(lineWidth: 0.022 * u, lineCap: .round))
+    }
+
+    /// Bucket hat: a soft canvas crown over his tip, a brim that droops all
+    /// the way round (back half behind the crown, front lip over it).
+    static func bucketHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
+        let L = lw(u), ink = self.ink
+        let g = placed(ctx, 0.005 * u, a.topY + 0.19 * u, -3)
+        let w = 0.38 * u, h = 0.21 * u
+        let back = ellipse(0, h * 0.02, w * 0.80, h * 0.24)
+        g.fill(back, with: .color(hx(0x6E8240)))
+        g.stroke(back, with: .color(ink), lineWidth: L)
+        var crown = Path()
+        crown.move(to: pt(-w * 0.50, h * 0.08))
+        crown.addLine(to: pt(-w * 0.40, -h * 0.82))
+        crown.addQuadCurve(to: pt(w * 0.40, -h * 0.82), control: pt(0, -h * 1.08))
+        crown.addLine(to: pt(w * 0.50, h * 0.08))
+        crown.closeSubpath()
+        g.fill(crown, with: lin([hx(0xB4C878), hx(0x7E9448)], pt(-w * 0.3, -h), pt(w * 0.3, h * 0.1)))
+        sheen(g, crown, CGRect(x: -w / 2, y: -h, width: w, height: h), 0.26)
+        g.stroke(crown, with: .color(ink), lineWidth: L)
+        var hatBand = Path()
+        hatBand.move(to: pt(-w * 0.47, -h * 0.20))
+        hatBand.addQuadCurve(to: pt(w * 0.47, -h * 0.20), control: pt(0, -h * 0.08))
+        hatBand.addLine(to: pt(w * 0.50, h * 0.06))
+        hatBand.addQuadCurve(to: pt(-w * 0.50, h * 0.06), control: pt(0, h * 0.2))
+        hatBand.closeSubpath()
+        g.fill(hatBand, with: .color(hx(0x55652C)))
+        var front = Path()
+        front.move(to: pt(-w * 0.80, h * 0.04))
+        front.addQuadCurve(to: pt(w * 0.80, h * 0.04), control: pt(0, h * 0.30))
+        front.addQuadCurve(to: pt(-w * 0.80, h * 0.04), control: pt(0, h * 0.78))
+        front.closeSubpath()
+        g.fill(front, with: lin([hx(0xA3B86C), hx(0x7E9448)], pt(0, h * 0.1), pt(0, h * 0.5)))
+        var stitch = Path()
+        stitch.move(to: pt(-w * 0.62, h * 0.20))
+        stitch.addQuadCurve(to: pt(w * 0.62, h * 0.20), control: pt(0, h * 0.62))
+        g.stroke(stitch, with: .color(hx(0x55652C)), style: StrokeStyle(lineWidth: L * 0.7, dash: [L * 1.8, L * 1.2]))
+        g.stroke(front, with: .color(ink), lineWidth: L)
+    }
+
+    /// Leather aviator cap: a dome over his tip, fleece-lined earflaps
+    /// hugging his sides, goggles pushed up on the front.
+    static func aviatorCap(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
+        let L = lw(u), ink = self.ink
+        let g = placed(ctx, 0.01 * u, a.topY + 0.22 * u, -2)
+        let w = 0.40 * u, h = 0.26 * u
+        let leather = lin([hx(0xA86A3C), hx(0x6B3E20)], pt(-w * 0.3, -h), pt(w * 0.3, h * 0.3))
+        for sx in [-1.0, 1.0] as [CGFloat] {
+            var flap = Path()
+            flap.move(to: pt(sx * w * 0.36, -h * 0.05))
+            flap.addLine(to: pt(sx * w * 0.52, -h * 0.02))
+            flap.addQuadCurve(to: pt(sx * w * 0.48, h * 0.52), control: pt(sx * w * 0.60, h * 0.30))
+            flap.addQuadCurve(to: pt(sx * w * 0.32, h * 0.18), control: pt(sx * w * 0.32, h * 0.52))
+            flap.closeSubpath()
+            g.stroke(flap, with: .color(hx(0xF3E6CF)), style: StrokeStyle(lineWidth: L * 3.2, lineJoin: .round))
+            g.fill(flap, with: leather)
+            g.stroke(flap, with: .color(ink), lineWidth: L)
+            g.fill(circle(sx * w * 0.47, h * 0.40, h * 0.035), with: .color(hx(0xC9953A)))
+        }
+        var dome = Path()
+        dome.move(to: pt(-w / 2, h * 0.06))
+        dome.addCurve(to: pt(w / 2, h * 0.06), control1: pt(-w / 2, -h * 1.22), control2: pt(w / 2, -h * 1.22))
+        dome.closeSubpath()
+        g.fill(dome, with: leather)
+        sheen(g, dome, CGRect(x: -w / 2, y: -h * 0.9, width: w, height: h), 0.26)
+        var seam = Path()
+        seam.move(to: pt(0, -h * 0.88))
+        seam.addLine(to: pt(0, h * 0.04))
+        g.stroke(seam, with: .color(hx(0x4A2A14)), style: StrokeStyle(lineWidth: L * 0.8, dash: [L * 1.5, L]))
+        g.stroke(dome, with: .color(ink), lineWidth: L)
+        var trim = Path()
+        trim.move(to: pt(-w * 0.50, h * 0.03))
+        trim.addQuadCurve(to: pt(w * 0.50, h * 0.03), control: pt(0, h * 0.24))
+        g.stroke(trim, with: .color(ink), style: StrokeStyle(lineWidth: h * 0.20 + L * 2, lineCap: .round))
+        g.stroke(trim, with: .color(hx(0xF6EAD2)), style: StrokeStyle(lineWidth: h * 0.20, lineCap: .round))
+        let gy = -h * 0.42
+        var strap = Path()
+        strap.move(to: pt(-w * 0.49, gy + h * 0.06))
+        strap.addQuadCurve(to: pt(w * 0.49, gy + h * 0.06), control: pt(0, gy + h * 0.16))
+        g.stroke(strap, with: .color(hx(0x2B2B33)), lineWidth: h * 0.11)
+        for sx in [-1.0, 1.0] as [CGFloat] {
+            let c = pt(sx * w * 0.19, gy)
+            g.fill(circle(c.x, c.y, h * 0.21), with: .color(hx(0xC9953A)))
+            g.stroke(circle(c.x, c.y, h * 0.21), with: .color(ink), lineWidth: L)
+            g.fill(circle(c.x, c.y, h * 0.15), with: lin([hx(0x9FE3FF), hx(0x3A7BD5)], pt(c.x - h * 0.14, c.y - h * 0.14), pt(c.x + h * 0.14, c.y + h * 0.14)))
+            g.fill(circle(c.x - h * 0.05, c.y - h * 0.05, h * 0.045), with: .color(.white.opacity(0.9)))
+        }
+    }
+
+    /// A cone hat worn ON his tip: the base is as wide as his head where it
+    /// sits, so the tip is inside it — never a cone balanced above him.
+    static func cone(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat, tilt: Double,
+                     fill: GraphicsContext.Shading, stripes: Color, trim: Color, pom: Color, dark: Bool) {
+        let L = lw(u), ink = self.ink
+        let bw = 0.30 * u, ht = coneHeight * u
+        let g = placed(ctx, 0.01 * u, a.topY + 0.16 * u, tilt)
+        var c = Path()
+        c.move(to: pt(-bw / 2, 0))
+        c.addQuadCurve(to: pt(0, -ht), control: pt(-bw * 0.28, -ht * 0.5))
+        c.addQuadCurve(to: pt(bw / 2, 0), control: pt(bw * 0.28, -ht * 0.5))
+        c.addQuadCurve(to: pt(-bw / 2, 0), control: pt(0, bw * 0.16))
+        c.closeSubpath()
+        g.fill(c, with: fill)
+        var st = g
+        st.clip(to: c)
+        for t in [0.30, 0.58] as [CGFloat] {
+            var stripe = Path()
+            stripe.move(to: pt(-bw, -ht * t + bw * 0.06))
+            stripe.addQuadCurve(to: pt(bw, -ht * t + bw * 0.06), control: pt(0, -ht * t + bw * 0.16))
+            st.stroke(stripe, with: .color(stripes), lineWidth: ht * 0.09)
+        }
+        st.fill(ellipse(-bw * 0.16, -ht * 0.55, bw * 0.08, ht * 0.30), with: .color(.white.opacity(dark ? 0.16 : 0.28)))
+        g.stroke(c, with: .color(ink), style: StrokeStyle(lineWidth: L, lineJoin: .round))
+        var t = Path()
+        t.move(to: pt(-bw * 0.52, 0))
+        t.addQuadCurve(to: pt(bw * 0.52, 0), control: pt(0, bw * 0.17))
+        g.stroke(t, with: .color(ink), style: StrokeStyle(lineWidth: 0.04 * u + L * 2, lineCap: .round))
+        g.stroke(t, with: .color(trim), style: StrokeStyle(lineWidth: 0.04 * u, lineCap: .round))
+        var gl = g
+        gl.addFilter(.blur(radius: 0.02 * u))
+        gl.fill(circle(0, -ht, 0.05 * u), with: .color(pom.opacity(0.6)))
+        g.fill(circle(0, -ht, 0.038 * u), with: .radialGradient(Gradient(colors: [.white, pom]), center: pt(-0.012 * u, -ht - 0.012 * u),
+                                                                 startRadius: 0, endRadius: 0.05 * u))
+        g.stroke(circle(0, -ht, 0.038 * u), with: .color(ink), lineWidth: L * 0.8)
+    }
+
+    static let coneHeight: CGFloat = 0.36
 
     /// The crown: 1,000 lifetime miles, so it is BIG — five pearl-tipped
     /// points, a jewelled band curving round his tip, red velvet showing
@@ -793,40 +960,65 @@ enum FlameyArt {
 
     // MARK: Chest (flat, under the mouth — there is no neck)
 
+    /// The chest band (body units above his base): pieces start at
+    /// `chestTop` and are fitted by `chestFit` so the lowest reaches no
+    /// further than ~0.03u above his base — above his legs, on his body.
+    static let chestTop: CGFloat = 0.135
+    static let chestFit: CGFloat = 0.78
+
     static func chest(_ item: FlameyItem, _ base: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
         let L = lw(u)
         let ink = self.ink
         let ny = a.bottom - 0.075 * u
-        // Chest pieces are drawn a size up about the middle of his chest, so
-        // they read on a 44pt widget (the sash spans him and stays 1:1).
+        // Every chest piece is FITTED into his upper chest: the band between
+        // the bottom of his grin (~bottom − 0.13u) and `chestFloor`, which
+        // sits clear above his base — so nothing ever hangs over his legs
+        // (shod) or off his bottom edge (bare). Each piece is drawn in its
+        // own coordinates, then scaled about the band's top so its lowest
+        // point lands on the floor. The sash spans him and is placed 1:1.
         var ctx = base
         if item != .championSash {
-            let k: CGFloat = 1.22, py = a.bottom - 0.07 * u
-            ctx.translateBy(x: 0, y: py); ctx.scaleBy(x: k, y: k); ctx.translateBy(x: 0, y: -py)
+            let top = a.bottom - chestTop * u
+            ctx.translateBy(x: 0, y: top - 0.012 * u)
+            ctx.scaleBy(x: chestFit, y: chestFit)
+            ctx.translateBy(x: 0, y: -top)
         }
         switch item {
         case .bandana:
-            // A kerchief: the triangle and its knot, no band round a neck.
+            // A neckerchief: a band tied snug under his grin, a small point
+            // hanging from its middle and the knot at his side — never a
+            // wrap round his hips.
             let blue = hx(0x2563EB)
-            let top = ny - 0.045 * u
+            let top = ny - 0.055 * u
             var tri = Path()
-            tri.move(to: pt(-0.19 * u, top))
-            tri.addQuadCurve(to: pt(0.19 * u, top), control: pt(0, top + 0.03 * u))
-            tri.addQuadCurve(to: pt(0, ny + 0.085 * u), control: pt(0.08 * u, ny + 0.03 * u))
-            tri.addQuadCurve(to: pt(-0.19 * u, top), control: pt(-0.08 * u, ny + 0.03 * u))
+            tri.move(to: pt(-0.15 * u, top))
+            tri.addQuadCurve(to: pt(0.15 * u, top), control: pt(0, top + 0.035 * u))
+            tri.addQuadCurve(to: pt(0.005 * u, ny + 0.065 * u), control: pt(0.07 * u, ny + 0.02 * u))
+            tri.addQuadCurve(to: pt(-0.15 * u, top), control: pt(-0.06 * u, ny + 0.02 * u))
             tri.closeSubpath()
-            ctx.fill(tri, with: lin([hx(0x3B82F6), blue], pt(0, top), pt(0, ny + 0.08 * u)))
-            var dots = ctx; dots.clip(to: tri)
-            for (x, y) in [(-0.12, -0.02), (-0.04, 0.0), (0.05, -0.02), (0.13, -0.02), (0.0, 0.035), (-0.06, 0.03), (0.07, 0.03), (0.0, 0.065)] as [(CGFloat, CGFloat)] {
-                dots.fill(circle(x * u, ny + y * u, 0.011 * u), with: .color(.white))
+            ctx.fill(tri, with: lin([hx(0x4F90FF), blue], pt(-0.1 * u, top), pt(0.05 * u, ny + 0.06 * u)))
+            var dots = ctx
+            dots.clip(to: tri)
+            for (x, y) in [(-0.09, -0.03), (0.0, -0.025), (0.09, -0.03), (-0.045, 0.005), (0.045, 0.005), (0.0, 0.035)] as [(CGFloat, CGFloat)] {
+                dots.fill(circle(x * u, ny + y * u, 0.010 * u), with: .color(.white))
             }
             ctx.stroke(tri, with: .color(ink), style: StrokeStyle(lineWidth: L, lineJoin: .round))
-            for sx in [-1.0, 1.0] as [CGFloat] {
-                let tie = placed(ctx, sx * 0.19 * u, top, Double(sx) * 28)
-                let t = rrect(-0.014 * u, -0.01 * u, 0.028 * u, 0.06 * u, 0.012 * u)
-                tie.fill(t, with: .color(blue))
-                tie.stroke(t, with: .color(ink), lineWidth: L * 0.8)
+            // The band itself, snug across his chest.
+            var bandPath = Path()
+            bandPath.move(to: pt(-0.17 * u, top - 0.004 * u))
+            bandPath.addQuadCurve(to: pt(0.17 * u, top - 0.004 * u), control: pt(0, top + 0.03 * u))
+            ctx.stroke(bandPath, with: .color(ink), style: StrokeStyle(lineWidth: 0.026 * u + L * 2, lineCap: .round))
+            ctx.stroke(bandPath, with: .color(blue), style: StrokeStyle(lineWidth: 0.026 * u, lineCap: .round))
+            // Knot at his side with two little tails.
+            let kx = -0.155 * u, ky = top + 0.004 * u
+            for ang in [22.0, 58.0] {
+                let t = placed(ctx, kx, ky, ang)
+                let tail = rrect(-0.012 * u, 0, 0.024 * u, 0.05 * u, 0.01 * u)
+                t.fill(tail, with: .color(blue))
+                t.stroke(tail, with: .color(ink), lineWidth: L * 0.8)
             }
+            ctx.fill(circle(kx, ky, 0.022 * u), with: .color(hx(0x3B7BF6)))
+            ctx.stroke(circle(kx, ky, 0.022 * u), with: .color(ink), lineWidth: L * 0.9)
         case .bowTie:
             let g = placed(ctx, 0, ny - 0.005 * u)
             let w = 0.12 * u, h = 0.08 * u
@@ -871,10 +1063,10 @@ enum FlameyArt {
             // Over one shoulder, across his front, clipped to his outline.
             let body = FlameBuddyOuterShape(wobble: 0).path(in: bodyRect(a, u))
             var g = ctx; g.clip(to: body)
-            let p0 = pt(-0.44 * u, a.bottom - 0.27 * u), p1 = pt(0.38 * u, a.bottom + 0.03 * u)
+            let p0 = pt(-0.44 * u, a.bottom - 0.17 * u), p1 = pt(0.42 * u, a.bottom - 0.05 * u)
             let dx = p1.x - p0.x, dy = p1.y - p0.y
             let len = sqrt(dx * dx + dy * dy)
-            let nxv = -dy / len * 0.05 * u, nyv = dx / len * 0.05 * u
+            let nxv = -dy / len * 0.036 * u, nyv = dx / len * 0.036 * u
             let sash = poly([pt(p0.x - nxv, p0.y - nyv), pt(p1.x - nxv, p1.y - nyv), pt(p1.x + nxv, p1.y + nyv), pt(p0.x + nxv, p0.y + nyv)])
             g.fill(sash, with: lin([hx(0xF0334C), hx(0xB3152F)], p0, p1))
             for s in [-1.0, 1.0] as [CGFloat] {
@@ -884,7 +1076,7 @@ enum FlameyArt {
             }
             g.stroke(sash, with: .color(ink), lineWidth: L)
             // A rosette where it crosses his front.
-            let rx = 0.14 * u, ry = a.bottom - 0.05 * u, rr = 0.05 * u
+            let rx = 0.17 * u, ry = a.bottom - 0.085 * u, rr = 0.042 * u
             for i in 0..<10 {
                 let ang = Double(i) / 10 * 2 * .pi
                 ctx.fill(circle(rx + CGFloat(cos(ang)) * rr * 0.72, ry + CGFloat(sin(ang)) * rr * 0.72, rr * 0.42),
@@ -930,8 +1122,8 @@ enum FlameyArt {
             cord.move(to: pt(-0.13 * u, ny - 0.06 * u)); cord.addQuadCurve(to: pt(0.02 * u, ny - 0.035 * u), control: pt(-0.05 * u, ny - 0.02 * u))
             cord.move(to: pt(0.15 * u, ny - 0.06 * u)); cord.addQuadCurve(to: pt(0.02 * u, ny - 0.035 * u), control: pt(0.09 * u, ny - 0.02 * u))
             ctx.stroke(cord, with: .color(hx(0x2B2B33)), style: StrokeStyle(lineWidth: L * 1.1, lineCap: .round))
-            let g = placed(ctx, 0.02 * u, ny + 0.03 * u, -8)
-            let fw = 0.15 * u, fh = 0.17 * u
+            let g = placed(ctx, 0.02 * u, ny + 0.022 * u, -8)
+            let fw = 0.13 * u, fh = 0.145 * u
             var shadow = g; shadow.addFilter(.shadow(color: .black.opacity(0.35), radius: 0.012 * u, y: 0.006 * u))
             shadow.fill(rrect(-fw / 2, -fh / 2, fw, fh, 0.008 * u), with: .color(hx(0xFBFAF6)))
             let photo = CGRect(x: -fw / 2 + 0.014 * u, y: -fh / 2 + 0.014 * u, width: fw - 0.028 * u, height: fh * 0.62)
@@ -963,7 +1155,7 @@ enum FlameyArt {
             ctx.stroke(wrap, with: .color(ink), lineWidth: L)
             for (dx, ang) in [(0.05, -10.0), (0.10, 8.0)] as [(CGFloat, Double)] {
                 let t = placed(ctx, dx * u, top + 0.035 * u, ang)
-                let hh = 0.12 * u, ww = 0.05 * u
+                let hh = 0.085 * u, ww = 0.05 * u
                 let r = rrect(-ww / 2, 0, ww, hh, 0.01 * u)
                 t.fill(r, with: .color(green))
                 var ts = t; ts.clip(to: r)
@@ -1104,141 +1296,221 @@ enum FlameyArt {
 
     // MARK: Holiday + mood hats
 
+    /// Christmas: a floppy red cap pulled down over his tip, the fur band
+    /// round his head and the bobble flopping off to one side.
     static func santaHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.30 * u, h = 0.30 * u
-        let g = placed(ctx, 0.03 * u, a.topY + 0.02 * u, -6)
+        let L = lw(u), ink = self.ink
+        let w = 0.40 * u, h = 0.36 * u
+        let g = placed(ctx, 0.02 * u, a.topY + 0.20 * u, -5)
         var hat = Path()
-        hat.move(to: pt(-w * 0.46, h * 0.28))
-        hat.addQuadCurve(to: pt(w * 0.12, -h * 0.52), control: pt(-w * 0.2, -h * 0.55))
-        hat.addQuadCurve(to: pt(w * 0.62, -h * 0.05), control: pt(w * 0.5, -h * 0.5))
-        hat.addQuadCurve(to: pt(w * 0.18, -h * 0.18), control: pt(w * 0.4, -h * 0.28))
-        hat.addQuadCurve(to: pt(w * 0.46, h * 0.28), control: pt(w * 0.35, h * 0.05))
+        hat.move(to: pt(-w * 0.46, 0))
+        hat.addQuadCurve(to: pt(w * 0.10, -h * 0.80), control: pt(-w * 0.34, -h * 0.78))
+        hat.addQuadCurve(to: pt(w * 0.66, -h * 0.30), control: pt(w * 0.52, -h * 0.82))
+        hat.addQuadCurve(to: pt(w * 0.24, -h * 0.40), control: pt(w * 0.44, -h * 0.46))
+        hat.addQuadCurve(to: pt(w * 0.46, 0), control: pt(w * 0.40, -h * 0.20))
         hat.closeSubpath()
-        g.fill(hat, with: .color(hx(0xE0243A)))
-        g.stroke(hat, with: .color(ink.opacity(0.6)), lineWidth: lw(u) * 0.8)
-        g.fill(Path(roundedRect: CGRect(x: -w * 0.56, y: h * 0.2, width: w * 1.12, height: h * 0.22),
-                    cornerRadius: h * 0.11), with: .color(.white))
-        g.fill(circle(w * 0.64, -h * 0.02, 0.045 * u), with: .color(.white))
+        g.fill(hat, with: lin([hx(0xFF4A5E), hx(0xB3152F)], pt(-w * 0.3, -h), pt(w * 0.3, 0)))
+        sheen(g, hat, CGRect(x: -w * 0.5, y: -h * 0.8, width: w, height: h * 0.8), 0.24)
+        g.stroke(hat, with: .color(ink), style: StrokeStyle(lineWidth: L, lineJoin: .round))
+        fur(g, pt(w * 0.68, -h * 0.28), 0.05 * u, L)
+        var bandPath = Path()
+        bandPath.move(to: pt(-w * 0.52, -h * 0.02))
+        bandPath.addQuadCurve(to: pt(w * 0.52, -h * 0.02), control: pt(0, h * 0.14))
+        g.stroke(bandPath, with: .color(ink), style: StrokeStyle(lineWidth: 0.075 * u + L * 2, lineCap: .round))
+        g.stroke(bandPath, with: .color(hx(0xFBFAF6)), style: StrokeStyle(lineWidth: 0.075 * u, lineCap: .round))
+        var shade = g
+        shade.clip(to: bandPath.strokedPath(StrokeStyle(lineWidth: 0.075 * u, lineCap: .round)))
+        var low = Path()
+        low.move(to: pt(-w * 0.6, h * 0.08))
+        low.addQuadCurve(to: pt(w * 0.6, h * 0.08), control: pt(0, h * 0.22))
+        shade.stroke(low, with: .color(hx(0xC9CFDD)), lineWidth: 0.035 * u)
+    }
+
+    /// A fluffy white pom.
+    static func fur(_ g: GraphicsContext, _ c: CGPoint, _ r: CGFloat, _ L: CGFloat) {
+        g.fill(circle(c.x, c.y, r), with: .radialGradient(Gradient(colors: [.white, hx(0xDDE3EA)]),
+                                                          center: pt(c.x - r * 0.35, c.y - r * 0.35), startRadius: 0, endRadius: r * 1.3))
+        g.stroke(circle(c.x, c.y, r), with: .color(ink.opacity(0.7)), lineWidth: L * 0.8)
+    }
+
+    /// A little top hat, sat square on his head (brim where he's as wide as
+    /// it), the crown covering his tip.
+    static func topHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat, tilt: Double,
+                       body: [Color], brim: Color, drawBand: (GraphicsContext, CGRect) -> Void) {
+        let L = lw(u), ink = self.ink
+        let g = placed(ctx, 0.02 * u, a.topY + 0.18 * u, tilt)
+        let w = 0.26 * u, h = 0.28 * u
+        let brimShape = ellipse(0, 0, w * 0.86, 0.042 * u)
+        g.fill(brimShape, with: .color(brim))
+        g.stroke(brimShape, with: .color(ink), lineWidth: L)
+        var crown = Path()
+        crown.move(to: pt(-w * 0.48, 0))
+        crown.addLine(to: pt(-w * 0.44, -h))
+        crown.addQuadCurve(to: pt(w * 0.44, -h), control: pt(0, -h - 0.03 * u))
+        crown.addLine(to: pt(w * 0.48, 0))
+        crown.addQuadCurve(to: pt(-w * 0.48, 0), control: pt(0, 0.035 * u))
+        crown.closeSubpath()
+        g.fill(crown, with: lin(body, pt(-w * 0.5, -h), pt(w * 0.5, 0)))
+        drawBand(g, CGRect(x: -w * 0.48, y: -h * 0.36, width: w * 0.96, height: h * 0.26))
+        sheen(g, crown, CGRect(x: -w / 2, y: -h, width: w, height: h), 0.24)
+        g.stroke(crown, with: .color(ink), style: StrokeStyle(lineWidth: L, lineJoin: .round))
+        var top = Path()
+        top.addEllipse(in: CGRect(x: -w * 0.44, y: -h - 0.022 * u, width: w * 0.88, height: 0.04 * u))
+        g.stroke(top, with: .color(ink.opacity(0.6)), lineWidth: L * 0.7)
+        var front = Path()
+        front.move(to: pt(-w * 0.86, 0))
+        front.addQuadCurve(to: pt(w * 0.86, 0), control: pt(0, 0.085 * u))
+        g.stroke(front, with: .color(ink), lineWidth: L)
     }
 
     static func leprechaunHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.22 * u, h = 0.20 * u
-        let g = placed(ctx, 0.03 * u, a.topY, -8)
-        g.fill(Path(roundedRect: CGRect(x: -w * 0.85, y: h * 0.32, width: w * 1.7, height: h * 0.16), cornerRadius: h * 0.08),
-               with: .color(hx(0x1C7A3A)))
-        var crown = Path()
-        crown.move(to: pt(-w / 2, h * 0.4)); crown.addLine(to: pt(-w * 0.42, -h * 0.5))
-        crown.addLine(to: pt(w * 0.42, -h * 0.5)); crown.addLine(to: pt(w / 2, h * 0.4)); crown.closeSubpath()
-        g.fill(crown, with: .color(hx(0x23A04A)))
-        g.fill(Path(CGRect(x: -w * 0.47, y: h * 0.05, width: w * 0.94, height: h * 0.2)), with: .color(hx(0x1A1A1A)))
-        g.stroke(Path(CGRect(x: -w * 0.1, y: h * 0.04, width: w * 0.2, height: h * 0.22)),
-                 with: .color(hx(0xFFCF40)), lineWidth: max(1, 0.014 * u))
+        topHat(&ctx, a, u, tilt: -7, body: [hx(0x3CC46A), hx(0x14803A)], brim: hx(0x17803C)) { g, r in
+            g.fill(Path(r), with: .color(hx(0x1A1A1A)))
+            let b = CGRect(x: r.midX - r.height * 0.55, y: r.minY - r.height * 0.05, width: r.height * 1.1, height: r.height * 1.1)
+            g.fill(Path(roundedRect: b, cornerRadius: r.height * 0.12), with: .color(hx(0xFFCF40)))
+            g.fill(Path(roundedRect: b.insetBy(dx: b.width * 0.26, dy: b.height * 0.26), cornerRadius: r.height * 0.05), with: .color(hx(0x1A1A1A)))
+            // A shamrock tucked in the band.
+            let c = CGPoint(x: r.maxX - r.width * 0.12, y: r.minY)
+            for ang in [-90.0, 30.0, 150.0] {
+                let rad = ang * .pi / 180
+                g.fill(circle(c.x + CGFloat(cos(rad)) * r.height * 0.34, c.y + CGFloat(sin(rad)) * r.height * 0.34, r.height * 0.34), with: .color(hx(0x7EE06A)))
+            }
+        }
     }
 
+    /// Independence Day: stars and stripes.
+    static func starHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
+        let red = hx(0xE0243A), blue = hx(0x1F3F99)
+        topHat(&ctx, a, u, tilt: -7, body: [.white, hx(0xE3E7F0)], brim: blue) { g, r in
+            let crownTop = r.minY - r.height * 2.4
+            var inner = g
+            inner.clip(to: Path(CGRect(x: r.minX, y: crownTop, width: r.width, height: r.minY - crownTop)))
+            for i in 0..<3 {
+                inner.fill(Path(CGRect(x: r.minX - 10, y: crownTop + CGFloat(i) * r.height * 0.9, width: r.width + 20, height: r.height * 0.42)), with: .color(red))
+            }
+            g.fill(Path(r), with: .color(blue))
+            g.fill(star(r.midX, r.midY, r.height * 0.42), with: .color(.white))
+            g.fill(star(r.minX + r.width * 0.2, r.midY, r.height * 0.24), with: .color(.white))
+            g.fill(star(r.maxX - r.width * 0.2, r.midY, r.height * 0.24), with: .color(.white))
+        }
+    }
+
+    /// Easter: a headband over his head with two long ears up off it.
     static func bunnyEars(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
+        let L = lw(u)
+        let bandY = a.topY + 0.20 * u
         for side in [-1.0, 1.0] as [CGFloat] {
-            let g = placed(ctx, side * 0.05 * u, a.topY + 0.06 * u, Double(side) * 16)
-            let outer = ellipse(0, -0.11 * u, 0.05 * u, 0.13 * u)
-            g.fill(outer, with: .color(hx(0xFFF4F6)))
-            g.stroke(outer, with: .color(hx(0xE5C8CF)), lineWidth: max(0.8, 0.005 * u))
-            g.fill(ellipse(0, -0.10 * u, 0.025 * u, 0.09 * u), with: .color(hx(0xFF9FB5)))
+            let g = placed(ctx, side * 0.085 * u, bandY - 0.04 * u, Double(side) * 14)
+            let outer = ellipse(0, -0.16 * u, 0.058 * u, 0.17 * u)
+            g.fill(outer, with: lin([.white, hx(0xF4E6EA)], pt(0, -0.33 * u), pt(0, 0)))
+            g.stroke(outer, with: .color(ink.opacity(0.75)), lineWidth: L)
+            g.fill(ellipse(0, -0.15 * u, 0.028 * u, 0.12 * u), with: lin([hx(0xFFC2D1), hx(0xFF8FAA)], pt(0, -0.27 * u), pt(0, 0)))
         }
         var bandPath = Path()
-        bandPath.move(to: pt(-0.1 * u, a.topY + 0.07 * u))
-        bandPath.addQuadCurve(to: pt(0.1 * u, a.topY + 0.07 * u), control: pt(0, a.topY + 0.02 * u))
-        ctx.stroke(bandPath, with: .color(hx(0xFF9FB5)), style: StrokeStyle(lineWidth: 0.02 * u, lineCap: .round))
+        bandPath.move(to: pt(-0.20 * u, bandY + 0.03 * u))
+        bandPath.addQuadCurve(to: pt(0.21 * u, bandY + 0.03 * u), control: pt(0, bandY - 0.07 * u))
+        ctx.stroke(bandPath, with: .color(ink), style: StrokeStyle(lineWidth: 0.034 * u + L * 2, lineCap: .round))
+        ctx.stroke(bandPath, with: .color(hx(0xFF9FB5)), style: StrokeStyle(lineWidth: 0.034 * u, lineCap: .round))
     }
 
-    static func starHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.21 * u, h = 0.22 * u
-        let blue = hx(0x1F3F99), red = hx(0xE0243A)
-        let g = placed(ctx, 0.03 * u, a.topY - 0.01 * u, -8)
-        g.fill(Path(roundedRect: CGRect(x: -w * 0.85, y: h * 0.34, width: w * 1.7, height: h * 0.15), cornerRadius: h * 0.07),
-               with: .color(blue))
-        let body = Path(roundedRect: CGRect(x: -w / 2, y: -h / 2, width: w, height: h * 0.9), cornerRadius: w * 0.08)
-        g.fill(body, with: .color(.white))
-        var inner = g
-        inner.clip(to: body)
-        for i in 0..<3 {
-            inner.fill(Path(CGRect(x: -w / 2, y: -h / 2 + h * 0.1 + CGFloat(i) * h * 0.22, width: w, height: h * 0.1)),
-                       with: .color(red))
-        }
-        inner.fill(Path(CGRect(x: -w / 2, y: h * 0.12, width: w, height: h * 0.24)), with: .color(blue))
-        g.fill(star(0, h * 0.24, 0.05 * u), with: .color(.white))
-    }
-
-    static func countdownHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ s: CGFloat) {
-        let w = s * 0.20, h = s * 0.26
+    static func countdownHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
         let gold = hx(0xFFCF40)
-        let g = placed(ctx, s * 0.05, a.topY - h * 0.35, 12)
-        var cone = Path()
-        cone.move(to: pt(0, -h / 2)); cone.addLine(to: pt(w / 2, h / 2)); cone.addLine(to: pt(-w / 2, h / 2)); cone.closeSubpath()
-        g.fill(cone, with: .color(hx(0x1A1A22)))
-        var trim = Path()
-        trim.move(to: pt(-w * 0.36, h * 0.22)); trim.addLine(to: pt(w * 0.36, h * 0.22))
-        trim.addLine(to: pt(w * 0.43, h * 0.36)); trim.addLine(to: pt(-w * 0.43, h * 0.36)); trim.closeSubpath()
-        g.fill(trim, with: .color(gold))
-        var line = Path()
-        line.move(to: pt(-w * 0.12, -h * 0.18)); line.addLine(to: pt(w * 0.12, -h * 0.18))
-        g.stroke(line, with: .color(gold), lineWidth: max(1, s * 0.01))
+        cone(&ctx, a, u, tilt: 9, fill: lin([hx(0x3A3A48), hx(0x121218)], pt(0, a.topY - 0.2 * u), pt(0, a.topY + 0.16 * u)),
+             stripes: gold, trim: gold, pom: hx(0xFFE27A), dark: true)
+        // The clock about to strike midnight, on the front of the cone.
+        let g = placed(ctx, 0.01 * u, a.topY + 0.16 * u, 9)
+        let c = pt(0, -0.105 * u), r = 0.042 * u
+        g.fill(circle(c.x, c.y, r), with: .color(hx(0xFFF6D8)))
+        g.stroke(circle(c.x, c.y, r), with: .color(gold), lineWidth: lw(u) * 1.3)
+        var hands = Path()
+        hands.move(to: c); hands.addLine(to: pt(c.x, c.y - r * 0.72))
+        hands.move(to: c); hands.addLine(to: pt(c.x + r * 0.1, c.y - r * 0.5))
+        g.stroke(hands, with: .color(hx(0x1A1A22)), style: StrokeStyle(lineWidth: lw(u) * 1.1, lineCap: .round))
         for i in 0..<6 {
-            let ray = placed(g, 0, -h / 2, Double(i) * 60)
-            ray.fill(Path(roundedRect: CGRect(x: -s * 0.005, y: -s * 0.05, width: s * 0.01, height: s * 0.05),
-                          cornerRadius: s * 0.005), with: .color(gold))
+            let ray = placed(g, 0, -coneHeight * u, Double(i) * 60)
+            ray.fill(Path(roundedRect: CGRect(x: -0.005 * u, y: -0.09 * u, width: 0.01 * u, height: 0.032 * u),
+                          cornerRadius: 0.005 * u), with: .color(gold))
         }
     }
 
-    static func partyHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ s: CGFloat) {
-        let w = s * 0.22, h = s * 0.24
-        let g = placed(ctx, s * 0.06, a.topY - h * 0.35, 14)
-        var cone = Path()
-        cone.move(to: pt(0, -h / 2)); cone.addLine(to: pt(w / 2, h / 2)); cone.addLine(to: pt(-w / 2, h / 2)); cone.closeSubpath()
-        g.fill(cone, with: .linearGradient(
-            Gradient(colors: [Color(red: 1.0, green: 0.42, blue: 0.62), Color(red: 0.55, green: 0.42, blue: 1.0)]),
-            startPoint: pt(0, -h / 2), endPoint: pt(0, h / 2)))
-        g.stroke(cone, with: .color(.white.opacity(0.35)), lineWidth: max(1, s * 0.006))
-        var stripes = g
-        stripes.clip(to: cone)
-        for i in 0..<2 {
-            let y = -h * 0.05 + CGFloat(i) * h * 0.28
-            stripes.fill(Path(CGRect(x: -w / 2, y: y - h * 0.04, width: w, height: h * 0.08)), with: .color(.white.opacity(0.28)))
-        }
-        g.fill(circle(0, -h / 2, s * 0.025), with: .color(Color(red: 1.0, green: 0.9, blue: 0.45)))
+    static func partyHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
+        cone(&ctx, a, u, tilt: 12,
+             fill: lin([Color(red: 1.0, green: 0.42, blue: 0.62), Color(red: 0.55, green: 0.42, blue: 1.0)],
+                       pt(0, a.topY - 0.2 * u), pt(0, a.topY + 0.16 * u)),
+             stripes: .white.opacity(0.55), trim: hx(0xFFE27A), pom: hx(0xFFE27A), dark: false)
     }
 
+    /// Bedtime: a long soft cap pulled over his tip, drooping to one side,
+    /// with a cuff round his head and a bobble at the end.
     static func nightcap(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.30 * u, h = 0.28 * u
-        let g = placed(ctx, 0.02 * u, a.topY + 0.02 * u, -4)
+        let L = lw(u), ink = self.ink
+        let w = 0.40 * u, h = 0.34 * u
+        let g = placed(ctx, 0.02 * u, a.topY + 0.20 * u, -4)
         var cap = Path()
-        cap.move(to: pt(-w * 0.46, h * 0.28))
-        cap.addQuadCurve(to: pt(w * 0.10, -h * 0.45), control: pt(-w * 0.30, -h * 0.40))
-        cap.addQuadCurve(to: pt(w * 0.70, h * 0.25), control: pt(w * 0.55, -h * 0.50))
-        cap.addQuadCurve(to: pt(w * 0.18, -h * 0.10), control: pt(w * 0.42, -h * 0.18))
-        cap.addQuadCurve(to: pt(w * 0.46, h * 0.28), control: pt(w * 0.35, h * 0.10))
+        cap.move(to: pt(-w * 0.46, 0))
+        cap.addQuadCurve(to: pt(w * 0.14, -h * 0.74), control: pt(-w * 0.36, -h * 0.80))
+        cap.addQuadCurve(to: pt(w * 0.74, -h * 0.02), control: pt(w * 0.62, -h * 0.70))
+        cap.addQuadCurve(to: pt(w * 0.28, -h * 0.34), control: pt(w * 0.50, -h * 0.30))
+        cap.addQuadCurve(to: pt(w * 0.46, 0), control: pt(w * 0.40, -h * 0.14))
         cap.closeSubpath()
-        g.fill(cap, with: .color(hx(0x5B6FD6)))
-        for (x, y) in [(-0.2, 0.0), (0.05, -0.25), (0.3, -0.2), (0.2, 0.1)] as [(CGFloat, CGFloat)] {
-            g.fill(circle(x * w, y * h, 0.012 * u), with: .color(.white.opacity(0.85)))
+        g.fill(cap, with: lin([hx(0x7D8FF0), hx(0x4152B8)], pt(-w * 0.3, -h), pt(w * 0.4, 0)))
+        var dots = g
+        dots.clip(to: cap)
+        for (x, y) in [(-0.22, -0.18), (0.02, -0.45), (0.30, -0.52), (0.10, -0.16), (-0.08, -0.62), (0.52, -0.22)] as [(CGFloat, CGFloat)] {
+            dots.fill(star(x * w, y * h, 0.018 * u, inner: 0.5), with: .color(.white.opacity(0.85)))
         }
-        g.fill(Path(roundedRect: CGRect(x: -w * 0.54, y: h * 0.18, width: w * 1.08, height: h * 0.20),
-                    cornerRadius: h * 0.10), with: .color(hx(0xE8ECFF)))
-        g.fill(circle(w * 0.72, h * 0.30, 0.04 * u), with: .color(hx(0xE8ECFF)))
+        sheen(g, cap, CGRect(x: -w * 0.5, y: -h * 0.8, width: w, height: h * 0.8), 0.22)
+        g.stroke(cap, with: .color(ink), style: StrokeStyle(lineWidth: L, lineJoin: .round))
+        g.fill(circle(w * 0.76, 0, 0.042 * u), with: .color(hx(0xE8ECFF)))
+        g.stroke(circle(w * 0.76, 0, 0.042 * u), with: .color(ink.opacity(0.7)), lineWidth: L * 0.8)
+        var cuff = Path()
+        cuff.move(to: pt(-w * 0.52, -h * 0.02))
+        cuff.addQuadCurve(to: pt(w * 0.52, -h * 0.02), control: pt(0, h * 0.15))
+        g.stroke(cuff, with: .color(ink), style: StrokeStyle(lineWidth: 0.06 * u + L * 2, lineCap: .round))
+        g.stroke(cuff, with: .color(hx(0xE8ECFF)), style: StrokeStyle(lineWidth: 0.06 * u, lineCap: .round))
     }
 
-    /// Valentine's: a heart on a springy stalk, drawn around its base.
+    /// Valentine's boppers — the BAND: an arc over his head, drawn still.
+    /// Its springs and hearts are `drawHeartBopper`, which the layer sways.
+    /// Both are drawn about the same origin: his head, `bopperSeat` under
+    /// the tip.
+    static func drawHeartBopperBand(in ctx: inout GraphicsContext, u: CGFloat) {
+        let L = lw(u)
+        var arc = Path()
+        arc.move(to: pt(-0.20 * u, 0.05 * u))
+        arc.addQuadCurve(to: pt(0.21 * u, 0.05 * u), control: pt(0, -0.07 * u))
+        ctx.stroke(arc, with: .color(ink), style: StrokeStyle(lineWidth: 0.03 * u + L * 2, lineCap: .round))
+        ctx.stroke(arc, with: .color(hx(0xFF5C8A)), style: StrokeStyle(lineWidth: 0.03 * u, lineCap: .round))
+    }
+
+    /// Where the boppers' band sits under his tip (body units).
+    static let bopperSeat: CGFloat = 0.20
+
+    /// Valentine's: two hearts on springy stalks off the band.
     static func drawHeartBopper(in ctx: inout GraphicsContext, u: CGFloat) {
-        let hxp = 0.07 * u, hy = -0.15 * u, r = 0.05 * u
-        var stalk = Path()
-        stalk.move(to: .zero)
-        stalk.addQuadCurve(to: pt(hxp, hy), control: pt(0.02 * u, hy + 0.06 * u))
-        ctx.stroke(stalk, with: .color(hx(0xFF8FB0)), style: StrokeStyle(lineWidth: 0.014 * u, lineCap: .round))
-        var heart = Path()
-        heart.move(to: pt(hxp, hy + r * 0.9))
-        heart.addCurve(to: pt(hxp, hy - r * 0.45), control1: pt(hxp - r * 1.6, hy - r * 0.2), control2: pt(hxp - r * 0.9, hy - r * 1.4))
-        heart.addCurve(to: pt(hxp, hy + r * 0.9), control1: pt(hxp + r * 0.9, hy - r * 1.4), control2: pt(hxp + r * 1.6, hy - r * 0.2))
-        heart.closeSubpath()
-        ctx.fill(heart, with: .color(hx(0xFF3B6B)))
-        ctx.stroke(heart, with: .color(.white), lineWidth: max(0.8, 0.005 * u))
+        let L = lw(u)
+        for side in [-1.0, 1.0] as [CGFloat] {
+            let root = pt(side * 0.09 * u, -0.005 * u)
+            let hc = pt(side * 0.15 * u, -0.25 * u)
+            var spring = Path()
+            spring.move(to: root)
+            for i in 1...8 {
+                let t = CGFloat(i) / 8
+                let x = root.x + (hc.x - root.x) * t + (i % 2 == 0 ? -1 : 1) * 0.014 * u
+                let y = root.y + (hc.y - root.y) * t
+                spring.addLine(to: pt(x, y))
+            }
+            ctx.stroke(spring, with: .color(hx(0x2A1410, 0.85)), style: StrokeStyle(lineWidth: max(1, 0.012 * u), lineCap: .round, lineJoin: .round))
+            let r = 0.055 * u
+            var heart = Path()
+            heart.move(to: pt(hc.x, hc.y + r * 0.9))
+            heart.addCurve(to: pt(hc.x, hc.y - r * 0.45), control1: pt(hc.x - r * 1.6, hc.y - r * 0.2), control2: pt(hc.x - r * 0.9, hc.y - r * 1.4))
+            heart.addCurve(to: pt(hc.x, hc.y + r * 0.9), control1: pt(hc.x + r * 0.9, hc.y - r * 1.4), control2: pt(hc.x + r * 1.6, hc.y - r * 0.2))
+            heart.closeSubpath()
+            ctx.fill(heart, with: lin([hx(0xFF7AA8), hx(0xE8195A)], pt(hc.x, hc.y - r), pt(hc.x, hc.y + r)))
+            ctx.stroke(heart, with: .color(ink), style: StrokeStyle(lineWidth: L, lineJoin: .round))
+            ctx.fill(ellipse(hc.x - r * 0.42, hc.y - r * 0.3, r * 0.22, r * 0.14), with: .color(.white.opacity(0.75)))
+        }
     }
 
     // MARK: - Held (in front, at his side — the viewer's left)
@@ -1390,6 +1662,28 @@ enum FlameyArt {
             m.fill(ellipse(c.x - R * 0.35, c.y - R * 0.4, R * 0.18, R * 0.1), with: .color(.white.opacity(0.7)))
         default: break
         }
+        // One little fist, in his colour, closed round every handle — so a
+        // prop is HELD, not balanced on the end of an arm.
+        switch item {
+        case .megaphone, .confettiCannon:
+            fist(m, pt(0.47 * u, a.bottom - 0.28 * u), u, armColor)
+        case .checkeredFlag, .stopwatch:
+            fist(m, pt(0.46 * u, a.bottom - 0.44 * u), u, armColor)
+        default: break
+        }
+    }
+
+    /// A round mitten fist with a thumb, lit from the top-left.
+    static func fist(_ g: GraphicsContext, _ c: CGPoint, _ u: CGFloat, _ color: Color) {
+        let r = 0.046 * u
+        let f = circle(c.x, c.y, r)
+        g.fill(f, with: .color(color))
+        g.fill(f, with: .radialGradient(Gradient(colors: [.white.opacity(0.45), .white.opacity(0)]),
+                                        center: pt(c.x - r * 0.4, c.y - r * 0.4), startRadius: 0, endRadius: r * 1.1))
+        g.stroke(f, with: .color(.white.opacity(0.45)), lineWidth: max(1, 0.008 * u))
+        var thumb = Path()
+        thumb.addArc(center: pt(c.x - r * 0.1, c.y - r * 0.1), radius: r * 0.55, startAngle: .degrees(200), endAngle: .degrees(300), clockwise: false)
+        g.stroke(thumb, with: .color(.black.opacity(0.22)), style: StrokeStyle(lineWidth: max(1, 0.007 * u), lineCap: .round))
     }
 
     // MARK: - Back (behind him)
@@ -1428,6 +1722,16 @@ enum FlameyArt {
         }
         func cape(_ main: Color, _ dark: Color, trim: Color?, ermine: Bool) {
             let sy = a.bottom - 0.50 * u
+            // The far side, draped round his right shoulder and peeking past
+            // his right edge — what makes it a cape he WEARS, not a flag.
+            var far = Path()
+            far.move(to: pt(0.06 * u, sy - 0.02 * u))
+            far.addQuadCurve(to: pt(0.38 * u, sy + 0.16 * u), control: pt(0.34 * u, sy - 0.02 * u))
+            far.addQuadCurve(to: pt(0.43 * u, a.bottom - 0.06 * u), control: pt(0.47 * u, sy + 0.34 * u))
+            far.addQuadCurve(to: pt(0.10 * u, a.bottom - 0.10 * u), control: pt(0.30 * u, a.bottom - 0.02 * u))
+            far.closeSubpath()
+            ctx.fill(far, with: lin([dark, main.opacity(0.9)], pt(0.4 * u, sy), pt(0.1 * u, a.bottom)))
+            ctx.stroke(far, with: .color(ink), lineWidth: L)
             var c = Path()
             c.move(to: pt(0.16 * u, sy))
             c.addQuadCurve(to: pt(-0.10 * u, sy - 0.04 * u), control: pt(0.02 * u, sy - 0.06 * u))
@@ -1732,164 +2036,302 @@ enum FlameyArt {
     }
 
     // MARK: - Companions (standing on the viewer's RIGHT)
+    //
+    // Little characters drawn in HIS style: a gradient body lit from the
+    // top-left, a light rim (not an ink outline — he has none), his eyes
+    // (tall dark ovals, a catchlight up-left), an open grin and rosy cheeks.
+    // Walkers stand on HIS ground line; floaters hover at shoulder height
+    // over a small shadow of their own. Sized at ~40% of his height.
 
     /// Where a companion stands: clear of his body, inside the surface.
     static func companionX(_ u: CGFloat, reach: CGFloat) -> CGFloat {
-        max(0.52, min(0.70, reach - 0.14)) * u
+        max(0.56, min(0.70, reach - 0.14)) * u
+    }
+
+    /// Balance: with a back piece AND a held prop he is already wide, so the
+    /// companion and the trail step down a size — the stage should read as
+    /// ONE character, not a pile of everything he owns.
+    static func isBusy(_ look: FlameyLook) -> Bool { look[.back] != nil && look[.held] != nil }
+    static func companionScale(for look: FlameyLook) -> CGFloat { isBusy(look) ? 1.0 : 1.15 }
+    static func trailScale(for look: FlameyLook) -> CGFloat { isBusy(look) ? 0.80 : 1 }
+
+    /// How high a floater's centre hovers over the ground (body units).
+    static let floatHeight: CGFloat = 0.50
+
+    /// The companion's shadow on the floor — drawn by the layer on its own,
+    /// so the creature can bob over a shadow that stays put.
+    static func drawCompanionShadow(_ item: FlameyItem, in ctx: inout GraphicsContext, a: Anchors, u: CGFloat, floats: Bool) {
+        var s = ctx
+        s.addFilter(.blur(radius: 0.02 * u))
+        let w: CGFloat = floats ? 0.16 : (item == .cometPup ? 0.30 : 0.24)
+        s.fill(ellipse(0, a.ground - 0.004 * u, w * u / 2, 0.028 * u), with: .color(.black.opacity(floats ? 0.20 : 0.30)))
+    }
+
+    static let critterInk = hx(0x331006)
+
+    /// His face, small: eyes, catchlights, a grin with a tongue, cheeks.
+    /// `r` is the face's half-width; `glance` shifts the eyes (±r·0.1).
+    static func critterFace(_ ctx: GraphicsContext, _ x: CGFloat, _ y: CGFloat, _ r: CGFloat,
+                            eye: Color = critterInk, glance: CGFloat = 0, cheeks: Color = hx(0xFF6F8E), grin: Bool = true) {
+        for sx in [-1.0, 1.0] as [CGFloat] {
+            let ex = x + sx * r * 0.40 + glance * r
+            ctx.fill(ellipse(ex, y, r * 0.15, r * 0.20), with: .color(eye))
+            ctx.fill(circle(ex - r * 0.045, y - r * 0.075, r * 0.06), with: .color(.white.opacity(0.95)))
+            ctx.fill(ellipse(x + sx * r * 0.70, y + r * 0.28, r * 0.15, r * 0.085), with: .color(cheeks.opacity(0.45)))
+        }
+        if grin {
+            var m = Path()
+            m.move(to: pt(x - r * 0.24, y + r * 0.22))
+            m.addQuadCurve(to: pt(x + r * 0.24, y + r * 0.22), control: pt(x, y + r * 0.34))
+            m.addCurve(to: pt(x - r * 0.24, y + r * 0.22), control1: pt(x + r * 0.22, y + r * 0.62), control2: pt(x - r * 0.22, y + r * 0.62))
+            m.closeSubpath()
+            ctx.fill(m, with: .color(eye))
+            var t = ctx
+            t.clip(to: m)
+            t.fill(ellipse(x, y + r * 0.50, r * 0.13, r * 0.08), with: .color(hx(0xFF6B5E)))
+        } else {
+            var m = Path()
+            m.move(to: pt(x - r * 0.16, y + r * 0.26))
+            m.addQuadCurve(to: pt(x + r * 0.16, y + r * 0.26), control: pt(x, y + r * 0.44))
+            ctx.stroke(m, with: .color(eye), style: StrokeStyle(lineWidth: max(1, r * 0.09), lineCap: .round))
+        }
+    }
+
+    /// Fill + his light rim + a top-left highlight, the house body recipe.
+    static func critterBody(_ ctx: GraphicsContext, _ shape: Path, _ colors: [Color], _ box: CGRect, u: CGFloat,
+                            rim: Color = .white.opacity(0.45), glow: Color? = nil) {
+        if let glow {
+            var g = ctx
+            g.addFilter(.blur(radius: box.width * 0.22))
+            g.fill(shape, with: .color(glow.opacity(0.55)))
+        }
+        ctx.fill(shape, with: lin(colors, pt(box.minX + box.width * 0.2, box.minY), pt(box.maxX - box.width * 0.2, box.maxY)))
+        sheen(ctx, shape, box, 0.40)
+        ctx.stroke(shape, with: .color(rim), lineWidth: max(1, 0.009 * u))
+    }
+
+    /// A rounded four-point star sprite.
+    static func sparkBody(_ x: CGFloat, _ y: CGFloat, _ r: CGFloat) -> Path {
+        var p = Path()
+        let n = 4
+        for i in 0..<(n * 2) {
+            let a0 = -Double.pi / 2 + Double(i) * Double.pi / Double(n)
+            let rr = i % 2 == 0 ? r : r * 0.52
+            let q = pt(x + rr * CGFloat(cos(a0)), y + rr * CGFloat(sin(a0)))
+            if i == 0 { p.move(to: q) } else {
+                let am = a0 - Double.pi / Double(n) / 2
+                let rc = i % 2 == 0 ? r * 0.62 : r * 0.62
+                p.addQuadCurve(to: q, control: pt(x + rc * CGFloat(cos(am)), y + rc * CGFloat(sin(am))))
+            }
+        }
+        let am = -Double.pi / 2 - Double.pi / Double(n) / 2
+        p.addQuadCurve(to: pt(x, y - r), control: pt(x + r * 0.62 * CGFloat(cos(am)), y + r * 0.62 * CGFloat(sin(am))))
+        p.closeSubpath()
+        return p
+    }
+
+    static func spark(_ ctx: GraphicsContext, _ x: CGFloat, _ y: CGFloat, _ r: CGFloat, _ c: Color, u: CGFloat, glance: CGFloat = -0.08) {
+        let body = sparkBody(x, y, r)
+        critterBody(ctx, body, [.white, hx(0xFFF3B0), c], CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2), u: u,
+                    rim: .white.opacity(0.7), glow: c)
+        critterFace(ctx, x, y + r * 0.06, r * 0.46, glance: glance)
     }
 
     /// Draws one companion about (0, ground) — the caller translates to
     /// `companionX`, so the bob can move the whole creature as one.
     static func drawCompanion(_ item: FlameyItem, in ctx: inout GraphicsContext, a: Anchors, u: CGFloat, palette: FlameyPalette?) {
-        let L = lw(u)
-        let ink = self.ink
         let gy = a.ground
-        func face(_ x: CGFloat, _ y: CGFloat, _ r: CGFloat, ink: Color = FlameyArt.ink) {
-            for sx in [-1.0, 1.0] as [CGFloat] {
-                ctx.fill(ellipse(x + sx * r * 0.42, y, r * 0.16, r * 0.22), with: .color(ink))
-                ctx.fill(circle(x + sx * r * 0.42 + r * 0.05, y - r * 0.08, r * 0.06), with: .color(.white))
-            }
-            var m = Path(); m.move(to: pt(x - r * 0.2, y + r * 0.3)); m.addQuadCurve(to: pt(x + r * 0.2, y + r * 0.3), control: pt(x, y + r * 0.52))
-            ctx.stroke(m, with: .color(ink), style: StrokeStyle(lineWidth: max(1, r * 0.1), lineCap: .round))
-        }
-        func spark(_ x: CGFloat, _ y: CGFloat, _ r: CGFloat, _ c: Color) {
-            var gl = ctx; gl.addFilter(.blur(radius: r * 0.5)); gl.fill(circle(x, y, r * 1.1), with: .color(c.opacity(0.75)))
-            var st = Path()
-            for i in 0..<8 {
-                let rr = i % 2 == 0 ? r * 1.25 : r * 0.55
-                let ang = -Double.pi / 2 + Double(i) * Double.pi / 4
-                let q = pt(x + rr * CGFloat(cos(ang)), y + rr * CGFloat(sin(ang)))
-                if i == 0 { st.move(to: q) } else { st.addLine(to: q) }
-            }
-            st.closeSubpath()
-            ctx.fill(st, with: .radialGradient(Gradient(colors: [.white, c]), center: pt(x, y), startRadius: 0, endRadius: r * 1.2))
-            face(x, y + r * 0.05, r * 0.6)
-        }
+        let fy = gy - floatHeight * u
         switch item {
         case .spark:
-            spark(0, gy - 0.46 * u, 0.13 * u, hx(0xFFD24A))
+            spark(ctx, 0, fy, 0.15 * u, hx(0xFFC21F), u: u)
         case .sparkTrio:
-            spark(-0.06 * u, gy - 0.30 * u, 0.10 * u, hx(0xFF7A45))
-            spark(0.08 * u, gy - 0.52 * u, 0.11 * u, hx(0xFFD24A))
-            spark(-0.10 * u, gy - 0.72 * u, 0.09 * u, hx(0x5CC8FF))
+            // A little huddle, not a scatter: gold in front, the other two
+            // peeking over its shoulders.
+            spark(ctx, -0.085 * u, fy - 0.10 * u, 0.095 * u, hx(0x5CC8FF), u: u, glance: -0.1)
+            spark(ctx, 0.095 * u, fy - 0.06 * u, 0.095 * u, hx(0xFF7A9A), u: u, glance: -0.1)
+            spark(ctx, 0, fy + 0.05 * u, 0.12 * u, hx(0xFFC21F), u: u)
         case .firefly:
-            let x: CGFloat = 0, y = gy - 0.50 * u, r = 0.085 * u
-            var gl = ctx; gl.addFilter(.blur(radius: r)); gl.fill(circle(x + r * 0.6, y + r * 0.9, r * 1.6), with: .color(hx(0xD8FF5C, 0.8)))
-            for sx in [-1.0, 1.0] as [CGFloat] {
-                let wg = placed(ctx, x + sx * r * 0.3, y - r * 0.6, Double(sx) * 35)
-                wg.fill(ellipse(0, -r * 0.6, r * 0.45, r * 0.8), with: .color(Color.white.opacity(0.6)))
-                wg.stroke(ellipse(0, -r * 0.6, r * 0.45, r * 0.8), with: .color(hx(0xB8D6FF)), lineWidth: L * 0.7)
+            let x: CGFloat = 0, y = fy, r = 0.10 * u
+            // Wings behind, glowing tail behind-right, a round cream head.
+            for (sx, ang) in [(-1.0, -28.0), (1.0, 28.0)] as [(CGFloat, Double)] {
+                let wg = placed(ctx, x + sx * r * 0.45, y - r * 0.55, ang)
+                let wing = ellipse(0, -r * 0.55, r * 0.42, r * 0.72)
+                wg.fill(wing, with: lin([.white.opacity(0.85), hx(0xCFE4FF, 0.55)], pt(0, -r * 1.2), pt(0, 0)))
+                wg.stroke(wing, with: .color(.white.opacity(0.8)), lineWidth: max(1, 0.008 * u))
             }
-            ctx.fill(ellipse(x + r * 0.55, y + r * 0.85, r * 0.7, r * 0.6), with: .radialGradient(Gradient(colors: [.white, hx(0xE8FF6B), hx(0x9EE22E)]), center: pt(x + r * 0.55, y + r * 0.85), startRadius: 0, endRadius: r * 0.7))
-            ctx.fill(circle(x, y, r * 0.75), with: .color(hx(0x3A2F4F)))
-            face(x, y, r * 0.72, ink: .white)
+            let tail = ellipse(x + r * 0.62, y + r * 0.62, r * 0.55, r * 0.48)
+            var tg = ctx
+            tg.addFilter(.blur(radius: r * 0.7))
+            tg.fill(tail, with: .color(hx(0xE8FF6B, 0.9)))
+            ctx.fill(tail, with: .radialGradient(Gradient(colors: [.white, hx(0xEEFF7A), hx(0xA8E02A)]),
+                                                 center: pt(x + r * 0.55, y + r * 0.52), startRadius: 0, endRadius: r * 0.6))
+            ctx.stroke(tail, with: .color(.white.opacity(0.6)), lineWidth: max(1, 0.008 * u))
+            let head = circle(x, y, r)
+            critterBody(ctx, head, [hx(0x7A5AA8), hx(0x4A3070)], CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2), u: u,
+                        rim: .white.opacity(0.4))
+            let face = ellipse(x - r * 0.05, y + r * 0.12, r * 0.72, r * 0.62)
+            ctx.fill(face, with: lin([hx(0xFFF3D6), hx(0xFFD98A)], pt(x, y - r * 0.4), pt(x, y + r * 0.8)))
+            critterFace(ctx, x - r * 0.05, y + r * 0.08, r * 0.62, glance: -0.1)
             for sx in [-1.0, 1.0] as [CGFloat] {
-                var an = Path(); an.move(to: pt(x + sx * r * 0.2, y - r * 0.6)); an.addQuadCurve(to: pt(x + sx * r * 0.7, y - r * 1.4), control: pt(x + sx * r * 0.2, y - r * 1.3))
-                ctx.stroke(an, with: .color(hx(0x3A2F4F)), lineWidth: L)
-                ctx.fill(circle(x + sx * r * 0.7, y - r * 1.4, r * 0.12), with: .color(hx(0xE8FF6B)))
+                var an = Path()
+                an.move(to: pt(x + sx * r * 0.25, y - r * 0.9))
+                an.addQuadCurve(to: pt(x + sx * r * 0.62, y - r * 1.55), control: pt(x + sx * r * 0.18, y - r * 1.45))
+                ctx.stroke(an, with: .color(hx(0x4A3070)), style: StrokeStyle(lineWidth: max(1, 0.012 * u), lineCap: .round))
+                ctx.fill(circle(x + sx * r * 0.62, y - r * 1.55, r * 0.14), with: .color(hx(0xEEFF7A)))
             }
         case .lantern:
-            let x: CGFloat = 0, y = gy - 0.48 * u, r = 0.15 * u
-            var gl = ctx; gl.addFilter(.blur(radius: r * 0.6)); gl.fill(circle(x, y, r * 1.3), with: .color(hx(0xFF9A3C, 0.7)))
-            var hang = Path(); hang.move(to: pt(x, y - r * 1.05)); hang.addLine(to: pt(x, y - r * 1.5))
-            ctx.stroke(hang, with: .color(hx(0x2B2B33)), lineWidth: L * 1.2)
-            ctx.fill(ellipse(x, y - r * 1.55, r * 0.14, r * 0.08), with: .color(hx(0x2B2B33)))
-            let body = ellipse(x, y, r * 0.95, r * 0.9)
-            ctx.fill(body, with: .radialGradient(Gradient(colors: [hx(0xFFE9A8), hx(0xFF8A2E), hx(0xD9431F)]), center: pt(x, y + r * 0.1), startRadius: 0, endRadius: r))
-            var ribs = ctx; ribs.clip(to: body)
-            for f in [-0.5, 0, 0.5] as [CGFloat] {
-                var rb = Path(); rb.move(to: pt(x + f * r, y - r)); rb.addQuadCurve(to: pt(x + f * r, y + r), control: pt(x + f * r * 1.7, y))
-                ribs.stroke(rb, with: .color(hx(0xB8321A, 0.6)), lineWidth: L)
+            let x: CGFloat = 0, y = fy, r = 0.14 * u
+            var gl = ctx
+            gl.addFilter(.blur(radius: r * 0.6))
+            gl.fill(circle(x, y, r * 1.2), with: .color(hx(0xFF9A3C, 0.55)))
+            // A little wire handle, as if it's carrying itself.
+            var handle = Path()
+            handle.move(to: pt(x - r * 0.35, y - r * 0.92))
+            handle.addQuadCurve(to: pt(x + r * 0.35, y - r * 0.92), control: pt(x, y - r * 1.7))
+            ctx.stroke(handle, with: .color(hx(0x3A2A24)), style: StrokeStyle(lineWidth: max(1, 0.014 * u), lineCap: .round))
+            let body = ellipse(x, y, r * 0.98, r * 0.86)
+            ctx.fill(body, with: .radialGradient(Gradient(colors: [hx(0xFFF1C4), hx(0xFF9A3C), hx(0xD9431F)]),
+                                                 center: pt(x - r * 0.15, y - r * 0.1), startRadius: 0, endRadius: r * 1.1))
+            var ribs = ctx
+            ribs.clip(to: body)
+            for f in [-0.55, 0.55] as [CGFloat] {
+                var rb = Path()
+                rb.move(to: pt(x + f * r * 0.8, y - r))
+                rb.addQuadCurve(to: pt(x + f * r * 0.8, y + r), control: pt(x + f * r * 1.5, y))
+                ribs.stroke(rb, with: .color(hx(0xB8321A, 0.45)), lineWidth: max(1, 0.01 * u))
             }
-            ctx.stroke(body, with: .color(ink), lineWidth: L)
-            for dy in [-0.9, 0.9] as [CGFloat] { ctx.fill(rrect(x - r * 0.45, y + dy * r - r * 0.1, r * 0.9, r * 0.2, r * 0.05), with: .color(hx(0x2B2B33))) }
-            face(x, y, r * 0.8)
-            var tassel = Path(); tassel.move(to: pt(x, y + r)); tassel.addLine(to: pt(x, y + r * 1.5))
-            ctx.stroke(tassel, with: .color(hx(0xE8384F)), style: StrokeStyle(lineWidth: L * 2, lineCap: .round))
-        case .phoenixChick:
-            let x: CGFloat = 0, r = 0.15 * u, y = gy - r * 1.0
-            for (dx, h, c) in [(-0.3, 0.7, hx(0xFF4E1A)), (0.0, 0.95, hx(0xFFB020)), (0.3, 0.65, hx(0xFF4E1A))] as [(CGFloat, CGFloat, Color)] {
-                let fl = FlameBuddyOuterShape(wobble: 0).path(in: CGRect(x: x + dx * r - r * 0.22, y: y - r * 0.8 - h * r, width: r * 0.44, height: h * r))
-                ctx.fill(fl, with: .color(c))
+            sheen(ctx, body, CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2), 0.35)
+            ctx.stroke(body, with: .color(.white.opacity(0.45)), lineWidth: max(1, 0.009 * u))
+            for dy in [-0.86, 0.86] as [CGFloat] {
+                let cap = rrect(x - r * 0.46, y + dy * r - r * 0.11, r * 0.92, r * 0.22, r * 0.08)
+                ctx.fill(cap, with: lin([hx(0x5A4038), hx(0x2A1C18)], pt(0, y + dy * r - r * 0.11), pt(0, y + dy * r + r * 0.11)))
             }
-            for (i, ang) in [150.0, 170.0, 190.0].enumerated() {
-                let t = placed(ctx, x + r * 0.7, y + r * 0.1, ang - 180)
-                t.fill(ellipse(r * 0.45, 0, r * 0.5, r * 0.14), with: .color(i == 1 ? hx(0xFFD24A) : hx(0xFF7A1F)))
-            }
-            let body = ellipse(x, y, r, r * 0.95)
-            ctx.fill(body, with: .radialGradient(Gradient(colors: [hx(0xFFD98A), hx(0xFF8A2E), hx(0xE0431A)]), center: pt(x - r * 0.2, y - r * 0.3), startRadius: 0, endRadius: r * 1.2))
-            ctx.stroke(body, with: .color(ink), lineWidth: L)
-            ctx.fill(ellipse(x + r * 0.35, y + r * 0.2, r * 0.35, r * 0.25), with: .color(hx(0xFFB84A)))
-            face(x - r * 0.1, y - r * 0.15, r * 0.62)
-            ctx.fill(poly([pt(x - r * 0.18, y + r * 0.08), pt(x - r * 0.02, y + r * 0.08), pt(x - r * 0.1, y + r * 0.24)]), with: .color(hx(0xFFD21F)))
-            for sx in [-0.35, 0.25] as [CGFloat] {
-                var leg = Path(); leg.move(to: pt(x + sx * r, y + r * 0.85)); leg.addLine(to: pt(x + sx * r, y + r * 1.0))
-                ctx.stroke(leg, with: .color(hx(0xFFB020)), style: StrokeStyle(lineWidth: L * 1.8, lineCap: .round))
-            }
-        case .cometPup:
-            // Faces LEFT, toward him, with his comet tail streaming right.
-            let r = 0.15 * u, x: CGFloat = 0, y = gy - r * 1.2
-            var tail = Path(); tail.move(to: pt(x + r * 0.7, y + r * 0.15)); tail.addQuadCurve(to: pt(x + r * 1.9, y - r * 1.0), control: pt(x + r * 1.5, y + r * 0.1))
-            var tg = ctx; tg.addFilter(.blur(radius: r * 0.15))
-            tg.stroke(tail, with: lin([hx(0x9FE3FF), hx(0x9FE3FF, 0)], pt(x + r, y), pt(x + r * 1.9, y - r * 1.0)), style: StrokeStyle(lineWidth: r * 0.55, lineCap: .round))
-            ctx.fill(circle(x + r * 1.9, y - r * 1.0, r * 0.18), with: .color(.white))
-            let body = ellipse(x + r * 0.2, y + r * 0.35, r * 0.85, r * 0.55)
-            ctx.fill(body, with: lin([hx(0xE8F6FF), hx(0x8CC8F2)], pt(x, y), pt(x, y + r)))
-            ctx.stroke(body, with: .color(hx(0x2A4A6B)), lineWidth: L)
-            let head = circle(x - r * 0.35, y - r * 0.25, r * 0.62)
-            ctx.fill(head, with: lin([.white, hx(0xBFE2FA)], pt(x, y - r), pt(x, y + r * 0.3)))
-            ctx.stroke(head, with: .color(hx(0x2A4A6B)), lineWidth: L)
-            for sx in [-1.0, 1.0] as [CGFloat] {
-                let e = placed(ctx, x - r * 0.35 + sx * r * 0.48, y - r * 0.62, Double(sx) * 25)
-                e.fill(ellipse(0, 0, r * 0.18, r * 0.32), with: .color(hx(0x5B8FC8)))
-            }
-            face(x - r * 0.35, y - r * 0.28, r * 0.5, ink: hx(0x14283F))
-            ctx.fill(ellipse(x - r * 0.35, y - r * 0.08, r * 0.08, r * 0.06), with: .color(hx(0x14283F)))
-            for sx in [-0.35, 0.55] as [CGFloat] { ctx.fill(rrect(x + sx * r - r * 0.12, y + r * 0.7, r * 0.24, r * 0.22, r * 0.1), with: .color(hx(0xBFE2FA))) }
-            ctx.fill(star(x + r * 0.2, y + r * 0.35, r * 0.18, inner: 0.45), with: .color(hx(0xFFD24A)))
+            critterFace(ctx, x, y - r * 0.05, r * 0.62, glance: -0.1)
+            var tassel = Path()
+            tassel.move(to: pt(x, y + r * 0.97))
+            tassel.addLine(to: pt(x, y + r * 1.35))
+            ctx.stroke(tassel, with: .color(hx(0xE8384F)), style: StrokeStyle(lineWidth: max(1.5, 0.02 * u), lineCap: .round))
         case .friendlyGhost:
-            let x: CGFloat = 0, r = 0.17 * u, y = gy - 0.46 * u
+            let x: CGFloat = 0, r = 0.15 * u, y = fy - 0.02 * u
             var s = Path()
-            s.move(to: pt(x - r, y + r * 0.9))
+            s.move(to: pt(x - r, y + r * 0.95))
             s.addLine(to: pt(x - r, y))
             s.addArc(center: pt(x, y), radius: r, startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
-            s.addLine(to: pt(x + r, y + r * 0.9))
+            s.addLine(to: pt(x + r, y + r * 0.95))
             for i in 0..<4 {
                 let x0 = x + r - CGFloat(i) * r * 0.5
-                s.addQuadCurve(to: pt(x0 - r * 0.5, y + r * 0.9), control: pt(x0 - r * 0.25, y + r * (i % 2 == 0 ? 1.25 : 0.6)))
+                s.addQuadCurve(to: pt(x0 - r * 0.5, y + r * 0.95), control: pt(x0 - r * 0.25, y + r * (i % 2 == 0 ? 1.28 : 0.72)))
             }
             s.closeSubpath()
-            var gl = ctx; gl.addFilter(.blur(radius: r * 0.35)); gl.fill(s, with: .color(hx(0xBFFFEA, 0.6)))
-            ctx.fill(s, with: lin([.white, hx(0xDDE6F5)], pt(x, y - r), pt(x, y + r)))
-            ctx.stroke(s, with: .color(hx(0xAAB4CC)), lineWidth: L)
-            face(x, y, r * 0.8)
-            for sx in [-1.0, 1.0] as [CGFloat] { ctx.fill(ellipse(x + sx * r * 0.6, y + r * 0.2, r * 0.13, r * 0.07), with: .color(hx(0xFF8FB0, 0.6))) }
+            // A little arm waving at him.
+            var arm = Path()
+            arm.move(to: pt(x - r * 0.92, y + r * 0.35))
+            arm.addQuadCurve(to: pt(x - r * 1.30, y - r * 0.05), control: pt(x - r * 1.28, y + r * 0.40))
+            ctx.stroke(arm, with: .color(.white.opacity(0.6)), style: StrokeStyle(lineWidth: r * 0.34 + 2, lineCap: .round))
+            ctx.stroke(arm, with: .color(hx(0xEEF2FA)), style: StrokeStyle(lineWidth: r * 0.34, lineCap: .round))
+            critterBody(ctx, s, [.white, hx(0xE4EAF6), hx(0xC8D2E8)], CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2), u: u,
+                        rim: hx(0xBFFFEA, 0.8), glow: hx(0xBFFFEA))
+            critterFace(ctx, x, y + r * 0.02, r * 0.66, eye: hx(0x1A0E24), glance: -0.1)
         case .flameyJr:
-            // A little him, in his colour, looking up at him.
-            let w = 0.30 * u, h = 0.36 * u
+            // A little him, in his colour, standing on the same ground and
+            // looking up at him.
+            let w = 0.30 * u, h = 0.38 * u
             let rect = CGRect(x: -w / 2, y: gy - h, width: w, height: h)
             let outer = palette?.outer ?? [.white, hx(0xFFE047), .orange, hx(0xFF3319)]
             let innerCols = palette?.inner ?? [.white, hx(0xFFEB4D), hx(0xFF8014)]
-            var gl = ctx; gl.addFilter(.blur(radius: 0.05 * u))
-            gl.fill(circle(0, gy - h * 0.4, h * 0.45), with: .color((palette?.glow ?? .orange).opacity(0.45)))
-            let body = FlameBuddyOuterShape(wobble: 0.02).path(in: rect)
+            var gl = ctx
+            gl.addFilter(.blur(radius: 0.05 * u))
+            gl.fill(circle(0, gy - h * 0.4, h * 0.42), with: .color((palette?.glow ?? .orange).opacity(0.45)))
+            let body = FlameBuddyOuterShape(wobble: -0.03).path(in: rect)
             if palette?.angular == true {
                 ctx.fill(body, with: .conicGradient(Gradient(colors: outer + [outer[0]]), center: pt(0, gy - h * 0.34)))
             } else {
                 ctx.fill(body, with: lin(outer, pt(0, rect.minY), pt(0, rect.maxY)))
             }
-            ctx.stroke(body, with: .color((palette?.rim ?? Color.white.opacity(0.3))), lineWidth: max(1, 0.008 * u))
             let innerRect = CGRect(x: -w * 0.27, y: gy - h * 0.58 + h * 0.13, width: w * 0.54, height: h * 0.58)
             ctx.fill(FlameBuddyInnerShape(wobble: 0).path(in: innerRect), with: lin(innerCols, pt(0, innerRect.minY), pt(0, innerRect.maxY)))
-            let eye = palette?.eye ?? hx(0x330B06)
-            let fy = gy - h * 0.34
-            for sx in [-1.0, 1.0] as [CGFloat] {
-                ctx.fill(ellipse(sx * w * 0.16, fy, w * 0.065, w * 0.085), with: .color(eye))
-                ctx.fill(circle(sx * w * 0.16 + w * 0.02, fy - w * 0.03, w * 0.022), with: .color(.white))
+            ctx.stroke(body, with: .color((palette?.rim ?? Color.white.opacity(0.35))), lineWidth: max(1, 0.009 * u))
+            critterFace(ctx, 0, gy - h * 0.30, w * 0.40, eye: palette?.eye ?? critterInk, glance: -0.12)
+        case .phoenixChick:
+            let x: CGFloat = 0, r = 0.14 * u, y = gy - 0.052 * u - r
+            // Crest of flame on his head.
+            for (dx, hh, c) in [(-0.34, 0.62, hx(0xFF4E1A)), (0.0, 0.88, hx(0xFFB020)), (0.34, 0.58, hx(0xFF4E1A))] as [(CGFloat, CGFloat, Color)] {
+                let fl = FlameBuddyOuterShape(wobble: 0).path(in: CGRect(x: x + dx * r - r * 0.24, y: y - r * 0.78 - hh * r, width: r * 0.48, height: hh * r))
+                ctx.fill(fl, with: lin([hx(0xFFF3A0), c], pt(0, y - r * 0.78 - hh * r), pt(0, y - r * 0.78)))
             }
-            var mouth = Path(); mouth.move(to: pt(-w * 0.1, fy + w * 0.1)); mouth.addQuadCurve(to: pt(w * 0.1, fy + w * 0.1), control: pt(0, fy + w * 0.22))
-            ctx.stroke(mouth, with: .color(eye), style: StrokeStyle(lineWidth: max(1, w * 0.04), lineCap: .round))
+            // Tail feathers behind-right.
+            for (i, ang) in [-24.0, -4.0, 16.0].enumerated() {
+                let t = placed(ctx, x + r * 0.78, y + r * 0.25, ang)
+                let f = ellipse(r * 0.40, 0, r * 0.45, r * 0.14)
+                t.fill(f, with: .color(i == 1 ? hx(0xFFD24A) : hx(0xFF7A1F)))
+            }
+            // Legs + feet, planted on the ground line.
+            for sx in [-0.38, 0.30] as [CGFloat] {
+                var leg = Path()
+                leg.move(to: pt(x + sx * r, y + r * 0.8))
+                leg.addLine(to: pt(x + sx * r, gy - 0.012 * u))
+                ctx.stroke(leg, with: .color(hx(0xF08A1A)), style: StrokeStyle(lineWidth: max(1.2, 0.016 * u), lineCap: .round))
+                var foot = Path()
+                foot.move(to: pt(x + sx * r - 0.035 * u, gy - 0.006 * u))
+                foot.addLine(to: pt(x + sx * r + 0.02 * u, gy - 0.006 * u))
+                ctx.stroke(foot, with: .color(hx(0xF08A1A)), style: StrokeStyle(lineWidth: max(1.2, 0.016 * u), lineCap: .round))
+            }
+            let body = ellipse(x, y, r, r * 0.96)
+            critterBody(ctx, body, [hx(0xFFE08A), hx(0xFF8A2E), hx(0xE0431A)], CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2), u: u,
+                        rim: .white.opacity(0.45), glow: hx(0xFF7A1F))
+            // A wing.
+            let wing = placed(ctx, x + r * 0.42, y + r * 0.28, -20)
+            let wp = ellipse(0, 0, r * 0.34, r * 0.22)
+            wing.fill(wp, with: lin([hx(0xFFC24A), hx(0xFF7A1F)], pt(0, -r * 0.22), pt(0, r * 0.22)))
+            wing.stroke(wp, with: .color(.white.opacity(0.35)), lineWidth: max(1, 0.007 * u))
+            critterFace(ctx, x - r * 0.12, y - r * 0.12, r * 0.64, glance: -0.1, grin: false)
+            ctx.fill(poly([pt(x - r * 0.22, y + r * 0.06), pt(x - r * 0.02, y + r * 0.06), pt(x - r * 0.12, y + r * 0.24)]), with: .color(hx(0xFFD21F)))
+        case .cometPup:
+            // Sits on the ground facing LEFT, toward him; his comet tail
+            // curls up behind him.
+            let r = 0.12 * u, x: CGFloat = 0.02 * u, y = gy - r * 1.05
+            var tail = Path()
+            tail.move(to: pt(x + r * 0.8, y + r * 0.45))
+            tail.addQuadCurve(to: pt(x + r * 1.45, y - r * 0.55), control: pt(x + r * 1.55, y + r * 0.35))
+            var tg = ctx
+            tg.addFilter(.blur(radius: r * 0.18))
+            tg.stroke(tail, with: lin([hx(0x9FE3FF), hx(0x9FE3FF, 0.1)], pt(x + r, y + r * 0.4), pt(x + r * 1.45, y - r * 0.55)),
+                      style: StrokeStyle(lineWidth: r * 0.5, lineCap: .round))
+            ctx.fill(star(x + r * 1.45, y - r * 0.62, r * 0.22, inner: 0.45), with: .color(hx(0xFFE27A)))
+            let fur = [Color.white, hx(0xD8EEFF), hx(0x9CCBF0)]
+            let body = ellipse(x + r * 0.30, y + r * 0.42, r * 0.80, r * 0.62)
+            critterBody(ctx, body, fur, CGRect(x: x - r * 0.5, y: y - r * 0.2, width: r * 1.6, height: r * 1.24), u: u)
+            ctx.fill(star(x + r * 0.45, y + r * 0.40, r * 0.16, inner: 0.45), with: .color(hx(0xFFD24A)))
+            for sx in [-0.28, 0.08, 0.72] as [CGFloat] {
+                let paw = rrect(x + sx * r - r * 0.14, gy - r * 0.26, r * 0.28, r * 0.26, r * 0.12)
+                ctx.fill(paw, with: .color(hx(0xE6F4FF)))
+                ctx.stroke(paw, with: .color(.white.opacity(0.5)), lineWidth: max(1, 0.007 * u))
+            }
+            for sx in [-1.0, 1.0] as [CGFloat] {
+                let e = placed(ctx, x - r * 0.30 + sx * r * 0.50, y - r * 0.55, Double(sx) * 28)
+                let ear = ellipse(0, 0, r * 0.20, r * 0.34)
+                e.fill(ear, with: lin([hx(0x7FB2E6), hx(0x4F86C8)], pt(0, -r * 0.3), pt(0, r * 0.3)))
+                e.fill(ellipse(0, r * 0.04, r * 0.09, r * 0.20), with: .color(hx(0xFFC2D1)))
+            }
+            let head = circle(x - r * 0.30, y - r * 0.06, r * 0.62)
+            critterBody(ctx, head, fur, CGRect(x: x - r * 0.92, y: y - r * 0.68, width: r * 1.24, height: r * 1.24), u: u)
+            critterFace(ctx, x - r * 0.36, y - r * 0.02, r * 0.52, eye: hx(0x14283F), glance: -0.1)
+            ctx.fill(ellipse(x - r * 0.36, y + r * 0.08, r * 0.07, r * 0.05), with: .color(hx(0x14283F)))
         default: break
         }
     }
+}
+
+// MARK: - Standing
+
+extension FlameyLook {
+    /// How far his legs raise him (body units): shoes stand him up on two
+    /// stubby legs, on EVERY surface; bare, he sits on the ground as always.
+    var standLift: CGFloat { self[.feet] == nil ? 0 : FlameyArt.legLength }
+
+    /// Everything that raises his body off the floor — legs, then any hover.
+    /// The figure's `lift` and every anchor use this, so the body, the face
+    /// props and the outfit move together.
+    var bodyLift: CGFloat { standLift + hoverLift }
 }

@@ -92,8 +92,8 @@ struct TrackerFlameyCheer: View {
                 }
                 .frame(width: size, height: size)
             }
-            // Room for the hat over his tip.
-            .frame(width: size * 1.5, height: size * 1.3, alignment: .bottom)
+            // Room for the hat over his tip (and his legs, when he's shod).
+            .frame(width: size * 1.5, height: size * 1.45, alignment: .bottom)
         }
         .accessibilityHidden(true)
         .onAppear {

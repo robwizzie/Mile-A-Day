@@ -39,7 +39,7 @@ struct FlameyOutfitLayer: View {
     private var moving: Bool { !still && !reduceMotion }
     private var palette: FlameyPalette? { FlameyPalette.palette(for: look.color) }
     private var u: CGFloat { size * scale }
-    private var anchors: FlameyArt.Anchors { FlameyArt.anchors(size: size, scale: scale, lift: look.hoverLift) }
+    private var anchors: FlameyArt.Anchors { FlameyArt.anchors(size: size, scale: scale, lift: look.hoverLift, stand: look.standLift) }
 
     var body: some View {
         ZStack {
@@ -134,6 +134,8 @@ struct FlameyOutfitLayer: View {
                     // A tight surface shortens the stream so it only peeks
                     // out from behind him.
                     if FlameyArt.isTight(reach) { ctx.scaleBy(x: FlameyArt.trailTuck, y: 1) }
+                    // ...and a busy look (cape + prop) shortens it a touch.
+                    ctx.scaleBy(x: FlameyArt.trailScale(for: look), y: 1)
                     FlameyArt.drawTrail(trail, in: &ctx, a: a, u: u, reach: reach)
                 }
                 .frame(width: size * 3, height: size * 3)
@@ -245,13 +247,21 @@ struct FlameyOutfitLayer: View {
             .frame(width: size * 3, height: size * 3)
 
             if look.wears(.heartBopper) {
+                // The band sits still on his head; only the springs sway.
+                let seat = a.topY + FlameyArt.bopperSeat * u
                 Canvas { ctx, canvas in
                     ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
+                    FlameyArt.drawHeartBopperBand(in: &ctx, u: u)
+                }
+                .frame(width: u * 0.6, height: u * 0.6)
+                .offset(y: seat)
+                Canvas { ctx, canvas in
+                    ctx.translateBy(x: canvas.width / 2, y: canvas.height - 0.05 * u)
                     FlameyArt.drawHeartBopper(in: &ctx, u: u)
                 }
-                .frame(width: u * 0.5, height: u * 0.5)
-                .rotationEffect(.degrees(moving ? (phase ? 7 : -7) : 0), anchor: .center)
-                .offset(y: a.topY + 0.03 * u)
+                .frame(width: u * 0.7, height: u * 0.7)
+                .rotationEffect(.degrees(moving ? (phase ? 6 : -6) : 0), anchor: .bottom)
+                .offset(y: seat - u * 0.30)
             }
 
             if let companion = look[.companion] {
@@ -261,9 +271,19 @@ struct FlameyOutfitLayer: View {
                 // column, clear of the numbers.
                 let tight = self.tight
                 let floats = Self.floats(companion)
-                let k: CGFloat = tight ? 0.62 : 1.35
+                let k: CGFloat = tight ? 0.60 : FlameyArt.companionScale(for: look)
                 let x = tight ? (floats ? 0.30 : 0.26) * u : FlameyArt.companionX(u, reach: reach)
                 let lift = tight && floats ? -0.42 * u : 0
+                if !(tight && floats) {
+                    // Its shadow stays on the floor while it bobs.
+                    Canvas { ctx, canvas in
+                        ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
+                        ctx.translateBy(x: 0, y: a.ground); ctx.scaleBy(x: k, y: k); ctx.translateBy(x: 0, y: -a.ground)
+                        FlameyArt.drawCompanionShadow(companion, in: &ctx, a: a, u: u, floats: floats)
+                    }
+                    .frame(width: size * 1.6, height: size * 3)
+                    .offset(x: x)
+                }
                 Canvas { ctx, canvas in
                     ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
                     ctx.translateBy(x: 0, y: a.ground); ctx.scaleBy(x: k, y: k); ctx.translateBy(x: 0, y: -a.ground)
@@ -411,7 +431,7 @@ struct FlameyDressedFigure: View {
             FlameyOutfitLayer(look: look, size: size, scale: scale, side: .behind, still: true)
             FlameBuddyFigure(health: health, size: size, showsFace: !look.wears(.ghostSheet), vigor: vigor,
                              grounded: true, palette: health == .dead ? nil : FlameyPalette.palette(for: look.color),
-                             lift: look.hoverLift * scale)
+                             lift: look.bodyLift * scale, legLength: look.standLift)
             FlameyOutfitLayer(look: look, size: size, scale: scale, side: .front, still: true)
         }
         .frame(width: size, height: size)
