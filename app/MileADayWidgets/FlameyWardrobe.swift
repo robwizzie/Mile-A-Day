@@ -249,10 +249,16 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
     }
 
     /// Slots this item covers up. The pumpkin is a whole outfit — its stem is
-    /// his hat, and it swallows his feet and anything round his middle.
+    /// his hat, and it swallows his feet and anything round his middle — and
+    /// a costume is worn INSTEAD of gear, so the 30-day sweatband comes off
+    /// with it (it drew as a gym band over a pumpkin). The star glasses' top
+    /// points reach the brow line, so they take the sweatband off too rather
+    /// than poking through it. Checked against every holiday × gear × mood
+    /// combination a resolve can produce (render matrix, not by eye).
     var hides: Set<FlameySlot> {
         switch self {
-        case .pumpkinSuit: return [.feet, .neck, .head]
+        case .pumpkinSuit: return [.feet, .neck, .head, .brow]
+        case .starGlasses: return [.brow]
         default: return []
         }
     }

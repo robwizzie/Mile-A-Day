@@ -204,19 +204,29 @@ struct FlameMood: Equatable {
         case .refuse: return ["Earn it first!", "Mile first!", "Not yet!"]
         case .tickle: return ["Hehe stop!", "Tickles!", "Hahaha!"]
         case .feed(let treat):
-            switch treat.effect {
-            case .stuffed: return ["Nom!", "So good", "Nom nom nom"]
-            case .tipsy: return ["Cheers!", "Ahh, lovely"]
-            case .wired: return ["Zoom zoom!", "Buzzing!"]
+            // FOOD lines only. Flamey is never shown drinking — `food(for:)`
+            // swaps an alcoholic pick for a donut before a feed can start, so
+            // `.tipsy` is unreachable here; it still gets food lines rather
+            // than a toast, belt and braces.
+            switch food(for: treat).effect {
+            case .stuffed, .tipsy: return ["Nom!", "So good", "Nom nom nom"]
+            case .wired: return ["Zoom zoom!", "Mmm, latte"]
             }
         }
     }
 
+    /// What Flamey actually EATS for a Well Earned pick. He is a mascot on a
+    /// 13+ fitness app and is never shown consuming alcohol: wine and beer
+    /// (any `.tipsy` treat) become a donut, counted in DONUTS — the Well
+    /// Earned cards themselves keep the user's pick unchanged.
+    static func food(for treat: CalorieTreat) -> CalorieTreat {
+        treat.effect == .tipsy ? .donut : treat
+    }
+
     /// Long-press with nothing earned yet today: he asks for it instead.
     static func hungryQuip(_ treat: CalorieTreat) -> String {
-        switch treat {
-        case .wine: return "Earn me wine!"
-        case .beer: return "Earn me a beer!"
+        switch food(for: treat) {
+        case .wine, .beer: return "Earn me a donut!"
         case .cheeseburger: return "Earn me a burger!"
         case .pizza: return "Earn me pizza!"
         case .donut: return "Earn me a donut!"

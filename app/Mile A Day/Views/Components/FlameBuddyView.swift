@@ -246,7 +246,8 @@ struct FlameBuddyView: View {
             var t = Transaction()
             t.disablesAnimations = true
             withTransaction(t) {
-                feeding = treat
+                // Never a drink in his hand, whatever the caller passed.
+                feeding = FlameMood.food(for: treat)
                 treatInMouth = false
             }
             DispatchQueue.main.async {

@@ -1428,7 +1428,8 @@ private struct FlameBuddyHeroCard: View {
     /// Long-press: feed him today's Well Earned treat — if at least one whole
     /// one has been earned today; otherwise he asks for it.
     private func feed() {
-        let treat = CalorieTreat.current
+        // Never a drink: an alcoholic pick feeds him a donut, earned in donuts.
+        let treat = FlameMood.food(for: CalorieTreat.current)
         let cached = healthManager.cachedWorkouts
         let todays = healthManager.todaysWorkouts
         Task { @MainActor in
