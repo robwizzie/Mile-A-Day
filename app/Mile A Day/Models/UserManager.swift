@@ -664,7 +664,9 @@ class UserManager: ObservableObject {
 
     /// Fetch the user's earned badges from the backend. Server is authoritative.
     /// Safe to call on every workout-upload completion and on Badges view appear.
-    func refreshBadgesFromServer() async {
+    /// `celebrateNew: false` absorbs freshly-earned medals without one unlock
+    /// popup each — for a burst the caller announces itself (Recalibrate).
+    func refreshBadgesFromServer(celebrateNew: Bool = true) async {
         #if !os(watchOS)
         guard let userId = currentUser.backendUserId else { return }
         do {
@@ -695,6 +697,8 @@ class UserManager: ObservableObject {
                     }
                     return
                 }
+
+                guard celebrateNew else { return }
 
                 // Decide whether a yearly headline celebration is owed BEFORE we
                 // queue any badge celebrations. If yes, suppress the matching

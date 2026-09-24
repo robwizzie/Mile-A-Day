@@ -255,11 +255,16 @@ struct ProfileView: View {
                 localStreakDays: healthManager.retroactiveStreak
             )
             userManager.updateStreakFromBackend(outcome.streak)
+            await RecalibrateMedals.refresh(userManager: userManager, newBadgeIds: outcome.newBadgeIds)
 
             let dayWord = outcome.streak == 1 ? "day" : "days"
             let workoutWord = outcome.workoutsPushed == 1 ? "workout" : "workouts"
-            recalibrateResultMessage =
+            var message =
                 "Your streak is now \(outcome.streak) \(dayWord). We re-checked \(outcome.workoutsPushed) recent \(workoutWord) and made sure they're all saved to your account."
+            if let medals = RecalibrateMedals.sentence(for: outcome.newBadgeIds) {
+                message += " " + medals
+            }
+            recalibrateResultMessage = message
         } catch {
             recalibrateResultMessage =
                 "We couldn't finish recalibrating right now. Please check your connection and try again."

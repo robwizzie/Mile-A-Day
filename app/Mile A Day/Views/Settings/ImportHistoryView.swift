@@ -440,11 +440,19 @@ struct ImportHistoryView: View {
     @MainActor
     private func recalibrateStreak() async {
         guard let userId = userManager.currentUser.backendUserId, !userId.isEmpty else { return }
-        struct Resp: Decodable { let streak: Int }
-        _ = try? await APIClient.fancyFetch(
+        struct Resp: Decodable {
+            let streak: Int
+            let new_badges: [String]?
+        }
+        let resp = try? await APIClient.fancyFetch(
             endpoint: "/workouts/\(userId)/recalibrate-streak",
             method: .POST,
             responseType: Resp.self
         )
+        // Imported history can earn medals (the server recalibrates them with
+        // the streak) — put them on the shelf now, stats beside them.
+        if let resp {
+            await RecalibrateMedals.refresh(userManager: userManager, newBadgeIds: resp.new_badges ?? [])
+        }
     }
 }
