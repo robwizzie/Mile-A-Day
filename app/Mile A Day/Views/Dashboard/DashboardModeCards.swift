@@ -1531,7 +1531,12 @@ private struct FlameBuddyHeroCard: View {
                                 dayEnd: StreakFlameClock.nextLocalMidnight(),
                                 coalWarmth: min(progress, 1),
                                 mood: currentMood,
-                                look: look(for: currentMood)
+                                look: look(for: currentMood),
+                                // His column is narrow: the stat column sits
+                                // just to his right and the card edge to his
+                                // left, so the cape/trail and companion
+                                // squeeze in close.
+                                wardrobeReach: 0.62
                             )
                             .frame(width: buddySize * 1.50, height: buddySize * 1.34)
                             .offset(y: -28)

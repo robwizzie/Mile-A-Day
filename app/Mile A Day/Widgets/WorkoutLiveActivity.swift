@@ -209,19 +209,20 @@ struct LiveActivityFlamey: View {
     var body: some View {
         if Self.isFun && !isStale {
             let band = Self.band(for: progress)
+            // A small surface: `.compact` keeps colour, head, eyes, chest,
+            // feet and costume, standing on the ground.
             let look = FlameyLook.resolve(
-                longestStreak: WidgetDataStore.loadLongestStreak(),
-                earnedBadgeIds: WidgetDataStore.loadFlameyBadgeIds(),
-                signupDate: WidgetDataStore.loadFlameySignupDate(),
+                owned: WidgetDataStore.loadFlameyOwnedItems(),
+                choice: WidgetDataStore.loadFlameyChoice(),
                 date: Date(),
-                moodProps: band == .cheering ? [.shades, .partyHat] : []
+                mood: band == .cheering ? [.moodShades, .partyHat] : [],
+                signupDate: WidgetDataStore.loadFlameySignupDate(),
+                detail: .compact
             )
             let health: FlameHealth = band == .cheering ? .blazing : .healthy
             ZStack {
                 if band != .ready { flair(band) }
-                FlameyOutfitLayer(look: look, size: size, scale: health.bodyScale, side: .behind, still: true)
-                FlameBuddyFigure(health: health, size: size, showsFace: true, vigor: nil, grounded: true)
-                FlameyOutfitLayer(look: look, size: size, scale: health.bodyScale, side: .front, still: true)
+                FlameyDressedFigure(look: look, health: health, size: size, scale: health.bodyScale)
             }
             .rotationEffect(.degrees(band == .excited ? -6 : 0), anchor: .bottom)
             .frame(width: size, height: size)

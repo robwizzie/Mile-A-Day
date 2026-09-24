@@ -48,6 +48,10 @@ struct FlameBuddyView: View {
     /// surface passes. When set, it OWNS the mood's props too (shades, party
     /// hat, nightcap), so a holiday hat can outrank them without two hats.
     var look: FlameyLook? = nil
+    /// How far (in body units) this surface lets his wardrobe spread
+    /// sideways — the cape and trail to his left, a companion to his right.
+    /// The Fun hero's column is narrow, so it passes less than a share card.
+    var wardrobeReach: CGFloat = 0.9
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The house pattern: an explicit still OR the system setting.
@@ -149,7 +153,7 @@ struct FlameBuddyView: View {
                 // Tail feathers: the first child, so behind the figure and
                 // its glow.
                 FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: currentVigor(at: Date())),
-                                  side: .behind, still: effectiveStill)
+                                  side: .behind, still: effectiveStill, reach: wardrobeReach)
             }
 
             // The ONLY per-frame clock: the figure's flicker and blink. 12 fps
@@ -176,14 +180,15 @@ struct FlameBuddyView: View {
                 // Canvas-drawn, no clock: redrawn only when the look or his
                 // scale changes. Rides the container's bob/hop like the props.
                 FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: currentVigor(at: Date())),
-                                  side: .front, still: effectiveStill)
+                                  side: .front, still: effectiveStill, reach: wardrobeReach)
             }
 
             if let mood {
                 // No clock of its own (see FlameMoodLayer). Shares the
                 // container's bob/hop/pace below, so props ride with him.
                 FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: currentVigor(at: Date())),
-                               showsBubble: showsMoodBubble, drawsWornProps: look == nil)
+                               showsBubble: showsMoodBubble, drawsWornProps: look == nil,
+                               bubbleStyle: look?.bubble ?? .classicBubble, lift: liftFraction)
             }
 
             reactionProps(scale: figureScale(vigor: currentVigor(at: Date())))
@@ -281,7 +286,7 @@ struct FlameBuddyView: View {
     @ViewBuilder
     private func reactionProps(scale: CGFloat) -> some View {
         let u = size * scale
-        let faceY = size / 2 - 0.32 * u
+        let faceY = size / 2 - liftFraction * size - 0.32 * u
         ZStack {
             FlameHighFiveHand(unit: u)
                 .scaleEffect(showHand ? 1 : 0.01, anchor: .bottomLeading)
@@ -320,15 +325,18 @@ struct FlameBuddyView: View {
                 EmberBaseGlow(size: size, intensity: min(1, (0.45 - vigorNow) / 0.45))
             }
             if let look {
-                FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: vigorNow), side: .behind, still: true)
+                FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: vigorNow), side: .behind, still: true,
+                                  reach: wardrobeReach)
             }
             figure(vigor: vigorNow, flicker: 0, blink: false, gaze: .zero)
             if let look {
-                FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: vigorNow), side: .front, still: true)
+                FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: vigorNow), side: .front, still: true,
+                                  reach: wardrobeReach)
             }
             if let mood {
                 FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: vigorNow), still: true,
-                               showsBubble: showsMoodBubble, drawsWornProps: look == nil)
+                               showsBubble: showsMoodBubble, drawsWornProps: look == nil,
+                               bubbleStyle: look?.bubble ?? .classicBubble, lift: liftFraction)
             }
         }
     }
@@ -355,8 +363,16 @@ struct FlameBuddyView: View {
             bellyBulge: munchBulge,
             gaze: gaze,
             asleep: mood?.eyesShut ?? false,
-            grounded: grounded
+            grounded: grounded,
+            palette: look.flatMap { FlameyPalette.palette(for: $0.color) },
+            lift: liftFraction
         )
+    }
+
+    /// His hover, as a fraction of `size` (the look's lift is in body units).
+    private var liftFraction: CGFloat {
+        guard let look else { return 0 }
+        return look.hoverLift * figureScale(vigor: currentVigor(at: Date()))
     }
 
     // MARK: - Mood: face (content clock — discrete, cheap)

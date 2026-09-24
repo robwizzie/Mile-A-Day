@@ -77,6 +77,11 @@ struct FlameyProfileBlock: Codable {
     var holiday_keys: [String]? = nil
     /// "YYYY-MM-DD", the day they signed up, on their own calendar.
     var signup_date: String? = nil
+    /// Their Flamey's Closet choice, the wire `{slot: itemId | null}` (a
+    /// missing slot is auto, null is bare). Additive; absent on older servers.
+    var look: [String: String?]? = nil
+    /// Every wardrobe item they own, when the server sends it. Additive.
+    var owned_item_ids: [String]? = nil
 }
 
 // MARK: - Friendship Models

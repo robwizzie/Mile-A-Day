@@ -43,7 +43,9 @@ struct TrackerFlameyBuddy: View {
                 // A bubble at this size would sit on the ring's numbers; his
                 // tempo and props carry the mood on their own.
                 showsMoodBubble: false,
-                look: FlameyFacts.look(mood: kind)
+                // A small surface: colour, head, eyes, chest, feet —
+                // standing on the ground (no jets over the ring).
+                look: FlameyFacts.look(mood: kind, detail: .compact)
             )
             .frame(width: size, height: size)
             .allowsHitTesting(false)

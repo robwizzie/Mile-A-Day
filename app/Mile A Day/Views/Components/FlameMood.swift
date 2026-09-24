@@ -88,11 +88,12 @@ struct FlameMood: Equatable {
 
     /// The props this mood puts on him, handed to `FlameyLook.resolve` as its
     /// mood layer — so a holiday hat can outrank the party hat and he still
-    /// never wears two.
+    /// never wears two. Mood dressing may only take the HEAD from what he
+    /// chose; the done-shades only go on bare eyes.
     var props: [FlameyItem] {
         switch kind {
-        case .done: return [.shades]
-        case .party: return [.shades, .partyHat]
+        case .done: return [.moodShades]
+        case .party: return [.moodShades, .partyHat]
         case .bedtime, .sleepy: return [.nightcap]
         default: return []
         }
@@ -281,12 +282,18 @@ struct FlameMoodLayer: View {
     /// against holiday outfits and gear), and drawing them twice is exactly
     /// the two-hats bug the look exists to prevent.
     var drawsWornProps: Bool = true
+    /// His speech-bubble style from the wardrobe (`FlameyLook.bubble`).
+    /// Classic draws the bubble below, unchanged.
+    var bubbleStyle: FlameyItem = .classicBubble
+    /// His hover (rocket jets / winged sandals), as a fraction of `size`, so
+    /// the bubble and props stay on him in the air.
+    var lift: CGFloat = 0
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Flipped once on appear; every moving prop animates off it.
     @State private var animate = false
 
-    private var bottom: CGFloat { size / 2 }
+    private var bottom: CGFloat { size / 2 - lift * size }
     private var faceY: CGFloat { bottom - 0.32 * size * scale }
     private var eyeX: CGFloat { 0.145 * size * scale }
     private var topY: CGFloat { bottom - 0.98 * size * scale }
@@ -366,7 +373,16 @@ struct FlameMoodLayer: View {
     /// types (the inline chain tipped the type-checker past its time
     /// budget). Width-capped to the flame's own column and allowed a second
     /// line, so a long quip wraps rather than widens, on every screen size.
+    @ViewBuilder
     private func bubbleLabel(_ text: String) -> some View {
+        if bubbleStyle == .classicBubble {
+            classicBubbleLabel(text)
+        } else {
+            FlameyStyledBubble(text: text, style: bubbleStyle, size: size)
+        }
+    }
+
+    private func classicBubbleLabel(_ text: String) -> some View {
         let fontSize: CGFloat = max(10, size * 0.07)
         let padX: CGFloat = size * 0.055
         let padY: CGFloat = size * 0.03

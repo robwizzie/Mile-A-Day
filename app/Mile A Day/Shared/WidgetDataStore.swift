@@ -286,6 +286,31 @@ struct WidgetDataStore {
         return epoch > 0 ? Date(timeIntervalSince1970: epoch) : nil
     }
 
+    private static let flameyChoiceKey = "flamey_look_choice"
+
+    /// The Closet choice, as its wire JSON. Written without a reload — the
+    /// badge save beside it reloads when the resolved look actually moved.
+    static func save(flameyChoice: FlameyLookChoice) {
+        guard let defaults = UserDefaults(suiteName: suiteName),
+              let data = try? JSONEncoder().encode(flameyChoice) else { return }
+        if defaults.data(forKey: flameyChoiceKey) == data { return }
+        defaults.set(data, forKey: flameyChoiceKey)
+    }
+
+    static func loadFlameyChoice() -> FlameyLookChoice {
+        guard let defaults = UserDefaults(suiteName: suiteName),
+              let data = defaults.data(forKey: flameyChoiceKey),
+              let choice = try? JSONDecoder().decode(FlameyLookChoice.self, from: data) else { return .auto }
+        return choice
+    }
+
+    /// Everything he owns, from the mirrored medals plus the streak colours
+    /// the mirrored longest streak implies.
+    static func loadFlameyOwnedItems() -> Set<FlameyItem> {
+        FlameyWardrobe.owned(earnedBadgeIds: loadFlameyBadgeIds()
+            .union(FlameyWardrobe.impliedBadgeIds(longestStreak: loadLongestStreak())))
+    }
+
     // MARK: - Streak tokens (streak widget accessory)
 
     private static let tokensReadyKey = "tokens_ready"
