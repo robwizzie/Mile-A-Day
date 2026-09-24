@@ -25,15 +25,19 @@ final class FlameyClosetLink: ObservableObject {
         /// Open on the "what you've unlocked" walkthrough even if it has been
         /// taken before (it always opens on the FIRST visit).
         var journey: Bool = false
+        /// Open `focus`'s card on arrival (a medal's "See it in Flamey's
+        /// Closet", `mileaday://flamey-closet?item=<id>`).
+        var openDetail: Bool = false
     }
 
     @Published var pending: Request?
 
     private init() {}
 
-    func open(highlighting items: Set<FlameyItem> = [], focus: FlameyItem? = nil, journey: Bool = false) {
+    func open(highlighting items: Set<FlameyItem> = [], focus: FlameyItem? = nil, journey: Bool = false,
+              openDetail: Bool = false) {
         guard DashboardStylePreference.current == .fun else { return }
-        pending = Request(highlight: items, focus: focus, journey: journey)
+        pending = Request(highlight: items, focus: focus, journey: journey, openDetail: openDetail && focus != nil)
     }
 
     /// The same, raised only AFTER a sheet has finished dismissing — a
@@ -362,7 +366,10 @@ struct FlameyClosetScreen: View {
         self.request = request
         self.canRoute = canRoute
         _model = State(initialValue: Self.makeModel(request))
-        _showingJourney = State(initialValue: request.journey || !FlameyJourneyLedger.seen)
+        // A request aimed at ONE item (from a medal, a deep link) goes
+        // straight there; the first-run walkthrough waits for a plain open.
+        _showingJourney = State(initialValue: request.journey
+            || (!FlameyJourneyLedger.seen && !request.openDetail))
     }
 
     var body: some View {
@@ -386,6 +393,11 @@ struct FlameyClosetScreen: View {
                 }
             }
             FlameyMedalCatalog.refreshNames { model.medals = FlameyMedalCatalog.medals() }
+            if request.openDetail, let item = request.focus, !showingJourney {
+                // After the cover has finished presenting: a sheet raised in
+                // the same transaction as its host's presentation is dropped.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { model.detail = item }
+            }
         }
         .onDisappear {
             FlameySeenLedger.markSeen(model.owned)
@@ -566,6 +578,47 @@ struct FlameyClosetProfileRow: View {
             ) {
                 MADHaptics.action()
                 FlameyClosetLink.shared.open()
+            }
+        }
+    }
+}
+
+// MARK: - The Medals screen's Flamey links
+
+/// The medal grid tile's glyph, only on Fun and only for a medal that dresses
+/// him. Hosts overlay it on the medal; a Modern user sees nothing.
+struct FlameyMedalItemGlyphLive: View {
+    let badgeId: String
+    let earned: Bool
+    @AppStorage(DashboardStylePreference.key) private var styleRaw = DashboardStyle.modern.rawValue
+
+    var body: some View {
+        let items = FlameyMedalLink.items(forBadge: badgeId)
+        if styleRaw == DashboardStyle.fun.rawValue, !items.isEmpty {
+            FlameyMedalItemGlyph(items: items, earned: earned)
+        }
+    }
+}
+
+/// The medal detail's "Unlocks for Flamey" card (Fun only). It presents the
+/// Closet on its OWN cover: the medal screen can be pushed inside a sheet,
+/// and a cover raised from MainTabView's root can't present over one. From
+/// here "where to earn it" has no tab to leave for, so locked cards say
+/// where instead of offering a button (`canRoute: false`).
+struct FlameyMedalUnlockCardLive: View {
+    let badgeId: String
+    let earned: Bool
+    @AppStorage(DashboardStylePreference.key) private var styleRaw = DashboardStyle.modern.rawValue
+    @State private var closet: FlameyClosetLink.Request?
+
+    var body: some View {
+        let items = FlameyMedalLink.items(forBadge: badgeId)
+        if styleRaw == DashboardStyle.fun.rawValue, !items.isEmpty {
+            FlameyMedalUnlockCard(items: items, earned: earned) { item in
+                closet = FlameyClosetLink.Request(focus: item, openDetail: true)
+            }
+            .fullScreenCover(item: $closet) { request in
+                FlameyClosetScreen(request: request, canRoute: false)
             }
         }
     }

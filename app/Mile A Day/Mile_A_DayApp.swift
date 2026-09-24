@@ -131,7 +131,14 @@ struct Mile_A_DayApp: App {
                         // mileaday://flamey-closet — parked on the link and
                         // presented by MainTabView's root host whenever it's
                         // mounted (a cold launch has no tabs yet). Fun-only.
-                        FlameyClosetLink.shared.open()
+                        // `?item=<id>` opens ON that item, its card up.
+                        let itemId = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                            .queryItems?.first { $0.name == "item" }?.value
+                        if let item = itemId.flatMap(FlameyItem.init(rawValue:)), !item.isMoodProp {
+                            FlameyClosetLink.shared.open(focus: item, openDetail: true)
+                        } else {
+                            FlameyClosetLink.shared.open()
+                        }
                     case "compete":
                         NotificationCenter.default.post(
                             name: NSNotification.Name("MAD_SwitchTab"),

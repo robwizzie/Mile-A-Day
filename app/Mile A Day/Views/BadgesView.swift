@@ -362,6 +362,11 @@ struct PremiumBadgeCard: View {
                 }
             }
             .frame(width: 110, height: 110)
+            // Fun only: the Flamey item this medal unlocks, on its corner.
+            .overlay(alignment: .bottomTrailing) {
+                FlameyMedalItemGlyphLive(badgeId: badge.id, earned: !badge.isLocked)
+                    .offset(x: 2, y: -4)
+            }
 
             // Badge name — reserves 2 lines of space so every card is the same height
             Text(badge.name)

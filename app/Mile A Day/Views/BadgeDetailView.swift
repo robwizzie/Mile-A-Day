@@ -256,6 +256,9 @@ struct BadgeDetailView: View {
                 unlockedContent
             }
 
+            // Fun only: what this medal dresses Flamey in, and the way there.
+            FlameyMedalUnlockCardLive(badgeId: badge.id, earned: !badge.isLocked)
+
             // Competition badges: show the competitions behind this medal.
             if badge.id.hasPrefix("comp_") {
                 CompetitionBadgeSection(badgeId: badge.id)

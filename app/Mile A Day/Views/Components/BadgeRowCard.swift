@@ -53,6 +53,12 @@ struct BadgeRowCard: View {
             HStack(spacing: MADTheme.Spacing.md) {
                 // Mini medal — shared premium look (no shimmer at this small size).
                 MedalView(badge: badge, size: 44, showShimmer: false)
+                    // Fun only: the Flamey item this medal unlocks.
+                    .overlay(alignment: .bottomTrailing) {
+                        FlameyMedalItemGlyphLive(badgeId: badge.id, earned: !badge.isLocked)
+                            .scaleEffect(0.62, anchor: .bottomTrailing)
+                            .offset(x: 6, y: 4)
+                    }
 
                 // Name & rarity
                 VStack(alignment: .leading, spacing: 2) {
