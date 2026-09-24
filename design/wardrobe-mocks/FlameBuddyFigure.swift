@@ -1,0 +1,415 @@
+import SwiftUI
+
+// Widget-target copy of the flame figure. KEEP IN SYNC with
+// app/Mile A Day/Views/Components/FlameBuddyFigure.swift — the Streak Flame
+// widget drives it with `vigor` so the flame burns down in lock-step with the
+// dashboard. Widgets render statically, so callers pass flickerPhase 0 / no
+// blink; the size + palette still track time left via `vigor`.
+
+enum FlameHealth: String, CaseIterable {
+    case blazing
+    case healthy
+    case dimming
+    case low
+    case critical
+    case dead
+
+    static func forState(
+        isCompleted: Bool,
+        distanceIsFresh: Bool,
+        isAtRisk: Bool,
+        secondsToReset: TimeInterval?,
+        streak: Int
+    ) -> FlameHealth {
+        if isCompleted && distanceIsFresh { return .blazing }
+        if streak == 0 && distanceIsFresh { return .dead }
+        if isAtRisk { return .critical }
+
+        guard let secondsToReset else { return .healthy }
+        let hours = secondsToReset / 3600
+        if hours >= 8 { return .healthy }
+        if hours >= 4 { return .dimming }
+        return .low
+    }
+
+    var glowOpacity: Double {
+        switch self {
+        case .blazing: return 0.66
+        case .healthy: return 0.48
+        case .dimming: return 0.32
+        case .low: return 0.20
+        case .critical: return 0.52
+        case .dead: return 0.05
+        }
+    }
+
+    var bodyScale: CGFloat {
+        switch self {
+        case .blazing: return 1.05
+        case .healthy: return 1.0
+        case .dimming: return 0.92
+        case .low: return 0.82
+        case .critical: return 0.90
+        case .dead: return 0.70
+        }
+    }
+}
+
+struct FlameBuddyFigure: View {
+    let health: FlameHealth
+    var flickerPhase: CGFloat = 0
+    var blink: Bool = false
+    var size: CGFloat = 170
+    /// The Modern flame renders faceless; the Fun buddy keeps its face.
+    var showsFace: Bool = true
+    /// Continuous time-left driver (1 = full day ahead, 0 = midnight). When set,
+    /// the flame's size, palette and glow burn down with the day — matching the
+    /// dashboard. When nil the figure keeps its stage-based look.
+    var vigor: CGFloat? = nil
+    /// Grounded flames (the Fun buddy) shrink toward their base and cast a
+    /// ground shadow; a non-grounded flame (the Modern ring) shrinks toward its
+    /// center so it stays framed in the circle.
+    var grounded: Bool = true
+    /// MOCK: a wardrobe flame colour. nil = the classic palette.
+    var skin: FlameSkin? = nil
+    var showsGround: Bool = true
+
+    var body: some View {
+        ZStack {
+            glowLayer
+            groundLayer
+
+            ZStack {
+                FlameBuddyOuterShape(wobble: wobble)
+                    .fill(outerStyle)
+                    .shadow(color: glowColor.opacity(effectiveGlowOpacity), radius: size * 0.16)
+                    .overlay(SkinOuterFX(skin: skin, size: size))
+                    .overlay(
+                        FlameBuddyOuterShape(wobble: wobble)
+                            .stroke(skin?.rim ?? Color.white.opacity(health == .dead ? 0.10 : 0.28), lineWidth: max(1.5, size * 0.012))
+                    )
+
+                FlameBuddyInnerShape(wobble: -wobble * 0.6)
+                    .fill(innerFill)
+                    .frame(width: size * 0.54, height: size * 0.58)
+                    .overlay(SkinInnerFX(skin: skin, size: size))
+                    .offset(y: size * 0.13)
+                    .opacity(health == .dead ? 0 : (skin?.innerOpacity ?? innerOpacity))
+
+                if showsFace {
+                    face
+                        .offset(y: size * 0.18)
+                }
+            }
+            .frame(width: size * 0.82, height: size)
+            .opacity(skin?.bodyOpacity ?? 1)
+            .scaleEffect(effectiveBodyScale, anchor: grounded ? .bottom : .center)
+            .offset(y: health == .dead ? size * 0.16 : 0)
+        }
+        .frame(width: size, height: size)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    /// Clamped vigor, only honored for states that represent a live flame.
+    private var vigorValue: CGFloat? {
+        guard let vigor, health != .dead, health != .blazing else { return nil }
+        return min(max(vigor, 0), 1)
+    }
+
+    private var effectiveBodyScale: CGFloat {
+        if let v = vigorValue { return StreakFlameClock.flameScale(vigor: Double(v)) }
+        return health.bodyScale
+    }
+
+    private var effectiveGlowOpacity: Double {
+        if let v = vigorValue, health != .critical { return 0.16 + Double(v) * 0.36 }
+        return health.glowOpacity
+    }
+
+    private var wobble: CGFloat {
+        guard health != .dead else { return 0 }
+        return sin(flickerPhase) * (health == .critical ? 0.07 : 0.045)
+    }
+
+    private var outerStyle: AnyShapeStyle {
+        if let skin, skin.angular {
+            return AnyShapeStyle(AngularGradient(colors: skin.outer + [skin.outer[0]], center: UnitPoint(x: 0.5, y: 0.66)))
+        }
+        if let skin {
+            return AnyShapeStyle(LinearGradient(colors: skin.outer, startPoint: skin.start, endPoint: skin.end))
+        }
+        return AnyShapeStyle(outerFill)
+    }
+
+    private var outerFill: LinearGradient {
+        LinearGradient(colors: outerColors, startPoint: .top, endPoint: .bottom)
+    }
+
+    private var innerFill: LinearGradient {
+        LinearGradient(colors: skin?.inner ?? innerColors, startPoint: .top, endPoint: .bottom)
+    }
+
+    private var outerColors: [Color] {
+        if let v = vigorValue, health != .critical {
+            return FlamePalette.outer(vigor: v)
+        }
+        switch health {
+        case .blazing:
+            return [.white, Color(red: 1, green: 0.88, blue: 0.28), .orange, Color(red: 1, green: 0.20, blue: 0.10)]
+        case .healthy:
+            return [Color(red: 1, green: 0.95, blue: 0.32), .orange, Color(red: 1, green: 0.22, blue: 0.10)]
+        case .dimming:
+            return [Color(red: 1, green: 0.72, blue: 0.22), Color(red: 0.95, green: 0.36, blue: 0.18), Color(red: 0.52, green: 0.12, blue: 0.14)]
+        case .low:
+            return [Color(red: 0.72, green: 0.42, blue: 0.22), Color(red: 0.42, green: 0.16, blue: 0.18), Color(red: 0.10, green: 0.10, blue: 0.14)]
+        case .critical:
+            return [Color(red: 1, green: 0.62, blue: 0.18), Color(red: 1, green: 0.17, blue: 0.16), Color(red: 0.52, green: 0.04, blue: 0.08)]
+        case .dead:
+            return [Color.white.opacity(0.40), Color.gray.opacity(0.55), Color.black.opacity(0.45)]
+        }
+    }
+
+    private var innerColors: [Color] {
+        if let v = vigorValue, health != .critical {
+            return FlamePalette.inner(vigor: v)
+        }
+        switch health {
+        case .blazing:
+            return [.white, Color(red: 1, green: 0.92, blue: 0.30), Color(red: 1, green: 0.50, blue: 0.08)]
+        case .healthy:
+            return [Color(red: 1, green: 0.98, blue: 0.44), Color(red: 1, green: 0.65, blue: 0.12)]
+        case .dimming:
+            return [Color(red: 1, green: 0.68, blue: 0.18), Color(red: 0.82, green: 0.22, blue: 0.10)]
+        case .low, .critical:
+            return [Color(red: 1, green: 0.46, blue: 0.16), Color(red: 0.28, green: 0.18, blue: 0.40)]
+        case .dead:
+            return [.clear]
+        }
+    }
+
+    private var innerOpacity: Double {
+        if let v = vigorValue, health != .critical {
+            return 0.36 + Double(v) * 0.52
+        }
+        switch health {
+        case .blazing: return 0.95
+        case .healthy: return 0.82
+        case .dimming: return 0.54
+        case .low: return 0.30
+        case .critical: return 0.58
+        case .dead: return 0
+        }
+    }
+
+    private var glowColor: Color {
+        if let skin { return skin.glow }
+        switch health {
+        case .dead: return .gray
+        case .low: return Color(red: 0.42, green: 0.32, blue: 0.95)
+        case .critical: return .red
+        default: return .orange
+        }
+    }
+
+    /// Light and shadow follow the flame's real size so a guttering wisp casts
+    /// a small pool of light, not a full-size halo.
+    private var lightSpread: CGFloat {
+        vigorValue == nil ? 1 : 0.45 + effectiveBodyScale * 0.55
+    }
+
+    /// How far the glow sinks toward the base as the flame shrinks. A grounded
+    /// flame's light pool follows it down; a centered flame keeps it centered.
+    private var glowSink: CGFloat {
+        grounded ? (1 - lightSpread) : 0
+    }
+
+    private var glowLayer: some View {
+        ZStack {
+            Circle()
+                .fill(glowColor.opacity(effectiveGlowOpacity * 0.45))
+                .blur(radius: size * 0.18 * lightSpread)
+                .frame(width: size * 1.1 * lightSpread, height: size * 0.92 * lightSpread)
+                .offset(y: size * 0.46 * glowSink)
+            Circle()
+                .fill((skin?.core ?? Color.yellow).opacity(health == .dead ? 0 : 0.16 * Double(lightSpread)))
+                .blur(radius: size * 0.09)
+                .frame(width: size * 0.62 * lightSpread, height: size * 0.62 * lightSpread)
+                .offset(y: size * (grounded ? 0.12 : 0) + size * 0.30 * glowSink)
+        }
+    }
+
+    @ViewBuilder
+    private var groundLayer: some View {
+        if grounded && showsGround {
+            VStack {
+                Spacer()
+                Ellipse()
+                    .fill(Color.black.opacity(0.24))
+                    .frame(width: size * 0.78 * lightSpread, height: size * 0.16 * lightSpread)
+                    .blur(radius: 3)
+                    .offset(y: size * 0.02)
+            }
+        }
+    }
+
+    private var face: some View {
+        ZStack {
+            HStack(spacing: size * 0.17) {
+                eye(isLeft: true)
+                eye(isLeft: false)
+            }
+
+            mouth
+                .offset(y: size * 0.13)
+        }
+    }
+
+    @ViewBuilder
+    private func eye(isLeft: Bool) -> some View {
+        if health == .dead {
+            ZStack {
+                Capsule().fill(Color.white.opacity(0.86)).frame(width: size * 0.085, height: size * 0.018).rotationEffect(.degrees(42))
+                Capsule().fill(Color.white.opacity(0.86)).frame(width: size * 0.085, height: size * 0.018).rotationEffect(.degrees(-42))
+            }
+            .frame(width: size * 0.13, height: size * 0.13)
+        } else {
+            Ellipse()
+                .fill(skin?.eye ?? Color(red: 0.20, green: 0.07, blue: 0.04))
+                .frame(width: size * 0.12, height: blink ? size * 0.018 : eyeHeight)
+                .overlay(alignment: .topLeading) {
+                    if !blink {
+                        Circle()
+                            .fill(Color.white.opacity(0.92))
+                            .frame(width: size * 0.035, height: size * 0.035)
+                            .offset(x: size * 0.024, y: size * 0.030)
+                    }
+                }
+                .offset(y: health == .critical ? size * 0.02 : 0)
+        }
+    }
+
+    /// Wide-open eyes are half of a startled expression, so the happy states
+    /// wear theirs a little softer.
+    private var eyeHeight: CGFloat {
+        switch health {
+        case .blazing, .healthy: return size * 0.155
+        default: return size * 0.18
+        }
+    }
+
+    @ViewBuilder
+    private var mouth: some View {
+        switch health {
+        case .blazing, .healthy:
+            // A grin, not a gasp. This was a plain Capsule TALLER than it was
+            // wide, which reads as an "o" of surprise no matter what the rest
+            // of the face is doing.
+            FlameBuddySmileShape()
+                .fill(skin?.eye ?? Color(red: 0.24, green: 0.04, blue: 0.04))
+                .frame(width: size * 0.27, height: size * 0.115)
+                .overlay(alignment: .bottom) {
+                    Capsule()
+                        .fill(Color(red: 1.0, green: 0.42, blue: 0.34))
+                        .frame(width: size * 0.11, height: size * 0.045)
+                }
+                .clipShape(FlameBuddySmileShape())
+        case .dimming:
+            Capsule()
+                .fill(Color(red: 0.24, green: 0.04, blue: 0.04).opacity(0.82))
+                .frame(width: size * 0.15, height: size * 0.030)
+        case .low, .critical:
+            FlameBuddyFrownShape()
+                .stroke(Color(red: 0.24, green: 0.04, blue: 0.04).opacity(0.86), style: StrokeStyle(lineWidth: max(2, size * 0.018), lineCap: .round))
+                .frame(width: size * 0.20, height: size * 0.075)
+        case .dead:
+            EmptyView()
+        }
+    }
+
+    private var accessibilityText: String {
+        switch health {
+        case .blazing: return "Flame buddy blazing. Today's mile is complete."
+        case .healthy: return "Flame buddy healthy."
+        case .dimming: return "Flame buddy dimming."
+        case .low: return "Flame buddy low."
+        case .critical: return "Flame buddy worried. Streak at risk."
+        case .dead: return "Flame buddy out."
+        }
+    }
+}
+
+struct FlameBuddyOuterShape: Shape {
+    var wobble: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let w = rect.width
+        let h = rect.height
+        let x = { (v: CGFloat) in rect.minX + v * w }
+        let y = { (v: CGFloat) in rect.minY + v * h }
+
+        path.move(to: CGPoint(x: x(0.50 + wobble * 0.10), y: y(0.02)))
+        path.addCurve(to: CGPoint(x: x(0.28 + wobble * 0.35), y: y(0.42)), control1: CGPoint(x: x(0.35 + wobble), y: y(0.13)), control2: CGPoint(x: x(0.27 - wobble * 0.3), y: y(0.25)))
+        path.addCurve(to: CGPoint(x: x(0.18 - wobble * 0.2), y: y(0.56)), control1: CGPoint(x: x(0.20), y: y(0.36)), control2: CGPoint(x: x(0.15), y: y(0.46)))
+        path.addCurve(to: CGPoint(x: x(0.08), y: y(0.72)), control1: CGPoint(x: x(0.12), y: y(0.61)), control2: CGPoint(x: x(0.08), y: y(0.66)))
+        path.addCurve(to: CGPoint(x: x(0.50), y: y(0.98)), control1: CGPoint(x: x(0.08), y: y(0.90)), control2: CGPoint(x: x(0.24), y: y(0.98)))
+        path.addCurve(to: CGPoint(x: x(0.92), y: y(0.72)), control1: CGPoint(x: x(0.76), y: y(0.98)), control2: CGPoint(x: x(0.92), y: y(0.90)))
+        path.addCurve(to: CGPoint(x: x(0.69 + wobble * 0.25), y: y(0.35)), control1: CGPoint(x: x(0.92), y: y(0.55)), control2: CGPoint(x: x(0.75 + wobble), y: y(0.48)))
+        path.addCurve(to: CGPoint(x: x(0.50 + wobble * 0.10), y: y(0.02)), control1: CGPoint(x: x(0.78), y: y(0.20)), control2: CGPoint(x: x(0.62), y: y(0.11)))
+        path.closeSubpath()
+        return path
+    }
+}
+
+struct FlameBuddyInnerShape: Shape {
+    var wobble: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let w = rect.width
+        let h = rect.height
+        let x = { (v: CGFloat) in rect.minX + v * w }
+        let y = { (v: CGFloat) in rect.minY + v * h }
+
+        path.move(to: CGPoint(x: x(0.52 + wobble * 0.20), y: y(0.02)))
+        path.addCurve(to: CGPoint(x: x(0.32), y: y(0.48)), control1: CGPoint(x: x(0.35), y: y(0.20)), control2: CGPoint(x: x(0.37), y: y(0.34)))
+        path.addCurve(to: CGPoint(x: x(0.18), y: y(0.72)), control1: CGPoint(x: x(0.22), y: y(0.54)), control2: CGPoint(x: x(0.18), y: y(0.62)))
+        path.addCurve(to: CGPoint(x: x(0.50), y: y(0.98)), control1: CGPoint(x: x(0.18), y: y(0.90)), control2: CGPoint(x: x(0.34), y: y(0.98)))
+        path.addCurve(to: CGPoint(x: x(0.82), y: y(0.72)), control1: CGPoint(x: x(0.66), y: y(0.98)), control2: CGPoint(x: x(0.82), y: y(0.90)))
+        path.addCurve(to: CGPoint(x: x(0.60 + wobble * 0.22), y: y(0.38)), control1: CGPoint(x: x(0.82), y: y(0.56)), control2: CGPoint(x: x(0.62), y: y(0.52)))
+        path.addCurve(to: CGPoint(x: x(0.52 + wobble * 0.20), y: y(0.02)), control1: CGPoint(x: x(0.72), y: y(0.24)), control2: CGPoint(x: x(0.60), y: y(0.14)))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// An open grin: the corners are the highest points, the top lip dips between
+/// them, and the bottom rounds out wide. Happy mouths are wider than they are
+/// tall — that ratio is what separates a smile from a gasp.
+private struct FlameBuddySmileShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY),
+            control: CGPoint(x: rect.midX, y: rect.minY + rect.height * 0.62)
+        )
+        path.addCurve(
+            to: CGPoint(x: rect.minX, y: rect.minY),
+            control1: CGPoint(x: rect.maxX - rect.width * 0.06, y: rect.maxY + rect.height * 0.34),
+            control2: CGPoint(x: rect.minX + rect.width * 0.06, y: rect.maxY + rect.height * 0.34)
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct FlameBuddyFrownShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.maxY), control: CGPoint(x: rect.midX, y: rect.minY))
+        return path
+    }
+}
