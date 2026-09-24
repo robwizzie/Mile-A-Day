@@ -243,6 +243,12 @@ struct BadgesView: View {
                 .filter { b in BadgeFilter.ghostPrefixes.contains { b.id.hasPrefix($0) } }
                 .sorted { Self.familySortKey($0.id, BadgeFilter.ghostPrefixes)
                     < Self.familySortKey($1.id, BadgeFilter.ghostPrefixes) }
+        case .holiday:
+            // Calendar order — the catalog's own order.
+            let order = HolidayKey.allCases.map(\.badgeId)
+            return allBadges
+                .filter { $0.id.hasPrefix(HolidayKey.badgePrefix) }
+                .sorted { (order.firstIndex(of: $0.id) ?? order.count) < (order.firstIndex(of: $1.id) ?? order.count) }
         case .new:
             // Use the on-open snapshot so the list survives mark-as-viewed.
             let snapshot = newBadgeIdsAtOpen
@@ -505,7 +511,7 @@ struct FilterChip: View {
 // MARK: - Badge Filter
 
 enum BadgeFilter: CaseIterable {
-    case all, streak, miles, speed, distance, challenges, social, buddy, ghost, new
+    case all, streak, miles, speed, distance, challenges, social, buddy, ghost, holiday, new
 
     var title: String {
         switch self {
@@ -518,6 +524,7 @@ enum BadgeFilter: CaseIterable {
         case .social: return "Social"
         case .buddy: return "Buddy"
         case .ghost: return "Ghost"
+        case .holiday: return "Holidays"
         case .new: return "New"
         }
     }
@@ -533,6 +540,7 @@ enum BadgeFilter: CaseIterable {
         case .social: return "person.2.fill"
         case .buddy: return "figure.2"
         case .ghost: return "flag.checkered"
+        case .holiday: return "gift.fill"
         case .new: return "sparkles"
         }
     }

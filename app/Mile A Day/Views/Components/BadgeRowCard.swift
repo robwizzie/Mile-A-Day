@@ -9,7 +9,9 @@ struct BadgeRowCard: View {
     @State private var isShowingDetail = false
 
     private var badgeIcon: String {
-        if badge.id.starts(with: "streak_") || badge.id.starts(with: "consistency_") {
+        if let holiday = HolidayKey(badgeId: badge.id) {
+            return holiday.medalIcon
+        } else if badge.id.starts(with: "streak_") || badge.id.starts(with: "consistency_") {
             return "flame.fill"
         } else if badge.id.starts(with: "miles_") {
             return "figure.run"

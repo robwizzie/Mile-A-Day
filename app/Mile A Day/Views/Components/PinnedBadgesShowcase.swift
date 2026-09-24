@@ -279,6 +279,9 @@ private struct PinnedBadgeSlotEmpty: View {
 // MARK: - Visual helpers (mirrors PremiumBadgeCard styling so the showcase looks consistent)
 
 func iconName(for badge: Badge) -> String {
+    if let holiday = HolidayKey(badgeId: badge.id) {
+        return holiday.medalIcon
+    }
     if badge.id.starts(with: "streak_") || badge.id.starts(with: "consistency_") {
         return "flame.fill"
     } else if badge.id.starts(with: "miles_") {

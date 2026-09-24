@@ -587,6 +587,38 @@ struct User: Identifiable, Codable {
             }
         }
 
+        // Holiday medals — walk or run your mile ON the holiday. Mirrors the
+        // backend's HOLIDAYS catalog (services/holidays.ts); ids are
+        // `holiday_<key>` and must never be renamed. Spelled out here rather
+        // than read from `HolidayKey` because this file may also be a Watch
+        // member and the catalog type is iPhone-only. Each one also unlocks
+        // that holiday's outfit for Flamey (FlameyCosmetic.catalog).
+        let holidayBadges: [(String, String, String)] = [
+            ("holiday_new_years_day", "First Mile of the Year", "Walked or ran your mile on New Year's Day."),
+            ("holiday_valentines_day", "Sweetheart Mile", "Walked or ran your mile on Valentine's Day."),
+            ("holiday_st_patricks_day", "Lucky Mile", "Walked or ran your mile on St. Patrick's Day."),
+            ("holiday_easter", "Egg-cellent Mile", "Walked or ran your mile on Easter."),
+            ("holiday_independence_day", "Freedom Mile", "Walked or ran your mile on Independence Day."),
+            ("holiday_halloween", "Spooky Mile", "Walked or ran your mile on Halloween."),
+            ("holiday_thanksgiving", "Gobble Mile", "Walked or ran your mile on Thanksgiving."),
+            ("holiday_christmas_eve", "Night Before Mile", "Walked or ran your mile on Christmas Eve."),
+            ("holiday_christmas", "Santa's Mile", "Walked or ran your mile on Christmas."),
+            ("holiday_new_years_eve", "Last Mile of the Year", "Walked or ran your mile on New Year's Eve.")
+        ]
+
+        for (badgeId, name, description) in holidayBadges {
+            if !hasBadge(id: badgeId) {
+                lockedBadges.append(Badge(
+                    id: badgeId,
+                    name: name,
+                    description: description,
+                    dateAwarded: Date.distantFuture,
+                    isNew: false,
+                    isLocked: true
+                ))
+            }
+        }
+
         // Note: Hidden badges are NOT shown in locked list - they're surprises!
 
         return lockedBadges
@@ -710,7 +742,7 @@ struct User: Identifiable, Codable {
             return .distance
         } else if id.starts(with: "challenge_") {
             return .special
-        } else if id.starts(with: "special_") {
+        } else if id.starts(with: "special_") || id.starts(with: "holiday_") {
             return .special
         }
         return .other
@@ -810,6 +842,10 @@ struct Badge: Identifiable, Codable {
             return .common
         }
         if id.starts(with: "special_") {
+            return .rare
+        }
+        // A holiday medal comes round once a year — rare by construction.
+        if id.starts(with: "holiday_") {
             return .rare
         }
         return .common
