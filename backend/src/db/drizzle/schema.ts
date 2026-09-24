@@ -328,6 +328,12 @@ export const users = pgTable(
     // like 'modern' by every Flamey gate (the friend's-Flamey block, the
     // Flamey poke). Nullable, no default: additive, no table rewrite.
     dashboardStyle: text("dashboard_style"),
+    // Lifetime nudges sent (friend + competition), for the nudge medals. The
+    // logs they used to be counted from are pruned after 7 days, so a recount
+    // could never see past the week. Bumped in the same statement as each log
+    // row (logNudge / logFriendNudge); seeded from the surviving logs by its
+    // migration. Constant default: metadata-only ADD COLUMN.
+    nudgesSentTotal: integer("nudges_sent_total").default(0).notNull(),
   },
   (table) => [
     index("idx_users_current_streak_desc").using(

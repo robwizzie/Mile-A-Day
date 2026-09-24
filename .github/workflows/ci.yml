@@ -254,6 +254,14 @@ jobs:
       # nudge's cooldown. All of it fails as an absence nobody reports.
       - name: Flamey + holiday medals check
         run: node scripts/flamey-check.mjs
+      # Medals are judged over the WHOLE history: Recalibrate Streak also
+      # recalibrates medals (a broken 370-day streak keeps streak_365, a sub-8
+      # split, a half-marathon day, a Halloween mile, a pruned nudge log),
+      # answers `new_badges`, is idempotent, never revokes, pushes ONE summary
+      # for a burst; the upload path is all-history too; the retro sweep is
+      # silent and idempotent. A medal nobody gets is reported by nobody.
+      - name: Badge recalibrate check
+        run: node scripts/badge-recalibrate-check.mjs
 
   website:
     name: Website (lint + build)

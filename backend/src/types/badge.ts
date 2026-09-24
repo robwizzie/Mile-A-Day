@@ -333,6 +333,9 @@ export interface NewWeeklyCompletion {
 
 export interface UserAggregates {
   currentStreak: number;
+  // Best run EVER (the Hall of Streaks' longest era) — what streak medals are
+  // judged on, so a broken streak keeps the medals it reached.
+  longestStreak: number;
   totalMiles: number;
   fastestSplitPaceMinMi: number;
   mostMilesInOneDay: number;

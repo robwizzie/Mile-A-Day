@@ -1323,8 +1323,15 @@ export async function logNudge(
   senderId: string,
   targetId: string,
 ): Promise<void> {
+  // The log is pruned after 7 days; the lifetime counter the nudge medals
+  // read is bumped in the SAME statement so the two can never drift.
   await db.query(
-    `INSERT INTO nudge_log (competition_id, sender_id, target_id) VALUES ($1, $2, $3)`,
+    `WITH logged AS (
+       INSERT INTO nudge_log (competition_id, sender_id, target_id) VALUES ($1, $2, $3)
+       RETURNING sender_id
+     )
+     UPDATE users SET nudges_sent_total = nudges_sent_total + 1
+     WHERE user_id IN (SELECT sender_id FROM logged)`,
     [competitionId, senderId, targetId],
   );
 }
@@ -1360,8 +1367,14 @@ export async function logFriendNudge(
   senderId: string,
   targetId: string,
 ): Promise<void> {
+  // Same statement as the lifetime counter — see logNudge.
   await db.query(
-    `INSERT INTO friend_nudge_log (sender_id, target_id) VALUES ($1, $2)`,
+    `WITH logged AS (
+       INSERT INTO friend_nudge_log (sender_id, target_id) VALUES ($1, $2)
+       RETURNING sender_id
+     )
+     UPDATE users SET nudges_sent_total = nudges_sent_total + 1
+     WHERE user_id IN (SELECT sender_id FROM logged)`,
     [senderId, targetId],
   );
 }
@@ -1428,6 +1441,66 @@ export async function fireBadgeEarnedPush(
       icon: badge.icon,
     },
   });
+}
+
+/** How many medals one evaluation may announce one push at a time. */
+export const BADGE_PUSH_BURST_LIMIT = 3;
+
+/**
+ * ONE push for a burst of medals — a Recalibrate that finds seven, or an
+ * upload that crosses several thresholds at once — instead of one banner per
+ * medal. Same `badge_earned` type (every shipped build routes it to the
+ * medals screen) with `badge_id` = the rarest of them so that routing still
+ * has a medal to land on; `count`/`source` are additive, and every value is a
+ * STRING (the inbox decodes `data` as [String: String]).
+ */
+export async function fireBadgeSummaryPush(
+  userId: string,
+  badges: BadgeEarnedPayload[],
+  source: "recalibrate" | "upload",
+): Promise<void> {
+  if (badges.length === 0) return;
+  const rank = { legendary: 0, rare: 1, common: 2 } as const;
+  const lead = [...badges].sort((a, b) => rank[a.rarity] - rank[b.rarity])[0];
+  await sendPush(userId, {
+    title: `🏅 ${badges.length} Medals Unlocked`,
+    body:
+      source === "recalibrate"
+        ? `Recalibrating found ${badges.length} medals you'd already earned, including ${lead.name}.`
+        : `${lead.name} and ${badges.length - 1} more — open your medals to see them all.`,
+    type: "badge_earned",
+    data: {
+      badge_id: lead.badgeId,
+      rarity: lead.rarity,
+      icon: lead.icon,
+      count: String(badges.length),
+      source,
+    },
+  });
+}
+
+/**
+ * Announce medals to their owner: one push each up to
+ * BADGE_PUSH_BURST_LIMIT, one summary push above it. Returns whether the
+ * burst was summarized, so a caller can hold its friend fan-out too.
+ */
+export async function deliverBadgeAwards(
+  userId: string,
+  badges: BadgeEarnedPayload[],
+  source: "recalibrate" | "upload",
+): Promise<{ summarized: boolean }> {
+  if (badges.length > BADGE_PUSH_BURST_LIMIT) {
+    await fireBadgeSummaryPush(userId, badges, source);
+    return { summarized: true };
+  }
+  await Promise.all(
+    badges.map((b) =>
+      fireBadgeEarnedPush(userId, b).catch((err) =>
+        console.error("Error firing badge_earned push:", err?.message ?? err),
+      ),
+    ),
+  );
+  return { summarized: false };
 }
 
 /**

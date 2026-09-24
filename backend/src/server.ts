@@ -63,6 +63,7 @@ import { backfillFeedRoles } from "./db/backfillFeedRoles.js";
 import { repairSweptMedia } from "./db/repairSweptMedia.js";
 import { backfillLongestStreaks } from "./db/backfillLongestStreaks.js";
 import { backfillHolidayMedals } from "./db/backfillHolidayMedals.js";
+import { backfillRetroBadges } from "./db/backfillRetroBadges.js";
 import {
   getUnifiedFeed,
   getStoriesRail,
@@ -416,6 +417,10 @@ runPendingMigrations()
       // history. Silent (no push), idempotent, done-marker in
       // maintenance_runs, so every later boot is one SELECT.
       void backfillHolidayMedals();
+      // Same contract: every medal judged over the WHOLE history once for
+      // everyone (what Recalibrate now does per user). Award-only, silent,
+      // one user at a time, done-marker `badge_retro_v1`.
+      void backfillRetroBadges();
       // Same contract again: compute-and-store the streak snapshot for every
       // active user the new columns (0057) haven't been written for. Until a
       // row is reached it reads its old stored value (as before); a few
