@@ -43,10 +43,16 @@ import {
   checkCompetitionMilestones,
   checkLeadChanges,
 } from "../services/notificationService.js";
-import { evaluateWorkoutRewards } from "../services/badgeService.js";
+import {
+  evaluateWorkoutRewards,
+  recalibrateBadges,
+} from "../services/badgeService.js";
 import { notifyGhostsBeaten } from "../services/ghostService.js";
 import {
+  BADGE_PUSH_BURST_LIMIT,
+  deliverBadgeAwards,
   fireBadgeEarnedPush,
+  fireBadgeSummaryPush,
   fanOutFriendBadgePush,
   fanOutFriendChallengePush,
   fanOutFriendPersonalBestPush,
@@ -276,18 +282,33 @@ export async function uploadWorkouts(req: Request, res: Response) {
     // with no single triggering workout fall back to "did this batch include any
     // workout from the last 24h". Friend fan-outs are additionally gated by
     // isFullSync so the setup backfill never notifies others.
-    for (const badge of rewards.newlyEarnedBadges) {
-      const fromRecentWorkout = badge.triggeringWorkoutId
+    //
+    // More than BADGE_PUSH_BURST_LIMIT at once (a first upload after the
+    // all-history medal rules shipped can cross a whole ladder of streak
+    // medals) is ONE summary push and no friend fan-out: a burst is news to
+    // its owner, not a dozen banners, and not an event for their friends.
+    const pushable = rewards.newlyEarnedBadges.filter((badge) =>
+      badge.triggeringWorkoutId
         ? recentWorkoutIds.has(badge.triggeringWorkoutId)
-        : hasRecentWorkout;
-      if (!fromRecentWorkout) continue;
-      fireBadgeEarnedPush(userId, badge).catch((err) =>
-        console.error("Error firing badge_earned push:", err.message),
+        : hasRecentWorkout,
+    );
+    if (pushable.length > BADGE_PUSH_BURST_LIMIT) {
+      fireBadgeSummaryPush(userId, pushable, "upload").catch((err) =>
+        console.error("Error firing badge summary push:", err.message),
       );
-      if (!isFullSync && badge.rarity !== "common") {
-        fanOutFriendBadgePush(userId, badge).catch((err) =>
-          console.error("Error fanning out friend_badge_earned:", err.message),
+    } else {
+      for (const badge of pushable) {
+        fireBadgeEarnedPush(userId, badge).catch((err) =>
+          console.error("Error firing badge_earned push:", err.message),
         );
+        if (!isFullSync && badge.rarity !== "common") {
+          fanOutFriendBadgePush(userId, badge).catch((err) =>
+            console.error(
+              "Error fanning out friend_badge_earned:",
+              err.message,
+            ),
+          );
+        }
       }
     }
     if (!isFullSync) {
@@ -562,7 +583,28 @@ export async function recalibrateStreak(req: Request, res: Response) {
 
     const streak = await refreshCurrentStreak(userId);
 
-    return res.status(200).json({ streak });
+    // Recalibrate MEDALS too, after the streak (a repaired history is exactly
+    // when a missing medal turns up). Award-only — see recalibrateBadges. A
+    // medal failure must never fail the streak fix the user asked for, so it
+    // degrades to "no new medals".
+    let newBadges: Awaited<ReturnType<typeof recalibrateBadges>> = [];
+    try {
+      newBadges = await recalibrateBadges(userId, "recalibrate");
+    } catch (err: any) {
+      console.error("Error recalibrating medals:", err?.message ?? err);
+    }
+    if (newBadges.length > 0) {
+      // One banner per medal up to BADGE_PUSH_BURST_LIMIT, one summary above
+      // it; never the friend fan-out (these are old achievements, not news).
+      deliverBadgeAwards(userId, newBadges, "recalibrate").catch((err) =>
+        console.error("Error delivering recalibrated medals:", err?.message),
+      );
+    }
+
+    // `new_badges` is additive: shipped builds decode `{ streak }` and ignore it.
+    return res
+      .status(200)
+      .json({ streak, new_badges: newBadges.map((b) => b.badgeId) });
   } catch (error: any) {
     console.error("Error recalibrating streak:", error.message);
     res

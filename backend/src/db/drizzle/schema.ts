@@ -322,6 +322,12 @@ export const users = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // Lifetime nudges sent (friend + competition), for the nudge medals. The
+    // logs they used to be counted from are pruned after 7 days, so a recount
+    // could never see past the week. Bumped in the same statement as each log
+    // row (logNudge / logFriendNudge); seeded from the surviving logs by its
+    // migration. Constant default: metadata-only ADD COLUMN.
+    nudgesSentTotal: integer("nudges_sent_total").default(0).notNull(),
   },
   (table) => [
     index("idx_users_current_streak_desc").using(
@@ -3189,3 +3195,17 @@ export const widgetRefreshPushes = pgTable(
     }).onDelete("cascade"),
   ],
 );
+
+// One row per completed one-shot maintenance job (post-listen backfills whose
+// "done" can't be read off an index the way backfillLongestStreaks does).
+// Written ONLY when a run finishes, so an interrupted run simply runs again;
+// the jobs themselves are idempotent. A new version of a job takes a new
+// name (e.g. `badge_retro_v2` once the evaluator sees more history).
+export const maintenanceRuns = pgTable("maintenance_runs", {
+  name: text().primaryKey().notNull(),
+  completedAt: timestamp("completed_at", {
+    withTimezone: true,
+    mode: "string",
+  }).notNull(),
+  detail: jsonb(),
+});
