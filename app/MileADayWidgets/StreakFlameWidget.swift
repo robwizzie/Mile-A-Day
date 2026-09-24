@@ -83,6 +83,7 @@ struct StreakFlameProvider: TimelineProvider {
         let isFun: Bool
         var flameyBadges: Set<String> = []
         var signupDate: Date? = nil
+        var flameyChoice: FlameyLookChoice = .auto
     }
 
     func placeholder(in context: Context) -> StreakFlameEntry {
@@ -144,7 +145,8 @@ struct StreakFlameProvider: TimelineProvider {
             tokensReady: WidgetDataStore.loadTokensReady(),
             isFun: WidgetDataStore.loadDashboardStyle() == "fun",
             flameyBadges: WidgetDataStore.loadFlameyBadgeIds(),
-            signupDate: WidgetDataStore.loadFlameySignupDate()
+            signupDate: WidgetDataStore.loadFlameySignupDate(),
+            flameyChoice: WidgetDataStore.loadFlameyChoice()
         )
     }
 
@@ -178,10 +180,12 @@ struct StreakFlameProvider: TimelineProvider {
             // byte-identical copy), mood-free: the widget has never drawn the
             // mood props. No outfit on the coal — he isn't lit.
             look: snapshot.isFun && snapshot.streak > 0
-                ? FlameyLook.resolve(longestStreak: max(snapshot.longestStreak, snapshot.streak),
-                                     earnedBadgeIds: snapshot.flameyBadges,
+                ? FlameyLook.resolve(owned: FlameyWardrobe.owned(earnedBadgeIds: snapshot.flameyBadges
+                                        .union(FlameyWardrobe.impliedBadgeIds(longestStreak: max(snapshot.longestStreak, snapshot.streak)))),
+                                     choice: snapshot.flameyChoice,
+                                     date: date,
                                      signupDate: snapshot.signupDate,
-                                     date: date)
+                                     detail: .compact)
                 : .plain
         )
     }
@@ -229,11 +233,7 @@ private struct FlameArt: View {
     var body: some View {
         if entry.isFun {
             // Static, like everything a widget draws: `still: true`.
-            ZStack {
-                FlameyOutfitLayer(look: entry.look, size: size, scale: bodyScale, side: .behind, still: true)
-                FlameBuddyFigure(health: entry.health, size: size, showsFace: true, vigor: vigor, grounded: true)
-                FlameyOutfitLayer(look: entry.look, size: size, scale: bodyScale, side: .front, still: true)
-            }
+            FlameyDressedFigure(look: entry.look, health: entry.health, size: size, vigor: vigor, scale: bodyScale)
         } else {
             MADWidgetRing(
                 progress: entry.progress,

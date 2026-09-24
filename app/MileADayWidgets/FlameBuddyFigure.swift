@@ -70,6 +70,17 @@ struct FlameBuddyFigure: View {
     /// ground shadow; a non-grounded flame (the Modern ring) shrinks toward its
     /// center so it stays framed in the circle.
     var grounded: Bool = true
+    /// Flamey's wardrobe colour (`FlameyPalette`, FlameyPalettes.swift). nil
+    /// = the lifecycle palette above, byte-identical to before the wardrobe —
+    /// every caller that isn't dressing him passes nothing. Ignored on a dead
+    /// flame (the coal is grey whatever he wears).
+    var palette: FlameyPalette? = nil
+    /// How far he hovers (rocket jets, winged sandals), as a fraction of
+    /// `size`. The body lifts; the ground shadow stays on the floor and
+    /// shrinks. Zero is byte-identical.
+    var lift: CGFloat = 0
+
+    private var activePalette: FlameyPalette? { health == .dead ? nil : palette }
 
     var body: some View {
         ZStack {
@@ -78,18 +89,28 @@ struct FlameBuddyFigure: View {
 
             ZStack {
                 FlameBuddyOuterShape(wobble: wobble)
-                    .fill(outerFill)
+                    .fill(outerStyle)
+                    .overlay {
+                        if let activePalette {
+                            FlameyPaletteBodyFX(palette: activePalette, size: size, wobble: wobble)
+                        }
+                    }
                     .shadow(color: glowColor.opacity(effectiveGlowOpacity), radius: size * 0.16)
                     .overlay(
                         FlameBuddyOuterShape(wobble: wobble)
-                            .stroke(Color.white.opacity(health == .dead ? 0.10 : 0.28), lineWidth: max(1.5, size * 0.012))
+                            .stroke(activePalette?.rim ?? Color.white.opacity(health == .dead ? 0.10 : 0.28), lineWidth: max(1.5, size * 0.012))
                     )
 
                 FlameBuddyInnerShape(wobble: -wobble * 0.6)
                     .fill(innerFill)
+                    .overlay {
+                        if let activePalette {
+                            FlameyPaletteInnerFX(palette: activePalette, size: size)
+                        }
+                    }
                     .frame(width: size * 0.54, height: size * 0.58)
                     .offset(y: size * 0.13)
-                    .opacity(health == .dead ? 0 : innerOpacity)
+                    .opacity(health == .dead ? 0 : (activePalette?.innerOpacity ?? innerOpacity))
 
                 if showsFace {
                     face
@@ -97,8 +118,9 @@ struct FlameBuddyFigure: View {
                 }
             }
             .frame(width: size * 0.82, height: size)
+            .opacity(activePalette?.bodyOpacity ?? 1)
             .scaleEffect(effectiveBodyScale, anchor: grounded ? .bottom : .center)
-            .offset(y: health == .dead ? size * 0.16 : 0)
+            .offset(y: (health == .dead ? size * 0.16 : 0) - lift * size)
         }
         .frame(width: size, height: size)
         .accessibilityElement(children: .ignore)
@@ -131,7 +153,17 @@ struct FlameBuddyFigure: View {
     }
 
     private var innerFill: LinearGradient {
-        LinearGradient(colors: innerColors, startPoint: .top, endPoint: .bottom)
+        LinearGradient(colors: activePalette?.inner ?? innerColors, startPoint: .top, endPoint: .bottom)
+    }
+
+    /// The outer fill: the wardrobe colour when he wears one (a conic sweep
+    /// for Prism), else the lifecycle gradient.
+    private var outerStyle: AnyShapeStyle {
+        guard let p = activePalette else { return AnyShapeStyle(outerFill) }
+        if p.angular {
+            return AnyShapeStyle(AngularGradient(colors: p.outer + [p.outer[0]], center: UnitPoint(x: 0.5, y: 0.66)))
+        }
+        return AnyShapeStyle(LinearGradient(colors: p.outer, startPoint: p.start, endPoint: p.end))
     }
 
     private var outerColors: [Color] {
@@ -187,6 +219,7 @@ struct FlameBuddyFigure: View {
     }
 
     private var glowColor: Color {
+        if let activePalette { return activePalette.glow }
         switch health {
         case .dead: return .gray
         case .low: return Color(red: 0.42, green: 0.32, blue: 0.95)
@@ -215,7 +248,7 @@ struct FlameBuddyFigure: View {
                 .frame(width: size * 1.1 * lightSpread, height: size * 0.92 * lightSpread)
                 .offset(y: size * 0.46 * glowSink)
             Circle()
-                .fill(Color.yellow.opacity(health == .dead ? 0 : 0.16 * Double(lightSpread)))
+                .fill((activePalette?.core ?? Color.yellow).opacity(health == .dead ? 0 : 0.16 * Double(lightSpread)))
                 .blur(radius: size * 0.09)
                 .frame(width: size * 0.62 * lightSpread, height: size * 0.62 * lightSpread)
                 .offset(y: size * (grounded ? 0.12 : 0) + size * 0.30 * glowSink)
@@ -229,7 +262,8 @@ struct FlameBuddyFigure: View {
                 Spacer()
                 Ellipse()
                     .fill(Color.black.opacity(0.24))
-                    .frame(width: size * 0.78 * lightSpread, height: size * 0.16 * lightSpread)
+                    .frame(width: size * 0.78 * lightSpread * (1 - min(lift, 0.3) * 1.6),
+                           height: size * 0.16 * lightSpread * (1 - min(lift, 0.3) * 1.6))
                     .blur(radius: 3)
                     .offset(y: size * 0.02)
             }
@@ -258,7 +292,7 @@ struct FlameBuddyFigure: View {
             .frame(width: size * 0.13, height: size * 0.13)
         } else {
             Ellipse()
-                .fill(Color(red: 0.20, green: 0.07, blue: 0.04))
+                .fill(activePalette?.eye ?? Color(red: 0.20, green: 0.07, blue: 0.04))
                 .frame(width: size * 0.12, height: blink ? size * 0.018 : eyeHeight)
                 .overlay(alignment: .topLeading) {
                     if !blink {

@@ -1,27 +1,27 @@
 import SwiftUI
 
-// FLAMEY'S WARDROBE — what he can wear, when he wears it, and how it's drawn.
+// FLAMEY'S WARDROBE — what he can wear, what he owns, and what he wears today.
 //
-// THIS FILE EXISTS TWICE, BYTE-IDENTICAL:
-//   app/Mile A Day/Views/Components/FlameyWardrobe.swift   (the app)
-//   app/MileADayWidgets/FlameyWardrobe.swift                (widget extension)
-// The widget extension can't see the app's files and new files can't be added
-// to its target from here except in its own synchronized folder, so the ONE
-// description of his look is compiled twice. Edit one, then `cp` it over the
-// other — `cmp` the pair before committing. Nothing in here may depend on
-// anything outside SwiftUI/Foundation (no MADTheme, no UserDefaults, no app
-// models): it is the shared contract, and every renderer — the Fun hero, the
-// flame widget, the Flamey share cards, and next a friend's profile, the
-// tracker and the Live Activity — draws from `FlameyLook` alone.
+// THIS FILE EXISTS TWICE, BYTE-IDENTICAL (and so do its three siblings,
+// FlameyPalettes.swift, FlameyArt.swift and FlameyRender.swift):
+//   app/Mile A Day/Views/Components/<file>   (the app)
+//   app/MileADayWidgets/<file>                (widget extension)
+// The widget extension can't see the app's files, so the ONE description of
+// his look is compiled twice. Edit one, then `cp` it over the other — `cmp`
+// every pair before committing. Nothing in here may depend on anything
+// outside SwiftUI/Foundation (no MADTheme, no UserDefaults, no app models).
 //
-// Three ideas, kept separate on purpose:
-//   - OWNING an item (`FlameyUnlock`) is DERIVED from durable facts — the
-//     longest streak, earned badges. Nothing about ownership is stored, so no
+// Four ideas, kept separate on purpose:
+//   - The CATALOG (`FlameyItem`) — string ids the backend validates against
+//     (`backend/src/services/flameyCatalog.ts`); never rename one.
+//   - OWNING an item is DERIVED from earned badge ids (+ `always`). Nothing
+//     about ownership is stored, so it is retroactive by construction and no
 //     style switch, reinstall or sign-out can take anything away.
-//   - WEARING an item on a given day (`FlameySeason`) is a calendar fact: the
-//     holiday outfits go on automatically ON the day, owned or not.
-//   - The resolved `FlameyLook` is a pure value: slot → item, one item per
-//     slot, so he can never wear two hats.
+//   - The user's CHOICE (`FlameyLookChoice`) — per slot auto / bare / an item.
+//     Missing = auto, so everyone sees their best owned items before they ever
+//     open the Closet.
+//   - The resolved `FlameyLook` — a pure value, one item per slot, what every
+//     renderer draws.
 
 // MARK: - Holidays
 
@@ -188,185 +188,892 @@ enum HolidayCalendar {
     }
 }
 
-// MARK: - Slots and items
+// MARK: - Slots
 
 /// Where on him an item goes. ONE item per slot — that is the whole of the
-/// "never two hats" rule. Declared in DRAW order.
+/// "never two hats" rule. Raw values are the backend's slot names.
+///
+/// Where each slot SITS, so two things never fight for one side:
+///   back       behind him (capes, banner, wings, tail feathers)
+///   trail      streams off to the viewer's LEFT, behind him
+///   companion  stands on the viewer's RIGHT
+///   held       in FRONT, at his side (the viewer's left, close to the body)
+///   chest      flat, under the mouth only — there is no neck
+///   aura       one effect around him (see `FlameyGlow`)
 enum FlameySlot: String, CaseIterable, Codable, Hashable {
-    /// Behind the body (turkey tail feathers).
-    case back
-    case feet
-    case neck
-    /// Over the lower body — a whole-outfit piece (the pumpkin).
-    case costume
-    case cheeks
-    case brow
-    case face
-    /// Every hat, crown and pair of ears.
-    case head
+    case color, head, eyes, chest, back, feet, costume, held, trail, companion, aura, bubble
 
-    var drawsBehindBody: Bool { self == .back }
+    var displayName: String {
+        switch self {
+        case .color: return "Colour"
+        case .head: return "Head"
+        case .eyes: return "Eyes"
+        case .chest: return "Chest"
+        case .back: return "Back"
+        case .feet: return "Feet"
+        case .costume: return "Costume"
+        case .held: return "Held"
+        case .trail: return "Trail"
+        case .companion: return "Companion"
+        case .aura: return "Aura"
+        case .bubble: return "Speech Bubble"
+        }
+    }
+
+    /// Kept on a small surface (widgets, friend card, Live Activity,
+    /// tracker). Everything else is too wide, too noisy, or unreadable there.
+    var survivesCompact: Bool {
+        switch self {
+        case .color, .head, .eyes, .chest, .feet, .costume: return true
+        case .back, .held, .trail, .companion, .aura, .bubble: return false
+        }
+    }
 }
 
-/// Everything he can wear. Raw values are STABLE ids (they will be stored by
-/// the wardrobe and may travel to a server); never rename one.
+/// How much of his wardrobe a surface can carry. Decided by the SURFACE, not
+/// by the look: the same person reads the same outfit everywhere, and a small
+/// surface simply leaves off the pieces it has no room for.
+enum FlameyRenderDetail: String, Codable, Hashable {
+    /// Hero, share cards, the Closet: everything, including the rocket jets
+    /// and the winged-sandal hover.
+    case full
+    /// Widgets, the friend card, the Live Activity, the tracker: colour,
+    /// head, eyes, chest, feet and costume only — standing on the ground.
+    case compact
+
+    /// Below this footprint a surface is compact however it asks.
+    static let compactThreshold: CGFloat = 100
+
+    static func forSize(_ size: CGFloat) -> FlameyRenderDetail {
+        size < compactThreshold ? .compact : .full
+    }
+}
+
+// MARK: - Families (grouping + how-to-unlock copy)
+
+/// What EARNS an item — one family per medal ladder. The Closet groups by it
+/// and every "how to unlock" line is written from it.
+enum FlameyFamily: String, CaseIterable, Hashable {
+    case starter, streakDays, lifetimeMiles, pace, dailyChallenges, weeklyChallenges,
+         competitionsEntered, competitionsWon, organizer, hypes, distanceInADay,
+         buddyWalks, ghosts, stories, nudges, firsts, holidays, mood
+
+    var displayName: String {
+        switch self {
+        case .starter: return "Starter"
+        case .streakDays: return "Streak Days"
+        case .lifetimeMiles: return "Lifetime Miles"
+        case .pace: return "Pace"
+        case .dailyChallenges: return "Daily Challenges"
+        case .weeklyChallenges: return "Weekly Challenges"
+        case .competitionsEntered: return "Competitions Entered"
+        case .competitionsWon: return "Competitions Won"
+        case .organizer: return "Organizer"
+        case .hypes: return "Hypes Given"
+        case .distanceInADay: return "Distance in One Day"
+        case .buddyWalks: return "Buddy Walks"
+        case .ghosts: return "Ghost Races"
+        case .stories: return "Stories"
+        case .nudges: return "Nudges Sent"
+        case .firsts: return "Firsts"
+        case .holidays: return "Holidays"
+        case .mood: return "Moods"
+        }
+    }
+}
+
+// MARK: - Items
+
+/// Everything he can wear. Raw values are the backend's catalog ids — STABLE,
+/// stored in `users.flamey_look` and sent by shipped builds; never rename one.
+/// The last three are MOOD dressing (automatic, never in the Closet, never on
+/// the wire).
 enum FlameyItem: String, CaseIterable, Codable, Hashable {
-    // Mood props — always his, worn by how the day is going.
-    case shades
-    case partyHat = "party_hat"
-    case nightcap
-    // Streak gear — owned for good once the LONGEST streak reaches it.
-    case bandana
-    case sweatband
-    case sneakers
-    case crown
-    // Holiday outfits — worn on the day; owned via that holiday's medal.
-    case pumpkinSuit = "pumpkin_suit"
-    case santaHat = "santa_hat"
-    case holidayScarf = "holiday_scarf"
-    case starGlasses = "star_glasses"
-    case heartBopper = "heart_bopper"
-    case blush
-    case leprechaunHat = "leprechaun_hat"
-    case bunnyEars = "bunny_ears"
-    case starHat = "star_hat"
-    case turkeyFeathers = "turkey_feathers"
-    case countdownHat = "countdown_hat"
+    // color
+    case classic, ember, lime, ruby, lavender, sunflower, mint, sapphire, violet, rose, teal, arctic, midnight,
+         sunset, aurora, ocean, lavaLamp = "lava_lamp", galaxy, candy, northernLights = "northern_lights",
+         gold, prism, cosmic, eternal, phantom
+    // head
+    case sweatband, ballCap = "ball_cap", visor, beanie, bucketHat = "bucket_hat", safariHat = "safari_hat",
+         cowboyHat = "cowboy_hat", aviatorCap = "aviator_cap", headlampHelmet = "headlamp_helmet", crown,
+         laurelWreath = "laurel_wreath", vikingHelmet = "viking_helmet", directorsBeret = "directors_beret",
+         santaHat = "santa_hat", heartBopper = "heart_bopper", leprechaunHat = "leprechaun_hat",
+         bunnyEars = "bunny_ears", starHat = "star_hat", countdownHat = "countdown_hat"
+    // eyes
+    case starStickers = "star_stickers", roundSpecs = "round_specs", classicShades = "classic_shades",
+         aviators, heartGlasses = "heart_glasses", cyberVisor = "cyber_visor", starGlasses = "star_glasses"
+    // chest
+    case bandana, bowTie = "bow_tie", finisherMedal = "finisher_medal", starBadge = "star_badge",
+         championSash = "champion_sash", goldChain = "gold_chain", trophyPendant = "trophy_pendant",
+         polaroid, holidayScarf = "holiday_scarf"
+    // back
+    case redCape = "red_cape", blueCape = "blue_cape", royalCape = "royal_cape", championCape = "champion_cape",
+         victoryBanner = "victory_banner", goldenWings = "golden_wings", turkeyFeathers = "turkey_feathers"
+    // feet
+    case canvasSneakers = "canvas_sneakers", trainers, racingFlats = "racing_flats", neonSoles = "neon_soles",
+         trackSpikes = "track_spikes", rocketBoots = "rocket_boots", lightningKicks = "lightning_kicks",
+         wingedSandals = "winged_sandals"
+    // costume
+    case ghostSheet = "ghost_sheet", astronautHelmet = "astronaut_helmet", pumpkinSuit = "pumpkin_suit"
+    // held
+    case checkeredFlag = "checkered_flag", stopwatch, pomPoms = "pom_poms", foamFinger = "foam_finger",
+         megaphone, confettiCannon = "confetti_cannon"
+    // trail
+    case emberSparks = "ember_sparks", dustPuffs = "dust_puffs", speedLines = "speed_lines", cometTail = "comet_tail",
+         smokeRings = "smoke_rings", starTrail = "star_trail", rainbowStreak = "rainbow_streak",
+         lightningTrail = "lightning_trail", fireworks, phoenixFeathers = "phoenix_feathers",
+         auroraRibbon = "aurora_ribbon", meteorShower = "meteor_shower"
+    // companion
+    case spark, firefly, flameyJr = "flamey_jr", sparkTrio = "spark_trio", lantern, phoenixChick = "phoenix_chick",
+         cometPup = "comet_pup", friendlyGhost = "friendly_ghost"
+    // aura
+    case spectralGlow = "spectral_glow", flicker, spotlight, paparazzi
+    // bubble
+    case classicBubble = "classic_bubble", comic, neon, pixel, goldBubble = "gold_bubble"
+    // mood dressing — automatic, never listed, never sent
+    case moodShades = "mood_shades", partyHat = "party_hat", nightcap
+
+    /// Every Closet item, in catalog order (mood dressing excluded).
+    static var closet: [FlameyItem] { allCases.filter { !$0.isMoodProp } }
+
+    var isMoodProp: Bool { self == .moodShades || self == .partyHat || self == .nightcap }
 
     var slot: FlameySlot {
         switch self {
-        case .shades, .starGlasses: return .face
-        case .partyHat, .nightcap, .crown, .santaHat, .heartBopper, .leprechaunHat,
-             .bunnyEars, .starHat, .countdownHat:
+        case .classic, .ember, .lime, .ruby, .lavender, .sunflower, .mint, .sapphire, .violet, .rose, .teal,
+             .arctic, .midnight, .sunset, .aurora, .ocean, .lavaLamp, .galaxy, .candy, .northernLights,
+             .gold, .prism, .cosmic, .eternal, .phantom:
+            return .color
+        case .sweatband, .ballCap, .visor, .beanie, .bucketHat, .safariHat, .cowboyHat, .aviatorCap,
+             .headlampHelmet, .crown, .laurelWreath, .vikingHelmet, .directorsBeret, .santaHat, .heartBopper,
+             .leprechaunHat, .bunnyEars, .starHat, .countdownHat, .partyHat, .nightcap:
             return .head
-        case .bandana, .holidayScarf: return .neck
-        case .sweatband: return .brow
-        case .sneakers: return .feet
-        case .pumpkinSuit: return .costume
-        case .blush: return .cheeks
-        case .turkeyFeathers: return .back
+        case .starStickers, .roundSpecs, .classicShades, .aviators, .heartGlasses, .cyberVisor, .starGlasses,
+             .moodShades:
+            return .eyes
+        case .bandana, .bowTie, .finisherMedal, .starBadge, .championSash, .goldChain, .trophyPendant,
+             .polaroid, .holidayScarf:
+            return .chest
+        case .redCape, .blueCape, .royalCape, .championCape, .victoryBanner, .goldenWings, .turkeyFeathers:
+            return .back
+        case .canvasSneakers, .trainers, .racingFlats, .neonSoles, .trackSpikes, .rocketBoots,
+             .lightningKicks, .wingedSandals:
+            return .feet
+        case .ghostSheet, .astronautHelmet, .pumpkinSuit:
+            return .costume
+        case .checkeredFlag, .stopwatch, .pomPoms, .foamFinger, .megaphone, .confettiCannon:
+            return .held
+        case .emberSparks, .dustPuffs, .speedLines, .cometTail, .smokeRings, .starTrail, .rainbowStreak,
+             .lightningTrail, .fireworks, .phoenixFeathers, .auroraRibbon, .meteorShower:
+            return .trail
+        case .spark, .firefly, .flameyJr, .sparkTrio, .lantern, .phoenixChick, .cometPup, .friendlyGhost:
+            return .companion
+        case .spectralGlow, .flicker, .spotlight, .paparazzi:
+            return .aura
+        case .classicBubble, .comic, .neon, .pixel, .goldBubble:
+            return .bubble
         }
     }
 
-    /// Slots this item covers up. The pumpkin is a whole outfit — its stem is
-    /// his hat, and it swallows his feet and anything round his middle — and
-    /// a costume is worn INSTEAD of gear, so the 30-day sweatband comes off
-    /// with it (it drew as a gym band over a pumpkin). The star glasses' top
-    /// points reach the brow line, so they take the sweatband off too rather
-    /// than poking through it. Checked against every holiday × gear × mood
-    /// combination a resolve can produce (render matrix, not by eye).
-    var hides: Set<FlameySlot> {
+    /// How it becomes his. Mirrors the backend catalog row for row.
+    var unlock: FlameyUnlock {
         switch self {
-        case .pumpkinSuit: return [.feet, .neck, .head, .brow]
-        case .starGlasses: return [.brow]
+        case .classic, .classicBubble, .moodShades, .partyHat, .nightcap: return .always
+        case .ember: return .badge("consistency_3")
+        case .lime: return .badge("consistency_5")
+        case .ruby: return .badge("streak_7")
+        case .lavender: return .badge("streak_10")
+        case .sunflower: return .badge("streak_14")
+        case .mint: return .badge("streak_21")
+        case .sapphire: return .badge("streak_30")
+        case .violet: return .badge("streak_45")
+        case .rose: return .badge("streak_50")
+        case .teal: return .badge("streak_60")
+        case .arctic: return .badge("streak_75")
+        case .midnight: return .badge("streak_90")
+        case .sunset: return .badge("streak_100")
+        case .aurora: return .badge("streak_120")
+        case .ocean: return .badge("streak_150")
+        case .lavaLamp: return .badge("streak_180")
+        case .galaxy: return .badge("streak_200")
+        case .candy: return .badge("streak_250")
+        case .northernLights: return .badge("streak_300")
+        case .gold: return .badge("streak_365")
+        case .prism: return .badge("streak_500")
+        case .cosmic: return .badge("streak_730")
+        case .eternal: return .badge("streak_1000")
+        case .phantom: return .badge("ghost_beat_50")
+        case .sweatband: return .badge("special_first_mile")
+        case .ballCap: return .badge("miles_25")
+        case .visor: return .badge("miles_50")
+        case .beanie: return .badge("miles_100")
+        case .bucketHat: return .badge("miles_150")
+        case .safariHat: return .badge("miles_200")
+        case .cowboyHat: return .badge("miles_250")
+        case .aviatorCap: return .badge("miles_500")
+        case .headlampHelmet: return .badge("miles_750")
+        case .crown: return .badge("miles_1000")
+        case .laurelWreath: return .badge("miles_1500")
+        case .vikingHelmet: return .badge("miles_2000")
+        case .directorsBeret: return .badge("story_5")
+        case .santaHat: return .badge(HolidayKey.christmas.badgeId)
+        case .heartBopper: return .badge(HolidayKey.valentinesDay.badgeId)
+        case .leprechaunHat: return .badge(HolidayKey.stPatricksDay.badgeId)
+        case .bunnyEars: return .badge(HolidayKey.easter.badgeId)
+        case .starHat: return .badge(HolidayKey.independenceDay.badgeId)
+        case .countdownHat: return .badge(HolidayKey.newYearsEve.badgeId)
+        case .starStickers: return .badge("challenge_1")
+        case .roundSpecs: return .badge("challenge_5")
+        case .classicShades: return .badge("challenge_10")
+        case .aviators: return .badge("challenge_25")
+        case .heartGlasses: return .badge("challenge_50")
+        case .cyberVisor: return .badge("challenge_100")
+        case .starGlasses: return .badge(HolidayKey.newYearsDay.badgeId)
+        case .bandana: return .badge("special_first_week")
+        case .bowTie: return .badge("weekly_1")
+        case .finisherMedal: return .badge("weekly_5")
+        case .starBadge: return .badge("weekly_10")
+        case .championSash: return .badge("weekly_25")
+        case .goldChain: return .badge("weekly_streak_4")
+        case .trophyPendant: return .badge("weekly_streak_12")
+        case .polaroid: return .badge("story_1")
+        case .holidayScarf: return .badge(HolidayKey.christmasEve.badgeId)
+        case .redCape: return .badge("comp_entered_1")
+        case .blueCape: return .badge("comp_entered_10")
+        case .royalCape: return .badge("comp_entered_50")
+        case .championCape: return .badge("comp_won_1")
+        case .victoryBanner: return .badge("comp_won_5")
+        case .goldenWings: return .badge("comp_won_25")
+        case .turkeyFeathers: return .badge(HolidayKey.thanksgiving.badgeId)
+        case .canvasSneakers: return .badge("pace_12min")
+        case .trainers: return .badge("pace_11min")
+        case .racingFlats: return .badge("pace_10min")
+        case .neonSoles: return .badge("pace_9min")
+        case .trackSpikes: return .badge("pace_8min")
+        case .rocketBoots: return .badge("pace_7min")
+        case .lightningKicks: return .badge("pace_6min")
+        case .wingedSandals: return .badge("pace_5min")
+        case .ghostSheet: return .badge("ghost_beat_10")
+        case .astronautHelmet: return .badge("miles_2500")
+        case .pumpkinSuit: return .badge(HolidayKey.halloween.badgeId)
+        case .checkeredFlag: return .badge("comp_started_1")
+        case .stopwatch: return .badge("comp_started_10")
+        case .pomPoms: return .badge("hype_1")
+        case .foamFinger: return .badge("hype_25")
+        case .megaphone: return .badge("hype_100")
+        case .confettiCannon: return .badge("hype_500")
+        case .emberSparks: return .badge("daily_2")
+        case .dustPuffs: return .badge("daily_3")
+        case .speedLines: return .badge("daily_5")
+        case .cometTail: return .badge("daily_10k")
+        case .smokeRings: return .badge("daily_8")
+        case .starTrail: return .badge("daily_10")
+        case .rainbowStreak: return .badge("daily_half")
+        case .lightningTrail: return .badge("daily_15")
+        case .fireworks: return .badge("daily_20")
+        case .phoenixFeathers: return .badge("daily_marathon")
+        case .auroraRibbon: return .badge("daily_50k")
+        case .meteorShower: return .badge("daily_ultra")
+        case .spark: return .badge("buddy_done_1")
+        case .firefly: return .badge("buddy_done_10")
+        case .flameyJr: return .badge("buddy_done_50")
+        case .sparkTrio: return .badge("buddy_crew_3")
+        case .lantern: return .badge("buddy_crew_10")
+        case .phoenixChick: return .badge("buddy_won_1")
+        case .cometPup: return .badge("buddy_won_10")
+        case .friendlyGhost: return .badge("ghost_beat_1")
+        case .spectralGlow: return .badge("ghost_margin_15")
+        case .flicker: return .badge("ghost_margin_45")
+        case .spotlight: return .badge("story_25")
+        case .paparazzi: return .badge("story_100")
+        case .comic: return .badge("nudge_1")
+        case .neon: return .badge("nudge_25")
+        case .pixel: return .badge("nudge_100")
+        case .goldBubble: return .badge("nudge_500")
+        }
+    }
+
+    var badgeId: String? {
+        if case .badge(let id) = unlock { return id }
+        return nil
+    }
+
+    /// The holiday this item is the outfit for — worn automatically on the
+    /// day, owned or not. The scarf covers both Christmas Eve and Day.
+    var holidays: [HolidayKey] {
+        switch self {
+        case .countdownHat: return [.newYearsEve]
+        case .starGlasses: return [.newYearsDay]
+        case .heartBopper: return [.valentinesDay]
+        case .leprechaunHat: return [.stPatricksDay]
+        case .bunnyEars: return [.easter]
+        case .starHat: return [.independenceDay]
+        case .pumpkinSuit: return [.halloween]
+        case .turkeyFeathers: return [.thanksgiving]
+        case .holidayScarf: return [.christmasEve, .christmas]
+        case .santaHat: return [.christmas]
         default: return []
         }
     }
+
+    var isHolidayOutfit: Bool { !holidays.isEmpty }
+
+    /// Worn for the whole month when that slot is on AUTO (the Santa hat all
+    /// December). A month never outranks a choice — only the day itself does.
+    var autoMonth: Int? { self == .santaHat ? 12 : nil }
+
+    /// Picked by AUTO when owned. Holiday outfits are the calendar's to put
+    /// on, costumes hide what you chose for other slots, and Phantom is a
+    /// spooky special rather than a rung on the streak ladder — all three
+    /// only ever go on because you (or the day) chose them.
+    var autoEligible: Bool {
+        if isMoodProp || isHolidayOutfit { return false }
+        switch slot {
+        case .costume: return false
+        default: return self != .phantom
+        }
+    }
+
+    /// Order WITHIN a slot: AUTO wears the highest tier owned. It is the
+    /// difficulty of the medal behind it, so across families in one slot
+    /// (a beret from five stories vs a beanie from 100 miles) the harder one
+    /// wins.
+    var tier: Int {
+        switch self {
+        // color — the streak ladder
+        case .classic: return 0
+        case .ember: return 3
+        case .lime: return 5
+        case .ruby: return 7
+        case .lavender: return 10
+        case .sunflower: return 14
+        case .mint: return 21
+        case .sapphire: return 30
+        case .violet: return 45
+        case .rose: return 50
+        case .teal: return 60
+        case .arctic: return 75
+        case .midnight: return 90
+        case .sunset: return 100
+        case .aurora: return 120
+        case .ocean: return 150
+        case .lavaLamp: return 180
+        case .galaxy: return 200
+        case .candy: return 250
+        case .northernLights: return 300
+        case .gold: return 365
+        case .prism: return 500
+        case .cosmic: return 730
+        case .eternal: return 1000
+        case .phantom: return 95
+        // head
+        case .sweatband: return 1
+        case .ballCap: return 10
+        case .visor: return 20
+        case .directorsBeret: return 25
+        case .beanie: return 30
+        case .bucketHat: return 40
+        case .safariHat: return 50
+        case .cowboyHat: return 60
+        case .aviatorCap: return 70
+        case .headlampHelmet: return 80
+        case .crown: return 90
+        case .laurelWreath: return 100
+        case .vikingHelmet: return 110
+        case .santaHat, .heartBopper, .leprechaunHat, .bunnyEars, .starHat, .countdownHat: return 5
+        case .partyHat, .nightcap: return 0
+        // eyes
+        case .starStickers: return 10
+        case .roundSpecs: return 20
+        case .classicShades: return 30
+        case .aviators: return 40
+        case .heartGlasses: return 50
+        case .cyberVisor: return 60
+        case .starGlasses: return 5
+        case .moodShades: return 0
+        // chest
+        case .bandana: return 5
+        case .bowTie: return 10
+        case .polaroid: return 12
+        case .finisherMedal: return 20
+        case .starBadge: return 30
+        case .championSash: return 40
+        case .goldChain: return 50
+        case .trophyPendant: return 60
+        case .holidayScarf: return 3
+        // back
+        case .redCape: return 10
+        case .blueCape: return 20
+        case .royalCape: return 30
+        case .championCape: return 40
+        case .victoryBanner: return 50
+        case .goldenWings: return 60
+        case .turkeyFeathers: return 3
+        // feet — a FASTER mile is a higher rung
+        case .canvasSneakers: return 10
+        case .trainers: return 20
+        case .racingFlats: return 30
+        case .neonSoles: return 40
+        case .trackSpikes: return 50
+        case .rocketBoots: return 60
+        case .lightningKicks: return 70
+        case .wingedSandals: return 80
+        // costume
+        case .ghostSheet: return 10
+        case .astronautHelmet: return 20
+        case .pumpkinSuit: return 5
+        // held
+        case .pomPoms: return 10
+        case .checkeredFlag: return 12
+        case .foamFinger: return 20
+        case .stopwatch: return 25
+        case .megaphone: return 40
+        case .confettiCannon: return 50
+        // trail
+        case .emberSparks: return 10
+        case .dustPuffs: return 20
+        case .speedLines: return 30
+        case .cometTail: return 40
+        case .smokeRings: return 50
+        case .starTrail: return 60
+        case .rainbowStreak: return 70
+        case .lightningTrail: return 80
+        case .fireworks: return 90
+        case .phoenixFeathers: return 100
+        case .auroraRibbon: return 110
+        case .meteorShower: return 120
+        // companion
+        case .spark: return 10
+        case .friendlyGhost: return 15
+        case .firefly: return 20
+        case .sparkTrio: return 25
+        case .phoenixChick: return 30
+        case .lantern: return 45
+        case .flameyJr: return 50
+        case .cometPup: return 60
+        // aura
+        case .spectralGlow: return 10
+        case .spotlight: return 15
+        case .flicker: return 20
+        case .paparazzi: return 30
+        // bubble
+        case .classicBubble: return 0
+        case .comic: return 10
+        case .neon: return 20
+        case .pixel: return 30
+        case .goldBubble: return 40
+        }
+    }
+
+    /// Slots this item covers up. A costume is worn INSTEAD of what it hides
+    /// — the resolver takes those slots off, so the Closet can say so and a
+    /// hat never pokes through a sheet. Checked with a resolve × render
+    /// matrix, not by eye.
+    var hides: Set<FlameySlot> {
+        switch self {
+        // Head to toe: its own eye holes, nothing above, round or under it.
+        case .ghostSheet: return [.head, .eyes, .chest, .feet, .back, .held]
+        // A fishbowl: no hat fits inside, and the collar sits on his chest.
+        case .astronautHelmet: return [.head, .chest]
+        // Sat in a pumpkin: its stem is his hat, it swallows his feet, his
+        // middle and the arm a held item needs.
+        case .pumpkinSuit: return [.head, .chest, .feet, .held]
+        default: return []
+        }
+    }
+
+    /// Holiday-specific clashes that aren't a whole slot: the star glasses'
+    /// top points reach the brow line, so the sweatband comes off rather
+    /// than poking through them.
+    func clashes(with other: FlameyItem) -> Bool {
+        (self == .starGlasses && other == .sweatband) || (self == .sweatband && other == .starGlasses)
+    }
+
+    /// Lifts him off the ground (a fraction of his body unit) on a full
+    /// surface: the rocket jets and the winged hover. Suppressed on compact
+    /// surfaces, where he stands on the ground like everyone else.
+    var hoverLift: CGFloat {
+        switch self {
+        case .rocketBoots: return 0.07
+        case .wingedSandals: return 0.08
+        default: return 0
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .classic: return "Classic"
+        case .ember: return "Ember"
+        case .lime: return "Lime"
+        case .ruby: return "Ruby"
+        case .lavender: return "Lavender"
+        case .sunflower: return "Sunflower"
+        case .mint: return "Mint"
+        case .sapphire: return "Sapphire"
+        case .violet: return "Violet"
+        case .rose: return "Rose"
+        case .teal: return "Teal"
+        case .arctic: return "Arctic"
+        case .midnight: return "Midnight"
+        case .sunset: return "Sunset"
+        case .aurora: return "Aurora"
+        case .ocean: return "Ocean"
+        case .lavaLamp: return "Lava Lamp"
+        case .galaxy: return "Galaxy"
+        case .candy: return "Candy"
+        case .northernLights: return "Northern Lights"
+        case .gold: return "Gold"
+        case .prism: return "Prism"
+        case .cosmic: return "Cosmic"
+        case .eternal: return "Eternal"
+        case .phantom: return "Phantom"
+        case .sweatband: return "Sweatband"
+        case .ballCap: return "Ball Cap"
+        case .visor: return "Visor"
+        case .beanie: return "Beanie"
+        case .bucketHat: return "Bucket Hat"
+        case .safariHat: return "Safari Hat"
+        case .cowboyHat: return "Cowboy Hat"
+        case .aviatorCap: return "Aviator Cap"
+        case .headlampHelmet: return "Headlamp Helmet"
+        case .crown: return "Crown"
+        case .laurelWreath: return "Laurel Wreath"
+        case .vikingHelmet: return "Viking Helmet"
+        case .directorsBeret: return "Director's Beret"
+        case .santaHat: return "Santa Hat"
+        case .heartBopper: return "Heart Bopper"
+        case .leprechaunHat: return "Lucky Hat"
+        case .bunnyEars: return "Bunny Ears"
+        case .starHat: return "Star Hat"
+        case .countdownHat: return "Countdown Hat"
+        case .starStickers: return "Star Stickers"
+        case .roundSpecs: return "Round Specs"
+        case .classicShades: return "Classic Shades"
+        case .aviators: return "Aviators"
+        case .heartGlasses: return "Heart Glasses"
+        case .cyberVisor: return "Cyber Visor"
+        case .starGlasses: return "Star Glasses"
+        case .bandana: return "Bandana"
+        case .bowTie: return "Bow Tie"
+        case .finisherMedal: return "Finisher Medal"
+        case .starBadge: return "Star Badge"
+        case .championSash: return "Champion Sash"
+        case .goldChain: return "Gold Chain"
+        case .trophyPendant: return "Trophy Pendant"
+        case .polaroid: return "Polaroid"
+        case .holidayScarf: return "Cozy Scarf"
+        case .redCape: return "Red Cape"
+        case .blueCape: return "Blue Cape"
+        case .royalCape: return "Royal Cape"
+        case .championCape: return "Champion Cape"
+        case .victoryBanner: return "Victory Banner"
+        case .goldenWings: return "Golden Wings"
+        case .turkeyFeathers: return "Tail Feathers"
+        case .canvasSneakers: return "Canvas Sneakers"
+        case .trainers: return "Trainers"
+        case .racingFlats: return "Racing Flats"
+        case .neonSoles: return "Neon Soles"
+        case .trackSpikes: return "Track Spikes"
+        case .rocketBoots: return "Rocket Boots"
+        case .lightningKicks: return "Lightning Kicks"
+        case .wingedSandals: return "Winged Sandals"
+        case .ghostSheet: return "Ghost Sheet"
+        case .astronautHelmet: return "Astronaut Helmet"
+        case .pumpkinSuit: return "Pumpkin Suit"
+        case .checkeredFlag: return "Checkered Flag"
+        case .stopwatch: return "Stopwatch"
+        case .pomPoms: return "Pom-Poms"
+        case .foamFinger: return "Foam Finger"
+        case .megaphone: return "Megaphone"
+        case .confettiCannon: return "Confetti Cannon"
+        case .emberSparks: return "Ember Sparks"
+        case .dustPuffs: return "Dust Puffs"
+        case .speedLines: return "Speed Lines"
+        case .cometTail: return "Comet Tail"
+        case .smokeRings: return "Smoke Rings"
+        case .starTrail: return "Star Trail"
+        case .rainbowStreak: return "Rainbow Streak"
+        case .lightningTrail: return "Lightning Trail"
+        case .fireworks: return "Fireworks"
+        case .phoenixFeathers: return "Phoenix Feathers"
+        case .auroraRibbon: return "Aurora Ribbon"
+        case .meteorShower: return "Meteor Shower"
+        case .spark: return "Spark"
+        case .firefly: return "Firefly"
+        case .flameyJr: return "Flamey Jr."
+        case .sparkTrio: return "Spark Trio"
+        case .lantern: return "Lantern"
+        case .phoenixChick: return "Phoenix Chick"
+        case .cometPup: return "Comet Pup"
+        case .friendlyGhost: return "Friendly Ghost"
+        case .spectralGlow: return "Spectral Glow"
+        case .flicker: return "Flicker"
+        case .spotlight: return "Spotlight"
+        case .paparazzi: return "Paparazzi"
+        case .classicBubble: return "Classic"
+        case .comic: return "Comic"
+        case .neon: return "Neon"
+        case .pixel: return "Pixel"
+        case .goldBubble: return "Gold"
+        case .moodShades: return "Shades"
+        case .partyHat: return "Party Hat"
+        case .nightcap: return "Nightcap"
+        }
+    }
+
+    var family: FlameyFamily {
+        if isMoodProp { return .mood }
+        if isHolidayOutfit { return .holidays }
+        guard let id = badgeId else { return .starter }
+        if id.hasPrefix("streak_") || id.hasPrefix("consistency_") { return .streakDays }
+        if id.hasPrefix("miles_") { return .lifetimeMiles }
+        if id.hasPrefix("pace_") { return .pace }
+        if id.hasPrefix("challenge_") { return .dailyChallenges }
+        if id.hasPrefix("weekly_") { return .weeklyChallenges }
+        if id.hasPrefix("comp_entered_") { return .competitionsEntered }
+        if id.hasPrefix("comp_won_") { return .competitionsWon }
+        if id.hasPrefix("comp_started_") { return .organizer }
+        if id.hasPrefix("hype_") { return .hypes }
+        if id.hasPrefix("daily_") { return .distanceInADay }
+        if id.hasPrefix("buddy_") { return .buddyWalks }
+        if id.hasPrefix("ghost_") { return .ghosts }
+        if id.hasPrefix("story_") { return .stories }
+        if id.hasPrefix("nudge_") { return .nudges }
+        return .firsts
+    }
+
+    /// "Run a sub-7 mile" — the how-to-unlock line, written from the medal.
+    var unlockCopy: String {
+        if isMoodProp { return "Worn with his mood" }
+        switch unlock {
+        case .always: return "Always his"
+        case .purchase: return "In the shop"
+        case .badge(let id): return Self.unlockCopy(badgeId: id)
+        case .streak(let days): return "Reach a \(days.formatted())-day streak"
+        }
+    }
+
+    static func unlockCopy(badgeId id: String) -> String {
+        func n(_ prefix: String) -> Int? { Int(id.dropFirst(prefix.count)) }
+        func plural(_ count: Int, _ one: String, _ many: String) -> String {
+            count == 1 ? one : "\(many.replacingOccurrences(of: "#", with: count.formatted()))"
+        }
+        if let key = HolidayKey(badgeId: id) { return "Walk your mile on \(key.holidayName)" }
+        switch id {
+        case "special_first_mile": return "Walk your first mile"
+        case "special_first_week": return "Walk every day for a week"
+        case "consistency_3": return "Walk 3 days in a row"
+        case "consistency_5": return "Walk 5 days in a row"
+        case "daily_2": return "Walk 2 miles in one day"
+        case "daily_3": return "Cover a 5K in one day"
+        case "daily_10k": return "Cover a 10K in one day"
+        case "daily_half": return "Cover a half marathon in one day"
+        case "daily_marathon": return "Cover a marathon in one day"
+        case "daily_50k": return "Cover a 50K in one day"
+        case "daily_ultra": return "Go ultra in one day"
+        case "ghost_margin_15": return "Beat a ghost by 15 seconds"
+        case "ghost_margin_45": return "Beat a ghost by 45 seconds"
+        default: break
+        }
+        if id.hasPrefix("streak_"), let d = n("streak_") { return "Reach a \(d.formatted())-day streak" }
+        if id.hasPrefix("miles_"), let m = n("miles_") { return "Walk \(m.formatted()) lifetime miles" }
+        if id.hasPrefix("pace_"), let p = Int(id.dropFirst("pace_".count).dropLast("min".count)) { return "Run a sub-\(p) mile" }
+        if id.hasPrefix("challenge_"), let c = n("challenge_") { return plural(c, "Complete a daily challenge", "Complete # daily challenges") }
+        if id.hasPrefix("weekly_streak_"), let w = n("weekly_streak_") { return "Finish weekly challenges \(w) weeks in a row" }
+        if id.hasPrefix("weekly_"), let w = n("weekly_") { return plural(w, "Complete a weekly challenge", "Complete # weekly challenges") }
+        if id.hasPrefix("comp_entered_"), let c = n("comp_entered_") { return plural(c, "Enter a competition", "Enter # competitions") }
+        if id.hasPrefix("comp_won_"), let c = n("comp_won_") { return plural(c, "Win a competition", "Win # competitions") }
+        if id.hasPrefix("comp_started_"), let c = n("comp_started_") { return plural(c, "Start a competition", "Start # competitions") }
+        if id.hasPrefix("hype_"), let h = n("hype_") { return plural(h, "Give a hype", "Give # hypes") }
+        if id.hasPrefix("nudge_"), let h = n("nudge_") { return plural(h, "Send a nudge", "Send # nudges") }
+        if id.hasPrefix("story_"), let s = n("story_") { return plural(s, "Post a story", "Post # stories") }
+        if id.hasPrefix("daily_"), let d = n("daily_") { return "Walk \(d) miles in one day" }
+        if id.hasPrefix("buddy_done_"), let b = n("buddy_done_") { return plural(b, "Finish a buddy walk", "Finish # buddy walks") }
+        if id.hasPrefix("buddy_crew_"), let b = n("buddy_crew_") { return "Walk in a crew of \(b)" }
+        if id.hasPrefix("buddy_won_"), let b = n("buddy_won_") { return plural(b, "Win a buddy race", "Win # buddy races") }
+        if id.hasPrefix("ghost_beat_"), let g = n("ghost_beat_") { return plural(g, "Beat a ghost", "Beat # ghosts") }
+        return "Earn the medal"
+    }
 }
 
-/// How an item becomes his for good. Derived, never stored.
+/// How an item becomes his. Derived, never stored.
 enum FlameyUnlock: Hashable {
-    /// Always his (the mood props).
+    /// Always his (the starter colour and bubble, the mood dressing).
     case always
-    /// His once the LONGEST streak reaches this many days — never the current
-    /// one, so a broken streak can't take the crown back.
-    case streak(Int)
-    /// His once this badge is earned (`holiday_<key>` for holiday outfits).
+    /// His once this badge is earned.
     case badge(String)
     /// Reserved for a purchasable item (StoreKit product id). Nothing uses it
-    /// yet; it is here so the wardrobe can list priced items without a model
-    /// change.
+    /// yet; owned by nobody until a purchase ledger exists.
     case purchase(productId: String)
+    /// Retired: streak gear used to unlock on the LONGEST streak alone. Kept
+    /// so the shape can express it again; no item uses it.
+    case streak(Int)
 }
 
-/// When an item goes on BY ITSELF, owned or not.
-enum FlameySeason: Hashable {
-    /// On the holiday's local calendar day.
-    case holidayDay(HolidayKey)
-    /// For a whole month (1-12) — the Santa hat is all December.
-    case month(Int)
-    /// On the anniversary of the day he met you.
-    case signupAnniversary
+// MARK: - Ownership
 
-    /// Higher wins when two seasons want the same slot: the exact day beats
-    /// the anniversary beats the month (Christmas Day's outfit over December's,
-    /// a mid-December anniversary's party hat over the Santa hat).
-    var rank: Int {
-        switch self {
-        case .month: return 1
-        case .signupAnniversary: return 2
-        case .holidayDay: return 3
+enum FlameyWardrobe {
+    /// Everything owned, from earned badge ids. Retroactive by construction:
+    /// a medal earned before the wardrobe existed unlocks its item the moment
+    /// this runs.
+    static func owned(earnedBadgeIds: Set<String>) -> Set<FlameyItem> {
+        Set(FlameyItem.allCases.filter { item in
+            switch item.unlock {
+            case .always: return true
+            case .badge(let id): return earnedBadgeIds.contains(id)
+            case .purchase, .streak: return false
+            }
+        })
+    }
+
+    /// Every badge id the catalog depends on (what a widget mirror stores).
+    static var catalogBadgeIds: Set<String> {
+        Set(FlameyItem.allCases.compactMap(\.badgeId))
+    }
+
+    /// The streak-colour medals a LONGEST streak implies. The server awards
+    /// them from the same figure, so this only ever fills a gap while the
+    /// badge list is loading (and dresses a friend whose profile block
+    /// carries the number but not the medals).
+    static func impliedBadgeIds(longestStreak: Int) -> Set<String> {
+        var ids = Set<String>()
+        for item in FlameyItem.allCases where item.slot == .color {
+            guard let id = item.badgeId else { continue }
+            if id.hasPrefix("streak_"), let days = Int(id.dropFirst("streak_".count)), longestStreak >= days {
+                ids.insert(id)
+            }
+            if id.hasPrefix("consistency_"), let days = Int(id.dropFirst("consistency_".count)), longestStreak >= days {
+                ids.insert(id)
+            }
+        }
+        return ids
+    }
+
+    /// The best owned item AUTO puts in `slot` (highest tier), or nil.
+    static func best(in slot: FlameySlot, owned: Set<FlameyItem>) -> FlameyItem? {
+        owned.filter { $0.slot == slot && $0.autoEligible }
+            .max { ($0.tier, $0.rawValue) < ($1.tier, $1.rawValue) }
+    }
+
+    /// Closet items in `slot`, in tier order.
+    static func items(in slot: FlameySlot) -> [FlameyItem] {
+        FlameyItem.closet.filter { $0.slot == slot }.sorted { $0.tier < $1.tier }
+    }
+}
+
+// MARK: - The user's choice (wire format)
+
+/// One slot of the Closet: follow the best owned item, wear nothing, or wear
+/// this.
+enum FlameySlotChoice: Hashable {
+    case auto
+    case bare
+    case item(FlameyItem)
+}
+
+/// What the user picked in the Closet. The WIRE FORMAT is the backend's
+/// `users.flamey_look`: `{ "<slot>": "<itemId>" | null }` — a missing slot is
+/// AUTO, `null` is BARE. An id this build doesn't know (a newer catalog) or
+/// one filed under the wrong slot decodes as AUTO for that slot, never a
+/// failure; mood dressing never goes on the wire.
+struct FlameyLookChoice: Hashable, Codable {
+    private(set) var slots: [FlameySlot: FlameySlotChoice] = [:]
+
+    static let auto = FlameyLookChoice()
+
+    init() {}
+
+    subscript(slot: FlameySlot) -> FlameySlotChoice {
+        get { slots[slot] ?? .auto }
+        set {
+            switch newValue {
+            case .auto: slots[slot] = nil
+            case .bare: slots[slot] = .bare
+            case .item(let item):
+                slots[slot] = (item.slot == slot && !item.isMoodProp) ? .item(item) : nil
+            }
+        }
+    }
+
+    var isAllAuto: Bool { slots.isEmpty }
+
+    /// From the wire dictionary (`[slot: id-or-nil]`).
+    init(wire: [String: String?]) {
+        for (key, value) in wire {
+            guard let slot = FlameySlot(rawValue: key) else { continue }
+            if let raw = value {
+                if let item = FlameyItem(rawValue: raw), item.slot == slot, !item.isMoodProp {
+                    slots[slot] = .item(item)
+                }
+            } else {
+                slots[slot] = .bare
+            }
+        }
+    }
+
+    /// To the wire dictionary: AUTO slots are absent.
+    var wire: [String: String?] {
+        var out: [String: String?] = [:]
+        for (slot, choice) in slots {
+            switch choice {
+            case .auto: continue
+            case .bare: out[slot.rawValue] = .some(nil)
+            case .item(let item): out[slot.rawValue] = .some(item.rawValue)
+            }
+        }
+        return out
+    }
+
+    private struct Key: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+        init(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    init(from decoder: Decoder) throws {
+        // `null` (or anything but an object) for the whole look is all-auto,
+        // like an empty object — never a failure.
+        var wire: [String: String?] = [:]
+        if let c = try? decoder.container(keyedBy: Key.self) {
+            for key in c.allKeys {
+                if (try? c.decodeNil(forKey: key)) == true {
+                    wire[key.stringValue] = .some(nil)
+                } else if let raw = try? c.decode(String.self, forKey: key) {
+                    wire[key.stringValue] = .some(raw)
+                }
+            }
+        }
+        self.init(wire: wire)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Key.self)
+        for slot in FlameySlot.allCases {
+            guard let choice = slots[slot] else { continue }
+            switch choice {
+            case .auto: continue
+            case .bare: try c.encodeNil(forKey: Key(stringValue: slot.rawValue))
+            case .item(let item): try c.encode(item.rawValue, forKey: Key(stringValue: slot.rawValue))
+            }
         }
     }
 }
 
-/// A catalog entry: an item plus its name, how it's owned and when it's worn.
-struct FlameyCosmetic: Identifiable, Hashable {
-    let item: FlameyItem
-    let name: String
-    let unlock: FlameyUnlock
-    var seasons: [FlameySeason] = []
+// MARK: - The resolved look
 
-    var id: String { item.rawValue }
-    var slot: FlameySlot { item.slot }
-
-    func isUnlocked(longestStreak: Int, earnedBadgeIds: Set<String>) -> Bool {
-        switch unlock {
-        case .always: return true
-        case .streak(let days): return longestStreak >= days
-        case .badge(let id): return earnedBadgeIds.contains(id)
-        case .purchase: return false
-        }
-    }
-
-    /// The whole wardrobe, in display order.
-    static let catalog: [FlameyCosmetic] = [
-        // Mood props
-        FlameyCosmetic(item: .shades, name: "Shades", unlock: .always),
-        FlameyCosmetic(item: .partyHat, name: "Party Hat", unlock: .always, seasons: [.signupAnniversary]),
-        FlameyCosmetic(item: .nightcap, name: "Nightcap", unlock: .always),
-        // Streak gear — the ladder
-        FlameyCosmetic(item: .bandana, name: "Lucky Bandana", unlock: .streak(7)),
-        FlameyCosmetic(item: .sweatband, name: "Sweatband", unlock: .streak(30)),
-        FlameyCosmetic(item: .sneakers, name: "Sneakers", unlock: .streak(100)),
-        FlameyCosmetic(item: .crown, name: "Crown", unlock: .streak(365)),
-        // Holiday outfits — each owned via that holiday's medal
-        FlameyCosmetic(item: .countdownHat, name: "Countdown Hat",
-                       unlock: .badge(HolidayKey.newYearsEve.badgeId), seasons: [.holidayDay(.newYearsEve)]),
-        FlameyCosmetic(item: .starGlasses, name: "Star Glasses",
-                       unlock: .badge(HolidayKey.newYearsDay.badgeId), seasons: [.holidayDay(.newYearsDay)]),
-        FlameyCosmetic(item: .heartBopper, name: "Heart Bopper",
-                       unlock: .badge(HolidayKey.valentinesDay.badgeId), seasons: [.holidayDay(.valentinesDay)]),
-        FlameyCosmetic(item: .blush, name: "Rosy Cheeks",
-                       unlock: .badge(HolidayKey.valentinesDay.badgeId), seasons: [.holidayDay(.valentinesDay)]),
-        FlameyCosmetic(item: .leprechaunHat, name: "Lucky Hat",
-                       unlock: .badge(HolidayKey.stPatricksDay.badgeId), seasons: [.holidayDay(.stPatricksDay)]),
-        FlameyCosmetic(item: .bunnyEars, name: "Bunny Ears",
-                       unlock: .badge(HolidayKey.easter.badgeId), seasons: [.holidayDay(.easter)]),
-        FlameyCosmetic(item: .starHat, name: "Star Hat",
-                       unlock: .badge(HolidayKey.independenceDay.badgeId), seasons: [.holidayDay(.independenceDay)]),
-        FlameyCosmetic(item: .pumpkinSuit, name: "Pumpkin Suit",
-                       unlock: .badge(HolidayKey.halloween.badgeId), seasons: [.holidayDay(.halloween)]),
-        FlameyCosmetic(item: .turkeyFeathers, name: "Tail Feathers",
-                       unlock: .badge(HolidayKey.thanksgiving.badgeId), seasons: [.holidayDay(.thanksgiving)]),
-        FlameyCosmetic(item: .holidayScarf, name: "Cozy Scarf",
-                       unlock: .badge(HolidayKey.christmasEve.badgeId),
-                       seasons: [.holidayDay(.christmasEve), .holidayDay(.christmas)]),
-        FlameyCosmetic(item: .santaHat, name: "Santa Hat",
-                       unlock: .badge(HolidayKey.christmas.badgeId), seasons: [.month(12)]),
-    ]
-
-    static func cosmetic(for item: FlameyItem) -> FlameyCosmetic? {
-        catalog.first { $0.item == item }
-    }
-
-    /// Everything owned — what the wardrobe will list.
-    static func unlocked(longestStreak: Int, earnedBadgeIds: Set<String>) -> [FlameyCosmetic] {
-        catalog.filter { $0.isUnlocked(longestStreak: longestStreak, earnedBadgeIds: earnedBadgeIds) }
-    }
+/// Which ONE halo-class effect is on him. Only one at a time, or a legendary
+/// colour + golden wings + an aura stack into noise.
+///
+/// Precedence: an aura you CHOSE > golden wings > a legendary colour's own
+/// halo/embers > an aura AUTO picked. The loser isn't gone — the colour still
+/// colours him, the wings still draw — only its glow is withheld.
+enum FlameyGlow: Hashable {
+    case none
+    case aura(FlameyItem)
+    case wings
+    case colorHalo
 }
-
-// MARK: - The look
 
 /// What Flamey is wearing — the ONE description every renderer draws. A pure
 /// value: resolve it once, pass it everywhere.
@@ -376,6 +1083,10 @@ struct FlameyLook: Equatable, Hashable, Codable {
     var holiday: HolidayKey? = nil
     /// The anniversary of the day he met you.
     var isAnniversary: Bool = false
+    /// The surface's size class (see `FlameyRenderDetail`).
+    var detail: FlameyRenderDetail = .full
+    /// The one halo-class effect (see `FlameyGlow`).
+    var glow: FlameyGlow = .none
 
     static let plain = FlameyLook()
 
@@ -383,7 +1094,7 @@ struct FlameyLook: Equatable, Hashable, Codable {
 
     subscript(slot: FlameySlot) -> FlameyItem? { worn[slot] }
 
-    /// Everything worn, in draw order.
+    /// Everything worn, in catalog slot order.
     var items: [FlameyItem] { FlameySlot.allCases.compactMap { worn[$0] } }
 
     func wears(_ item: FlameyItem) -> Bool { worn[item.slot] == item }
@@ -393,80 +1104,133 @@ struct FlameyLook: Equatable, Hashable, Codable {
 
     mutating func takeOff(_ slot: FlameySlot) { worn[slot] = nil }
 
-    /// Resolves the look for a day. Every layer REPLACES the one below it,
-    /// slot by slot, so there is never more than one item per slot:
+    /// The colour item he burns in (Classic = the figure's own palette).
+    var color: FlameyItem { worn[.color] ?? .classic }
+
+    /// The speech-bubble style (Classic when none or on a compact surface).
+    var bubble: FlameyItem { detail == .full ? (worn[.bubble] ?? .classicBubble) : .classicBubble }
+
+    /// How far off the ground he floats, as a fraction of his body unit. Zero
+    /// on a compact surface: jets and hover are for the big screens.
+    var hoverLift: CGFloat {
+        guard detail == .full, let feet = worn[.feet] else { return 0 }
+        return feet.hoverLift
+    }
+
+    /// The draw order for the front of him.
+    var frontItems: [FlameyItem] {
+        [FlameySlot.feet, .costume, .chest, .eyes, .head, .held].compactMap { worn[$0] }
+    }
+
+    /// Resolves the look for a day.
     ///
-    ///   1. streak gear — the best rung the LONGEST streak reached, per slot
-    ///   2. `equipped`  — the wardrobe's manual picks (owned items only; the
-    ///                    next phase — pass [:] until then)
-    ///   3. `moodProps` — the day's mood (shades when done, party hat on a
-    ///                    milestone, nightcap at bedtime)
-    ///   4. seasons     — month < anniversary < the holiday itself
-    ///
-    /// then anything a worn item `hides` comes off. Mood-free callers (the
-    /// widget) pass no `moodProps` and get gear + today's outfit.
+    /// Precedence, highest first, one item per slot:
+    ///   1. TODAY's holiday outfit — on the day, owned or not, whatever you
+    ///      chose (a chosen costume that would hide it comes off). The
+    ///      sign-up anniversary puts the party hat on, below the holiday.
+    ///   2. Mood dressing — HEAD only (nightcap at bedtime, party hat on a
+    ///      milestone), and only when no costume is worn. The done-shades
+    ///      only fill EYES when nothing is there.
+    ///   3. Your choice — an owned item or bare. An item you no longer own
+    ///      reads as auto.
+    ///   4. Auto — the best owned item in the slot (highest tier), plus the
+    ///      Santa hat all December on an auto head.
+    /// Colour is never overridden by a mood or a holiday. Then what worn
+    /// items `hides` / clash with comes off, and a compact surface drops the
+    /// slots it can't carry.
     static func resolve(
-        longestStreak: Int,
-        earnedBadgeIds: Set<String>,
-        signupDate: Date?,
+        owned: Set<FlameyItem>,
+        choice: FlameyLookChoice = .auto,
         date: Date = Date(),
-        moodProps: [FlameyItem] = [],
-        equipped: [FlameySlot: FlameyItem] = [:],
+        mood: [FlameyItem] = [],
+        signupDate: Date? = nil,
+        detail: FlameyRenderDetail = .full,
         timeZone: TimeZone = .current
     ) -> FlameyLook {
         var look = FlameyLook()
+        look.detail = detail
         let holiday = HolidayCalendar.holiday(on: date, timeZone: timeZone)
         let anniversary = signupDate.map {
             HolidayCalendar.isAnniversary(of: $0, on: date, timeZone: timeZone)
         } ?? false
         look.holiday = holiday
         look.isAnniversary = anniversary
-
-        // 1. Streak gear: the highest rung per slot.
-        var bestRung: [FlameySlot: Int] = [:]
-        for cosmetic in FlameyCosmetic.catalog {
-            guard case .streak(let days) = cosmetic.unlock, longestStreak >= days else { continue }
-            if days > bestRung[cosmetic.slot, default: -1] {
-                bestRung[cosmetic.slot] = days
-                look.wear(cosmetic.item)
-            }
-        }
-
-        // 2. Manual picks — only what is actually owned.
-        for (_, item) in equipped.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
-            guard let cosmetic = FlameyCosmetic.cosmetic(for: item),
-                  cosmetic.isUnlocked(longestStreak: longestStreak, earnedBadgeIds: earnedBadgeIds)
-            else { continue }
-            look.wear(item)
-        }
-
-        // 3. The mood's props.
-        for item in moodProps { look.wear(item) }
-
-        // 4. Seasons, lowest rank first so the day itself lands last.
         let month = HolidayCalendar.components(of: date, timeZone: timeZone).month
-        let seasonal: [(rank: Int, item: FlameyItem)] = FlameyCosmetic.catalog.compactMap { cosmetic in
-            let live = cosmetic.seasons.filter { season in
-                switch season {
-                case .holidayDay(let key): return key == holiday
-                case .month(let m): return m == month
-                case .signupAnniversary: return anniversary
+        let owned = owned.union(FlameyItem.allCases.filter { $0.unlock == .always })
+
+        // 3 + 4. Choice, else auto.
+        var autoSlots = Set<FlameySlot>()
+        for slot in FlameySlot.allCases {
+            switch choice[slot] {
+            case .bare:
+                continue
+            case .item(let item) where owned.contains(item) && item.slot == slot:
+                look.wear(item)
+            default:
+                autoSlots.insert(slot)
+                if let best = FlameyWardrobe.best(in: slot, owned: owned) { look.wear(best) }
+                if let monthly = FlameyItem.allCases.first(where: { $0.slot == slot && $0.autoMonth == month }) {
+                    look.wear(monthly)
                 }
             }
-            guard let best = live.map(\.rank).max() else { return nil }
-            return (best, cosmetic.item)
         }
-        for entry in seasonal.sorted(by: { $0.rank < $1.rank }) { look.wear(entry.item) }
 
-        // Finally, what the outfit covers up.
+        // 2. Mood: head only (and only uncostumed); shades only on bare eyes.
+        for item in mood where item.isMoodProp {
+            switch item.slot {
+            case .head where look[.costume] == nil: look.wear(item)
+            case .eyes where look[.eyes] == nil: look.wear(item)
+            default: break
+            }
+        }
+
+        // 1. The day itself.
+        var dayItems: [FlameyItem] = []
+        if anniversary { dayItems.append(.partyHat) }
+        if let holiday {
+            dayItems += FlameyItem.allCases.filter { $0.holidays.contains(holiday) }
+        }
+        for item in dayItems {
+            if item.slot != .costume, let costume = look[.costume], costume.hides.contains(item.slot) {
+                look.takeOff(.costume)
+            }
+            look.wear(item)
+        }
+        let dayWorn = Set(dayItems.filter { look.wears($0) })
+
+        // What the outfit covers up. Colour is never hidden: a costume
+        // covers his body, and what peeks out (the sheet's tip, the bowl) is
+        // still his colour.
         let hidden = look.items.reduce(into: Set<FlameySlot>()) { $0.formUnion($1.hides) }
-        for slot in hidden { look.takeOff(slot) }
+        for slot in hidden where slot != .color { look.takeOff(slot) }
+        for a in look.items {
+            for b in look.items where a != b && a.clashes(with: b) {
+                // The day's item wins a clash; otherwise the eyes do.
+                let loser = dayWorn.contains(a) ? b : (dayWorn.contains(b) ? a : (a.slot == .eyes ? b : a))
+                look.takeOff(loser.slot)
+            }
+        }
+
+        if detail == .compact {
+            for slot in FlameySlot.allCases where !slot.survivesCompact { look.takeOff(slot) }
+        }
+
+        look.glow = glow(for: look, auraWasAuto: autoSlots.contains(.aura))
         return look
     }
 
+    private static func glow(for look: FlameyLook, auraWasAuto: Bool) -> FlameyGlow {
+        let colorHalo = FlameyPalette.palette(for: look.color)?.hasHalo ?? false
+        if let aura = look[.aura], !auraWasAuto { return .aura(aura) }
+        if look.wears(.goldenWings) { return .wings }
+        if colorHalo { return .colorHalo }
+        if let aura = look[.aura] { return .aura(aura) }
+        return .none
+    }
+
     // Codable by raw strings, dropping ids this build doesn't know, so a look
-    // written by a newer build (or a server) never fails to decode.
-    private enum CodingKeys: String, CodingKey { case worn, holiday, isAnniversary }
+    // written by a newer build never fails to decode.
+    private enum CodingKeys: String, CodingKey { case worn, holiday, isAnniversary, detail }
 
     init() {}
 
@@ -482,6 +1246,11 @@ struct FlameyLook: Equatable, Hashable, Codable {
         if let flag = try? c.decodeIfPresent(Bool.self, forKey: .isAnniversary) {
             isAnniversary = flag
         }
+        if let rawDetail = try? c.decodeIfPresent(String.self, forKey: .detail),
+           let parsed = FlameyRenderDetail(rawValue: rawDetail) {
+            detail = parsed
+        }
+        glow = Self.glow(for: self, auraWasAuto: true)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -491,532 +1260,6 @@ struct FlameyLook: Equatable, Hashable, Codable {
         try c.encode(raw, forKey: .worn)
         try c.encodeIfPresent(holiday?.rawValue, forKey: .holiday)
         try c.encode(isAnniversary, forKey: .isAnniversary)
-    }
-}
-
-// MARK: - Drawing
-
-/// Draws a `FlameyLook` on the figure, in `FlameBuddyFigure`'s own geometry:
-/// the figure fills a `size` square, his body is scaled by `scale` about the
-/// bottom edge, the face sits 0.32·size·scale above the bottom, the eyes
-/// ±0.145·size·scale either side, the tip 0.98·size·scale up. Every prop is
-/// placed from those, so gear stays on him as he burns down through the day.
-///
-/// ONE layer draws one side of him: `.behind` goes before the figure in the
-/// caller's ZStack (tail feathers), `.front` after it. Drawn with `Canvas` —
-/// no per-frame work: the only motion is the heart bopper's sway, a
-/// `repeatForever` transform started once, and none at all when `still`.
-///
-/// Reports a `size × size` layout footprint (the drawing overflows it, like
-/// the figure's glow), so adding it to a ZStack never moves anything.
-struct FlameyOutfitLayer: View {
-    enum Side { case behind, front }
-
-    let look: FlameyLook
-    let size: CGFloat
-    /// The body scale the figure is drawn at right now.
-    var scale: CGFloat = 1
-    var side: Side = .front
-    /// A still frame: share cards, widgets, Reduce Motion.
-    var still: Bool = false
-
-    @State private var sway = false
-
-    private var drawn: [FlameyItem] {
-        look.items.filter { ($0.slot.drawsBehindBody) == (side == .behind) }
-    }
-
-    var body: some View {
-        let items = drawn
-        let size = self.size
-        let scale = self.scale
-        ZStack {
-            if !items.isEmpty {
-                let staticItems = items.filter { $0 != .heartBopper }
-                Canvas { context, canvas in
-                    context.translateBy(x: canvas.width / 2, y: canvas.height / 2)
-                    for item in staticItems {
-                        FlameyArt.draw(item, in: &context, size: size, scale: scale)
-                    }
-                }
-                .frame(width: size * 2.4, height: size * 2.4)
-                if items.contains(.heartBopper) {
-                    heartBopper
-                }
-            }
-        }
-        .frame(width: size, height: size)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        .onAppear { startSway() }
-        .onChange(of: look) { _, _ in startSway() }
-    }
-
-    /// Idempotent: re-assigning an already-true phase is a no-op, so a
-    /// re-fired appear can't stack a second repeat.
-    private func startSway() {
-        guard !still, drawn.contains(.heartBopper), !sway else { return }
-        // Off the appear commit — a repeatForever started inside onAppear
-        // attaches to the view's first transaction (see FlameBuddyView).
-        DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { sway = true }
-        }
-    }
-
-    /// Valentine's bopper sways from its base on the tip.
-    private var heartBopper: some View {
-        let size = self.size
-        let scale = self.scale
-        let base = FlameyArt.anchors(size: size, scale: scale)
-        return Canvas { context, canvas in
-            context.translateBy(x: canvas.width / 2, y: canvas.height / 2)
-            FlameyArt.drawHeartBopper(in: &context, u: size * scale)
-        }
-        .frame(width: size * scale * 0.5, height: size * scale * 0.5)
-        .rotationEffect(.degrees(still ? 0 : (sway ? 7 : -7)), anchor: .center)
-        .offset(y: base.topY + 0.03 * size * scale)
-    }
-}
-
-/// The prop drawings. Coordinates are offsets from the centre of the figure's
-/// `size` square (SwiftUI's frame centre), in points — the same space the
-/// mood props use — so a Canvas translated to its centre draws them 1:1.
-/// `u` = size × scale, the unit every prop is measured in so it scales with
-/// him.
-enum FlameyArt {
-    struct Anchors {
-        let bottom: CGFloat
-        let faceY: CGFloat
-        let eyeX: CGFloat
-        let topY: CGFloat
-    }
-
-    static func anchors(size: CGFloat, scale: CGFloat) -> Anchors {
-        Anchors(bottom: size / 2,
-                faceY: size / 2 - 0.32 * size * scale,
-                eyeX: 0.145 * size * scale,
-                topY: size / 2 - 0.98 * size * scale)
-    }
-
-    static func draw(_ item: FlameyItem, in ctx: inout GraphicsContext, size s: CGFloat, scale k: CGFloat) {
-        let a = anchors(size: s, scale: k)
-        let u = s * k
-        switch item {
-        case .shades: shades(&ctx, a, u, s)
-        case .partyHat: partyHat(&ctx, a, u)
-        case .nightcap: nightcap(&ctx, a, u)
-        case .bandana: bandana(&ctx, a, u)
-        case .sweatband: sweatband(&ctx, a, u)
-        case .sneakers: sneakers(&ctx, a, u)
-        case .crown: crown(&ctx, a, u, s)
-        case .pumpkinSuit: pumpkin(&ctx, a, u)
-        case .santaHat: santaHat(&ctx, a, u)
-        case .holidayScarf: scarf(&ctx, a, u)
-        case .starGlasses: starGlasses(&ctx, a, u)
-        case .heartBopper:
-            var sub = ctx
-            sub.translateBy(x: 0, y: a.topY + 0.03 * u)
-            drawHeartBopper(in: &sub, u: u)
-        case .blush: blush(&ctx, a, u)
-        case .leprechaunHat: leprechaunHat(&ctx, a, u)
-        case .bunnyEars: bunnyEars(&ctx, a, u)
-        case .starHat: starHat(&ctx, a, u)
-        case .turkeyFeathers: turkeyFeathers(&ctx, a, u)
-        case .countdownHat: countdownHat(&ctx, a, u)
-        }
-    }
-
-    // MARK: Helpers
-
-    private static func rgb(_ hex: UInt32, _ opacity: Double = 1) -> Color {
-        Color(red: Double((hex >> 16) & 0xFF) / 255,
-              green: Double((hex >> 8) & 0xFF) / 255,
-              blue: Double(hex & 0xFF) / 255).opacity(opacity)
-    }
-
-    /// A sub-context moved to (x, y) and turned by `degrees` — SVG's
-    /// `translate(x,y) rotate(r)`.
-    private static func placed(_ ctx: GraphicsContext, _ x: CGFloat, _ y: CGFloat, _ degrees: Double = 0) -> GraphicsContext {
-        var sub = ctx
-        sub.translateBy(x: x, y: y)
-        if degrees != 0 { sub.rotate(by: .degrees(degrees)) }
-        return sub
-    }
-
-    private static func circle(_ x: CGFloat, _ y: CGFloat, _ r: CGFloat) -> Path {
-        Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2))
-    }
-
-    private static func ellipse(_ x: CGFloat, _ y: CGFloat, _ rx: CGFloat, _ ry: CGFloat) -> Path {
-        Path(ellipseIn: CGRect(x: x - rx, y: y - ry, width: rx * 2, height: ry * 2))
-    }
-
-    private static func star(_ cx: CGFloat, _ cy: CGFloat, _ r: CGFloat, inner: CGFloat = 0.45) -> Path {
-        var p = Path()
-        for i in 0..<10 {
-            let rr = i % 2 == 1 ? r * inner : r
-            let angle = -Double.pi / 2 + Double(i) * Double.pi / 5
-            let pt = CGPoint(x: cx + rr * CGFloat(cos(angle)), y: cy + rr * CGFloat(sin(angle)))
-            if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
-        }
-        p.closeSubpath()
-        return p
-    }
-
-    private static func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x, y: y) }
-
-    // MARK: Mood props
-
-    /// Mile banked: the mood layer's shades, ported 1:1.
-    private static func shades(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat, _ s: CGFloat) {
-        let g = placed(ctx, 0, a.faceY - 0.005 * u)
-        let lw = 0.20 * u, lh = 0.185 * u
-        let frame = Color(red: 0.18, green: 0.16, blue: 0.20)
-        for side in [-1.0, 1.0] as [CGFloat] {
-            let rect = CGRect(x: side * a.eyeX - lw / 2, y: -lh / 2, width: lw, height: lh)
-            let lens = Path(roundedRect: rect, cornerRadius: lh * 0.45, style: .continuous)
-            g.fill(lens, with: .color(Color(red: 0.08, green: 0.07, blue: 0.10)))
-            g.fill(lens, with: .linearGradient(Gradient(colors: [Color.white.opacity(0.28), .clear]),
-                                               startPoint: rect.origin, endPoint: pt(rect.midX, rect.midY)))
-            g.stroke(lens, with: .color(frame), lineWidth: max(1, s * 0.006))
-        }
-        let bridgeW = max(2, a.eyeX * 2 - lw + s * 0.02)
-        let bridgeH = max(1.5, s * 0.012)
-        g.fill(Path(roundedRect: CGRect(x: -bridgeW / 2, y: -bridgeH / 2, width: bridgeW, height: bridgeH),
-                    cornerRadius: bridgeH / 2), with: .color(frame))
-        for side in [-1.0, 1.0] as [CGFloat] {
-            let armW = 0.06 * u
-            let cx = side * (a.eyeX + lw / 2 + 0.025 * u)
-            g.fill(Path(roundedRect: CGRect(x: cx - armW / 2, y: -lh * 0.15 - bridgeH / 2, width: armW, height: bridgeH),
-                        cornerRadius: bridgeH / 2), with: .color(frame))
-        }
-    }
-
-    /// Milestone / anniversary: the mood layer's striped cone, measured off
-    /// the BODY (`u`) rather than the frame — the mood layer's own copy is
-    /// sized off `size` and floats beside a flame burnt down to a wisp.
-    private static func partyHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ s: CGFloat) {
-        let w = s * 0.22, h = s * 0.24
-        let g = placed(ctx, s * 0.06, a.topY - h * 0.35, 14)
-        var cone = Path()
-        cone.move(to: pt(0, -h / 2)); cone.addLine(to: pt(w / 2, h / 2)); cone.addLine(to: pt(-w / 2, h / 2)); cone.closeSubpath()
-        g.fill(cone, with: .linearGradient(
-            Gradient(colors: [Color(red: 1.0, green: 0.42, blue: 0.62), Color(red: 0.55, green: 0.42, blue: 1.0)]),
-            startPoint: pt(0, -h / 2), endPoint: pt(0, h / 2)))
-        g.stroke(cone, with: .color(.white.opacity(0.35)), lineWidth: max(1, s * 0.006))
-        var stripes = g
-        stripes.clip(to: cone)
-        for i in 0..<2 {
-            let y = -h * 0.05 + CGFloat(i) * h * 0.28
-            stripes.fill(Path(CGRect(x: -w / 2, y: y - h * 0.04, width: w, height: h * 0.08)),
-                         with: .color(.white.opacity(0.28)))
-        }
-        g.fill(circle(0, -h / 2, s * 0.025), with: .color(Color(red: 1.0, green: 0.9, blue: 0.45)))
-    }
-
-    /// Bedtime: a soft blue cap with a drooping tip and a pom-pom.
-    private static func nightcap(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.30 * u, h = 0.28 * u
-        let g = placed(ctx, 0.02 * u, a.topY + 0.02 * u, -4)
-        var cap = Path()
-        cap.move(to: pt(-w * 0.46, h * 0.28))
-        cap.addQuadCurve(to: pt(w * 0.10, -h * 0.45), control: pt(-w * 0.30, -h * 0.40))
-        cap.addQuadCurve(to: pt(w * 0.70, h * 0.25), control: pt(w * 0.55, -h * 0.50))
-        cap.addQuadCurve(to: pt(w * 0.18, -h * 0.10), control: pt(w * 0.42, -h * 0.18))
-        cap.addQuadCurve(to: pt(w * 0.46, h * 0.28), control: pt(w * 0.35, h * 0.10))
-        cap.closeSubpath()
-        g.fill(cap, with: .color(rgb(0x5B6FD6)))
-        for (x, y) in [(-0.2, 0.0), (0.05, -0.25), (0.3, -0.2), (0.2, 0.1)] as [(CGFloat, CGFloat)] {
-            g.fill(circle(x * w, y * h, 0.012 * u), with: .color(.white.opacity(0.85)))
-        }
-        g.fill(Path(roundedRect: CGRect(x: -w * 0.54, y: h * 0.18, width: w * 1.08, height: h * 0.20),
-                    cornerRadius: h * 0.10), with: .color(rgb(0xE8ECFF)))
-        g.fill(circle(w * 0.72, h * 0.30, 0.04 * u), with: .color(rgb(0xE8ECFF)))
-    }
-
-    // MARK: Streak gear
-
-    /// 7 days: a blue polka-dot bandana knotted under his grin.
-    private static func bandana(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.58 * u, h = 0.05 * u
-        let g = placed(ctx, 0, a.bottom - 0.095 * u)
-        let blue = rgb(0x2563EB)
-        g.fill(band(w: w, h: h, sag: 0.4), with: .color(blue))
-        var tri = Path()
-        tri.move(to: pt(-w * 0.16, h * 0.7)); tri.addLine(to: pt(w * 0.16, h * 0.7)); tri.addLine(to: pt(0, h * 3.1)); tri.closeSubpath()
-        g.fill(tri, with: .color(blue))
-        for (x, y) in [(-0.3, 0.1), (-0.1, 0.6), (0.12, 0.6), (0.32, 0.1), (0, 1.6), (-0.04, 2.3)] as [(CGFloat, CGFloat)] {
-            g.fill(circle(x * w, y * h, 0.011 * u), with: .color(.white))
-        }
-    }
-
-    /// A band that curves like it wraps a round body: top edge sags by `sag`
-    /// of its height, bottom edge by one more.
-    private static func band(w: CGFloat, h: CGFloat, sag: CGFloat) -> Path {
-        var p = Path()
-        p.move(to: pt(-w / 2, -h / 2))
-        p.addQuadCurve(to: pt(w / 2, -h / 2), control: pt(0, h * sag))
-        p.addLine(to: pt(w / 2, h / 2))
-        p.addQuadCurve(to: pt(-w / 2, h / 2), control: pt(0, h * (sag + 1)))
-        p.closeSubpath()
-        return p
-    }
-
-    /// 30 days: a terry sweatband across the forehead.
-    private static func sweatband(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.50 * u, h = 0.06 * u
-        let g = placed(ctx, -0.005 * u, a.faceY - 0.135 * u)
-        g.fill(band(w: w, h: h, sag: 0.9), with: .color(rgb(0xF4F4F6)))
-        var stripe = Path()
-        stripe.move(to: pt(-w / 2, -h * 0.05))
-        stripe.addQuadCurve(to: pt(w / 2, -h * 0.05), control: pt(0, h * 1.35))
-        g.stroke(stripe, with: .color(rgb(0xE8384F)), lineWidth: h * 0.28)
-    }
-
-    /// 100 days: a pair of red-soled sneakers poking out under him.
-    private static func sneakers(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.19 * u, h = 0.085 * u
-        let red = rgb(0xE8384F)
-        for side in [-1.0, 1.0] as [CGFloat] {
-            var g = placed(ctx, side * 0.14 * u, a.bottom - h * 0.35)
-            g.scaleBy(x: side, y: 1)
-            var upper = Path()
-            upper.move(to: pt(-w * 0.5, h * 0.35))
-            upper.addLine(to: pt(-w * 0.5, -h * 0.1))
-            upper.addQuadCurve(to: pt(-w * 0.15, -h * 0.5), control: pt(-w * 0.45, -h * 0.5))
-            upper.addLine(to: pt(w * 0.05, -h * 0.45))
-            upper.addQuadCurve(to: pt(w * 0.45, h * 0.02), control: pt(w * 0.2, -h * 0.05))
-            upper.addQuadCurve(to: pt(w * 0.5, h * 0.35), control: pt(w * 0.55, h * 0.1))
-            upper.closeSubpath()
-            g.fill(upper, with: .color(rgb(0xFAFAFA)))
-            g.fill(Path(roundedRect: CGRect(x: -w * 0.52, y: h * 0.22, width: w * 1.04, height: h * 0.28),
-                        cornerRadius: h * 0.14), with: .color(red))
-            var swoosh = Path()
-            swoosh.move(to: pt(-w * 0.3, -h * 0.05))
-            swoosh.addQuadCurve(to: pt(w * 0.25, -h * 0.02), control: pt(-w * 0.05, h * 0.2))
-            g.stroke(swoosh, with: .color(red), style: StrokeStyle(lineWidth: h * 0.14, lineCap: .round))
-        }
-    }
-
-    /// 365 days: a jewelled crown perched on the tip.
-    private static func crown(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat, _ s: CGFloat) {
-        let w = 0.24 * u, h = 0.15 * u
-        let gold = rgb(0xFFCF40), dark = rgb(0xC98A12)
-        let g = placed(ctx, 0.02 * u, a.topY + 0.06 * u, -8)
-        var body = Path()
-        let points: [(CGFloat, CGFloat)] = [(-0.5, 0.5), (-0.5, -0.05), (-0.3, 0.12), (-0.16, -0.5), (0, 0.02),
-                                            (0.16, -0.5), (0.3, 0.12), (0.5, -0.05), (0.5, 0.5)]
-        for (i, p) in points.enumerated() {
-            let point = pt(p.0 * w, p.1 * h)
-            if i == 0 { body.move(to: point) } else { body.addLine(to: point) }
-        }
-        body.closeSubpath()
-        g.fill(body, with: .color(gold))
-        g.stroke(body, with: .color(dark), style: StrokeStyle(lineWidth: max(1, 0.012 * s), lineJoin: .round))
-        var bandCtx = g
-        bandCtx.clip(to: body)
-        bandCtx.fill(Path(CGRect(x: -w / 2, y: h * 0.22, width: w, height: h * 0.28)), with: .color(dark.opacity(0.55)))
-        g.fill(circle(0, h * 0.36, 0.022 * u), with: .color(rgb(0xE8384F)))
-        g.fill(circle(-w * 0.3, h * 0.36, 0.016 * u), with: .color(rgb(0x4FB8FF)))
-        g.fill(circle(w * 0.3, h * 0.36, 0.016 * u), with: .color(rgb(0x4FB8FF)))
-        g.fill(circle(-w * 0.16, -h / 2, 0.018 * u), with: .color(gold))
-        g.fill(circle(w * 0.16, -h / 2, 0.018 * u), with: .color(gold))
-    }
-
-    // MARK: Holiday outfits
-
-    /// Halloween: sat in a carved pumpkin, with its stem on his tip.
-    private static func pumpkin(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.84 * u, h = 0.25 * u
-        let top = a.bottom - 0.135 * u
-        let g = placed(ctx, 0, top + h / 2)
-        var shell = Path()
-        shell.move(to: pt(-w * 0.5, 0))
-        shell.addCurve(to: pt(0, -h * 0.42), control1: pt(-w * 0.5, -h * 0.62), control2: pt(-w * 0.16, -h * 0.56))
-        shell.addCurve(to: pt(w * 0.5, 0), control1: pt(w * 0.16, -h * 0.56), control2: pt(w * 0.5, -h * 0.62))
-        shell.addCurve(to: pt(0, h * 0.5), control1: pt(w * 0.5, h * 0.62), control2: pt(w * 0.2, h * 0.6))
-        shell.addCurve(to: pt(-w * 0.5, 0), control1: pt(-w * 0.2, h * 0.6), control2: pt(-w * 0.5, h * 0.62))
-        shell.closeSubpath()
-        g.fill(shell, with: .color(rgb(0xF07B1A)))
-        for f in [-0.28, 0, 0.28] as [CGFloat] {
-            var rib = Path()
-            rib.move(to: pt(f * w, -h * 0.45))
-            rib.addQuadCurve(to: pt(f * w, h * 0.5), control: pt(f * w * 1.5, 0))
-            g.stroke(rib, with: .color(rgb(0xC75A0D)), style: StrokeStyle(lineWidth: 0.012 * u, lineCap: .round))
-        }
-        var rim = Path()
-        rim.move(to: pt(-w * 0.36, -h * 0.34))
-        for i in 0...8 {
-            rim.addLine(to: pt(-w * 0.36 + CGFloat(i) * w * 0.09, -h * 0.34 + (i % 2 == 1 ? h * 0.1 : 0)))
-        }
-        g.stroke(rim, with: .color(rgb(0x8A3A06)), style: StrokeStyle(lineWidth: 0.012 * u, lineJoin: .round))
-        g.fill(ellipse(-w * 0.26, -h * 0.05, w * 0.07, h * 0.16), with: .color(rgb(0xFFB15C, 0.45)))
-
-        // The stem is the costume's hat.
-        let stem = placed(ctx, 0.01 * u, a.topY + 0.02 * u)
-        var stalk = stem
-        stalk.rotate(by: .degrees(10))
-        stalk.fill(Path(roundedRect: CGRect(x: -0.025 * u, y: -0.09 * u, width: 0.05 * u, height: 0.10 * u),
-                        cornerRadius: 0.015 * u), with: .color(rgb(0x4F7D2A)))
-        var vine = Path()
-        vine.move(to: pt(0, -0.04 * u))
-        vine.addQuadCurve(to: pt(0.15 * u, -0.04 * u), control: pt(0.10 * u, -0.11 * u))
-        stem.stroke(vine, with: .color(rgb(0x4F9D2A)), style: StrokeStyle(lineWidth: 0.018 * u, lineCap: .round))
-    }
-
-    /// December: a Santa hat slouched over the tip.
-    private static func santaHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.30 * u, h = 0.30 * u
-        let g = placed(ctx, 0.03 * u, a.topY + 0.02 * u, -6)
-        var hat = Path()
-        hat.move(to: pt(-w * 0.46, h * 0.28))
-        hat.addQuadCurve(to: pt(w * 0.12, -h * 0.52), control: pt(-w * 0.2, -h * 0.55))
-        hat.addQuadCurve(to: pt(w * 0.62, -h * 0.05), control: pt(w * 0.5, -h * 0.5))
-        hat.addQuadCurve(to: pt(w * 0.18, -h * 0.18), control: pt(w * 0.4, -h * 0.28))
-        hat.addQuadCurve(to: pt(w * 0.46, h * 0.28), control: pt(w * 0.35, h * 0.05))
-        hat.closeSubpath()
-        g.fill(hat, with: .color(rgb(0xE0243A)))
-        g.fill(Path(roundedRect: CGRect(x: -w * 0.56, y: h * 0.2, width: w * 1.12, height: h * 0.22),
-                    cornerRadius: h * 0.11), with: .color(.white))
-        g.fill(circle(w * 0.64, -h * 0.02, 0.045 * u), with: .color(.white))
-    }
-
-    /// Christmas Eve and Day: a striped scarf with a tail.
-    private static func scarf(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.66 * u, h = 0.065 * u
-        let green = rgb(0x1F9D55), red = rgb(0xE0243A)
-        let g = placed(ctx, 0, a.bottom - 0.085 * u)
-        let shape = band(w: w, h: h, sag: 0.5)
-        g.fill(shape, with: .color(green))
-        var stripes = g
-        stripes.clip(to: shape)
-        for f in [-0.3, -0.1, 0.1, 0.3] as [CGFloat] {
-            stripes.fill(Path(CGRect(x: f * w - w * 0.03, y: -h, width: w * 0.06, height: h * 3)), with: .color(red))
-        }
-        let tail = placed(g, w * 0.22, h * 0.6, -12)
-        tail.fill(Path(roundedRect: CGRect(x: -h * 0.45, y: 0, width: h * 0.9, height: h * 1.9), cornerRadius: h * 0.2),
-                  with: .color(green))
-        tail.fill(Path(CGRect(x: -h * 0.45, y: h * 0.5, width: h * 0.9, height: h * 0.3)), with: .color(red))
-        tail.fill(Path(CGRect(x: -h * 0.45, y: h * 1.2, width: h * 0.9, height: h * 0.3)), with: .color(red))
-    }
-
-    /// New Year's Day: gold star glasses.
-    private static func starGlasses(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let gold = rgb(0xFFCF40), dark = rgb(0xB8860B)
-        for side in [-1.0, 1.0] as [CGFloat] {
-            let p = star(side * a.eyeX, a.faceY - 0.005 * u, 0.13 * u, inner: 0.5)
-            ctx.fill(p, with: .color(gold))
-            ctx.stroke(p, with: .color(dark), style: StrokeStyle(lineWidth: max(1, 0.006 * u), lineJoin: .round))
-        }
-        ctx.fill(Path(CGRect(x: -0.03 * u, y: a.faceY - 0.02 * u, width: 0.06 * u, height: 0.018 * u)), with: .color(dark))
-    }
-
-    /// Valentine's: a heart on a springy stalk, drawn around its base.
-    static func drawHeartBopper(in ctx: inout GraphicsContext, u: CGFloat) {
-        let hx = 0.07 * u, hy = -0.15 * u, r = 0.05 * u
-        var stalk = Path()
-        stalk.move(to: .zero)
-        stalk.addQuadCurve(to: pt(hx, hy), control: pt(0.02 * u, hy + 0.06 * u))
-        ctx.stroke(stalk, with: .color(rgb(0xFF8FB0)), style: StrokeStyle(lineWidth: 0.014 * u, lineCap: .round))
-        var heart = Path()
-        heart.move(to: pt(hx, hy + r * 0.9))
-        heart.addCurve(to: pt(hx, hy - r * 0.45), control1: pt(hx - r * 1.6, hy - r * 0.2), control2: pt(hx - r * 0.9, hy - r * 1.4))
-        heart.addCurve(to: pt(hx, hy + r * 0.9), control1: pt(hx + r * 0.9, hy - r * 1.4), control2: pt(hx + r * 1.6, hy - r * 0.2))
-        heart.closeSubpath()
-        ctx.fill(heart, with: .color(rgb(0xFF3B6B)))
-        ctx.stroke(heart, with: .color(.white), lineWidth: max(0.8, 0.005 * u))
-    }
-
-    /// Valentine's: rosy cheeks.
-    private static func blush(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        for side in [-1.0, 1.0] as [CGFloat] {
-            ctx.fill(ellipse(side * (a.eyeX + 0.05 * u), a.faceY + 0.09 * u, 0.05 * u, 0.025 * u),
-                     with: .color(rgb(0xFF5C8A, 0.55)))
-        }
-    }
-
-    /// St. Patrick's: a little green buckled hat.
-    private static func leprechaunHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.22 * u, h = 0.20 * u
-        let g = placed(ctx, 0.03 * u, a.topY, -8)
-        g.fill(Path(roundedRect: CGRect(x: -w * 0.85, y: h * 0.32, width: w * 1.7, height: h * 0.16), cornerRadius: h * 0.08),
-               with: .color(rgb(0x1C7A3A)))
-        var crown = Path()
-        crown.move(to: pt(-w / 2, h * 0.4)); crown.addLine(to: pt(-w * 0.42, -h * 0.5))
-        crown.addLine(to: pt(w * 0.42, -h * 0.5)); crown.addLine(to: pt(w / 2, h * 0.4)); crown.closeSubpath()
-        g.fill(crown, with: .color(rgb(0x23A04A)))
-        g.fill(Path(CGRect(x: -w * 0.47, y: h * 0.05, width: w * 0.94, height: h * 0.2)), with: .color(rgb(0x1A1A1A)))
-        g.stroke(Path(CGRect(x: -w * 0.1, y: h * 0.04, width: w * 0.2, height: h * 0.22)),
-                 with: .color(rgb(0xFFCF40)), lineWidth: max(1, 0.014 * u))
-    }
-
-    /// Easter: bunny ears on a pink band.
-    private static func bunnyEars(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        for side in [-1.0, 1.0] as [CGFloat] {
-            let g = placed(ctx, side * 0.05 * u, a.topY + 0.06 * u, Double(side) * 16)
-            let outer = ellipse(0, -0.11 * u, 0.05 * u, 0.13 * u)
-            g.fill(outer, with: .color(rgb(0xFFF4F6)))
-            g.stroke(outer, with: .color(rgb(0xE5C8CF)), lineWidth: max(0.8, 0.005 * u))
-            g.fill(ellipse(0, -0.10 * u, 0.025 * u, 0.09 * u), with: .color(rgb(0xFF9FB5)))
-        }
-        var bandPath = Path()
-        bandPath.move(to: pt(-0.1 * u, a.topY + 0.07 * u))
-        bandPath.addQuadCurve(to: pt(0.1 * u, a.topY + 0.07 * u), control: pt(0, a.topY + 0.02 * u))
-        ctx.stroke(bandPath, with: .color(rgb(0xFF9FB5)), style: StrokeStyle(lineWidth: 0.02 * u, lineCap: .round))
-    }
-
-    /// Independence Day: a striped top hat with a star.
-    private static func starHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.21 * u, h = 0.22 * u
-        let blue = rgb(0x1F3F99), red = rgb(0xE0243A)
-        let g = placed(ctx, 0.03 * u, a.topY - 0.01 * u, -8)
-        g.fill(Path(roundedRect: CGRect(x: -w * 0.85, y: h * 0.34, width: w * 1.7, height: h * 0.15), cornerRadius: h * 0.07),
-               with: .color(blue))
-        let body = Path(roundedRect: CGRect(x: -w / 2, y: -h / 2, width: w, height: h * 0.9), cornerRadius: w * 0.08)
-        g.fill(body, with: .color(.white))
-        var inner = g
-        inner.clip(to: body)
-        for i in 0..<3 {
-            inner.fill(Path(CGRect(x: -w / 2, y: -h / 2 + h * 0.1 + CGFloat(i) * h * 0.22, width: w, height: h * 0.1)),
-                       with: .color(red))
-        }
-        inner.fill(Path(CGRect(x: -w / 2, y: h * 0.12, width: w, height: h * 0.24)), with: .color(blue))
-        g.fill(star(0, h * 0.24, 0.05 * u), with: .color(.white))
-    }
-
-    /// Thanksgiving: a fan of tail feathers behind him.
-    private static func turkeyFeathers(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let colors: [UInt32] = [0xC2410C, 0xEA8A1E, 0xE8384F, 0xEA8A1E, 0xC2410C, 0xA16207, 0xA16207]
-        let angles: [Double] = [-70, -45, -20, 0, 20, 45, 70]
-        let baseY = a.bottom - 0.28 * u
-        for (i, angle) in angles.enumerated() {
-            let g = placed(ctx, 0, baseY, angle)
-            let feather = ellipse(0, -0.33 * u, 0.075 * u, 0.20 * u)
-            g.fill(feather, with: .color(rgb(colors[i])))
-            g.stroke(feather, with: .color(rgb(0x7C2D12)), lineWidth: max(0.8, 0.005 * u))
-            g.fill(ellipse(0, -0.46 * u, 0.035 * u, 0.05 * u), with: .color(rgb(0xFDE68A, 0.8)))
-        }
-    }
-
-    /// New Year's Eve: a black-and-gold countdown hat with a burst on top.
-    private static func countdownHat(_ ctx: inout GraphicsContext, _ a: Anchors, _ s: CGFloat) {
-        let w = s * 0.20, h = s * 0.26
-        let gold = rgb(0xFFCF40)
-        let g = placed(ctx, s * 0.05, a.topY - h * 0.35, 12)
-        var cone = Path()
-        cone.move(to: pt(0, -h / 2)); cone.addLine(to: pt(w / 2, h / 2)); cone.addLine(to: pt(-w / 2, h / 2)); cone.closeSubpath()
-        g.fill(cone, with: .color(rgb(0x1A1A22)))
-        var trim = Path()
-        trim.move(to: pt(-w * 0.36, h * 0.22)); trim.addLine(to: pt(w * 0.36, h * 0.22))
-        trim.addLine(to: pt(w * 0.43, h * 0.36)); trim.addLine(to: pt(-w * 0.43, h * 0.36)); trim.closeSubpath()
-        g.fill(trim, with: .color(gold))
-        var line = Path()
-        line.move(to: pt(-w * 0.12, -h * 0.18)); line.addLine(to: pt(w * 0.12, -h * 0.18))
-        g.stroke(line, with: .color(gold), lineWidth: max(1, s * 0.01))
-        for i in 0..<6 {
-            let ray = placed(g, 0, -h / 2, Double(i) * 60)
-            ray.fill(Path(roundedRect: CGRect(x: -s * 0.005, y: -s * 0.05, width: s * 0.01, height: s * 0.05),
-                          cornerRadius: s * 0.005), with: .color(gold))
-        }
+        try c.encode(detail.rawValue, forKey: .detail)
     }
 }

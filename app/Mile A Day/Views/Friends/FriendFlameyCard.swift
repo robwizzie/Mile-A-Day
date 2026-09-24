@@ -16,6 +16,13 @@ struct FriendFlameyFacts: Equatable {
     let longestStreak: Int
     let earnedBadgeIds: Set<String>
     let signupDate: Date?
+    /// Everything they own, as far as this block tells us: the server's
+    /// `owned_item_ids` when it sends them, else what the medals it does send
+    /// (holidays) and the longest streak imply — plus anything their Closet
+    /// choice names, which the server only serves when it is owned.
+    let owned: Set<FlameyItem>
+    /// Their Closet choice (`look`, the wire `{slot: id|null}`); absent = auto.
+    let choice: FlameyLookChoice
 
     init?(block: FlameyProfileBlock?, ownerName: String) {
         guard let block, block.enabled == true else { return nil }
@@ -24,6 +31,15 @@ struct FriendFlameyFacts: Equatable {
         // Holiday medals travel as keys; the wardrobe unlocks by badge id.
         earnedBadgeIds = Set((block.holiday_keys ?? []).compactMap { HolidayKey(rawValue: $0)?.badgeId })
         signupDate = block.signup_date.flatMap(Self.parseDay)
+        let choice = FlameyLookChoice(wire: block.look ?? [:])
+        self.choice = choice
+        var owned = FlameyWardrobe.owned(
+            earnedBadgeIds: earnedBadgeIds.union(FlameyWardrobe.impliedBadgeIds(longestStreak: longestStreak)))
+        owned.formUnion((block.owned_item_ids ?? []).compactMap(FlameyItem.init(rawValue:)))
+        for slot in FlameySlot.allCases {
+            if case .item(let item) = choice[slot] { owned.insert(item) }
+        }
+        self.owned = owned
     }
 
     /// "2025-06-13" (their own calendar day) → local noon that day, so the
@@ -39,17 +55,19 @@ struct FriendFlameyFacts: Equatable {
         return Calendar.current.date(from: components)
     }
 
-    func look(mood: FlameMood.Kind?, date: Date = Date()) -> FlameyLook {
+    /// The card is a SMALL surface (`.compact`): colour, head, eyes, chest,
+    /// feet, costume, standing on the ground. The wardrobe sheet passes
+    /// `.full`.
+    func look(mood: FlameMood.Kind?, date: Date = Date(), detail: FlameyRenderDetail = .compact) -> FlameyLook {
         let props = mood.map { FlameMood(kind: $0, streak: 0).props } ?? []
-        return FlameyLook.resolve(longestStreak: longestStreak, earnedBadgeIds: earnedBadgeIds,
-                                  signupDate: signupDate, date: date, moodProps: props)
+        return FlameyLook.resolve(owned: owned, choice: choice, date: date, mood: props,
+                                  signupDate: signupDate, detail: detail)
     }
 
-    /// Owned for good — the always-his mood props aren't "unlocked" by
-    /// anything, so they aren't listed.
-    var unlocked: [FlameyCosmetic] {
-        FlameyCosmetic.unlocked(longestStreak: longestStreak, earnedBadgeIds: earnedBadgeIds)
-            .filter { $0.unlock != .always }
+    /// Owned for good, in Closet order — the always-his starters aren't
+    /// "unlocked" by anything, so they aren't listed.
+    var unlocked: [FlameyItem] {
+        FlameyItem.closet.filter { owned.contains($0) && $0.unlock != .always }
     }
 
     /// "Aaron's" / "James'".
@@ -58,58 +76,68 @@ struct FriendFlameyFacts: Equatable {
     }
 
     /// The one thing worth naming under him today: the day's outfit if he's
-    /// in one, else the best rung of streak gear he's earned.
+    /// in one, else a costume, else his hat, then colour, shoes, eyes, chest.
     func headlineItem(in look: FlameyLook) -> FlameyItem? {
-        let order: [FlameyItem] = [.pumpkinSuit, .santaHat, .holidayScarf, .turkeyFeathers, .bunnyEars,
-                                   .leprechaunHat, .starHat, .heartBopper, .starGlasses, .countdownHat,
-                                   .crown, .sneakers, .sweatband, .bandana]
-        return order.first { look.wears($0) }
+        if let dayItem = look.items.first(where: { $0.isHolidayOutfit }) { return dayItem }
+        for slot in [FlameySlot.costume, .head, .color, .feet, .eyes, .chest] {
+            if let item = look[slot], !item.isMoodProp, item != .classic { return item }
+        }
+        return nil
     }
 }
 
 extension FlameyItem {
-    /// A glyph for captions and the wardrobe list.
+    /// A glyph for captions and the wardrobe list — one per FAMILY (holiday
+    /// outfits keep their own), so the list reads by what earned it.
     var flairEmoji: String {
         switch self {
-        case .shades: return "😎"
+        case .moodShades, .classicShades: return "😎"
         case .partyHat: return "🥳"
         case .nightcap: return "😴"
-        case .bandana: return "🔥"
-        case .sweatband: return "💪"
-        case .sneakers: return "👟"
         case .crown: return "👑"
         case .pumpkinSuit: return "🎃"
         case .santaHat: return "🎅"
         case .holidayScarf: return "🧣"
         case .starGlasses: return "🤩"
         case .heartBopper: return "💘"
-        case .blush: return "😊"
         case .leprechaunHat: return "☘️"
         case .bunnyEars: return "🐰"
         case .starHat: return "⭐️"
         case .turkeyFeathers: return "🦃"
         case .countdownHat: return "🎉"
+        case .ghostSheet, .friendlyGhost: return "👻"
+        case .astronautHelmet: return "🧑‍🚀"
+        case .polaroid: return "📸"
+        default: break
+        }
+        switch family {
+        case .streakDays, .starter: return "🔥"
+        case .lifetimeMiles, .firsts: return "🧢"
+        case .pace: return "👟"
+        case .dailyChallenges: return "👓"
+        case .weeklyChallenges: return "🏅"
+        case .competitionsEntered, .competitionsWon: return "🦸"
+        case .organizer: return "🏁"
+        case .hypes: return "📣"
+        case .distanceInADay: return "✨"
+        case .buddyWalks: return "🐾"
+        case .ghosts: return "👻"
+        case .stories: return "🎬"
+        case .nudges: return "💬"
+        case .holidays: return "🎁"
+        case .mood: return "🙂"
         }
     }
-}
 
-extension FlameyCosmetic {
-    /// "365-day crown" / "Pumpkin Suit" — the caption under him.
-    var captionName: String {
-        if case .streak(let days) = unlock { return "\(days)-day \(name.split(separator: " ").last.map(String.init)?.lowercased() ?? name)" }
-        return name
-    }
+    /// The caption under him ("Crown", "Pumpkin Suit").
+    var captionName: String { displayName }
 
     /// How it was earned, in the wardrobe list.
     var earnedLine: String {
-        switch unlock {
-        case .always: return "Always his"
-        case .streak(let days): return "Longest streak hit \(days) days"
-        case .badge(let id):
-            if let key = HolidayKey(badgeId: id) { return "\(key.medalName) medal · \(key.holidayName)" }
-            return "Medal"
-        case .purchase: return "Wardrobe"
+        if case .badge(let id) = unlock, let key = HolidayKey(badgeId: id) {
+            return "\(key.medalName) medal · \(key.holidayName)"
         }
+        return unlockCopy
     }
 }
 
@@ -336,10 +364,10 @@ struct FriendFlameyCard: View {
             showWardrobe = true
         } label: {
             HStack(spacing: 5) {
-                if let item = facts.headlineItem(in: look), let cosmetic = FlameyCosmetic.cosmetic(for: item) {
+                if let item = facts.headlineItem(in: look) {
                     Text(item.flairEmoji)
                         .font(.system(size: 12))
-                    Text(cosmetic.captionName)
+                    Text(item.captionName)
                         .font(.system(size: 12, weight: .bold, design: .rounded))
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
@@ -491,9 +519,9 @@ struct FriendFlameyWardrobeSheet: View {
     /// The sheet's contents, outside the ScrollView (also what a snapshot
     /// render draws — ImageRenderer can't see into a ScrollView).
     var content: some View {
-        let look = facts.look(mood: nil)
+        let look = facts.look(mood: nil, detail: .full)
         let owned = facts.unlocked
-        let total = FlameyCosmetic.catalog.filter { $0.unlock != .always }.count
+        let total = FlameyItem.closet.filter { $0.unlock != .always }.count
         return VStack(spacing: 18) {
                 VStack(spacing: 6) {
                     ZStack(alignment: .bottom) {
@@ -515,19 +543,19 @@ struct FriendFlameyWardrobeSheet: View {
                 .padding(.top, 8)
 
                 if owned.isEmpty {
-                    Text("Nothing yet — a 7-day streak earns his first bandana.")
+                    Text("Nothing yet — a 3-day streak turns him Ember.")
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.6))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 24)
                 } else {
                     VStack(spacing: 0) {
-                        ForEach(Array(owned.enumerated()), id: \.element.id) { index, cosmetic in
+                        ForEach(Array(owned.enumerated()), id: \.element) { index, cosmetic in
                             if index > 0 {
                                 Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1)
                                     .padding(.leading, 60)
                             }
-                            row(cosmetic, wearing: look.wears(cosmetic.item))
+                            row(cosmetic, wearing: look.wears(cosmetic))
                         }
                     }
                     .profileCard()
@@ -537,15 +565,15 @@ struct FriendFlameyWardrobeSheet: View {
             .padding(.bottom, 24)
     }
 
-    private func row(_ cosmetic: FlameyCosmetic, wearing: Bool) -> some View {
+    private func row(_ cosmetic: FlameyItem, wearing: Bool) -> some View {
         HStack(spacing: 12) {
-            Text(cosmetic.item.flairEmoji)
+            Text(cosmetic.flairEmoji)
                 .font(.system(size: 20))
                 .frame(width: 36, height: 36)
                 .background(Circle().fill(Color.white.opacity(0.07)))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(cosmetic.name)
+                Text(cosmetic.displayName)
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
                     .lineLimit(1)

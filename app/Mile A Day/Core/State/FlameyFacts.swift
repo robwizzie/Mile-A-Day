@@ -72,50 +72,100 @@ enum FlameyFacts {
         return max(user.longestStreak ?? 0, user.streak)
     }
 
-    /// What Flamey wears right now on a Fun surface, or nil on Modern (no
-    /// Flamey feature exists there). `mood` adds its props (shades / party
-    /// hat / nightcap) under the day's outfit.
+    /// Every wardrobe item this user owns — from earned medals, plus the
+    /// streak colours their longest streak implies (a gap-filler while the
+    /// badge list loads; the server awards those medals from the same
+    /// figure). Retroactive by construction.
     @MainActor
-    static func look(mood: FlameMood.Kind? = nil, date: Date = Date()) -> FlameyLook? {
+    static var ownedItems: Set<FlameyItem> {
+        FlameyWardrobe.owned(earnedBadgeIds: earnedBadgeIds.union(FlameyWardrobe.impliedBadgeIds(longestStreak: longestStreak)))
+    }
+
+    // MARK: The Closet choice
+
+    /// "<userId>" → the wire JSON (`{slot: id|null}`), keyed by account so a
+    /// second account on this phone starts on auto.
+    private static let choiceKeyPrefix = "flameyLookChoiceV1|"
+
+    /// What this user picked in the Closet. Absent = all AUTO, which is what
+    /// everyone sees until they open it: their best owned items.
+    @MainActor
+    static var choice: FlameyLookChoice {
+        guard let me = currentUserId,
+              let data = UserDefaults.standard.data(forKey: choiceKeyPrefix + me),
+              let decoded = try? JSONDecoder().decode(FlameyLookChoice.self, from: data) else { return .auto }
+        return decoded
+    }
+
+    /// Stores the choice locally (the Closet PUTs it to the server itself —
+    /// or hands the server's copy here via `applyServerChoice`) and mirrors
+    /// it to the widget.
+    @MainActor
+    static func setChoice(_ choice: FlameyLookChoice) {
+        guard let me = currentUserId else { return }
+        if let data = try? JSONEncoder().encode(choice) {
+            UserDefaults.standard.set(data, forKey: choiceKeyPrefix + me)
+        }
+        mirrorToWidget()
+    }
+
+    /// The server's copy (`GET /users/:id/flamey-closet` `look`) wins over
+    /// the phone's — another device may have dressed him since.
+    @MainActor
+    static func applyServerChoice(_ choice: FlameyLookChoice) {
+        guard choice != self.choice else { return }
+        setChoice(choice)
+    }
+
+    /// What Flamey wears right now on a Fun surface, or nil on Modern (no
+    /// Flamey feature exists there). `mood` adds its dressing (party hat /
+    /// nightcap on the head, shades on bare eyes). `detail` is the SURFACE's
+    /// size class: `.compact` for widgets, the friend card, the tracker and
+    /// the Live Activity.
+    @MainActor
+    static func look(mood: FlameMood.Kind? = nil, date: Date = Date(),
+                     detail: FlameyRenderDetail = .full) -> FlameyLook? {
         guard DashboardStylePreference.current == .fun else { return nil }
         let props = mood.map { FlameMood(kind: $0, streak: 0).props } ?? []
         return FlameyLook.resolve(
-            longestStreak: longestStreak,
-            earnedBadgeIds: earnedBadgeIds,
-            signupDate: signupDate,
+            owned: ownedItems,
+            choice: choice,
             date: date,
-            moodProps: props
+            mood: props,
+            signupDate: signupDate,
+            detail: detail
         )
     }
 
     // MARK: Widget mirror
 
     /// Mirrors the facts the flame widget resolves his look from into the App
-    /// Group (the widget can't see `UserDefaults.standard` or the user blob).
-    /// Reloads the widget ONLY when that changes what he'd wear today or
-    /// tomorrow — the rest is baked per entry by the widget itself, so a
-    /// holiday rolls in at midnight with no reload spent.
+    /// Group (the widget can't see `UserDefaults.standard` or the user blob):
+    /// the catalog's medals, the signup date and the Closet choice. Reloads
+    /// the widget ONLY when that changes what he'd wear today or tomorrow —
+    /// the rest is baked per entry by the widget itself, so a holiday rolls
+    /// in at midnight with no reload spent.
     @MainActor
     static func mirrorToWidget() {
-        let catalogBadges = Set(FlameyCosmetic.catalog.compactMap { cosmetic -> String? in
-            if case .badge(let id) = cosmetic.unlock { return id }
-            return nil
-        })
-        let badges = earnedBadgeIds.intersection(catalogBadges)
+        let badges = earnedBadgeIds.intersection(FlameyWardrobe.catalogBadgeIds)
+            .union(FlameyWardrobe.impliedBadgeIds(longestStreak: longestStreak))
         let signup = signupDate
         let longest = longestStreak
+        let choice = self.choice
 
         let calendar = Calendar.current
         let days = [Date(), calendar.date(byAdding: .day, value: 1, to: Date()) ?? Date()]
         let before = days.map {
-            FlameyLook.resolve(longestStreak: WidgetDataStore.loadLongestStreak(),
-                               earnedBadgeIds: WidgetDataStore.loadFlameyBadgeIds(),
-                               signupDate: WidgetDataStore.loadFlameySignupDate(), date: $0)
+            FlameyLook.resolve(owned: WidgetDataStore.loadFlameyOwnedItems(),
+                               choice: WidgetDataStore.loadFlameyChoice(),
+                               date: $0, signupDate: WidgetDataStore.loadFlameySignupDate(), detail: .compact)
         }
         let after = days.map {
-            FlameyLook.resolve(longestStreak: longest, earnedBadgeIds: badges, signupDate: signup, date: $0)
+            FlameyLook.resolve(owned: FlameyWardrobe.owned(earnedBadgeIds: badges), choice: choice,
+                               date: $0, signupDate: signup, detail: .compact)
         }
         WidgetDataStore.save(longestStreak: longest)
+        WidgetDataStore.save(flameyChoice: choice)
         WidgetDataStore.save(flameyBadgeIds: Array(badges), signupDate: signup, reload: before != after)
     }
 }
