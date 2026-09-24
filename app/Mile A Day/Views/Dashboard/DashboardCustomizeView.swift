@@ -417,7 +417,8 @@ struct DashboardCustomizeView: View {
                             : Color(red: 0.09, green: 0.09, blue: 0.10))
                         .frame(height: 96)
                     if option == .fun {
-                        FlameBuddyView(health: .healthy, size: 72)
+                        // The Fun mascot as the dashboard draws him: arms and legs.
+                        FlameBuddyView(health: .healthy, size: 72, look: .plain)
                     } else {
                         ProfessionalFlameView(
                             phase: .burning, health: .healthy, size: 62,

@@ -425,15 +425,24 @@ struct FlameyDressedFigure: View {
     var vigor: CGFloat? = nil
     /// The scale the figure draws at (its effective body scale).
     var scale: CGFloat
+    /// How his arms are held (a static surface picks one pose).
+    var arms: FlameArmPose = .rest
 
     var body: some View {
-        ZStack {
+        let figure = FlameBuddyFigure(health: health, size: size, showsFace: !look.wears(.ghostSheet), vigor: vigor,
+                                      grounded: true, palette: health == .dead ? nil : FlameyPalette.palette(for: look.color),
+                                      lift: look.bodyLift * scale, legLength: look.standLift)
+        return ZStack {
             FlameyOutfitLayer(look: look, size: size, scale: scale, side: .behind, still: true)
-            FlameBuddyFigure(health: health, size: size, showsFace: !look.wears(.ghostSheet), vigor: vigor,
-                             grounded: true, palette: health == .dead ? nil : FlameyPalette.palette(for: look.color),
-                             lift: look.bodyLift * scale, legLength: look.standLift)
+            figure
             FlameyOutfitLayer(look: look, size: size, scale: scale, side: .front, still: true)
+            if look.showsArms {
+                FlameBuddyArms(figure: figure, pose: arms, hold: look.armHold(reach: 0.9))
+            }
         }
+        // A compact surface (widget, Live Activity) was fitted to him
+        // before he had legs: there he stands the same height as ever.
+        .scaleEffect(look.detail == .compact ? 1 / (1 + look.standLift) : 1, anchor: .bottom)
         .frame(width: size, height: size)
     }
 }

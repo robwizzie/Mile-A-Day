@@ -38,10 +38,10 @@ enum FlameyArt {
 
     // MARK: - Legs
 
-    /// How far his legs raise him when he wears shoes, in body units. Bare,
-    /// he has no legs at all and sits on the ground exactly as he always
-    /// has; shoes are the only thing that stands him up.
-    static let legLength: CGFloat = 0.15
+    /// How far his legs raise him, in body units. The Fun mascot ALWAYS
+    /// stands on his two stubby legs — bare (little rounded feet in his
+    /// colour) or shod.
+    static let legLength: CGFloat = FlameBuddyFigure.mascotLegLength
 
     /// Where each leg meets the floor (the figure draws the legs).
     static var legSpread: CGFloat { FlameBuddyFigure.legSpread }
@@ -137,8 +137,15 @@ enum FlameyArt {
     /// view's centre (the hero's buddy frame starts ~38pt under it).
     static let tightTopBound: CGFloat = -0.72
 
-    /// How far a cape's width is squeezed on a tight surface.
+    /// How far a back piece's width is squeezed on a tight surface.
     static let capeTuck: CGFloat = 0.53
+    /// A cape hangs close behind him, so a tight surface only narrows its
+    /// flare — it still shows on both sides.
+    static let capeTightScale: CGFloat = 0.82
+
+    static func isCape(_ item: FlameyItem) -> Bool {
+        [.redCape, .blueCape, .royalCape, .championCape].contains(item)
+    }
 
     /// How far a trail's length is squeezed on a tight surface.
     static let trailTuck: CGFloat = 0.56
@@ -147,11 +154,11 @@ enum FlameyArt {
     /// (measured: the cannon runs to 1.05u at full size, the stopwatch 0.61u).
     static func tightHeldScale(_ item: FlameyItem) -> CGFloat {
         switch item {
-        case .confettiCannon: return 0.44
-        case .megaphone: return 0.58
-        case .checkeredFlag: return 0.64
-        case .pomPoms: return 0.68
-        default: return 0.8
+        case .confettiCannon: return 0.56
+        case .megaphone: return 0.70
+        case .checkeredFlag: return 0.70
+        case .pomPoms: return 0.70
+        default: return 0.84
         }
     }
 
@@ -172,15 +179,18 @@ enum FlameyArt {
             // scaled about his shoulder, so it stays on the card.
             var h = ctx
             if isTight(reach) {
-                // Brought IN FRONT of him (shifted toward his middle) and
-                // scaled about his shoulder by how far the prop reaches, so
-                // the longest (the cannon, the flag) still ends inside the
-                // card instead of past its edge.
-                let sx = -0.26 * u, sy = a.bottom - 0.22 * u, k = tightHeldScale(item)
-                h.translateBy(x: 0.12 * u, y: 0)
-                h.translateBy(x: sx, y: sy); h.scaleBy(x: k, y: k); h.translateBy(x: -sx, y: -sy)
+                // Brought in close (his arm hangs nearer his side) and
+                // scaled by how far the prop reaches, about the pivot that
+                // carries his hand exactly to its tight spot — so the hand
+                // the arms layer draws still closes round the handle, and
+                // the longest (the cannon, the flag) ends inside the card.
+                let k = tightHeldScale(item)
+                let base = heldHand(item), tightHand = tightHeldHand(item)
+                let px = -(tightHand.x - k * base.x) / (1 - k) * u
+                let py = a.bottom + (tightHand.y - k * base.y) / (1 - k) * u
+                h.translateBy(x: px, y: py); h.scaleBy(x: k, y: k); h.translateBy(x: -px, y: -py)
             }
-            held(item, &h, a, u, arm: palette?.bodyTone ?? hx(0xFF8A1F))
+            held(item, &h, a, u)
         default: break
         }
     }
@@ -289,39 +299,65 @@ enum FlameyArt {
                     g.fill(poly([pt(x - h * 0.07, h * 0.38), pt(x + h * 0.07, h * 0.38), pt(x, h * 0.62)]), with: .color(hx(0xDDE3EA)))
                 }
             case .rocketBoots:
+                // Chunky astronaut boots — tall silver shells, a red cuff,
+                // a swept fin and a thick sole — riding ONE tidy jet each out
+                // of a nozzle under the sole. Compact surfaces stand on the
+                // floor, so there the nozzle and jet are left off.
                 if jets {
-                    // Jets first, so the boot sits over their roots. They
-                    // reach down to the floor under the hover.
-                    // Down to the floor and no further: the jets end where
-                    // he would land, washing the floor with a warm glow.
+                    let nozzleTop = h * 0.42, nozzleBottom = h * 0.70
+                    let nx = -w * 0.04
                     let floorY = a.ground - a.feet + h * 0.46
-                    let reach = max(0.7, (floorY - h * 0.45) / h + 0.05)
-                    var puff = g; puff.addFilter(.blur(radius: h * 0.30))
-                    puff.fill(ellipse(-w * 0.11, floorY, w * 0.42, h * 0.20), with: .color(hx(0xFF9A2E, 0.55)))
-                    for (dx, sc) in [(-w * 0.28, 1.0), (w * 0.06, 0.82)] as [(CGFloat, CGFloat)] {
-                        var flame = Path()
-                        let len = h * reach * sc
-                        flame.move(to: pt(dx - h * 0.26, h * 0.45))
-                        flame.addQuadCurve(to: pt(dx, h * 0.45 + len), control: pt(dx - h * 0.36, h * 0.45 + len * 0.55))
-                        flame.addQuadCurve(to: pt(dx + h * 0.26, h * 0.45), control: pt(dx + h * 0.36, h * 0.45 + len * 0.55))
-                        flame.closeSubpath()
-                        var gg = g; gg.addFilter(.blur(radius: h * 0.18))
-                        gg.fill(flame, with: .color(hx(0xFF8A1F, 0.8)))
-                        g.fill(flame, with: lin([hx(0xFFF3A0), hx(0xFFB020), hx(0xFF4E1A, 0.2)], pt(0, h * 0.45), pt(0, h * 0.45 + len)))
-                        g.fill(ellipse(dx, h * 0.62, h * 0.08, h * 0.2), with: .color(hx(0xBFE8FF)))
+                    let len = min(h * 1.25, max(h * 0.45, floorY - nozzleBottom - h * 0.02))
+                    var glow = g; glow.addFilter(.blur(radius: h * 0.28))
+                    glow.fill(ellipse(nx, nozzleBottom + len * 0.45, w * 0.20, len * 0.55), with: .color(hx(0xFF8A1F, 0.65)))
+                    var pool = g; pool.addFilter(.blur(radius: h * 0.22))
+                    pool.fill(ellipse(nx, floorY, w * 0.30, h * 0.10), with: .color(hx(0xFFB347, 0.45)))
+                    func jet(_ half: CGFloat, _ length: CGFloat) -> Path {
+                        var f = Path()
+                        f.move(to: pt(nx - half, nozzleBottom))
+                        f.addCurve(to: pt(nx, nozzleBottom + length), control1: pt(nx - half * 1.1, nozzleBottom + length * 0.45),
+                                   control2: pt(nx - half * 0.35, nozzleBottom + length * 0.85))
+                        f.addCurve(to: pt(nx + half, nozzleBottom), control1: pt(nx + half * 0.35, nozzleBottom + length * 0.85),
+                                   control2: pt(nx + half * 1.1, nozzleBottom + length * 0.45))
+                        f.closeSubpath()
+                        return f
                     }
+                    g.fill(jet(w * 0.19, len), with: lin([hx(0xFFB020), hx(0xFF5A1F), hx(0xFF3D1A, 0.3)], pt(0, nozzleBottom), pt(0, nozzleBottom + len)))
+                    g.fill(jet(w * 0.10, len * 0.62), with: lin([.white, hx(0xFFF3A0)], pt(0, nozzleBottom), pt(0, nozzleBottom + len * 0.62)))
+                    // The nozzle: a little flared bell.
+                    var bell = Path()
+                    bell.move(to: pt(nx - w * 0.13, nozzleTop)); bell.addLine(to: pt(nx + w * 0.13, nozzleTop))
+                    bell.addLine(to: pt(nx + w * 0.19, nozzleBottom)); bell.addLine(to: pt(nx - w * 0.19, nozzleBottom))
+                    bell.closeSubpath()
+                    g.fill(bell, with: lin([hx(0xA9B3C1), hx(0x4A5260)], pt(0, nozzleTop), pt(0, nozzleBottom)))
+                    g.stroke(bell, with: .color(ink), style: StrokeStyle(lineWidth: L, lineJoin: .round))
+                    g.fill(ellipse(nx, nozzleBottom, w * 0.17, h * 0.05), with: .color(hx(0xFFD27A)))
                 }
+                // A swept fin on the outside of the shaft, behind the shell.
+                let fin = poly([pt(w * 0.02, -h * 0.74), pt(w * 0.40, -h * 0.58), pt(w * 0.30, -h * 0.36), pt(w * 0.04, -h * 0.42)])
+                g.fill(fin, with: lin([hx(0xFF5A6E), hx(0xB3152F)], pt(0, -h * 0.8), pt(0, h * 0.05)))
+                g.stroke(fin, with: .color(ink), style: StrokeStyle(lineWidth: L, lineJoin: .round))
                 var boot = Path()
-                boot.move(to: pt(-w * 0.5, h * 0.4)); boot.addLine(to: pt(-w * 0.5, -h * 0.95))
-                boot.addQuadCurve(to: pt(-w * 0.05, -h * 0.95), control: pt(-w * 0.28, -h * 1.1))
-                boot.addLine(to: pt(-w * 0.02, -h * 0.3))
-                boot.addQuadCurve(to: pt(w * 0.5, h * 0.1), control: pt(w * 0.4, -h * 0.25))
-                boot.addLine(to: pt(w * 0.5, h * 0.4)); boot.closeSubpath()
-                g.fill(boot, with: lin([hx(0xF2F5F8), hx(0xAAB6C4)], pt(0, -h), pt(0, h * 0.4)))
-                g.fill(Path(CGRect(x: -w * 0.5, y: -h * 0.62, width: w * 0.47, height: h * 0.14)), with: .color(hx(0xE8384F)))
-                g.stroke(boot, with: .color(ink), lineWidth: L)
-                g.fill(rrect(-w * 0.44, h * 0.30, w * 0.28, h * 0.2, h * 0.05), with: .color(hx(0x4A5563)))
-                g.fill(rrect(-w * 0.52, h * 0.24, w * 1.04, h * 0.16, h * 0.06), with: .color(hx(0x5B6675)))
+                boot.move(to: pt(-w * 0.48, h * 0.30))
+                boot.addLine(to: pt(-w * 0.47, -h * 0.76))
+                boot.addQuadCurve(to: pt(w * 0.06, -h * 0.76), control: pt(-w * 0.21, -h * 0.98))
+                boot.addLine(to: pt(w * 0.08, -h * 0.40))
+                boot.addQuadCurve(to: pt(w * 0.52, h * 0.02), control: pt(w * 0.46, -h * 0.34))
+                boot.addLine(to: pt(w * 0.52, h * 0.30))
+                boot.closeSubpath()
+                g.fill(boot, with: lin([.white, hx(0xD4DBE4), hx(0x9AA6B5)], pt(0, -h * 1.1), pt(0, h * 0.3)))
+                var shell = g; shell.clip(to: boot)
+                // Dark toe cap and a red cuff band.
+                shell.fill(ellipse(w * 0.40, h * 0.12, w * 0.24, h * 0.34), with: .color(hx(0x4A5563)))
+                shell.fill(Path(CGRect(x: -w * 0.6, y: -h * 0.76, width: w * 0.8, height: h * 0.20)), with: .color(hx(0xE8384F)))
+                shell.fill(Path(CGRect(x: -w * 0.6, y: -h * 0.76, width: w * 0.8, height: h * 0.05)), with: .color(.white.opacity(0.45)))
+                // A shine down the shell.
+                shell.fill(rrect(-w * 0.38, -h * 0.52, w * 0.08, h * 0.44, w * 0.04), with: .color(.white.opacity(0.7)))
+                g.stroke(boot, with: .color(ink), style: StrokeStyle(lineWidth: L, lineJoin: .round))
+                let sole = rrect(-w * 0.54, h * 0.18, w * 1.08, h * 0.26, h * 0.10)
+                g.fill(sole, with: lin([hx(0x5B6675), hx(0x2F353F)], pt(0, h * 0.18), pt(0, h * 0.44)))
+                g.stroke(sole, with: .color(ink), lineWidth: L)
+                g.fill(Path(CGRect(x: -w * 0.48, y: h * 0.22, width: w * 0.96, height: h * 0.04)), with: .color(.white.opacity(0.25)))
             case .lightningKicks:
                 for (x0, y0, dir) in [(-w * 0.62, -h * 0.2, -1.0), (w * 0.62, -h * 0.45, 1.0), (w * 0.2, h * 0.75, 1.0)] as [(CGFloat, CGFloat, CGFloat)] {
                     var z = Path()
@@ -1515,18 +1551,49 @@ enum FlameyArt {
 
     // MARK: - Held (in front, at his side — the viewer's left)
 
-    /// The arm from his side to the hand, in his colour. Drawn in the
-    /// held item's mirrored space: +x points AWAY from his body.
-    private static func arm(_ g: GraphicsContext, _ a: Anchors, _ u: CGFloat, color: Color, up: Bool) -> CGPoint {
-        let s = pt(0.26 * u, a.bottom - 0.22 * u)
-        let hand = up ? pt(0.46 * u, a.bottom - 0.44 * u) : pt(0.47 * u, a.bottom - 0.28 * u)
-        var p = Path(); p.move(to: s); p.addQuadCurve(to: hand, control: pt(0.42 * u, a.bottom - 0.20 * u))
-        g.stroke(p, with: .color(color), style: StrokeStyle(lineWidth: 0.075 * u, lineCap: .round))
-        g.stroke(p, with: .color(.white.opacity(0.28)), style: StrokeStyle(lineWidth: 0.022 * u, lineCap: .round))
-        return hand
+    /// Props he holds UP (the rest are held out low).
+    static func heldUp(_ item: FlameyItem) -> Bool {
+        [.pomPoms, .foamFinger, .checkeredFlag, .stopwatch].contains(item)
     }
 
-    static func held(_ item: FlameyItem, _ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat, arm armColor: Color) {
+    /// Where his hand is for a prop, in body units: +x AWAY from his body
+    /// (the prop is mirrored), y from his base (negative is up). The prop is
+    /// drawn round this point and `heldArmTargets` sends his real arm
+    /// (`FlameBuddyArms`) to the same point — one set of numbers, so the
+    /// hand always closes on the handle.
+    static func heldHand(_ item: FlameyItem) -> CGPoint {
+        heldUp(item) ? pt(0.41, -0.40) : pt(0.46, -0.25)
+    }
+
+    /// Where the hand goes on a TIGHT surface: nearer his side, so the
+    /// prop (scaled by `tightHeldScale`) stays inside his column. Pom-poms
+    /// keep x = k·base so one symmetric scale carries BOTH hands.
+    static func tightHeldHand(_ item: FlameyItem) -> CGPoint {
+        if item == .pomPoms { return pt(heldHand(item).x * tightHeldScale(item), -0.40) }
+        return heldUp(item) ? pt(0.34, -0.38) : pt(0.31, -0.13)
+    }
+
+    /// His arms' targets for what he's holding, in body units in the
+    /// figure's real space (x negative = the viewer's left, his holding
+    /// side), for `FlameBuddyArms(hold:)`.
+    static func heldArmTargets(_ item: FlameyItem?, reach: CGFloat) -> FlameArmHold? {
+        guard let item else { return nil }
+        let p = isTight(reach) ? tightHeldHand(item) : heldHand(item)
+        var hold = FlameArmHold(left: pt(-p.x, p.y))
+        if item == .pomPoms { hold.right = p }
+        if item == .foamFinger { hold.leftHand = false }
+        return hold
+    }
+
+    /// The hand point in the held item's mirrored drawing space.
+    private static func arm(_ a: Anchors, _ u: CGFloat, _ item: FlameyItem) -> CGPoint {
+        let h = heldHand(item)
+        return pt(h.x * u, a.bottom + h.y * u)
+    }
+
+    /// Draws the PROP only — his arm and the hand closing round it are
+    /// `FlameBuddyArms`, drawn over the outfit.
+    static func held(_ item: FlameyItem, _ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
         let L = lw(u)
         let ink = self.ink
         // Mirror so +x runs toward the viewer's LEFT (away from his body).
@@ -1537,7 +1604,7 @@ enum FlameyArt {
             for sx in [-1.0, 1.0] as [CGFloat] {
                 var side = ctx
                 side.scaleBy(x: -sx, y: 1)
-                let hand = arm(side, a, u, color: armColor, up: true)
+                let hand = arm(a, u, item)
                 let R = 0.10 * u
                 for i in 0..<18 {
                     let ang = Double(i) / 18 * 2 * .pi
@@ -1548,7 +1615,7 @@ enum FlameyArt {
                 side.fill(circle(hand.x, hand.y, R * 0.45), with: .color(hx(0xFF6B7E)))
             }
         case .foamFinger:
-            let hand = arm(m, a, u, color: armColor, up: true)
+            let hand = arm(a, u, item)
             let g = placed(m, hand.x + 0.01 * u, hand.y, 12)
             let palm = rrect(-0.08 * u, -0.10 * u, 0.16 * u, 0.16 * u, 0.04 * u)
             let finger = rrect(-0.037 * u, -0.27 * u, 0.074 * u, 0.21 * u, 0.037 * u)
@@ -1560,7 +1627,7 @@ enum FlameyArt {
             let t = placed(ctx, -(hand.x + 0.01 * u), hand.y, -12)
             t.draw(text, at: pt(0, -0.025 * u))
         case .megaphone:
-            let hand = arm(m, a, u, color: armColor, up: false)
+            let hand = arm(a, u, item)
             let g = placed(m, hand.x, hand.y - 0.02 * u, -18)
             var cone = Path()
             cone.move(to: pt(-0.02 * u, -0.035 * u)); cone.addLine(to: pt(0.20 * u, -0.10 * u)); cone.addLine(to: pt(0.20 * u, 0.10 * u)); cone.addLine(to: pt(-0.02 * u, 0.035 * u)); cone.closeSubpath()
@@ -1576,7 +1643,7 @@ enum FlameyArt {
                 g.stroke(w, with: .color(.white.opacity(0.9 - Double(i) * 0.25)), style: StrokeStyle(lineWidth: L * 1.5, lineCap: .round))
             }
         case .confettiCannon:
-            let hand = arm(m, a, u, color: armColor, up: false)
+            let hand = arm(a, u, item)
             let g = placed(m, hand.x, hand.y, -40)
             let tube = rrect(-0.03 * u, -0.045 * u, 0.20 * u, 0.09 * u, 0.02 * u)
             g.fill(tube, with: lin([hx(0x9B4DFF), hx(0x5A1FB8)], pt(0, -0.045 * u), pt(0, 0.045 * u)))
@@ -1596,7 +1663,7 @@ enum FlameyArt {
                 else { cc.fill(Path(CGRect(x: -0.015 * u, y: -0.0075 * u, width: 0.03 * u, height: 0.015 * u)), with: .color(colors[i % colors.count])) }
             }
         case .checkeredFlag:
-            let hand = arm(m, a, u, color: armColor, up: true)
+            let hand = arm(a, u, item)
             // Pole up from the fist, flag streaming away from him.
             let base = pt(hand.x - 0.01 * u, hand.y + 0.08 * u), tip = pt(hand.x + 0.03 * u, hand.y - 0.36 * u)
             var pole = Path(); pole.move(to: base); pole.addLine(to: tip)
@@ -1630,7 +1697,7 @@ enum FlameyArt {
             }
             m.stroke(flag, with: .color(ink), style: StrokeStyle(lineWidth: L, lineJoin: .round))
         case .stopwatch:
-            let hand = arm(m, a, u, color: armColor, up: true)
+            let hand = arm(a, u, item)
             let c = pt(hand.x + 0.04 * u, hand.y - 0.09 * u)
             let R = 0.11 * u
             // Crown + side button + loop.
@@ -1662,45 +1729,26 @@ enum FlameyArt {
             m.fill(ellipse(c.x - R * 0.35, c.y - R * 0.4, R * 0.18, R * 0.1), with: .color(.white.opacity(0.7)))
         default: break
         }
-        // One little fist, in his colour, closed round every handle — so a
-        // prop is HELD, not balanced on the end of an arm.
-        switch item {
-        case .megaphone, .confettiCannon:
-            fist(m, pt(0.47 * u, a.bottom - 0.28 * u), u, armColor)
-        case .checkeredFlag, .stopwatch:
-            fist(m, pt(0.46 * u, a.bottom - 0.44 * u), u, armColor)
-        default: break
-        }
-    }
-
-    /// A round mitten fist with a thumb, lit from the top-left.
-    static func fist(_ g: GraphicsContext, _ c: CGPoint, _ u: CGFloat, _ color: Color) {
-        let r = 0.046 * u
-        let f = circle(c.x, c.y, r)
-        g.fill(f, with: .color(color))
-        g.fill(f, with: .radialGradient(Gradient(colors: [.white.opacity(0.45), .white.opacity(0)]),
-                                        center: pt(c.x - r * 0.4, c.y - r * 0.4), startRadius: 0, endRadius: r * 1.1))
-        g.stroke(f, with: .color(.white.opacity(0.45)), lineWidth: max(1, 0.008 * u))
-        var thumb = Path()
-        thumb.addArc(center: pt(c.x - r * 0.1, c.y - r * 0.1), radius: r * 0.55, startAngle: .degrees(200), endAngle: .degrees(300), clockwise: false)
-        g.stroke(thumb, with: .color(.black.opacity(0.22)), style: StrokeStyle(lineWidth: max(1, 0.007 * u), lineCap: .round))
     }
 
     // MARK: - Back (behind him)
 
     static func capeClasp(_ item: FlameyItem, _ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        // Fastened at his SIDE, where the cape wraps round — never across
-        // his face or mouth (there is no neck to tie it at).
-        let cord: Color = item == .royalCape || item == .championCape ? hx(0xFFCF40) : hx(0x2A1410, 0.8)
-        let cx = -0.345 * u, cy = a.bottom - 0.19 * u
-        var c = Path()
-        c.move(to: pt(-0.43 * u, a.bottom - 0.31 * u))
-        c.addQuadCurve(to: pt(cx, cy), control: pt(-0.36 * u, a.bottom - 0.30 * u))
-        ctx.stroke(c, with: .color(cord), style: StrokeStyle(lineWidth: 0.018 * u, lineCap: .round))
-        let clasp: Color = item == .redCape ? hx(0xC9D2DC) : hx(0xFFCF40)
-        ctx.fill(circle(cx, cy, 0.032 * u), with: .color(clasp))
-        ctx.stroke(circle(cx, cy, 0.032 * u), with: .color(ink), lineWidth: lw(u))
-        ctx.fill(circle(cx - 0.009 * u, cy - 0.009 * u, 0.009 * u), with: .color(.white.opacity(0.8)))
+        // Fastened at BOTH shoulders, where the cape comes round from
+        // behind him — above his arms, never across his face (he has no
+        // neck to tie it at).
+        let metal: Color = item == .redCape || item == .blueCape ? hx(0xC9D2DC) : hx(0xFFCF40)
+        for side in [-1.0, 1.0] as [CGFloat] {
+            // Where the collar meets his outline, well above his eyes (a
+            // disc at eye level read as a second pair of eyes).
+            let cx = side * 0.228 * u, cy = a.bottom - 0.515 * u
+            // A little bar clasp laid along the collar — a disc read as an eye.
+            let g = placed(ctx, cx, cy, Double(side) * 38)
+            let bar = rrect(-0.034 * u, -0.013 * u, 0.068 * u, 0.026 * u, 0.012 * u)
+            g.fill(bar, with: .color(metal))
+            g.stroke(bar, with: .color(ink), lineWidth: lw(u))
+            g.fill(rrect(-0.024 * u, -0.008 * u, 0.03 * u, 0.006 * u, 0.003 * u), with: .color(.white.opacity(0.75)))
+        }
     }
 
     /// Draws a back item. `reach` is how far (in `u`) the surface lets him
@@ -1716,58 +1764,71 @@ enum FlameyArt {
         if tight {
             // The hero's column: a cape tucks in behind him (squeezed until
             // it only peeks past his side); wings are RAISED instead, below.
-            if item != .goldenWings { ctx.scaleBy(x: capeTuck, y: 1) }
+            if isCape(item) {
+                ctx.scaleBy(x: capeTightScale, y: 1)
+            } else if item != .goldenWings {
+                ctx.scaleBy(x: capeTuck, y: 1)
+            }
         } else if squeeze < 1 {
             ctx.scaleBy(x: squeeze, y: 1)
         }
         func cape(_ main: Color, _ dark: Color, trim: Color?, ermine: Bool) {
-            let sy = a.bottom - 0.50 * u
-            // The far side, draped round his right shoulder and peeking past
-            // his right edge — what makes it a cape he WEARS, not a flag.
-            var far = Path()
-            far.move(to: pt(0.06 * u, sy - 0.02 * u))
-            far.addQuadCurve(to: pt(0.38 * u, sy + 0.16 * u), control: pt(0.34 * u, sy - 0.02 * u))
-            far.addQuadCurve(to: pt(0.43 * u, a.bottom - 0.06 * u), control: pt(0.47 * u, sy + 0.34 * u))
-            far.addQuadCurve(to: pt(0.10 * u, a.bottom - 0.10 * u), control: pt(0.30 * u, a.bottom - 0.02 * u))
-            far.closeSubpath()
-            ctx.fill(far, with: lin([dark, main.opacity(0.9)], pt(0.4 * u, sy), pt(0.1 * u, a.bottom)))
-            ctx.stroke(far, with: .color(ink), lineWidth: L)
+            // A HERO'S cape: fastened at his shoulders (the clasps are drawn
+            // in front, `capeClasp`), hanging down his back and flaring out
+            // on BOTH sides below his arms, hem clear of the floor. It used
+            // to stream sideways like a flag, which read as a banner stuck
+            // to him and buried whatever trail he wore under it.
+            let b = a.bottom
+            func q(_ x: CGFloat, _ y: CGFloat) -> CGPoint { pt(x * u, b + y * u) }
+            // A breath of wind to the viewer's left (the way trails run).
             var c = Path()
-            c.move(to: pt(0.16 * u, sy))
-            c.addQuadCurve(to: pt(-0.10 * u, sy - 0.04 * u), control: pt(0.02 * u, sy - 0.06 * u))
-            c.addCurve(to: pt(-0.92 * u, sy - 0.10 * u), control1: pt(-0.40 * u, sy - 0.10 * u), control2: pt(-0.70 * u, sy - 0.22 * u))
-            c.addQuadCurve(to: pt(-0.84 * u, sy + 0.10 * u), control: pt(-0.80 * u, sy - 0.02 * u))
-            c.addQuadCurve(to: pt(-0.90 * u, sy + 0.26 * u), control: pt(-0.96 * u, sy + 0.18 * u))
-            c.addQuadCurve(to: pt(-0.74 * u, sy + 0.38 * u), control: pt(-0.78 * u, sy + 0.30 * u))
-            c.addCurve(to: pt(-0.10 * u, a.bottom - 0.04 * u), control1: pt(-0.55 * u, sy + 0.44 * u), control2: pt(-0.30 * u, a.bottom - 0.02 * u))
-            c.addLine(to: pt(0.20 * u, a.bottom - 0.10 * u))
+            // A stand-up collar: its two points peek out behind his head.
+            c.move(to: q(-0.30, -0.56))
+            c.addQuadCurve(to: q(0.30, -0.56), control: q(0, -0.44))
+            c.addCurve(to: q(0.47, 0.07), control1: q(0.33, -0.36), control2: q(0.45, -0.12))
+            // The hem: three soft scallops, the left one a touch further out.
+            c.addQuadCurve(to: q(0.25, 0.10), control: q(0.38, 0.13))
+            c.addQuadCurve(to: q(-0.02, 0.08), control: q(0.12, 0.14))
+            c.addQuadCurve(to: q(-0.30, 0.11), control: q(-0.16, 0.15))
+            c.addQuadCurve(to: q(-0.54, 0.05), control: q(-0.43, 0.14))
+            c.addCurve(to: q(-0.30, -0.56), control1: q(-0.50, -0.14), control2: q(-0.35, -0.36))
             c.closeSubpath()
-            ctx.fill(c, with: lin([main, dark], pt(-0.2 * u, sy - 0.1 * u), pt(-0.8 * u, sy + 0.4 * u)))
+            ctx.fill(c, with: lin([main, dark], q(0, -0.5), q(0, 0.12)))
             var inner = ctx; inner.clip(to: c)
-            for (x0, y0, x1, y1) in [(-0.30, -0.02, -0.80, 0.02), (-0.28, 0.12, -0.78, 0.22), (-0.24, 0.26, -0.66, 0.36)] as [(CGFloat, CGFloat, CGFloat, CGFloat)] {
-                var f = Path(); f.move(to: pt(x0 * u, sy + y0 * u))
-                f.addQuadCurve(to: pt(x1 * u, sy + y1 * u), control: pt((x0 + x1) / 2 * u, sy + (y0 + y1) / 2 * u - 0.06 * u))
-                inner.stroke(f, with: .color(dark.opacity(0.7)), style: StrokeStyle(lineWidth: L * 1.2, lineCap: .round))
+            // Folds fanning down from the shoulders.
+            for (x0, x1) in [(-0.14, -0.40), (-0.06, -0.16), (0.07, 0.12), (0.15, 0.36)] as [(CGFloat, CGFloat)] {
+                var f = Path(); f.move(to: q(x0, -0.40))
+                f.addQuadCurve(to: q(x1, 0.10), control: q((x0 + x1) / 2 + (x1 < 0 ? -0.04 : 0.04), -0.12))
+                inner.stroke(f, with: .color(dark.opacity(0.55)), style: StrokeStyle(lineWidth: L * 1.4, lineCap: .round))
             }
-            inner.fill(Path(ellipseIn: CGRect(x: -0.55 * u, y: sy - 0.10 * u, width: 0.35 * u, height: 0.08 * u)), with: .color(.white.opacity(0.18)))
+            // Its lining turns out at the left flare, where the wind lifts it.
+            var lining = Path()
+            lining.move(to: q(-0.54, 0.05))
+            lining.addQuadCurve(to: q(-0.38, 0.12), control: q(-0.47, 0.13))
+            lining.addQuadCurve(to: q(-0.47, -0.06), control: q(-0.40, 0.02))
+            lining.closeSubpath()
+            inner.fill(lining, with: .color(trim ?? dark.opacity(0.9)))
+            // Sheen on the shoulders.
+            inner.fill(Path(ellipseIn: CGRect(x: -0.44 * u, y: b - 0.30 * u, width: 0.14 * u, height: 0.30 * u)), with: .color(.white.opacity(0.16)))
+            inner.fill(Path(ellipseIn: CGRect(x: 0.30 * u, y: b - 0.30 * u, width: 0.12 * u, height: 0.28 * u)), with: .color(.white.opacity(0.10)))
             if let trim {
                 var hem = Path()
-                hem.move(to: pt(-0.92 * u, sy - 0.10 * u))
-                hem.addQuadCurve(to: pt(-0.84 * u, sy + 0.10 * u), control: pt(-0.80 * u, sy - 0.02 * u))
-                hem.addQuadCurve(to: pt(-0.90 * u, sy + 0.26 * u), control: pt(-0.96 * u, sy + 0.18 * u))
-                hem.addQuadCurve(to: pt(-0.74 * u, sy + 0.38 * u), control: pt(-0.78 * u, sy + 0.30 * u))
-                hem.addCurve(to: pt(-0.10 * u, a.bottom - 0.04 * u), control1: pt(-0.55 * u, sy + 0.44 * u), control2: pt(-0.30 * u, a.bottom - 0.02 * u))
-                var tc = ctx; tc.clip(to: c)
-                tc.stroke(hem, with: .color(trim), style: StrokeStyle(lineWidth: ermine ? 0.10 * u : 0.05 * u, lineCap: .round, lineJoin: .round))
+                hem.move(to: q(0.47, 0.07))
+                hem.addQuadCurve(to: q(0.25, 0.10), control: q(0.38, 0.13))
+                hem.addQuadCurve(to: q(-0.02, 0.08), control: q(0.12, 0.14))
+                hem.addQuadCurve(to: q(-0.30, 0.11), control: q(-0.16, 0.15))
+                hem.addQuadCurve(to: q(-0.54, 0.05), control: q(-0.43, 0.14))
+                inner.stroke(hem, with: .color(trim), style: StrokeStyle(lineWidth: ermine ? 0.08 * u : 0.045 * u, lineCap: .round, lineJoin: .round))
                 if ermine {
-                    for (x, y) in [(-0.86, -0.02), (-0.88, 0.18), (-0.74, 0.34), (-0.50, 0.40), (-0.28, 0.44)] as [(CGFloat, CGFloat)] {
-                        ctx.fill(ellipse(x * u, sy + y * u, 0.010 * u, 0.018 * u), with: .color(.black))
+                    for (x, y) in [(-0.50, 0.08), (-0.33, 0.10), (0.30, 0.10), (0.44, 0.08)] as [(CGFloat, CGFloat)] {
+                        ctx.fill(ellipse(x * u, b + y * u, 0.010 * u, 0.018 * u), with: .color(.black))
                     }
                 } else {
-                    ctx.fill(star(-0.55 * u, sy + 0.16 * u, 0.075 * u, inner: 0.45), with: .color(trim))
+                    // The champion's star, on the flare that shows.
+                    ctx.fill(star(-0.45 * u, b - 0.06 * u, 0.065 * u, inner: 0.45), with: .color(trim))
                 }
             }
-            ctx.stroke(c, with: .color(ink), lineWidth: L)
+            ctx.stroke(c, with: .color(ink), style: StrokeStyle(lineWidth: L, lineJoin: .round))
         }
         switch item {
         case .redCape: cape(hx(0xFF4A5E), hx(0xA8122C), trim: nil, ermine: false)
@@ -2326,9 +2387,15 @@ enum FlameyArt {
 // MARK: - Standing
 
 extension FlameyLook {
-    /// How far his legs raise him (body units): shoes stand him up on two
-    /// stubby legs, on EVERY surface; bare, he sits on the ground as always.
-    var standLift: CGFloat { self[.feet] == nil ? 0 : FlameyArt.legLength }
+    /// How far his legs raise him (body units): the Fun mascot always
+    /// stands on two stubby legs, bare or shod, on EVERY surface.
+    var standLift: CGFloat { FlameyArt.legLength }
+
+    /// His arms' hold for what's in his hand on a surface of this reach.
+    func armHold(reach: CGFloat) -> FlameArmHold? { FlameyArt.heldArmTargets(self[.held], reach: reach) }
+
+    /// Arms hide under a costume that covers him whole.
+    var showsArms: Bool { !wears(.ghostSheet) }
 
     /// Everything that raises his body off the floor — legs, then any hover.
     /// The figure's `lift` and every anchor use this, so the body, the face

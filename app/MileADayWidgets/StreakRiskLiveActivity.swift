@@ -59,7 +59,10 @@ struct StreakRiskLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     if context.attributes.funStyle {
                         HStack(spacing: 6) {
-                            FlameBuddyFigure(health: .critical, size: 42)
+                            // The Fun mascot, hands on his cheeks — the nervous pose,
+                            // scaled so his legs keep the height he always had.
+                            FlameBuddyFigure(health: .critical, size: 42, limbs: .cheeks)
+                                .scaleEffect(1 / (1 + FlameBuddyFigure.mascotLegLength), anchor: .bottom)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("DAY \(context.attributes.streak)")
                                     .font(.system(size: 12, weight: .heavy, design: .rounded))
@@ -168,7 +171,8 @@ private struct StreakRiskLockScreenView: View {
     var body: some View {
         HStack(spacing: 14) {
             if context.attributes.funStyle {
-                FlameBuddyFigure(health: .critical, size: 62)
+                FlameBuddyFigure(health: .critical, size: 62, limbs: .cheeks)
+                    .scaleEffect(1 / (1 + FlameBuddyFigure.mascotLegLength), anchor: .bottom)
                     .frame(width: 64, height: 64)
             }
 
