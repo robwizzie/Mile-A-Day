@@ -1314,8 +1314,17 @@ private struct FlameBuddyHeroCard: View {
     @State private var pokedAt: Date?
     @State private var pokeQuip: String?
     @State private var pokeClearTask: Task<Void, Never>?
+    /// The local day a poke woke him, so he stays up for the rest of that
+    /// morning — across tab switches and relaunches, not just this view's
+    /// lifetime. A new day's date never matches, so he sleeps in again.
+    @AppStorage("flameyWokenDayV1") private var flameyWokenDay = ""
 
     private var trustedDone: Bool { isGoalCompleted && distanceIsFresh }
+
+    private static func localDayStamp(_ date: Date = Date()) -> String {
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
 
     /// What the flame is feeling: resolved from the same state the phase and
     /// health already read, so it can never disagree with the face.
@@ -1325,7 +1334,8 @@ private struct FlameBuddyHeroCard: View {
             progress: progress,
             isAtRisk: userManager.currentUser.isStreakAtRisk && !trustedDone,
             hasActiveWorkout: hasActiveWorkout,
-            streak: heroStreakValue
+            streak: heroStreakValue,
+            wokenToday: flameyWokenDay == Self.localDayStamp()
         )
         mood.pokedAt = pokedAt
         mood.pokeQuip = pokeQuip
@@ -1337,7 +1347,14 @@ private struct FlameBuddyHeroCard: View {
     /// up 2.4s, then the mood bubble gets its turn back.
     private func poke() {
         MADHaptics.emphasis()
-        pokeQuip = FlameMood.pokeQuips.randomElement() ?? "Hey!"
+        // The line answers the mood he was IN when poked — so poking a
+        // sleeper gets the startle, and the same poke wakes him (the mood
+        // flips to .groggy: eyes open, zzz's gone).
+        let before = mood.kind
+        pokeQuip = FlameMood.pokeQuips(for: before).randomElement() ?? "Hey!"
+        if before == .sleepy {
+            flameyWokenDay = Self.localDayStamp()
+        }
         pokedAt = Date()
         pokeClearTask?.cancel()
         pokeClearTask = Task { @MainActor in

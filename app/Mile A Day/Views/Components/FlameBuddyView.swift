@@ -133,6 +133,9 @@ struct FlameBuddyView: View {
     @State private var moodPacePhase = false
     @State private var bobPhase = false
     @State private var pokeSquash: CGFloat = 1
+    /// The jolt of being woken — a one-shot hop, separate from the mood's own
+    /// repeating hop so it can't inherit (or reset) that tempo.
+    @State private var startleOffset: CGFloat = 0
 
     private var animatedFlame: some View {
         ZStack {
@@ -164,7 +167,7 @@ struct FlameBuddyView: View {
             }
         }
         .scaleEffect(x: 1, y: pokeSquash, anchor: .bottom)
-        .offset(x: paceOffset, y: hopOffset + bobOffset)
+        .offset(x: paceOffset, y: hopOffset + bobOffset + startleOffset)
         .onAppear {
             // Off the appear commit, on purpose: a `repeatForever` animation
             // started INSIDE onAppear is attached to the view's initial
@@ -179,7 +182,10 @@ struct FlameBuddyView: View {
                 startMoodMotion()
             }
         }
-        .onChange(of: mood?.kind) { _, _ in restartMoodMotion() }
+        .onChange(of: mood?.kind) { old, new in
+            restartMoodMotion()
+            if old == .sleepy, new == .groggy { startle() }
+        }
         .onChange(of: mood?.pokedAt) { _, newValue in
             if newValue != nil { pokeBounce() }
         }
@@ -310,6 +316,15 @@ struct FlameBuddyView: View {
             moodPacePhase = false
         }
         DispatchQueue.main.async { startMoodMotion() }
+    }
+
+    /// Woken: jolt up, then drop back — the cartoon "wha—?!".
+    private func startle() {
+        guard !effectiveStill else { return }
+        withAnimation(.spring(response: 0.18, dampingFraction: 0.5)) { startleOffset = -size * 0.09 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) { startleOffset = 0 }
+        }
     }
 
     /// Poked: squash, then spring back.

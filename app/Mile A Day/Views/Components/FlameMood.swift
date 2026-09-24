@@ -15,8 +15,14 @@ struct FlameMood: Equatable {
     enum Kind: Equatable {
         /// No streak, no mile: the coal.
         case unlit
-        /// Burning, nothing done, still early.
+        /// Burning, nothing done, still early — ASLEEP. Eyes shut, zzz's, and
+        /// every line he says is a snore or sleep-talk: he is not awake to
+        /// say "mornin'".
         case sleepy
+        /// Early, nothing done, and poked awake. Eyes open, no zzz's, and the
+        /// morning lines live here — they used to be the SLEEPER's bubble,
+        /// which is how a buddy with his eyes shut said "Mornin'…".
+        case groggy
         /// Burning, nothing done, the day is on.
         case ready
         /// Some distance in.
@@ -46,6 +52,10 @@ struct FlameMood: Equatable {
         isAtRisk: Bool,
         hasActiveWorkout: Bool,
         streak: Int,
+        /// The user woke him today (a poke while he was asleep). He stays up
+        /// for the rest of the morning — falling back asleep the moment the
+        /// bubble times out would make the poke feel like it did nothing.
+        wokenToday: Bool = false,
         now: Date = Date()
     ) -> FlameMood {
         let hour = Calendar.current.component(.hour, from: now)
@@ -60,7 +70,7 @@ struct FlameMood: Equatable {
             else if progress >= 0.8 { kind = .almost }
             else if progress >= 0.5 { kind = .halfway }
             else if progress > 0.05 || hasActiveWorkout { kind = .going }
-            else if hour < 10 { kind = .sleepy }
+            else if hour < 10 { kind = wokenToday ? .groggy : .sleepy }
             else { kind = .ready }
         }
         return FlameMood(kind: kind, streak: streak)
@@ -78,7 +88,10 @@ struct FlameMood: Equatable {
         // card with a stat column, so it is width-capped and two-line at most.
         switch kind {
         case .unlit: return ["Light me up!", "One mile, lit", "Ready when you are"]
-        case .sleepy: return ["Mornin'…", "Five more mins", "Coffee first?"]
+        // Snores and sleep-talk only. Every line here is said with his eyes
+        // shut, so none of them may sound awake.
+        case .sleepy: return ["Zzz…", "Hnnnk… shoo…", "zzZZzz…", "*snore*", "mmm… donuts…", "…one more mi…"]
+        case .groggy: return ["Mornin'…", "I'm up, I'm up", "Coffee first?", "*yaaawn*", "Mile o'clock?"]
         case .ready: return ["Let's walk!", "Mile o'clock?", "Shoes on!", "Waiting…"]
         case .going: return ["Nice start!", "Keep it rolling", "Warming up"]
         case .halfway: return ["Halfway!", "Don't stop now", "Half to go"]
@@ -90,6 +103,19 @@ struct FlameMood: Equatable {
     }
 
     static let pokeQuips = ["Hey!", "That tickles", "Working here", "Boop", "Careful, hot", "Again!"]
+
+    /// What a poke gets out of him, by what he was doing when it landed.
+    /// Poking a SLEEPER wakes him, so those lines are the startle.
+    static func pokeQuips(for kind: Kind) -> [String] {
+        switch kind {
+        case .sleepy: return ["Huh?! I'm up!", "Wha—? Who?", "I wasn't asleep!", "*snort* Huh?", "Five more mi… ok"]
+        case .groggy: return ["Okay, okay…", "Still waking up", "Gentle! I'm up"]
+        case .nervous: return ["No time! Walk!", "Tickle me later", "Shoes. On. Now."]
+        case .done: return ["I was chilling!", "Careful, hot", "Boop"]
+        case .party: return ["Party foul!", "Boop!", "Cake first"]
+        default: return pokeQuips
+        }
+    }
 }
 
 /// The mood's props and bubble, laid out in `FlameBuddyView`'s own frame
