@@ -1372,6 +1372,13 @@ struct WorkoutTrackingView: View {
                     .foregroundColor(.white.opacity(0.7))
             }
         }
+        // Fun: Flamey stands off the ring's lower-right edge. An OVERLAY,
+        // offset past the ring's frame, so the metric column's height-derived
+        // layout never moves; draws nothing on Modern.
+        .overlay(alignment: .bottomTrailing) {
+            TrackerFlameyBuddy(progress: progress, size: min(66, diameter * 0.34))
+                .offset(x: diameter * 0.26, y: 2)
+        }
     }
 
     /// The reason GPS tracking is NOT working right now, when there is one.
@@ -1782,17 +1789,23 @@ struct WorkoutTrackingView: View {
     private var goalCompletionOverlay: some View {
         if showCompletion {
             VStack(spacing: 24) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 100))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.green, .green.opacity(0.7)],
-                            startPoint: .top,
-                            endPoint: .bottom
+                // Fun: Flamey cheers IN this overlay (same one-shot, same 3s)
+                // rather than in a second one competing with it.
+                if TrackerFlameyCheer.isAvailable {
+                    TrackerFlameyCheer()
+                } else {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 100))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.green, .green.opacity(0.7)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
                         )
-                    )
-                    .scaleEffect(showCompletion ? 1.0 : 0.5)
-                    .animation(.spring(response: 0.6, dampingFraction: 0.6), value: showCompletion)
+                        .scaleEffect(showCompletion ? 1.0 : 0.5)
+                        .animation(.spring(response: 0.6, dampingFraction: 0.6), value: showCompletion)
+                }
 
                 Text("Goal Complete!")
                     .font(.system(size: 48, weight: .bold, design: .rounded))

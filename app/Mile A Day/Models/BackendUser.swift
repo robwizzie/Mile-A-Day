@@ -27,6 +27,13 @@ struct BackendUser: Codable, Identifiable, Hashable {
     /// the full `GET /users/:id` record carries it; a String because backend
     /// timestamps have fractional seconds `.iso8601` can't decode.
     var created_at: String? = nil
+    /// 'fun' | 'modern' | nil (a build that never reported one, or an older
+    /// server). Carried by `GET /users/:id` and the friends-list rows.
+    var dashboard_style: String? = nil
+    /// Their Flamey, on `GET /users/:id` only — enabled for a Fun user seen
+    /// by themselves or an accepted friend. Absent on an older server, which
+    /// every reader treats exactly like `enabled: false`.
+    var flamey: FlameyProfileBlock? = nil
 
     var id: String { user_id }
 
@@ -55,6 +62,21 @@ struct BackendUser: Codable, Identifiable, Hashable {
     static func == (lhs: BackendUser, rhs: BackendUser) -> Bool {
         lhs.user_id == rhs.user_id
     }
+}
+
+/// The `flamey` block on `GET /users/:id`: the durable facts someone's Flamey
+/// is dressed from. Foundation-only and defined HERE (not beside the
+/// wardrobe) because this file may be a Watch-target member. Every field but
+/// `enabled` is optional so a partial block still decodes; readers treat a
+/// missing block, `enabled: false` or a garbled one identically — no Flamey.
+struct FlameyProfileBlock: Codable {
+    /// Optional too: one malformed block must never fail the whole profile.
+    var enabled: Bool? = nil
+    var longest_streak: Int? = nil
+    /// Holiday medals held, as `HolidayKey` raw values ("halloween").
+    var holiday_keys: [String]? = nil
+    /// "YYYY-MM-DD", the day they signed up, on their own calendar.
+    var signup_date: String? = nil
 }
 
 // MARK: - Friendship Models

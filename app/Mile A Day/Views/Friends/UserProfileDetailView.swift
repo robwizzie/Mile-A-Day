@@ -80,6 +80,8 @@ struct UserProfileDetailView: View {
     @State private var nudgeStatus: NudgeStatusResponse?
     @State private var isNudging = false
     @State private var nudgeFeedback: NudgeFeedback?
+    /// A Flamey poke got 403 flamey_unavailable — no Flamey this visit.
+    @State private var flameyUnavailable = false
 
     // Compete-together sheet — opens CreateCompetitionView with this friend
     // pre-selected. Sheet state lives here so the CTA can present the
@@ -497,6 +499,11 @@ struct UserProfileDetailView: View {
         // together, their recent workouts, then streak history. One flat card
         // style throughout (`profileCard` / `ProfileCardLabel`).
         VStack(spacing: MADTheme.Spacing.md) {
+            // Their Flamey first: the friendliest thing on the page, and the
+            // poke is the quickest thing to do for them. Renders only when
+            // THEY are Fun (the server's `flamey` block) and so is the viewer
+            // (checked inside the card).
+            friendFlameyCard
             // TODAY, as one group: how far they are and the challenge they
             // were served, tight together (8pt) so they read as one thought.
             VStack(spacing: MADTheme.Spacing.sm) {
@@ -556,6 +563,30 @@ struct UserProfileDetailView: View {
             }
             // History last: the streaks they've run, the longest view back.
             HallOfStreaksSection(userId: user.user_id, isSelf: isCurrentUser())
+        }
+    }
+
+    /// "Aaron's Flamey". Friends only (the block is only ever enabled for
+    /// one), hidden for good this visit if a poke learns Flamey is
+    /// unavailable (either side left Fun).
+    @ViewBuilder
+    private var friendFlameyCard: some View {
+        if !isCurrentUser(), !flameyUnavailable,
+           let facts = FriendFlameyFacts(
+               block: fullUser?.flamey,
+               ownerName: user.first_name ?? user.username ?? user.displayName) {
+            FriendFlameyCard(
+                friendId: user.user_id,
+                facts: facts,
+                streak: nudgeStatus?.current_streak ?? userStats?.streak ?? 0,
+                todayMiles: nudgeStatus?.today_miles ?? friendTodayMiles,
+                goalMiles: userStats?.goalMiles ?? 1.0,
+                isDone: nudgeStatus?.has_completed_mile == true || userStats?.hasCompletedGoalToday == true,
+                savedToday: friendSavedToday != nil,
+                alreadyNudged: nudgeStatus.map { $0.nudgedToday && !$0.unlimitedNudges } ?? false,
+                onNudged: { markNudgeSent() },
+                onUnavailable: { withAnimation(.easeInOut(duration: 0.25)) { flameyUnavailable = true } }
+            )
         }
     }
 
@@ -942,23 +973,7 @@ struct UserProfileDetailView: View {
                 try await friendService.nudgeFriend(user.user_id)
                 await MainActor.run {
                     isNudging = false
-                    FlexNudgeTracker.markFriendNudgeSent(friendId: user.user_id)
-                    // Preserve existing miles/completion in the optimistic update.
-                    // Unlimited nudgers keep "Nudge again" available.
-                    let unlimited = nudgeStatus?.unlimitedNudges ?? false
-                    nudgeStatus = NudgeStatusResponse(
-                        can_nudge: unlimited,
-                        has_completed_mile: nudgeStatus?.has_completed_mile ?? false,
-                        already_nudged_today: !unlimited,
-                        today_miles: nudgeStatus?.today_miles,
-                        current_streak: nudgeStatus?.current_streak,
-                        has_nudged_today: true,
-                        unlimited_nudges: nudgeStatus?.unlimited_nudges,
-                        // Sending a nudge doesn't change whether a token is
-                        // holding their day — carry it, or the banner blinks
-                        // out the moment the bell is tapped.
-                        today_covered: nudgeStatus?.today_covered
-                    )
+                    markNudgeSent()
                     MADHaptics.success()
                     showProfileNudgeFeedback(NudgeFeedback(
                         icon: "bell.badge.fill",
@@ -978,6 +993,28 @@ struct UserProfileDetailView: View {
                 }
             }
         }
+    }
+
+    /// The optimistic "nudged today" state, shared by the Nudge pill and a
+    /// Flamey poke (the two spend the same daily nudge).
+    private func markNudgeSent() {
+        FlexNudgeTracker.markFriendNudgeSent(friendId: user.user_id)
+        // Preserve existing miles/completion in the optimistic update.
+        // Unlimited nudgers keep "Nudge again" available.
+        let unlimited = nudgeStatus?.unlimitedNudges ?? false
+        nudgeStatus = NudgeStatusResponse(
+            can_nudge: unlimited,
+            has_completed_mile: nudgeStatus?.has_completed_mile ?? false,
+            already_nudged_today: !unlimited,
+            today_miles: nudgeStatus?.today_miles,
+            current_streak: nudgeStatus?.current_streak,
+            has_nudged_today: true,
+            unlimited_nudges: nudgeStatus?.unlimited_nudges,
+            // Sending a nudge doesn't change whether a token is
+            // holding their day — carry it, or the banner blinks
+            // out the moment the bell is tapped.
+            today_covered: nudgeStatus?.today_covered
+        )
     }
 
     private func loadNudgeStatus() async {

@@ -177,6 +177,86 @@ private struct LiveTimerText: View {
     }
 }
 
+// MARK: - Flamey (Fun only)
+
+/// A tiny, STATIC Flamey for the Live Activity (a system-rendered snapshot:
+/// no onAppear, no animation). Fun-only, read from the App Group mirror of the
+/// dashboard style; draws nothing on Modern or on a stale activity. His
+/// look is resolved from the same mirrored facts the flame widget uses, and
+/// his pose from the DAY's progress in three bands:
+///
+///   < 50%   ready    — plain, calm
+///   50–99%  excited  — leaning in, sparkles
+///   ≥ 100%  cheering — blazing, shades + party hat, confetti
+///
+/// Compiled into BOTH the app module and the widget extension, so it only
+/// touches API the two copies of the figure/wardrobe share.
+struct LiveActivityFlamey: View {
+    let progress: Double
+    let size: CGFloat
+    var isStale: Bool = false
+
+    enum Band: Equatable { case ready, excited, cheering }
+
+    static func band(for progress: Double) -> Band {
+        if progress >= 1 { return .cheering }
+        if progress >= 0.5 { return .excited }
+        return .ready
+    }
+
+    static var isFun: Bool { WidgetDataStore.loadDashboardStyle() == "fun" }
+
+    var body: some View {
+        if Self.isFun && !isStale {
+            let band = Self.band(for: progress)
+            let look = FlameyLook.resolve(
+                longestStreak: WidgetDataStore.loadLongestStreak(),
+                earnedBadgeIds: WidgetDataStore.loadFlameyBadgeIds(),
+                signupDate: WidgetDataStore.loadFlameySignupDate(),
+                date: Date(),
+                moodProps: band == .cheering ? [.shades, .partyHat] : []
+            )
+            let health: FlameHealth = band == .cheering ? .blazing : .healthy
+            ZStack {
+                if band != .ready { flair(band) }
+                FlameyOutfitLayer(look: look, size: size, scale: health.bodyScale, side: .behind, still: true)
+                FlameBuddyFigure(health: health, size: size, showsFace: true, vigor: nil, grounded: true)
+                FlameyOutfitLayer(look: look, size: size, scale: health.bodyScale, side: .front, still: true)
+            }
+            .rotationEffect(.degrees(band == .excited ? -6 : 0), anchor: .bottom)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+        }
+    }
+
+    /// Sparkles (excited) or confetti (cheering), baked in place.
+    @ViewBuilder
+    private func flair(_ band: Band) -> some View {
+        if band == .excited {
+            ForEach(0..<2, id: \.self) { i in
+                Image(systemName: "sparkle")
+                    .font(.system(size: size * (i == 0 ? 0.20 : 0.14), weight: .bold))
+                    .foregroundColor(Color(red: 1.0, green: 0.92, blue: 0.55))
+                    .offset(x: (i == 0 ? 1 : -1) * size * 0.46, y: -size * (i == 0 ? 0.30 : 0.05))
+            }
+        } else {
+            let pieces: [(x: CGFloat, y: CGFloat, deg: Double, hue: Int)] = [
+                (-0.52, -0.42, 20, 0), (0.50, -0.36, -30, 1), (-0.46, 0.02, 50, 2),
+                (0.56, 0.04, 10, 3), (-0.30, -0.62, -15, 3), (0.34, -0.60, 35, 2),
+            ]
+            let colors = [Color(red: 1.0, green: 0.42, blue: 0.62), Color(red: 0.55, green: 0.42, blue: 1.0),
+                          Color(red: 0.35, green: 0.85, blue: 0.95), Color(red: 1.0, green: 0.9, blue: 0.45)]
+            ForEach(0..<pieces.count, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(colors[pieces[i].hue])
+                    .frame(width: size * 0.09, height: size * 0.05)
+                    .rotationEffect(.degrees(pieces[i].deg))
+                    .offset(x: size * pieces[i].x, y: size * pieces[i].y)
+            }
+        }
+    }
+}
+
 // MARK: - Live Activity Widget
 
 struct WorkoutLiveActivity: Widget {
@@ -264,6 +344,10 @@ struct WorkoutLiveActivity: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.bottom) {
+                    HStack(alignment: .bottom, spacing: 10) {
+                    // Fun: a tiny Flamey leading the progress bar (nothing on
+                    // Modern — an EmptyView takes no room in the stack).
+                    LiveActivityFlamey(progress: context.state.dailyProgress, size: 34, isStale: context.isStale)
                     VStack(spacing: 8) {
                         // Progress bar
                         GeometryReader { geometry in
@@ -320,6 +404,7 @@ struct WorkoutLiveActivity: Widget {
                                     .foregroundColor(.white.opacity(0.7))
                             }
                         }
+                    }
                     }
                     .padding(.horizontal, 12)
                 }
@@ -429,7 +514,13 @@ struct WorkoutLiveActivityView: View {
                 }
             }
 
-            Spacer()
+            // Fun: Flamey stands in the gap between the two columns — the
+            // spacers keep both columns exactly where they were, and nothing
+            // caps the timer's width. Modern: nothing, i.e. one Spacer.
+            Spacer(minLength: 0)
+            LiveActivityFlamey(progress: progress, size: 54, isStale: context.isStale)
+                .padding(.top, 10)
+            Spacer(minLength: 0)
 
             // Right side - Time & Progress
             VStack(alignment: .trailing, spacing: 10) {
