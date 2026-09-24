@@ -197,6 +197,24 @@ struct MADSettingsView: View {
             }
             .padding(.bottom, MADTheme.Spacing.xs)
 
+            // Flamey lives on the Fun dashboard only, so his Closet does too.
+            if selectedStyle == .fun {
+                divider
+
+                Button {
+                    MADHaptics.tap()
+                    FlameyClosetLink.shared.open()
+                } label: {
+                    MADSettingsRow(
+                        icon: "hanger",
+                        title: "Flamey's Closet",
+                        subtitle: "Dress Flamey in what you've earned",
+                        iconColor: .orange
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
             divider
 
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {

@@ -680,6 +680,11 @@ class UserManager: ObservableObject {
                 let existingIds = Set(currentUser.badges.map { $0.id })
                 currentUser.badges = fetched
                 saveUserData()
+                // Medals unlock Flamey's wardrobe. Deferred to the END of this
+                // block so it sees `hasCompletedInitialBadgeSync` as the
+                // branches below leave it; runs on every path, celebrateNew or
+                // not — a Recalibrate burst is exactly the batch card's case.
+                defer { FlameyUnlocks.reconcile(allowAnnounce: hasCompletedInitialBadgeSync) }
 
                 // Badges awarded retroactively during initial setup are absorbed
                 // silently — no celebrations. The flag is normally flipped by the

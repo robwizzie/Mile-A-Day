@@ -73,6 +73,9 @@ struct CelebrationContainerView: View {
 
         case .ghostBeaten(let win):
             GhostBeatenCelebrationView(win: win)
+
+        case .flameyUnlocked(let itemIds):
+            FlameyUnlockCelebrationHost(itemIds: itemIds)
         }
     }
 }

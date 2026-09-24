@@ -175,6 +175,9 @@ struct MainTabView: View {
             // Existing users already past a streak milestone get asked on this
             // first calm pass — the retroactive path.
             scheduleReviewEvaluation()
+            // Restore Flamey's look from the server (a reinstall / new phone),
+            // or push a change this phone made offline. Fun-only, token-gated.
+            await FlameyClosetSync.syncOnForeground()
         }
         .onReceive(NotificationCenter.default.publisher(for: .didReceivePushNotification)) { notification in
             guard let type = notification.userInfo?["type"] as? String else { return }
@@ -361,6 +364,7 @@ struct MainTabView: View {
                     // resolved on another device while this one was backgrounded.
                     await notificationService.setAppBadge(friendService.friendRequests.count)
                     await syncLeaderboardWidget()
+                    await FlameyClosetSync.syncOnForeground()
                 }
                 // Refresh health data and re-evaluate the daily reminder
                 // so "Mile still waiting" is cancelled if the user completed their mile
@@ -508,6 +512,10 @@ struct MainTabView: View {
         .onChange(of: userManager.currentUser.streak) { _, _ in
             scheduleReviewEvaluation()
         }
+        // Flamey's Closet — one presentation for every door into it (hero,
+        // profile, Settings, a friend's wardrobe, the unlock card, the deep
+        // link), here at root for the same reason as the sheets above.
+        .flameyClosetHost()
         .animation(.easeInOut(duration: 0.25), value: trackingManager.isTracking)
     }
 

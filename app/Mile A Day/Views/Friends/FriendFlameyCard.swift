@@ -506,14 +506,50 @@ struct FlameyStageGround: View {
 struct FriendFlameyWardrobeSheet: View {
     let facts: FriendFlameyFacts
     @Environment(\.dismiss) private var dismiss
+    /// Your own Closet, opened ON this sheet: the friend's profile may itself
+    /// be a sheet, and a cover raised from MainTabView's root can't present
+    /// over one. Done lands back here.
+    @State private var ownCloset: FlameyClosetLink.Request?
 
     var body: some View {
         ScrollView {
             content
+            dressYourOwn
+                .padding(.horizontal, MADTheme.Spacing.screenGutter)
+                .padding(.bottom, 28)
         }
         .background(MADTheme.Colors.appBackgroundGradient.ignoresSafeArea())
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .fullScreenCover(item: $ownCloset) { request in
+            FlameyClosetScreen(request: request)
+        }
+    }
+
+    /// "Dress your own Flamey" — the viewer is on Fun (the card only shows
+    /// when both sides are), so their Closet is always there to open.
+    private var dressYourOwn: some View {
+        Button {
+            MADHaptics.action()
+            ownCloset = FlameyClosetLink.Request()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "hanger")
+                    .madFont(size: 14, weight: .bold, maxScale: 1.3)
+                    .accessibilityHidden(true)
+                Text("Dress your own Flamey")
+                    .madFont(size: 15, weight: .heavy, design: .rounded)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(0.10)))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens your Flamey's Closet")
     }
 
     /// The sheet's contents, outside the ScrollView (also what a snapshot

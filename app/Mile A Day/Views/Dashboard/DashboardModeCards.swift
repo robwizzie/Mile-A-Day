@@ -1273,6 +1273,9 @@ struct ModernChallengeRow: View {
 
 private struct FlameBuddyHeroCard: View {
     @ObservedObject private var injuryPause = InjuryPauseState.shared
+    /// Redraws him when the Closet closes — his look is read from
+    /// UserDefaults (`FlameyFacts`), which nothing else here observes.
+    @ObservedObject private var closetLink = FlameyClosetLink.shared
 
     /// The number to print on the hero. A pause FREEZES a specific value, and
     /// `currentUser.streak` is not it: the local copy is quarantined and
@@ -1567,6 +1570,17 @@ private struct FlameBuddyHeroCard: View {
                             // ground to the card height detaches it from the
                             // flame's feet the moment the card grows.
                             .offset(y: Self.groundBaseline)
+
+                        // The way into Flamey's Closet, under his feet — his
+                        // own column, and the one free spot on this card: the
+                        // top-left is HIS frame's overflow and the top-right
+                        // holds savers + Share. Below the ground, clear of the
+                        // rocket boots' jets and of his hit area (the frame
+                        // ends ~208pt down).
+                        if !injuryPause.isPaused {
+                            HeroClosetButton()
+                                .offset(y: Self.groundBaseline + 32)
+                        }
                     }
                     .frame(width: leftWidth, height: geo.size.height, alignment: .top)
 

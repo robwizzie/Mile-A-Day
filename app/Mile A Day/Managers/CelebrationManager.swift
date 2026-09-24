@@ -326,6 +326,12 @@ enum CelebrationType: Identifiable, Equatable {
     case newRecordStreak(days: Int, previousBest: Int, eraStart: String)
     /// Beat the ghost you chose over the mile.
     case ghostBeaten(win: GhostRaceWin)
+    /// New medals unlocked Flamey wardrobe items (catalog ids — plain
+    /// strings, because this file is also a Watch member and the catalog
+    /// isn't). One item or a batch; one card either way. Fun-only, decided by
+    /// the enqueuer (`FlameyUnlocks`); stamped into `FlameyUnlockLedger` at
+    /// dismissal.
+    case flameyUnlocked(itemIds: [String])
 
     var id: String {
         switch self {
@@ -353,6 +359,8 @@ enum CelebrationType: Identifiable, Equatable {
             return "record-\(eraStart)"
         case .ghostBeaten(let win):
             return "ghost-beaten-\(win.workoutId ?? "\(win.mileSeconds)")"
+        case .flameyUnlocked(let ids):
+            return "flamey-unlocked-\(ids.joined(separator: ","))"
         }
     }
 
@@ -382,6 +390,8 @@ enum CelebrationType: Identifiable, Equatable {
             return s1 == s2 // one record moment per era
         case (.ghostBeaten(let w1), .ghostBeaten(let w2)):
             return w1.workoutId == w2.workoutId // one win per raced workout
+        case (.flameyUnlocked, .flameyUnlocked):
+            return true // one wardrobe card at a time; the rest waits for its stamp
         default:
             return false
         }
@@ -429,6 +439,31 @@ enum CelebrationDismissAction: Equatable {
 /// direction (a missing entry means someone gets asked, and the server still
 /// refuses the duplicate). The one way to go stale is a post deleted on another
 /// device, which `clear(_:)` fixes on this one whenever the feed sees it.
+/// Which Flamey wardrobe items this account has been told about (the
+/// "New for Flamey" card). Lives HERE, dependency-free, because this file is
+/// also compiled into the Watch target and `markConsumed` stamps it; the iOS
+/// side (`FlameyUnlocks`) reads it to decide what's news. Absent = never
+/// seeded (the first reconcile seeds it silently).
+enum FlameyUnlockLedger {
+    private static let prefix = "flameyAnnouncedItemsV1|"
+
+    private static var key: String? {
+        guard let me = UserDefaults.standard.string(forKey: "backendUserId"), !me.isEmpty else { return nil }
+        return prefix + me
+    }
+
+    static func announced() -> Set<String>? {
+        guard let key, let raw = UserDefaults.standard.stringArray(forKey: key) else { return nil }
+        return Set(raw)
+    }
+
+    static func markAnnounced(_ ids: Set<String>) {
+        guard let key else { return }
+        let union = (announced() ?? []).union(ids)
+        UserDefaults.standard.set(union.sorted(), forKey: key)
+    }
+}
+
 enum PostedWorkoutRegistry {
     private static let storageKey = "postedWorkoutIdsV1"
     private static let maxIds = 200
@@ -688,6 +723,9 @@ class CelebrationManager: ObservableObject {
         if case .postRunPhotoPrompt(let workoutId, _) = celebration {
             markPromptedPhoto(for: workoutId)
         }
+        if case .flameyUnlocked(let ids) = celebration {
+            FlameyUnlockLedger.markAnnounced(Set(ids))
+        }
         switch celebration {
         case .comeback, .newRecordStreak:
             markComebackOrRecordShown(id: celebration.id)
@@ -787,6 +825,9 @@ class CelebrationManager: ObservableObject {
         case .milestone: return 7
         case .challengeCompleted: return 8 // celebrate the daily challenge as a finale
         case .postRunPhotoPrompt: return 9 // BeReal photo prompt — the very last step
+        // Right after the medal popups that caused it: the medal is the news,
+        // the thing Flamey can wear is the reward.
+        case .flameyUnlocked: return 6
         }
     }
 

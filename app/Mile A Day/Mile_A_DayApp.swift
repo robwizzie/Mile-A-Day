@@ -127,6 +127,11 @@ struct Mile_A_DayApp: App {
                         if let code, !code.isEmpty {
                             DeepLinkRouter.shared.requestOpenBuddySession(code: code)
                         }
+                    case "flamey-closet":
+                        // mileaday://flamey-closet — parked on the link and
+                        // presented by MainTabView's root host whenever it's
+                        // mounted (a cold launch has no tabs yet). Fun-only.
+                        FlameyClosetLink.shared.open()
                     case "compete":
                         NotificationCenter.default.post(
                             name: NSNotification.Name("MAD_SwitchTab"),

@@ -110,6 +110,10 @@ struct ProfileView: View {
                             profileTokenShelf(tokens)
                         }
 
+                        // Flamey's Closet (Fun only — the row draws nothing
+                        // on Modern).
+                        FlameyClosetProfileRow()
+
                         // Same four sections as a friend's profile, Activity first.
                         ProfileTabBar(
                             selection: $profileTab,
