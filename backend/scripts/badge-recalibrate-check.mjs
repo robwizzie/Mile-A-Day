@@ -5,7 +5,8 @@
  *      has earned but the user doesn't hold, across categories: a BROKEN
  *      370-day streak (streak ladder up to streak_365, not streak_500), a
  *      sub-8 mile split (pace_8min, not pace_7min), a half-marathon day
- *      (daily_half), lifetime miles, a hype given (never a self-hype) and a nudge whose log row has
+ *      (daily_half), a Halloween goal day (holiday_halloween), lifetime
+ *      miles, a hype given (never a self-hype) and a nudge whose log row has
  *      since been pruned (the lifetime counter);
  *   2. it answers `new_badges` = exactly the rows it inserted, is idempotent
  *      (a second run awards nothing) and NEVER revokes a medal already held;
@@ -163,7 +164,7 @@ await pgClient.connect();
 try {
   await cleanup();
   // The full canonical catalog (streak / miles / pace / daily ladders) plus
-  // the v2 social rows. Both idempotent.
+  // the v2 social + holiday rows. Both idempotent.
   await db.query(fs.readFileSync(path.join(here, "badges-seed.sql"), "utf8"));
   await seedExtraBadges();
   // What the server seeds at boot: a today-dated upload selects today's
@@ -176,8 +177,8 @@ try {
     );
   }
 
-  // ── The repaired history: a 370-day run that BROKE in Jan 2025, a
-  // half-marathon day, a sub-8 split, a hype given and
+  // ── The repaired history: a 370-day run that BROKE in Jan 2025 (it spans
+  // Halloween 2024), a half-marathon day, a sub-8 split, a hype given and
   // one received from themselves, a nudge whose log has been pruned.
   await seedRun(RC, "brc-run", "2025-01-10", 370);
   await seedWalk(RC, "brc-half", "2023-06-01", 13.2);
@@ -220,6 +221,7 @@ try {
     "miles_250",
     "pace_8min",
     "daily_half",
+    "holiday_halloween",
     "hype_1",
     "nudge_1",
   ]) {
@@ -300,13 +302,14 @@ try {
   check("upload doesn't invent streak_14", upBadges.includes("streak_14"), false);
 
   // ── 5. Retro sweep: silent, idempotent, targeted runs leave the marker.
-  await seedRun(SWEEP, "brc-sw", "2023-11-05", 8);
+  await seedRun(SWEEP, "brc-sw", "2023-11-05", 8); // spans Halloween 2023
   const markerBefore = (await db.query(`SELECT 1 FROM maintenance_runs WHERE name = $1`, [RETRO_BADGES_BACKFILL])).length;
   let sw = await runRetroBadgeBackfill(pgClient, { force: true, onlyUserIds: [SWEEP] });
   const swept = await held(SWEEP);
   check("sweep visited the one user", sw.users, 1);
   check("sweep awarded what it reports", swept.length, sw.awarded);
   check("sweep awards the broken run's streak_7", swept.includes("streak_7"), true);
+  check("sweep awards holiday_halloween", swept.includes("holiday_halloween"), true);
   check("sweep is silent (no inbox row)", (await badgeInbox(SWEEP)).length, 0);
   check(
     "sweep leaves is_new TRUE",

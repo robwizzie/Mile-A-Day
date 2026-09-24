@@ -540,6 +540,13 @@
       "when": 1790265739509,
       "tag": "0076_recalibrate_medals",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1790266451931,
+      "tag": "0077_flamey_dashboard_style",
+      "breakpoints": true
     }
   ]
 }

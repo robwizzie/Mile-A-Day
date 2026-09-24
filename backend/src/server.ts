@@ -62,6 +62,7 @@ import {
 import { backfillFeedRoles } from "./db/backfillFeedRoles.js";
 import { repairSweptMedia } from "./db/repairSweptMedia.js";
 import { backfillLongestStreaks } from "./db/backfillLongestStreaks.js";
+import { backfillHolidayMedals } from "./db/backfillHolidayMedals.js";
 import { backfillRetroBadges } from "./db/backfillRetroBadges.js";
 import {
   getUnifiedFeed,
@@ -412,6 +413,10 @@ runPendingMigrations()
       // users.longest_streak from workout history; rows it hasn't reached
       // read 0, which every API surface degrades to max(0, current streak).
       void backfillLongestStreaks();
+      // Same contract: retroactive holiday medals for goal days already in
+      // history. Silent (no push), idempotent, done-marker in
+      // maintenance_runs, so every later boot is one SELECT.
+      void backfillHolidayMedals();
       // Same contract: every medal judged over the WHOLE history once for
       // everyone (what Recalibrate now does per user). Award-only, silent,
       // one user at a time, done-marker `badge_retro_v1` in maintenance_runs.

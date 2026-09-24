@@ -6,9 +6,10 @@ import { recalibrateBadges, seedExtraBadges } from "../services/badgeService.js"
  * would give them (recalibrateBadges — ALL categories judged over the whole
  * history), because medals used to be judged on current state in places (the
  * streak ladder read the CURRENT run, so a broken 400-day streak never held
- * streak_365; the nudge medals counted a log pruned after 7 days).
+ * streak_365; the nudge medals counted a log pruned after 7 days) and the
+ * holiday rule only ever looked at the days an upload touched.
  *
- * Same contract as backfillFeedRoles: post-listen, not awaited, never
+ * Same contract as backfillHolidayMedals: post-listen, not awaited, never
  * takes the server down, done-marker in `maintenance_runs` written only after
  * the LAST batch (every later boot is one SELECT), idempotent and resumable
  * — an interrupted run starts over next boot and re-awards nothing, since
@@ -50,7 +51,7 @@ export async function runRetroBadgeBackfill(
     if (done.rowCount) return { skipped: true, users: 0, awarded: 0, failed: 0 };
   }
 
-  // The v2 catalog rows must exist before anything can reference
+  // The v2/holiday catalog rows must exist before anything can reference
   // them (FK). Idempotent; the boot seed is fire-and-forget, so don't race it.
   await seedExtraBadges();
 

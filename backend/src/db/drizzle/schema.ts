@@ -322,6 +322,12 @@ export const users = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // Which dashboard the app is drawing: 'fun' (Flamey, the mascot) or
+    // 'modern'. Written by `PATCH /users/:id` (validated in usersController);
+    // NULL = unknown, i.e. a build that predates the field — treated exactly
+    // like 'modern' by every Flamey gate (the friend's-Flamey block, the
+    // Flamey poke). Nullable, no default: additive, no table rewrite.
+    dashboardStyle: text("dashboard_style"),
     // Lifetime nudges sent (friend + competition), for the nudge medals. The
     // logs they used to be counted from are pruned after 7 days, so a recount
     // could never see past the week. Bumped in the same statement as each log
@@ -3200,7 +3206,7 @@ export const widgetRefreshPushes = pgTable(
 // "done" can't be read off an index the way backfillLongestStreaks does).
 // Written ONLY when a run finishes, so an interrupted run simply runs again;
 // the jobs themselves are idempotent. A new version of a job takes a new
-// name (e.g. `badge_retro_v2` once the evaluator sees more history).
+// name (e.g. `badge_retro_v2` once the evaluator sees more history, `holiday_medals_v2` once the holiday catalog grows).
 export const maintenanceRuns = pgTable("maintenance_runs", {
   name: text().primaryKey().notNull(),
   completedAt: timestamp("completed_at", {

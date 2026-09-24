@@ -246,12 +246,20 @@ jobs:
       # A silent push renders nothing, so every failure here is invisible.
       - name: Widget refresh push check
         run: node scripts/widget-refresh-check.mjs
+      # Flamey (the Fun-dashboard mascot): dashboard_style validation, the
+      # friends-only `flamey` block on GET /users/:id, holiday medals through
+      # the real upload path (goal × tolerance, counted workouts only, silent
+      # for a backdated walk, revoked with the walk), the silent idempotent
+      # backfill, and the Flamey poke's both-sides-Fun gate on the ordinary
+      # nudge's cooldown. All of it fails as an absence nobody reports.
+      - name: Flamey + holiday medals check
+        run: node scripts/flamey-check.mjs
       # Medals are judged over the WHOLE history: Recalibrate Streak also
       # recalibrates medals (a broken 370-day streak keeps streak_365, a sub-8
-      # split, a half-marathon day, a pruned nudge log), answers `new_badges`,
-      # is idempotent, never revokes, pushes ONE summary for a burst; the
-      # upload path is all-history too; the retro sweep is silent and
-      # idempotent. A medal nobody gets is reported by nobody.
+      # split, a half-marathon day, a Halloween mile, a pruned nudge log),
+      # answers `new_badges`, is idempotent, never revokes, pushes ONE summary
+      # for a burst; the upload path is all-history too; the retro sweep is
+      # silent and idempotent. A medal nobody gets is reported by nobody.
       - name: Badge recalibrate check
         run: node scripts/badge-recalibrate-check.mjs
 

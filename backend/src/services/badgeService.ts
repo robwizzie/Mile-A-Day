@@ -1,6 +1,17 @@
 import { PostgresService } from "./DbService.js";
 import { MIN_PLAUSIBLE_MILE_SECONDS, countedWorkoutSql } from "./mileTime.js";
-import { getStreakErasForUser } from "./workoutService.js";
+import {
+  DAILY_GOAL_TOLERANCE,
+  getStreakErasForUser,
+} from "./workoutService.js";
+import {
+  HOLIDAYS,
+  holidayBadgeId,
+  holidayDatesBetween,
+  holidayKeyForLocalDate,
+  holidayKeyFromBadgeId,
+  type HolidayKey,
+} from "./holidays.js";
 import type {
   Badge,
   UserBadge,
@@ -384,6 +395,12 @@ export async function evaluateForUser(
   userId: string,
   newWorkoutIds: string[],
   opts: {
+    /**
+     * Judge holiday medals over the WHOLE history instead of only the days
+     * this upload touched (Recalibrate + the retro sweep). Every other
+     * category is all-history already.
+     */
+    allHolidays?: boolean;
     /** Stamped into progress_snapshot.source so an award is traceable. */
     source?: "recalibrate" | "retro_sweep";
   } = {},
@@ -405,7 +422,11 @@ export async function evaluateForUser(
     ...(opts.source ? { source: opts.source } : {}),
   };
 
-  const toInsert: { badgeId: string; aggregateOnly: boolean }[] = [];
+  const toInsert: {
+    badgeId: string;
+    aggregateOnly: boolean;
+    workoutId?: string;
+  }[] = [];
 
   for (const badge of catalog) {
     if (earned.has(badge.badgeId)) continue;
@@ -416,6 +437,20 @@ export async function evaluateForUser(
         aggregateOnly: result.aggregateOnly,
       });
     }
+  }
+
+  // Holiday medals are a fact about ONE DAY, not about aggregates, so they're
+  // judged from the days this upload touched. Each is attributed to a workout
+  // of THAT day, which is what keeps the controller's 24h push gate honest: a
+  // backdated/first-run import of last Halloween earns the medal silently.
+  const catalogIds = new Set(catalog.map((b) => b.badgeId));
+  const holidayHits = opts.allHolidays
+    ? await holidayHitsAllHistory(userId)
+    : await evaluateHolidayBadges(userId, newWorkoutIds);
+  for (const hit of holidayHits) {
+    const badgeId = holidayBadgeId(hit.key);
+    if (earned.has(badgeId) || !catalogIds.has(badgeId)) continue;
+    toInsert.push({ badgeId, aggregateOnly: false, workoutId: hit.workoutId });
   }
 
   if (toInsert.length === 0) {
@@ -434,7 +469,9 @@ export async function evaluateForUser(
     [
       userId,
       toInsert.map((t) => t.badgeId),
-      toInsert.map((t) => (t.aggregateOnly ? null : triggeringWorkoutId)),
+      toInsert.map(
+        (t) => t.workoutId ?? (t.aggregateOnly ? null : triggeringWorkoutId),
+      ),
       JSON.stringify(snapshot),
     ],
   );
@@ -461,6 +498,137 @@ async function getEarnedBadgeIds(userId: string): Promise<Set<string>> {
     [userId],
   );
   return new Set(rows.map((r) => r.badge_id));
+}
+
+// ─── Holiday medals ─────────────────────────────────────────────────
+
+/**
+ * The goal line for a holiday day, shared by the sync-time award, the
+ * revocation and the backfill (db/backfillHolidayMedals.ts) so the three can
+ * never disagree: the day's COUNTED miles (callers filter with
+ * countedWorkoutSql — a Strava twin or a vehicle-speed drive never counts)
+ * reach the user's goal × the streak tolerance. The goal is clamped > 0:
+ * `x >= 0 * 0.95` is vacuously true. `u` is the users row, the aggregate is
+ * over `w`. It is the user's CURRENT goal — goal history isn't stored.
+ */
+export function holidayDayQualifiesSql(u: string, w: string): string {
+  return `SUM(${w}.distance) >= (CASE WHEN ${u}.goal_miles > 0 THEN ${u}.goal_miles ELSE 1 END)::double precision * ${DAILY_GOAL_TOLERANCE}`;
+}
+
+/**
+ * Every holiday date the product could have seen a walk on: from well before
+ * the app existed through next year (a device a day ahead of UTC on Dec 31).
+ * ~300 dates; the probe is `local_date = ANY(…)` over ONE user's rows.
+ */
+export function holidayProbeDates(): Array<{ date: string; key: HolidayKey }> {
+  return holidayDatesBetween(2015, new Date().getUTCFullYear() + 1);
+}
+
+/**
+ * Holidays this upload completed the goal on. Looks only at the local days
+ * the given workouts belong to — never the whole history (that is the
+ * backfill's job, once) — and returns, per holiday, the newest uploaded
+ * counted workout of a qualifying day as the medal's trigger.
+ */
+async function evaluateHolidayBadges(
+  userId: string,
+  workoutIds: string[],
+): Promise<Array<{ key: HolidayKey; workoutId: string }>> {
+  if (workoutIds.length === 0) return [];
+  const rows = await db.query<{ workout_id: string; local_date: string }>(
+    `SELECT w.workout_id, to_char(w.local_date, 'YYYY-MM-DD') AS local_date
+		FROM workouts w
+		WHERE w.user_id = $1 AND w.workout_id = ANY($2::text[]) AND ${countedWorkoutSql("w")}
+		ORDER BY w.device_end_date DESC`,
+    [userId, workoutIds],
+  );
+  // Newest uploaded workout per holiday date (rows are newest-first).
+  const byDate = new Map<string, { key: HolidayKey; workoutId: string }>();
+  for (const r of rows) {
+    const key = holidayKeyForLocalDate(r.local_date);
+    if (key && !byDate.has(r.local_date)) {
+      byDate.set(r.local_date, { key, workoutId: r.workout_id });
+    }
+  }
+  if (byDate.size === 0) return [];
+
+  const qualifying = await db.query<{ local_date: string }>(
+    `SELECT to_char(w.local_date, 'YYYY-MM-DD') AS local_date
+		FROM workouts w
+		JOIN users u ON u.user_id = w.user_id
+		WHERE w.user_id = $1 AND w.local_date = ANY($2::date[]) AND ${countedWorkoutSql("w")}
+		GROUP BY w.local_date, u.goal_miles
+		HAVING ${holidayDayQualifiesSql("u", "w")}`,
+    [userId, [...byDate.keys()]],
+  );
+  const seen = new Set<HolidayKey>();
+  const out: Array<{ key: HolidayKey; workoutId: string }> = [];
+  for (const { local_date } of qualifying) {
+    const hit = byDate.get(local_date);
+    if (hit && !seen.has(hit.key)) {
+      seen.add(hit.key);
+      out.push(hit);
+    }
+  }
+  return out;
+}
+
+/**
+ * Every holiday the user's CURRENT counted history still has a goal day on.
+ * Revocation only, and only for a user who holds a holiday medal.
+ */
+async function holidaysStillEarned(userId: string): Promise<Set<HolidayKey>> {
+  const probe = holidayProbeDates();
+  const rows = await db.query<{ local_date: string }>(
+    `SELECT to_char(w.local_date, 'YYYY-MM-DD') AS local_date
+		FROM workouts w
+		JOIN users u ON u.user_id = w.user_id
+		WHERE w.user_id = $1 AND w.local_date = ANY($2::date[]) AND ${countedWorkoutSql("w")}
+		GROUP BY w.local_date, u.goal_miles
+		HAVING ${holidayDayQualifiesSql("u", "w")}`,
+    [userId, probe.map((p) => p.date)],
+  );
+  const out = new Set<HolidayKey>();
+  for (const { local_date } of rows) {
+    const key = holidayKeyForLocalDate(local_date);
+    if (key) out.add(key);
+  }
+  return out;
+}
+
+/**
+ * Every holiday the user's counted history has a goal day on, over ALL of it
+ * — Recalibrate and the retro sweep (the sync path judges only the days an
+ * upload touched). Same rule and same attribution as the one-time holiday
+ * backfill: the EARLIEST qualifying day per holiday, its newest counted
+ * workout as the trigger. A trigger that old sits outside the upload
+ * controller's 24h push gate by construction.
+ */
+async function holidayHitsAllHistory(
+  userId: string,
+): Promise<Array<{ key: HolidayKey; workoutId: string }>> {
+  const probe = holidayProbeDates();
+  const rows = await db.query<{ local_date: string; workout_id: string }>(
+    `SELECT to_char(w.local_date, 'YYYY-MM-DD') AS local_date,
+		        (ARRAY_AGG(w.workout_id ORDER BY w.device_end_date DESC))[1] AS workout_id
+		FROM workouts w
+		JOIN users u ON u.user_id = w.user_id
+		WHERE w.user_id = $1 AND w.local_date = ANY($2::date[]) AND ${countedWorkoutSql("w")}
+		GROUP BY w.local_date, u.goal_miles
+		HAVING ${holidayDayQualifiesSql("u", "w")}
+		ORDER BY w.local_date ASC`,
+    [userId, probe.map((p) => p.date)],
+  );
+  const out: Array<{ key: HolidayKey; workoutId: string }> = [];
+  const seen = new Set<HolidayKey>();
+  for (const r of rows) {
+    const key = holidayKeyForLocalDate(r.local_date);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      out.push({ key, workoutId: r.workout_id });
+    }
+  }
+  return out;
 }
 
 // Returns { earned: bool, aggregateOnly: bool }.
@@ -579,6 +747,9 @@ function evaluatePredicate(
         aggregateOnly: true,
       };
     }
+    case "holiday":
+      // Judged per DAY by evaluateHolidayBadges, never from aggregates.
+      return { earned: false, aggregateOnly: false };
     default:
       return { earned: false, aggregateOnly: true };
   }
@@ -635,9 +806,9 @@ export async function evaluateSocialBadgesForUser(
  * (db/backfillRetroBadges.ts) runs it for everyone once.
  *
  * AWARD-ONLY, deliberately. It never revokes, even where the recount now
- * disagrees with a medal held: a Recalibrate is something a user taps to FIX
- * their account, and a medal that silently vanishes from their shelf is a far
- * worse outcome than one kept. The one
+ * disagrees with a medal held: medals unlock Flamey cosmetics, a Recalibrate
+ * is something a user taps to FIX their account, and a medal that silently
+ * vanishes from under an outfit is a far worse outcome than one kept. The one
  * revocation path stays revokeUnearnedBadges, run only on a workout DELETION
  * or exclusion — i.e. when the user's history actually lost something.
  *
@@ -648,7 +819,10 @@ export async function recalibrateBadges(
   userId: string,
   source: "recalibrate" | "retro_sweep" = "recalibrate",
 ): Promise<UserBadge[]> {
-  const { newlyEarnedBadges } = await evaluateForUser(userId, [], { source });
+  const { newlyEarnedBadges } = await evaluateForUser(userId, [], {
+    allHolidays: true,
+    source,
+  });
   return newlyEarnedBadges;
 }
 
@@ -696,11 +870,27 @@ export async function revokeUnearnedBadges(userId: string): Promise<string[]> {
   // drops the medal; a real past streak that simply isn't current keeps it).
   const aggForEarn: UserAggregates = agg;
 
+  // Holiday medals: kept while ANY goal day on that holiday (any year)
+  // survives in the counted history — deleting the only Halloween walk takes
+  // the Spooky Mile with it, exactly like a pace badge; deleting one of two
+  // Halloweens doesn't. Only queried when the user holds one.
+  const holdsHoliday = earnedRows.some(
+    (r) => holidayKeyFromBadgeId(r.badge_id) !== null,
+  );
+  const stillHoliday = holdsHoliday
+    ? await holidaysStillEarned(userId)
+    : new Set<HolidayKey>();
+
   const toRevoke: string[] = [];
   for (const { badge_id } of earnedRows) {
     const badge = byId.get(badge_id);
     if (!badge) continue; // unknown/legacy badge — leave it alone
     if (!isWorkoutDerived(badge.category)) continue;
+    if (badge.category === "holiday") {
+      const key = holidayKeyFromBadgeId(badge_id);
+      if (key && !stillHoliday.has(key)) toRevoke.push(badge_id);
+      continue;
+    }
     if (!evaluatePredicate(badge, aggForEarn).earned) {
       toRevoke.push(badge_id);
     }
@@ -725,7 +915,7 @@ const EXTRA_BADGES: Array<{
   description: string;
   icon: string;
   rarity: "common" | "rare" | "legendary";
-  requirement: number;
+  requirement: number | null;
   sortOrder: number;
 }> = [
   // Stories
@@ -1135,6 +1325,18 @@ const EXTRA_BADGES: Array<{
     requirement: 12,
     sortOrder: 975,
   },
+  // Holiday medals — one per HOLIDAYS entry, evergreen (earned once, ever).
+  // No numeric requirement: the rule is "goal met on that local day".
+  ...HOLIDAYS.map((h, i) => ({
+    badgeId: holidayBadgeId(h.key),
+    category: "holiday" as const,
+    name: h.medalName,
+    description: `Walked or ran your mile on ${h.holidayName}.`,
+    icon: h.icon,
+    rarity: "rare" as const,
+    requirement: null,
+    sortOrder: 990 + i,
+  })),
 ];
 
 export async function seedExtraBadges(): Promise<void> {
