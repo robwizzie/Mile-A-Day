@@ -101,6 +101,44 @@ enum FlameyArt {
 
     private static func hx(_ v: UInt32, _ o: Double = 1) -> Color { FlameyPalette.hex(v, o) }
 
+    // MARK: - Tight surfaces (the dashboard hero's column)
+
+    /// Below this `reach` a surface is TIGHT: the hero, whose stat column
+    /// starts just right of his body and whose card edge is just left of it.
+    static let tightReach: CGFloat = 0.75
+
+    static func isTight(_ reach: CGFloat) -> Bool { reach < tightReach }
+
+    /// Where a tight surface's room ends, in units of the view's `size`
+    /// measured from his centre: the card edge on the left, the stat column
+    /// on the right (the hero's own geometry: ~0.52 and ~0.49 at 375–430pt).
+    /// Art is FITTED inside `tightArtBounds`; `FlameyOutfitLayer` also masks
+    /// to `tightMaskBounds` as a guarantee, feathered so a stray pixel fades.
+    static let tightArtBounds: (left: CGFloat, right: CGFloat) = (-0.49, 0.46)
+    static let tightMaskBounds: (left: CGFloat, right: CGFloat) = (-0.53, 0.50)
+
+    /// The card's TOP edge on a tight surface, in units of `size` from the
+    /// view's centre (the hero's buddy frame starts ~38pt under it).
+    static let tightTopBound: CGFloat = -0.72
+
+    /// How far a cape's width is squeezed on a tight surface.
+    static let capeTuck: CGFloat = 0.53
+
+    /// How far a trail's length is squeezed on a tight surface.
+    static let trailTuck: CGFloat = 0.56
+
+    /// A held prop's scale on a tight surface — by how far it reaches out
+    /// (measured: the cannon runs to 1.05u at full size, the stopwatch 0.61u).
+    static func tightHeldScale(_ item: FlameyItem) -> CGFloat {
+        switch item {
+        case .confettiCannon: return 0.44
+        case .megaphone: return 0.58
+        case .checkeredFlag: return 0.64
+        case .pomPoms: return 0.68
+        default: return 0.8
+        }
+    }
+
     // MARK: - Front (feet, costume, chest, eyes, head, held)
 
     /// Draws one front item. `palette` is his colour (arms and costume peeks
@@ -117,8 +155,13 @@ enum FlameyArt {
             // A tight surface (the hero's column) holds it a size smaller,
             // scaled about his shoulder, so it stays on the card.
             var h = ctx
-            if reach < 0.75 {
-                let sx = -0.26 * u, sy = a.bottom - 0.22 * u, k: CGFloat = 0.8
+            if isTight(reach) {
+                // Brought IN FRONT of him (shifted toward his middle) and
+                // scaled about his shoulder by how far the prop reaches, so
+                // the longest (the cannon, the flag) still ends inside the
+                // card instead of past its edge.
+                let sx = -0.26 * u, sy = a.bottom - 0.22 * u, k = tightHeldScale(item)
+                h.translateBy(x: 0.12 * u, y: 0)
                 h.translateBy(x: sx, y: sy); h.scaleBy(x: k, y: k); h.translateBy(x: -sx, y: -sy)
             }
             held(item, &h, a, u, arm: palette?.bodyTone ?? hx(0xFF8A1F))
@@ -1374,8 +1417,15 @@ enum FlameyArt {
         let L = lw(u)
         let ink = self.ink
         var ctx = base
+        let tight = isTight(reach)
         let squeeze = min(1, (reach + 0.06) / 0.92)
-        if squeeze < 1 { ctx.scaleBy(x: squeeze, y: 1) }
+        if tight {
+            // The hero's column: a cape tucks in behind him (squeezed until
+            // it only peeks past his side); wings are RAISED instead, below.
+            if item != .goldenWings { ctx.scaleBy(x: capeTuck, y: 1) }
+        } else if squeeze < 1 {
+            ctx.scaleBy(x: squeeze, y: 1)
+        }
         func cape(_ main: Color, _ dark: Color, trim: Color?, ermine: Bool) {
             let sy = a.bottom - 0.50 * u
             var c = Path()
@@ -1424,6 +1474,13 @@ enum FlameyArt {
             // Planted right behind him, flying ABOVE his head — high and
             // close in, so it never meets a companion or a stat column.
             let px = 0.14 * u
+            var ctx = ctx
+            if tight {
+                // A size smaller about the pole's foot, so it flies below
+                // the card's top edge.
+                let fy = a.bottom - 0.30 * u
+                ctx.translateBy(x: px, y: fy); ctx.scaleBy(x: 0.8, y: 0.8); ctx.translateBy(x: -px, y: -fy)
+            }
             var pole = Path(); pole.move(to: pt(px, a.bottom - 0.30 * u)); pole.addLine(to: pt(px + 0.02 * u, a.topY - 0.30 * u))
             ctx.stroke(pole, with: .color(hx(0x6B4E2A)), style: StrokeStyle(lineWidth: 0.03 * u, lineCap: .round))
             ctx.fill(circle(px + 0.02 * u, a.topY - 0.32 * u, 0.034 * u), with: .color(hx(0xFFCF40)))
@@ -1444,6 +1501,16 @@ enum FlameyArt {
         case .goldenWings:
             for sx in [-1.0, 1.0] as [CGFloat] {
                 let rx = sx * 0.16 * u, ry = a.bottom - 0.46 * u
+                // Tight surface: each wing swings UP about its root (angel
+                // wings over his shoulders) and a size smaller, so the span
+                // stays inside his own column instead of over the stats.
+                var ctx = ctx
+                if tight {
+                    ctx.translateBy(x: rx, y: ry)
+                    ctx.rotate(by: .degrees(-50 * sx))
+                    ctx.scaleBy(x: 0.78, y: 0.78)
+                    ctx.translateBy(x: -rx, y: -ry)
+                }
                 var w = Path()
                 w.move(to: pt(rx, ry))
                 w.addCurve(to: pt(sx * 0.86 * u, ry - 0.40 * u), control1: pt(sx * 0.34 * u, ry - 0.30 * u), control2: pt(sx * 0.62 * u, ry - 0.46 * u))

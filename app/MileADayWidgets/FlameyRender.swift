@@ -50,6 +50,8 @@ struct FlameyOutfitLayer: View {
                 }
             }
         }
+        .mask { tightMask }
+        .mask { tightTopMask }
         .frame(width: size, height: size)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -65,6 +67,48 @@ struct FlameyOutfitLayer: View {
         guard moving, !phase, needsMotion else { return }
         DispatchQueue.main.async {
             withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { phase = true }
+        }
+    }
+
+    private var tight: Bool { FlameyArt.isTight(reach) }
+
+    /// On a tight surface (the hero's column) NOTHING he wears may cross the
+    /// card edge or the stat column. The art is fitted to stay inside; this
+    /// is the guarantee — a band exactly as wide as his room, its edges
+    /// feathered so anything that still reaches them fades instead of being
+    /// cut. Unbounded vertically. Elsewhere it's a plain full mask.
+    @ViewBuilder
+    private var tightMask: some View {
+        if tight {
+            let bounds = FlameyArt.tightMaskBounds
+            let width = (bounds.right - bounds.left) * size
+            let feather = min(0.5, 0.022 / (bounds.right - bounds.left))
+            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: feather),
+                                   .init(color: .black, location: 1 - feather), .init(color: .clear, location: 1)],
+                           startPoint: .leading, endPoint: .trailing)
+                .frame(width: width, height: size * 4)
+                .offset(x: (bounds.left + bounds.right) / 2 * size)
+                .frame(width: size, height: size)
+        } else {
+            Color.black.frame(width: size * 4, height: size * 4).frame(width: size, height: size)
+        }
+    }
+
+    /// ...and nothing may leave the card's TOP edge (a banner's pole, a
+    /// camera flash). A hard edge: anything reaching it is fitted first.
+    @ViewBuilder
+    private var tightTopMask: some View {
+        if tight {
+            let top = FlameyArt.tightTopBound
+            VStack(spacing: 0) {
+                Color.clear.frame(height: max(0, (top + 2) * size))
+                Color.black.frame(height: size * 4)
+            }
+            .frame(width: size * 4, height: size * 4, alignment: .top)
+            .offset(y: 0)
+            .frame(width: size, height: size)
+        } else {
+            Color.black.frame(width: size * 4, height: size * 4).frame(width: size, height: size)
         }
     }
 
@@ -87,11 +131,14 @@ struct FlameyOutfitLayer: View {
             if let trail = look[.trail] {
                 Canvas { ctx, canvas in
                     ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
+                    // A tight surface shortens the stream so it only peeks
+                    // out from behind him.
+                    if FlameyArt.isTight(reach) { ctx.scaleBy(x: FlameyArt.trailTuck, y: 1) }
                     FlameyArt.drawTrail(trail, in: &ctx, a: a, u: u, reach: reach)
                 }
                 .frame(width: size * 3, height: size * 3)
                 // Streaming: drifts back from him and breathes.
-                .offset(x: moving && phase ? -0.035 * u : 0)
+                .offset(x: moving && phase ? -(tight ? 0.015 : 0.035) * u : 0)
                 .opacity(moving && phase ? 0.78 : 1)
             }
             if let back = look[.back] {
@@ -137,7 +184,7 @@ struct FlameyOutfitLayer: View {
                                              startPoint: .top, endPoint: .bottom))
                         .frame(width: 0.82 * u, height: u)
                         .opacity((i == 0 ? 0.30 : 0.15) * (moving && phase ? 0.45 : 1))
-                        .offset(x: -(0.17 + 0.15 * CGFloat(i)) * u, y: a.bottom - 0.5 * u)
+                        .offset(x: -(tight ? 0.05 + 0.04 * CGFloat(i) : 0.17 + 0.15 * CGFloat(i)) * u, y: a.bottom - 0.5 * u)
                 }
             case .spotlight:
                 Canvas { ctx, canvas in
@@ -157,6 +204,7 @@ struct FlameyOutfitLayer: View {
                               with: .color(FlameyPalette.hex(0xFFF3C4, 0.45)))
                 }
                 .frame(width: size * 3, height: size * 3)
+                .scaleEffect(x: tight ? 0.66 : 1, y: 1)
                 .opacity(moving && phase ? 0.8 : 1)
             default:
                 EmptyView()
@@ -208,12 +256,13 @@ struct FlameyOutfitLayer: View {
 
             if let companion = look[.companion] {
                 // A tight surface (the hero, a stat column just to his right)
-                // keeps the companion small and CLOSE: walkers at his feet,
-                // floaters up by his shoulder, clear of the numbers.
-                let tight = reach < 0.75
+                // keeps the companion small and CLOSE: walkers in front of
+                // his feet, floaters up by his shoulder — inside his own
+                // column, clear of the numbers.
+                let tight = self.tight
                 let floats = Self.floats(companion)
-                let k: CGFloat = tight ? 0.78 : 1.35
-                let x = tight ? (floats ? 0.36 : 0.38) * u : FlameyArt.companionX(u, reach: reach)
+                let k: CGFloat = tight ? 0.62 : 1.35
+                let x = tight ? (floats ? 0.30 : 0.26) * u : FlameyArt.companionX(u, reach: reach)
                 let lift = tight && floats ? -0.42 * u : 0
                 Canvas { ctx, canvas in
                     ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
@@ -226,7 +275,7 @@ struct FlameyOutfitLayer: View {
             }
 
             if look.glow == .aura(.paparazzi) {
-                FlameyPaparazzi(u: u, flash: moving && phase)
+                FlameyPaparazzi(u: u, flash: moving && phase, spread: tight ? 0.56 : 1, rise: tight ? 0.78 : 1)
                     .offset(y: a.bottom - 0.5 * u)
             }
         }
@@ -310,6 +359,10 @@ struct FlameyOrbit: GeometryEffect {
 struct FlameyPaparazzi: View {
     let u: CGFloat
     let flash: Bool
+    /// Horizontal spread (a tight surface pulls the flashes in).
+    var spread: CGFloat = 1
+    /// Vertical spread (a tight surface keeps the top flash on the card).
+    var rise: CGFloat = 1
 
     private static let flashes: [(CGFloat, CGFloat, CGFloat, Int)] = [
         (-0.64, -0.16, 1.0, 0), (0.62, -0.40, 0.8, 1), (0.70, 0.16, 0.6, 0), (-0.54, -0.60, 0.55, 1), (0.30, -0.78, 0.45, 0)]
@@ -333,7 +386,7 @@ struct FlameyPaparazzi: View {
                 }
                 .frame(width: u * 0.4, height: u * 0.4)
                 .opacity(flash ? (f.3 == 0 ? 0.25 : 1) : (f.3 == 0 ? 1 : 0.55))
-                .offset(x: f.0 * u, y: f.1 * u)
+                .offset(x: f.0 * spread * u, y: f.1 * rise * u)
             }
         }
         .allowsHitTesting(false)
