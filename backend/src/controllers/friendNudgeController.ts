@@ -20,6 +20,7 @@ import {
 } from "../services/streakFeatureCore.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import { PostgresService } from "../services/DbService.js";
+import { bothUseFun } from "../services/flameyService.js";
 
 const db = PostgresService.getInstance();
 
@@ -51,6 +52,19 @@ async function fetchStreaks(
   }
 }
 
+const FLAMEY_POKE_BODIES = [
+  "He's itching for a mile — want to go?",
+  "He's bouncing on his toes. One mile?",
+  "He wants to stretch his legs. Walk with him?",
+];
+
+/** Varied copy for a Flamey poke. Playful, never a health claim. */
+export function flameyPokeCopy(senderName: string): { title: string; body: string } {
+  const body =
+    FLAMEY_POKE_BODIES[Math.floor(Math.random() * FLAMEY_POKE_BODIES.length)];
+  return { title: `🔥 ${senderName} poked your Flamey`, body };
+}
+
 export async function nudgeFriend(req: AuthenticatedRequest, res: Response) {
   const friendId = req.params.friendId;
   const senderId = req.userId!;
@@ -68,6 +82,16 @@ export async function nudgeFriend(req: AuthenticatedRequest, res: Response) {
       friendship.status !== "accepted"
     ) {
       return res.status(400).json({ error: "You can only nudge friends" });
+    }
+
+    // A Flamey poke is the same nudge — same friendship check above, same
+    // done-today and once-a-day rules below, same push type — dressed in
+    // Flamey's copy. Flamey only exists on the Fun dashboard, so both sides
+    // must draw it; NULL (a build predating the field) counts as not Fun.
+    // Without `source` nothing below changes.
+    const flameyPoke = req.body?.source === "flamey";
+    if (flameyPoke && !(await bothUseFun(senderId, friendId))) {
+      return res.status(403).json({ error: "flamey_unavailable" });
     }
 
     // Check if friend has already completed their mile today — same 0.95
@@ -99,12 +123,23 @@ export async function nudgeFriend(req: AuthenticatedRequest, res: Response) {
       const sender = await getUser({ userId: senderId });
       const senderName = sender?.username || "Someone";
 
-      await sendPush(friendId, {
-        title: "Time to lace up!",
-        body: `${senderName} is nudging you to get your mile in today`,
-        type: "friend_nudge",
-        data: { user_id: senderId },
-      });
+      await sendPush(
+        friendId,
+        flameyPoke
+          ? {
+              ...flameyPokeCopy(senderName),
+              // Same type every shipped build routes; `source` is additive
+              // and string-valued (inbox `data` decodes as [String: String]).
+              type: "friend_nudge",
+              data: { user_id: senderId, source: "flamey" },
+            }
+          : {
+              title: "Time to lace up!",
+              body: `${senderName} is nudging you to get your mile in today`,
+              type: "friend_nudge",
+              data: { user_id: senderId },
+            },
+      );
     }
 
     // Log after the send so a failed push doesn't consume the daily limit

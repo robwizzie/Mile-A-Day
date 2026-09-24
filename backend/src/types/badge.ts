@@ -11,7 +11,10 @@ export type BadgeCategory =
   | "competition"
   | "buddy"
   | "ghost"
-  | "weekly_challenge";
+  | "weekly_challenge"
+  // holiday_<key>: walked the day's goal ON a holiday (services/holidays.ts).
+  // Evaluated per DAY (not from aggregates) — see evaluateHolidayBadges.
+  | "holiday";
 export type BadgeRarity = "common" | "rare" | "legendary";
 export type DailyChallengeType =
   | "pace"

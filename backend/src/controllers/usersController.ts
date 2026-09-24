@@ -16,6 +16,8 @@ import {
 	getPublicStreak,
 	searchUsers as searchUsersByName
 } from '../services/userService.js';
+import { DASHBOARD_STYLES, flameyBlockFor, type FlameyBlock } from '../services/flameyService.js';
+import type { AuthenticatedRequest } from '../middleware/auth.js';
 
 const db = PostgresService.getInstance();
 
@@ -30,7 +32,17 @@ export async function getUser(req: Request, res: Response) {
 		});
 	}
 
-	res.json(results[0]);
+	// Additive: a friend's Flamey (Fun dashboard only). `{enabled:false}` for
+	// everyone else, including strangers — see flameyBlockFor. Never fails the
+	// profile read: a broken block degrades to "no Flamey".
+	const flamey = await flameyBlockFor((req as AuthenticatedRequest).userId, req.params.userId).catch(
+		(err: any): FlameyBlock => {
+			console.error('[flamey] block failed:', err?.message ?? err);
+			return { enabled: false };
+		}
+	);
+
+	res.json({ ...results[0], flamey });
 }
 
 export async function searchUsers(req: Request, res: Response) {
@@ -109,6 +121,17 @@ export async function updateUser(req: Request, res: Response) {
 		}
 		values.push(style);
 		updates.push(`profile_banner_style = $${values.length}`);
+	}
+
+	// Which dashboard the app draws — 'fun' (Flamey) or 'modern'. Gates the
+	// friend's-Flamey block and the Flamey poke. Absent = untouched.
+	if (req.body.dashboard_style !== undefined) {
+		const style = req.body.dashboard_style;
+		if (typeof style !== 'string' || !DASHBOARD_STYLES.has(style)) {
+			return res.status(400).json({ error: 'invalid_dashboard_style' });
+		}
+		values.push(style);
+		updates.push(`dashboard_style = $${values.length}`);
 	}
 
 	// Banner image: this PATCH can only CLEAR it. The path is written solely by
