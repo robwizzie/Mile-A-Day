@@ -151,6 +151,8 @@ struct FlameyItemArt: View {
 struct FlameyMedalDisc: View {
     let medal: FlameyMedalInfo
     var size: CGFloat = 40
+    /// A tile already wears its own lock; its corner medal doesn't repeat it.
+    var showsLock: Bool = true
 
     var body: some View {
         ZStack {
@@ -164,7 +166,7 @@ struct FlameyMedalDisc: View {
                 .font(.system(size: size * 0.4, weight: .bold))
                 .foregroundColor(.white.opacity(medal.isEarned ? 0.96 : 0.55))
                 .shadow(color: .black.opacity(0.25), radius: 1, y: 1)
-            if !medal.isEarned {
+            if !medal.isEarned, showsLock {
                 Image(systemName: "lock.fill")
                     .font(.system(size: size * 0.2, weight: .black))
                     .foregroundColor(.white)
@@ -177,6 +179,153 @@ struct FlameyMedalDisc: View {
         .accessibilityHidden(true)
     }
 }
+
+// MARK: - The stage, shared
+
+/// What every Closet stage agrees on: how much room his speech bubble takes
+/// above him, and how he's described.
+enum FlameyStage {
+    /// Height a speech bubble reaches ABOVE his `size`×`size` frame — every
+    /// style, two lines (measured in the harness: ~34pt at 104, ~29pt at 84).
+    /// A stage reserves it whether or not he's talking, so a bubble never
+    /// clips against what sits above him and choosing a voice moves nothing.
+    static func bubbleRoom(_ size: CGFloat) -> CGFloat { 16 + size * 0.4 }
+
+    static func accessibilityLabel(_ look: FlameyLook) -> String {
+        let worn = look.items.filter { !$0.isMoodProp && $0 != .classic && $0 != .classicBubble }
+        guard !worn.isEmpty else { return "Flamey, basic — wearing nothing" }
+        return "Flamey, wearing " + worn.map(\.displayName).joined(separator: ", ")
+    }
+
+    /// "From your Quick Runner medal" / "Locked · earn the Quick Runner medal".
+    @MainActor
+    static func medalLine(_ item: FlameyItem, model: FlameyClosetModel) -> String {
+        guard let medal = model.medal(for: item) else { return "Always his — no medal needed" }
+        guard let name = medal.name else {
+            let how = FlameyClosetCopy.lowercasedFirst(item.unlockCopy)
+            return model.owns(item) ? "Unlocked: \(how)" : "Locked · \(how)"
+        }
+        return model.owns(item) ? "From your \(name) medal" : "Locked · earn the \(name) medal"
+    }
+}
+
+// MARK: - The medal on a tile
+
+/// The medal behind an item, pinned to the corner of its picture — so the
+/// link between a medal and what it unlocks is on every tile, not only in
+/// the item's card.
+struct FlameyTileMedal: View {
+    let medal: FlameyMedalInfo
+    var size: CGFloat = 19
+
+    var body: some View {
+        FlameyMedalDisc(medal: medal, size: size, showsLock: false)
+            .overlay(Circle().strokeBorder(Color.black.opacity(0.55), lineWidth: 1.5))
+            .shadow(color: .black.opacity(0.4), radius: 1.5, y: 1)
+    }
+}
+
+// MARK: - A walkthrough tile
+
+/// One choice in a walkthrough row: the item (or None), its medal on the
+/// corner, and a clear SELECTED state — white ring, check, "SELECTED".
+struct FlameyPickTile: View {
+    /// nil = the row's "None".
+    let item: FlameyItem?
+    let slot: FlameySlot
+    let selected: Bool
+    let medal: FlameyMedalInfo?
+    var color: FlameyItem = .classic
+    var isNew: Bool = false
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                ZStack(alignment: .bottomTrailing) {
+                    Group {
+                        if let item {
+                            FlameyItemArt(item: item, color: color)
+                        } else {
+                            Image(systemName: "circle.slash")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.4))
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .frame(height: 50)
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(FlameyClosetStyle.artFill))
+                    if let medal {
+                        FlameyTileMedal(medal: medal, size: 18)
+                            .padding(3)
+                    }
+                }
+                Text(item?.displayName ?? "None")
+                    .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(selected ? .white : .white.opacity(0.78))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity, minHeight: 26, alignment: .top)
+                Text("SELECTED")
+                    .madFont(size: 8, weight: .black, design: .rounded, maxScale: 1.2)
+                    .tracking(0.6)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .opacity(selected ? 1 : 0)
+                    .frame(height: 9)
+            }
+            .padding(5)
+            .background(RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .fill(selected ? Color.white.opacity(0.15) : FlameyClosetStyle.tileFill))
+            .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .strokeBorder(selected ? Color.white : FlameyClosetStyle.tileStroke, lineWidth: selected ? 2 : 1))
+            .overlay(alignment: .topTrailing) {
+                if selected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .black))
+                        .foregroundColor(.black)
+                        .frame(width: 19, height: 19)
+                        .background(Circle().fill(Color.white))
+                        .offset(x: 4, y: -4)
+                        .accessibilityHidden(true)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if isNew && !selected {
+                    Text("NEW")
+                        .madFont(size: 8, weight: .black, design: .rounded, maxScale: 1.2)
+                        .tracking(0.5)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(FlameyClosetStyle.newDot))
+                        .offset(x: -3, y: -4)
+                        .accessibilityHidden(true)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        }
+        .buttonStyle(FlameyTilePressStyle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(selected ? (item == nil || item == slot.basicItem ? "" : "Double-tap to take it off")
+                                    : "Double-tap to put it on him")
+        .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
+    }
+
+    private var accessibilityLabel: String {
+        guard let item else { return "No \(slot.pickLabel.lowercased())" }
+        var parts = [item.displayName]
+        if let name = medal?.name { parts.append("from the \(name) medal") }
+        if isNew { parts.append("new") }
+        return parts.joined(separator: ", ")
+    }
+}
+
 
 // MARK: - A tile
 
@@ -198,11 +347,18 @@ struct FlameyClosetTile: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 5) {
-                FlameyItemArt(item: item, color: model.stageLook.color, locked: !owned)
-                    .frame(height: 56)
-                    .frame(maxWidth: .infinity)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(FlameyClosetStyle.artFill))
+                ZStack(alignment: .bottomTrailing) {
+                    FlameyItemArt(item: item, color: model.stageLook.color, locked: !owned)
+                        .frame(height: 56)
+                        .frame(maxWidth: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(FlameyClosetStyle.artFill))
+                    // The medal that unlocks it, on every tile — owned or not.
+                    if let medal = model.medal(for: item) {
+                        FlameyTileMedal(medal: medal, size: 18)
+                            .padding(3)
+                    }
+                }
 
                 Text(item.displayName)
                     .madFont(size: 11.5, weight: .heavy, design: .rounded, maxScale: 1.35)
@@ -304,6 +460,7 @@ struct FlameyClosetTile: View {
 
     private var accessibilityLabel: String {
         var parts = [item.displayName, item.slot.shortLabel]
+        if let name = model.medal(for: item)?.name { parts.append("from the \(name) medal") }
         if !owned {
             parts.append("locked")
             parts.append(FlameyClosetCopy.lowercasedFirst(item.unlockCopy))

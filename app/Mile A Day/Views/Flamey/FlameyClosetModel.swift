@@ -93,6 +93,80 @@ extension FlameySlot {
     }
 
     var sortIndex: Int { FlameySlot.allCases.firstIndex(of: self) ?? 0 }
+
+    /// The one sentence that says which medals fill this slot — every slot is
+    /// (almost) one medal ladder, so the rule is learnable once, in the
+    /// section header, instead of item by item.
+    var familyRule: String {
+        switch self {
+        case .color: return "Colours come from streak medals — the longer the streak, the rarer the flame."
+        case .head: return "Hats come from lifetime-mile medals — walk further, better hats."
+        case .eyes: return "Eyewear comes from daily-challenge medals."
+        case .chest: return "Chest pieces come from weekly-challenge medals."
+        case .back: return "Capes come from entering competitions; wings and banners from winning them."
+        case .feet: return "Shoes come from pace medals — run faster, cooler kicks."
+        case .costume: return "Costumes are rare: beat ghosts, walk huge miles — or it's Halloween."
+        case .held: return "Held items come from hyping friends and starting competitions."
+        case .trail: return "Trails come from big days — more miles in one day, flashier trails."
+        case .companion: return "Buddies come from buddy walks — walk together, gain a sidekick."
+        case .aura: return "Auras come from beating ghosts by a margin and posting stories."
+        case .bubble: return "Speech bubbles come from nudging friends."
+        }
+    }
+
+    /// "Pick his shoes" — a walkthrough section's instruction.
+    var pickLabel: String {
+        switch self {
+        case .color: return "Colour"
+        case .head: return "Hat"
+        case .eyes: return "Eyewear"
+        case .chest: return "Chest"
+        case .back: return "Cape or wings"
+        case .feet: return "Shoes"
+        case .costume: return "Costume"
+        case .held: return "In his hand"
+        case .trail: return "Trail"
+        case .companion: return "Buddy"
+        case .aura: return "Aura"
+        case .bubble: return "Speech bubble"
+        }
+    }
+}
+
+extension FlameyLookChoice {
+    /// The choice with `item` picked (nil = that slot cleared). Picking a
+    /// costume leaves the rest alone (it covers them); picking something a
+    /// costume would cover takes the costume off, so the pick is visible.
+    /// The Classic colour / bubble are stored as "nothing picked".
+    func picking(_ item: FlameyItem?, in slot: FlameySlot) -> FlameyLookChoice {
+        var next = self
+        guard let item else {
+            next[slot] = nil
+            return next
+        }
+        next[slot] = slot.basicItem == item ? nil : item
+        if slot != .costume, let costume = next[.costume], costume.hides.contains(slot) {
+            next[.costume] = nil
+        }
+        return next
+    }
+}
+
+// MARK: - Medal ↔ item
+
+/// Which Flamey items a medal unlocks — what the Medals screen shows (Fun
+/// only) and links into the Closet with.
+enum FlameyMedalLink {
+    private static let byBadge: [String: [FlameyItem]] = {
+        var out: [String: [FlameyItem]] = [:]
+        for item in FlameyItem.closet {
+            guard let id = item.badgeId else { continue }
+            out[id, default: []].append(item)
+        }
+        return out
+    }()
+
+    static func items(forBadge id: String) -> [FlameyItem] { byBadge[id] ?? [] }
 }
 
 // MARK: - Medals
@@ -470,6 +544,11 @@ final class FlameyClosetModel {
         return FlameyLook.resolve(owned: owned, choice: choice, date: date, signupDate: signupDate, detail: .full)
     }
 
+    /// Him in an arbitrary choice (the walkthrough's picks before they're saved).
+    func look(for choice: FlameyLookChoice) -> FlameyLook {
+        FlameyLook.resolve(owned: owned, choice: choice, date: date, signupDate: signupDate, detail: .full)
+    }
+
     var isBasic: Bool { choice.isBasic }
 
     /// A slot's items: what you own first (so picking is one glance), then
@@ -556,10 +635,8 @@ final class FlameyClosetModel {
         guard owns(item) else { return }
         focus = item
         say(FlameyClosetCopy.wearLine(item, seed: nextSeed()))
-        var next = choice
         // Picking the Classic colour / bubble is the same as leaving it basic.
-        next[item.slot] = item.slot.basicItem == item ? nil : item
-        commit(next, toast: "Wearing \(item.displayName)")
+        commit(choice.picking(item, in: item.slot), toast: "Wearing \(item.displayName)")
     }
 
     func takeOff(_ slot: FlameySlot) {
@@ -645,6 +722,22 @@ final class FlameyClosetModel {
     }
 
     func clearLine() { line = nil }
+
+    /// Point the caption at an item (a deep link, a walkthrough tap).
+    func setFocus(_ item: FlameyItem?) { focus = item }
+
+    /// The walkthrough saving its picks as each step is left: written
+    /// through like any tap, but quietly — one toast at the end says it.
+    func save(_ next: FlameyLookChoice) {
+        guard next != choice else { return }
+        choice = next
+        onChoiceChange(choice)
+    }
+
+    /// "Saved your picks · Undo" — back to `previous` in one tap.
+    func announce(_ text: String, undo previous: FlameyLookChoice?) {
+        toast = FlameyClosetToast(text: text, undo: previous == choice ? nil : previous)
+    }
 
     /// "Seen": the New dots go once the Closet closes.
     func markAllSeen() { newItems = [] }

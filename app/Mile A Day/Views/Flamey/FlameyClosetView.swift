@@ -2,19 +2,23 @@ import SwiftUI
 
 /// Flamey's Closet: dress him in what you've earned.
 ///
-/// ONE scroll. At the top a compact stage — Flamey as he looks right now, a
-/// line about the last thing you touched, and the three whole-look actions
-/// (Best look · Surprise me · Basic). Under it a PINNED header: the four tabs
-/// (Colour · Outfit · Extras · Bubble) and, on the tabs that hold several
-/// slots, a jump row. Each tab is its slots stacked as sections with a count
-/// ("Hats · 3 of 19"), four item tiles to a row — nothing hidden behind a
-/// sub-chip. Scroll and the stage slides away (a small Flamey docks beside
-/// the tabs so you still see him), leaving the grid most of the screen.
+/// The PREVIEW NEVER LEAVES. Everything above the grid is a fixed header —
+/// never part of the scroll — so he is always on screen, fully dressed, while
+/// you pick: at the top of the grid a roomy stage (him, his bubble with room
+/// to speak, a caption naming the last thing you touched and the MEDAL it
+/// came from, and Best look · Surprise me · Basic beside him); once you scroll
+/// the stage shrinks to a compact but readable one (~140pt, the caption and
+/// the three actions beside him) instead of scrolling away. Under it the
+/// tabs (Colour · Outfit · Extras · Bubble) and a jump row, then a hairline;
+/// the grid scrolls in its own frame below that line, so nothing can ever
+/// slide under the tabs.
 ///
-/// Picking: tap something you own to wear it (tap it again to take it off),
-/// every change with an Undo toast; tap something locked — or long-press
-/// anything — for its card: the medal it comes from, when you earned it, or
-/// how and WHERE to earn it. Nothing is ever put on him that you didn't pick.
+/// Each tab is its slots stacked as sections — "Shoes · 5 of 8", the one
+/// sentence saying which medals fill that slot, then 4-up item tiles, each
+/// wearing its medal on the corner. Tap something you own to wear it (tap
+/// again to take it off), every change with an Undo toast; tap something
+/// locked — or long-press anything — for its card. Nothing is ever put on him
+/// that you didn't pick.
 ///
 /// Fun-only by construction: the hosts only present it on Fun.
 struct FlameyClosetView: View {
@@ -24,8 +28,10 @@ struct FlameyClosetView: View {
     var onShowJourney: () -> Void = {}
     /// False only for a snapshot (ImageRenderer can't see into a ScrollView).
     var scrollable: Bool = true
-    /// Snapshot of the scrolled state (the harness).
+    /// Snapshot of the scrolled state (the harness): compact stage, and the
+    /// grid drawn this far up under the header's hairline.
     var previewCollapsed: Bool = false
+    var previewScroll: CGFloat = 0
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -42,40 +48,24 @@ struct FlameyClosetView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            if scrollable {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                            stageBlock
-                                .background(collapseProbe)
-                            Section {
-                                sections
-                            } header: {
-                                pinnedHeader { slot in
-                                    withAnimation(reduceMotion ? nil : .snappy) {
-                                        proxy.scrollTo(anchorId(slot), anchor: .top)
-                                    }
-                                }
-                            }
+            ScrollViewReader { proxy in
+                VStack(spacing: 0) {
+                    header { slot in
+                        withAnimation(reduceMotion ? nil : .snappy) {
+                            proxy.scrollTo(anchorId(slot), anchor: .top)
                         }
                     }
-                    .coordinateSpace(name: "closet")
-                    .scrollIndicators(.hidden)
-                    .onPreferenceChange(StageBottomKey.self) { bottom in
-                        let now = bottom < 24
-                        guard now != collapsed else { return }
-                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) { collapsed = now }
-                    }
-                    .onChange(of: model.tab) { _, _ in
-                        guard collapsed, let first = model.tab.slots.first else { return }
-                        proxy.scrollTo(anchorId(first), anchor: .top)
-                    }
+                    grid
                 }
-            } else {
-                if !previewCollapsed { stageBlock }
-                pinnedHeader { _ in }
-                sections
-                Spacer(minLength: 0)
+                .onChange(of: model.tab) { _, _ in
+                    proxy.scrollTo("closet-top", anchor: .top)
+                }
+                .onAppear {
+                    // Opened ON an item (a medal's "See it in Flamey's
+                    // Closet", the unlock card): land on its section.
+                    guard scrollable, let focus = model.focus else { return }
+                    DispatchQueue.main.async { proxy.scrollTo(anchorId(focus.slot), anchor: .top) }
+                }
             }
         }
         .background(background.ignoresSafeArea())
@@ -91,6 +81,39 @@ struct FlameyClosetView: View {
     }
 
     private func anchorId(_ slot: FlameySlot) -> String { "section-\(slot.rawValue)" }
+
+    // MARK: The grid (the only thing that scrolls)
+
+    @ViewBuilder
+    private var grid: some View {
+        if scrollable {
+            ScrollView {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: 0).id("closet-top")
+                        .background(scrollProbe)
+                    sections
+                }
+            }
+            .coordinateSpace(name: "closet-grid")
+            .scrollIndicators(.hidden)
+            .onPreferenceChange(GridScrollKey.self) { top in
+                // Hysteresis, so the header can't flicker at the boundary.
+                let next = collapsed ? top < -6 : top < -48
+                guard next != collapsed else { return }
+                withAnimation(reduceMotion ? nil : .snappy(duration: 0.25)) { collapsed = next }
+            }
+        } else {
+            Color.clear
+                .overlay(alignment: .top) { sections.offset(y: -previewScroll) }
+                .clipped()
+        }
+    }
+
+    private var scrollProbe: some View {
+        GeometryReader { geo in
+            Color.clear.preference(key: GridScrollKey.self, value: geo.frame(in: .named("closet-grid")).minY)
+        }
+    }
 
     // MARK: Chrome
 
@@ -122,7 +145,7 @@ struct FlameyClosetView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("What I've unlocked")
-            .accessibilityHint("Walks you through what your medals have unlocked")
+            .accessibilityHint("Walks you through dressing him in what your medals have unlocked")
             Spacer(minLength: 0)
             Text("Flamey's Closet")
                 .madFont(size: 17, weight: .heavy, design: .rounded, maxScale: 1.3)
@@ -145,38 +168,48 @@ struct FlameyClosetView: View {
         .frame(height: 46)
     }
 
+    // MARK: The fixed header — stage, tabs, jump row
+
+    private func header(jump: @escaping (FlameySlot) -> Void) -> some View {
+        VStack(spacing: 0) {
+            if isCollapsed {
+                HStack(alignment: .center, spacing: 10) {
+                    stage(size: 80)
+                        .frame(width: 142)
+                    VStack(alignment: .leading, spacing: 10) {
+                        compactCaption
+                        HStack(spacing: 8) { actionButtons(compact: true) }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 16)
+                .transition(.opacity)
+            } else {
+                VStack(spacing: 6) {
+                    HStack(alignment: .center, spacing: 10) {
+                        stage(size: 100)
+                        VStack(spacing: 8) { actionButtons(compact: false) }
+                            .frame(width: 138)
+                    }
+                    caption
+                }
+                .padding(.horizontal, 16)
+                .transition(.opacity)
+            }
+            tabsAndJump(jump)
+            Rectangle().fill(Color.white.opacity(0.09)).frame(height: 1)
+        }
+    }
+
     // MARK: Stage
 
-    private var stageBlock: some View {
-        VStack(spacing: 8) {
-            // The whole-look actions stand BESIDE him, not in a row of their
-            // own: every point of height up here is a row of tiles lost.
-            HStack(alignment: .center, spacing: 10) {
-                stage
-                actionColumn
-                    .frame(width: 138)
-            }
-            .padding(.horizontal, 16)
-            caption
-                .padding(.horizontal, 16)
-        }
-        .padding(.bottom, 6)
-    }
-
-    /// Reports where the stage block ends, so the header can dock a small
-    /// Flamey once he has scrolled away. Only an opacity/width change hangs
-    /// off it — never the height of anything above the scroll.
-    private var collapseProbe: some View {
-        GeometryReader { geo in
-            Color.clear.preference(key: StageBottomKey.self, value: geo.frame(in: .named("closet")).maxY - 70)
-        }
-    }
-
-    private var stage: some View {
-        let size: CGFloat = 104
+    /// Him, as he looks right now. Room for his bubble is RESERVED above him
+    /// (`FlameyStage.bubbleRoom`) at every size, so every bubble style draws
+    /// whole — the old stage let the scroll view's edge slice it to a bar.
+    private func stage(size: CGFloat) -> some View {
         var mood = FlameMood(kind: .ready, streak: 0)
-        // He speaks only about the selection — except on the Bubble tab,
-        // where the bubble IS the item and has to be on screen to be judged.
+        // He speaks about the selection — and always on the Bubble tab, where
+        // the bubble IS the item and has to be on screen to be judged.
         let line = model.line ?? (model.tab == .style ? "How do I sound?" : nil)
         mood.pokeQuip = line
         mood.pokedAt = model.lineAt
@@ -190,20 +223,14 @@ struct FlameyClosetView: View {
                 .frame(width: size, height: size)
                 .padding(.bottom, size * 0.11)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(stageAccessibilityLabel)
+                .accessibilityLabel(FlameyStage.accessibilityLabel(model.stageLook))
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 136, alignment: .bottom)
+        .frame(height: size * 1.11 + FlameyStage.bubbleRoom(size), alignment: .bottom)
     }
 
-    private var stageAccessibilityLabel: String {
-        let worn = model.stageLook.items.filter { !$0.isMoodProp && $0 != .classic && $0 != .classicBubble }
-        guard !worn.isEmpty else { return "Flamey, basic — wearing nothing" }
-        return "Flamey, wearing " + worn.map(\.displayName).joined(separator: ", ")
-    }
-
-    /// Under him: the item you last touched (with a way to its card), else
-    /// what state he's in and how much is unlocked. Fixed height, so tapping
+    /// Under him: the item you last touched and the MEDAL it came from (with
+    /// a way to its card), else what state he's in. Fixed height, so tapping
     /// around never shoves the grid.
     @ViewBuilder
     private var caption: some View {
@@ -213,17 +240,15 @@ struct FlameyClosetView: View {
                     MADHaptics.tap()
                     model.detail = item
                 } label: {
-                    HStack(spacing: 6) {
-                        if let medal = model.medal(for: item) {
-                            FlameyMedalDisc(medal: medal, size: 22)
-                        }
+                    HStack(spacing: 8) {
+                        focusBadge(item, size: 26)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(item.displayName)
                                 .madFont(size: 14, weight: .heavy, design: .rounded)
                                 .foregroundColor(.white)
-                            Text(focusDetail(item))
+                            Text(FlameyStage.medalLine(item, model: model))
                                 .madFont(size: 11.5, weight: .semibold, design: .rounded)
-                                .foregroundColor(.white.opacity(0.55))
+                                .foregroundColor(.white.opacity(0.6))
                         }
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
@@ -272,85 +297,135 @@ struct FlameyClosetView: View {
                 .accessibilityHint("Walks you through what your medals have unlocked")
             }
         }
-        .frame(height: 48)
+        .frame(height: 46)
     }
 
-    private func focusDetail(_ item: FlameyItem) -> String {
-        if let medal = model.medal(for: item) {
-            let name = medal.name ?? item.unlockCopy
-            return model.owns(item) ? "From \(name)" : "Locked · \(name)"
-        }
-        return "\(item.slot.shortLabel) · always his"
-    }
-
-    private var actionColumn: some View {
-        VStack(spacing: 8) {
-            actionPill("Best look", icon: "sparkles", hint: "Puts on the best thing you own in each slot") {
-                MADHaptics.success()
-                withAnimation(reduceMotion ? nil : .snappy) { model.bestLook() }
-            }
-            actionPill("Surprise me", icon: "dice.fill", hint: "A random mix of things you own") {
-                MADHaptics.emphasis()
-                withAnimation(reduceMotion ? nil : .snappy) { model.surprise() }
-            }
-            actionPill("Basic", icon: "arrow.uturn.backward", hint: "Takes everything off — the original Flamey",
-                       enabled: !model.isBasic) {
+    /// The scrolled caption, beside him: what you last touched and its medal
+    /// on two lines, tappable for the card — else the tally.
+    @ViewBuilder
+    private var compactCaption: some View {
+        if let item = model.focus {
+            Button {
                 MADHaptics.tap()
-                withAnimation(reduceMotion ? nil : .snappy) { model.resetToBasic() }
+                model.detail = item
+            } label: {
+                HStack(spacing: 7) {
+                    focusBadge(item, size: 22)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.displayName)
+                            .madFont(size: 13.5, weight: .heavy, design: .rounded, maxScale: 1.3)
+                            .foregroundColor(.white)
+                        Text(FlameyStage.medalLine(item, model: model))
+                            .madFont(size: 11, weight: .semibold, design: .rounded, maxScale: 1.3)
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens its card")
+        } else {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(model.isBasic ? "Basic Flamey" : (model.choice.items.count == 1 ? "Wearing 1 pick" : "Wearing \(model.choice.items.count) picks"))
+                    .madFont(size: 13.5, weight: .heavy, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white)
+                Text("\(model.tally.owned) of \(model.tally.total) unlocked")
+                    .madFont(size: 11, weight: .semibold, design: .rounded, maxScale: 1.3, monospacedDigit: true)
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+            .accessibilityElement(children: .combine)
         }
     }
 
-    private func actionPill(_ title: String, icon: String, hint: String, enabled: Bool = true,
+    @ViewBuilder
+    private func focusBadge(_ item: FlameyItem, size: CGFloat) -> some View {
+        if let medal = model.medal(for: item) {
+            FlameyMedalDisc(medal: medal, size: size)
+        } else {
+            Image(systemName: "gift.fill")
+                .font(.system(size: size * 0.5, weight: .bold))
+                .foregroundColor(FlameyClosetStyle.ember)
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
+        }
+    }
+
+    // MARK: Whole-look actions
+
+    /// Best look · Surprise me · Basic — labelled pills beside the big stage,
+    /// labelled icon discs beside the compact one.
+    @ViewBuilder
+    private func actionButtons(compact: Bool) -> some View {
+        actionPill("Best look", icon: "sparkles", compact: compact,
+                   hint: "Puts on the best thing you own in each slot") {
+            MADHaptics.success()
+            withAnimation(reduceMotion ? nil : .snappy) { model.bestLook() }
+        }
+        actionPill("Surprise me", icon: "dice.fill", compact: compact, hint: "A random mix of things you own") {
+            MADHaptics.emphasis()
+            withAnimation(reduceMotion ? nil : .snappy) { model.surprise() }
+        }
+        actionPill("Basic", icon: "arrow.uturn.backward", compact: compact,
+                   hint: "Takes everything off — the original Flamey", enabled: !model.isBasic) {
+            MADHaptics.tap()
+            withAnimation(reduceMotion ? nil : .snappy) { model.resetToBasic() }
+        }
+    }
+
+    private func actionPill(_ title: String, icon: String, compact: Bool, hint: String, enabled: Bool = true,
                             action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .madFont(size: 11, weight: .bold, maxScale: 1.3)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .madFont(size: 12.5, weight: .heavy, design: .rounded, maxScale: 1.3)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+            Group {
+                if compact {
+                    Image(systemName: icon)
+                        .madFont(size: 13, weight: .bold, maxScale: 1.3)
+                        .frame(width: 40, height: 36)
+                        .background(Capsule().fill(Color.white.opacity(0.08)))
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+                        .contentShape(Capsule())
+                } else {
+                    HStack(spacing: 5) {
+                        Image(systemName: icon)
+                            .madFont(size: 11, weight: .bold, maxScale: 1.3)
+                            .accessibilityHidden(true)
+                        Text(title)
+                            .madFont(size: 12.5, weight: .heavy, design: .rounded, maxScale: 1.3)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                    .background(Capsule().fill(Color.white.opacity(0.08)))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+                    .contentShape(Capsule())
+                }
             }
             .foregroundColor(.white.opacity(enabled ? 0.92 : 0.35))
-            .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-            .background(Capsule().fill(Color.white.opacity(0.08)))
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
-            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+        .accessibilityLabel(title)
         .accessibilityHint(hint)
     }
 
-    // MARK: Pinned header (tabs + jump row)
+    // MARK: Tabs + jump row
 
-    private func pinnedHeader(jump: @escaping (FlameySlot) -> Void) -> some View {
+    private func tabsAndJump(_ jump: @escaping (FlameySlot) -> Void) -> some View {
         VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                if isCollapsed {
-                    FlameyDressedFigure(look: model.stageLook, health: .healthy, size: 34, scale: 1)
-                        .frame(width: 36, height: 36)
-                        .background(Circle().fill(stageGlow.opacity(0.16)))
-                        .transition(.scale.combined(with: .opacity))
-                        .accessibilityHidden(true)
-                }
-                tabPicker
-            }
+            tabPicker
             if model.tab.slots.count > 1 {
                 jumpRow(jump)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 6)
-        .padding(.bottom, 8)
-        .background(
-            Color(red: 0.08, green: 0.035, blue: 0.045)
-                .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1) }
-                .opacity(isCollapsed ? 1 : 0.0)
-        )
+        .padding(.top, 8)
+        .padding(.bottom, 10)
     }
 
     private var tabPicker: some View {
@@ -429,48 +504,53 @@ struct FlameyClosetView: View {
         Circle().fill(FlameyClosetStyle.newDot).frame(width: 7, height: 7).accessibilityHidden(true)
     }
 
+
     // MARK: Sections
 
     private var sections: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 22) {
             ForEach(model.tab.slots, id: \.self) { slot in
                 section(slot)
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 10)
+        .padding(.top, 12)
         .padding(.bottom, 96)
     }
 
     private func section(_ slot: FlameySlot) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(slot.closetLabel)
-                    .madFont(size: 13, weight: .black, design: .rounded, maxScale: 1.4)
-                    .tracking(1)
-                    .textCase(.uppercase)
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                    .accessibilityAddTraits(.isHeader)
-                Text("\(model.ownedCount(in: slot)) of \(model.totalCount(in: slot))")
-                    .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.4, monospacedDigit: true)
-                    .foregroundColor(.white.opacity(0.45))
-                    .lineLimit(1)
-                    .accessibilityLabel("\(model.ownedCount(in: slot)) of \(model.totalCount(in: slot)) unlocked")
-                Spacer(minLength: 8)
-                if let worn = model.worn(in: slot) {
-                    Text("Wearing \(worn.displayName)")
-                        .madFont(size: 11.5, weight: .bold, design: .rounded, maxScale: 1.3)
-                        .foregroundColor(FlameyClosetStyle.worn)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(slot.closetLabel)
+                        .madFont(size: 13, weight: .black, design: .rounded, maxScale: 1.4)
+                        .tracking(1)
+                        .textCase(.uppercase)
+                        .foregroundColor(.white)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("\(model.ownedCount(in: slot)) of \(model.totalCount(in: slot))")
+                        .madFont(size: 12, weight: .bold, design: .rounded, maxScale: 1.4, monospacedDigit: true)
+                        .foregroundColor(.white.opacity(0.45))
+                        .lineLimit(1)
+                        .accessibilityLabel("\(model.ownedCount(in: slot)) of \(model.totalCount(in: slot)) unlocked")
+                    Spacer(minLength: 8)
+                    if let worn = model.worn(in: slot) {
+                        Text("Wearing \(worn.displayName)")
+                            .madFont(size: 11.5, weight: .bold, design: .rounded, maxScale: 1.3)
+                            .foregroundColor(FlameyClosetStyle.worn)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
                 }
+                // Which medals fill this slot — said once, here, so the medal
+                // on each tile below reads as a ladder, not a coincidence.
+                Text(slot.familyRule)
+                    .madFont(size: 12, weight: .semibold, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white.opacity(0.5))
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .background(alignment: .top) {
-                // The jump target sits ABOVE the title by the pinned
-                // header's height, so a jump lands the title under it.
-                Color.clear.frame(height: 1).id(anchorId(slot)).padding(.top, -104)
-            }
+            .id(anchorId(slot))
             LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(model.items(in: slot), id: \.self) { item in
                     FlameyClosetTile(item: item, model: model) {
@@ -515,7 +595,7 @@ struct FlameyClosetView: View {
     }
 }
 
-private struct StageBottomKey: PreferenceKey {
+private struct GridScrollKey: PreferenceKey {
     static let defaultValue: CGFloat = 1000
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
