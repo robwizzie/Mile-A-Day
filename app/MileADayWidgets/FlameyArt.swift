@@ -960,40 +960,65 @@ enum FlameyArt {
 
     // MARK: Chest (flat, under the mouth — there is no neck)
 
+    /// The chest band (body units above his base): pieces start at
+    /// `chestTop` and are fitted by `chestFit` so the lowest reaches no
+    /// further than ~0.03u above his base — above his legs, on his body.
+    static let chestTop: CGFloat = 0.135
+    static let chestFit: CGFloat = 0.78
+
     static func chest(_ item: FlameyItem, _ base: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
         let L = lw(u)
         let ink = self.ink
         let ny = a.bottom - 0.075 * u
-        // Chest pieces are drawn a size up about the middle of his chest, so
-        // they read on a 44pt widget (the sash spans him and stays 1:1).
+        // Every chest piece is FITTED into his upper chest: the band between
+        // the bottom of his grin (~bottom − 0.13u) and `chestFloor`, which
+        // sits clear above his base — so nothing ever hangs over his legs
+        // (shod) or off his bottom edge (bare). Each piece is drawn in its
+        // own coordinates, then scaled about the band's top so its lowest
+        // point lands on the floor. The sash spans him and is placed 1:1.
         var ctx = base
         if item != .championSash {
-            let k: CGFloat = 1.22, py = a.bottom - 0.07 * u
-            ctx.translateBy(x: 0, y: py); ctx.scaleBy(x: k, y: k); ctx.translateBy(x: 0, y: -py)
+            let top = a.bottom - chestTop * u
+            ctx.translateBy(x: 0, y: top - 0.012 * u)
+            ctx.scaleBy(x: chestFit, y: chestFit)
+            ctx.translateBy(x: 0, y: -top)
         }
         switch item {
         case .bandana:
-            // A kerchief: the triangle and its knot, no band round a neck.
+            // A neckerchief: a band tied snug under his grin, a small point
+            // hanging from its middle and the knot at his side — never a
+            // wrap round his hips.
             let blue = hx(0x2563EB)
-            let top = ny - 0.045 * u
+            let top = ny - 0.055 * u
             var tri = Path()
-            tri.move(to: pt(-0.19 * u, top))
-            tri.addQuadCurve(to: pt(0.19 * u, top), control: pt(0, top + 0.03 * u))
-            tri.addQuadCurve(to: pt(0, ny + 0.085 * u), control: pt(0.08 * u, ny + 0.03 * u))
-            tri.addQuadCurve(to: pt(-0.19 * u, top), control: pt(-0.08 * u, ny + 0.03 * u))
+            tri.move(to: pt(-0.15 * u, top))
+            tri.addQuadCurve(to: pt(0.15 * u, top), control: pt(0, top + 0.035 * u))
+            tri.addQuadCurve(to: pt(0.005 * u, ny + 0.065 * u), control: pt(0.07 * u, ny + 0.02 * u))
+            tri.addQuadCurve(to: pt(-0.15 * u, top), control: pt(-0.06 * u, ny + 0.02 * u))
             tri.closeSubpath()
-            ctx.fill(tri, with: lin([hx(0x3B82F6), blue], pt(0, top), pt(0, ny + 0.08 * u)))
-            var dots = ctx; dots.clip(to: tri)
-            for (x, y) in [(-0.12, -0.02), (-0.04, 0.0), (0.05, -0.02), (0.13, -0.02), (0.0, 0.035), (-0.06, 0.03), (0.07, 0.03), (0.0, 0.065)] as [(CGFloat, CGFloat)] {
-                dots.fill(circle(x * u, ny + y * u, 0.011 * u), with: .color(.white))
+            ctx.fill(tri, with: lin([hx(0x4F90FF), blue], pt(-0.1 * u, top), pt(0.05 * u, ny + 0.06 * u)))
+            var dots = ctx
+            dots.clip(to: tri)
+            for (x, y) in [(-0.09, -0.03), (0.0, -0.025), (0.09, -0.03), (-0.045, 0.005), (0.045, 0.005), (0.0, 0.035)] as [(CGFloat, CGFloat)] {
+                dots.fill(circle(x * u, ny + y * u, 0.010 * u), with: .color(.white))
             }
             ctx.stroke(tri, with: .color(ink), style: StrokeStyle(lineWidth: L, lineJoin: .round))
-            for sx in [-1.0, 1.0] as [CGFloat] {
-                let tie = placed(ctx, sx * 0.19 * u, top, Double(sx) * 28)
-                let t = rrect(-0.014 * u, -0.01 * u, 0.028 * u, 0.06 * u, 0.012 * u)
-                tie.fill(t, with: .color(blue))
-                tie.stroke(t, with: .color(ink), lineWidth: L * 0.8)
+            // The band itself, snug across his chest.
+            var bandPath = Path()
+            bandPath.move(to: pt(-0.17 * u, top - 0.004 * u))
+            bandPath.addQuadCurve(to: pt(0.17 * u, top - 0.004 * u), control: pt(0, top + 0.03 * u))
+            ctx.stroke(bandPath, with: .color(ink), style: StrokeStyle(lineWidth: 0.026 * u + L * 2, lineCap: .round))
+            ctx.stroke(bandPath, with: .color(blue), style: StrokeStyle(lineWidth: 0.026 * u, lineCap: .round))
+            // Knot at his side with two little tails.
+            let kx = -0.155 * u, ky = top + 0.004 * u
+            for ang in [22.0, 58.0] {
+                let t = placed(ctx, kx, ky, ang)
+                let tail = rrect(-0.012 * u, 0, 0.024 * u, 0.05 * u, 0.01 * u)
+                t.fill(tail, with: .color(blue))
+                t.stroke(tail, with: .color(ink), lineWidth: L * 0.8)
             }
+            ctx.fill(circle(kx, ky, 0.022 * u), with: .color(hx(0x3B7BF6)))
+            ctx.stroke(circle(kx, ky, 0.022 * u), with: .color(ink), lineWidth: L * 0.9)
         case .bowTie:
             let g = placed(ctx, 0, ny - 0.005 * u)
             let w = 0.12 * u, h = 0.08 * u
@@ -1038,10 +1063,10 @@ enum FlameyArt {
             // Over one shoulder, across his front, clipped to his outline.
             let body = FlameBuddyOuterShape(wobble: 0).path(in: bodyRect(a, u))
             var g = ctx; g.clip(to: body)
-            let p0 = pt(-0.44 * u, a.bottom - 0.27 * u), p1 = pt(0.38 * u, a.bottom + 0.03 * u)
+            let p0 = pt(-0.44 * u, a.bottom - 0.17 * u), p1 = pt(0.42 * u, a.bottom - 0.05 * u)
             let dx = p1.x - p0.x, dy = p1.y - p0.y
             let len = sqrt(dx * dx + dy * dy)
-            let nxv = -dy / len * 0.05 * u, nyv = dx / len * 0.05 * u
+            let nxv = -dy / len * 0.036 * u, nyv = dx / len * 0.036 * u
             let sash = poly([pt(p0.x - nxv, p0.y - nyv), pt(p1.x - nxv, p1.y - nyv), pt(p1.x + nxv, p1.y + nyv), pt(p0.x + nxv, p0.y + nyv)])
             g.fill(sash, with: lin([hx(0xF0334C), hx(0xB3152F)], p0, p1))
             for s in [-1.0, 1.0] as [CGFloat] {
@@ -1051,7 +1076,7 @@ enum FlameyArt {
             }
             g.stroke(sash, with: .color(ink), lineWidth: L)
             // A rosette where it crosses his front.
-            let rx = 0.14 * u, ry = a.bottom - 0.05 * u, rr = 0.05 * u
+            let rx = 0.17 * u, ry = a.bottom - 0.085 * u, rr = 0.042 * u
             for i in 0..<10 {
                 let ang = Double(i) / 10 * 2 * .pi
                 ctx.fill(circle(rx + CGFloat(cos(ang)) * rr * 0.72, ry + CGFloat(sin(ang)) * rr * 0.72, rr * 0.42),
@@ -1097,8 +1122,8 @@ enum FlameyArt {
             cord.move(to: pt(-0.13 * u, ny - 0.06 * u)); cord.addQuadCurve(to: pt(0.02 * u, ny - 0.035 * u), control: pt(-0.05 * u, ny - 0.02 * u))
             cord.move(to: pt(0.15 * u, ny - 0.06 * u)); cord.addQuadCurve(to: pt(0.02 * u, ny - 0.035 * u), control: pt(0.09 * u, ny - 0.02 * u))
             ctx.stroke(cord, with: .color(hx(0x2B2B33)), style: StrokeStyle(lineWidth: L * 1.1, lineCap: .round))
-            let g = placed(ctx, 0.02 * u, ny + 0.03 * u, -8)
-            let fw = 0.15 * u, fh = 0.17 * u
+            let g = placed(ctx, 0.02 * u, ny + 0.022 * u, -8)
+            let fw = 0.13 * u, fh = 0.145 * u
             var shadow = g; shadow.addFilter(.shadow(color: .black.opacity(0.35), radius: 0.012 * u, y: 0.006 * u))
             shadow.fill(rrect(-fw / 2, -fh / 2, fw, fh, 0.008 * u), with: .color(hx(0xFBFAF6)))
             let photo = CGRect(x: -fw / 2 + 0.014 * u, y: -fh / 2 + 0.014 * u, width: fw - 0.028 * u, height: fh * 0.62)
@@ -1130,7 +1155,7 @@ enum FlameyArt {
             ctx.stroke(wrap, with: .color(ink), lineWidth: L)
             for (dx, ang) in [(0.05, -10.0), (0.10, 8.0)] as [(CGFloat, Double)] {
                 let t = placed(ctx, dx * u, top + 0.035 * u, ang)
-                let hh = 0.12 * u, ww = 0.05 * u
+                let hh = 0.085 * u, ww = 0.05 * u
                 let r = rrect(-ww / 2, 0, ww, hh, 0.01 * u)
                 t.fill(r, with: .color(green))
                 var ts = t; ts.clip(to: r)
