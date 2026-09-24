@@ -349,6 +349,7 @@ class UserManager: ObservableObject {
         currentUser.profileImageUrl = remote.profile_image_url
         currentUser.profileBannerUrl = remote.profile_banner_url
         currentUser.profileBannerStyle = remote.profile_banner_style
+        FlameyFacts.recordSignup(createdAt: remote.created_at, userId: userId)
         saveUserData()
     }
     #endif

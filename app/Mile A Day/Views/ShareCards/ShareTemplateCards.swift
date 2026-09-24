@@ -105,8 +105,11 @@ struct ShareStyleFlame: View {
                 // No `mood`: the hero's props and bubble are live-dashboard
                 // dressing, and a bubble baked into a picture reads as a
                 // caption nobody wrote.
+                // His look (gear + today's outfit) — the SAME description the
+                // hero draws, still-rendered.
                 FlameBuddyView(health: .blazing, size: size,
-                               phase: .blazing, coalWarmth: 1, still: true)
+                               phase: .blazing, coalWarmth: 1, still: true,
+                               look: FlameyFacts.look())
             case .modern:
                 ProfessionalFlameView(phase: .blazing, health: .blazing,
                                       size: size, coalWarmth: 1, still: true)
@@ -129,7 +132,10 @@ struct ShareFlamey: View {
         FlameBuddyView(health: .blazing, size: size,
                        phase: .blazing, coalWarmth: 1,
                        mood: mood.map { FlameMood(kind: $0, streak: streak) },
-                       still: true, showsMoodBubble: false)
+                       still: true, showsMoodBubble: false,
+                       // Wearing what he wears on the dashboard today; the
+                       // look carries the mood's shades / party hat.
+                       look: FlameyFacts.look(mood: mood))
             .frame(width: size, height: size)
             .accessibilityHidden(true)
     }

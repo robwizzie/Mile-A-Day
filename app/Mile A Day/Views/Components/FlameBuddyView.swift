@@ -42,6 +42,12 @@ struct FlameBuddyView: View {
     /// props (shades, party hat): the bubble is live-dashboard dressing, and
     /// baked into a picture it reads as a caption nobody wrote.
     var showsMoodBubble: Bool = true
+    /// What he's wearing (`FlameyLook`, resolved once by the caller from
+    /// durable facts + today's date + the mood). nil = no wardrobe at all —
+    /// byte-identical to before, which is what every caller that isn't a Fun
+    /// surface passes. When set, it OWNS the mood's props too (shades, party
+    /// hat, nightcap), so a holiday hat can outrank them without two hats.
+    var look: FlameyLook? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The house pattern: an explicit still OR the system setting.
@@ -133,9 +139,19 @@ struct FlameBuddyView: View {
     @State private var moodPacePhase = false
     @State private var bobPhase = false
     @State private var pokeSquash: CGFloat = 1
+    /// The jolt of being woken — a one-shot hop, separate from the mood's own
+    /// repeating hop so it can't inherit (or reset) that tempo.
+    @State private var startleOffset: CGFloat = 0
 
     private var animatedFlame: some View {
         ZStack {
+            if let look {
+                // Tail feathers: the first child, so behind the figure and
+                // its glow.
+                FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: currentVigor(at: Date())),
+                                  side: .behind, still: effectiveStill)
+            }
+
             // The ONLY per-frame clock: the figure's flicker and blink. 12 fps
             // of a shadowed, blurred shape is the one cost this view has
             // always carried; nothing else may ride it.
@@ -156,15 +172,25 @@ struct FlameBuddyView: View {
                 }
             }
 
+            if let look {
+                // Canvas-drawn, no clock: redrawn only when the look or his
+                // scale changes. Rides the container's bob/hop like the props.
+                FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: currentVigor(at: Date())),
+                                  side: .front, still: effectiveStill)
+            }
+
             if let mood {
                 // No clock of its own (see FlameMoodLayer). Shares the
                 // container's bob/hop/pace below, so props ride with him.
                 FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: currentVigor(at: Date())),
-                               showsBubble: showsMoodBubble)
+                               showsBubble: showsMoodBubble, drawsWornProps: look == nil)
             }
+
+            reactionProps(scale: figureScale(vigor: currentVigor(at: Date())))
         }
+        .rotationEffect(.degrees(wiggle), anchor: .bottom)
         .scaleEffect(x: 1, y: pokeSquash, anchor: .bottom)
-        .offset(x: paceOffset, y: hopOffset + bobOffset)
+        .offset(x: paceOffset, y: hopOffset + bobOffset + startleOffset)
         .onAppear {
             // Off the appear commit, on purpose: a `repeatForever` animation
             // started INSIDE onAppear is attached to the view's initial
@@ -179,10 +205,98 @@ struct FlameBuddyView: View {
                 startMoodMotion()
             }
         }
-        .onChange(of: mood?.kind) { _, _ in restartMoodMotion() }
+        .onChange(of: mood?.kind) { old, new in
+            restartMoodMotion()
+            if old == .sleepy, new == .groggy { startle() }
+        }
         .onChange(of: mood?.pokedAt) { _, newValue in
             if newValue != nil { pokeBounce() }
         }
+        .onChange(of: mood?.reactionAt) { _, newValue in
+            guard newValue != nil, let reaction = mood?.reaction else { return }
+            play(reaction)
+        }
+    }
+
+    // MARK: - Play reactions (one-shot container transforms)
+
+    @State private var wiggle: Double = 0
+    @State private var showHand = false
+    @State private var feeding: CalorieTreat?
+    @State private var treatInMouth = false
+    @State private var munchBulge: CGFloat = 0
+
+    /// Every reaction is a one-shot transform on state this view owns — no
+    /// clock. Reduce Motion / stills skip the motion; the quip (the hero's
+    /// job) and the haptic still land.
+    private func play(_ reaction: FlameMood.Reaction) {
+        guard !effectiveStill else { return }
+        switch reaction {
+        case .highFive:
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.55)) { showHand = true }
+            startle()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+                withAnimation(.easeIn(duration: 0.2)) { showHand = false }
+            }
+        case .refuse:
+            shake(degrees: 5, beats: 4, beat: 0.09)
+        case .tickle:
+            shake(degrees: 8, beats: 8, beat: 0.06)
+        case .feed(let treat):
+            var t = Transaction()
+            t.disablesAnimations = true
+            withTransaction(t) {
+                // Never a drink in his hand, whatever the caller passed.
+                feeding = FlameMood.food(for: treat)
+                treatInMouth = false
+            }
+            DispatchQueue.main.async {
+                withAnimation(.easeIn(duration: 0.5)) { treatInMouth = true }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                pokeBounce()
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.6)) { munchBulge = 0.55 }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { pokeBounce() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.9) {
+                withAnimation(.easeInOut(duration: 0.6)) { munchBulge = 0 }
+                feeding = nil
+            }
+        }
+    }
+
+    /// A side-to-side wobble about his base: `beats` half-swings, then home.
+    private func shake(degrees: Double, beats: Int, beat: Double) {
+        for i in 0..<beats {
+            DispatchQueue.main.asyncAfter(deadline: .now() + beat * Double(i)) {
+                withAnimation(.easeInOut(duration: beat)) { wiggle = i.isMultiple(of: 2) ? degrees : -degrees }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + beat * Double(beats)) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { wiggle = 0 }
+        }
+    }
+
+    /// The high-five hand and the treat on its way in — both transform-only.
+    @ViewBuilder
+    private func reactionProps(scale: CGFloat) -> some View {
+        let u = size * scale
+        let faceY = size / 2 - 0.32 * u
+        ZStack {
+            FlameHighFiveHand(unit: u)
+                .scaleEffect(showHand ? 1 : 0.01, anchor: .bottomLeading)
+                .opacity(showHand ? 1 : 0)
+                .offset(x: 0.36 * u, y: faceY - 0.06 * u)
+            if let feeding {
+                TreatGlyph(treat: feeding, size: 0.26 * u)
+                    .scaleEffect(treatInMouth ? 0.25 : 1)
+                    .opacity(treatInMouth ? 0 : 1)
+                    .offset(x: treatInMouth ? 0 : 0.40 * u,
+                            y: treatInMouth ? faceY + 0.13 * u : faceY - 0.02 * u)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     /// The idle bob — used to be a sine sampled on the 12 fps content clock;
@@ -205,10 +319,16 @@ struct FlameBuddyView: View {
             if grounded, let vigorNow, vigorNow < 0.45 {
                 EmberBaseGlow(size: size, intensity: min(1, (0.45 - vigorNow) / 0.45))
             }
+            if let look {
+                FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: vigorNow), side: .behind, still: true)
+            }
             figure(vigor: vigorNow, flicker: 0, blink: false, gaze: .zero)
+            if let look {
+                FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: vigorNow), side: .front, still: true)
+            }
             if let mood {
                 FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: vigorNow), still: true,
-                               showsBubble: showsMoodBubble)
+                               showsBubble: showsMoodBubble, drawsWornProps: look == nil)
             }
         }
     }
@@ -232,8 +352,9 @@ struct FlameBuddyView: View {
             size: size,
             showsFace: showsFace,
             vigor: vigor.map { CGFloat($0) },
+            bellyBulge: munchBulge,
             gaze: gaze,
-            asleep: mood?.kind == .sleepy,
+            asleep: mood?.eyesShut ?? false,
             grounded: grounded
         )
     }
@@ -246,7 +367,7 @@ struct FlameBuddyView: View {
     /// squashed sliver, not a lid. Sleeping is a face the figure draws
     /// (`asleep`), so here the sleeper simply never blinks.
     private func moodBlink(at t: TimeInterval) -> Bool {
-        if mood?.kind == .sleepy { return false }
+        if mood?.eyesShut == true { return false }
         return Int(t * 2.0) % 9 == 0
     }
 
@@ -310,6 +431,15 @@ struct FlameBuddyView: View {
             moodPacePhase = false
         }
         DispatchQueue.main.async { startMoodMotion() }
+    }
+
+    /// Woken: jolt up, then drop back — the cartoon "wha—?!".
+    private func startle() {
+        guard !effectiveStill else { return }
+        withAnimation(.spring(response: 0.18, dampingFraction: 0.5)) { startleOffset = -size * 0.09 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.65)) { startleOffset = 0 }
+        }
     }
 
     /// Poked: squash, then spring back.
@@ -415,5 +545,47 @@ private struct BlazingEmberField: View {
             )
             .opacity(sin(.pi * min(max(cycle, 0), 1)) * 0.55)
             .blur(radius: 0.4)
+    }
+}
+
+
+/// The high-five: a small flame-orange mitten raised beside him, with a spark
+/// burst where the palm lands. Drawn once (Canvas), shown and hidden by the
+/// view's transforms only. Coordinates are in `unit` = size × body scale,
+/// relative to the hand's own centre — the mock's numbers 1:1.
+struct FlameHighFiveHand: View {
+    let unit: CGFloat
+
+    var body: some View {
+        Canvas { ctx, canvas in
+            let u = unit
+            ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
+            var hand = ctx
+            hand.rotate(by: .degrees(20))
+            var p = Path()
+            p.move(to: CGPoint(x: -0.04 * u, y: 0.13 * u))
+            p.addCurve(to: CGPoint(x: -0.045 * u, y: -0.07 * u), control1: CGPoint(x: -0.07 * u, y: 0.02 * u), control2: CGPoint(x: -0.075 * u, y: -0.05 * u))
+            p.addCurve(to: CGPoint(x: -0.02 * u, y: -0.05 * u), control1: CGPoint(x: -0.03 * u, y: -0.08 * u), control2: CGPoint(x: -0.02 * u, y: -0.06 * u))
+            p.addCurve(to: CGPoint(x: 0.02 * u, y: -0.07 * u), control1: CGPoint(x: -0.02 * u, y: -0.12 * u), control2: CGPoint(x: 0.02 * u, y: -0.13 * u))
+            p.addCurve(to: CGPoint(x: 0.06 * u, y: -0.03 * u), control1: CGPoint(x: 0.035 * u, y: -0.10 * u), control2: CGPoint(x: 0.07 * u, y: -0.09 * u))
+            p.addCurve(to: CGPoint(x: 0.035 * u, y: 0.13 * u), control1: CGPoint(x: 0.055 * u, y: 0.04 * u), control2: CGPoint(x: 0.04 * u, y: 0.09 * u))
+            p.closeSubpath()
+            hand.fill(p, with: .linearGradient(
+                Gradient(colors: [Color(red: 1, green: 0.88, blue: 0.28), Color(red: 1, green: 0.55, blue: 0.10)]),
+                startPoint: CGPoint(x: 0, y: -0.13 * u), endPoint: CGPoint(x: 0, y: 0.13 * u)))
+            hand.stroke(p, with: .color(.white.opacity(0.55)), lineWidth: max(1, 0.012 * u))
+            var burst = ctx
+            burst.translateBy(x: 0.06 * u, y: -0.17 * u)
+            for i in 0..<8 {
+                var ray = burst
+                ray.rotate(by: .degrees(Double(i) * 45))
+                ray.fill(Path(roundedRect: CGRect(x: -0.006 * u, y: -0.07 * u, width: 0.012 * u, height: 0.035 * u),
+                              cornerRadius: 0.006 * u),
+                         with: .color(Color(red: 1, green: 0.9, blue: 0.45)))
+            }
+        }
+        .frame(width: unit * 0.5, height: unit * 0.6)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

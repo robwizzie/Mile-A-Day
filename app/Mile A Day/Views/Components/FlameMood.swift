@@ -15,8 +15,14 @@ struct FlameMood: Equatable {
     enum Kind: Equatable {
         /// No streak, no mile: the coal.
         case unlit
-        /// Burning, nothing done, still early.
+        /// Burning, nothing done, still early — ASLEEP. Eyes shut, zzz's, and
+        /// every line he says is a snore or sleep-talk: he is not awake to
+        /// say "mornin'".
         case sleepy
+        /// Early, nothing done, and poked awake. Eyes open, no zzz's, and the
+        /// morning lines live here — they used to be the SLEEPER's bubble,
+        /// which is how a buddy with his eyes shut said "Mornin'…".
+        case groggy
         /// Burning, nothing done, the day is on.
         case ready
         /// Some distance in.
@@ -29,6 +35,25 @@ struct FlameMood: Equatable {
         case done
         /// Mile banked on a milestone streak.
         case party
+        /// Mile banked and it's past 10 PM: nightcap on, eyes shut, gentle
+        /// zzz's. A poke gets a grumble and he dozes straight back off — unlike
+        /// the morning, nothing about bedtime persists a wake.
+        case bedtime
+
+        /// Asleep right now (eyes shut, zzz's, no blinking).
+        var isAsleep: Bool { self == .sleepy || self == .bedtime }
+    }
+
+    /// A play gesture on the hero buddy, played once from `reactionAt`.
+    enum Reaction: Equatable {
+        /// Double-tap once the mile is in: a flame-hand pops up, "Up top!".
+        case highFive
+        /// A double-tap before the mile: he shakes his head — earn it first.
+        case refuse
+        /// A horizontal rub: he wiggles and giggles.
+        case tickle
+        /// Long-press: today's Well Earned treat flies into his mouth.
+        case feed(CalorieTreat)
     }
 
     var kind: Kind
@@ -39,6 +64,39 @@ struct FlameMood: Equatable {
     /// the hero clears it. Non-nil SUPPRESSES the mood bubble outright, so the
     /// two can never be on screen together.
     var pokeQuip: String? = nil
+    /// The play gesture in flight and when it started (see `Reaction`).
+    var reaction: Reaction? = nil
+    var reactionAt: Date? = nil
+    /// Today's holiday / the signup anniversary — each gets its own line in
+    /// the rotation (the outfit itself is `FlameyLook`'s job).
+    var holiday: HolidayKey? = nil
+    var isAnniversary: Bool = false
+    /// ONE line built from the user's own data ("3 days before 8 AM!"),
+    /// already chosen for today by `FlameyMemory`. Joins the rotation once —
+    /// never every slot — and only when it's true.
+    var memoryLine: String? = nil
+
+    /// Eyes shut right now. A bedtime sleeper opens them while a poke's
+    /// grumble is up and closes them the moment it clears.
+    var eyesShut: Bool {
+        switch kind {
+        case .sleepy: return true
+        case .bedtime: return pokeQuip == nil
+        default: return false
+        }
+    }
+
+    /// The props this mood puts on him, handed to `FlameyLook.resolve` as its
+    /// mood layer — so a holiday hat can outrank the party hat and he still
+    /// never wears two.
+    var props: [FlameyItem] {
+        switch kind {
+        case .done: return [.shades]
+        case .party: return [.shades, .partyHat]
+        case .bedtime, .sleepy: return [.nightcap]
+        default: return []
+        }
+    }
 
     static func resolve(
         phase: StreakFlamePhase,
@@ -46,6 +104,10 @@ struct FlameMood: Equatable {
         isAtRisk: Bool,
         hasActiveWorkout: Bool,
         streak: Int,
+        /// The user woke him today (a poke while he was asleep). He stays up
+        /// for the rest of the morning — falling back asleep the moment the
+        /// bubble times out would make the poke feel like it did nothing.
+        wokenToday: Bool = false,
         now: Date = Date()
     ) -> FlameMood {
         let hour = Calendar.current.component(.hour, from: now)
@@ -54,13 +116,17 @@ struct FlameMood: Equatable {
         case .coal:
             kind = .unlit
         case .blazing:
-            kind = isMilestone(streak) ? .party : .done
+            // A milestone outranks bedtime: it happens once, and a party that
+            // falls asleep at ten reads as the app forgetting it.
+            if isMilestone(streak) { kind = .party }
+            else if hour >= 22 { kind = .bedtime }
+            else { kind = .done }
         case .burning:
             if isAtRisk { kind = .nervous }
             else if progress >= 0.8 { kind = .almost }
             else if progress >= 0.5 { kind = .halfway }
             else if progress > 0.05 || hasActiveWorkout { kind = .going }
-            else if hour < 10 { kind = .sleepy }
+            else if hour < 10 { kind = wokenToday ? .groggy : .sleepy }
             else { kind = .ready }
         }
         return FlameMood(kind: kind, streak: streak)
@@ -71,14 +137,50 @@ struct FlameMood: Equatable {
         return [7, 14, 30, 50, 100, 200, 365, 500, 730, 1000].contains(streak) || streak % 100 == 0
     }
 
-    /// What he says, rotating. Short, because the bubble sits beside a
-    /// stat column.
+    /// What he says, rotating: the mood's lines, plus — when he's awake — the
+    /// day's occasion up front and at most ONE line about the user's own data.
     var bubbles: [String] {
+        var lines = moodLines
+        guard !kind.isAsleep else { return lines }
+        var special: [String] = []
+        if isAnniversary { special.append("Happy Flamey-versary!") }
+        if let holiday { special.append(Self.holidayLine(holiday)) }
+        else if HolidayCalendar.components(of: Date()).month == 12 { special.append("Ho ho ho!") }
+        lines.insert(contentsOf: special, at: 0)
+        if let memoryLine, kind != .unlit {
+            // Mid-rotation, so it reads as a thought, not a headline.
+            lines.insert(memoryLine, at: min(special.count + 1, lines.count))
+        }
+        return lines
+    }
+
+    /// One line per holiday — warm, never a claim about health.
+    static func holidayLine(_ holiday: HolidayKey) -> String {
+        switch holiday {
+        case .newYearsDay: return "Happy New Year!"
+        case .valentinesDay: return "Love a good walk"
+        case .stPatricksDay: return "Feeling lucky!"
+        case .easter: return "Hoppy Easter!"
+        case .independenceDay: return "Happy 4th!"
+        case .halloween: return "Boo! Trick or treat?"
+        case .thanksgiving: return "Gobble gobble!"
+        case .christmasEve: return "Santa's coming!"
+        case .christmas: return "Merry Christmas!"
+        case .newYearsEve: return "Last mile of the year!"
+        }
+    }
+
+    /// The mood's own rotation. Short, because the bubble sits beside a stat
+    /// column.
+    private var moodLines: [String] {
         // ≤ 16 characters each: the bubble sits over a flame that shares its
         // card with a stat column, so it is width-capped and two-line at most.
         switch kind {
         case .unlit: return ["Light me up!", "One mile, lit", "Ready when you are"]
-        case .sleepy: return ["Mornin'…", "Five more mins", "Coffee first?"]
+        // Snores and sleep-talk only. Every line here is said with his eyes
+        // shut, so none of them may sound awake.
+        case .sleepy: return ["Zzz…", "Hnnnk… shoo…", "zzZZzz…", "*snore*", "mmm… donuts…", "…one more mi…"]
+        case .groggy: return ["Mornin'…", "I'm up, I'm up", "Coffee first?", "*yaaawn*", "Mile o'clock?"]
         case .ready: return ["Let's walk!", "Mile o'clock?", "Shoes on!", "Waiting…"]
         case .going: return ["Nice start!", "Keep it rolling", "Warming up"]
         case .halfway: return ["Halfway!", "Don't stop now", "Half to go"]
@@ -86,10 +188,63 @@ struct FlameMood: Equatable {
         case .nervous: return ["Tick tock…", "Still time!", "Not like this…", "A mile. Tonight."]
         case .done: return ["Nailed it", "Streak safe", "Look at us", "Again tomorrow?"]
         case .party: return ["\(streak) days!", "Legend", "Cake?", "Party time"]
+        // Said drifting off and asleep — drowsy, never chirpy.
+        case .bedtime: return ["Night night", "*yaaawn*", "Big day tmrw", "Zzz…", "Good mile today"]
         }
     }
 
     static let pokeQuips = ["Hey!", "That tickles", "Working here", "Boop", "Careful, hot", "Again!"]
+
+    /// What a poke gets out of him, by what he was doing when it landed.
+    /// Poking a SLEEPER wakes him, so those lines are the startle.
+    /// What a play gesture gets out of him.
+    static func reactionQuips(_ reaction: Reaction) -> [String] {
+        switch reaction {
+        case .highFive: return ["Up top!", "Yeah!", "Nailed it!"]
+        case .refuse: return ["Earn it first!", "Mile first!", "Not yet!"]
+        case .tickle: return ["Hehe stop!", "Tickles!", "Hahaha!"]
+        case .feed(let treat):
+            // FOOD lines only. Flamey is never shown drinking — `food(for:)`
+            // swaps an alcoholic pick for a donut before a feed can start, so
+            // `.tipsy` is unreachable here; it still gets food lines rather
+            // than a toast, belt and braces.
+            switch food(for: treat).effect {
+            case .stuffed, .tipsy: return ["Nom!", "So good", "Nom nom nom"]
+            case .wired: return ["Zoom zoom!", "Mmm, latte"]
+            }
+        }
+    }
+
+    /// What Flamey actually EATS for a Well Earned pick. He is a mascot on a
+    /// 13+ fitness app and is never shown consuming alcohol: wine and beer
+    /// (any `.tipsy` treat) become a donut, counted in DONUTS — the Well
+    /// Earned cards themselves keep the user's pick unchanged.
+    static func food(for treat: CalorieTreat) -> CalorieTreat {
+        treat.effect == .tipsy ? .donut : treat
+    }
+
+    /// Long-press with nothing earned yet today: he asks for it instead.
+    static func hungryQuip(_ treat: CalorieTreat) -> String {
+        switch food(for: treat) {
+        case .wine, .beer: return "Earn me a donut!"
+        case .cheeseburger: return "Earn me a burger!"
+        case .pizza: return "Earn me pizza!"
+        case .donut: return "Earn me a donut!"
+        case .coffee: return "Earn me a latte!"
+        }
+    }
+
+    static func pokeQuips(for kind: Kind) -> [String] {
+        switch kind {
+        case .sleepy: return ["Huh?! I'm up!", "Wha—? Who?", "I wasn't asleep!", "*snort* Huh?", "Five more mi… ok"]
+        case .groggy: return ["Okay, okay…", "Still waking up", "Gentle! I'm up"]
+        case .nervous: return ["No time! Walk!", "Tickle me later", "Shoes. On. Now."]
+        case .done: return ["I was chilling!", "Careful, hot", "Boop"]
+        case .party: return ["Party foul!", "Boop!", "Cake first"]
+        case .bedtime: return ["Lights out!", "Five more hours…", "Shhh… sleeping", "Mmf. Night."]
+        default: return pokeQuips
+        }
+    }
 }
 
 /// The mood's props and bubble, laid out in `FlameBuddyView`'s own frame
@@ -121,6 +276,11 @@ struct FlameMoodLayer: View {
     /// The speech bubble. OFF for a share card: a bubble baked into a picture
     /// somebody posts reads as a caption nobody wrote — the props stay.
     var showsBubble: Bool = true
+    /// Draw the shades / party hat here. OFF when the caller passes a
+    /// `FlameyLook`: the look already carries the mood's props (resolved
+    /// against holiday outfits and gear), and drawing them twice is exactly
+    /// the two-hats bug the look exists to prevent.
+    var drawsWornProps: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Flipped once on appear; every moving prop animates off it.
@@ -136,15 +296,17 @@ struct FlameMoodLayer: View {
         ZStack {
             switch mood.kind {
             case .done, .party:
-                sunglasses
+                if drawsWornProps { sunglasses }
                 if mood.kind == .party {
-                    partyHat
+                    if drawsWornProps { partyHat }
                     confetti
                 }
             case .nervous:
                 sweatDrop
             case .sleepy:
                 zzz
+            case .bedtime:
+                if mood.eyesShut { zzz }
             case .almost:
                 sparkles
             default:
