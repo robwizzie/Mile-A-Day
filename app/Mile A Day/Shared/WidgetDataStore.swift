@@ -248,6 +248,44 @@ struct WidgetDataStore {
         return defaults.string(forKey: dashboardStyleKey) ?? "modern"
     }
 
+    // MARK: - Flamey's wardrobe facts (streak flame widget, Fun style)
+
+    private static let flameyBadgesKey = "flamey_badge_ids"
+    private static let flameySignupKey = "flamey_signup_epoch"
+
+    /// The durable facts the flame widget resolves Flamey's look from
+    /// (`FlameyLook.resolve`, per timeline entry, so a holiday outfit goes on
+    /// at midnight with no reload). The longest streak rides `longest_streak`.
+    /// Only the catalog's badge ids are stored. The caller decides `reload`
+    /// — it's true only when what he'd wear today or tomorrow changed, so
+    /// badge churn that changes nothing on him costs no reload budget.
+    static func save(flameyBadgeIds: [String], signupDate: Date?, reload: Bool) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        let sorted = flameyBadgeIds.sorted()
+        let epoch = signupDate?.timeIntervalSince1970 ?? 0
+        let unchanged = (defaults.stringArray(forKey: flameyBadgesKey) ?? []) == sorted
+            && defaults.double(forKey: flameySignupKey) == epoch
+        if !unchanged {
+            defaults.set(sorted, forKey: flameyBadgesKey)
+            defaults.set(epoch, forKey: flameySignupKey)
+        }
+        guard reload else { return }
+        DispatchQueue.main.async {
+            WidgetCenter.shared.reloadTimelines(ofKind: "StreakFlameWidget")
+        }
+    }
+
+    static func loadFlameyBadgeIds() -> Set<String> {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return [] }
+        return Set(defaults.stringArray(forKey: flameyBadgesKey) ?? [])
+    }
+
+    static func loadFlameySignupDate() -> Date? {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
+        let epoch = defaults.double(forKey: flameySignupKey)
+        return epoch > 0 ? Date(timeIntervalSince1970: epoch) : nil
+    }
+
     // MARK: - Streak tokens (streak widget accessory)
 
     private static let tokensReadyKey = "tokens_ready"

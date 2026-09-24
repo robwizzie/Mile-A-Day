@@ -23,6 +23,10 @@ struct BackendUser: Codable, Identifiable, Hashable {
     /// (friend lists, search) — the profile screen re-fetches the full record.
     var profile_banner_url: String? = nil
     var profile_banner_style: String? = nil
+    /// `users.created_at` — the day Flamey met you (his anniversary). Only
+    /// the full `GET /users/:id` record carries it; a String because backend
+    /// timestamps have fractional seconds `.iso8601` can't decode.
+    var created_at: String? = nil
 
     var id: String { user_id }
 

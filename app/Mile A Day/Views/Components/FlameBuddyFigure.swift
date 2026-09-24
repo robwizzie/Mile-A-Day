@@ -414,6 +414,14 @@ struct FlameBuddyOuterShape: Shape {
     /// and the bottom deliberately overshoots the frame (like the glow does).
     var bellyBulge: CGFloat = 0
 
+    /// Only the belly animates — the hero's "feed" gesture eases it out and
+    /// back. `wobble` is set per frame by the 12 fps clock and must never
+    /// interpolate, so it stays out of here.
+    var animatableData: CGFloat {
+        get { bellyBulge }
+        set { bellyBulge = newValue }
+    }
+
     func path(in rect: CGRect) -> Path {
         var path = Path()
         let w = rect.width

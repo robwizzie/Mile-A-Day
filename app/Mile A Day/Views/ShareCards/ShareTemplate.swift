@@ -143,8 +143,12 @@ enum ShareTemplate: String, CaseIterable, Identifiable {
 
     /// Every template this content can actually draw, in carousel order.
     static func available(for content: MADStoryContent) -> [ShareTemplate] {
+        // Flamey is a Fun-dashboard character: a Modern user never meets him,
+        // so none of his cards are offered (Modern keeps its own flame on the
+        // Streak family via `ShareStyleFlame`).
+        let flamey = DashboardStylePreference.current == .fun
         if content.week != nil {
-            return [.weekStory, .weekFlamey]
+            return flamey ? [.weekStory, .weekFlamey] : [.weekStory]
         }
         var out: [ShareTemplate] = []
         if content.hasPhoto { out += [.photoFrame, .photoPolaroid, .photoBigNumber] }
@@ -154,8 +158,10 @@ enum ShareTemplate: String, CaseIterable, Identifiable {
             if ShareMilestone.isMilestone(streak) { out.append(.streakMilestone) }
             out += [.streakFlame, .streakBold]
         }
-        out.append(.flameyMile)
-        if streak > 0 { out.append(.flameyStreak) }
+        if flamey {
+            out.append(.flameyMile)
+            if streak > 0 { out.append(.flameyStreak) }
+        }
         out.append(.statsSticker)
         return out
     }

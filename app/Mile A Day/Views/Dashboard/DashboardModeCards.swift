@@ -1318,6 +1318,16 @@ private struct FlameBuddyHeroCard: View {
     /// morning — across tab switches and relaunches, not just this view's
     /// lifetime. A new day's date never matches, so he sleeps in again.
     @AppStorage("flameyWokenDayV1") private var flameyWokenDay = ""
+    /// The play gesture in flight (high five / refuse / tickle / feed) — the
+    /// buddy view plays it from `reactionAt`; its line rides the poke-quip
+    /// channel, so it can never share the screen with another bubble.
+    @State private var reaction: FlameMood.Reaction?
+    @State private var reactionAt: Date?
+    /// The previous tap, for double-tap detection without delaying the poke.
+    @State private var lastTapAt: Date?
+    /// Today's "Flamey remembers" facts — computed off-main once per
+    /// appearance / day / completion change, never in `body`.
+    @State private var memory: FlameyMemory?
 
     private var trustedDone: Bool { isGoalCompleted && distanceIsFresh }
 
@@ -1339,7 +1349,100 @@ private struct FlameBuddyHeroCard: View {
         )
         mood.pokedAt = pokedAt
         mood.pokeQuip = pokeQuip
+        mood.reaction = reaction
+        mood.reactionAt = reactionAt
+        let today = Date()
+        mood.holiday = HolidayCalendar.holiday(on: today)
+        mood.isAnniversary = FlameyFacts.signupDate.map { HolidayCalendar.isAnniversary(of: $0, on: today) } ?? false
+        mood.memoryLine = memory?.line(for: mood.kind, dayIndex: FlameyMemory.dayIndex(today))
         return mood
+    }
+
+    /// What he wears — gear from the longest streak, the day's outfit, the
+    /// mood's props — resolved from durable facts, never stored.
+    private func look(for mood: FlameMood) -> FlameyLook? {
+        FlameyFacts.look(mood: mood.kind)
+    }
+
+    /// Recomputes `memory` when any input to it moves.
+    private var memoryKey: String {
+        "\(Self.localDayStamp())|\(heroStreakValue)|\(trustedDone)|\(healthManager.cachedWorkouts.count)|\(healthManager.todaysWorkouts.count)"
+    }
+
+    private func refreshMemory() async {
+        let result = await FlameyMemory.compute(
+            cachedWorkouts: healthManager.cachedWorkouts,
+            todaysWorkouts: healthManager.todaysWorkouts,
+            goalMiles: goalDistance,
+            streak: heroStreakValue,
+            longestStreak: userManager.currentUser.longestStreak ?? 0,
+            doneToday: trustedDone
+        )
+        memory = result
+    }
+
+    /// Shows a line on the poke-quip channel for `seconds`, then hands the
+    /// bubble back to the mood.
+    private func say(_ line: String, for seconds: Double = 2.4) {
+        pokeQuip = line
+        pokeClearTask?.cancel()
+        pokeClearTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(Int(seconds * 1000)))
+            guard !Task.isCancelled else { return }
+            pokeQuip = nil
+        }
+    }
+
+    private func react(_ reaction: FlameMood.Reaction, line: String? = nil) {
+        self.reaction = reaction
+        reactionAt = Date()
+        say(line ?? FlameMood.reactionQuips(reaction).randomElement() ?? "Hey!")
+    }
+
+    /// A tap. The FIRST tap pokes immediately (no double-tap wait delaying
+    /// every poke); a second one within 0.35 s upgrades it to a high five —
+    /// or, before the mile is in, a head-shake: earn it first.
+    private func handleTap() {
+        let now = Date()
+        if let last = lastTapAt, now.timeIntervalSince(last) < 0.35 {
+            lastTapAt = nil
+            if trustedDone {
+                MADHaptics.success()
+                react(.highFive)
+            } else {
+                MADHaptics.warning()
+                react(.refuse)
+            }
+            return
+        }
+        lastTapAt = now
+        poke()
+    }
+
+    /// A horizontal rub across him.
+    private func tickle() {
+        MADHaptics.tap()
+        react(.tickle)
+    }
+
+    /// Long-press: feed him today's Well Earned treat — if at least one whole
+    /// one has been earned today; otherwise he asks for it.
+    private func feed() {
+        let treat = CalorieTreat.current
+        let cached = healthManager.cachedWorkouts
+        let todays = healthManager.todaysWorkouts
+        Task { @MainActor in
+            let kcal = await CalorieLedger.workoutKilocalories(
+                period: .today, cachedWorkouts: cached, todaysWorkouts: todays)
+            let earned = treat.kcalPerUnit > 0 ? kcal / treat.kcalPerUnit : 0
+            if earned >= 1 {
+                MADHaptics.success()
+                react(.feed(treat))
+            } else {
+                MADHaptics.tap()
+                say(FlameMood.hungryQuip(treat))
+            }
+        }
     }
 
     /// Tapping the buddy pokes him (the rest of the card still opens the
@@ -1349,19 +1452,15 @@ private struct FlameBuddyHeroCard: View {
         MADHaptics.emphasis()
         // The line answers the mood he was IN when poked — so poking a
         // sleeper gets the startle, and the same poke wakes him (the mood
-        // flips to .groggy: eyes open, zzz's gone).
+        // flips to .groggy: eyes open, zzz's gone). Bedtime is NOT persisted:
+        // he grumbles with his eyes open while the line is up, then dozes
+        // straight back off.
         let before = mood.kind
-        pokeQuip = FlameMood.pokeQuips(for: before).randomElement() ?? "Hey!"
         if before == .sleepy {
             flameyWokenDay = Self.localDayStamp()
         }
         pokedAt = Date()
-        pokeClearTask?.cancel()
-        pokeClearTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(2400))
-            guard !Task.isCancelled else { return }
-            pokeQuip = nil
-        }
+        say(FlameMood.pokeQuips(for: before).randomElement() ?? "Hey!")
     }
     private var health: FlameHealth {
         FlameHealth.forState(
@@ -1423,18 +1522,36 @@ private struct FlameBuddyHeroCard: View {
                                 .frame(width: buddySize * 1.50, height: buddySize * 1.34)
                                 .offset(y: -28)
                         } else {
+                            let currentMood = mood
                             FlameBuddyView(
                                 health: health,
                                 size: buddySize,
                                 phase: flamePhase,
                                 dayEnd: StreakFlameClock.nextLocalMidnight(),
                                 coalWarmth: min(progress, 1),
-                                mood: mood
+                                mood: currentMood,
+                                look: look(for: currentMood)
                             )
                             .frame(width: buddySize * 1.50, height: buddySize * 1.34)
                             .offset(y: -28)
                             .contentShape(Rectangle())
-                            .onTapGesture { poke() }
+                            // Every play gesture is scoped to HIS hit area,
+                            // so the card's own tap (share) and the page's
+                            // vertical scroll are untouched: taps and the
+                            // long-press are child gestures (they beat the
+                            // card's tap), and the rub only begins on a
+                            // horizontal-dominant drag.
+                            .onTapGesture { handleTap() }
+                            .onLongPressGesture(minimumDuration: 0.5) { feed() }
+                            .flameyRubGesture { tickle() }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Flamey")
+                            .accessibilityHint("Tap to poke. Double-tap for a high five once your mile is done.")
+                            .accessibilityAction(named: "Poke") { poke() }
+                            .accessibilityAction(named: "High five") {
+                                if trustedDone { react(.highFive) } else { react(.refuse) }
+                            }
+                            .accessibilityAction(named: "Feed a treat") { feed() }
                         }
 
                         FunHeroGround()
@@ -1504,6 +1621,7 @@ private struct FlameBuddyHeroCard: View {
         .sheet(isPresented: $showTokens) {
             StreakTokensDetailView()
         }
+        .task(id: memoryKey) { await refreshMemory() }
         .onAppear {
             updateTimeRemaining()
             timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in updateTimeRemaining() }

@@ -706,6 +706,12 @@ struct MainTabView: View {
         // Backfill the flame widget's style for users who chose it before the
         // widget existed (the setter mirrors it going forward).
         WidgetDataStore.save(dashboardStyle: DashboardStylePreference.current.rawValue)
+        // Flamey's wardrobe facts (reloads the flame widget only when what he
+        // wears changes), the signup date behind his anniversary, and the
+        // once-per-launch style report.
+        FlameyFacts.mirrorToWidget()
+        Task { await FlameyFacts.ensureSignupDate() }
+        DashboardStyleReporter.report()
         // Those saves are no-ops when nothing changed, so they can't fix a
         // widget that's rendering an old timeline over correct stored values.
         // Throttled to 15 minutes, so repeated foregrounding stays cheap.
