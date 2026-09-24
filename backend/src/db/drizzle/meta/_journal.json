@@ -547,6 +547,13 @@
       "when": 1790266451931,
       "tag": "0077_flamey_dashboard_style",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1790266847790,
+      "tag": "0078_flamey_look",
+      "breakpoints": true
     }
   ]
 }

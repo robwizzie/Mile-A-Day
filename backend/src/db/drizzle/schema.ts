@@ -328,6 +328,12 @@ export const users = pgTable(
     // like 'modern' by every Flamey gate (the friend's-Flamey block, the
     // Flamey poke). Nullable, no default: additive, no table rewrite.
     dashboardStyle: text("dashboard_style"),
+    // Flamey's Closet: the look the user dressed Flamey in, `{ <slot>: <itemId>
+    // | null }` (see services/flameyCatalog.ts). NULL = "auto" (the app picks
+    // the best owned item per slot); a slot absent from the object is auto for
+    // that slot, an explicit null is bare. Validated for ownership at write AND
+    // re-validated at read (a medal can be revoked). Nullable, no default.
+    flameyLook: jsonb("flamey_look"),
     // Lifetime nudges sent (friend + competition), for the nudge medals. The
     // logs they used to be counted from are pruned after 7 days, so a recount
     // could never see past the week. Bumped in the same statement as each log

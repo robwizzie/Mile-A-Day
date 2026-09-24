@@ -13,6 +13,8 @@ import {
   updateUserOnboarding,
   uploadProfileImage,
   uploadProfileBanner,
+  getFlameyClosetController,
+  putFlameyLook,
 } from "../controllers/usersController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
 import {
@@ -65,6 +67,13 @@ router.patch(
   updateUserUsername,
 );
 router.patch("/:userId/bio", requireSelfAccess("userId"), updateUserBio);
+// Flamey's Closet (self only): the chosen mascot look + server-side ownership.
+router.get(
+  "/:userId/flamey-closet",
+  requireSelfAccess("userId"),
+  getFlameyClosetController,
+);
+router.put("/:userId/flamey-look", requireSelfAccess("userId"), putFlameyLook);
 router.patch(
   "/:userId/onboarding",
   requireSelfAccess("userId"),

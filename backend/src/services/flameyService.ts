@@ -2,6 +2,14 @@ import { PostgresService } from "./DbService.js";
 import { areFriends } from "./friendshipService.js";
 import { effectiveStreakSql } from "./streakFeatureCore.js";
 import { HOLIDAYS, holidayKeyFromBadgeId, type HolidayKey } from "./holidays.js";
+import {
+  FLAMEY_CATALOG,
+  FLAMEY_CATALOG_VERSION,
+  FLAMEY_SLOTS,
+  isFlameySlot,
+  ownedFlameyItemIds,
+  type FlameySlot,
+} from "./flameyCatalog.js";
 
 const db = PostgresService.getInstance();
 
@@ -24,6 +32,8 @@ export type FlameyBlock =
       longest_streak: number;
       holiday_keys: HolidayKey[];
       signup_date: string;
+      /** Flamey's Closet look, re-validated for ownership; null = auto. */
+      look: FlameyLook | null;
     };
 
 /**
@@ -47,8 +57,9 @@ export async function flameyBlockFor(
     dashboard_style: string | null;
     longest_streak: number;
     signup_date: string;
+    flamey_look: unknown;
   }>(
-    `SELECT u.dashboard_style,
+    `SELECT u.dashboard_style, u.flamey_look,
 	        GREATEST(u.longest_streak, (${effectiveStreakSql("u")}))::int AS longest_streak,
 	        to_char(((u.created_at AT TIME ZONE 'UTC') + (COALESCE(
 	            (SELECT ns.timezone_offset_minutes FROM notification_settings ns WHERE ns.user_id = u.user_id),
@@ -63,10 +74,12 @@ export async function flameyBlockFor(
     return { enabled: false };
   }
 
+  // Every badge row: the holiday keys and the closet's ownership read ONE set.
   const badgeRows = await db.query<{ badge_id: string }>(
-    `SELECT badge_id FROM user_badges WHERE user_id = $1 AND badge_id LIKE 'holiday\\_%'`,
+    `SELECT badge_id FROM user_badges WHERE user_id = $1`,
     [targetUserId],
   );
+  const owned = ownedFlameyItemIds(badgeRows.map((r) => r.badge_id));
   const held = new Set(
     badgeRows
       .map((r) => holidayKeyFromBadgeId(r.badge_id))
@@ -78,6 +91,7 @@ export async function flameyBlockFor(
     // Catalog (calendar) order, so the client can lay them out as-is.
     holiday_keys: HOLIDAYS.map((h) => h.key).filter((k) => held.has(k)),
     signup_date: row.signup_date,
+    look: servedFlameyLook(row.flamey_look, owned),
   };
 }
 
@@ -89,4 +103,116 @@ export async function bothUseFun(a: string, b: string): Promise<boolean> {
     [[a, b]],
   );
   return (rows[0]?.n ?? 0) === 2;
+}
+
+// ─── Flamey's Closet ────────────────────────────────────────────────
+
+/** `{ <slot>: <itemId> | null }` — absent slot = auto, null = bare. */
+export type FlameyLook = Partial<Record<FlameySlot, string | null>>;
+
+/** Items this user owns right now, from their badge rows. */
+export async function ownedFlameyItems(userId: string): Promise<Set<string>> {
+  const rows = await db.query<{ badge_id: string }>(
+    `SELECT badge_id FROM user_badges WHERE user_id = $1`,
+    [userId],
+  );
+  return ownedFlameyItemIds(rows.map((r) => r.badge_id));
+}
+
+export type LookParse =
+  | { ok: true; look: FlameyLook | null }
+  | { ok: false; detail: string };
+
+/**
+ * Validate a client-sent look against the catalog AND the owner's items.
+ * Rejects (never silently drops) at WRITE: an unknown slot, an unknown item,
+ * an item in the wrong slot, or one the user doesn't own — `detail` is
+ * `<slot>:<item>`. An empty object normalizes to null (all auto).
+ */
+export function parseFlameyLook(input: unknown, owned: Set<string>): LookParse {
+  if (input === null) return { ok: true, look: null };
+  if (typeof input !== "object" || Array.isArray(input)) {
+    return { ok: false, detail: "look:not_an_object" };
+  }
+  const look: FlameyLook = {};
+  for (const [slot, value] of Object.entries(input as Record<string, unknown>)) {
+    const detail = `${slot}:${value === null ? "null" : String(value)}`;
+    if (!isFlameySlot(slot)) return { ok: false, detail };
+    if (value === null) {
+      look[slot] = null;
+      continue;
+    }
+    if (typeof value !== "string") return { ok: false, detail };
+    const item = FLAMEY_CATALOG.get(value);
+    if (!item || item.slot !== slot || !owned.has(value)) {
+      return { ok: false, detail };
+    }
+    look[slot] = value;
+  }
+  return { ok: true, look: canonicalLook(look) };
+}
+
+/** Catalog slot order, empty ⇒ null, so stored and served forms are canonical. */
+function canonicalLook(look: FlameyLook): FlameyLook | null {
+  const out: FlameyLook = {};
+  for (const slot of FLAMEY_SLOTS) {
+    if (slot in look) out[slot] = look[slot] ?? null;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * The look as SERVED. A stored item the user no longer owns (a medal revoked
+ * with a deleted workout) or one retired from the catalog is DROPPED — that
+ * slot reads auto again. The row is never rewritten: earn the medal back and
+ * the choice returns on its own.
+ */
+export function servedFlameyLook(stored: unknown, owned: Set<string>): FlameyLook | null {
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return null;
+  const src = stored as Record<string, unknown>;
+  const look: FlameyLook = {};
+  for (const slot of FLAMEY_SLOTS) {
+    if (!(slot in src)) continue;
+    const value = src[slot];
+    if (value === null) {
+      look[slot] = null;
+    } else if (typeof value === "string") {
+      const item = FLAMEY_CATALOG.get(value);
+      if (item && item.slot === slot && owned.has(value)) look[slot] = value;
+    }
+  }
+  return canonicalLook(look);
+}
+
+export interface FlameyCloset {
+  look: FlameyLook | null;
+  owned_item_ids: string[];
+  catalog_version: string;
+}
+
+/** Self-only closet read; null for an unknown user. */
+export async function getFlameyCloset(userId: string): Promise<FlameyCloset | null> {
+  const rows = await db.query<{ flamey_look: unknown }>(
+    `SELECT flamey_look FROM users WHERE user_id = $1`,
+    [userId],
+  );
+  if (!rows.length) return null;
+  const owned = await ownedFlameyItems(userId);
+  return {
+    look: servedFlameyLook(rows[0].flamey_look, owned),
+    owned_item_ids: [...owned],
+    catalog_version: FLAMEY_CATALOG_VERSION,
+  };
+}
+
+/** Writes an already-validated look (null = auto). False for an unknown user. */
+export async function saveFlameyLook(
+  userId: string,
+  look: FlameyLook | null,
+): Promise<boolean> {
+  const rows = await db.query(
+    `UPDATE users SET flamey_look = $2::jsonb WHERE user_id = $1 RETURNING user_id`,
+    [userId, look === null ? null : JSON.stringify(look)],
+  );
+  return rows.length > 0;
 }

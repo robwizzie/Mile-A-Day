@@ -16,7 +16,16 @@ import {
 	getPublicStreak,
 	searchUsers as searchUsersByName
 } from '../services/userService.js';
-import { DASHBOARD_STYLES, flameyBlockFor, type FlameyBlock } from '../services/flameyService.js';
+import {
+	DASHBOARD_STYLES,
+	flameyBlockFor,
+	getFlameyCloset,
+	ownedFlameyItems,
+	parseFlameyLook,
+	saveFlameyLook,
+	type FlameyBlock
+} from '../services/flameyService.js';
+import { FLAMEY_CATALOG_VERSION } from '../services/flameyCatalog.js';
 import type { AuthenticatedRequest } from '../middleware/auth.js';
 
 const db = PostgresService.getInstance();
@@ -42,7 +51,42 @@ export async function getUser(req: Request, res: Response) {
 		}
 	);
 
-	res.json({ ...results[0], flamey });
+	// The raw closet column never rides the row: it is served only inside the
+	// friends-only `flamey` block, re-validated for ownership.
+	const { flamey_look: _rawLook, ...user } = results[0];
+	res.json({ ...user, flamey });
+}
+
+// Flamey's Closet — `GET /users/:id/flamey-closet` (self). The look as served
+// plus what the server says this user owns, so the app can confirm its own
+// badge-derived ownership.
+export async function getFlameyClosetController(req: Request, res: Response) {
+	const closet = await getFlameyCloset(req.params.userId);
+	if (!closet) return res.status(404).json({ error: 'User not found' });
+	res.json(closet);
+}
+
+// `PUT /users/:id/flamey-look` (self). Body `{ look: {slot: item|null} | null }`.
+// Saved regardless of dashboard style — switching styles must never lose a
+// look; display gating is the client's.
+export async function putFlameyLook(req: Request, res: Response) {
+	const userId = req.params.userId;
+	if (!req.body || typeof req.body !== 'object' || !('look' in req.body)) {
+		return res.status(400).json({ error: 'invalid_flamey_look', detail: 'look:missing' });
+	}
+	const owned = await ownedFlameyItems(userId);
+	const parsed = parseFlameyLook(req.body.look, owned);
+	if (!parsed.ok) {
+		return res.status(400).json({ error: 'invalid_flamey_look', detail: parsed.detail });
+	}
+	if (!(await saveFlameyLook(userId, parsed.look))) {
+		return res.status(404).json({ error: 'User not found' });
+	}
+	res.json({
+		look: parsed.look,
+		owned_item_ids: [...owned],
+		catalog_version: FLAMEY_CATALOG_VERSION
+	});
 }
 
 export async function searchUsers(req: Request, res: Response) {
