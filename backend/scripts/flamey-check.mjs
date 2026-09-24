@@ -225,6 +225,7 @@ try {
     holiday_keys: ["halloween", "christmas"],
     signup_date: "2025-06-13",
     look: null, // Flamey's Closet: never saved ⇒ auto
+    owned_item_ids: ["classic", "santa_hat", "pumpkin_suit", "classic_bubble"],
   });
   check("…and the row itself is still there", r.json?.user_id, FUN_B);
   r = await call("GET", `/users/${FUN_B}`, FUN_B);

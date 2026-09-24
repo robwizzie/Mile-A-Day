@@ -13,7 +13,7 @@
  *      catalog_version, 403 for anyone else;
  *   4. a revoked medal (the real `revokeUnearnedBadges` path) drops its item
  *      at READ while the stored row keeps it — earn it back and it returns;
- *   5. the `flamey` block on `GET /users/:id` carries `look` to a friend and
+ *   5. the `flamey` block on `GET /users/:id` carries `look` + `owned_item_ids` to a friend and
  *      to self, never to a stranger, and the raw `flamey_look` column never
  *      rides the top-level user row.
  *
@@ -200,9 +200,15 @@ try {
   r = await call("GET", `/users/${OWNER}`, FRIEND);
   check("friend sees look in flamey block", [r.json?.flamey?.enabled, r.json?.flamey?.look], [true, CANON]);
   check("…and holiday_keys still ride", r.json?.flamey?.holiday_keys, ["halloween"]);
+  check(
+    "friend's block carries owned_item_ids (catalog order)",
+    r.json?.flamey?.owned_item_ids,
+    ["classic", "ruby", "ball_cap", "racing_flats", "pumpkin_suit", "classic_bubble"],
+  );
   check("raw flamey_look not on the row (friend)", "flamey_look" in (r.json ?? {}), false);
   r = await call("GET", `/users/${OWNER}`, OWNER);
   check("self sees look", r.json?.flamey?.look, CANON);
+  check("self sees owned_item_ids", r.json?.flamey?.owned_item_ids?.length, 6);
   check("raw flamey_look not on the row (self)", "flamey_look" in (r.json ?? {}), false);
   r = await call("GET", `/users/${OWNER}`, STRANGER);
   check("stranger: block disabled, no look", r.json?.flamey, { enabled: false });
@@ -219,6 +225,7 @@ try {
   check("owned shrinks to the always items", r.json?.owned_item_ids, ["classic", "classic_bubble"]);
   r = await call("GET", `/users/${OWNER}`, FRIEND);
   check("friend's block drops them too", r.json?.flamey?.look, DROPPED);
+  check("…and its owned_item_ids shrink with them", r.json?.flamey?.owned_item_ids, ["classic", "classic_bubble"]);
   check("stored row untouched", sorted(await storedLook(OWNER)), sorted(CANON));
   r = await call("PUT", `/users/${OWNER}/flamey-look`, OWNER, { look: { color: "ruby" } });
   check("re-saving a revoked item → 400", [r.status, r.json?.detail], [400, "color:ruby"]);

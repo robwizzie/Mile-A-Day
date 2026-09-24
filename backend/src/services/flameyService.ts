@@ -34,6 +34,13 @@ export type FlameyBlock =
       signup_date: string;
       /** Flamey's Closet look, re-validated for ownership; null = auto. */
       look: FlameyLook | null;
+      /**
+       * Every catalog item they own (catalog order) — additive, so a
+       * viewer's phone resolves their AUTO slots against what they really
+       * own rather than guessing from `holiday_keys` + `longest_streak`.
+       * Same gate as `look`: friends and self only.
+       */
+      owned_item_ids: string[];
     };
 
 /**
@@ -92,6 +99,7 @@ export async function flameyBlockFor(
     holiday_keys: HOLIDAYS.map((h) => h.key).filter((k) => held.has(k)),
     signup_date: row.signup_date,
     look: servedFlameyLook(row.flamey_look, owned),
+    owned_item_ids: [...owned],
   };
 }
 
