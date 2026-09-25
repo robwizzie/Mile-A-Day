@@ -554,6 +554,13 @@
       "when": 1790266847790,
       "tag": "0078_flamey_look",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1790303997856,
+      "tag": "0079_flamey_name_outfits",
+      "breakpoints": true
     }
   ]
 }

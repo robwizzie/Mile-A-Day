@@ -23,6 +23,11 @@ import {
 	ownedFlameyItems,
 	parseFlameyLook,
 	saveFlameyLook,
+	parseFlameyName,
+	saveFlameyName,
+	parseFlameyOutfits,
+	readFlameyOutfits,
+	replaceFlameyOutfits,
 	type FlameyBlock
 } from '../services/flameyService.js';
 import { FLAMEY_CATALOG_VERSION } from '../services/flameyCatalog.js';
@@ -53,7 +58,8 @@ export async function getUser(req: Request, res: Response) {
 
 	// The raw closet column never rides the row: it is served only inside the
 	// friends-only `flamey` block, re-validated for ownership.
-	const { flamey_look: _rawLook, ...user } = results[0];
+	// Same for Flamey's name: friends-only, inside the block.
+	const { flamey_look: _rawLook, flamey_name: _rawName, ...user } = results[0];
 	res.json({ ...user, flamey });
 }
 
@@ -87,6 +93,48 @@ export async function putFlameyLook(req: Request, res: Response) {
 		owned_item_ids: [...owned],
 		catalog_version: FLAMEY_CATALOG_VERSION
 	});
+}
+
+// `PUT /users/:id/flamey-name` (self). Body `{ name: "Sparky" | null }` — null
+// resets to the default. Friends read it (App Review 1.2), so it is validated
+// and moderated: 400 `invalid_flamey_name` + `reason`
+// (too_long | empty | characters | not_allowed).
+export async function putFlameyName(req: Request, res: Response) {
+	const userId = req.params.userId;
+	if (!req.body || typeof req.body !== 'object' || !('name' in req.body)) {
+		return res.status(400).json({ error: 'invalid_flamey_name', reason: 'empty' });
+	}
+	const parsed = parseFlameyName(req.body.name);
+	if (!parsed.ok) {
+		return res.status(400).json({ error: 'invalid_flamey_name', reason: parsed.reason });
+	}
+	if (!(await saveFlameyName(userId, parsed.name))) {
+		return res.status(404).json({ error: 'User not found' });
+	}
+	res.json({ name: parsed.name });
+}
+
+// `GET /users/:id/flamey-outfits` (self): saved outfits in order, each look
+// re-validated for ownership (a revoked medal drops its item, row untouched).
+export async function getFlameyOutfits(req: Request, res: Response) {
+	res.json({ outfits: await readFlameyOutfits(req.params.userId) });
+}
+
+// `PUT /users/:id/flamey-outfits` (self). Body `{ outfits: [{ id?, name, look }] }`
+// REPLACES the list (max 5). Names are moderated like Flamey's name; looks are
+// validated exactly like PUT …/flamey-look. Answers the stored list.
+export async function putFlameyOutfits(req: Request, res: Response) {
+	const userId = req.params.userId;
+	if (!req.body || typeof req.body !== 'object' || !('outfits' in req.body)) {
+		return res.status(400).json({ error: 'invalid_outfits', detail: 'outfits:missing' });
+	}
+	const exists = await db.query('SELECT 1 FROM users WHERE user_id = $1', [userId]);
+	if (!exists.length) return res.status(404).json({ error: 'User not found' });
+	const owned = await ownedFlameyItems(userId);
+	const parsed = parseFlameyOutfits(req.body.outfits, owned);
+	if (!parsed.ok) return res.status(400).json(parsed.body);
+	await replaceFlameyOutfits(userId, parsed.outfits);
+	res.json({ outfits: await readFlameyOutfits(userId, owned) });
 }
 
 export async function searchUsers(req: Request, res: Response) {

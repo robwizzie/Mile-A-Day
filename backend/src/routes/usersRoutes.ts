@@ -15,6 +15,9 @@ import {
   uploadProfileBanner,
   getFlameyClosetController,
   putFlameyLook,
+  putFlameyName,
+  getFlameyOutfits,
+  putFlameyOutfits,
 } from "../controllers/usersController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
 import {
@@ -74,6 +77,9 @@ router.get(
   getFlameyClosetController,
 );
 router.put("/:userId/flamey-look", requireSelfAccess("userId"), putFlameyLook);
+router.put("/:userId/flamey-name", requireSelfAccess("userId"), putFlameyName);
+router.get("/:userId/flamey-outfits", requireSelfAccess("userId"), getFlameyOutfits);
+router.put("/:userId/flamey-outfits", requireSelfAccess("userId"), putFlameyOutfits);
 router.patch(
   "/:userId/onboarding",
   requireSelfAccess("userId"),

@@ -261,6 +261,14 @@ jobs:
       # id exists. A look that silently reverts is reported by nobody.
       - name: Flamey closet check
         run: node scripts/flamey-closet-check.mjs
+      # Flamey's name (moderated UGC shown to friends: grapheme length, emoji,
+      # control chars, blocklist incl. leetspeak), saved outfits (replace
+      # semantics, stable ids, max 5, looks validated at write and re-validated
+      # at read), and `earned_detail` on GET /users/:id/badges across streak /
+      # miles / pace / daily / holiday / count medals — bounded queries for 60
+      # medals. A wrong summary reads plausibly, so pin it.
+      - name: Flamey profile check
+        run: node scripts/flamey-profile-check.mjs
       # Medals are judged over the WHOLE history: Recalibrate Streak also
       # recalibrates medals (a broken 370-day streak keeps streak_365, a sub-8
       # split, a half-marathon day, a Halloween mile, a pruned nudge log),

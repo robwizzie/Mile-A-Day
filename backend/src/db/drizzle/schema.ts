@@ -334,6 +334,11 @@ export const users = pgTable(
     // that slot, an explicit null is bare. Validated for ownership at write AND
     // re-validated at read (a medal can be revoked). Nullable, no default.
     flameyLook: jsonb("flamey_look"),
+    // Flamey's NAME, shown to friends beside the mascot. NULL = "Flamey" (the
+    // default is the client's to print, never stored). User-generated and
+    // served to friends, so written only through PUT /users/:id/flamey-name,
+    // which validates + moderates it. Nullable, no default.
+    flameyName: text("flamey_name"),
     // Lifetime nudges sent (friend + competition), for the nudge medals. The
     // logs they used to be counted from are pruned after 7 days, so a recount
     // could never see past the week. Bumped in the same statement as each log
@@ -3221,3 +3226,38 @@ export const maintenanceRuns = pgTable("maintenance_runs", {
   }).notNull(),
   detail: jsonb(),
 });
+
+// Flamey's Closet saved outfits: up to 5 named looks per user, in the order
+// the user keeps them (`position`, 0-based). `look` has exactly the shape of
+// `users.flamey_look` and the same rules — validated for ownership at WRITE
+// and re-validated at READ (a revoked medal drops its item, row untouched).
+// The list is REPLACED wholesale by PUT /users/:id/flamey-outfits, keeping an
+// entry's id + created_at when the client sends its id back.
+export const flameyOutfits = pgTable(
+  "flamey_outfits",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    position: integer().notNull(),
+    name: text().notNull(),
+    look: jsonb().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_flamey_outfits_user").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.position.asc().nullsLast(),
+    ),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "flamey_outfits_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
