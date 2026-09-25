@@ -26,6 +26,13 @@ import { HOLIDAYS, HOLIDAY_BADGE_PREFIX } from "../services/holidays.js";
  * burst of "Medal Unlocked" for last Christmas across the whole user base is
  * exactly the notification spam the push rules exist to prevent.
  *
+ * DATED by the walk, never the run: `earned_at` is the qualifying day's last
+ * counted workout (the same one `triggering_workout_id` names). Leaving it at
+ * its DEFAULT now() dated every medal to the deploy instant, so the Medals
+ * screen said last Halloween's Spooky Mile was earned "today" and the app,
+ * which celebrates medals dated today, popped one unlock per holiday.
+ * Rows written that way are repaired by db/repairHolidayMedalDates.ts.
+ *
  * Done-marker: a `maintenance_runs` row written only after the LAST batch, so
  * every later boot costs one SELECT. Grow the holiday catalog → bump the name.
  */
@@ -80,7 +87,8 @@ export async function runHolidayMedalBackfill(
 			),
 			days AS (
 				SELECT w.user_id, w.local_date,
-				       (ARRAY_AGG(w.workout_id ORDER BY w.device_end_date DESC))[1] AS workout_id
+				       (ARRAY_AGG(w.workout_id ORDER BY w.device_end_date DESC))[1] AS workout_id,
+				       MAX(w.device_end_date) AS earned_at
 				FROM workouts w
 				JOIN users u ON u.user_id = w.user_id
 				WHERE w.user_id = ANY($1::text[])
@@ -89,9 +97,9 @@ export async function runHolidayMedalBackfill(
 				GROUP BY w.user_id, w.local_date, u.goal_miles
 				HAVING ${holidayDayQualifiesSql("u", "w")}
 			)
-			INSERT INTO user_badges (user_id, badge_id, triggering_workout_id, progress_snapshot)
+			INSERT INTO user_badges (user_id, badge_id, earned_at, triggering_workout_id, progress_snapshot)
 			SELECT DISTINCT ON (d.user_id, h.key)
-			       d.user_id, '${HOLIDAY_BADGE_PREFIX}' || h.key, d.workout_id,
+			       d.user_id, '${HOLIDAY_BADGE_PREFIX}' || h.key, d.earned_at, d.workout_id,
 			       jsonb_build_object('holiday_date', to_char(d.local_date, 'YYYY-MM-DD'), 'backfilled', true)
 			FROM days d
 			JOIN hol h ON h.d = d.local_date

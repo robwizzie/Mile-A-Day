@@ -63,6 +63,7 @@ import { backfillFeedRoles } from "./db/backfillFeedRoles.js";
 import { repairSweptMedia } from "./db/repairSweptMedia.js";
 import { backfillLongestStreaks } from "./db/backfillLongestStreaks.js";
 import { backfillHolidayMedals } from "./db/backfillHolidayMedals.js";
+import { repairHolidayMedalDates } from "./db/repairHolidayMedalDates.js";
 import { backfillRetroBadges } from "./db/backfillRetroBadges.js";
 import {
   getUnifiedFeed,
@@ -417,6 +418,11 @@ runPendingMigrations()
       // history. Silent (no push), idempotent, done-marker in
       // maintenance_runs, so every later boot is one SELECT.
       void backfillHolidayMedals();
+      // Same contract: put holiday medals the first backfill / retro sweep
+      // dated to the deploy instant back on the day they were earned (the app
+      // celebrates medals dated today — that date popped one unlock per
+      // holiday). Holiday rows only, marker `holiday_medal_dates_v1`.
+      void repairHolidayMedalDates();
       // Same contract: every medal judged over the WHOLE history once for
       // everyone (what Recalibrate now does per user). Award-only, silent,
       // one user at a time, done-marker `badge_retro_v1` in maintenance_runs.

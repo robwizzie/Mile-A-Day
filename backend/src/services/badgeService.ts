@@ -426,6 +426,8 @@ export async function evaluateForUser(
     badgeId: string;
     aggregateOnly: boolean;
     workoutId?: string;
+    /** When the medal was actually earned; absent = now. */
+    earnedAt?: Date | string;
   }[] = [];
 
   for (const badge of catalog) {
@@ -443,6 +445,9 @@ export async function evaluateForUser(
   // judged from the days this upload touched. Each is attributed to a workout
   // of THAT day, which is what keeps the controller's 24h push gate honest: a
   // backdated/first-run import of last Halloween earns the medal silently.
+  // And DATED by that workout: `earned_at` defaulting to now() is what told a
+  // Recalibrate / retro sweep / first-run import that last Christmas's medal
+  // was earned today (and the app celebrates medals dated today).
   const catalogIds = new Set(catalog.map((b) => b.badgeId));
   const holidayHits = opts.allHolidays
     ? await holidayHitsAllHistory(userId)
@@ -450,7 +455,12 @@ export async function evaluateForUser(
   for (const hit of holidayHits) {
     const badgeId = holidayBadgeId(hit.key);
     if (earned.has(badgeId) || !catalogIds.has(badgeId)) continue;
-    toInsert.push({ badgeId, aggregateOnly: false, workoutId: hit.workoutId });
+    toInsert.push({
+      badgeId,
+      aggregateOnly: false,
+      workoutId: hit.workoutId,
+      earnedAt: hit.earnedAt,
+    });
   }
 
   if (toInsert.length === 0) {
@@ -461,9 +471,9 @@ export async function evaluateForUser(
   // Recalibrate (or the retro sweep) can insert the same medal a moment
   // earlier, and a medal reported by both would be pushed twice.
   const inserted = await db.query<{ badge_id: string }>(
-    `INSERT INTO user_badges (user_id, badge_id, triggering_workout_id, progress_snapshot)
-		SELECT $1::text, t.badge_id, t.workout_id, $4::jsonb
-		FROM unnest($2::text[], $3::text[]) AS t(badge_id, workout_id)
+    `INSERT INTO user_badges (user_id, badge_id, earned_at, triggering_workout_id, progress_snapshot)
+		SELECT $1::text, t.badge_id, COALESCE(t.earned_at, NOW()), t.workout_id, $4::jsonb
+		FROM unnest($2::text[], $3::text[], $5::timestamptz[]) AS t(badge_id, workout_id, earned_at)
 		ON CONFLICT (user_id, badge_id) DO NOTHING
 		RETURNING badge_id`,
     [
@@ -473,6 +483,11 @@ export async function evaluateForUser(
         (t) => t.workoutId ?? (t.aggregateOnly ? null : triggeringWorkoutId),
       ),
       JSON.stringify(snapshot),
+      toInsert.map((t) =>
+        t.earnedAt instanceof Date
+          ? t.earnedAt.toISOString()
+          : (t.earnedAt ?? null),
+      ),
     ],
   );
   if (inserted.length === 0) return { newlyEarnedBadges: [] };
@@ -533,21 +548,32 @@ export function holidayProbeDates(): Array<{ date: string; key: HolidayKey }> {
 async function evaluateHolidayBadges(
   userId: string,
   workoutIds: string[],
-): Promise<Array<{ key: HolidayKey; workoutId: string }>> {
+): Promise<Array<{ key: HolidayKey; workoutId: string; earnedAt: Date | string }>> {
   if (workoutIds.length === 0) return [];
-  const rows = await db.query<{ workout_id: string; local_date: string }>(
-    `SELECT w.workout_id, to_char(w.local_date, 'YYYY-MM-DD') AS local_date
+  const rows = await db.query<{
+    workout_id: string;
+    local_date: string;
+    device_end_date: Date | string;
+  }>(
+    `SELECT w.workout_id, to_char(w.local_date, 'YYYY-MM-DD') AS local_date, w.device_end_date
 		FROM workouts w
 		WHERE w.user_id = $1 AND w.workout_id = ANY($2::text[]) AND ${countedWorkoutSql("w")}
 		ORDER BY w.device_end_date DESC`,
     [userId, workoutIds],
   );
   // Newest uploaded workout per holiday date (rows are newest-first).
-  const byDate = new Map<string, { key: HolidayKey; workoutId: string }>();
+  const byDate = new Map<
+    string,
+    { key: HolidayKey; workoutId: string; earnedAt: Date | string }
+  >();
   for (const r of rows) {
     const key = holidayKeyForLocalDate(r.local_date);
     if (key && !byDate.has(r.local_date)) {
-      byDate.set(r.local_date, { key, workoutId: r.workout_id });
+      byDate.set(r.local_date, {
+        key,
+        workoutId: r.workout_id,
+        earnedAt: r.device_end_date,
+      });
     }
   }
   if (byDate.size === 0) return [];
@@ -562,7 +588,7 @@ async function evaluateHolidayBadges(
     [userId, [...byDate.keys()]],
   );
   const seen = new Set<HolidayKey>();
-  const out: Array<{ key: HolidayKey; workoutId: string }> = [];
+  const out: Array<{ key: HolidayKey; workoutId: string; earnedAt: Date | string }> = [];
   for (const { local_date } of qualifying) {
     const hit = byDate.get(local_date);
     if (hit && !seen.has(hit.key)) {
@@ -606,11 +632,16 @@ async function holidaysStillEarned(userId: string): Promise<Set<HolidayKey>> {
  */
 async function holidayHitsAllHistory(
   userId: string,
-): Promise<Array<{ key: HolidayKey; workoutId: string }>> {
+): Promise<Array<{ key: HolidayKey; workoutId: string; earnedAt: Date | string }>> {
   const probe = holidayProbeDates();
-  const rows = await db.query<{ local_date: string; workout_id: string }>(
+  const rows = await db.query<{
+    local_date: string;
+    workout_id: string;
+    earned_at: Date | string;
+  }>(
     `SELECT to_char(w.local_date, 'YYYY-MM-DD') AS local_date,
-		        (ARRAY_AGG(w.workout_id ORDER BY w.device_end_date DESC))[1] AS workout_id
+		        (ARRAY_AGG(w.workout_id ORDER BY w.device_end_date DESC))[1] AS workout_id,
+		        MAX(w.device_end_date) AS earned_at
 		FROM workouts w
 		JOIN users u ON u.user_id = w.user_id
 		WHERE w.user_id = $1 AND w.local_date = ANY($2::date[]) AND ${countedWorkoutSql("w")}
@@ -619,13 +650,13 @@ async function holidayHitsAllHistory(
 		ORDER BY w.local_date ASC`,
     [userId, probe.map((p) => p.date)],
   );
-  const out: Array<{ key: HolidayKey; workoutId: string }> = [];
+  const out: Array<{ key: HolidayKey; workoutId: string; earnedAt: Date | string }> = [];
   const seen = new Set<HolidayKey>();
   for (const r of rows) {
     const key = holidayKeyForLocalDate(r.local_date);
     if (key && !seen.has(key)) {
       seen.add(key);
-      out.push({ key, workoutId: r.workout_id });
+      out.push({ key, workoutId: r.workout_id, earnedAt: r.earned_at });
     }
   }
   return out;

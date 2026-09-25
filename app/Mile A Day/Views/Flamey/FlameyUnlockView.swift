@@ -30,10 +30,8 @@ struct FlameyUnlockView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
-    @State private var spin = false
 
     private var single: FlameyItem? { items.count == 1 ? items[0] : nil }
-    private var animated: Bool { !still && !reduceMotion }
 
     /// He wears the news: each new item in its slot (the best one when two
     /// share a slot), over what he already wears.
@@ -76,34 +74,23 @@ struct FlameyUnlockView: View {
         .opacity(appeared || still ? 1 : 0)
         .scaleEffect(appeared || still || reduceMotion ? 1 : 0.94)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Behind, never beside: the rays are wider than the screen and must
-        // not size the layout.
+        // Behind, never beside: the glow must not size the layout.
         .background(background)
         .madTypeCap(.madCardCap)
         .accessibilityElement(children: .contain)
         .onAppear {
             guard !still else { return }
             withAnimation(reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.8)) { appeared = true }
-            guard animated else { return }
-            // Off the appear commit (see FlameBuddyView), or the loop
-            // attaches to the first transaction.
-            DispatchQueue.main.async {
-                withAnimation(.linear(duration: 40).repeatForever(autoreverses: false)) { spin = true }
-            }
         }
     }
 
     // MARK: Pieces
 
+    /// One soft glow behind him — the spinning light rays that used to sit
+    /// under it were removed as too busy for a card that already carries a
+    /// bubble, a dressed figure and a strip of items.
     private var background: some View {
         Color(red: 0.07, green: 0.03, blue: 0.04).opacity(0.97)
-            .overlay {
-                FlameyUnlockRays(color: glow)
-                    .rotationEffect(.degrees(spin ? 360 : 0))
-                    .opacity(0.55)
-                    .frame(width: 900, height: 900)
-                    .offset(y: -40)
-            }
             .overlay {
                 RadialGradient(colors: [glow.opacity(0.28), .clear], center: .center, startRadius: 10, endRadius: 260)
                     .offset(y: -40)
@@ -261,29 +248,5 @@ struct FlameyUnlockView: View {
             .accessibilityHint(single != nil ? "Keeps it in \(FlameyNameRules.possessive(flameyName)) Closet without putting it on"
                                              : "They'll be marked New in \(FlameyNameRules.possessive(flameyName)) Closet")
         }
-    }
-}
-
-/// Soft light rays behind the stage.
-struct FlameyUnlockRays: View {
-    let color: Color
-    var body: some View {
-        Canvas { ctx, size in
-            let c = CGPoint(x: size.width / 2, y: size.height / 2)
-            let r = max(size.width, size.height) / 2
-            let count = 14
-            for i in 0..<count {
-                let a0 = Double(i) / Double(count) * 2 * .pi
-                let a1 = a0 + .pi / Double(count) * 0.55
-                var p = Path()
-                p.move(to: c)
-                p.addLine(to: CGPoint(x: c.x + CGFloat(cos(a0)) * r, y: c.y + CGFloat(sin(a0)) * r))
-                p.addLine(to: CGPoint(x: c.x + CGFloat(cos(a1)) * r, y: c.y + CGFloat(sin(a1)) * r))
-                p.closeSubpath()
-                ctx.fill(p, with: .radialGradient(Gradient(colors: [color.opacity(0.22), color.opacity(0)]),
-                                                  center: c, startRadius: 30, endRadius: r))
-            }
-        }
-        .allowsHitTesting(false)
     }
 }

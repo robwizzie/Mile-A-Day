@@ -314,6 +314,11 @@ enum CelebrationType: Identifiable, Equatable {
     /// One-time welcome summary for a new account with historical data — shows
     /// the COUNT of badges unlocked instead of spamming a popup per badge.
     case badgeSummary(count: Int, badges: [Badge])
+    /// Several medals arriving in ONE refresh, as one card instead of a popup
+    /// each. `retroactive` = earned on EARLIER days (a server-side backfill
+    /// such as the holiday medals, or medals earned while the app went
+    /// unopened) — the card dates each one rather than calling it today's.
+    case badgeBatch(badges: [Badge], retroactive: Bool)
     /// Rewarding moment when the user completes today's daily challenge.
     case challengeCompleted(info: ChallengeCelebrationInfo)
     /// BeReal-style prompt to add a photo to the just-finished mile.
@@ -349,6 +354,8 @@ enum CelebrationType: Identifiable, Equatable {
             return "year-milestone-\(info.years)"
         case .badgeSummary:
             return "badge-summary"
+        case .badgeBatch(let badges, let retroactive):
+            return "badge-batch-\(retroactive ? "retro" : "today")-\(badges.map(\.id).sorted().joined(separator: ","))"
         case .challengeCompleted(let info):
             return "challenge-completed-\(info.key)"
         case .postRunPhotoPrompt(let workoutId, _):
@@ -380,6 +387,8 @@ enum CelebrationType: Identifiable, Equatable {
             return i1.years == i2.years
         case (.badgeSummary, .badgeSummary):
             return true // only one welcome summary
+        case (.badgeBatch(let b1, let r1), .badgeBatch(let b2, let r2)):
+            return r1 == r2 && Set(b1.map(\.id)) == Set(b2.map(\.id))
         case (.challengeCompleted(let i1), .challengeCompleted(let i2)):
             return i1.key == i2.key // one celebration per challenge per day
         case (.postRunPhotoPrompt(let w1, _), .postRunPhotoPrompt(let w2, _)):
@@ -822,6 +831,7 @@ class CelebrationManager: ObservableObject {
         case .leaderboardMoveUp: return 4 // right after the fire/streak screen
         case .postGoalWorkout: return 5
         case .badgeUnlocked: return 6
+        case .badgeBatch: return 6 // the same medal news, just bunched
         case .milestone: return 7
         case .challengeCompleted: return 8 // celebrate the daily challenge as a finale
         case .postRunPhotoPrompt: return 9 // BeReal photo prompt — the very last step
