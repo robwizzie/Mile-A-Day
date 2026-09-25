@@ -85,6 +85,24 @@ export const displayMovingSecondsSql = (w: string) => `(CASE
 // recorded in stealth has NO workout_routes row at all (enforced at write —
 // workoutService's conditional route insert + stealthService), so both
 // resolve to NULL by construction.
+/**
+ * SQL: the AUTHOR's own Flamey for their card — `{look, name}` when `u` (the
+ * author's users row, which every post-shaped read already joins) draws the
+ * Fun dashboard, else NULL. The routeless/indoor card's cheerleader is the
+ * author's customised Flamey rather than a generic one. Additive; shipped
+ * clients ignore the key.
+ *
+ * The look is served as STORED, deliberately. It was validated against the
+ * author's medals at write (PUT …/flamey-look) and the Closet + profile block
+ * still re-validate at read (`servedFlameyLook`); re-validating here would
+ * cost a user_badges read per card on the feed's hottest query, for a
+ * cosmetic whose only stale case is a medal revoked with a deleted workout.
+ * A bare column read off `u` — no subquery, no join — so the feed's plan is
+ * unchanged. The author's only, never a coauthor's.
+ */
+export const authorFlameySql = (u: string) => `CASE WHEN ${u}.dashboard_style = 'fun'
+	THEN jsonb_build_object('look', ${u}.flamey_look, 'name', ${u}.flamey_name) END`;
+
 const POST_COLUMNS = `
 	p.post_id,
 	p.user_id,
@@ -92,6 +110,7 @@ const POST_COLUMNS = `
 	u.first_name,
 	u.last_name,
 	u.profile_image_url,
+	${authorFlameySql("u")} AS author_flamey,
 	p.media_url,
 	-- FRONT & BACK: the swapped composition of the same two frames. Additive
 	-- and NULL on every ordinary post; a client that doesn't know it simply

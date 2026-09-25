@@ -1,6 +1,7 @@
 // Post row shapes shared by every post read, plus the ghost-claim sanitizer
 // that guards the stats snapshot.
 
+import type { FlameyLook } from "../flameyService.js";
 import { MIN_PLAUSIBLE_MILE_SECONDS, MAX_PLAUSIBLE_MILE_SECONDS } from "../mileTime.js";
 
 export interface PostStatsSnapshot {
@@ -134,6 +135,16 @@ export interface CommentPreview {
   content: string;
 }
 
+/**
+ * The author's own Flamey for their card (`authorFlameySql`): present only
+ * when the author draws the Fun dashboard, null otherwise. `look` is the
+ * stored Closet look (null = auto), `name` null = "Flamey".
+ */
+export interface AuthorFlamey {
+  look: FlameyLook | null;
+  name: string | null;
+}
+
 export interface PostRow {
   post_id: string;
   user_id: string;
@@ -141,6 +152,7 @@ export interface PostRow {
   first_name: string | null;
   last_name: string | null;
   profile_image_url: string | null;
+  author_flamey: AuthorFlamey | null;
   media_url: string;
   caption: string | null;
   workout_id: string | null;

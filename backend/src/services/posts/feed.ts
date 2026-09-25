@@ -14,6 +14,7 @@ import {
   type PostStatsSnapshot,
   type PostCompetitionRef,
   type CommentPreview,
+  type AuthorFlamey,
 } from "./postTypes.js";
 import {
   CIRCLE_CTE,
@@ -31,6 +32,7 @@ import {
   COAUTHOR_COLUMNS,
   MULTI_COLLAB_ACTIVE,
   collabActiveSql,
+  authorFlameySql,
 } from "./postSql.js";
 import { POST_WINDOW_MS } from "./postWindow.js";
 import { visiblePostAuthor } from "./postAccess.js";
@@ -92,6 +94,8 @@ export interface FeedEntryRow {
   first_name: string | null;
   last_name: string | null;
   profile_image_url: string | null;
+  // Both kinds: the author's Flamey when they draw the Fun dashboard.
+  author_flamey: AuthorFlamey | null;
   // post-only
   media_url: string | null;
   caption: string | null;
@@ -233,6 +237,10 @@ const FEED_ENTRY_PROJECTION = `
 			page.sort_ts,
 			page.owner_id AS user_id,
 			u.username, u.first_name, u.last_name, u.profile_image_url,
+			-- The author's Flamey (Fun dashboard only), on BOTH arms — the raw
+			-- workout card is where the indoor cheerleader is drawn most.
+			-- Same fragment as POST_COLUMNS, so feed == grid.
+			${authorFlameySql("u")} AS author_flamey,
 			p.media_url, p.dual_media_url, p.dual_inset_corner, p.caption,
 			-- A photo post on the day's anchor speaks for the whole mile, so its
 			-- baked snapshot is restated in the rollup's terms. Without this a

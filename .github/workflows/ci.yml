@@ -269,6 +269,13 @@ jobs:
       # medals. A wrong summary reads plausibly, so pin it.
       - name: Flamey profile check
         run: node scripts/flamey-profile-check.mjs
+      # The AUTHOR's Flamey on their cards: `author_flamey` ({look, name}) on
+      # the feed's post AND workout arms, the single-post read, the grid
+      # (== feed), pinned, memories and the created-post shape — only for a
+      # Fun-dashboard author (Modern/NULL ⇒ null), with every other field of
+      # the entry unchanged. A missing one draws the generic Flamey silently.
+      - name: Flamey author look check
+        run: node scripts/flamey-author-look-check.mjs
       # Medals are judged over the WHOLE history: Recalibrate Streak also
       # recalibrates medals (a broken 370-day streak keeps streak_365, a sub-8
       # split, a half-marathon day, a Halloween mile, a pruned nudge log),
