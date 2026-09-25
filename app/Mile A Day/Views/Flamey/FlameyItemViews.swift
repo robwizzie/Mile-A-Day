@@ -77,7 +77,7 @@ struct FlameyItemArt: View {
         case .feet: return (1.45, 0, 0.46)
         case .back: return (0.66, -0.22, 0.0)
         case .costume: return (0.66, 0, -0.02)
-        case .held: return (0.9, -0.40, 0.06)
+        case .held: return FlameyArt.heldTileFraming(item)
         case .trail: return (0.60, -0.72, 0.14)
         case .companion:
             return FlameyOutfitLayer.floats(item) ? (0.95, 0.66, -0.02) : (0.95, 0.70, 0.36)
@@ -189,7 +189,10 @@ enum FlameyStage {
     /// style, two lines (measured in the harness: ~34pt at 104, ~29pt at 84).
     /// A stage reserves it whether or not he's talking, so a bubble never
     /// clips against what sits above him and choosing a voice moves nothing.
-    static func bubbleRoom(_ size: CGFloat) -> CGFloat { 16 + size * 0.4 }
+    /// Covers the tallest look too: tall hats and hover are fitted to one
+    /// envelope (`FlameyLook.stageFit`), and the bubble now sits OVER the
+    /// hat rather than on it (`FlameyLook.stageRoomAbove`).
+    static func bubbleRoom(_ size: CGFloat) -> CGFloat { max(16 + size * 0.4, FlameyLook.stageRoomAbove(size) + 4) }
 
     static func accessibilityLabel(_ look: FlameyLook, name: String = FlameyNameRules.fallback) -> String {
         let worn = look.items.filter { !$0.isMoodProp && $0 != .classic && $0 != .classicBubble }

@@ -37,6 +37,8 @@ struct FlameyOutfitLayer: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase = false
+    /// The held prop's own beat (a flag waves faster than a trail drifts).
+    @State private var heldPhase = false
 
     private var moving: Bool { !still && !reduceMotion }
     private var palette: FlameyPalette? { FlameyPalette.palette(for: look.color) }
@@ -58,7 +60,9 @@ struct FlameyOutfitLayer: View {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .onAppear { start() }
-        .onChange(of: look) { _, _ in start() }
+        .onChange(of: look) { old, new in
+            if old[.held] != new[.held] { restartHeld() } else { start() }
+        }
     }
 
     /// Idempotent: re-assigning an already-true phase is a no-op, so a
@@ -66,10 +70,27 @@ struct FlameyOutfitLayer: View {
     /// a repeatForever started inside onAppear attaches to the view's first
     /// transaction (see FlameBuddyView).
     private func start() {
-        guard moving, !phase, needsMotion else { return }
-        DispatchQueue.main.async {
-            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { phase = true }
+        guard moving else { return }
+        if !phase, needsMotion {
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { phase = true }
+            }
         }
+        if !heldPhase, let held = look[.held] {
+            let period = FlameyArt.heldMotion(held).period
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: period).repeatForever(autoreverses: true)) { heldPhase = true }
+            }
+        }
+    }
+
+    /// A new prop is a new tempo: land the beat without animation, then
+    /// start it again (re-assigning an at-target phase keeps the old timing).
+    private func restartHeld() {
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) { heldPhase = false }
+        DispatchQueue.main.async { start() }
     }
 
     private var tight: Bool { FlameyArt.isTight(reach) }
@@ -101,7 +122,7 @@ struct FlameyOutfitLayer: View {
     @ViewBuilder
     private var tightTopMask: some View {
         if tight {
-            let top = FlameyArt.tightTopBound
+            let top = FlameyArt.tightTopBound(for: look, scale: scale)
             VStack(spacing: 0) {
                 Color.clear.frame(height: max(0, (top + 2) * size))
                 Color.black.frame(height: size * 4)
@@ -243,11 +264,12 @@ struct FlameyOutfitLayer: View {
                 if look.wears(.astronautHelmet) {
                     FlameyArt.drawFront(.astronautHelmet, in: &ctx, a: a, u: u, palette: palette, jets: jets)
                 }
-                if let held = look[.held] {
-                    FlameyArt.drawFront(held, in: &ctx, a: a, u: u, palette: palette, jets: jets, reach: reach)
-                }
             }
             .frame(width: size * 3, height: size * 3)
+
+            if let held = look[.held] {
+                heldProp(held, a: a)
+            }
 
             if look.wears(.heartBopper) {
                 // The band sits still on his head; only the springs sway.
@@ -302,6 +324,49 @@ struct FlameyOutfitLayer: View {
                     .offset(y: a.bottom - 0.5 * u)
             }
         }
+    }
+
+    /// What he holds, in its own two layers so it can MOVE without a clock
+    /// (see `FlameyArt.HeldMotion`): the prop swings about his fist as one
+    /// piece — the handle turns inside the hand the arms layer closes over
+    /// it — and its accent (the flag's cloth, the sweep hand, the sound
+    /// rings, the burst) moves about its own pivot. Both ride `heldPhase`,
+    /// one `repeatForever` at the prop's own tempo; a still draws phase 0.
+    @ViewBuilder
+    private func heldProp(_ item: FlameyItem, a: FlameyArt.Anchors) -> some View {
+        let u = self.u
+        let reach = self.reach
+        let motion = FlameyArt.heldMotion(item)
+        let on = moving && heldPhase
+        let grip = unitPoint(FlameyArt.heldPoint(item, FlameyArt.heldGrip(item), a: a, u: u, reach: reach))
+        let accentAt = FlameyArt.heldAccentPivot(item).map { unitPoint(FlameyArt.heldPoint(item, $0, a: a, u: u, reach: reach)) }
+        ZStack {
+            Canvas { ctx, canvas in
+                ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
+                FlameyArt.applyHeldTight(item, &ctx, a: a, u: u, reach: reach)
+                FlameyArt.held(item, &ctx, a, u, layer: .body)
+            }
+            .frame(width: size * 3, height: size * 3)
+            if let accentAt {
+                Canvas { ctx, canvas in
+                    ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
+                    FlameyArt.applyHeldTight(item, &ctx, a: a, u: u, reach: reach)
+                    FlameyArt.held(item, &ctx, a, u, layer: .accent)
+                }
+                .frame(width: size * 3, height: size * 3)
+                .modifier(FlameyHeldAccent(kind: motion.accent, on: on, anchor: accentAt))
+            }
+        }
+        // Pom-poms shake (a quick pump up and out) rather than swing.
+        .scaleEffect(item == .pomPoms && on ? 1.07 : 1, anchor: grip)
+        .offset(y: item == .pomPoms && on ? -0.012 * u : 0)
+        .rotationEffect(.degrees(on ? motion.wobble : -motion.wobble * 0.35), anchor: grip)
+    }
+
+    /// A point in the outfit canvas (origin at his square's centre) as a
+    /// UnitPoint of the 3×size canvas the props are drawn in.
+    private func unitPoint(_ p: CGPoint) -> UnitPoint {
+        UnitPoint(x: (1.5 * size + p.x) / (3 * size), y: (1.5 * size + p.y) / (3 * size))
     }
 
     static func floats(_ companion: FlameyItem) -> Bool {
@@ -544,9 +609,11 @@ struct FlameyStyledBubble: View {
     let text: String
     let style: FlameyItem
     let size: CGFloat
+    /// Width cap as a fraction of `size` (the hero passes less).
+    var widthFraction: CGFloat = 0.78
 
     private var fontSize: CGFloat { max(10, size * 0.07) }
-    private var maxWidth: CGFloat { size * 0.78 }
+    private var maxWidth: CGFloat { size * widthFraction }
     private var tail: CGFloat { max(5, size * 0.045) }
 
     var body: some View {
@@ -723,6 +790,31 @@ struct FlameyHalftone: View {
                 y += step * 0.86
                 row += 1
             }
+        }
+    }
+}
+
+/// The held prop's accent motion: the flag's cloth flutters about the pole
+/// top, the stopwatch hand sweeps round, the megaphone's rings pulse out of
+/// the bell, the cannon's burst blooms from the muzzle. Transform/opacity
+/// only, about `anchor`, on the prop's `heldPhase`.
+struct FlameyHeldAccent: ViewModifier {
+    let kind: FlameyArt.HeldMotion.Accent
+    let on: Bool
+    let anchor: UnitPoint
+
+    func body(content: Content) -> some View {
+        switch kind {
+        case .flutter:
+            content.scaleEffect(x: on ? 0.9 : 1.02, y: on ? 1.04 : 0.98, anchor: anchor)
+        case .sweep:
+            content.rotationEffect(.degrees(on ? 150 : 0), anchor: anchor)
+        case .pulse:
+            content.scaleEffect(on ? 1.14 : 0.9, anchor: anchor).opacity(on ? 0.55 : 1)
+        case .burst:
+            content.scaleEffect(on ? 1.1 : 0.92, anchor: anchor).opacity(on ? 0.8 : 1)
+        case .none:
+            content
         }
     }
 }
