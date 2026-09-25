@@ -66,6 +66,12 @@ struct FlameBuddyFigure: View {
     /// the flame's size, palette and glow burn down with the day — matching the
     /// dashboard. When nil the figure keeps its stage-based look.
     var vigor: CGFloat? = nil
+    /// Dozing: lids down and a small, slack mouth — the SAME face the app
+    /// copy draws for a sleeping mood (`FlameMoodKind.eyesShut`), so the
+    /// widget's Flamey sleeps in when the dashboard's does. Defaulted off,
+    /// and placed where the app copy's memberwise order has it (after
+    /// `vigor`, before `grounded`), so one call compiles against both.
+    var asleep: Bool = false
     /// Grounded flames (the Fun buddy) shrink toward their base and cast a
     /// ground shadow; a non-grounded flame (the Modern ring) shrinks toward its
     /// center so it stays framed in the circle.
@@ -373,6 +379,15 @@ struct FlameBuddyFigure: View {
                 Capsule().fill(Color.white.opacity(0.86)).frame(width: size * 0.085, height: size * 0.018).rotationEffect(.degrees(-42))
             }
             .frame(width: size * 0.13, height: size * 0.13)
+        } else if asleep {
+            // Same lid as the app copy: an arc bowing up, a touch low.
+            FlameBuddyFrownShape()
+                .stroke(
+                    Color(red: 0.20, green: 0.07, blue: 0.04),
+                    style: StrokeStyle(lineWidth: max(2, size * 0.02), lineCap: .round)
+                )
+                .frame(width: size * 0.12, height: size * 0.045)
+                .offset(y: size * 0.03)
         } else {
             Ellipse()
                 .fill(activePalette?.eye ?? Color(red: 0.20, green: 0.07, blue: 0.04))
@@ -400,6 +415,18 @@ struct FlameBuddyFigure: View {
 
     @ViewBuilder
     private var mouth: some View {
+        if asleep {
+            // The small, slack snore — same as the app copy.
+            Ellipse()
+                .fill(Color(red: 0.24, green: 0.04, blue: 0.04).opacity(0.9))
+                .frame(width: size * 0.055, height: size * 0.06)
+        } else {
+            awakeMouth
+        }
+    }
+
+    @ViewBuilder
+    private var awakeMouth: some View {
         switch health {
         case .blazing, .healthy:
             // A grin, not a gasp. This was a plain Capsule TALLER than it was
@@ -428,6 +455,7 @@ struct FlameBuddyFigure: View {
     }
 
     private var accessibilityText: String {
+        if asleep { return "Flame buddy dozing. The day hasn't started yet." }
         switch health {
         case .blazing: return "Flame buddy blazing. Today's mile is complete."
         case .healthy: return "Flame buddy healthy."

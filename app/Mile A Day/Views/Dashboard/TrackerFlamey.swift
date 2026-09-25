@@ -17,12 +17,8 @@ enum TrackerFlameyMood {
     /// Calm while the day is young, bouncing mid-way, hyped (fast hop +
     /// sparkles) near the end, shades on once the goal is in.
     static func kind(for progress: Double) -> FlameMood.Kind {
-        switch progress {
-        case ..<0.35: return .going
-        case ..<0.75: return .halfway
-        case ..<1.0: return .almost
-        default: return .done
-        }
+        // Shared with the Workout Live Activity (FlameyMoodCore.swift).
+        FlameMoodKind.forWorkoutProgress(progress)
     }
 }
 

@@ -1,28 +1,7 @@
 import SwiftUI
 
-/// Lifecycle of the streak flame shared by both dashboard styles.
-///
-/// The flame is a day-long candle: full right after midnight, shrinking as the
-/// day drains, and nothing at all at the stroke of midnight unless the mile
-/// reignites it. With no living streak there is no flame — just a cold coal
-/// waiting to be lit by the first mile.
-enum StreakFlamePhase: Equatable {
-    /// No living streak and no mile banked today — a cold coal.
-    case coal
-    /// Streak alive but today's mile not done — the flame burns down with the time left.
-    case burning
-    /// Today's mile is banked — full flame, nothing left to lose.
-    case blazing
-
-    /// Mirrors the trust rules of `FlameHealth.forState`: completion and
-    /// streak-zero are only believed when today's distance is fresh, so a
-    /// locked-device zero can never flash the coal at a streaking user.
-    static func forState(isCompleted: Bool, distanceIsFresh: Bool, streak: Int) -> StreakFlamePhase {
-        if isCompleted && distanceIsFresh { return .blazing }
-        if streak == 0 && distanceIsFresh { return .coal }
-        return .burning
-    }
-}
+// `StreakFlamePhase` lives in FlameyMoodCore.swift, which the widget
+// extension compiles too (its mood resolver takes a phase).
 
 enum StreakFlameClock {
     static let dayLength: TimeInterval = 24 * 60 * 60

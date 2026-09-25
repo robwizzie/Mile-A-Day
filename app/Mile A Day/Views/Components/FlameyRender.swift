@@ -487,6 +487,13 @@ struct FlameyPaparazzi: View {
 /// The whole dressed Flamey as ONE static view — for surfaces that render
 /// statically (the flame widget, the Live Activity). Behind + figure + front,
 /// the figure in his colour and hovering when the look says so.
+///
+/// `mood` makes it the SAME Flamey the Fun hero is drawing: his eyes shut
+/// when that mood sleeps, his arms in its pose, and its props (zzz, sweat
+/// drop, sparkles, confetti) in their still frame — every piece of that from
+/// FlameyMoodCore.swift, the code the hero itself calls. Pass the look
+/// resolved WITH `mood.props` (nightcap / shades / party hat) so the head is
+/// dressed by the look, never twice.
 struct FlameyDressedFigure: View {
     let look: FlameyLook
     let health: FlameHealth
@@ -494,16 +501,26 @@ struct FlameyDressedFigure: View {
     var vigor: CGFloat? = nil
     /// The scale the figure draws at (its effective body scale).
     var scale: CGFloat
-    /// How his arms are held (a static surface picks one pose).
-    var arms: FlameArmPose = .rest
+    /// How his arms are held; nil = the mood's pose (`.rest` without one).
+    var arms: FlameArmPose? = nil
+    var mood: FlameMoodKind? = nil
 
     var body: some View {
-        FlameyDressedBody(look: look, arms: arms,
-                          figure: FlameyDressedBody.figure(look: look, health: health, size: size, vigor: vigor, scale: scale))
-            // A compact surface (widget, Live Activity) was fitted to him
-            // before he had legs: there he stands the same height as ever.
-            .scaleEffect(look.detail == .compact ? 1 / (1 + look.standLift) : 1, anchor: .bottom)
-            .frame(width: size, height: size)
+        let asleep = mood?.eyesShut() ?? false
+        let pose = arms ?? mood?.armPose(eyesShut: asleep) ?? .rest
+        ZStack {
+            FlameyDressedBody(look: look, arms: pose,
+                              figure: FlameyDressedBody.figure(look: look, health: health, size: size, vigor: vigor,
+                                                               scale: scale, asleep: asleep))
+            if let mood {
+                FlameMoodProps(kind: mood, eyesShut: asleep, size: size, scale: scale, still: true,
+                               drawsWornProps: false, lift: look.bodyLift * scale, peak: true)
+            }
+        }
+        // A compact surface (widget, Live Activity) was fitted to him
+        // before he had legs: there he stands the same height as ever.
+        .scaleEffect(look.detail == .compact ? 1 / (1 + look.standLift) : 1, anchor: .bottom)
+        .frame(width: size, height: size)
     }
 }
 
@@ -576,9 +593,10 @@ extension FlameyDressedBody where Skin == EmptyView, Prop == EmptyView {
 
     /// A figure dressed in `look`: his colour, his legs, his lift.
     static func figure(look: FlameyLook, health: FlameHealth, size: CGFloat, flickerPhase: CGFloat = 0,
-                       blink: Bool = false, vigor: CGFloat? = nil, scale: CGFloat) -> FlameBuddyFigure {
+                       blink: Bool = false, vigor: CGFloat? = nil, scale: CGFloat,
+                       asleep: Bool = false) -> FlameBuddyFigure {
         FlameBuddyFigure(health: health, flickerPhase: flickerPhase, blink: blink, size: size,
-                         showsFace: !look.wears(.ghostSheet), vigor: vigor, grounded: true,
+                         showsFace: !look.wears(.ghostSheet), vigor: vigor, asleep: asleep, grounded: true,
                          palette: health == .dead ? nil : FlameyPalette.palette(for: look.color),
                          lift: look.bodyLift * scale, legLength: look.standLift)
     }

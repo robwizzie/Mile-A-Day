@@ -311,6 +311,28 @@ struct WidgetDataStore {
             .union(FlameyWardrobe.impliedBadgeIds(longestStreak: loadLongestStreak())))
     }
 
+    private static let flameyWokenDayKey = "flamey_woken_day"
+
+    /// The local day a poke woke the dashboard's sleeping Flamey
+    /// (`flameyWokenDayV1`, `FlameMoodKind.dayStamp`). The widget resolves
+    /// his mood per entry from it, so the home screen wakes when the hero
+    /// does and sleeps in again tomorrow with no write at all. Written at
+    /// most once a day (a wake), and it reloads the flame widget only when
+    /// it actually changes — that reload IS the point: he's awake now.
+    static func save(flameyWokenDay: String) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        if defaults.string(forKey: flameyWokenDayKey) == flameyWokenDay { return }
+        defaults.set(flameyWokenDay, forKey: flameyWokenDayKey)
+        DispatchQueue.main.async {
+            WidgetCenter.shared.reloadTimelines(ofKind: "StreakFlameWidget")
+        }
+    }
+
+    static func loadFlameyWokenDay() -> String {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return "" }
+        return defaults.string(forKey: flameyWokenDayKey) ?? ""
+    }
+
     // MARK: - Streak tokens (streak widget accessory)
 
     private static let tokensReadyKey = "tokens_ready"

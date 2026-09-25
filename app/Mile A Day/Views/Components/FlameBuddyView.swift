@@ -447,12 +447,9 @@ struct FlameBuddyView: View {
     /// relaxed at his sides otherwise.
     private var armPose: FlameArmPose {
         if let armReaction { return armReaction }
-        switch mood?.kind {
-        case .nervous?: return .cheeks
-        case .party?: return .cheer
-        case .sleepy?, .bedtime?: return mood?.eyesShut == true ? .tucked : .rest
-        default: return .rest
-        }
+        // One mapping, shared with the widget (FlameyMoodCore.swift).
+        guard let mood else { return .rest }
+        return mood.kind.armPose(eyesShut: mood.eyesShut)
     }
 
     /// How far his body is raised — his legs, plus any hover — as a

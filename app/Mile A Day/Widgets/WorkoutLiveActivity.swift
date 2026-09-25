@@ -180,14 +180,17 @@ private struct LiveTimerText: View {
 // MARK: - Flamey (Fun only)
 
 /// The streak-risk Live Activity's Flamey: the user's OWN look (not a
-/// generic red buddy), worried — critical flame, hands on his cheeks.
-/// Fun-only by the caller (`funStyle`). Compiled into both targets.
+/// generic red buddy), in the hero's `.nervous` mood — critical flame, hands
+/// on his cheeks, the sweat drop — all from FlameyMoodCore.swift, the same
+/// mapping the dashboard uses when the streak is at risk. Fun-only by the
+/// caller (`funStyle`). Compiled into both targets.
 struct LiveActivityWorriedFlamey: View {
     let size: CGFloat
 
     var body: some View {
-        FlameyDressedFigure(look: LiveActivityFlamey.mirroredLook(), health: .critical, size: size,
-                            scale: FlameHealth.critical.bodyScale, arms: .cheeks)
+        let mood = FlameMoodKind.nervous
+        FlameyDressedFigure(look: LiveActivityFlamey.mirroredLook(mood: mood.props), health: .critical, size: size,
+                            scale: FlameHealth.critical.bodyScale, mood: mood)
             .frame(width: size, height: size)
             .accessibilityHidden(true)
     }
@@ -197,11 +200,13 @@ struct LiveActivityWorriedFlamey: View {
 /// no onAppear, no animation). Fun-only, read from the App Group mirror of the
 /// dashboard style; draws nothing on Modern or on a stale activity. His
 /// look is resolved from the same mirrored facts the flame widget uses, and
-/// his pose from the DAY's progress in three bands:
+/// his mood from the DAY's progress through `FlameMoodKind.forWorkoutProgress`
+/// — the SAME bands the tracker's own Flamey uses (FlameyMoodCore.swift):
 ///
-///   < 50%   ready    — plain, calm
-///   50–99%  excited  — leaning in, sparkles
-///   ≥ 100%  cheering — blazing, shades + party hat, confetti
+///   < 35%   going    — calm
+///   35–74%  halfway  — calm
+///   75–99%  almost   — sparkles
+///   >= 100% done     — blazing, shades
 ///
 /// Compiled into BOTH the app module and the widget extension, so it only
 /// touches API the two copies of the figure/wardrobe share.
@@ -209,14 +214,6 @@ struct LiveActivityFlamey: View {
     let progress: Double
     let size: CGFloat
     var isStale: Bool = false
-
-    enum Band: Equatable { case ready, excited, cheering }
-
-    static func band(for progress: Double) -> Band {
-        if progress >= 1 { return .cheering }
-        if progress >= 0.5 { return .excited }
-        return .ready
-    }
 
     static var isFun: Bool { WidgetDataStore.loadDashboardStyle() == "fun" }
 
@@ -237,48 +234,14 @@ struct LiveActivityFlamey: View {
 
     var body: some View {
         if Self.isFun && !isStale {
-            let band = Self.band(for: progress)
+            let mood = FlameMoodKind.forWorkoutProgress(progress)
             // A small surface: `.compact` keeps colour, head, eyes, chest,
             // feet and costume, standing on the ground.
-            let look = Self.mirroredLook(mood: band == .cheering ? [.moodShades, .partyHat] : [])
-            let health: FlameHealth = band == .cheering ? .blazing : .healthy
-            ZStack {
-                if band != .ready { flair(band) }
-                // Arms up when the day's done — the same cheer as the goal
-                // celebration.
-                FlameyDressedFigure(look: look, health: health, size: size, scale: health.bodyScale,
-                                    arms: band == .cheering ? .cheer : .rest)
-            }
-            .rotationEffect(.degrees(band == .excited ? -6 : 0), anchor: .bottom)
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
-        }
-    }
-
-    /// Sparkles (excited) or confetti (cheering), baked in place.
-    @ViewBuilder
-    private func flair(_ band: Band) -> some View {
-        if band == .excited {
-            ForEach(0..<2, id: \.self) { i in
-                Image(systemName: "sparkle")
-                    .font(.system(size: size * (i == 0 ? 0.20 : 0.14), weight: .bold))
-                    .foregroundColor(Color(red: 1.0, green: 0.92, blue: 0.55))
-                    .offset(x: (i == 0 ? 1 : -1) * size * 0.46, y: -size * (i == 0 ? 0.30 : 0.05))
-            }
-        } else {
-            let pieces: [(x: CGFloat, y: CGFloat, deg: Double, hue: Int)] = [
-                (-0.52, -0.42, 20, 0), (0.50, -0.36, -30, 1), (-0.46, 0.02, 50, 2),
-                (0.56, 0.04, 10, 3), (-0.30, -0.62, -15, 3), (0.34, -0.60, 35, 2),
-            ]
-            let colors = [Color(red: 1.0, green: 0.42, blue: 0.62), Color(red: 0.55, green: 0.42, blue: 1.0),
-                          Color(red: 0.35, green: 0.85, blue: 0.95), Color(red: 1.0, green: 0.9, blue: 0.45)]
-            ForEach(0..<pieces.count, id: \.self) { i in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(colors[pieces[i].hue])
-                    .frame(width: size * 0.09, height: size * 0.05)
-                    .rotationEffect(.degrees(pieces[i].deg))
-                    .offset(x: size * pieces[i].x, y: size * pieces[i].y)
-            }
+            let health: FlameHealth = mood == .done ? .blazing : .healthy
+            FlameyDressedFigure(look: Self.mirroredLook(mood: mood.props), health: health, size: size,
+                                scale: health.bodyScale, mood: mood)
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
         }
     }
 }

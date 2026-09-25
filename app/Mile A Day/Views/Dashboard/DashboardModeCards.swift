@@ -1334,9 +1334,9 @@ private struct FlameBuddyHeroCard: View {
 
     private var trustedDone: Bool { isGoalCompleted && distanceIsFresh }
 
+    /// The same stamp the widget compares against (FlameyMoodCore.swift).
     private static func localDayStamp(_ date: Date = Date()) -> String {
-        let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+        FlameMoodKind.dayStamp(date)
     }
 
     /// What the flame is feeling: resolved from the same state the phase and
@@ -1462,6 +1462,8 @@ private struct FlameBuddyHeroCard: View {
         let before = mood.kind
         if before == .sleepy {
             flameyWokenDay = Self.localDayStamp()
+            // The home-screen Flamey wakes with him (one reload, once a day).
+            WidgetDataStore.save(flameyWokenDay: flameyWokenDay)
         }
         pokedAt = Date()
         say(FlameMood.pokeQuips(for: before).randomElement() ?? "Hey!")
