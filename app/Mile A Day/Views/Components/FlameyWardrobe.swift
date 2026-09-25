@@ -206,7 +206,7 @@ enum FlameySlot: String, CaseIterable, Codable, Hashable {
 
     var displayName: String {
         switch self {
-        case .color: return "Colour"
+        case .color: return "Color"
         case .head: return "Head"
         case .eyes: return "Eyes"
         case .chest: return "Chest"

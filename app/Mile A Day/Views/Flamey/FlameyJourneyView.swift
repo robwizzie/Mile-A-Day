@@ -166,12 +166,20 @@ struct FlameyJourneyView: View {
     @State private var nameText: String
     @State private var nameError: String?
     @State private var naming = false
+    /// The name was just saved from the field's own button ("He's Sparky now").
+    @State private var nameSaved = false
+    @FocusState private var nameFocused: Bool
+    /// The screen's height WITHOUT the keyboard — deciding "compact" from
+    /// the keyboard-shrunk height re-laid the page out the moment the name
+    /// field was tapped.
+    @State private var screenHeight: CGFloat = 0
     /// Skip with picks: "Save changes?" is up.
     @State private var asking = false
 
     init(model: FlameyClosetModel, still: Bool = false, startPage: Int = 0,
          draft: FlameyLookChoice? = nil, tapped: FlameyItem? = nil, nameText: String? = nil,
-         nameError: String? = nil, asking: Bool = false, onFinish: @escaping () -> Void = {}) {
+         nameError: String? = nil, nameSaved: Bool = false, asking: Bool = false,
+         onFinish: @escaping () -> Void = {}) {
         self.model = model
         self.still = still
         self.startPage = startPage
@@ -182,6 +190,7 @@ struct FlameyJourneyView: View {
         _startChoice = State(initialValue: model.choice)
         _nameText = State(initialValue: nameText ?? (model.name ?? ""))
         _nameError = State(initialValue: nameError)
+        _nameSaved = State(initialValue: nameSaved)
         _asking = State(initialValue: asking)
     }
 
@@ -204,7 +213,7 @@ struct FlameyJourneyView: View {
             VStack(spacing: 0) {
                 topBar
                 ZStack {
-                    pageBody(page, compact: geo.size.height < 700)
+                    pageBody(page, compact: (screenHeight > 0 ? screenHeight : geo.size.height) < 700)
                         .id(page.id)
                         .transition(pageTransition)
                 }
@@ -216,6 +225,14 @@ struct FlameyJourneyView: View {
                     .padding(.horizontal, 20)
                     .padding(.bottom, 16)
             }
+        }
+        .background {
+            GeometryReader { full in
+                Color.clear
+                    .onAppear { screenHeight = full.size.height }
+                    .onChange(of: full.size.height) { _, h in screenHeight = h }
+            }
+            .ignoresSafeArea(.keyboard, edges: .bottom)
         }
         .background(background.ignoresSafeArea())
         .overlay {
@@ -584,8 +601,10 @@ struct FlameyJourneyView: View {
         }
     }
 
-    /// "What should we call him?" — optional; blank leaves him Flamey. Saved
-    /// when the welcome page is left forward.
+    /// "What should we call him?" — optional; blank leaves him Flamey. It has
+    /// its OWN Save beside the field (and Return saves), so the action is
+    /// always right where the typing is — never behind the keyboard; leaving
+    /// the page forward still saves a name that was typed and not saved.
     private var nameField: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -599,18 +618,66 @@ struct FlameyJourneyView: View {
                     .foregroundColor(.white.opacity(0.4))
             }
             .foregroundColor(.white.opacity(0.85))
-            FlameyTextField(placeholder: FlameyNameRules.fallback, text: $nameText, maxLength: FlameyNameRules.maxLength,
-                            still: still, isError: nameError != nil, submitLabel: .next) { go(index + 1) }
+            HStack(spacing: 8) {
+                FlameyTextField(placeholder: FlameyNameRules.fallback, text: $nameText, maxLength: FlameyNameRules.maxLength,
+                                still: still, isError: nameError != nil, submitLabel: .done) { saveNameNow() }
+                    .focused($nameFocused)
+                if nameChanged && nameError == nil {
+                    Button(action: saveNameNow) {
+                        Group {
+                            if naming {
+                                ProgressView().tint(.white).controlSize(.small)
+                            } else {
+                                Text("Save")
+                                    .madFont(size: 15, weight: .heavy, design: .rounded, maxScale: 1.3)
+                                    .lineLimit(1)
+                                    .fixedSize()
+                            }
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .frame(height: 52)
+                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(FlameyClosetStyle.primaryFill))
+                        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Save name")
+                    .transition(.opacity)
+                }
+            }
             if let nameError {
                 FlameyFieldNote(error: nameError, hint: "")
+            } else if nameSaved && !nameChanged {
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .accessibilityHidden(true)
+                    Text(model.name == nil ? "He's Flamey" : "He's \(model.displayName) now")
+                        .madFont(size: 12.5, weight: .bold, design: .rounded, maxScale: 1.3)
+                }
+                .foregroundColor(FlameyClosetStyle.worn)
             }
         }
         .onChange(of: nameText) { _, new in
+            nameSaved = false
             if case .failure(let issue) = FlameyNameRules.validate(new), issue != .empty {
                 nameError = issue.message()
             } else {
                 nameError = nil
             }
+        }
+    }
+
+    /// The field's Save / Return: name him, stay on the page, put the
+    /// keyboard away.
+    private func saveNameNow() {
+        guard nameChanged, nameError == nil, !naming else {
+            nameFocused = false
+            return
+        }
+        commitName {
+            nameFocused = false
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { nameSaved = true }
         }
     }
 
