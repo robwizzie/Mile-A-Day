@@ -712,13 +712,33 @@ class UserManager: ObservableObject {
                 let yearlyOwed = checkAndQueueYearlyCelebration()
                 let suppressedBadgeIDs: Set<String> = yearlyOwed ? suppressedBadgeIDsForYearly() : []
 
-                // Celebrate freshly-earned badges (not previously present).
-                let today = Calendar.current.startOfDay(for: Date())
-                for badge in fetched {
-                    let earnedToday = Calendar.current.startOfDay(for: badge.dateAwarded) == today
-                    if earnedToday && !existingIds.contains(badge.id) && !suppressedBadgeIDs.contains(badge.id) {
+                // Celebrate freshly-arrived badges (not previously present),
+                // split by WHEN they were earned. Something this refresh brought
+                // in that was earned on an earlier day (a server backfill such
+                // as the holiday medals — ten at once for a long-time walker —
+                // or medals earned while the app went unopened) is ONE dated
+                // card, never a popup each claiming to be today's. A big burst
+                // earned today is bunched the same way.
+                let calendar = Calendar.current
+                let today = calendar.startOfDay(for: Date())
+                let fresh = fetched.filter {
+                    !existingIds.contains($0.id) && !suppressedBadgeIDs.contains($0.id)
+                }
+                let earnedToday = fresh.filter { calendar.startOfDay(for: $0.dateAwarded) >= today }
+                let earlier = fresh.filter { calendar.startOfDay(for: $0.dateAwarded) < today }
+
+                if earnedToday.count > Self.individualBadgePopupLimit {
+                    CelebrationManager.shared.addCelebration(.badgeBatch(badges: earnedToday, retroactive: false))
+                } else {
+                    for badge in earnedToday {
                         CelebrationManager.shared.addCelebration(.badgeUnlocked(badge: badge))
                     }
+                }
+                // Only against a shelf we actually had: with no local list
+                // (a lost persisted blob) EVERY medal diffs as fresh, and that
+                // is a restore, not news.
+                if !earlier.isEmpty && !existingIds.isEmpty {
+                    CelebrationManager.shared.addCelebration(.badgeBatch(badges: earlier, retroactive: true))
                 }
             }
         } catch {
@@ -734,6 +754,10 @@ class UserManager: ObservableObject {
     /// `-1` is the uninitialized sentinel so existing users with mid-year streaks aren't
     /// retroactively flooded with year-1/2/3 animations on first launch with this feature.
     @AppStorage("lastCelebratedYearMilestoneStreak") private var lastCelebratedYearMilestoneStreak: Int = -1
+
+    /// More medals than this earned TODAY in one refresh become one card
+    /// (`.badgeBatch`) instead of a popup each.
+    static let individualBadgePopupLimit = 3
 
     /// Armed only AFTER the initial historical workout sync completes (via the
     /// MAD_InitialSyncCompleted handler in init). While false, refreshBadgesFromServer

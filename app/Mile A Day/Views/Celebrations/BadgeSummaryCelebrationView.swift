@@ -1,11 +1,19 @@
 import SwiftUI
 
-/// One-time welcome shown to a new account that signed in with historical data.
-/// Instead of spamming an unlock popup per badge, this shows the COUNT and a
-/// preview, with "View all badges" / "Back to dashboard".
+/// ONE card for many medals, instead of an unlock popup per badge. Three
+/// occasions, same card:
+/// - `.welcome`: once, for a new account that signed in with history.
+/// - `.retroactive`: medals that landed in one refresh but were EARNED on
+///   earlier days (a server backfill like the holiday medals, or medals earned
+///   while the app went unopened). They are listed WITH their dates — a card
+///   calling last Halloween's Spooky Mile "today's" is the bug this replaced.
+/// - `.burst`: more than a few medals earned today in one go.
 struct BadgeSummaryCelebrationView: View {
+    enum Mode { case welcome, retroactive, burst }
+
     let count: Int
     let badges: [Badge]
+    var mode: Mode = .welcome
 
     @State private var showOverlay = false
     @State private var showStack = false
@@ -49,14 +57,18 @@ struct BadgeSummaryCelebrationView: View {
                             )
                             .monospacedDigit()
                             .contentTransition(.numericText())
-                        Text(count == 1 ? "Badge unlocked" : "Badges unlocked")
+                        Text(headline)
                             .font(.system(size: 20, weight: .heavy, design: .rounded))
                             .foregroundColor(.white)
-                        Text("Welcome to Mile A Day! Here's everything you've already earned from your history. 🎉")
+                        Text(subtitle)
                             .font(.system(size: 14, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.6))
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, MADTheme.Spacing.xl)
+                        if mode == .retroactive {
+                            datedList
+                                .padding(.top, MADTheme.Spacing.sm)
+                        }
                     }
                     .transition(.scale(scale: 0.9).combined(with: .opacity))
                 }
@@ -83,6 +95,77 @@ struct BadgeSummaryCelebrationView: View {
             }
         }
         .onAppear(perform: runSequence)
+    }
+
+    private var headline: String {
+        switch mode {
+        case .welcome:
+            return count == 1 ? "Badge unlocked" : "Badges unlocked"
+        case .retroactive:
+            return count == 1 ? "Medal from your history" : "Medals from your history"
+        case .burst:
+            return "Medals unlocked today"
+        }
+    }
+
+    private var subtitle: String {
+        switch mode {
+        case .welcome:
+            return "Welcome to Mile A Day! Here's everything you've already earned from your history. 🎉"
+        case .retroactive:
+            return count == 1
+                ? "You'd already earned this one on an earlier day — it's now on your shelf."
+                : "You'd already earned these on earlier days — they're now on your shelf."
+        case .burst:
+            return "A big day. Every one of these is on your shelf."
+        }
+    }
+
+    /// Retroactive medals, oldest first, each with the day it was EARNED —
+    /// the whole point of this card is that none of them are today's.
+    private var datedBadges: [Badge] {
+        badges.sorted { $0.dateAwarded < $1.dateAwarded }
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
+
+    private var datedList: some View {
+        let shown = Array(datedBadges.prefix(4))
+        let rest = datedBadges.count - shown.count
+        return VStack(spacing: 6) {
+            ForEach(shown, id: \.id) { badge in
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Text(badge.name)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.9))
+                        .lineLimit(1)
+                    Spacer(minLength: MADTheme.Spacing.sm)
+                    Text(Self.dateFormatter.string(from: badge.dateAwarded))
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                .accessibilityElement(children: .combine)
+            }
+            if rest > 0 {
+                Text("and \(rest) more in your Medals")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.45))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+        )
+        .padding(.horizontal, MADTheme.Spacing.lg)
     }
 
     private var medalStack: some View {

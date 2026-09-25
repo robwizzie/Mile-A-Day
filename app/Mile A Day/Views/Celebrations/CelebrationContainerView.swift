@@ -54,6 +54,13 @@ struct CelebrationContainerView: View {
         case .badgeSummary(let count, let badges):
             BadgeSummaryCelebrationView(count: count, badges: badges)
 
+        case .badgeBatch(let badges, let retroactive):
+            BadgeSummaryCelebrationView(
+                count: badges.count,
+                badges: badges,
+                mode: retroactive ? .retroactive : .burst
+            )
+
         case .challengeCompleted(let info):
             ChallengeCompletedCelebrationView(info: info)
 

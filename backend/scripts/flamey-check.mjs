@@ -38,6 +38,7 @@ import {
 } from "../dist/services/holidays.js";
 import { revokeUnearnedBadges, seedExtraBadges } from "../dist/services/badgeService.js";
 import { runHolidayMedalBackfill } from "../dist/db/backfillHolidayMedals.js";
+import { runHolidayMedalDateRepair } from "../dist/db/repairHolidayMedalDates.js";
 
 const db = PostgresService.getInstance();
 
@@ -306,6 +307,12 @@ try {
     check("backfill awards exactly the goal days", await badgesOf(BACK), ["holiday_christmas", "holiday_thanksgiving"]);
     const snap = (await db.query(`SELECT progress_snapshot, triggering_workout_id, is_new FROM user_badges WHERE user_id = $1 AND badge_id = 'holiday_christmas'`, [BACK]))[0];
     check("…with the day recorded", [snap?.progress_snapshot?.holiday_date, snap?.triggering_workout_id, snap?.is_new], ["2024-12-25", "fl-b-xmas", true]);
+    const earnedAt = async (u, badge) =>
+      (await db.query(
+        `SELECT to_char(earned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS') AS at FROM user_badges WHERE user_id = $1 AND badge_id = $2`,
+        [u, badge],
+      ))[0]?.at;
+    check("…dated by the walk, not the run", await earnedAt(BACK, "holiday_christmas"), "2024-12-25T12:00:00");
     check("…silently (no inbox row, no push)", (await db.query(`SELECT COUNT(*)::int AS n FROM in_app_notifications WHERE user_id = $1`, [BACK]))[0].n - backInboxBefore, 0);
     const rowsBefore = (await db.query(`SELECT COUNT(*)::int AS n FROM user_badges WHERE user_id = ANY($1)`, [ALL]))[0].n;
     await runHolidayMedalBackfill(client, { force: true });
@@ -313,6 +320,24 @@ try {
     check("re-run is idempotent (no new rows for our users)", rowsAfter - rowsBefore, 0);
     const third = await runHolidayMedalBackfill(client);
     check("done-marker: next boot skips", third.skipped, true);
+
+    // The date repair: rows the first backfill wrote at the deploy instant go
+    // back on the walk's day; a live award (synced the same day) is untouched.
+    await db.query(`UPDATE user_badges SET earned_at = NOW() WHERE user_id = $1 AND badge_id LIKE 'holiday\\_%'`, [BACK]);
+    await db.query(
+      `UPDATE user_badges SET earned_at = ($2 || 'T13:00:00Z')::timestamptz
+       WHERE user_id = $1 AND badge_id = 'holiday_thanksgiving'`,
+      [BACK, "2023-11-23"],
+    );
+    const fixed = await runHolidayMedalDateRepair(client, { force: true });
+    check("date repair ran", fixed.skipped, false);
+    check("…re-dates a deploy-stamped medal to its walk", await earnedAt(BACK, "holiday_christmas"), "2024-12-25T12:00:00");
+    check("…leaves a same-day award alone", await earnedAt(BACK, "holiday_thanksgiving"), "2023-11-23T13:00:00");
+    const stamped = (await db.query(`SELECT progress_snapshot FROM user_badges WHERE user_id = $1 AND badge_id = 'holiday_christmas'`, [BACK]))[0];
+    check("…keeps the replaced date on the row", typeof stamped?.progress_snapshot?.stamped_at, "string");
+    await runHolidayMedalDateRepair(client, { force: true });
+    check("…and a re-run finds nothing for our user", await earnedAt(BACK, "holiday_christmas"), "2024-12-25T12:00:00");
+    check("date repair done-marker: next boot skips", (await runHolidayMedalDateRepair(client)).skipped, true);
   } finally {
     await client.end();
   }
