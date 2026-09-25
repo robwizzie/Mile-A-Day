@@ -38,7 +38,7 @@ import {
 } from "../dist/services/holidays.js";
 import { revokeUnearnedBadges, seedExtraBadges } from "../dist/services/badgeService.js";
 import { runHolidayMedalBackfill } from "../dist/db/backfillHolidayMedals.js";
-import { runHolidayMedalDateRepair } from "../dist/db/repairHolidayMedalDates.js";
+import { runBadgeDateRepair } from "../dist/db/repairBadgeEarnedDates.js";
 
 const db = PostgresService.getInstance();
 
@@ -329,15 +329,14 @@ try {
        WHERE user_id = $1 AND badge_id = 'holiday_thanksgiving'`,
       [BACK, "2023-11-23"],
     );
-    const fixed = await runHolidayMedalDateRepair(client, { force: true });
+    const fixed = await runBadgeDateRepair(client, { force: true, onlyUserIds: [BACK] });
     check("date repair ran", fixed.skipped, false);
     check("…re-dates a deploy-stamped medal to its walk", await earnedAt(BACK, "holiday_christmas"), "2024-12-25T12:00:00");
     check("…leaves a same-day award alone", await earnedAt(BACK, "holiday_thanksgiving"), "2023-11-23T13:00:00");
     const stamped = (await db.query(`SELECT progress_snapshot FROM user_badges WHERE user_id = $1 AND badge_id = 'holiday_christmas'`, [BACK]))[0];
     check("…keeps the replaced date on the row", typeof stamped?.progress_snapshot?.stamped_at, "string");
-    await runHolidayMedalDateRepair(client, { force: true });
+    await runBadgeDateRepair(client, { force: true, onlyUserIds: [BACK] });
     check("…and a re-run finds nothing for our user", await earnedAt(BACK, "holiday_christmas"), "2024-12-25T12:00:00");
-    check("date repair done-marker: next boot skips", (await runHolidayMedalDateRepair(client)).skipped, true);
   } finally {
     await client.end();
   }

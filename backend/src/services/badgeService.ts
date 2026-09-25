@@ -493,6 +493,18 @@ export async function evaluateForUser(
   if (inserted.length === 0) return { newlyEarnedBadges: [] };
 
   const insertedIds = inserted.map((r) => r.badge_id);
+  // Date what was just inserted by the history that earned it: a medal
+  // crossed by today's walk keeps now(); one this pass found in the past
+  // (Recalibrate, the retro sweep, a first-run import, a late sync) moves to
+  // its real day, so it never reads — or gets celebrated — as today's. Lazy
+  // import: badgeEarnedDates reaches back into this module. Never fails the
+  // award.
+  try {
+    const { redateBadges } = await import("./badgeEarnedDates.js");
+    await redateBadges(userId, insertedIds);
+  } catch (e: any) {
+    console.error("[badges] re-dating new medals failed:", e?.message ?? e);
+  }
   const newlyEarnedBadges = await db.query<any>(
     `SELECT
 			ub.badge_id, ub.earned_at, ub.is_new, ub.pin_slot, ub.triggering_workout_id, ub.progress_snapshot,
@@ -548,7 +560,9 @@ export function holidayProbeDates(): Array<{ date: string; key: HolidayKey }> {
 async function evaluateHolidayBadges(
   userId: string,
   workoutIds: string[],
-): Promise<Array<{ key: HolidayKey; workoutId: string; earnedAt: Date | string }>> {
+): Promise<
+  Array<{ key: HolidayKey; workoutId: string; earnedAt: Date | string }>
+> {
   if (workoutIds.length === 0) return [];
   const rows = await db.query<{
     workout_id: string;
@@ -588,7 +602,11 @@ async function evaluateHolidayBadges(
     [userId, [...byDate.keys()]],
   );
   const seen = new Set<HolidayKey>();
-  const out: Array<{ key: HolidayKey; workoutId: string; earnedAt: Date | string }> = [];
+  const out: Array<{
+    key: HolidayKey;
+    workoutId: string;
+    earnedAt: Date | string;
+  }> = [];
   for (const { local_date } of qualifying) {
     const hit = byDate.get(local_date);
     if (hit && !seen.has(hit.key)) {
@@ -632,7 +650,9 @@ async function holidaysStillEarned(userId: string): Promise<Set<HolidayKey>> {
  */
 async function holidayHitsAllHistory(
   userId: string,
-): Promise<Array<{ key: HolidayKey; workoutId: string; earnedAt: Date | string }>> {
+): Promise<
+  Array<{ key: HolidayKey; workoutId: string; earnedAt: Date | string }>
+> {
   const probe = holidayProbeDates();
   const rows = await db.query<{
     local_date: string;
@@ -650,7 +670,11 @@ async function holidayHitsAllHistory(
 		ORDER BY w.local_date ASC`,
     [userId, probe.map((p) => p.date)],
   );
-  const out: Array<{ key: HolidayKey; workoutId: string; earnedAt: Date | string }> = [];
+  const out: Array<{
+    key: HolidayKey;
+    workoutId: string;
+    earnedAt: Date | string;
+  }> = [];
   const seen = new Set<HolidayKey>();
   for (const r of rows) {
     const key = holidayKeyForLocalDate(r.local_date);

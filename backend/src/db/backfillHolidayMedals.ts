@@ -31,7 +31,7 @@ import { HOLIDAYS, HOLIDAY_BADGE_PREFIX } from "../services/holidays.js";
  * its DEFAULT now() dated every medal to the deploy instant, so the Medals
  * screen said last Halloween's Spooky Mile was earned "today" and the app,
  * which celebrates medals dated today, popped one unlock per holiday.
- * Rows written that way are repaired by db/repairHolidayMedalDates.ts.
+ * Rows written that way are repaired by db/repairBadgeEarnedDates.ts.
  *
  * Done-marker: a `maintenance_runs` row written only after the LAST batch, so
  * every later boot costs one SELECT. Grow the holiday catalog → bump the name.
