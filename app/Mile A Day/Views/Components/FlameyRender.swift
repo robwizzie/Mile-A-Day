@@ -32,6 +32,8 @@ struct FlameyOutfitLayer: View {
     /// hero's column is narrower than a share card. Capes squeeze, the trail
     /// shortens, the companion steps in.
     var reach: CGFloat = 0.9
+    /// Flamey's arm pose right now — Flamey Jr. copies it (arms and face).
+    var companionPose: FlameArmPose = .rest
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var phase = false
@@ -136,7 +138,8 @@ struct FlameyOutfitLayer: View {
                     if FlameyArt.isTight(reach) { ctx.scaleBy(x: FlameyArt.trailTuck, y: 1) }
                     // ...and a busy look (cape + prop) shortens it a touch.
                     ctx.scaleBy(x: FlameyArt.trailScale(for: look), y: 1)
-                    FlameyArt.drawTrail(trail, in: &ctx, a: a, u: u, reach: reach)
+                    FlameyArt.drawTrail(trail, in: &ctx, a: a, u: u, reach: reach,
+                                        low: look[.back].map(FlameyArt.isCape) ?? false)
                 }
                 .frame(width: size * 3, height: size * 3)
                 // Streaming: drifts back from him and breathes.
@@ -272,7 +275,7 @@ struct FlameyOutfitLayer: View {
                 let tight = self.tight
                 let floats = Self.floats(companion)
                 let k: CGFloat = tight ? 0.60 : FlameyArt.companionScale(for: look)
-                let x = tight ? (floats ? 0.30 : 0.26) * u : FlameyArt.companionX(u, reach: reach)
+                let x = tight ? (floats ? 0.30 : 0.26) * u : FlameyArt.companionX(u, reach: reach, look: look)
                 let lift = tight && floats ? -0.42 * u : 0
                 if !(tight && floats) {
                     // Its shadow stays on the floor while it bobs.
@@ -287,7 +290,7 @@ struct FlameyOutfitLayer: View {
                 Canvas { ctx, canvas in
                     ctx.translateBy(x: canvas.width / 2, y: canvas.height / 2)
                     ctx.translateBy(x: 0, y: a.ground); ctx.scaleBy(x: k, y: k); ctx.translateBy(x: 0, y: -a.ground)
-                    FlameyArt.drawCompanion(companion, in: &ctx, a: a, u: u, palette: palette)
+                    FlameyArt.drawCompanion(companion, in: &ctx, a: a, u: u, palette: palette, pose: companionPose)
                 }
                 .frame(width: size * 1.6, height: size * 3)
                 // Floaters bob; walkers bounce a little.
@@ -429,21 +432,106 @@ struct FlameyDressedFigure: View {
     var arms: FlameArmPose = .rest
 
     var body: some View {
-        let figure = FlameBuddyFigure(health: health, size: size, showsFace: !look.wears(.ghostSheet), vigor: vigor,
-                                      grounded: true, palette: health == .dead ? nil : FlameyPalette.palette(for: look.color),
-                                      lift: look.bodyLift * scale, legLength: look.standLift)
+        FlameyDressedBody(look: look, arms: arms,
+                          figure: FlameyDressedBody.figure(look: look, health: health, size: size, vigor: vigor, scale: scale))
+            // A compact surface (widget, Live Activity) was fitted to him
+            // before he had legs: there he stands the same height as ever.
+            .scaleEffect(look.detail == .compact ? 1 / (1 + look.standLift) : 1, anchor: .bottom)
+            .frame(width: size, height: size)
+    }
+}
+
+/// The ONE dressed stack every Flamey surface draws — behind layer, the
+/// figure, anything ON his skin, front layer, anything in his hand, then his
+/// arms over it — around a figure the CALLER builds. That is what lets a
+/// surface with figure knobs only the app has (the celebration's blaze, the
+/// treats card's belly, the reignite's flicker) still wear exactly the look
+/// the hero wears: the look owns the colour (`palette`), the legs
+/// (`legLength`) and the lift, so the caller builds its figure through
+/// `figure(look:…)` or passes those same three values. `skin` sits right on
+/// the body, UNDER the outfit (the treats card's blush and full tummy — a bow
+/// tie goes over a belly, not under it); `prop` sits between the outfit and
+/// the arms, so a hand closes OVER whatever the surface puts in it.
+struct FlameyDressedBody<Skin: View, Prop: View>: View {
+    let look: FlameyLook
+    var arms: FlameArmPose = .rest
+    /// Where each hand goes, overriding the look's own held prop (nil = the
+    /// look's `armHold`).
+    var hold: FlameArmHold? = nil
+    var reach: CGFloat = 0.9
+    var still: Bool = true
+    let figure: FlameBuddyFigure
+    var skin: Skin
+    var prop: Prop
+
+    init(look: FlameyLook, arms: FlameArmPose = .rest, hold: FlameArmHold? = nil, reach: CGFloat = 0.9,
+         still: Bool = true, figure: FlameBuddyFigure, @ViewBuilder skin: () -> Skin, @ViewBuilder prop: () -> Prop) {
+        self.look = look
+        self.arms = arms
+        self.hold = hold
+        self.reach = reach
+        self.still = still
+        self.figure = figure
+        self.skin = skin()
+        self.prop = prop()
+    }
+
+    var body: some View {
+        let scale = figure.effectiveBodyScale
         return ZStack {
-            FlameyOutfitLayer(look: look, size: size, scale: scale, side: .behind, still: true)
+            FlameyOutfitLayer(look: look, size: figure.size, scale: scale, side: .behind, still: still, reach: reach)
             figure
-            FlameyOutfitLayer(look: look, size: size, scale: scale, side: .front, still: true)
+            skin
+            FlameyOutfitLayer(look: look, size: figure.size, scale: scale, side: .front, still: still, reach: reach,
+                              companionPose: arms)
+            prop
             if look.showsArms {
-                FlameBuddyArms(figure: figure, pose: arms, hold: look.armHold(reach: 0.9))
+                FlameBuddyArms(figure: figure, pose: arms, hold: hold ?? look.armHold(reach: reach))
             }
         }
-        // A compact surface (widget, Live Activity) was fitted to him
-        // before he had legs: there he stands the same height as ever.
-        .scaleEffect(look.detail == .compact ? 1 / (1 + look.standLift) : 1, anchor: .bottom)
-        .frame(width: size, height: size)
+        .frame(width: figure.size, height: figure.size)
+    }
+}
+
+extension FlameyDressedBody where Skin == EmptyView {
+    init(look: FlameyLook, arms: FlameArmPose = .rest, hold: FlameArmHold? = nil, reach: CGFloat = 0.9,
+         still: Bool = true, figure: FlameBuddyFigure, @ViewBuilder prop: () -> Prop) {
+        self.init(look: look, arms: arms, hold: hold, reach: reach, still: still, figure: figure,
+                  skin: { EmptyView() }, prop: prop)
+    }
+}
+
+extension FlameyDressedBody where Skin == EmptyView, Prop == EmptyView {
+    init(look: FlameyLook, arms: FlameArmPose = .rest, hold: FlameArmHold? = nil, reach: CGFloat = 0.9,
+         still: Bool = true, figure: FlameBuddyFigure) {
+        self.init(look: look, arms: arms, hold: hold, reach: reach, still: still, figure: figure,
+                  skin: { EmptyView() }, prop: { EmptyView() })
+    }
+
+    /// A figure dressed in `look`: his colour, his legs, his lift.
+    static func figure(look: FlameyLook, health: FlameHealth, size: CGFloat, flickerPhase: CGFloat = 0,
+                       blink: Bool = false, vigor: CGFloat? = nil, scale: CGFloat) -> FlameBuddyFigure {
+        FlameBuddyFigure(health: health, flickerPhase: flickerPhase, blink: blink, size: size,
+                         showsFace: !look.wears(.ghostSheet), vigor: vigor, grounded: true,
+                         palette: health == .dead ? nil : FlameyPalette.palette(for: look.color),
+                         lift: look.bodyLift * scale, legLength: look.standLift)
+    }
+}
+
+extension FlameyLook {
+    /// This look with `slots` taken off — what a scene with props of its
+    /// own (the treats card's treat and empties, the injured buddy's
+    /// crutches and head wrap) dresses him in: everything that is HIM, none
+    /// of what would stand where the scene's props already are.
+    func trimmed(removing slots: [FlameySlot]) -> FlameyLook {
+        var l = self
+        for slot in slots { l.takeOff(slot) }
+        switch l.glow {
+        case .aura where l[.aura] == nil: l.glow = .none
+        case .wings where !l.wears(.goldenWings): l.glow = .none
+        default: break
+        }
+        return l
     }
 }
 

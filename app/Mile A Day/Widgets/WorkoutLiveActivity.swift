@@ -179,6 +179,20 @@ private struct LiveTimerText: View {
 
 // MARK: - Flamey (Fun only)
 
+/// The streak-risk Live Activity's Flamey: the user's OWN look (not a
+/// generic red buddy), worried — critical flame, hands on his cheeks.
+/// Fun-only by the caller (`funStyle`). Compiled into both targets.
+struct LiveActivityWorriedFlamey: View {
+    let size: CGFloat
+
+    var body: some View {
+        FlameyDressedFigure(look: LiveActivityFlamey.mirroredLook(), health: .critical, size: size,
+                            scale: FlameHealth.critical.bodyScale, arms: .cheeks)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
 /// A tiny, STATIC Flamey for the Live Activity (a system-rendered snapshot:
 /// no onAppear, no animation). Fun-only, read from the App Group mirror of the
 /// dashboard style; draws nothing on Modern or on a stale activity. His
@@ -206,23 +220,34 @@ struct LiveActivityFlamey: View {
 
     static var isFun: Bool { WidgetDataStore.loadDashboardStyle() == "fun" }
 
+    /// His look from the App Group mirror — the SAME facts the flame widget
+    /// resolves (the process can't see the app's store) — on a compact
+    /// surface. Every Live Activity Flamey (this one, the streak-risk one)
+    /// draws through here, so none of them can wear something else.
+    static func mirroredLook(mood: [FlameyItem] = [], date: Date = Date()) -> FlameyLook {
+        FlameyLook.resolve(
+            owned: WidgetDataStore.loadFlameyOwnedItems(),
+            choice: WidgetDataStore.loadFlameyChoice(),
+            date: date,
+            mood: mood,
+            signupDate: WidgetDataStore.loadFlameySignupDate(),
+            detail: .compact
+        )
+    }
+
     var body: some View {
         if Self.isFun && !isStale {
             let band = Self.band(for: progress)
             // A small surface: `.compact` keeps colour, head, eyes, chest,
             // feet and costume, standing on the ground.
-            let look = FlameyLook.resolve(
-                owned: WidgetDataStore.loadFlameyOwnedItems(),
-                choice: WidgetDataStore.loadFlameyChoice(),
-                date: Date(),
-                mood: band == .cheering ? [.moodShades, .partyHat] : [],
-                signupDate: WidgetDataStore.loadFlameySignupDate(),
-                detail: .compact
-            )
+            let look = Self.mirroredLook(mood: band == .cheering ? [.moodShades, .partyHat] : [])
             let health: FlameHealth = band == .cheering ? .blazing : .healthy
             ZStack {
                 if band != .ready { flair(band) }
-                FlameyDressedFigure(look: look, health: health, size: size, scale: health.bodyScale)
+                // Arms up when the day's done — the same cheer as the goal
+                // celebration.
+                FlameyDressedFigure(look: look, health: health, size: size, scale: health.bodyScale,
+                                    arms: band == .cheering ? .cheer : .rest)
             }
             .rotationEffect(.degrees(band == .excited ? -6 : 0), anchor: .bottom)
             .frame(width: size, height: size)

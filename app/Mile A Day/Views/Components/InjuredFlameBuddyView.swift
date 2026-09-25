@@ -32,6 +32,12 @@ struct InjuredFlameBuddyView: View {
     /// Crutches and wrap are the whole point at hero size, but they turn to
     /// mush below ~60pt — the caller can drop the props and keep the frown.
     var showsProps: Bool = true
+    /// Flamey's look (`FlameyFacts.look()`) on the Fun hero: the patient is
+    /// HIM — his colour, eyes, chest and shoes, on his legs, arms at his
+    /// sides — with the head wrap standing in for any hat, and nothing that
+    /// stands beside him (the crutches are there). nil (Modern) is the bare
+    /// buddy, unchanged.
+    var look: FlameyLook? = nil
 
     /// Warm amber, a touch below a full day's blaze. The "banked" palette
     /// picked in review — lit, just turned down.
@@ -51,13 +57,11 @@ struct InjuredFlameBuddyView: View {
                 CrossedCrutches(size: size)
             }
 
-            FlameBuddyFigure(
-                health: .low,
-                size: figureSize,
-                showsFace: true,
-                vigor: pausedVigor,
-                grounded: grounded
-            )
+            if let dressed {
+                FlameyDressedBody(look: dressed, figure: figure)
+            } else {
+                figure
+            }
 
             if showsProps {
                 HeadWrap(size: size)
@@ -66,11 +70,40 @@ struct InjuredFlameBuddyView: View {
                     // off it — bands are drawn oversized on purpose and the
                     // silhouette decides where they stop.
                     .clipShape(FlameSilhouette(bodyRect: bodyRect, wobble: bodyWobble))
+                    .offset(y: -liftPoints)
             }
         }
         .frame(width: containerSize.width, height: containerSize.height)
+        // His legs are extra height: scaled about his feet, his tip lands
+        // where it always did.
+        .scaleEffect(1 / (1 + (dressed?.standLift ?? 0)),
+                     anchor: UnitPoint(x: 0.5, y: (containerSize.height / 2 + figureSize / 2) / containerSize.height))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Flame buddy on crutches. Streak paused for injury.")
+    }
+
+    /// What he wears while injured: everything that is HIM, minus the hat
+    /// (the head wrap is his hat today) and whatever would stand where the
+    /// crutches are.
+    private var dressed: FlameyLook? {
+        guard grounded else { return nil }
+        return look?.trimmed(removing: [.head, .held, .trail, .companion, .aura, .back, .costume])
+    }
+
+    private var scale: CGFloat { StreakFlameClock.flameScale(vigor: Double(pausedVigor)) }
+    private var liftPoints: CGFloat { (dressed?.bodyLift ?? 0) * scale * figureSize }
+
+    private var figure: FlameBuddyFigure {
+        FlameBuddyFigure(
+            health: .low,
+            size: figureSize,
+            showsFace: true,
+            vigor: pausedVigor,
+            grounded: grounded,
+            palette: dressed.flatMap { FlameyPalette.palette(for: $0.color) },
+            lift: (dressed?.bodyLift ?? 0) * scale,
+            legLength: dressed?.standLift ?? 0
+        )
     }
 
     /// Where `FlameBuddyFigure` actually draws its silhouette, in this view's

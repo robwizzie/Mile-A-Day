@@ -33,6 +33,10 @@ struct ReignitingFlameView: View {
     var progress: CGFloat
     var intensity: CGFloat = 1
     var origin: FlameRevivalOrigin = .coal
+    /// Flamey's look (`FlameyFacts.look()`) on the Fun celebration: the
+    /// flame that catches is HIM — his colour, his outfit, his legs — not a
+    /// generic mascot. nil (Modern, or no wardrobe) draws the bare figure.
+    var look: FlameyLook? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -133,23 +137,67 @@ struct ReignitingFlameView: View {
         .shadow(color: Color.orange.opacity(Double(effectiveFlameProgress) * Double(0.28 * intensity)), radius: size * 0.10 * intensity, x: 0, y: size * 0.04)
     }
 
+    @ViewBuilder
     private func figure(health: FlameHealth, vigor: CGFloat?, blaze: CGFloat, phase: CGFloat, blink: Bool) -> some View {
-        FlameBuddyFigure(
-            health: health,
-            flickerPhase: phase,
-            blink: blink,
-            size: size,
-            // A living flame already wore its face on the dashboard, so it
-            // keeps it the whole way through — same as the reignite path.
-            showsFace: showsFace,
-            vigor: vigor,
-            blaze: blaze,
-            // The Fun celebration is the mascot: arms up, on his legs. The
-            // faceless Modern flame has neither.
-            limbs: showsFace ? .cheer : nil
+        if showsFace, let look {
+            dressedFigure(look: look, health: health, vigor: vigor, blaze: blaze, phase: phase, blink: blink)
+        } else {
+            FlameBuddyFigure(
+                health: health,
+                flickerPhase: phase,
+                blink: blink,
+                size: size,
+                // A living flame already wore its face on the dashboard, so it
+                // keeps it the whole way through — same as the reignite path.
+                showsFace: showsFace,
+                vigor: vigor,
+                blaze: blaze,
+                // The Fun celebration is the mascot: arms up, on his legs. The
+                // faceless Modern flame has neither.
+                limbs: showsFace ? .cheer : nil
+            )
+            // Legs are extra height the celebration wasn't laid out for.
+            .scaleEffect(showsFace ? 1 / (1 + FlameBuddyFigure.mascotLegLength) : 1, anchor: .bottom)
+        }
+    }
+
+    /// The Fun cheer in his look: arms up (a held prop stays in his hand),
+    /// sparks popping off both hands once he's lit, and a little hop on his
+    /// legs — the jump rides the SAME timeline phase as the flicker, so Reduce
+    /// Motion (phase 0) stands him still, feet on the ground.
+    private func dressedFigure(look: FlameyLook, health: FlameHealth, vigor: CGFloat?, blaze: CGFloat,
+                               phase: CGFloat, blink: Bool) -> some View {
+        let base = FlameBuddyFigure(health: health, size: size, vigor: vigor)
+        let scale = base.effectiveBodyScale
+        let figure = FlameBuddyFigure(
+            health: health, flickerPhase: phase, blink: blink, size: size,
+            showsFace: !look.wears(.ghostSheet), vigor: vigor, blaze: blaze,
+            palette: FlameyPalette.palette(for: look.color),
+            lift: look.bodyLift * scale, legLength: look.standLift
         )
+        let lit = smoothstep(0.80, 1.0, clampedProgress)
+        let hop = abs(sin(phase * 0.8)) * size * 0.045 * lit
+        let u = size * scale
+        let handY = size / 2 - look.bodyLift * scale * size
+        return ZStack {
+            FlameyDressedBody(look: look, arms: .cheer, reach: 0.8, figure: figure)
+            // Sparks off his raised hands.
+            ForEach([-1, 1] as [CGFloat], id: \.self) { side in
+                let hand = FlameBuddyArms.hand(for: .cheer, side: side)
+                Image(systemName: "sparkle")
+                    .font(.system(size: size * 0.10, weight: .bold))
+                    .foregroundStyle(LinearGradient(colors: [.white, Color(red: 1.0, green: 0.85, blue: 0.35)],
+                                                    startPoint: .top, endPoint: .bottom))
+                    .shadow(color: .orange.opacity(0.8), radius: size * 0.02)
+                    .scaleEffect(0.75 + 0.35 * abs(sin(phase * 1.3 + side)))
+                    .offset(x: hand.x * u + side * size * 0.05, y: handY + hand.y * u - size * 0.07)
+                    .opacity(Double(lit))
+            }
+        }
+        .frame(width: size, height: size)
+        .offset(y: -hop)
         // Legs are extra height the celebration wasn't laid out for.
-        .scaleEffect(showsFace ? 1 / (1 + FlameBuddyFigure.mascotLegLength) : 1, anchor: .bottom)
+        .scaleEffect(1 / (1 + look.standLift), anchor: .bottom)
     }
 
     /// How far up the flame climbs into place. A reignited flame rises out of

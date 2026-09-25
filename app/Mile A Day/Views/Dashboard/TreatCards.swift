@@ -62,7 +62,7 @@ struct TreatSceneCard: View {
                     // `.id(sceneKey)`: a new treat, or a flip between "nothing
                     // yet" and "something", is a new set of motions — rebuild
                     // rather than re-drive (see TreatFlameBuddyView).
-                    TreatFlameBuddyView(size: 88, treat: model.treat, count: model.count)
+                    TreatFlameBuddyView(size: 88, treat: model.treat, count: model.count, look: FlameyFacts.look())
                         .id(model.sceneKey)
                         .transition(.scale(scale: 0.85).combined(with: .opacity))
                 }
