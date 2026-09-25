@@ -25,7 +25,7 @@ enum FlameyClosetTab: String, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
-        case .flame: return "Colour"
+        case .flame: return "Color"
         case .outfit: return "Outfit"
         case .extras: return "Extras"
         case .style: return "Bubble"
@@ -50,7 +50,7 @@ extension FlameySlot {
     /// The Closet's section title (the catalog's `displayName` is for sentences).
     var closetLabel: String {
         switch self {
-        case .color: return "Flame colours"
+        case .color: return "Flame colors"
         case .head: return "Hats"
         case .eyes: return "Eyewear"
         case .chest: return "Chest"
@@ -68,7 +68,7 @@ extension FlameySlot {
     /// One word for the jump row and tight captions.
     var shortLabel: String {
         switch self {
-        case .color: return "Colour"
+        case .color: return "Color"
         case .head: return "Hats"
         case .eyes: return "Eyes"
         case .chest: return "Chest"
@@ -100,7 +100,7 @@ extension FlameySlot {
     /// section header, instead of item by item.
     var familyRule: String {
         switch self {
-        case .color: return "Colours come from streak medals — the longer the streak, the rarer the flame."
+        case .color: return "Colors come from streak medals — the longer the streak, the rarer the flame."
         case .head: return "Hats come from lifetime-mile medals — walk further, better hats."
         case .eyes: return "Eyewear comes from daily-challenge medals."
         case .chest: return "Chest pieces come from weekly-challenge medals."
@@ -118,7 +118,7 @@ extension FlameySlot {
     /// "Pick his shoes" — a walkthrough section's instruction.
     var pickLabel: String {
         switch self {
-        case .color: return "Colour"
+        case .color: return "Color"
         case .head: return "Hat"
         case .eyes: return "Eyewear"
         case .chest: return "Chest"
@@ -854,6 +854,37 @@ final class FlameyClosetModel {
     /// The outfit the draft IS right now (its chip reads as selected).
     var currentOutfit: FlameyOutfit? { outfits.first { wearable($0) == choice } }
 
+    /// The outfit he WEARS (the saved look is exactly it), if any.
+    var wornOutfit: FlameyOutfit? { outfits.first { wearable($0) == savedChoice } }
+
+    /// On the stage right now but not saved — "Trying on".
+    func isPreviewing(_ outfit: FlameyOutfit) -> Bool {
+        hasUnsavedChanges && wearable(outfit) == choice
+    }
+
+    /// What the stage shows, relative to the saved outfits — the one line
+    /// the Closet and the Outfits page both say.
+    enum OutfitStatus: Equatable {
+        /// Saved look = this outfit, no draft.
+        case wearing(String)
+        /// The draft = this outfit (Save wears it).
+        case tryingOn(String)
+        /// A draft that matches no outfit.
+        case newLook
+        /// Saved, basic or otherwise, matching no outfit.
+        case noOutfit
+    }
+
+    var outfitStatus: OutfitStatus {
+        if let current = currentOutfit {
+            return hasUnsavedChanges ? .tryingOn(current.name) : .wearing(current.name)
+        }
+        return hasUnsavedChanges && !choice.isBasic ? .newLook : .noOutfit
+    }
+
+    /// The draft is a look worth keeping that isn't kept yet.
+    var canSaveDraftAsOutfit: Bool { currentOutfit == nil && !choice.isBasic }
+
     var outfitsFull: Bool { outfits.count >= FlameyOutfit.max }
 
     /// "Outfit 3" — the save sheet's suggestion.
@@ -1137,6 +1168,28 @@ final class FlameyClosetModel {
         guard outfits.indices.contains(j) else { return .saved }
         var next = outfits
         next.swapAt(i, j)
+        return await writeOutfits(next)
+    }
+
+    /// "Update with current look": the outfit takes the DRAFT on the stage
+    /// (its name stays).
+    func updateOutfit(_ id: FlameyOutfit.ID) async -> FlameySaveOutcome {
+        guard let i = outfits.firstIndex(where: { $0.id == id }) else { return .saved }
+        guard outfits[i].look != choice || !outfits[i].ownedOK else { return .saved }
+        var next = outfits
+        next[i].look = choice
+        next[i].ownedOK = true
+        let outcome = await writeOutfits(next)
+        if !outcome.isRejected { say("\(next[i].name), updated!") }
+        return outcome
+    }
+
+    /// A drag-reorder landed: the list in this order (unknown ids ignored,
+    /// missing ones kept at the end).
+    func reorderOutfits(_ ids: [FlameyOutfit.ID]) async -> FlameySaveOutcome {
+        var next = ids.compactMap { id in outfits.first { $0.id == id } }
+        next += outfits.filter { !ids.contains($0.id) }
+        guard next.map(\.id) != outfits.map(\.id) else { return .saved }
         return await writeOutfits(next)
     }
 

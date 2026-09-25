@@ -46,7 +46,7 @@ enum WhatsNewCatalog {
                 WhatsNewFeature(
                     icon: "scribble.variable",
                     title: "Route Art",
-                    blurb: "Your route, drawn rather than plotted — coloured by the time of day you went out, with your miles ticked along the line.",
+                    blurb: "Your route, drawn rather than plotted — colored by the time of day you went out, with your miles ticked along the line.",
                     tint: .mint
                 ),
                 WhatsNewFeature(

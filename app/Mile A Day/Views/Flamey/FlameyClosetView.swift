@@ -9,7 +9,7 @@ import SwiftUI
 /// came from, and Best look · Surprise me · Basic beside him); once you scroll
 /// the stage shrinks to a compact but readable one (~140pt, the caption and
 /// the three actions beside him) instead of scrolling away. Under it the
-/// tabs (Colour · Outfit · Extras · Bubble) and a jump row, then a hairline;
+/// tabs (Color · Outfit · Extras · Bubble) and a jump row, then a hairline;
 /// the grid scrolls in its own frame below that line, so nothing can ever
 /// slide under the tabs.
 ///
@@ -23,8 +23,9 @@ import SwiftUI
 /// nothing he wears elsewhere changes until Save. While the draft differs
 /// from what's saved, `FlameySaveBar` sits at the bottom (Discard · Save),
 /// and Done asks "Save changes to Sparky's look?". Saved outfits sit under
-/// the stage and load into the draft the same way; the title is his name
-/// ("Sparky's Closet ✎") and opens the name editor.
+/// the stage as a shortcut row (and a full page of cards behind "See all")
+/// and load into the draft the same way. His NAME is the plate under him
+/// ("Sparky ✎" / "Name your flame") — the title is just a title.
 ///
 /// Fun-only by construction: the hosts only present it on Fun.
 struct FlameyClosetView: View {
@@ -48,7 +49,7 @@ struct FlameyClosetView: View {
     /// The Closet's own sheets (the item card rides `model.detail`, on a
     /// different node — two sheets on one node drop one).
     enum ClosetSheet: String, Identifiable {
-        case name, saveOutfit, manageOutfits
+        case name, saveOutfit, outfits
         var id: String { rawValue }
     }
 
@@ -85,39 +86,11 @@ struct FlameyClosetView: View {
                 }
             }
         }
+        // The Closet has no field of its own; a keyboard raised by one of
+        // its sheets must not shrink it (the header, the grid, the dock).
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .background(background.ignoresSafeArea())
-        .overlay(alignment: .bottom) {
-            VStack(spacing: 10) {
-                if model.hasUnsavedChanges {
-                    // The bar carries the last change + its Undo itself —
-                    // a toast above it would bury the grid on small phones.
-                    FlameySaveBar(changes: model.changedSlotCount, possessiveName: model.possessiveName,
-                                  note: model.toast?.text,
-                                  onUndo: model.toast?.undo == nil ? nil : {
-                                      MADHaptics.tap()
-                                      withAnimation(reduceMotion ? nil : .snappy) { model.undo() }
-                                  }) {
-                        MADHaptics.tap()
-                        withAnimation(reduceMotion ? nil : .snappy) { model.discardDraft() }
-                    } onSave: {
-                        MADHaptics.success()
-                        withAnimation(reduceMotion ? nil : .snappy) { model.saveDraft() }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                    .task(id: model.toast?.id) {
-                        // The note fades back to the change count, like the toast would.
-                        guard let id = model.toast?.id else { return }
-                        try? await Task.sleep(for: .seconds(4))
-                        model.clearToast(id)
-                    }
-                } else {
-                    toastOverlay
-                }
-            }
-            .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: model.hasUnsavedChanges)
-        }
+        .overlay(alignment: .bottom) { bottomDock }
         .overlay {
             if model.leavePrompt != nil {
                 FlameyLeavePromptCard(name: model.displayName, saved: model.look(for: model.savedChoice),
@@ -147,19 +120,21 @@ struct FlameyClosetView: View {
     @ViewBuilder
     private func sheetView(_ which: ClosetSheet) -> some View {
         switch which {
+        // Typing sheets are LARGE: their Save lives in the bar at the top,
+        // and a large sheet never has to move for the keyboard.
         case .name:
             FlameyNameEditor(model: model) { sheet = nil }
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FlameyClosetStyle.ground)
         case .saveOutfit:
-            FlameyOutfitSaveSheet(model: model) { sheet = nil }
-                .presentationDetents(model.outfitsFull ? [.large] : [.medium, .large])
+            FlameyOutfitNameSheet(model: model) { sheet = nil }
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FlameyClosetStyle.ground)
-        case .manageOutfits:
-            FlameyOutfitsManageSheet(model: model) { sheet = nil }
-                .presentationDetents([.medium, .large])
+        case .outfits:
+            FlameyOutfitsSheet(model: model) { sheet = nil }
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FlameyClosetStyle.ground)
         }
@@ -236,10 +211,13 @@ struct FlameyClosetView: View {
             .accessibilityLabel("What I've unlocked")
             .accessibilityHint("Walks you through dressing him in what your medals have unlocked")
             Spacer(minLength: 0)
-            FlameyClosetTitle(name: model.displayName) {
-                MADHaptics.tap()
-                sheet = .name
-            }
+            // Just a title: renaming lives on his name plate, under him.
+            Text("\(model.possessiveName) Closet")
+                .madFont(size: 17, weight: .heavy, design: .rounded, maxScale: 1.3)
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
             Button(action: close) {
                 Text("Done")
@@ -275,7 +253,13 @@ struct FlameyClosetView: View {
             } else {
                 VStack(spacing: 6) {
                     HStack(alignment: .center, spacing: 10) {
-                        stage(size: 100)
+                        VStack(spacing: -4) {
+                            stage(size: 100)
+                            FlameyNamePlate(name: model.name) {
+                                MADHaptics.tap()
+                                sheet = .name
+                            }
+                        }
                         VStack(spacing: 8) { actionButtons(compact: false) }
                             .frame(width: 138)
                     }
@@ -283,14 +267,14 @@ struct FlameyClosetView: View {
                 }
                 .padding(.horizontal, 16)
                 .transition(.opacity)
-                FlameyOutfitsRow(model: model, scrollable: scrollable) {
+                FlameyOutfitsShortcut(model: model, scrollable: scrollable) {
+                    MADHaptics.tap()
+                    sheet = .outfits
+                } onSaveLook: {
                     MADHaptics.tap()
                     sheet = .saveOutfit
-                } onManage: {
-                    MADHaptics.tap()
-                    sheet = .manageOutfits
                 }
-                .padding(.top, 6)
+                .padding(.top, 8)
                 .transition(.opacity)
             }
             tabsAndJump(jump)
@@ -612,7 +596,9 @@ struct FlameyClosetView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
-        .padding(.bottom, model.hasUnsavedChanges ? 110 : 96)
+        // Constant: room for the dock whether or not it's up, so showing it
+        // never changes the scroll content under it.
+        .padding(.bottom, FlameySaveBar.height + 40)
     }
 
     private func section(_ slot: FlameySlot) -> some View {
@@ -662,24 +648,61 @@ struct FlameyClosetView: View {
         }
     }
 
-    // MARK: Toast
+    // MARK: The bottom dock — the save bar, or a toast
 
-    @ViewBuilder
-    private var toastOverlay: some View {
-        if let toast = model.toast {
-            FlameyUndoToast(toast: toast) {
+    /// Pinned to the BOTTOM SAFE AREA and nothing else. It used to be an
+    /// overlay on a view that honoured the KEYBOARD inset too, so whenever
+    /// one of the Closet's own sheets raised the keyboard (naming him, naming
+    /// an outfit) the inset reached the cover underneath and the bar rode up
+    /// with it, then dropped back — and it sat inside every `withAnimation`
+    /// the Closet runs (each tap, the header collapsing on scroll), so its
+    /// insertion and its note were animated by whatever else was moving. Now:
+    /// `.ignoresSafeArea(.keyboard)`, a fixed height, always in the tree
+    /// (shown by opacity + a short slide keyed ONLY on the draft state), and
+    /// every other transaction stripped from it.
+    private var bottomDock: some View {
+        let dirty = model.hasUnsavedChanges
+        return ZStack(alignment: .bottom) {
+            FlameySaveBar(changes: model.changedSlotCount, possessiveName: model.possessiveName,
+                          note: dirty ? model.toast?.text : nil,
+                          onUndo: model.toast?.undo == nil ? nil : {
+                              MADHaptics.tap()
+                              withAnimation(reduceMotion ? nil : .snappy) { model.undo() }
+                          }) {
                 MADHaptics.tap()
-                withAnimation(reduceMotion ? nil : .snappy) { model.undo() }
+                withAnimation(reduceMotion ? nil : .snappy) { model.discardDraft() }
+            } onSave: {
+                MADHaptics.success()
+                withAnimation(reduceMotion ? nil : .snappy) { model.saveDraft() }
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
-            .id(toast.id)
-            .task(id: toast.id) {
-                try? await Task.sleep(for: .seconds(4))
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { model.clearToast(toast.id) }
+            .transaction { $0.animation = nil }
+            .opacity(dirty ? 1 : 0)
+            .offset(y: dirty ? 0 : 24)
+            .allowsHitTesting(dirty)
+            .accessibilityHidden(!dirty)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: dirty)
+            if !dirty, let toast = model.toast {
+                FlameyUndoToast(toast: toast) {
+                    MADHaptics.tap()
+                    withAnimation(reduceMotion ? nil : .snappy) { model.undo() }
+                }
+                .padding(.horizontal, 8)
+                .frame(height: FlameySaveBar.height, alignment: .bottom)
+                .id(toast.id)
+                .transition(.opacity)
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+        .frame(height: FlameySaveBar.height + 8, alignment: .bottom)
+        .task(id: model.toast?.id) {
+            // The bar's note fades back to the change count, and a toast
+            // goes, after a few seconds.
+            guard let id = model.toast?.id else { return }
+            try? await Task.sleep(for: .seconds(4))
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { model.clearToast(id) }
+        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private func scheduleLineClear() {
