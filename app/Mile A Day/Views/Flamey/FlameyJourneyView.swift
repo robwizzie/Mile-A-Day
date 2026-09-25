@@ -15,10 +15,12 @@ import SwiftUI
 // screen each, and a step with nothing owned is skipped.
 //
 // Picking: a tap SELECTS for its row (one per slot; tap again = none) and
-// the stage shows the whole outfit at once. There is no "Wear it" — picks
-// are SAVED when the step is left (Next, Back, a swipe) and Skip keeps them
-// too; the footer says so whenever there is something unsaved. When it ends
-// the Closet opens with one "Saved your picks · Undo". Pure: renders from
+// the stage shows the whole outfit at once. Picks are a DRAFT the whole way
+// through — Next, Back and a swipe only move between steps — and the last
+// page asks: "Save this look" or "Keep him basic" (his current look, if he
+// has one). Skip with picks on the stage asks the same question as leaving
+// the Closet with a draft (Save / Discard / Keep going). The welcome page
+// also names him ("What should we call him?", optional). Pure: renders from
 // stub data in the harness.
 
 // MARK: - The steps
@@ -153,16 +155,23 @@ struct FlameyJourneyView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var index: Int
-    /// The picks on screen; nil until the first tap (= what's saved).
+    /// The picks on screen; nil until the first tap (= the Closet's draft).
     @State private var draft: FlameyLookChoice?
-    /// What he wore when the walkthrough opened — the one Undo at the end.
+    /// The Closet's draft when the walkthrough opened — what "discard" puts back.
     @State private var startChoice: FlameyLookChoice
     /// The last tile tapped, for the caption.
     @State private var tapped: FlameyItem?
     @State private var forward = true
+    /// The welcome page's name field.
+    @State private var nameText: String
+    @State private var nameError: String?
+    @State private var naming = false
+    /// Skip with picks: "Save changes?" is up.
+    @State private var asking = false
 
     init(model: FlameyClosetModel, still: Bool = false, startPage: Int = 0,
-         draft: FlameyLookChoice? = nil, tapped: FlameyItem? = nil, onFinish: @escaping () -> Void = {}) {
+         draft: FlameyLookChoice? = nil, tapped: FlameyItem? = nil, nameText: String? = nil,
+         nameError: String? = nil, asking: Bool = false, onFinish: @escaping () -> Void = {}) {
         self.model = model
         self.still = still
         self.startPage = startPage
@@ -171,13 +180,23 @@ struct FlameyJourneyView: View {
         _draft = State(initialValue: draft)
         _tapped = State(initialValue: tapped)
         _startChoice = State(initialValue: model.choice)
+        _nameText = State(initialValue: nameText ?? (model.name ?? ""))
+        _nameError = State(initialValue: nameError)
+        _asking = State(initialValue: asking)
     }
 
     private var pages: [FlameyJourneyPage] { FlameyJourney.pages(owned: model.owned) }
     private var page: FlameyJourneyPage { pages[min(index, pages.count - 1)] }
     private var isLast: Bool { index >= pages.count - 1 }
     private var picks: FlameyLookChoice { draft ?? model.choice }
-    private var hasUnsaved: Bool { picks != model.choice }
+    /// The picks differ from what he WEARS — they need a Save.
+    private var hasUnsaved: Bool { picks != model.savedChoice }
+    private var changeCount: Int { FlameySlot.allCases.filter { picks[$0] != model.savedChoice[$0] }.count }
+    /// The name as typed, if it would be accepted — the title says it live.
+    private var shownName: String {
+        if nameError == nil, case .success(let name) = FlameyNameRules.validate(nameText) { return name }
+        return model.displayName
+    }
     private var stepCount: Int { pages.filter { if case .step = $0.kind { return true } else { return false } }.count }
 
     var body: some View {
@@ -199,6 +218,20 @@ struct FlameyJourneyView: View {
             }
         }
         .background(background.ignoresSafeArea())
+        .overlay {
+            if asking {
+                FlameyLeavePromptCard(name: shownName, saved: model.look(for: model.savedChoice), draft: stageLook,
+                                      changes: changeCount) { answer in
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { asking = false }
+                    switch answer {
+                    case .save: finish(save: true)
+                    case .discard: finish(save: false)
+                    case .keepEditing: break
+                    }
+                }
+                .transition(.opacity)
+            }
+        }
         .madTypeCap(.madCardCap)
     }
 
@@ -217,17 +250,16 @@ struct FlameyJourneyView: View {
             }
     }
 
-    /// Every way off a page SAVES its picks first — Next, Back, a swipe,
-    /// Skip, Done — so nothing chosen is ever silently lost.
-    private func savePicks() {
-        guard let draft else { return }
-        model.save(draft)
-    }
-
+    /// Moving between pages never saves: the picks stay a draft until the
+    /// last page's "Save this look". Leaving the welcome page forward names
+    /// him first (a refused name keeps you there, saying why).
     private func go(_ next: Int) {
-        guard next >= 0 else { return }
-        savePicks()
-        guard next < pages.count else { return finish() }
+        guard next >= 0, !naming else { return }
+        if case .welcome = page.kind, next > index, nameChanged {
+            commitName { go(next) }
+            return
+        }
+        guard next < pages.count else { return finish(save: hasUnsaved ? true : nil) }
         guard next != index else { return }
         MADHaptics.tap()
         forward = next > index
@@ -235,13 +267,50 @@ struct FlameyJourneyView: View {
         withAnimation(reduceMotion ? nil : .snappy(duration: 0.3)) { index = next }
     }
 
-    private func finish() {
-        savePicks()
-        if model.choice != startChoice {
-            let count = FlameySlot.allCases.filter { model.choice[$0] != startChoice[$0] }.count
-            model.announce(count == 1 ? "Saved your pick" : "Saved your \(count) picks", undo: startChoice)
+    /// Skip / Done: straight out when nothing is picked, else ask.
+    private func skip() {
+        guard !naming else { return }
+        if hasUnsaved {
+            MADHaptics.tap()
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { asking = true }
+        } else {
+            finish(save: nil)
+        }
+    }
+
+    /// save: true = wear the picks; false = put back what he had on; nil =
+    /// there was nothing to decide.
+    private func finish(save: Bool?) {
+        switch save {
+        case .some(true):
+            model.commit(picks)
+            model.announce("Saved \(model.possessiveName) look")
+        case .some(false):
+            model.setDraft(startChoice)
+        case .none:
+            break
         }
         onFinish()
+    }
+
+    private var nameChanged: Bool {
+        let typed = FlameyNameRules.normalize(nameText)
+        return typed != (model.name ?? "") && !(typed == FlameyNameRules.fallback && model.name == nil)
+    }
+
+    private func commitName(then next: @escaping () -> Void) {
+        naming = true
+        Task { @MainActor in
+            let outcome = await model.rename(nameText)
+            naming = false
+            if case .rejected(let message) = outcome {
+                nameError = message
+                MADHaptics.error()
+            } else {
+                nameError = nil
+                next()
+            }
+        }
     }
 
     private func pick(_ item: FlameyItem?, in slot: FlameySlot) {
@@ -297,8 +366,7 @@ struct FlameyJourneyView: View {
             .accessibilityLabel("Page \(index + 1) of \(pages.count)")
             Spacer(minLength: 0)
             Button {
-                MADHaptics.tap()
-                finish()
+                skip()
             } label: {
                 Text(isLast ? "Done" : "Skip")
                     .madFont(size: 16, weight: .bold, design: .rounded, maxScale: 1.3)
@@ -309,8 +377,8 @@ struct FlameyJourneyView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityHint(hasUnsaved ? "Keeps what you picked and goes to Flamey's Closet"
-                                          : "Goes straight to Flamey's Closet")
+            .accessibilityHint(hasUnsaved ? "Asks whether to save what you picked"
+                                          : "Goes straight to the Closet")
         }
         .padding(.horizontal, 12)
         .frame(height: 48)
@@ -321,46 +389,94 @@ struct FlameyJourneyView: View {
             if case .step = page.kind {
                 // Reserved even when empty, so the button never jumps.
                 HStack(spacing: 5) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 12, weight: .bold))
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11, weight: .bold))
                         .accessibilityHidden(true)
-                    Text("Your picks save when you tap Next — Skip keeps them too")
+                    Text("Just trying on — you'll save at the end")
                         .madFont(size: 12, weight: .semibold, design: .rounded, maxScale: 1.3)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                 }
-                .foregroundColor(FlameyClosetStyle.worn)
+                .foregroundColor(FlameyClosetStyle.ember)
                 .opacity(hasUnsaved ? 1 : 0)
                 .frame(height: 16)
                 .accessibilityHidden(!hasUnsaved)
             }
-            Button {
-                MADHaptics.action()
-                go(index + 1)
-            } label: {
-                Text(primaryTitle)
-                    .madFont(size: 17, weight: .heavy, design: .rounded, maxScale: 1.4)
+            if isLast && hasUnsaved {
+                picksSummary
+                FlameyWideButton(title: "Save this look", icon: "checkmark") {
+                    MADHaptics.success()
+                    finish(save: true)
+                }
+                FlameyTextButton(title: model.savedChoice.isBasic ? "Keep him basic" : "Keep his current look") {
+                    MADHaptics.tap()
+                    finish(save: false)
+                }
+                .accessibilityHint("Puts back what he had on — nothing you picked is saved")
+            } else {
+                Button {
+                    MADHaptics.action()
+                    go(index + 1)
+                } label: {
+                    HStack(spacing: 8) {
+                        if naming { ProgressView().tint(.white).controlSize(.small) }
+                        Text(primaryTitle)
+                            .madFont(size: 17, weight: .heavy, design: .rounded, maxScale: 1.4)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
                     .foregroundColor(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
                     .frame(maxWidth: .infinity, minHeight: 54)
                     .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(FlameyClosetStyle.primaryFill))
                     .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
+    }
+
+    /// The last page decides about a look it doesn't show — so it shows it:
+    /// him in the picks, and what they are.
+    private var picksSummary: some View {
+        let names = picks.items.filter { $0.slot.basicItem != $0 }.map(\.displayName)
+        return HStack(spacing: 12) {
+            ZStack(alignment: .bottom) {
+                Circle().fill(glow.opacity(0.18))
+                FlameyDressedFigure(look: model.look(for: picks, detail: .compact), health: .healthy, size: 44, scale: 1)
+                    .frame(width: 44, height: 44)
+                    .padding(.bottom, 3)
+            }
+            .frame(width: 54, height: 54)
+            .clipShape(Circle())
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("YOUR PICKS")
+                    .madFont(size: 10.5, weight: .black, design: .rounded, maxScale: 1.3)
+                    .tracking(1)
+                    .foregroundColor(FlameyClosetStyle.ember)
+                Text(names.isEmpty ? "Back to basic" : names.joined(separator: ", "))
+                    .madFont(size: 13.5, weight: .bold, design: .rounded)
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(0.05)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+        .accessibilityElement(children: .combine)
     }
 
     private var primaryTitle: String {
         if isLast { return "Open the Closet" }
-        let save = hasUnsaved ? "Save · " : ""
         switch pages[index + 1].kind {
         case .step(let next):
             if case .welcome = page.kind { return "Let's dress him" }
-            return save + "Next: \(next.shortTitle)"
+            return "Next: \(next.shortTitle)"
         case .more:
             if case .welcome = page.kind { return "Show me how to unlock things" }
-            return save + "Next: what's left to earn"
+            return "Next: what's left to earn"
         case .welcome:
             return "Next"
         }
@@ -372,7 +488,7 @@ struct FlameyJourneyView: View {
     private func pageBody(_ page: FlameyJourneyPage, compact: Bool) -> some View {
         switch page.kind {
         case .welcome:
-            scrolling { welcome(page) }
+            scrolling { welcome(page, compact: compact) }
         case .step(let step):
             stepPage(step, page: page, compact: compact)
         case .more:
@@ -413,7 +529,7 @@ struct FlameyJourneyView: View {
         .frame(height: size * 1.12 + FlameyStage.bubbleRoom(size), alignment: .bottom)
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(FlameyStage.accessibilityLabel(stageLook))
+        .accessibilityLabel(FlameyStage.accessibilityLabel(stageLook, name: shownName))
     }
 
     private func titleBlock(eyebrow: String, title: String, body: String) -> some View {
@@ -442,16 +558,18 @@ struct FlameyJourneyView: View {
 
     // Welcome
 
-    private func welcome(_ page: FlameyJourneyPage) -> some View {
+    private func welcome(_ page: FlameyJourneyPage, compact: Bool) -> some View {
         let count = page.items.count
         return VStack(spacing: 14) {
-            stage(size: 150, line: "I've got a closet!")
+            stage(size: compact ? 104 : 150, line: "I've got a closet!")
                 .padding(.top, 4)
-            titleBlock(eyebrow: "New for Flamey",
-                       title: "Flamey has a closet!",
+            titleBlock(eyebrow: "New for \(shownName)",
+                       title: "\(shownName) has a closet!",
                        body: count > 0
-                           ? "Your medals unlock things he can wear. Let's pick what he puts on — he stays just as he is until you do."
+                           ? "Your medals unlock things he can wear. Try things on — nothing changes until you save."
                            : "Your medals unlock things he can wear. He stays just as he is until you pick something.")
+            nameField
+                .padding(.horizontal, 20)
             if count > 0 {
                 unlockedSummary(page.items)
                     .padding(.horizontal, 20)
@@ -462,6 +580,36 @@ struct FlameyJourneyView: View {
                     .foregroundColor(.white.opacity(0.55))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
+            }
+        }
+    }
+
+    /// "What should we call him?" — optional; blank leaves him Flamey. Saved
+    /// when the welcome page is left forward.
+    private var nameField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "pencil")
+                    .font(.system(size: 11, weight: .bold))
+                    .accessibilityHidden(true)
+                Text("What should we call him?")
+                    .madFont(size: 13, weight: .heavy, design: .rounded, maxScale: 1.3)
+                Text("Optional")
+                    .madFont(size: 11.5, weight: .semibold, design: .rounded, maxScale: 1.3)
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .foregroundColor(.white.opacity(0.85))
+            FlameyTextField(placeholder: FlameyNameRules.fallback, text: $nameText, maxLength: FlameyNameRules.maxLength,
+                            still: still, isError: nameError != nil, submitLabel: .next) { go(index + 1) }
+            if let nameError {
+                FlameyFieldNote(error: nameError, hint: "")
+            }
+        }
+        .onChange(of: nameText) { _, new in
+            if case .failure(let issue) = FlameyNameRules.validate(new), issue != .empty {
+                nameError = issue.message()
+            } else {
+                nameError = nil
             }
         }
     }

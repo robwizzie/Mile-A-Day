@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import HealthKit
 
 // FLAMEY'S CLOSET — the live glue: presenting it, saving what's chosen,
 // restoring it on a new phone, and announcing new items. The screen and the
@@ -163,6 +164,40 @@ enum FlameyClosetSync {
     private struct Closet: Decodable {
         let look: FlameyLookChoice?
         let owned_item_ids: [String]?
+        /// nil = the server didn't send `name` (older server); `.some(nil)`
+        /// = it did, and he's "Flamey".
+        let name: String??
+        /// nil = no `outfits` key (older server).
+        let outfits: [OutfitDTO]?
+
+        enum CodingKeys: String, CodingKey { case look, owned_item_ids, name, outfits }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            look = try? c.decodeIfPresent(FlameyLookChoice.self, forKey: .look)
+            owned_item_ids = try? c.decodeIfPresent([String].self, forKey: .owned_item_ids)
+            if c.contains(.name) {
+                name = .some((try? c.decodeIfPresent(String.self, forKey: .name)) ?? nil)
+            } else {
+                name = nil
+            }
+            outfits = try? c.decodeIfPresent([OutfitDTO].self, forKey: .outfits)
+        }
+    }
+
+    /// A saved outfit as the server serves it. Timestamps are ISO strings
+    /// (never `Date` — the shared decoder can't read fractional seconds).
+    struct OutfitDTO: Decodable {
+        let id: String
+        let name: String
+        let look: FlameyLookChoice?
+        let created_at: String?
+        let updated_at: String?
+        let owned_ok: Bool?
+
+        func outfit(localId: String? = nil) -> FlameyOutfit {
+            FlameyOutfit(id: localId ?? id, serverId: id, name: name, look: look ?? .basic, ownedOK: owned_ok ?? true)
+        }
     }
 
     private static func push() async {
@@ -192,6 +227,9 @@ enum FlameyClosetSync {
     /// phone gets its Flamey back.
     static func syncOnForeground() async {
         guard DashboardStylePreference.current == .fun, TokenStore.hasTokens, userId != nil else { return }
+        // A name or outfit list kept offline goes up first, like the look.
+        if isNameDirty { _ = await pushName(FlameyFacts.name) }
+        if isOutfitsDirty { _ = await pushOutfits(outfits) }
         if isDirty {
             await push()
             return
@@ -207,10 +245,190 @@ enum FlameyClosetSync {
         guard let closet = try? await APIClient.fancyFetch(endpoint: "/users/\(userId)/flamey-closet",
                                                            responseType: Closet.self) else { return }
         storeServerOwned(closet.owned_item_ids)
+        // Another phone may have renamed him or changed the outfits; a
+        // change still waiting to go up from THIS phone wins.
+        if let name = closet.name, !isNameDirty {
+            FlameyFacts.setName(name)
+        }
+        if let served = closet.outfits, !isOutfitsDirty {
+            storeOutfits(served.map { $0.outfit() })
+        }
         // A local change made while this was in flight wins.
-        guard force || !isDirty else { return }
+        guard force || !isDirty else {
+            FlameyClosetLink.shared.objectWillChange.send()
+            return
+        }
         FlameyFacts.applyServerChoice(closet.look ?? .basic)
         FlameyClosetLink.shared.objectWillChange.send()
+    }
+
+    // MARK: His name (`PUT /users/:id/flamey-name`)
+
+    private static let nameDirtyPrefix = "flameyNameDirtyV1|"
+
+    private static var isNameDirty: Bool {
+        get { userId.map { UserDefaults.standard.bool(forKey: nameDirtyPrefix + $0) } ?? false }
+        set { if let userId { UserDefaults.standard.set(newValue, forKey: nameDirtyPrefix + userId) } }
+    }
+
+    private struct NameBody: Encodable {
+        let name: String?
+        enum CodingKeys: String, CodingKey { case name }
+        // `{"name": null}` resets him — the key must be PRESENT.
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(name, forKey: .name)
+        }
+    }
+    private struct NameAck: Decodable { let name: String? }
+
+    /// Renames him. Refused ⇒ why, in words (the name is left alone).
+    /// Offline ⇒ kept here and pushed at the next launch/foreground. An
+    /// older server (404) ⇒ kept on this phone only.
+    static func rename(_ name: String?) async -> FlameySaveOutcome {
+        guard TokenStore.hasTokens, userId != nil else {
+            FlameyFacts.setName(name)
+            isNameDirty = true
+            FlameyClosetLink.shared.objectWillChange.send()
+            return .deferred
+        }
+        let outcome = await pushName(name)
+        if !outcome.isRejected { FlameyClosetLink.shared.objectWillChange.send() }
+        return outcome
+    }
+
+    private static func pushName(_ name: String?) async -> FlameySaveOutcome {
+        guard TokenStore.hasTokens, let userId,
+              let body = try? JSONEncoder().encode(NameBody(name: name)) else { return .deferred }
+        do {
+            let ack = try await APIClient.fancyFetch(endpoint: "/users/\(userId)/flamey-name", method: .PUT,
+                                                     body: body, responseType: NameAck.self)
+            FlameyFacts.setName(ack.name)
+            isNameDirty = false
+            return .saved
+        } catch APIError.badRequest(let error) where error.hasPrefix("invalid_flamey_name") {
+            // The body's `reason` isn't carried by APIError; every rule but
+            // the blocklist is mirrored here, so a name that passes locally
+            // was refused by the blocklist.
+            isNameDirty = false
+            if let raw = name, case .failure(let issue) = FlameyNameRules.validate(raw) {
+                return .rejected(issue.message())
+            }
+            return .rejected(FlameyNameIssue.notAllowed.message())
+        } catch APIError.badRequest {
+            isNameDirty = false
+            return .rejected(FlameyNameIssue.notAllowed.message())
+        } catch APIError.notFound {
+            // An older server: the name lives on this phone.
+            FlameyFacts.setName(name)
+            isNameDirty = false
+            return .saved
+        } catch {
+            FlameyFacts.setName(name)
+            isNameDirty = true
+            return .deferred
+        }
+    }
+
+    // MARK: Saved outfits (`PUT /users/:id/flamey-outfits`)
+
+    private static let outfitsPrefix = "flameyOutfitsV1|"
+    private static let outfitsDirtyPrefix = "flameyOutfitsDirtyV1|"
+
+    private static var isOutfitsDirty: Bool {
+        get { userId.map { UserDefaults.standard.bool(forKey: outfitsDirtyPrefix + $0) } ?? false }
+        set { if let userId { UserDefaults.standard.set(newValue, forKey: outfitsDirtyPrefix + userId) } }
+    }
+
+    /// This account's outfits as this phone last knew them.
+    static var outfits: [FlameyOutfit] {
+        guard let userId, let data = UserDefaults.standard.data(forKey: outfitsPrefix + userId),
+              let list = try? JSONDecoder().decode([FlameyOutfit].self, from: data) else { return [] }
+        return list
+    }
+
+    private static func storeOutfits(_ list: [FlameyOutfit]) {
+        guard let userId, let data = try? JSONEncoder().encode(list) else { return }
+        UserDefaults.standard.set(data, forKey: outfitsPrefix + userId)
+    }
+
+    private struct OutfitsBody: Encodable {
+        struct Entry: Encodable {
+            let id: String?
+            let name: String
+            let look: FlameyLookChoice
+            enum CodingKeys: String, CodingKey { case id, name, look }
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(id, forKey: .id)
+                try c.encode(name, forKey: .name)
+                try c.encode(look, forKey: .look)
+            }
+        }
+        let outfits: [Entry]
+    }
+    private struct OutfitsAck: Decodable { let outfits: [OutfitDTO]? }
+
+    /// Replaces the list. Returns the outcome and — when the server answered —
+    /// its copy, with this phone's ids kept (the server keeps the order, so
+    /// entry i IS entry i), so nothing on screen changes identity.
+    static func saveOutfits(_ list: [FlameyOutfit]) async -> (FlameySaveOutcome, [FlameyOutfit]?) {
+        let outcome = await pushOutfits(list)
+        switch outcome.0 {
+        case .rejected: return outcome
+        case .saved, .deferred:
+            if outcome.1 == nil { storeOutfits(list) }
+            return outcome
+        }
+    }
+
+    private static func pushOutfits(_ list: [FlameyOutfit]) async -> (FlameySaveOutcome, [FlameyOutfit]?) {
+        guard TokenStore.hasTokens, let userId else {
+            isOutfitsDirty = true
+            return (.deferred, nil)
+        }
+        // Only what's owned goes up — the server refuses a look naming
+        // anything else, and an outfit is worn without it anyway.
+        let owned = FlameyFacts.ownedItems.union(serverOwned)
+        let entries = list.map { outfit -> OutfitsBody.Entry in
+            var look = outfit.look
+            for slot in FlameySlot.allCases where look[slot].map({ !owned.contains($0) && $0.unlock != .always }) == true {
+                look[slot] = nil
+            }
+            return .init(id: outfit.serverId, name: outfit.name, look: look)
+        }
+        guard let body = try? JSONEncoder().encode(OutfitsBody(outfits: entries)) else { return (.deferred, nil) }
+        do {
+            let ack = try await APIClient.fancyFetch(endpoint: "/users/\(userId)/flamey-outfits", method: .PUT,
+                                                     body: body, responseType: OutfitsAck.self)
+            isOutfitsDirty = false
+            guard let served = ack.outfits else { return (.saved, nil) }
+            let merged = served.enumerated().map { i, dto in
+                dto.outfit(localId: served.count == list.count ? list[i].id : nil)
+            }
+            storeOutfits(merged)
+            return (.saved, merged)
+        } catch APIError.badRequest(let error) {
+            isOutfitsDirty = false
+            if error.hasPrefix("too_many_outfits") {
+                return (.rejected("All \(FlameyOutfit.max) outfit slots are full — pick one to replace."), nil)
+            }
+            if error.hasPrefix("invalid_outfit_name") {
+                return (.rejected(FlameyNameIssue.notAllowed.message(maxLength: FlameyNameRules.outfitMaxLength)), nil)
+            }
+            if error.hasPrefix("invalid_flamey_look") {
+                return (.rejected("Something in this look isn't unlocked on your account yet."), nil)
+            }
+            return (.rejected("Couldn't save that outfit — try again."), nil)
+        } catch APIError.notFound {
+            // An older server: outfits live on this phone, and go up once
+            // the server knows them (kept dirty, retried on foreground).
+            isOutfitsDirty = true
+            return (.saved, nil)
+        } catch {
+            isOutfitsDirty = true
+            return (.deferred, nil)
+        }
     }
 }
 
@@ -258,6 +476,7 @@ enum FlameyMedalCatalog {
         let earned = Dictionary(UserManager.shared.currentUser.badges.filter { !$0.isLocked }.map { ($0.id, $0) },
                                 uniquingKeysWith: { first, _ in first })
         let names = cachedNames
+        let details = BadgeEarnedDetails.all()
         var out: [String: FlameyMedalInfo] = [:]
         for id in FlameyWardrobe.catalogBadgeIds {
             let badge = earned[id] ?? Badge(id: id, name: names[id] ?? "", description: "")
@@ -268,8 +487,12 @@ enum FlameyMedalCatalog {
             case .rare: rarity = .rare
             case .legendary: rarity = .legendary
             }
+            let detail = earned[id] != nil ? details[id] : nil
             out[id] = FlameyMedalInfo(badgeId: id, name: name, icon: iconName(for: badge), rarity: rarity,
-                                      earnedAt: earned[id]?.dateAwarded, isEarned: earned[id] != nil)
+                                      earnedAt: earned[id]?.dateAwarded, isEarned: earned[id] != nil,
+                                      earnedSummary: detail?.summary,
+                                      earnedDay: FlameyClosetCopy.parseDay(detail?.date),
+                                      earnedWorkoutId: detail?.workoutId)
         }
         return out
     }
@@ -426,8 +649,17 @@ struct FlameyClosetScreen: View {
         let fresh = FlameySeenLedger.unseen(in: owned).union(request.highlight.intersection(owned))
         let model = FlameyClosetModel(owned: owned, choice: FlameyFacts.choice, newItems: fresh, facts: facts,
                                       medals: FlameyMedalCatalog.medals(),
-                                      signupDate: FlameyFacts.signupDate, focus: request.focus)
+                                      signupDate: FlameyFacts.signupDate, focus: request.focus,
+                                      name: FlameyFacts.name, outfits: FlameyClosetSync.outfits)
+        // Only a SAVE reaches here — the Closet edits a draft.
         model.onChoiceChange = { FlameyClosetSync.choiceChanged($0) }
+        model.onRename = { await FlameyClosetSync.rename($0) }
+        model.onOutfitsChange = { [weak model] list in
+            let (outcome, served) = await FlameyClosetSync.saveOutfits(list)
+            if let served { model?.adoptOutfits(served) }
+            return outcome
+        }
+        model.workoutView = { id in AnyView(FlameyEarnedWorkoutView(workoutId: id)) }
         return model
     }
 }
@@ -492,6 +724,7 @@ struct FlameyUnlockCelebrationHost: View {
                 choice: FlameyFacts.choice,
                 medalName: medal?.name,
                 medal: medal,
+                flameyName: FlameyFacts.displayName,
                 onWear: { item in
                     var choice = FlameyFacts.choice
                     choice[item.slot] = item
@@ -552,7 +785,7 @@ struct HeroClosetButton: View {
     }
 
     var body: some View {
-        FlameyClosetPill(hasNews: hasNews) {
+        FlameyClosetPill(hasNews: hasNews, name: FlameyFacts.displayName) {
             MADHaptics.action()
             FlameyClosetLink.shared.open()
         }
@@ -574,7 +807,8 @@ struct FlameyClosetProfileRow: View {
                 unlocked: owned.filter { $0.unlock != .always && !$0.isMoodProp }.count,
                 total: FlameyItem.closet.filter { $0.unlock != .always }.count,
                 fresh: FlameySeenLedger.unseen(in: owned).count,
-                firstVisit: !FlameyJourneyLedger.seen
+                firstVisit: !FlameyJourneyLedger.seen,
+                name: FlameyFacts.displayName
             ) {
                 MADHaptics.action()
                 FlameyClosetLink.shared.open()
@@ -614,12 +848,120 @@ struct FlameyMedalUnlockCardLive: View {
     var body: some View {
         let items = FlameyMedalLink.items(forBadge: badgeId)
         if styleRaw == DashboardStyle.fun.rawValue, !items.isEmpty {
-            FlameyMedalUnlockCard(items: items, earned: earned) { item in
+            FlameyMedalUnlockCard(items: items, earned: earned, name: FlameyFacts.displayName) { item in
                 closet = FlameyClosetLink.Request(focus: item, openDetail: true)
             }
             .fullScreenCover(item: $closet) { request in
                 FlameyClosetScreen(request: request, canRoute: false)
             }
+        }
+    }
+}
+
+// MARK: - "View workout" from a medal
+
+/// The workout that earned a medal, opened by its id (the server's
+/// `earned_detail.workout_id`, else `triggeringWorkoutId` — both are the
+/// HKWorkout UUID the sync uploaded). Found in this phone's HealthKit through
+/// the app's LONG-LIVED store (a per-call store is released before its query
+/// answers); a workout that isn't on this phone (another device, deleted
+/// from Health) says so rather than spinning.
+struct FlameyEarnedWorkoutView: View {
+    let workoutId: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var workout: HKWorkout?
+    @State private var missing = false
+
+    var body: some View {
+        Group {
+            if let workout {
+                WorkoutDetailView(workout: workout)
+            } else {
+                VStack(spacing: 14) {
+                    if missing {
+                        Image(systemName: "figure.walk.motion")
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.5))
+                            .accessibilityHidden(true)
+                        Text("That workout isn't on this phone")
+                            .madFont(size: 18, weight: .heavy, design: .rounded)
+                            .foregroundColor(.white)
+                        Text("It may have been recorded on another device or removed from Apple Health.")
+                            .madFont(size: 14, weight: .semibold, design: .rounded)
+                            .foregroundColor(.white.opacity(0.6))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                        Button {
+                            dismiss()
+                        } label: {
+                            Text("Close")
+                                .madFont(size: 16, weight: .bold, design: .rounded)
+                                .foregroundColor(FlameyClosetStyle.ember)
+                                .frame(minWidth: 88, minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        ProgressView().tint(.white)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(FlameyClosetStyle.ground.ignoresSafeArea())
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard workout == nil, !missing else { return }
+        let manager = HealthKitManager.shared
+        // Already in memory (recent history) — no query needed.
+        if let known = (manager.cachedWorkouts + manager.recentWorkouts)
+            .first(where: { $0.uuid.uuidString.caseInsensitiveCompare(workoutId) == .orderedSame }) {
+            workout = known
+            return
+        }
+        guard let uuid = UUID(uuidString: workoutId), HKHealthStore.isHealthDataAvailable() else {
+            missing = true
+            return
+        }
+        let found: HKWorkout? = await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(sampleType: HKObjectType.workoutType(),
+                                      predicate: HKQuery.predicateForObject(with: uuid),
+                                      limit: 1, sortDescriptors: nil) { _, samples, _ in
+                continuation.resume(returning: (samples as? [HKWorkout])?.first)
+            }
+            manager.healthStore.execute(query)
+        }
+        if let found { workout = found } else { missing = true }
+    }
+}
+
+/// The medal detail's "HOW YOU EARNED IT" card (every style — it's about the
+/// medal, not Flamey): the server's sentence + day + "View workout", else the
+/// requirement and the earned date. Presents the workout on its OWN sheet.
+struct MedalHowEarnedCard: View {
+    let badge: Badge
+    /// The medal's requirement in words (BadgeDetailView's unlock text).
+    let requirement: String
+    @State private var workout: FlameyWorkoutRef?
+
+    var body: some View {
+        let detail = BadgeEarnedDetails.entry(for: badge.id)
+        let medal = FlameyMedalInfo(
+            badgeId: badge.id, name: badge.name, icon: iconName(for: badge), rarity: .common,
+            earnedAt: badge.dateAwarded, isEarned: true,
+            earnedSummary: detail?.summary,
+            earnedDay: FlameyClosetCopy.parseDay(detail?.date),
+            earnedWorkoutId: detail?.workoutId)
+        FlameyHowEarned(medal: medal, requirement: requirement) { id in
+            MADHaptics.tap()
+            workout = FlameyWorkoutRef(id: id)
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color.white.opacity(0.06)))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+        .sheet(item: $workout) { ref in
+            FlameyEarnedWorkoutView(workoutId: ref.id)
         }
     }
 }

@@ -24,6 +24,9 @@ struct FriendFlameyFacts: Equatable {
     /// Their Closet choice (`look`, the wire `{slot: id}`); absent = basic —
     /// a friend's Flamey wears exactly what THEY picked.
     let choice: FlameyLookChoice
+    /// What they named him (`flamey.name`); nil = "Flamey" (or an older
+    /// server that doesn't send it).
+    let flameyName: String?
 
     init?(block: FlameyProfileBlock?, ownerName: String) {
         guard let block, block.enabled == true else { return nil }
@@ -34,6 +37,8 @@ struct FriendFlameyFacts: Equatable {
         signupDate = block.signup_date.flatMap(Self.parseDay)
         let choice = FlameyLookChoice(wire: block.look ?? [:])
         self.choice = choice
+        let trimmed = block.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        flameyName = (trimmed?.isEmpty == false) ? trimmed : nil
         var owned = FlameyWardrobe.owned(
             earnedBadgeIds: earnedBadgeIds.union(FlameyWardrobe.impliedBadgeIds(longestStreak: longestStreak)))
         owned.formUnion((block.owned_item_ids ?? []).compactMap(FlameyItem.init(rawValue:)))
@@ -73,6 +78,12 @@ struct FriendFlameyFacts: Equatable {
     var possessive: String {
         ownerName.hasSuffix("s") ? "\(ownerName)’" : "\(ownerName)’s"
     }
+
+    /// His name — "Sparky", else "Flamey".
+    var mascotName: String { flameyName ?? "Flamey" }
+
+    /// "Aaron's Sparky" (or "Aaron's Flamey") — the card's title.
+    var title: String { "\(possessive) \(mascotName)" }
 
     /// The one thing worth naming under him today: the day's outfit if he's
     /// in one, else a costume, else his hat, then colour, shoes, eyes, chest.
@@ -316,7 +327,7 @@ struct FriendFlameyCard: View {
         .contentShape(Rectangle())
         .onTapGesture { poke(kind: kind) }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(facts.possessive) Flamey")
+        .accessibilityLabel(facts.title)
         .accessibilityHint("Tap to poke. Sends \(facts.ownerName) a nudge.")
         .accessibilityAddTraits(.isButton)
     }
@@ -325,7 +336,7 @@ struct FriendFlameyCard: View {
 
     private func info(kind: FlameMood.Kind, look: FlameyLook) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("\(facts.possessive.uppercased()) FLAMEY")
+            Text(facts.title.uppercased())
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
                 .tracking(1.2)
                 .foregroundColor(Color(red: 1.0, green: 0.72, blue: 0.35))
@@ -394,7 +405,7 @@ struct FriendFlameyCard: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("What \(facts.possessive) Flamey is wearing")
+        .accessibilityLabel("What \(facts.title) is wearing")
     }
 
     /// A warm ember glow behind him, inside the flat card chrome.
@@ -539,7 +550,8 @@ struct FriendFlameyWardrobeSheet: View {
                 Image(systemName: "hanger")
                     .madFont(size: 14, weight: .bold, maxScale: 1.3)
                     .accessibilityHidden(true)
-                Text("Dress your own Flamey")
+                // Yours has a name of his own, maybe: "Dress up Sparky".
+                Text(FlameyFacts.name.map { "Dress up \($0)" } ?? "Dress your own Flamey")
                     .madFont(size: 15, weight: .heavy, design: .rounded)
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
@@ -551,7 +563,7 @@ struct FriendFlameyWardrobeSheet: View {
             .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Opens your Flamey's Closet")
+        .accessibilityHint("Opens \(FlameyNameRules.possessive(FlameyFacts.displayName)) Closet")
     }
 
     /// The sheet's contents, outside the ScrollView (also what a snapshot
@@ -570,7 +582,7 @@ struct FriendFlameyWardrobeSheet: View {
                             .frame(width: 120, height: 120)
                     }
                     .frame(height: 150, alignment: .bottom)
-                    Text("\(facts.possessive) Flamey")
+                    Text(facts.title)
                         .font(.system(size: 22, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
                     Text("\(owned.count) of \(total) unlocked")

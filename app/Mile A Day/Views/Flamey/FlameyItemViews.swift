@@ -191,10 +191,10 @@ enum FlameyStage {
     /// clips against what sits above him and choosing a voice moves nothing.
     static func bubbleRoom(_ size: CGFloat) -> CGFloat { 16 + size * 0.4 }
 
-    static func accessibilityLabel(_ look: FlameyLook) -> String {
+    static func accessibilityLabel(_ look: FlameyLook, name: String = FlameyNameRules.fallback) -> String {
         let worn = look.items.filter { !$0.isMoodProp && $0 != .classic && $0 != .classicBubble }
-        guard !worn.isEmpty else { return "Flamey, basic — wearing nothing" }
-        return "Flamey, wearing " + worn.map(\.displayName).joined(separator: ", ")
+        guard !worn.isEmpty else { return "\(name), basic — wearing nothing" }
+        return "\(name), wearing " + worn.map(\.displayName).joined(separator: ", ")
     }
 
     /// "From your Quick Runner medal" / "Locked · earn the Quick Runner medal".
@@ -396,20 +396,24 @@ struct FlameyClosetTile: View {
         .simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in onDetails() })
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint(owned ? (worn ? (item.slot.basicItem == item ? "" : "Double-tap to take it off") : "Double-tap to wear it")
+        .accessibilityHint(owned ? (worn ? (item.slot.basicItem == item ? "" : "Double-tap to take it off") : "Double-tap to try it on")
                                  : "Double-tap to see how to earn it")
         .accessibilityAddTraits(worn ? [.isSelected, .isButton] : .isButton)
         .accessibilityAction(named: "Details") { onDetails() }
     }
 
+    /// On him in the draft but not saved yet.
+    private var tryingOn: Bool { worn && model.isChanged(item.slot) }
+
     @ViewBuilder
     private var footer: some View {
         if worn {
-            Text("WEARING")
+            Text(tryingOn ? "TRYING ON" : "WEARING")
                 .madFont(size: 8.5, weight: .black, design: .rounded, maxScale: 1.2)
                 .tracking(0.6)
-                .foregroundColor(FlameyClosetStyle.worn)
+                .foregroundColor(tryingOn ? FlameyClosetStyle.ember : FlameyClosetStyle.worn)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
         } else if let progress {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -466,7 +470,7 @@ struct FlameyClosetTile: View {
             parts.append(FlameyClosetCopy.lowercasedFirst(item.unlockCopy))
             if let progress { parts.append(progress.spoken) }
         } else if worn {
-            parts.append("wearing")
+            parts.append(tryingOn ? "trying on, not saved" : "wearing")
         } else {
             parts.append("unlocked")
         }
@@ -496,6 +500,9 @@ struct FlameyItemDetailView: View {
     var still: Bool = false
     var onClose: () -> Void = {}
 
+    /// "View workout": the medal's workout, on a sheet over this card.
+    @State private var workout: FlameyWorkoutRef?
+
     private var owned: Bool { model.owns(item) }
     private var worn: Bool { model.isWorn(item) }
     private var medal: FlameyMedalInfo? { model.medal(for: item) }
@@ -522,6 +529,9 @@ struct FlameyItemDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(FlameyClosetStyle.ground.ignoresSafeArea())
         .madTypeCap(.madCardCap)
+        .sheet(item: $workout) { ref in
+            if let view = model.workoutView?(ref.id) { view }
+        }
     }
 
     // MARK: Header — him wearing it + what it is
@@ -577,7 +587,7 @@ struct FlameyItemDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(owned ? "Flamey wearing \(item.displayName)" : "Preview of Flamey wearing \(item.displayName)")
+        .accessibilityLabel(owned ? "\(model.displayName) wearing \(item.displayName)" : "Preview of \(model.displayName) wearing \(item.displayName)")
     }
 
     private var statusChip: some View {
@@ -644,14 +654,15 @@ struct FlameyItemDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
     }
 
+    /// HOW the medal was earned — the server's sentence ("You ran a 7:42
+    /// mile") with its day and, when a workout did it, a way to that workout;
+    /// else the medal's requirement and the day it was earned.
     private func ownedLine(_ medal: FlameyMedalInfo) -> some View {
-        let text: String
-        if let earned = medal.earnedAt {
-            text = "Unlocked \(FlameyClosetCopy.day(earned))"
-        } else {
-            text = "Unlocked — " + FlameyClosetCopy.lowercasedFirst(item.unlockCopy)
-        }
-        return note(icon: "checkmark.seal.fill", text: text, tint: FlameyClosetStyle.worn)
+        FlameyHowEarned(medal: medal, requirement: item.unlockCopy,
+                        onViewWorkout: model.workoutView == nil ? nil : { id in
+                            MADHaptics.tap()
+                            workout = FlameyWorkoutRef(id: id)
+                        })
     }
 
     @ViewBuilder
@@ -717,7 +728,7 @@ struct FlameyItemDetailView: View {
                         onClose()
                     }
                 } else if !worn {
-                    primary("Wear it", icon: "checkmark", filled: true) {
+                    primary("Try it on", icon: "checkmark", filled: true) {
                         MADHaptics.success()
                         model.wear(item)
                         onClose()

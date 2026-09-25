@@ -582,13 +582,10 @@ struct BadgeDetailView: View {
                 .multilineTextAlignment(.center)
                 .lineSpacing(4)
             
-            HStack(spacing: 6) {
-                Image(systemName: "calendar")
-                    .font(.system(size: 12))
-                Text("Earned \(badge.dateAwarded.formattedDate)")
-            }
-            .font(.system(size: 14, weight: .medium, design: .rounded))
-            .foregroundColor(.white.opacity(0.4))
+
+            // HOW it was earned ("You ran a 7:42 mile · Aug 14, 2026" + View
+            // workout) — else what it asks for and the day it was earned.
+            MedalHowEarnedCard(badge: badge, requirement: getUnlockText())
         }
     }
     

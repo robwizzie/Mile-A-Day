@@ -82,6 +82,8 @@ struct FlameyProfileBlock: Codable {
     var look: [String: String?]? = nil
     /// Every wardrobe item they own, when the server sends it. Additive.
     var owned_item_ids: [String]? = nil
+    /// What they named him; null/absent = "Flamey". Additive.
+    var name: String? = nil
 }
 
 // MARK: - Friendship Models

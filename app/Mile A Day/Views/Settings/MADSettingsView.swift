@@ -207,8 +207,8 @@ struct MADSettingsView: View {
                 } label: {
                     MADSettingsRow(
                         icon: "hanger",
-                        title: "Flamey's Closet",
-                        subtitle: "Dress Flamey in what you've earned",
+                        title: "\(FlameyNameRules.possessive(FlameyFacts.displayName)) Closet",
+                        subtitle: "Dress \(FlameyFacts.displayName) in what you've earned",
                         iconColor: .orange
                     )
                 }

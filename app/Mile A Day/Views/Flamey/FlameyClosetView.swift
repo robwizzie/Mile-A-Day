@@ -15,10 +15,16 @@ import SwiftUI
 ///
 /// Each tab is its slots stacked as sections — "Shoes · 5 of 8", the one
 /// sentence saying which medals fill that slot, then 4-up item tiles, each
-/// wearing its medal on the corner. Tap something you own to wear it (tap
+/// wearing its medal on the corner. Tap something you own to try it on (tap
 /// again to take it off), every change with an Undo toast; tap something
-/// locked — or long-press anything — for its card. Nothing is ever put on him
-/// that you didn't pick.
+/// locked — or long-press anything — for its card.
+///
+/// It is an EDITING SESSION: every tap changes a draft on the stage, and
+/// nothing he wears elsewhere changes until Save. While the draft differs
+/// from what's saved, `FlameySaveBar` sits at the bottom (Discard · Save),
+/// and Done asks "Save changes to Sparky's look?". Saved outfits sit under
+/// the stage and load into the draft the same way; the title is his name
+/// ("Sparky's Closet ✎") and opens the name editor.
 ///
 /// Fun-only by construction: the hosts only present it on Fun.
 struct FlameyClosetView: View {
@@ -37,6 +43,14 @@ struct FlameyClosetView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var lineClear: Task<Void, Never>?
     @State private var collapsed = false
+    @State private var sheet: ClosetSheet?
+
+    /// The Closet's own sheets (the item card rides `model.detail`, on a
+    /// different node — two sheets on one node drop one).
+    enum ClosetSheet: String, Identifiable {
+        case name, saveOutfit, manageOutfits
+        var id: String { rawValue }
+    }
 
     private var columns: [GridItem] {
         let count = typeSize >= .accessibility1 ? 3 : 4
@@ -48,6 +62,9 @@ struct FlameyClosetView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
+                .sheet(item: $sheet) { which in
+                    sheetView(which)
+                }
             ScrollViewReader { proxy in
                 VStack(spacing: 0) {
                     header { slot in
@@ -69,7 +86,52 @@ struct FlameyClosetView: View {
             }
         }
         .background(background.ignoresSafeArea())
-        .overlay(alignment: .bottom) { toastOverlay }
+        .overlay(alignment: .bottom) {
+            VStack(spacing: 10) {
+                if model.hasUnsavedChanges {
+                    // The bar carries the last change + its Undo itself —
+                    // a toast above it would bury the grid on small phones.
+                    FlameySaveBar(changes: model.changedSlotCount, possessiveName: model.possessiveName,
+                                  note: model.toast?.text,
+                                  onUndo: model.toast?.undo == nil ? nil : {
+                                      MADHaptics.tap()
+                                      withAnimation(reduceMotion ? nil : .snappy) { model.undo() }
+                                  }) {
+                        MADHaptics.tap()
+                        withAnimation(reduceMotion ? nil : .snappy) { model.discardDraft() }
+                    } onSave: {
+                        MADHaptics.success()
+                        withAnimation(reduceMotion ? nil : .snappy) { model.saveDraft() }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .task(id: model.toast?.id) {
+                        // The note fades back to the change count, like the toast would.
+                        guard let id = model.toast?.id else { return }
+                        try? await Task.sleep(for: .seconds(4))
+                        model.clearToast(id)
+                    }
+                } else {
+                    toastOverlay
+                }
+            }
+            .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: model.hasUnsavedChanges)
+        }
+        .overlay {
+            if model.leavePrompt != nil {
+                FlameyLeavePromptCard(name: model.displayName, saved: model.look(for: model.savedChoice),
+                                      draft: model.stageLook, changes: model.changedSlotCount) { answer in
+                    switch answer {
+                    case .save: MADHaptics.success()
+                    case .discard: MADHaptics.warning()
+                    case .keepEditing: MADHaptics.tap()
+                    }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { model.answerLeave(answer) }
+                }
+                .transition(.opacity)
+            }
+        }
         .madTypeCap(.madCardCap)
         .onChange(of: model.lineAt) { _, _ in scheduleLineClear() }
         .sheet(item: $model.detail) { item in
@@ -81,6 +143,33 @@ struct FlameyClosetView: View {
     }
 
     private func anchorId(_ slot: FlameySlot) -> String { "section-\(slot.rawValue)" }
+
+    @ViewBuilder
+    private func sheetView(_ which: ClosetSheet) -> some View {
+        switch which {
+        case .name:
+            FlameyNameEditor(model: model) { sheet = nil }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(FlameyClosetStyle.ground)
+        case .saveOutfit:
+            FlameyOutfitSaveSheet(model: model) { sheet = nil }
+                .presentationDetents(model.outfitsFull ? [.large] : [.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(FlameyClosetStyle.ground)
+        case .manageOutfits:
+            FlameyOutfitsManageSheet(model: model) { sheet = nil }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(FlameyClosetStyle.ground)
+        }
+    }
+
+    /// Done / close: asks first when the draft isn't saved.
+    private func close() {
+        MADHaptics.tap()
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { model.leave(onDone) }
+    }
 
     // MARK: The grid (the only thing that scrolls)
 
@@ -147,13 +236,12 @@ struct FlameyClosetView: View {
             .accessibilityLabel("What I've unlocked")
             .accessibilityHint("Walks you through dressing him in what your medals have unlocked")
             Spacer(minLength: 0)
-            Text("Flamey's Closet")
-                .madFont(size: 17, weight: .heavy, design: .rounded, maxScale: 1.3)
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .accessibilityAddTraits(.isHeader)
+            FlameyClosetTitle(name: model.displayName) {
+                MADHaptics.tap()
+                sheet = .name
+            }
             Spacer(minLength: 0)
-            Button(action: onDone) {
+            Button(action: close) {
                 Text("Done")
                     .madFont(size: 16, weight: .bold, design: .rounded, maxScale: 1.3)
                     .foregroundColor(FlameyClosetStyle.ember)
@@ -195,6 +283,15 @@ struct FlameyClosetView: View {
                 }
                 .padding(.horizontal, 16)
                 .transition(.opacity)
+                FlameyOutfitsRow(model: model, scrollable: scrollable) {
+                    MADHaptics.tap()
+                    sheet = .saveOutfit
+                } onManage: {
+                    MADHaptics.tap()
+                    sheet = .manageOutfits
+                }
+                .padding(.top, 6)
+                .transition(.opacity)
             }
             tabsAndJump(jump)
             Rectangle().fill(Color.white.opacity(0.09)).frame(height: 1)
@@ -223,7 +320,7 @@ struct FlameyClosetView: View {
                 .frame(width: size, height: size)
                 .padding(.bottom, size * 0.11)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(FlameyStage.accessibilityLabel(model.stageLook))
+                .accessibilityLabel(FlameyStage.accessibilityLabel(model.stageLook, name: model.displayName))
         }
         .frame(maxWidth: .infinity)
         .frame(height: size * 1.11 + FlameyStage.bubbleRoom(size), alignment: .bottom)
@@ -275,7 +372,7 @@ struct FlameyClosetView: View {
                     onShowJourney()
                 } label: {
                     VStack(spacing: 2) {
-                        Text(model.isBasic ? "Basic Flamey — tap anything you've unlocked to put it on"
+                        Text(model.isBasic ? "Basic \(model.displayName) — tap anything you've unlocked to try it on"
                                            : "Tap what he's wearing to take it off")
                             .madFont(size: 12.5, weight: .semibold, design: .rounded)
                             .foregroundColor(.white.opacity(0.62))
@@ -330,7 +427,7 @@ struct FlameyClosetView: View {
             .accessibilityHint("Opens its card")
         } else {
             VStack(alignment: .leading, spacing: 1) {
-                Text(model.isBasic ? "Basic Flamey" : (model.choice.items.count == 1 ? "Wearing 1 pick" : "Wearing \(model.choice.items.count) picks"))
+                Text(model.isBasic ? "Basic \(model.displayName)" : (model.choice.items.count == 1 ? "Wearing 1 pick" : "Wearing \(model.choice.items.count) picks"))
                     .madFont(size: 13.5, weight: .heavy, design: .rounded, maxScale: 1.3)
                     .foregroundColor(.white)
                 Text("\(model.tally.owned) of \(model.tally.total) unlocked")
@@ -363,16 +460,16 @@ struct FlameyClosetView: View {
     @ViewBuilder
     private func actionButtons(compact: Bool) -> some View {
         actionPill("Best look", icon: "sparkles", compact: compact,
-                   hint: "Puts on the best thing you own in each slot") {
+                   hint: "Tries on the best thing you own in each slot") {
             MADHaptics.success()
             withAnimation(reduceMotion ? nil : .snappy) { model.bestLook() }
         }
-        actionPill("Surprise me", icon: "dice.fill", compact: compact, hint: "A random mix of things you own") {
+        actionPill("Surprise me", icon: "dice.fill", compact: compact, hint: "Tries on a random mix of things you own") {
             MADHaptics.emphasis()
             withAnimation(reduceMotion ? nil : .snappy) { model.surprise() }
         }
         actionPill("Basic", icon: "arrow.uturn.backward", compact: compact,
-                   hint: "Takes everything off — the original Flamey", enabled: !model.isBasic) {
+                   hint: "Takes everything off — the original look", enabled: !model.isBasic) {
             MADHaptics.tap()
             withAnimation(reduceMotion ? nil : .snappy) { model.resetToBasic() }
         }
@@ -515,7 +612,7 @@ struct FlameyClosetView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
-        .padding(.bottom, 96)
+        .padding(.bottom, model.hasUnsavedChanges ? 110 : 96)
     }
 
     private func section(_ slot: FlameySlot) -> some View {
@@ -612,6 +709,8 @@ extension FlameyItem: Identifiable {
 /// walkthrough not yet taken, or items unlocked since the last visit.
 struct FlameyClosetPill: View {
     var hasNews: Bool = false
+    /// His name, for VoiceOver ("Sparky's Closet").
+    var name: String = FlameyNameRules.fallback
     var action: () -> Void
 
     var body: some View {
@@ -641,8 +740,8 @@ struct FlameyClosetPill: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(hasNews ? "Flamey's Closet, new" : "Flamey's Closet")
-        .accessibilityHint("Dress Flamey in what you've earned")
+        .accessibilityLabel(hasNews ? "\(FlameyNameRules.possessive(name)) Closet, new" : "\(FlameyNameRules.possessive(name)) Closet")
+        .accessibilityHint("Dress \(name) in what you've earned")
     }
 }
 
@@ -655,6 +754,8 @@ struct FlameyClosetProfileCard: View {
     let fresh: Int
     /// The first-run walkthrough hasn't been taken.
     var firstVisit: Bool = false
+    /// His name ("Sparky's Closet").
+    var name: String = FlameyNameRules.fallback
     var action: () -> Void
 
     private var subtitle: String {
@@ -670,7 +771,7 @@ struct FlameyClosetProfileCard: View {
                     .frame(width: 48, height: 48)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Flamey's Closet")
+                    Text("\(FlameyNameRules.possessive(name)) Closet")
                         .madFont(size: 15, weight: .heavy, design: .rounded)
                         .foregroundColor(.white)
                     Text(subtitle)
@@ -703,6 +804,6 @@ struct FlameyClosetProfileCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
-        .accessibilityHint("Opens Flamey's Closet")
+        .accessibilityHint("Opens \(FlameyNameRules.possessive(name)) Closet")
     }
 }
