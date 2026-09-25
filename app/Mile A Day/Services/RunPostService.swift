@@ -554,6 +554,8 @@ enum RunPostService {
             stats: stats.snapshot,
             workoutType: workoutType,
             avatar: bakedAvatar(),
+            // Baked on the POSTER's phone: the cheerleader is their own.
+            isOwn: true,
             still: true
         )
         .frame(width: RunStatsCardView.designSize.width,

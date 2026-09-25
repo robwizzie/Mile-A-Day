@@ -371,6 +371,8 @@ struct ActivityCardView: View {
             splits: WorkoutSplitBar.bars(from: entry.splits),
             avatar: RouteArtAvatar(name: entry.displayName, imageURL: entry.profile_image_url),
             isIndoor: entry.is_indoor,
+            authorFlamey: entry.author_flamey,
+            isOwn: entry.is_self,
             still: still
         )
     }

@@ -942,6 +942,8 @@ struct PostCardView: View {
             splits: WorkoutSplitBar.bars(from: post.splits),
             avatar: RouteArtAvatar(name: post.displayName, imageURL: post.profile_image_url),
             isIndoor: post.is_indoor,
+            authorFlamey: post.author_flamey,
+            isOwn: post.is_self,
             still: still
         )
     }

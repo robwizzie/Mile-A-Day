@@ -294,6 +294,11 @@ struct PostItem: Codable, Identifiable {
     /// OWNER-ONLY: the linked walk was recorded in Stealth Mode (route
     /// withheld for good). Friends always receive false; nil = older server.
     var stealth: Bool? = nil
+    /// The AUTHOR's Flamey — non-nil only when the author is on the Fun
+    /// dashboard (`{"look": {slot: id} | null, "name": … | null}`); nil for a
+    /// Modern author and from every older server. Drawn by the routeless
+    /// card's trackside cheerleader so a post shows ITS author's mascot.
+    var author_flamey: AuthorFlamey? = nil
     /// The run's ACTIVE story photo (profile posts responses) — the real
     /// picture leads wherever it exists; the workout card is secondary.
     var story_photo_url: String?
@@ -435,6 +440,44 @@ struct PostItem: Codable, Identifiable {
     var relativeTime: String { RelativeTime.short(from: created_at) }
 }
 
+/// The author's Flamey on a post or feed entry: what they dressed him in
+/// (`look`, the wire `{slot: id}` — null = basic) and his name (null =
+/// "Flamey"). The whole block is null unless the author is on Fun, so its
+/// PRESENCE is the signal. Lenient: a malformed look reads as basic.
+struct AuthorFlamey: Codable, Equatable {
+    var look: FlameyLookChoice?
+    var name: String?
+
+    init(look: FlameyLookChoice? = nil, name: String? = nil) {
+        self.look = look
+        self.name = name
+    }
+
+    private enum CodingKeys: String, CodingKey { case look, name }
+
+    /// Never throws on a bad value: one odd field here must not fail the
+    /// whole feed page it rides on.
+    init(from decoder: Decoder) throws {
+        let c = try? decoder.container(keyedBy: CodingKeys.self)
+        look = (try? c?.decodeIfPresent(FlameyLookChoice.self, forKey: .look)) ?? nil
+        name = (try? c?.decodeIfPresent(String.self, forKey: .name)) ?? nil
+    }
+
+    /// His name, trimmed; nil = "Flamey".
+    var displayName: String? {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (trimmed?.isEmpty == false) ? trimmed : nil
+    }
+
+    /// The author's look, resolved for a small (compact) surface. Only
+    /// what they CHOSE is drawn (the server serves only owned items), plus
+    /// the day's holiday outfit like every Flamey.
+    func resolved(date: Date = Date(), detail: FlameyRenderDetail = .compact) -> FlameyLook {
+        let choice = look ?? .basic
+        return FlameyLook.resolve(owned: Set(choice.items), choice: choice, date: date, mood: [], detail: detail)
+    }
+}
+
 /// Decode a backend `[[lat, lng], ...]` trace into map coordinates. Nil when
 /// absent or degenerate (fewer than 2 valid points) — the single definition of
 /// "drawable route" shared by post and feed-entry models.
@@ -561,6 +604,9 @@ struct FeedEntry: Codable, Identifiable {
     let flyover_allowed: Bool?
     /// OWNER-ONLY: recorded in Stealth Mode. nil = older server.
     let stealth: Bool?
+    /// The author's Flamey (see `PostItem.author_flamey`). Needs its
+    /// CodingKeys case below AND its line in `asPostItem()`.
+    let author_flamey: AuthorFlamey?
     // shared
     let is_self: Bool
     var is_hyped: Bool
@@ -622,7 +668,7 @@ struct FeedEntry: Codable, Identifiable {
         case workout_id, workout_type, feed_role, distance, total_duration
         case moving_seconds, calories, steps, route, splits, is_indoor, flyover_allowed
         case route_times, route_started_at, competitions, competition_id
-        case stealth
+        case stealth, author_flamey
         case segment_count, segments
         case is_self, is_hyped, hype_count, comment_count, comment_preview
         case photo_locked, is_fresh
@@ -676,6 +722,7 @@ struct FeedEntry: Codable, Identifiable {
             splits: splits, is_indoor: is_indoor,
             flyover_allowed: flyover_allowed,
             stealth: stealth,
+            author_flamey: author_flamey,
             story_photo_url: story_photo_url,
             is_self: is_self, is_hyped: is_hyped,
             hype_count: hype_count, comment_count: comment_count,

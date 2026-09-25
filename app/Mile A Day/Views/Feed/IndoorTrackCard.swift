@@ -13,8 +13,11 @@ struct IndoorTrackCard: View {
     /// nil = unknown — the scaffold's chip doesn't draw then.
     var isIndoor: Bool? = nil
     /// Fun-dashboard viewers get Flamey standing trackside, cheering the
-    /// laps on (transform/opacity motion only — the feed-cell perf rule).
-    var cheerleader: Bool = false
+    /// laps on (transform/opacity motion only — the feed-cell perf rule),
+    /// dressed as the AUTHOR's Flamey. nil = no cheerleader.
+    var cheerLook: FlameyLook? = nil
+    /// The author's name for him ("Sparky"), nil = unnamed/"Flamey".
+    var cheerName: String? = nil
     var still: Bool = false
 
     /// 0 → `laps`, set once OUTSIDE `withAnimation`; every consumer (comet
@@ -110,8 +113,8 @@ struct IndoorTrackCard: View {
                 }
                 .position(x: rect.midX, y: rect.midY)
 
-                if cheerleader {
-                    TrackCheerleader(still: still)
+                if let cheerLook {
+                    TrackCheerleader(look: cheerLook, name: cheerName, still: still)
                         // Trackside, tucked into the space the stadium's
                         // rounded end leaves at the bottom-leading corner.
                         .position(x: max(rect.minX + 2, 20), y: rect.maxY - 18)
@@ -225,25 +228,32 @@ struct IndoorTrackCard: View {
 /// pulsing above. No TimelineView, no per-frame redraw (the retired treadmill
 /// face's mistake).
 private struct TrackCheerleader: View {
+    let look: FlameyLook
+    var name: String? = nil
     let still: Bool
     @State private var hop = false
     @State private var cheer = false
 
     var body: some View {
         VStack(spacing: 2) {
-            Text("GO!")
+            // His name when the author gave him one — "GO SPARKY!" —
+            // else (or when it wouldn't fit trackside) the plain cheer.
+            Text(name.flatMap { $0.count <= 8 ? "GO \($0.uppercased())!" : nil } ?? "GO!")
                 .font(.system(size: 9, weight: .heavy, design: .rounded))
                 .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
                 .background(Capsule().fill(Color.white.opacity(0.16)))
                 .opacity((still || cheer) ? 1 : 0.15)
                 .offset(y: cheer ? -1 : 2)
-            // The VIEWER's own Flamey (this card only shows him on Fun), in
-            // his colour and outfit, both arms up cheering. Compact: it's a
-            // 38pt figure. FlameyDressedFigure scales a compact look so his
-            // legs keep the trackside spot the height it always was.
-            FlameyDressedFigure(look: FlameyFacts.look(detail: .compact) ?? .plain, health: .healthy, size: 38,
+            // The AUTHOR's Flamey (resolved by IndoorWorkoutCard), in his
+            // colour and outfit, both arms up cheering. Compact: it's a 38pt
+            // figure. FlameyDressedFigure scales a compact look so his legs
+            // keep the trackside spot the height it always was.
+            FlameyDressedFigure(look: look, health: .healthy, size: 38,
                                 scale: FlameHealth.healthy.bodyScale, arms: .cheer)
             .rotationEffect(.degrees(hop ? 4 : -4))
             .offset(y: hop ? -3 : 0)

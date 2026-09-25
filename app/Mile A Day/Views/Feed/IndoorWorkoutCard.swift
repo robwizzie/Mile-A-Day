@@ -8,11 +8,15 @@ import SwiftUI
 /// read identically (the same rule the buddy wizard's copy follows).
 ///
 /// One face for everyone — the stadium track. The VIEWER's
-/// `DashboardStylePreference` (the runner's style isn't on the wire) only
-/// decides whether Flamey stands trackside cheering: the Fun dashboard's
-/// mascot joins the scene, the Modern one keeps it clean. (An earlier build
-/// had a whole separate treadmill face for Fun; retired — one scene, one
-/// small delight.)
+/// `DashboardStylePreference` decides whether Flamey stands trackside
+/// cheering at all (the Fun dashboard's mascot joins the scene, the Modern
+/// one keeps it clean); WHICH Flamey is the AUTHOR's: their look from the
+/// post's `author_flamey` (served only for a Fun author), your own when it's
+/// your post, and the plain basic Flamey otherwise — a Modern author, or an
+/// older server that doesn't send the field. Never the viewer's outfit on
+/// somebody else's walk: that put your crown on their post. (An earlier
+/// build had a whole separate treadmill face for Fun; retired — one scene,
+/// one small delight.)
 struct IndoorWorkoutCard: View {
     let stats: PostStats
     let workoutType: String?
@@ -21,6 +25,12 @@ struct IndoorWorkoutCard: View {
     /// HealthKit's indoor flag from the wire — nil (older data) means UNKNOWN
     /// and the card makes no claim; routeless alone is never "indoor".
     var isIndoor: Bool? = nil
+    /// The author's Flamey off the wire (nil = not a Fun author / older
+    /// server ⇒ the basic Flamey).
+    var authorFlamey: AuthorFlamey? = nil
+    /// The viewer IS the author — their own current look, from local facts
+    /// (fresher than the post's copy, and what the auto-post bake needs).
+    var isOwn: Bool = false
     /// Final frame for `ImageRenderer` (zoom composites, baked auto-post
     /// images) — no tasks, no motion.
     var still: Bool = false
@@ -32,9 +42,17 @@ struct IndoorWorkoutCard: View {
             splits: splits,
             avatar: avatar,
             isIndoor: isIndoor,
-            cheerleader: DashboardStylePreference.current == .fun,
+            cheerLook: cheerLook,
+            cheerName: isOwn ? FlameyFacts.name : authorFlamey?.displayName,
             still: still
         )
+    }
+
+    /// Who cheers trackside — nil (no cheerleader) for a Modern viewer.
+    private var cheerLook: FlameyLook? {
+        guard DashboardStylePreference.current == .fun else { return nil }
+        if isOwn, let own = FlameyFacts.look(detail: .compact) { return own }
+        return (authorFlamey ?? AuthorFlamey()).resolved()
     }
 }
 
