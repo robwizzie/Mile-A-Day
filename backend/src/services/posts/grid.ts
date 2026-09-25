@@ -210,10 +210,13 @@ const userGridWhere = (
 				-- as an exemption on the AUTHOR's grid too — handing a curation
 				-- choice to the wrong person, which is the bug in mirror image.
 				OR (p.coauthor_user_id = ${author} AND p.coauthor_on_profile IS TRUE)
+				-- A crew member's OWN slide is a photo: for them this card is
+				-- not photo-less, whatever the author's lead face is (usually
+				-- the first finisher's route card). Their explicit "off" wins.
 				OR EXISTS (
 					SELECT 1 FROM post_coauthors pca
 					WHERE pca.post_id = p.post_id AND pca.user_id = ${author}
-						AND pca.on_profile IS TRUE
+						AND COALESCE(pca.on_profile, pca.media_url IS NOT NULL)
 				)
 				OR COALESCE((
 					SELECT ns.auto_posts_on_profile FROM notification_settings ns
@@ -463,6 +466,17 @@ export async function getUserTaggedPosts(
 						AND ${MULTI_COLLAB_ACTIVE}
 				)
 				OR ($5::text IS NOT NULL AND p.caption IS NOT NULL AND p.caption ~* $5)
+			)
+			-- ...unless they put their own photo on it: then it is THEIR post
+			-- (CREW_SLIDE_IS_THEIR_POST) and lives on their Posts grid, not
+			-- here. Only while it IS on the grid — a walk they took off it
+			-- comes back here rather than vanishing from their profile.
+			AND NOT EXISTS (
+				SELECT 1 FROM post_coauthors pca
+				WHERE pca.post_id = p.post_id AND pca.user_id = $2
+					AND pca.media_url IS NOT NULL
+					AND ${MULTI_COLLAB_ACTIVE}
+					AND ${coauthorOnProfileMultiSql("$2")}
 			)
 			-- Profile gate: may the viewer see the tagged user's content at all?
 			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$2", "$1")}

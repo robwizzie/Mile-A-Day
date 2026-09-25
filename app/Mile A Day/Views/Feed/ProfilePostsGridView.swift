@@ -612,6 +612,7 @@ struct ProfilePostsGridView: View {
                 posts: $posts,
                 initialPostId: reader.postId,
                 onNeedMore: { Task { await loadMore() } },
+                leadPhotoUserId: userId,
                 // This list IS a profile grid, so a collab hidden from the
                 // viewer's grid has to leave it. Only on their OWN profile —
                 // someone else's grid isn't theirs to curate.
@@ -626,6 +627,7 @@ struct ProfilePostsGridView: View {
                 posts: $pinnedPosts,
                 initialPostId: reader.postId,
                 onNeedMore: {},
+                leadPhotoUserId: userId,
                 dropsCollabsHiddenFromProfile: isSelf
             )
         case .stories:
@@ -653,7 +655,7 @@ struct ProfilePostsGridView: View {
     private func thumbnail(_ post: PostItem) -> some View {
         // The real picture leads when the run has one; the workout card is only
         // the face of the post when no photo exists.
-        let url = post.storyPhotoURL ?? post.mediaURL
+        let url = post.gridLeadPhotoURL(forOwner: userId)
         return Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay(

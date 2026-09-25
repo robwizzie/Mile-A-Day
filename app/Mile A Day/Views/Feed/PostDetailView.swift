@@ -17,6 +17,10 @@ struct PostDetailView: View {
     @Binding var posts: [PostItem]
     let initialPostId: String
     let onNeedMore: () -> Void
+    /// Whose slide leads each card: the profile OWNER when this list is a
+    /// grid, so a buddy walk opens on the photo that put it on their grid.
+    /// nil = the viewer's own slide, as everywhere else.
+    var leadPhotoUserId: String? = nil
     // `showsAuthorProfiles` is gone. It defaulted to FALSE and only the Tagged
     // tab ever passed true, so on "Your Posts" — and on any other person's
     // grid — every name on a card was dead: a buddy walk's co-walker, the crew
@@ -244,6 +248,7 @@ struct PostDetailView: View {
         return PostCardView(
             post: post,
             storyPhotoURL: post.storyPhotoURL,
+            leadPhotoUserId: leadPhotoUserId,
             isHyping: hypingIds.contains(post.post_id),
             onHype: { Task { await hype(post) } },
             onReport: { reportingPost = post },

@@ -304,6 +304,59 @@ async function main() {
     false,
   );
 
+  // ── 4. A crew member who added THEIR OWN photo posted the walk ─────────
+  // One post per walk is why they have no card of their own, so their slide
+  // makes it their post: on their Posts grid even with tagged posts quieted
+  // and on the first finisher's route card under the author's photo-first
+  // setting — and out of their Tagged tab, since it isn't a tag.
+  await cleanup();
+  postId = await seed({
+    isAuto: true,
+    authorHidesAutos: true,
+    taggedOnGrid: false,
+  });
+  await db.query(
+    `UPDATE post_coauthors SET media_url = '/uploads/posts/bwr-crew-1.jpg'
+      WHERE post_id = $1 AND user_id = $2`,
+    [postId, CREW],
+  );
+  check(
+    "a crew member who added their photo has the walk on their grid",
+    holds(await getUserPosts(CREW, CREW, 30, null, false, {}), postId),
+    true,
+  );
+  await db.query(
+    `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1, $2, 'accepted'),
+       ($2, $1, 'accepted') ON CONFLICT DO NOTHING`,
+    [CREW, FIRST],
+  );
+  check(
+    "...and a friend reading their grid sees it there too",
+    holds(await getUserPosts(FIRST, CREW, 30, null, false, {}), postId),
+    true,
+  );
+  check(
+    "...and it is NOT in their Tagged tab",
+    holds(await getUserTaggedPosts(CREW, CREW, 30, null), postId),
+    false,
+  );
+  check(
+    "...while a crew member with no photo on it keeps the tag rules",
+    holds(await getUserPosts(FIRST, FIRST, 30, null, false, {}), postId),
+    false,
+  );
+  check(
+    "a photo contributor can still take it OFF their grid",
+    (await setCoauthorProfileVisibility(CREW, postId, false)) !== null &&
+      !holds(await getUserPosts(CREW, CREW, 30, null, false, {}), postId),
+    true,
+  );
+  check(
+    "...and then it falls back to their Tagged tab rather than vanishing",
+    holds(await getUserTaggedPosts(CREW, CREW, 30, null), postId),
+    true,
+  );
+
   await cleanup();
   console.log(
     failures === 0

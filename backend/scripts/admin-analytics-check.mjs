@@ -43,11 +43,13 @@ import {
   clearReferralAlias,
 } from "../dist/services/adminAnalyticsService.js";
 import {
+  getOverview,
   getUsers,
   getUserDetail,
   getUserFriends,
   getUserPosts,
 } from "../dist/services/adminService.js";
+import { logFriendNudge } from "../dist/services/pushNotificationService.js";
 
 const db = PostgresService.getInstance();
 
@@ -129,6 +131,10 @@ async function cleanup() {
   ]);
   await db.query(
     `DELETE FROM streak_coverage WHERE source_user = ANY($1::text[])`,
+    [ALL],
+  );
+  await db.query(
+    `DELETE FROM friend_nudge_log WHERE sender_id = ANY($1::text[])`,
     [ALL],
   );
   await db.query(`DELETE FROM hype_log WHERE sender_id = ANY($1::text[])`, [
@@ -873,6 +879,26 @@ async function main() {
   );
   await clearReferralAlias("adm-ghost");
   resetAnalyticsCaches();
+
+  console.log("\n--- nudges outlive the 7-day log ---");
+  // Both nudge logs are pruned after 7 days, so a total counted off them is a
+  // rolling week that reads as "nudges fell off a cliff". The totals must
+  // read the lifetime counter bumped beside each log row.
+  const nudgesBefore = (await getOverview()).total_nudges;
+  await logFriendNudge(ALICE, BOB);
+  await logFriendNudge(ALICE, CAROL);
+  // What cleanupNotificationLogs does to these rows a week from now.
+  await db.query(`DELETE FROM friend_nudge_log WHERE sender_id = $1`, [ALICE]);
+  check(
+    "a pruned nudge still counts in the dashboard total",
+    (await getOverview()).total_nudges - nudgesBefore,
+    2,
+  );
+  check(
+    "and on the sender's profile",
+    (await getUserDetail(ALICE)).social.nudges_sent,
+    2,
+  );
 
   const aliceFriends = await getUserFriends(ALICE);
   check("friend list reads the accepted rows once each", aliceFriends.total, 2);

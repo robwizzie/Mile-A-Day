@@ -268,6 +268,19 @@ export const coauthorOnProfileSql = (a: string, coauthorParam: string) => `COALE
 )`;
 
 /**
+ * A crew member who put their OWN photo on the walk's card posted it — the
+ * card is one post for N people only because one-post-per-walk forbids them a
+ * card of their own. So their slide makes it THEIR post, not a tag: it belongs
+ * on their Posts grid whatever `tagged_posts_on_profile` says (that switch is
+ * about other people's posts that mention you), and it leaves their Tagged
+ * tab. Their explicit per-post `on_profile` still wins in both directions.
+ *
+ * TRUE or NULL, never FALSE, so it slots into a COALESCE chain. Requires the
+ * `pca` row in scope.
+ */
+export const CREW_SLIDE_IS_THEIR_POST = `(CASE WHEN pca.media_url IS NOT NULL THEN TRUE END)`;
+
+/**
  * SQL: the same question for a CREW member — does this buddy walk belong on
  * their Posts grid?
  *
@@ -276,12 +289,14 @@ export const coauthorOnProfileSql = (a: string, coauthorParam: string) => `COALE
  * were therefore unable to say yes at all: the write matched no row and the
  * grid never looked at them. `post_coauthors.on_profile` is their copy of the
  * switch, resolved in the same order — per-post override, then their own
- * `tagged_posts_on_profile`, then TRUE.
+ * slide (CREW_SLIDE_IS_THEIR_POST: a walk they added a photo to is on), then
+ * their own `tagged_posts_on_profile`, then TRUE.
  *
  * Requires the `pca` row in scope.
  */
 export const coauthorOnProfileMultiSql = (coauthorParam: string) => `COALESCE(
 	pca.on_profile,
+	${CREW_SLIDE_IS_THEIR_POST},
 	(SELECT ns.tagged_posts_on_profile FROM notification_settings ns
 		WHERE ns.user_id = ${coauthorParam}),
 	TRUE

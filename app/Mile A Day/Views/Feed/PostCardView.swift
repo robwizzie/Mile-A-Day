@@ -16,6 +16,9 @@ struct PostCardView: View {
     let post: PostItem
     /// The run's story-only photo, when different from the post media.
     var storyPhotoURL: URL? = nil
+    /// Whose crew slide leads the photo face. nil = the viewer's (`myPhotoFirst`);
+    /// a profile grid passes its OWNER, so their walk opens on their photo.
+    var leadPhotoUserId: String? = nil
     var isHyping: Bool = false
     /// Daily hype allowance spent (never true for unlimited roles) — dims the
     /// unspent Hype button, same as the friends list.
@@ -644,7 +647,7 @@ struct PostCardView: View {
     /// hasn't earned, and moving it behind one would read as the gate being
     /// off.
     private func myPhotoFirst(_ slides: [MediaSlide]) -> [MediaSlide] {
-        guard let me = UserDefaults.standard.string(forKey: "backendUserId"),
+        guard let me = leadPhotoUserId ?? UserDefaults.standard.string(forKey: "backendUserId"),
               me != post.user_id,
               let mine = post.acceptedCoauthors.first(where: { $0.user_id == me }),
               let myURL = mine.mediaURL,

@@ -436,6 +436,19 @@ struct PostItem: Codable, Identifiable {
         return ProfileImageService.fullImageURL(for: story_photo_url)
     }
 
+    /// The picture that fronts this post on `ownerId`'s profile grid. A buddy
+    /// walk is ONE card, so a crew member who added their own photo has no
+    /// post of their own — on THEIR grid the walk is theirs (the server files
+    /// it there, not under Tagged) and must lead with the photo they took,
+    /// not the first finisher's.
+    func gridLeadPhotoURL(forOwner ownerId: String) -> URL? {
+        if ownerId != user_id,
+           let mine = acceptedCoauthors.first(where: { $0.user_id == ownerId })?.mediaURL {
+            return mine
+        }
+        return storyPhotoURL ?? mediaURL
+    }
+
     /// Short "2h", "5m", "now" relative time from created_at.
     var relativeTime: String { RelativeTime.short(from: created_at) }
 }

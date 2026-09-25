@@ -636,7 +636,7 @@ function OverviewTab({
           />
           <Field
             label="Nudges"
-            value={`${detail.social.nudges_sent} sent · ${detail.social.nudges_received} got`}
+            value={`${detail.social.nudges_sent} sent · ${detail.social.nudges_received} got (7d)`}
           />
           <Field
             label="Push devices"

@@ -50,10 +50,12 @@ export async function getOverview() {
          WHERE created_at >= ${START_OF_TODAY_ET_SQL})::int AS hypes_today,
       -- Nudges live in TWO tables: friend_nudge_log (the friends-list nudge —
       -- the overwhelmingly common kind) and nudge_log (competition nudges).
-      -- Counting only nudge_log made the dashboard read 0 forever. "Today"
-      -- uses the app's midnight-ET reset, matching every other daily counter.
-      ((SELECT COUNT(*) FROM nudge_log)
-        + (SELECT COUNT(*) FROM friend_nudge_log))::int AS total_nudges,
+      -- Both are PRUNED after 7 days (cleanupNotificationLogs), so a COUNT(*)
+      -- over them is a rolling week, never a total. The lifetime figure is
+      -- users.nudges_sent_total, bumped in the same statement as each log row.
+      -- "Today" still reads the logs (a day is inside the retention window)
+      -- and uses the app's midnight-ET reset, like every other daily counter.
+      (SELECT COALESCE(SUM(nudges_sent_total), 0) FROM users)::int AS total_nudges,
       ((SELECT COUNT(*) FROM nudge_log
           WHERE created_at >= ${START_OF_TODAY_ET_SQL})
         + (SELECT COUNT(*) FROM friend_nudge_log
@@ -386,8 +388,10 @@ export async function getUserDetail(userId: string) {
        (SELECT COUNT(*) FROM friendships WHERE user_id = $1 AND status = 'accepted')::int AS friends,
        (SELECT COUNT(*) FROM hype_log WHERE sender_id = $1)::int AS hypes_sent,
        (SELECT COUNT(*) FROM hype_log WHERE target_id = $1)::int AS hypes_received,
-       ((SELECT COUNT(*) FROM friend_nudge_log WHERE sender_id = $1)
-         + (SELECT COUNT(*) FROM nudge_log WHERE sender_id = $1))::int AS nudges_sent,
+       -- Lifetime counter: both nudge logs are pruned after 7 days.
+       (SELECT nudges_sent_total FROM users WHERE user_id = $1)::int AS nudges_sent,
+       -- No lifetime counter exists for RECEIVED nudges, so this one is the
+       -- 7-day retention window of the logs (labelled as such in the modal).
        ((SELECT COUNT(*) FROM friend_nudge_log WHERE target_id = $1)
          + (SELECT COUNT(*) FROM nudge_log WHERE target_id = $1))::int AS nudges_received,
        (SELECT COUNT(*) FROM posts WHERE user_id = $1 AND deleted_at IS NULL)::int AS posts_live,
