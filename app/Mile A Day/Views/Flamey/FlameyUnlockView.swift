@@ -20,6 +20,8 @@ struct FlameyUnlockView: View {
     /// Its icon and rarity, when known (drawn as a medal over the name).
     var medal: FlameyMedalInfo? = nil
     var date: Date = Date()
+    /// What they call him ("New for Sparky").
+    var flameyName: String = FlameyNameRules.fallback
     /// A still frame (the harness; ImageRenderer drives no lifecycle).
     var still: Bool = false
     var onWear: (FlameyItem) -> Void = { _ in }
@@ -150,17 +152,17 @@ struct FlameyUnlockView: View {
         }
         .frame(height: size * 1.55, alignment: .bottom)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Preview of Flamey in " + look.items.filter { items.contains($0) }.map(\.displayName).joined(separator: ", "))
+        .accessibilityLabel("Preview of \(flameyName) in " + look.items.filter { items.contains($0) }.map(\.displayName).joined(separator: ", "))
     }
 
     private var titleBlock: some View {
         VStack(spacing: 6) {
-            Text("New for Flamey")
+            Text("New for \(flameyName)")
                 .madFont(size: 12, weight: .black, design: .rounded, maxScale: 1.4)
                 .tracking(1.8)
                 .textCase(.uppercase)
                 .foregroundColor(FlameyClosetStyle.ember)
-            Text(single?.displayName ?? "Flamey unlocked \(items.count) new items")
+            Text(single?.displayName ?? "\(flameyName) unlocked \(items.count) new items")
                 .madFont(size: single != nil ? 34 : 26, weight: .black, design: .rounded)
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
@@ -256,7 +258,8 @@ struct FlameyUnlockView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityHint(single != nil ? "Keeps it in Flamey's Closet without putting it on" : "They'll be marked New in Flamey's Closet")
+            .accessibilityHint(single != nil ? "Keeps it in \(FlameyNameRules.possessive(flameyName)) Closet without putting it on"
+                                             : "They'll be marked New in \(FlameyNameRules.possessive(flameyName)) Closet")
         }
     }
 }

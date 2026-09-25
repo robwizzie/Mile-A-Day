@@ -59,6 +59,33 @@ enum FlameyFacts {
         mirrorToWidget()
     }
 
+    // MARK: His name
+
+    /// "<userId>" → the name they gave him. Absent = "Flamey" (the default
+    /// is the client's to print; the server stores NULL for it too).
+    private static let nameKeyPrefix = "flameyNameV1|"
+
+    /// What they named him, or nil for "Flamey".
+    static var name: String? {
+        guard let me = currentUserId, !me.isEmpty,
+              let raw = UserDefaults.standard.string(forKey: nameKeyPrefix + me), !raw.isEmpty else { return nil }
+        return raw
+    }
+
+    /// "Sparky" — or "Flamey". Every surface about the USER'S OWN mascot
+    /// prints this (the Closet title, the unlock card, the walkthrough,
+    /// the hero's VoiceOver name); a friend's comes from their profile.
+    static var displayName: String { name ?? "Flamey" }
+
+    static func setName(_ name: String?) {
+        guard let me = currentUserId, !me.isEmpty else { return }
+        if let name, !name.isEmpty {
+            UserDefaults.standard.set(name, forKey: nameKeyPrefix + me)
+        } else {
+            UserDefaults.standard.removeObject(forKey: nameKeyPrefix + me)
+        }
+    }
+
     // MARK: Facts → look
 
     @MainActor

@@ -1554,7 +1554,7 @@ private struct FlameBuddyHeroCard: View {
                             .onLongPressGesture(minimumDuration: 0.5) { feed() }
                             .flameyRubGesture { tickle() }
                             .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("Flamey")
+                            .accessibilityLabel(FlameyFacts.displayName)
                             .accessibilityHint("Tap to poke. Double-tap for a high five once your mile is done.")
                             .accessibilityAction(named: "Poke") { poke() }
                             .accessibilityAction(named: "High five") {

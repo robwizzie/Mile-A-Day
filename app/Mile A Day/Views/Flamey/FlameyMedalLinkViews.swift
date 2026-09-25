@@ -49,11 +49,11 @@ struct FlameyMedalItemGlyph: View {
 
 extension FlameyMedalLink {
     /// "Unlocks Rocket Boots for Flamey" / "Will unlock … for Flamey".
-    static func spokenList(_ items: [FlameyItem], earned: Bool) -> String {
+    static func spokenList(_ items: [FlameyItem], earned: Bool, name: String = FlameyNameRules.fallback) -> String {
         let names = items.map(\.displayName)
         let list = names.count <= 2 ? names.joined(separator: " and ")
             : names.dropLast().joined(separator: ", ") + " and " + (names.last ?? "")
-        return (earned ? "Unlocks " : "Will unlock ") + list + " for Flamey"
+        return (earned ? "Unlocks " : "Will unlock ") + list + " for " + name
     }
 }
 
@@ -64,6 +64,8 @@ extension FlameyMedalLink {
 struct FlameyMedalUnlockCard: View {
     let items: [FlameyItem]
     var earned: Bool
+    /// What they call him ("UNLOCKS FOR SPARKY").
+    var name: String = FlameyNameRules.fallback
     var onOpen: (FlameyItem) -> Void
 
     var body: some View {
@@ -72,7 +74,8 @@ struct FlameyMedalUnlockCard: View {
                 Image(systemName: "hanger")
                     .font(.system(size: 12, weight: .bold))
                     .accessibilityHidden(true)
-                Text(earned ? "UNLOCKS FOR FLAMEY" : "WILL UNLOCK FOR FLAMEY")
+                Text((earned ? "Unlocks for " : "Will unlock for ") + name)
+                    .textCase(.uppercase)
                     .madFont(size: 11, weight: .black, design: .rounded, maxScale: 1.3)
                     .tracking(1.1)
             }
@@ -107,7 +110,7 @@ struct FlameyMedalUnlockCard: View {
                     onOpen(first)
                 } label: {
                     HStack(spacing: 6) {
-                        Text("See it in Flamey's Closet")
+                        Text("See it in \(FlameyNameRules.possessive(name)) Closet")
                             .madFont(size: 15, weight: .heavy, design: .rounded, maxScale: 1.4)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
@@ -121,7 +124,7 @@ struct FlameyMedalUnlockCard: View {
                     .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint("Opens Flamey's Closet on \(first.displayName)")
+                .accessibilityHint("Opens \(FlameyNameRules.possessive(name)) Closet on \(first.displayName)")
             }
         }
         .padding(14)
