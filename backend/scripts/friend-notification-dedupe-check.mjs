@@ -47,13 +47,12 @@ function check(label, actual, expected) {
   );
 }
 
-const ET_DAY = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "America/New_York",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-const today = () => ET_DAY.format(new Date());
+// The runner's LOCAL day, on the same UTC-5 clock the seeded workouts carry
+// (`timezone_offset` -300). Reading "today" in America/New_York instead put
+// the two a day apart between midnight and 1 AM ET during daylight time
+// (ET = UTC-4), so every lookup missed and the whole check failed for that
+// hour — on any branch, for a reason that says nothing about the code.
+const today = () => new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
 async function cleanup() {
   await db.query(
