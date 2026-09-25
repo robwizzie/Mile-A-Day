@@ -288,6 +288,13 @@ struct FlameMoodLayer: View {
     /// His hover (rocket jets / winged sandals), as a fraction of `size`, so
     /// the bubble and props stay on him in the air.
     var lift: CGFloat = 0
+    /// How far above his tip his look reaches (body units — a crown, a
+    /// countdown hat; `FlameyArt.crest(of:)`), so the bubble sits OVER the
+    /// hat instead of on it. 0 = bare, the old placement's anchor.
+    var crest: CGFloat = 0
+    /// The bubble's width cap as a fraction of `size`. The dashboard hero
+    /// passes less: its bubble shares a band with the savers/Share chips.
+    var bubbleWidth: CGFloat = 0.78
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Flipped once on appear; every moving prop animates off it.
@@ -364,7 +371,14 @@ struct FlameMoodLayer: View {
                 }
             }
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: mood.pokeQuip)
-            .offset(x: -size * 0.03, y: topY - size * 0.13)
+            // Anchored by its BOTTOM (the tail) just over his crest, so a
+            // two-line quip grows UP — away from his hat — and a surface can
+            // reserve room for it (`FlameyArt.extentAboveView`). It used to
+            // be centred a fixed 0.13·size over the tip, which sat it ON a
+            // crown and pushed a tall hat's bubble off the hero card.
+            .frame(height: 1, alignment: .bottom)
+            .offset(x: -size * (bubbleWidth < 0.78 ? 0.07 : 0.03),
+                    y: topY - crest * size * scale - FlameyArt.bubbleGap * size)
         }
     }
 
@@ -378,7 +392,7 @@ struct FlameMoodLayer: View {
         if bubbleStyle == .classicBubble {
             classicBubbleLabel(text)
         } else {
-            FlameyStyledBubble(text: text, style: bubbleStyle, size: size)
+            FlameyStyledBubble(text: text, style: bubbleStyle, size: size, widthFraction: bubbleWidth)
         }
     }
 
@@ -386,7 +400,7 @@ struct FlameMoodLayer: View {
         let fontSize: CGFloat = max(10, size * 0.07)
         let padX: CGFloat = size * 0.055
         let padY: CGFloat = size * 0.03
-        let maxWidth: CGFloat = size * 0.78
+        let maxWidth: CGFloat = size * bubbleWidth
         let tail: CGFloat = max(5, size * 0.045)
         let cream = Color(red: 1.0, green: 0.97, blue: 0.91)
         let ink = Color(red: 0.24, green: 0.10, blue: 0.08)

@@ -53,6 +53,10 @@ struct FlameBuddyView: View {
     /// The Fun hero's column is narrow, so it passes less than a share card.
     var wardrobeReach: CGFloat = 0.9
 
+    /// His bubble's width cap (fraction of `size`). The tight hero narrows
+    /// it: the bubble rides a band it shares with the savers/Share chips.
+    private var bubbleWidth: CGFloat { FlameyArt.isTight(wardrobeReach) ? 0.66 : 0.78 }
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The house pattern: an explicit still OR the system setting.
     private var effectiveStill: Bool { still || reduceMotion }
@@ -195,7 +199,8 @@ struct FlameBuddyView: View {
                 // container's bob/hop/pace below, so props ride with him.
                 FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: currentVigor(at: Date())),
                                showsBubble: showsMoodBubble, drawsWornProps: look == nil,
-                               bubbleStyle: look?.bubble ?? .classicBubble, lift: liftFraction)
+                               bubbleStyle: look?.bubble ?? .classicBubble, lift: liftFraction,
+                               crest: look.map(FlameyArt.crest) ?? 0, bubbleWidth: bubbleWidth)
             }
 
             reactionProps(scale: figureScale(vigor: currentVigor(at: Date())))
@@ -356,9 +361,18 @@ struct FlameBuddyView: View {
     /// leg's length taller than the surface was fitted for, so there he is
     /// drawn that much smaller instead: same height as ever, legs and all.
     /// Elsewhere he simply stands taller.
+    ///
+    /// Everywhere else (the Closet and walkthrough stages, share cards, the
+    /// friend wardrobe) a TALL look — a crown or countdown hat, rocket-boot
+    /// hover — is fitted to one envelope (`FlameyLook.stageFit`), so a stage
+    /// that reserves `FlameyStage.bubbleRoom` over him holds every hat, every
+    /// hover and every bubble without growing as he tries things on.
     private var standFit: CGFloat {
-        guard let look, look.standLift > 0, FlameyArt.isTight(wardrobeReach) || look.detail == .compact else { return 1 }
-        return 1 / (1 + look.standLift)
+        guard let look else { return 1 }
+        if FlameyArt.isTight(wardrobeReach) || look.detail == .compact {
+            return look.standLift > 0 ? 1 / (1 + look.standLift) : 1
+        }
+        return look.stageFit
     }
 
     private var staticFlame: some View {
@@ -380,7 +394,8 @@ struct FlameBuddyView: View {
             if let mood {
                 FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: vigorNow), still: true,
                                showsBubble: showsMoodBubble, drawsWornProps: look == nil,
-                               bubbleStyle: look?.bubble ?? .classicBubble, lift: liftFraction)
+                               bubbleStyle: look?.bubble ?? .classicBubble, lift: liftFraction,
+                               crest: look.map(FlameyArt.crest) ?? 0, bubbleWidth: bubbleWidth)
             }
         }
         .scaleEffect(standFit, anchor: .bottom)

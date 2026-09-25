@@ -1508,12 +1508,40 @@ private struct FlameBuddyHeroCard: View {
         return .orange
     }
 
+    /// Buddy size for a stat frame `width` wide (his column is 48% of it).
+    private func buddySize(forWidth width: CGFloat) -> CGFloat {
+        min(max(width * 0.48 * 1.14, 176), min(216, statFrameHeight * 0.90))
+    }
+
+    /// Room reserved ABOVE the usual layout so nothing he wears or says
+    /// leaves the card: his tallest point (hat crest + hover + legs) plus a
+    /// two-line bubble over it (`FlameyArt.extentAboveView`), minus what the
+    /// card already had over him — 36pt of card padding less the frame's
+    /// −28 offset, plus the frame's own slack above his square (0.17·size).
+    /// Measured at the blazing scale (his biggest) so the card doesn't
+    /// breathe as he burns down through the day. A crown on rocket boots
+    /// used to be sliced at the card top and a Pixel bubble sat over the
+    /// "Replay today's celebration" banner above the hero.
+    private func headroom(for look: FlameyLook?, buddySize: CGFloat) -> CGFloat {
+        guard let look, !injuryPause.isPaused else { return 0 }
+        let extent = FlameyArt.extentAboveView(look: look, size: buddySize, scale: FlameHealth.blazing.bodyScale,
+                                               fit: 1 / (1 + look.standLift), bubble: true)
+        return max(0, (extent - (8 + 0.17 * buddySize) + 6).rounded(.up))
+    }
+
+    /// The stat frame's width, measured (the headroom needs his size BEFORE
+    /// the frame's height is set). 0 until the first layout pass.
+    @State private var heroFrameWidth: CGFloat = 0
+
     var body: some View {
-        VStack(spacing: 14) {
+        let currentMood = mood
+        let heroLook = look(for: currentMood)
+        let top = heroFrameWidth > 0 ? headroom(for: heroLook, buddySize: buddySize(forWidth: heroFrameWidth)) : 0
+        return VStack(spacing: 14) {
             GeometryReader { geo in
                 let leftWidth = geo.size.width * 0.48
                 let rightWidth = geo.size.width - leftWidth - 12
-                let buddySize = min(max(leftWidth * 1.14, 176), min(216, geo.size.height * 0.90))
+                let buddySize = buddySize(forWidth: geo.size.width)
 
                 HStack(alignment: .top, spacing: 12) {
                     ZStack(alignment: .top) {
@@ -1526,7 +1554,6 @@ private struct FlameBuddyHeroCard: View {
                                 .frame(width: buddySize * 1.50, height: buddySize * 1.34)
                                 .offset(y: -28)
                         } else {
-                            let currentMood = mood
                             FlameBuddyView(
                                 health: health,
                                 size: buddySize,
@@ -1534,7 +1561,7 @@ private struct FlameBuddyHeroCard: View {
                                 dayEnd: StreakFlameClock.nextLocalMidnight(),
                                 coalWarmth: min(progress, 1),
                                 mood: currentMood,
-                                look: look(for: currentMood),
+                                look: heroLook,
                                 // His column is narrow: the stat column sits
                                 // just to his right and the card edge to his
                                 // left, so the cape/trail and companion
@@ -1542,7 +1569,7 @@ private struct FlameBuddyHeroCard: View {
                                 wardrobeReach: 0.62
                             )
                             .frame(width: buddySize * 1.50, height: buddySize * 1.34)
-                            .offset(y: -28)
+                            .offset(y: -28 + top)
                             .contentShape(Rectangle())
                             // Every play gesture is scoped to HIS hit area,
                             // so the card's own tap (share) and the page's
@@ -1569,7 +1596,7 @@ private struct FlameBuddyHeroCard: View {
                             // bottom: the buddy is top-anchored, so tying the
                             // ground to the card height detaches it from the
                             // flame's feet the moment the card grows.
-                            .offset(y: Self.groundBaseline)
+                            .offset(y: Self.groundBaseline + top)
 
                         // The way into Flamey's Closet, under his feet — his
                         // own column, and the one free spot on this card: the
@@ -1579,19 +1606,23 @@ private struct FlameBuddyHeroCard: View {
                         // ends ~208pt down).
                         if !injuryPause.isPaused {
                             HeroClosetButton()
-                                .offset(y: Self.groundBaseline + 32)
+                                .offset(y: Self.groundBaseline + top + 32)
                         }
                     }
                     .frame(width: leftWidth, height: geo.size.height, alignment: .top)
 
                     funStatRows
                         // Clears the savers chip in the corner above — at 8 the
-                        // streak box sat right against it.
-                        .padding(.top, 24)
+                        // streak box sat right against it. Moves down with
+                        // him, so the stats stay level with his body and the
+                        // bubble shares the top band with the chips.
+                        .padding(.top, 24 + top)
                         .frame(width: rightWidth, height: geo.size.height, alignment: .top)
                 }
+                .onAppear { heroFrameWidth = geo.size.width }
+                .onChange(of: geo.size.width) { _, width in heroFrameWidth = width }
             }
-            .frame(height: statFrameHeight)
+            .frame(height: statFrameHeight + top)
 
             DashboardMilestoneBar(streak: userManager.currentUser.streak)
                 .padding(.horizontal, 2)
