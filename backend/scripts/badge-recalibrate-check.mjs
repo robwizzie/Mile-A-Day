@@ -16,7 +16,12 @@
  *      broke long ago gets the streak medals on their next upload;
  *   5. the retro sweep awards silently (no inbox row, is_new TRUE), is
  *      idempotent, and a targeted run never writes the global done-marker;
- *   6. revocation measures the same longest run, so it keeps what it awarded.
+ *   6. revocation measures the same longest run, so it keeps what it awarded;
+ *   7. every retroactive award is DATED by the history that earned it (the
+ *      day the streak reached N, the cumulative miles crossed N, the FIRST
+ *      qualifying mile), never the moment the pass ran — and the one-time
+ *      repair re-dates rows written before that, leaving live/undated
+ *      medals (hypes) alone.
  *
  * Every failure here is silent in production (a medal nobody gets), so the
  * assertions are memberships and deltas on this script's own users, never
@@ -43,6 +48,7 @@ import {
   runRetroBadgeBackfill,
   RETRO_BADGES_BACKFILL,
 } from "../dist/db/backfillRetroBadges.js";
+import { runBadgeDateRepair, BADGE_DATE_REPAIR } from "../dist/db/repairBadgeEarnedDates.js";
 
 const db = PostgresService.getInstance();
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -142,6 +148,13 @@ async function seedWalk(user, id, day, dist) {
   );
 }
 
+const earnedDay = async (u, badge) =>
+  (await db.query(
+    `SELECT to_char(earned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS d FROM user_badges WHERE user_id = $1 AND badge_id = $2`,
+    [u, badge],
+  ))[0]?.d ?? null;
+const utcToday = () => new Date().toISOString().slice(0, 10);
+
 const held = async (u) =>
   (await db.query(`SELECT badge_id FROM user_badges WHERE user_id = $1 ORDER BY badge_id`, [u])).map((r) => r.badge_id);
 const badgeInbox = async (u) =>
@@ -236,6 +249,29 @@ try {
   )[0]?.progress_snapshot;
   check("award is traceable to the recalibrate", snap?.source, "recalibrate");
 
+  // ── 7. Dated by the history, not by the recalibrate.
+  const rcDates = {};
+  for (const id of ["streak_7", "streak_365", "special_first_week", "special_first_mile", "miles_250", "pace_8min", "daily_half", "holiday_halloween", "hype_1"]) {
+    rcDates[id] = await earnedDay(RC, id);
+  }
+  check("medals are dated by the day they were earned", rcDates, {
+    streak_7: "2024-01-13", // run starts 2024-01-07
+    streak_365: "2025-01-05",
+    special_first_week: "2024-01-13",
+    special_first_mile: "2023-05-01",
+    miles_250: "2024-08-29", // 14.3 mi of 2023 + 236 one-mile days
+    pace_8min: "2023-05-01", // the FIRST sub-8 mile
+    daily_half: "2023-06-01",
+    holiday_halloween: "2024-10-31",
+    hype_1: utcToday(), // no dated history → the award's own moment
+  });
+  check(
+    "…and the replaced moment is kept on the row",
+    typeof (await db.query(`SELECT progress_snapshot FROM user_badges WHERE user_id = $1 AND badge_id = 'streak_7'`, [RC]))[0]
+      ?.progress_snapshot?.stamped_at,
+    "string",
+  );
+
   // ── 3. Push: one summary row for the burst, string-valued data.
   const rcInbox = await waitFor(async () => {
     const rows = await badgeInbox(RC);
@@ -321,12 +357,39 @@ try {
     (await db.query(`SELECT DISTINCT progress_snapshot->>'source' AS s FROM user_badges WHERE user_id = $1`, [SWEEP])).map((x) => x.s),
     ["retro_sweep"],
   );
+  check(
+    "sweep dates what it awards",
+    [await earnedDay(SWEEP, "streak_7"), await earnedDay(SWEEP, "holiday_halloween")],
+    ["2023-11-04", "2023-10-31"],
+  );
   sw = await runRetroBadgeBackfill(pgClient, { force: true, onlyUserIds: [SWEEP] });
   check("sweep is idempotent", sw.awarded, 0);
   check(
     "a targeted sweep never writes the done-marker",
     (await db.query(`SELECT 1 FROM maintenance_runs WHERE name = $1`, [RETRO_BADGES_BACKFILL])).length,
     markerBefore,
+  );
+
+  // ── 7b. The one-time repair: rows an earlier sweep dated to the moment it
+  // ran go back on their day; an undated medal and a live award stay put.
+  await db.query(
+    `UPDATE user_badges SET earned_at = NOW() WHERE user_id = $1 AND badge_id IN ('streak_7', 'miles_250', 'pace_8min')`,
+    [RC],
+  );
+  const repairMarkerBefore = (await db.query(`SELECT 1 FROM maintenance_runs WHERE name = $1`, [BADGE_DATE_REPAIR])).length;
+  const rep = await runBadgeDateRepair(pgClient, { force: true, onlyUserIds: [RC] });
+  check("repair re-dated exactly the three", rep.repaired, 3);
+  check(
+    "…back to their days",
+    [await earnedDay(RC, "streak_7"), await earnedDay(RC, "miles_250"), await earnedDay(RC, "pace_8min")],
+    ["2024-01-13", "2024-08-29", "2023-05-01"],
+  );
+  check("…leaves an undated medal alone", await earnedDay(RC, "hype_1"), utcToday());
+  check("…is idempotent", (await runBadgeDateRepair(pgClient, { force: true, onlyUserIds: [RC] })).repaired, 0);
+  check(
+    "a targeted repair never writes the done-marker",
+    (await db.query(`SELECT 1 FROM maintenance_runs WHERE name = $1`, [BADGE_DATE_REPAIR])).length,
+    repairMarkerBefore,
   );
 } catch (err) {
   failures++;
