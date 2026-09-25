@@ -354,13 +354,14 @@ struct FlameyOutfitLayer: View {
                     FlameyArt.held(item, &ctx, a, u, layer: .accent)
                 }
                 .frame(width: size * 3, height: size * 3)
-                .modifier(FlameyHeldAccent(kind: motion.accent, on: on, anchor: accentAt))
+                .modifier(FlameyHeldAccent(kind: moving ? motion.accent : .none, on: on, anchor: accentAt))
             }
         }
         // Pom-poms shake (a quick pump up and out) rather than swing.
         .scaleEffect(item == .pomPoms && on ? 1.07 : 1, anchor: grip)
         .offset(y: item == .pomPoms && on ? -0.012 * u : 0)
-        .rotationEffect(.degrees(on ? motion.wobble : -motion.wobble * 0.35), anchor: grip)
+        // A still (widget, share card, Reduce Motion) draws the prop at rest.
+        .rotationEffect(.degrees(!moving ? 0 : (on ? motion.wobble : -motion.wobble * 0.35)), anchor: grip)
     }
 
     /// A point in the outfit canvas (origin at his square's centre) as a
