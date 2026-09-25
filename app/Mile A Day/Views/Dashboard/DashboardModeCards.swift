@@ -1522,7 +1522,7 @@ private struct FlameBuddyHeroCard: View {
                         // figure outright. Nothing is burning down, so nothing
                         // should shrink with the clock.
                         if injuryPause.isPaused {
-                            InjuredFlameBuddyView(size: buddySize)
+                            InjuredFlameBuddyView(size: buddySize, look: FlameyFacts.look())
                                 .frame(width: buddySize * 1.50, height: buddySize * 1.34)
                                 .offset(y: -28)
                         } else {

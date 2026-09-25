@@ -180,7 +180,8 @@ struct FlameBuddyView: View {
                 // Canvas-drawn, no clock: redrawn only when the look or his
                 // scale changes. Rides the container's bob/hop like the props.
                 FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: currentVigor(at: Date())),
-                                  side: .front, still: effectiveStill, reach: wardrobeReach)
+                                  side: .front, still: effectiveStill, reach: wardrobeReach,
+                                  companionPose: armPose)
             }
 
             // His arms: over the outfit (a hand closes round a prop's
@@ -373,7 +374,7 @@ struct FlameBuddyView: View {
             figure(vigor: vigorNow, flicker: 0, blink: false, gaze: .zero)
             if let look {
                 FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: vigorNow), side: .front, still: true,
-                                  reach: wardrobeReach)
+                                  reach: wardrobeReach, companionPose: armPose)
             }
             armsLayer(vigor: vigorNow, still: true)
             if let mood {

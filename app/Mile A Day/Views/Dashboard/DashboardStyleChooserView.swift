@@ -57,8 +57,10 @@ struct DashboardStyleChooserView: View {
                         .fill(style == .fun ? Color(red: 0.18, green: 0.05, blue: 0.06) : Color(red: 0.09, green: 0.09, blue: 0.10))
                         .frame(height: 132)
                     if style == .fun {
-                        // The Fun mascot as the dashboard draws him: arms and legs.
-                        FlameBuddyView(health: .healthy, size: 106, look: .plain)
+                        // THEIR Flamey, as the dashboard draws him — colour and
+                        // outfit from the Closet (compact: the tile is small),
+                        // so the one they'd get is the one they recognise.
+                        FlameBuddyView(health: .healthy, size: 106, look: FlameyFacts.ownLook(detail: .compact))
                     } else {
                         ZStack {
                             Circle()

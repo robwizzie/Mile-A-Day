@@ -80,7 +80,10 @@ struct FunGoalCompletedCelebrationView: View {
     }
 
     private var reigniteStage: some View {
-        ReignitingFlameView(showsFace: true, size: 210, progress: ignitionProgress, intensity: 1.35, origin: flameOrigin)
+        // Wearing HIS look — the flame that catches is the Flamey from the
+        // dashboard, not a generic mascot.
+        ReignitingFlameView(showsFace: true, size: 210, progress: ignitionProgress, intensity: 1.35, origin: flameOrigin,
+                            look: FlameyFacts.look())
             .frame(width: 330, height: 276)
     }
 

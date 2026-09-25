@@ -54,7 +54,7 @@ struct CalorieEquivalentsView: View {
     @ViewBuilder
     private var scene: some View {
         if isFun {
-            TreatFlameBuddyView(size: 150, treat: model.treat, count: model.count)
+            TreatFlameBuddyView(size: 150, treat: model.treat, count: model.count, look: FlameyFacts.look())
                 .id(model.sceneKey)
                 .transition(.scale(scale: 0.85).combined(with: .opacity))
                 .frame(maxWidth: .infinity)

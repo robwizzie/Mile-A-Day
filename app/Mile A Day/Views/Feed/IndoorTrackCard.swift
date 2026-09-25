@@ -239,18 +239,12 @@ private struct TrackCheerleader: View {
                 .background(Capsule().fill(Color.white.opacity(0.16)))
                 .opacity((still || cheer) ? 1 : 0.15)
                 .offset(y: cheer ? -1 : 2)
-            FlameBuddyFigure(
-                health: .healthy,
-                flickerPhase: 0.35,
-                blink: false,
-                size: 38,
-                showsFace: true,
-                grounded: true,
-                // The Fun mascot, both arms up cheering — scaled so his
-                // legs keep the trackside spot the height it always was.
-                limbs: .cheer
-            )
-            .scaleEffect(1 / (1 + FlameBuddyFigure.mascotLegLength), anchor: .bottom)
+            // The VIEWER's own Flamey (this card only shows him on Fun), in
+            // his colour and outfit, both arms up cheering. Compact: it's a
+            // 38pt figure. FlameyDressedFigure scales a compact look so his
+            // legs keep the trackside spot the height it always was.
+            FlameyDressedFigure(look: FlameyFacts.look(detail: .compact) ?? .plain, health: .healthy, size: 38,
+                                scale: FlameHealth.healthy.bodyScale, arms: .cheer)
             .rotationEffect(.degrees(hop ? 4 : -4))
             .offset(y: hop ? -3 : 0)
         }

@@ -41,6 +41,12 @@ struct TreatFlameBuddyView: View {
     let count: Double
     /// Finished frame (Reduce Motion, snapshots): nothing is animated.
     var still: Bool = false
+    /// Flamey's look (`FlameyFacts.look()`, Fun only). Set, he is the SAME
+    /// Flamey the hero draws — his colour, outfit and legs — and holds the
+    /// treat in his real hand (`FlameBuddyArms`), with what stands BESIDE
+    /// him (held prop, trail, companion, aura) left off for the scene's own
+    /// props. nil keeps the bare buddy (previews).
+    var look: FlameyLook? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // One phase per motion, each flipped once under its own repeatForever.
@@ -97,6 +103,28 @@ struct TreatFlameBuddyView: View {
     private var bellyBulge: CGFloat { effect == .stuffed ? CGFloat(level) : 0 }
     private var scale: CGFloat { StreakFlameClock.flameScale(vigor: Double(vigor)) }
 
+    // MARK: Dressed (his look)
+
+    /// The look he wears here: everything that is HIM; nothing that would
+    /// stand where the treat, the empties or the bubble already are.
+    private var dressed: FlameyLook? {
+        look?.trimmed(removing: [.held, .trail, .companion, .aura])
+    }
+    private var palette: FlameyPalette? { dressed.flatMap { FlameyPalette.palette(for: $0.color) } }
+    /// How far his legs raise his body, in points of this view.
+    private var liftPoints: CGFloat { (dressed?.bodyLift ?? 0) * scale * figureSize }
+    /// Legs are extra height the scene wasn't laid out for: the whole group
+    /// scales about his feet so his TIP lands exactly where it always did.
+    private var standFit: CGFloat { 1 / (1 + (dressed?.standLift ?? 0)) }
+    private var feetAnchor: UnitPoint {
+        UnitPoint(x: 0.5, y: (containerSize.height / 2 + figureSize / 2) / containerSize.height)
+    }
+    /// Where his treat hand goes, in body units (+x = the viewer's right,
+    /// y up from his base): a drink raised to toast, food held out.
+    private var handTarget: CGPoint {
+        effect == .stuffed ? CGPoint(x: 0.43, y: -0.29) : CGPoint(x: 0.42, y: -0.34)
+    }
+
     // Face landmarks in design units, from the figure's own layout: the face
     // sits 0.18·size below the figure's centre inside a group scaled about its
     // bottom, and the mouth 0.13·size below that.
@@ -108,11 +136,12 @@ struct TreatFlameBuddyView: View {
 
     var body: some View {
         ZStack {
-            groundProps
             figureGroup
                 .scaleEffect(x: 1, y: breatheScale, anchor: .bottom)
                 .rotationEffect(.degrees(swayDegrees), anchor: .bottom)
                 .offset(x: xOffset, y: yOffset)
+            // In front of him: a cape's hem must never cover the empties.
+            groundProps
             if effect == .wired && !isEmpty { speedLines }
             bubbles
         }
@@ -131,26 +160,69 @@ struct TreatFlameBuddyView: View {
     /// Body + everything attached to it, so the sway carries the props.
     private var figureGroup: some View {
         ZStack {
-            FlameBuddyFigure(
-                health: health,
-                flickerPhase: 0.35,
-                blink: blink,
-                size: figureSize,
-                showsFace: true,
-                vigor: vigor,
-                bellyBulge: bellyBulge,
-                grounded: true
-            )
+            if let dressed {
+                dressedBody(dressed)
+            } else {
+                figure
+            }
+            if dressed == nil { skin }
+            // A lampshade only on a bare head: over his hat it reads as two
+            // hats.
+            if effect == .tipsy && level >= 0.85 && dressed?[.head] == nil && dressed?[.costume] == nil {
+                lampshade.offset(y: -liftPoints)
+            }
+            if dressed == nil { heldProp }
+        }
+        .frame(width: containerSize.width, height: containerSize.height)
+        .scaleEffect(standFit, anchor: feetAnchor)
+    }
+
+    private var figure: FlameBuddyFigure {
+        FlameBuddyFigure(
+            health: health,
+            flickerPhase: 0.35,
+            blink: blink,
+            size: figureSize,
+            showsFace: !(dressed?.wears(.ghostSheet) ?? false),
+            vigor: vigor,
+            bellyBulge: bellyBulge,
+            grounded: true,
+            palette: palette,
+            lift: (dressed?.bodyLift ?? 0) * scale,
+            legLength: dressed?.standLift ?? 0
+        )
+    }
+
+    /// Him, dressed, the treat in his right hand: the arm reaches
+    /// `handTarget` and closes over the treat's base (the prop is drawn
+    /// under the arms layer).
+    private func dressedBody(_ dressed: FlameyLook) -> some View {
+        let u = figureSize * scale
+        let hand = CGPoint(x: figureSize / 2 + handTarget.x * u,
+                           y: figureSize - liftPoints + handTarget.y * u)
+        let grip = CGPoint(x: hand.x + 0.01 * u, y: hand.y - 0.075 * u)
+        return FlameyDressedBody(look: dressed, hold: FlameArmHold(right: handTarget), still: !animate, figure: figure) {
+            // On his skin, UNDER his outfit: a bow tie sits over a full tummy.
+            skin.frame(width: containerSize.width, height: containerSize.height)
+        } prop: {
+            ZStack { treatInHand(at: grip) }
+                .frame(width: figureSize, height: figureSize)
+        }
+    }
+
+    /// Blush and the full tummy — in this view's container space, raised
+    /// with his body.
+    private var skin: some View {
+        ZStack {
             if !isEmpty {
                 cheeks
                     .clipShape(TreatFlameSilhouette(
                         bodyRect: bodyRect, wobble: bodyWobble, bellyBulge: bellyBulge))
             }
             if effect == .stuffed && !isEmpty { belly }
-            if effect == .tipsy && level >= 0.85 { lampshade }
-            heldProp
         }
         .frame(width: containerSize.width, height: containerSize.height)
+        .offset(y: -liftPoints)
     }
 
     // MARK: Motion values (rest pose when not animating)
@@ -263,7 +335,7 @@ struct TreatFlameBuddyView: View {
 
     /// The body's own colour, for arms, cheeks and the belly's rim.
     private var bodyColor: Color {
-        let colors = FlamePalette.outer(vigor: vigor)
+        let colors = palette?.outer ?? FlamePalette.outer(vigor: vigor)
         return colors.count > 1 ? colors[1] : (colors.first ?? .orange)
     }
 
@@ -285,7 +357,7 @@ struct TreatFlameBuddyView: View {
             // Chipmunk cheeks: small, lighter bulges at the MOUTH corners (not
             // blobs at eye level), in the inner palette so they read as the
             // face puffing out.
-            let cheek = FlamePalette.inner(vigor: vigor).first ?? .yellow
+            let cheek = (palette?.inner ?? FlamePalette.inner(vigor: vigor)).first ?? .yellow
             ForEach([-1, 1] as [CGFloat], id: \.self) { side in
                 Ellipse()
                     .fill(cheek)
@@ -309,7 +381,7 @@ struct TreatFlameBuddyView: View {
         let grow = 0.35 + 0.65 * CGFloat(level)
         let width = w(30) * grow
         let height = w(15) * grow
-        let inner = FlamePalette.inner(vigor: vigor)
+        let inner = palette?.inner ?? FlamePalette.inner(vigor: vigor)
         let top = inner.first ?? .yellow
         let bottom = inner.count > 1 ? inner[1] : .orange
         let jiggleX: CGFloat = animate ? (jiggle ? 1.05 : 0.97) : 1
@@ -369,9 +441,10 @@ struct TreatFlameBuddyView: View {
 
     // MARK: Props
 
-    /// Flamey has no arms, so a stub in the body's own colour reaches the
-    /// prop — the crutch-line language: a stroked polyline in design space.
-    /// Positions hang off the mouth so they follow the body's scale.
+    /// The BARE buddy only (no `look` — previews): no arms, so a stub in the
+    /// body's own colour reaches the prop. Dressed, his real arm holds it
+    /// (`dressedBody`). Positions hang off the mouth so they follow the
+    /// body's scale.
     @ViewBuilder
     private var heldProp: some View {
         let armFrom = pt(65 + 26 * scale, mouthY + 2)
@@ -382,6 +455,13 @@ struct TreatFlameBuddyView: View {
             path.addLine(to: armTo)
         }
         .stroke(bodyColor, style: StrokeStyle(lineWidth: w(4), lineCap: .round))
+        treatInHand(at: hand)
+    }
+
+    /// The treat itself, at `hand` — held up, sipped, chewed; or, on an
+    /// empty day, the upturned glass / clean plate.
+    @ViewBuilder
+    private func treatInHand(at hand: CGPoint) -> some View {
         if isEmpty {
             emptyProp(at: hand)
         } else {
@@ -527,7 +607,8 @@ struct TreatFlameBuddyView: View {
                 .scaleEffect(shown ? 1 : 0.7)
                 .opacity(shown ? 1 : 0)
                 .offset(x: effect == .wired ? xOffset * 0.4 : 0, y: shown ? -w(3) : w(2))
-                .position(pt(102, bodyTopY + 6))
+                // Clear of a hat's brim when he wears one.
+                .position(pt(dressed?[.head] != nil ? 106 : 102, bodyTopY + (dressed?[.head] != nil ? -2 : 6)))
             if effect == .tipsy && level >= 0.8 {
                 ForEach(0..<2, id: \.self) { index in
                     let dot: (CGFloat, CGFloat, CGFloat) = index == 0 ? (92, 50, 5) : (98, 44, 3)
