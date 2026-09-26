@@ -198,12 +198,19 @@ struct HighlightViewerView: View {
                 // The FACE the owner kept, not the post's lead photo — on a
                 // buddy walk those are routinely different people's pictures,
                 // and playing the author's would ignore the whole choice.
-                if item.slideKey == .map {
+                if item.slideKey == .map
+                    || (item.slideImageURL == nil && (item.post.routeCoordinates?.count ?? 0) >= 2) {
+                    // The map face — or an AUTO card's whole-post face, which
+                    // has no picture and is its route, drawn live.
                     RouteArtView(
                         coordinates: item.post.routeCoordinates ?? [],
                         routeColor: ActivityCardView.color(item.post.workout_type)
                     )
                     .frame(width: geo.size.width, height: geo.size.height)
+                } else if item.slideImageURL == nil {
+                    // A routeless auto card: its live face, not a spinner.
+                    LiveCardThumbnail(post: item.post)
+                        .frame(width: geo.size.width, height: geo.size.height)
                 } else {
                     AsyncImage(url: item.slideImageURL) { phase in
                         switch phase {
@@ -502,16 +509,19 @@ struct HighlightEditorView: View {
     /// also means a member written before faces existed stays byte-identical.
     /// The route joins the list only when there is actually a line to draw.
     private func faces(of post: PostItem) -> [PostFace] {
+        // An AUTO card has no picture: its whole-post face IS its route, so
+        // it's drawn as the map and no separate "Route" face repeats it.
+        let lead = post.storyPhotoURL ?? post.photoURL
+        let leadIsMap = lead == nil && (post.routeCoordinates?.count ?? 0) >= 2
         var out: [PostFace] = [
-            PostFace(key: .wholePost, name: post.displayName,
-                     url: post.storyPhotoURL ?? post.mediaURL, isMap: false)
+            PostFace(key: .wholePost, name: post.displayName, url: lead, isMap: leadIsMap)
         ]
         for crew in post.acceptedCoauthors {
             guard let url = crew.mediaURL else { continue }
             out.append(PostFace(key: .person(crew.user_id), name: crew.displayName,
                                 url: url, isMap: false))
         }
-        if (post.routeCoordinates?.count ?? 0) >= 2 {
+        if (post.routeCoordinates?.count ?? 0) >= 2, !leadIsMap {
             out.append(PostFace(key: .map, name: "Route", url: nil, isMap: true))
         }
         return out
@@ -610,11 +620,16 @@ struct HighlightEditorView: View {
                     }
                 }
             } else if let post = coverPost {
-                AsyncImage(url: post.storyPhotoURL ?? post.mediaURL) { phase in
-                    switch phase {
-                    case .success(let image): image.resizable().scaledToFill()
-                    default: Color.white.opacity(0.06)
+                if let url = post.storyPhotoURL ?? post.photoURL {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image): image.resizable().scaledToFill()
+                        default: Color.white.opacity(0.06)
+                        }
                     }
+                } else {
+                    // An auto card: its live face.
+                    LiveCardThumbnail(post: post)
                 }
             } else {
                 ZStack {
@@ -829,14 +844,19 @@ struct HighlightEditorView: View {
         } label: {
             Color.clear
                 .aspectRatio(1, contentMode: .fit)
-                .overlay(
-                    AsyncImage(url: post.storyPhotoURL ?? post.mediaURL) { phase in
-                        switch phase {
-                        case .success(let image): image.resizable().scaledToFill()
-                        default: Color.white.opacity(0.05)
+                .overlay {
+                    if let url = post.storyPhotoURL ?? post.photoURL {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image): image.resizable().scaledToFill()
+                            default: Color.white.opacity(0.05)
+                            }
                         }
+                    } else {
+                        // An auto card: its live face.
+                        LiveCardThumbnail(post: post)
                     }
-                )
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)

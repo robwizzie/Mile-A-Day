@@ -33,6 +33,7 @@ import {
   MULTI_COLLAB_ACTIVE,
   collabActiveSql,
   authorFlameySql,
+  AUTO_FLAG_SQL,
 } from "./postSql.js";
 import { POST_WINDOW_MS } from "./postWindow.js";
 import { visiblePostAuthor } from "./postAccess.js";
@@ -279,7 +280,7 @@ const FEED_ENTRY_PROJECTION = `
 				ORDER BY p3.created_at DESC
 				LIMIT 1
 			) AS story_photo_url,
-			p.is_auto,
+			${AUTO_FLAG_SQL} AS is_auto,
 			-- The author's route-slide choice, so the card's ⋯ menu can offer to
 			-- withdraw or restore it without a second round trip. Additive.
 			p.include_route,
@@ -351,14 +352,15 @@ const FEED_ENTRY_PROJECTION = `
 			-- same figures are already public via stats_snapshot. Withheld on
 			-- stitched rollups for BOTH kinds (post stats are restated to the
 			-- day's rollup too, and the anchor's splits describe only the LAST
-			-- leg of the combined mile) and on auto posts (their media already
-			-- IS the baked card). The withholds live in the CASE conditions,
+			-- leg of the combined mile). Auto posts carry them too: the card is
+			-- drawn live now, and the pace wave under the indoor card is one of
+			-- the things it draws. The withholds live in the CASE conditions,
 			-- not inside the subqueries, so Postgres skips the idx_splits_workout
 			-- probe entirely for rows that would return NULL anyway — auto posts
 			-- are the feed's most common card. Inner LIMIT caps a pathological
 			-- workout.
 			CASE
-				WHEN page.kind = 'post' AND NOT p.is_auto
+				WHEN page.kind = 'post'
 					AND COALESCE(roll.segment_count, 1) <= 1 THEN (
 					SELECT jsonb_agg(jsonb_build_object(
 						'split_number', s.split_number,

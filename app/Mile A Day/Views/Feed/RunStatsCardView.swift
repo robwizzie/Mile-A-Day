@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// Branded 4:5 stats card used as the auto feed image for a run that has no
-/// photo and no GPS route (e.g. a treadmill mile).
+/// Branded 4:5 stats card for a run that has no photo and no GPS route (e.g.
+/// a treadmill mile).
 ///
-/// Laid out at DESIGN size (360×450 — phone-card proportions) and rendered to
-/// 1080×1350 by `RunPostService.renderStatsCard` with `scale = 3`. Never
-/// render this at a 1080-wide frame with scale 1: point sizes would become
-/// raw pixels and everything displays at a third of the intended size (the
-/// original "tiny stats card" bug).
+/// Laid out at DESIGN size (360×450 — phone-card proportions) and scaled to
+/// its slot. If this is ever rendered to an image, render it at design size
+/// with `scale = 3`, never at a 1080-wide frame with scale 1: point sizes
+/// would become raw pixels and everything displays at a third of the
+/// intended size (the original "tiny stats card" bug).
 struct RunStatsCardView: View {
     /// The design-space size the card is laid out against; render scale is
     /// derived from it so the flattened image is exactly 1080×1350.

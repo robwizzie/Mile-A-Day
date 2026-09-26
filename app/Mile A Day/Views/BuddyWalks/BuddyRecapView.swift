@@ -660,8 +660,12 @@ struct BuddyRecapView: View {
                     // state here, not a missing value.
                     if let preview = postPreview,
                        !preview.media_url.isEmpty,
-                       let url = preview.mediaURL {
+                       let url = preview.photoURL {
                         FeedImageView(url: url, loadedImage: $previewLoadedImage)
+                    } else if let preview = postPreview, preview.is_auto == true {
+                        // The walk's auto card has no picture — it's drawn
+                        // live, so its preview is the walk's route.
+                        LiveCardThumbnail(post: preview)
                     } else {
                         // Loading, or a post whose photo this viewer hasn't
                         // earned yet. Neither is an error worth a broken-image

@@ -3,6 +3,7 @@
 // import graph: it imports nothing from its siblings.
 
 import { OWNER_NOT_PRIVATE_SQL } from "../visibilityService.js";
+import { CLIENT_FEATURES, supportsClientFeatureSql } from "../clientFeatures.js";
 import { postHypedByViewerMatchSql, postHypeMatchSql } from "../hypeService.js";
 
 // Shared circle + symmetric-block fragment. `$1` is always the viewer id.
@@ -103,6 +104,21 @@ export const displayMovingSecondsSql = (w: string) => `(CASE
 export const authorFlameySql = (u: string) => `CASE WHEN ${u}.dashboard_style = 'fun'
 	THEN jsonb_build_object('look', ${u}.flamey_look, 'name', ${u}.flamey_name) END`;
 
+/**
+ * SQL: `is_auto` as THIS viewer (`$1`) should see it.
+ *
+ * A live auto card (media_url = '') has no picture: current builds draw it
+ * from the workout, its route and the stats snapshot. A build that predates
+ * that (`live_auto_card_v1` undeclared) hides the route slide and the stats
+ * card on anything flagged auto and shows its media — which is nothing — so
+ * for THEM the row is served as an ordinary post, whose existing code draws
+ * exactly the live route slide (or the stats card when routeless) instead.
+ * Real auto cards with a baked picture are served as they always were.
+ * Viewer-only: nothing is written, and every internal read keeps `p.is_auto`.
+ */
+export const AUTO_FLAG_SQL = `(p.is_auto AND (p.media_url <> ''
+	OR ${supportsClientFeatureSql("$1", CLIENT_FEATURES.liveAutoCardV1)}))`;
+
 const POST_COLUMNS = `
 	p.post_id,
 	p.user_id,
@@ -179,7 +195,7 @@ const POST_COLUMNS = `
 	p.share_to_story,
 	p.story_expires_at,
 	p.created_at,
-	p.is_auto,
+	${AUTO_FLAG_SQL} AS is_auto,
 	p.include_route,
 	p.pinned_at,
 	(SELECT w.workout_type FROM workouts w WHERE w.workout_id = p.workout_id) AS workout_type`;

@@ -10,6 +10,7 @@ import {
   Loading,
   MAD_SUCCESS,
   mediaSrc,
+  LiveCardTile,
   prettySource,
   relativeDay,
   SegmentedControl,
@@ -978,18 +979,26 @@ function PostsTab({
               className="group overflow-hidden rounded-2xl border border-white/[0.08] bg-black/40 text-left transition hover:border-white/20"
             >
               <div className="relative aspect-[4/5]">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={mediaSrc(post.media_url)}
-                  alt=""
-                  loading="lazy"
-                  className={`h-full w-full object-cover ${
+                {post.media_url ? (
+                  <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={mediaSrc(post.media_url)}
+                    alt=""
+                    loading="lazy"
+                    className={`h-full w-full object-cover ${
+                      post.deleted_at ? "opacity-40" : ""
+                    }`}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.opacity = "0.12";
+                    }}
+                  />
+                  </>
+                ) : (
+                  <LiveCardTile className={`h-full w-full object-cover ${
                     post.deleted_at ? "opacity-40" : ""
-                  }`}
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.opacity = "0.12";
-                  }}
-                />
+                  }`} />
+                )}
                 <div className="absolute top-1.5 left-1.5 flex flex-wrap gap-1">
                   {post.deleted_at && <Chip text="DELETED" tone="bad" />}
                   {post.pinned_at && <Chip text="PINNED" tone="info" />}
@@ -1091,12 +1100,18 @@ function PostLightbox({
         style={{ background: PANEL_BACKGROUND }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={mediaSrc(post.media_url)}
-          alt=""
-          className="max-h-[70vh] w-full rounded-xl object-contain sm:w-3/5"
-        />
+        {post.media_url ? (
+          <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={mediaSrc(post.media_url)}
+            alt=""
+            className="max-h-[70vh] w-full rounded-xl object-contain sm:w-3/5"
+          />
+          </>
+        ) : (
+          <LiveCardTile className="aspect-[4/5] w-full rounded-xl sm:w-3/5" />
+        )}
         <div className="flex min-w-0 flex-1 flex-col gap-3 text-sm">
           <div className="flex items-start justify-between gap-3">
             <div>

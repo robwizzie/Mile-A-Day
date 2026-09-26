@@ -673,6 +673,11 @@ struct ProfilePostsGridView: View {
                                 .font(.system(size: 20, weight: .bold))
                                 .foregroundColor(.white.opacity(0.9))
                         }
+                    } else if url == nil {
+                        // No picture — an auto card, drawn live from its walk
+                        // (it used to be a baked image; `AsyncImage(nil)` here
+                        // is a spinner forever).
+                        LiveCardThumbnail(post: post)
                     } else {
                         AsyncImage(url: url) { phase in
                             switch phase {

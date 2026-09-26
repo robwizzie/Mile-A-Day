@@ -63,7 +63,8 @@ enum MemoriesService {
 
         for post in posts {
             guard let localDate = post.local_date, let date = parser.date(from: localDate),
-                  let photoURL = post.mediaURL else { continue }
+                  // `photoURL`: an auto card is not a photo of the day.
+                  let photoURL = post.photoURL else { continue }
             // Yearly memories only — a server that predates this rule also
             // sends week/month-ago photos; anything under a year old is too
             // recent to be a memory.

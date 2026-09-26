@@ -422,6 +422,15 @@ struct PostItem: Codable, Identifiable {
 
     var mediaURL: URL? { ProfileImageService.fullImageURL(for: media_url) }
 
+    /// The post's own PHOTO — nil on an AUTO card. An auto card is drawn live
+    /// from the walk (route art / the indoor card), so its media is either
+    /// nothing (current builds post none) or, on older cards, a baked picture
+    /// of that same card, which must not be drawn as if someone took it: it
+    /// froze the poster's line before the crew's synced, froze their outfit,
+    /// and would sit a second, stale copy beside the live one. Every surface
+    /// that shows "the post's picture" reads this, never `mediaURL`.
+    var photoURL: URL? { is_auto == true ? nil : mediaURL }
+
     /// The FRONT & BACK twin, when this post has one. Withheld alongside the
     /// primary: the earn-to-view gate blanks `media_url` to "" and nulls this,
     /// and a flip offered from a lock would serve the very photo being held.
@@ -446,7 +455,7 @@ struct PostItem: Codable, Identifiable {
            let mine = acceptedCoauthors.first(where: { $0.user_id == ownerId })?.mediaURL {
             return mine
         }
-        return storyPhotoURL ?? mediaURL
+        return storyPhotoURL ?? photoURL
     }
 
     /// Short "2h", "5m", "now" relative time from created_at.
@@ -607,7 +616,8 @@ struct FeedEntry: Codable, Identifiable {
     /// Post entries only. Same CodingKeys rule as everything here.
     let competition_id: String?
     /// Per-mile splits for the entry's workout — the indoor pace wave. Nil on
-    /// older servers, stitched rollups and auto posts. Same CodingKeys rule as
+    /// older servers and stitched rollups (auto posts carry them now: their
+    /// card is drawn live). Same CodingKeys rule as
     /// everything here: listed below, or Codable synthesis dies.
     let splits: [FeedSplit]?
     /// HealthKit's indoor flag — nil means UNKNOWN, never "outdoor".
@@ -961,7 +971,9 @@ enum PostService {
     /// a live user post for that destination (one deliberate post per workout —
     /// delete the old one to post again).
     static func createPost(
-        mediaUrl: String,
+        /// nil only for a LIVE auto card (`isAuto`), which has no picture:
+        /// the key is omitted and the server stores none.
+        mediaUrl: String?,
         /// FRONT & BACK: the swapped arrangement of the same two frames.
         /// Absent on every ordinary post, and an older server ignores the key
         /// entirely — in which case the post is simply the primary, which is
@@ -998,7 +1010,7 @@ enum PostService {
         competitionId: String? = nil
     ) async throws -> PostItem {
         struct Body: Encodable {
-            let media_url: String
+            let media_url: String?
             let dual_media_url: String?
             let dual_inset_corner: String?
             let caption: String?
