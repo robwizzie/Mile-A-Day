@@ -441,10 +441,16 @@ export const VIEWER_WAS_ON_THIS_WALK = `(p.buddy_session_id IS NOT NULL AND EXIS
  * Deliberately carries NO consent gate: that belongs to the route (a trace is
  * where you were), not to how far someone went on a walk they are credited on.
  */
+// The walk is the credit row's session, else the POST's — the same order
+// BUDDY_GROUP_JSON reads it in. A row credited without its session (a legacy
+// coauthor list on a post whose session was resolved onto `posts` only) was
+// counted in "3 of you" while every one of its routes resolved to nothing.
+const CREW_SESSION_SQL = `COALESCE(pca.buddy_session_id, p.buddy_session_id)`;
+
 const CREW_WORKOUT_ID_SQL = `COALESCE(
 			pca.workout_id,
 			(SELECT bsp.workout_id FROM buddy_session_participants bsp
-			  WHERE bsp.session_id = pca.buddy_session_id
+			  WHERE bsp.session_id = ${CREW_SESSION_SQL}
 				AND bsp.user_id = pca.user_id),
 			-- Not linked yet. The link is stamped by reconcileBuddySessions
 			-- only when the workout syncs AFTER the Finish tap, and by
@@ -463,7 +469,7 @@ const CREW_WORKOUT_ID_SQL = `COALESCE(
 			         - (COALESCE(w.total_duration, 0) || ' seconds')::interval)
 			        <= COALESCE(bs.ended_at, bs.started_at + INTERVAL '6 hours')
 			           + INTERVAL '10 minutes'
-			  WHERE bs.id = pca.buddy_session_id AND bs.started_at IS NOT NULL
+			  WHERE bs.id = ${CREW_SESSION_SQL} AND bs.started_at IS NOT NULL
 			  ORDER BY w.device_end_date DESC
 			  LIMIT 1)
 		)`;
@@ -538,7 +544,7 @@ const crewWorkoutSelect = (expr: string) => `(
 const CREW_DISTANCE_SQL = `COALESCE(
 	(SELECT COALESCE(bsp.final_distance_miles, bsp.distance_miles)
 	   FROM buddy_session_participants bsp
-	  WHERE bsp.session_id = pca.buddy_session_id
+	  WHERE bsp.session_id = ${CREW_SESSION_SQL}
 		AND bsp.user_id = pca.user_id),
 	${crewWorkoutSelect("w.distance")}
 )`;

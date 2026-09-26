@@ -268,6 +268,9 @@ struct FriendFlameyCard: View {
     /// A line held in his bubble from the start — SwiftUI previews and
     /// snapshot renders only; the live card always passes nil.
     var previewQuip: String? = nil
+    /// Their medals, for the wardrobe sheet's "from the X medal" lines.
+    var badges: [Badge] = []
+    var catalogBadges: [Badge] = []
 
     @AppStorage(DashboardStylePreference.key) private var viewerStyle = DashboardStyle.modern.rawValue
     @State private var showWardrobe = false
@@ -299,7 +302,7 @@ struct FriendFlameyCard: View {
             .background(cardGlow)
             .profileCard()
             .sheet(isPresented: $showWardrobe) {
-                FriendFlameyWardrobeSheet(facts: facts)
+                FriendFlameyWardrobeSheet(facts: facts, badges: badges, catalogBadges: catalogBadges)
             }
         }
     }
@@ -512,15 +515,26 @@ struct FlameyStageGround: View {
 
 // MARK: - Wardrobe (read-only)
 
-/// Everything their Flamey owns, read-only. The wardrobe proper (picking
-/// what he wears) will grow out of this list.
+/// Their Flamey, dressed as they left him: his NAME, what he's WEARING, and
+/// the MEDAL each piece came from. It used to be every item they own — a long
+/// list of colour swatches and streak lines under a small figure — which
+/// answered "what could they wear" when the only question anyone asks of a
+/// friend's Flamey is "what's he got on, and how did they get it".
 struct FriendFlameyWardrobeSheet: View {
     let facts: FriendFlameyFacts
+    /// Their earned medals (name + the day they got it) and the catalog's
+    /// names for the rest — the profile has already loaded both.
+    var badges: [Badge] = []
+    var catalogBadges: [Badge] = []
+    /// Snapshot renders only; the live sheet lets him idle.
+    var still: Bool = false
     @Environment(\.dismiss) private var dismiss
     /// Your own Closet, opened ON this sheet: the friend's profile may itself
     /// be a sheet, and a cover raised from MainTabView's root can't present
     /// over one. Done lands back here.
     @State private var ownCloset: FlameyClosetLink.Request?
+
+    private static let stageSize: CGFloat = 150
 
     var body: some View {
         ScrollView {
@@ -570,83 +584,158 @@ struct FriendFlameyWardrobeSheet: View {
     /// render draws — ImageRenderer can't see into a ScrollView).
     var content: some View {
         let look = facts.look(mood: nil, detail: .full)
-        let owned = facts.unlocked
-        let total = FlameyItem.closet.filter { $0.unlock != .always }.count
+        let worn = Self.wornItems(look)
+        let medals = FriendFlameyMedals.build(earned: badges, catalog: catalogBadges)
         return VStack(spacing: 18) {
-                VStack(spacing: 6) {
-                    ZStack(alignment: .bottom) {
-                        FlameyStageGround()
-                            .frame(width: 140, height: 16)
-                            .offset(y: 4)
-                        FlameBuddyView(health: .healthy, size: 120, still: true, look: look)
-                            .frame(width: 120, height: 120)
-                    }
-                    .frame(height: 150, alignment: .bottom)
-                    Text(facts.title)
-                        .font(.system(size: 22, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white)
-                    Text("\(owned.count) of \(total) unlocked")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.55))
-                        .monospacedDigit()
-                }
-                .padding(.top, 8)
-
-                if owned.isEmpty {
-                    Text("Nothing yet — a 3-day streak turns him Ember.")
-                        .font(.system(size: 14, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.6))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(Array(owned.enumerated()), id: \.element) { index, cosmetic in
-                            if index > 0 {
-                                Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1)
-                                    .padding(.leading, 60)
-                            }
-                            row(cosmetic, wearing: look.wears(cosmetic))
-                        }
-                    }
-                    .profileCard()
-                }
+            VStack(spacing: 6) {
+                stage(look: look)
+                Text(facts.title)
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(worn.isEmpty ? "Keeping it basic"
+                                  : "Wearing \(worn.count) \(worn.count == 1 ? "piece" : "pieces")")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
             }
-            .padding(.horizontal, MADTheme.Spacing.screenGutter)
-            .padding(.bottom, 24)
+            .padding(.top, 8)
+
+            if worn.isEmpty {
+                Text("\(facts.mascotName) isn't wearing anything right now — just his own flame.")
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(worn.enumerated()), id: \.element) { index, item in
+                        if index > 0 {
+                            Rectangle().fill(Color.white.opacity(0.07)).frame(height: 1)
+                                .padding(.leading, 76)
+                        }
+                        row(item, look: look, medal: item.badgeId.map { medals[$0] ?? .placeholder(badgeId: $0) })
+                    }
+                }
+                .profileCard()
+            }
+        }
+        .padding(.horizontal, MADTheme.Spacing.screenGutter)
+        .padding(.bottom, 24)
     }
 
-    private func row(_ cosmetic: FlameyItem, wearing: Bool) -> some View {
+    /// What he's actually got on: the resolved look minus the defaults (the
+    /// classic colour and bubble aren't "wearing" anything) and mood props.
+    /// Same rule the Closet's own VoiceOver line uses.
+    static func wornItems(_ look: FlameyLook) -> [FlameyItem] {
+        look.items.filter { !$0.isMoodProp && $0 != .classic && $0 != .classicBubble }
+    }
+
+    /// The Closet's stage recipe — his `size` box lifted by the ground's
+    /// height, with headroom for a tall hat or a hover — so he stands as big
+    /// here as he does in your own Closet. A fixed 120pt figure in a 150pt box
+    /// left the outfit's aura, trail and companion crowding a small flame.
+    private func stage(look: FlameyLook) -> some View {
+        let size = Self.stageSize
+        return ZStack(alignment: .bottom) {
+            Ellipse()
+                .fill(RadialGradient(colors: [Color.orange.opacity(0.32), Color.white.opacity(0.04), .clear],
+                                     center: .center, startRadius: 1, endRadius: size * 0.9))
+                .frame(width: size * 1.9, height: size * 0.24)
+            FlameBuddyView(health: .healthy, size: size, still: still, look: look)
+                .frame(width: size, height: size)
+                .padding(.bottom, size * 0.11)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: size * 1.11 + FlameyLook.stageRoomAbove(size), alignment: .bottom)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(FlameyStage.accessibilityLabel(look, name: facts.title))
+    }
+
+    private func row(_ item: FlameyItem, look: FlameyLook, medal: FlameyMedalInfo?) -> some View {
         HStack(spacing: 12) {
-            Text(cosmetic.flairEmoji)
-                .font(.system(size: 20))
-                .frame(width: 36, height: 36)
-                .background(Circle().fill(Color.white.opacity(0.07)))
+            FlameyItemArt(item: item, color: look.color)
+                .frame(width: 52, height: 52)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.06)))
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(cosmetic.displayName)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.slot.closetLabel.uppercased())
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundColor(.white.opacity(0.45))
+                    .lineLimit(1)
+                Text(item.displayName)
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
                     .lineLimit(1)
-                Text(cosmetic.earnedLine)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.5))
-                    .lineLimit(1)
                     .minimumScaleFactor(0.85)
+                medalLine(item, medal: medal)
             }
-            Spacer(minLength: 8)
-            if wearing {
-                Text("WEARING")
-                    .font(.system(size: 9, weight: .black, design: .rounded))
-                    .tracking(0.6)
-                    .foregroundColor(.black.opacity(0.85))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(Color(red: 1.0, green: 0.72, blue: 0.35)))
-                    .fixedSize()
-            }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .accessibilityElement(children: .combine)
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
+
+    /// The medal this piece came from, with the day they earned it. A
+    /// holiday outfit is worn on its day whether or not it's been earned, and
+    /// a starter piece has no medal at all — both say so rather than
+    /// inventing one.
+    @ViewBuilder
+    private func medalLine(_ item: FlameyItem, medal: FlameyMedalInfo?) -> some View {
+        if let medal, medal.isEarned {
+            HStack(spacing: 6) {
+                FlameyMedalDisc(medal: medal, size: 18, showsLock: false)
+                Text([medal.name.map { "\($0) medal" }, medal.earnedAt.map { Self.dateFormatter.string(from: $0) }]
+                        .compactMap { $0 }.joined(separator: " · "))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+        } else {
+            Text(item.isHolidayOutfit && medal != nil ? "Holiday outfit — worn on the day"
+                 : medal == nil ? "A starter piece — no medal needed"
+                 : "Unlocked: \(FlameyClosetCopy.lowercasedFirst(item.unlockCopy))")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+    }
+}
+
+/// A friend's medals in the Closet's own shape: their earned badges (name +
+/// the day they earned it) with the catalog naming the rest, icon and rarity
+/// by the Badges screen's rules — `FlameyMedalCatalog.medals()` is the same
+/// recipe over YOUR shelf, which is why it can't be used here.
+enum FriendFlameyMedals {
+    static func build(earned: [Badge], catalog: [Badge]) -> [String: FlameyMedalInfo] {
+        let mine = Dictionary(earned.filter { !$0.isLocked }.map { ($0.id, $0) },
+                              uniquingKeysWith: { first, _ in first })
+        let names = Dictionary(catalog.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        var out: [String: FlameyMedalInfo] = [:]
+        for id in FlameyWardrobe.catalogBadgeIds {
+            let badge = mine[id] ?? Badge(id: id, name: names[id] ?? "", description: "")
+            let name = [mine[id]?.name, names[id], HolidayKey(badgeId: id)?.medalName]
+                .compactMap { $0 }.first { !$0.isEmpty }
+            let rarity: FlameyMedalRarity
+            switch badge.rarity {
+            case .common: rarity = .common
+            case .rare: rarity = .rare
+            case .legendary: rarity = .legendary
+            }
+            out[id] = FlameyMedalInfo(badgeId: id, name: name, icon: iconName(for: badge), rarity: rarity,
+                                      earnedAt: mine[id]?.dateAwarded, isEarned: mine[id] != nil)
+        }
+        return out
     }
 }

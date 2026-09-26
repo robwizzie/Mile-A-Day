@@ -1,6 +1,7 @@
 import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { challengeForNotification } from "./dailyChallengeService.js";
+import { standing } from "./h2hMatchupService.js";
 
 const db = PostgresService.getInstance();
 
@@ -12,7 +13,7 @@ export interface ReminderCandidate {
 }
 
 /** The duel this user is in today, when the rotation served them one. */
-interface ReminderMatchup {
+export interface ReminderMatchup {
   user_id: string;
   rival_username: string | null;
   my_miles: number;
@@ -304,18 +305,32 @@ export function winBackCopy(lapse: LapseContext): ReminderCopy {
   };
 }
 
-/** Says where the duel stands, because that is what decides whether to go. */
-function duelCopy(duel: ReminderMatchup): { title: string; body: string } {
+/**
+ * Says where the duel stands, because that is what decides whether to go.
+ *
+ * Decided by `standing` — the same 2dp comparison the live lead-change push
+ * and the duel card use — never by the raw miles. Comparing raw values told
+ * people "@x is ahead of you — 0.00 mi to your 0.00" over a few metres of
+ * GPS drift: a tie at every precision the user can see.
+ */
+export function duelCopy(duel: ReminderMatchup): { title: string; body: string } {
   const name = duel.rival_username ? `@${duel.rival_username}` : "Your rival";
   const mine = duel.my_miles.toFixed(2);
   const theirs = duel.rival_miles.toFixed(2);
-  if (duel.rival_miles <= 0) {
+  const state = standing(duel.my_miles, duel.rival_miles);
+  if (state === "tied") {
+    if (Number(mine) <= 0) {
+      return {
+        title: `You're up against ${name} today 🥊`,
+        body: "Neither of you has logged a mile yet. Go first.",
+      };
+    }
     return {
-      title: `You're up against ${name} today 🥊`,
-      body: "Neither of you has logged a mile yet. Go first.",
+      title: `Dead even with ${name} 🥊`,
+      body: `${mine} mi each. Whoever finishes their mile first takes the lead.`,
     };
   }
-  if (duel.my_miles >= duel.rival_miles) {
+  if (state === "ahead") {
     return {
       title: `You're ahead of ${name} 🔥`,
       body: `${mine} mi to their ${theirs} — but your mile isn't done. Finish it to keep the lead.`,

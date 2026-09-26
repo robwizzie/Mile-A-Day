@@ -663,9 +663,14 @@ async function selectedChallengeKey(
 // ─── Live lead changes (workout-sync path) ──────────────────────────
 
 /** One side's standing in a duel, from that row owner's point of view. */
-type LeadState = "ahead" | "behind" | "tied";
+export type LeadState = "ahead" | "behind" | "tied";
 
-function standing(mine: number, theirs: number): LeadState {
+/**
+ * THE duel comparison — the live lead-change push and the evening reminder
+ * both call it, so neither can tell someone they're behind at a standing the
+ * other (or the card) calls level.
+ */
+export function standing(mine: number, theirs: number): LeadState {
   // Compared at the 2dp the duel card displays, and the same precision the
   // end-of-day resolver uses — so "you're behind" can never disagree with the
   // number the user is looking at.

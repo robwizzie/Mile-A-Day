@@ -487,8 +487,21 @@ struct PostCardView: View {
     /// that (AUTHOR_ROUTE_SQL), and a user whose history is mostly auto posts
     /// otherwise had no Flyover anywhere on the feed.
     private var routeSlideCoordinates: [CLLocationCoordinate2D]? {
-        guard post.is_auto != true else { return nil }
+        guard post.is_auto != true || autoCardMissesCrew else { return nil }
         return post.routeCoordinates
+    }
+
+    /// An AUTO card on a buddy walk whose crew routes have since arrived.
+    ///
+    /// The auto card's picture is baked on the poster's phone the moment their
+    /// walk ends — i.e. before anyone else's workout has synced, and on a
+    /// shipped build that bakes its own line only. So a three-person walk
+    /// posted that way showed ONE route forever while the server was serving
+    /// all three. The live map draws the same stats band over every line, so
+    /// once there is a crew line the baked picture has nothing left to say:
+    /// it drops out and the map IS the card.
+    private var autoCardMissesCrew: Bool {
+        post.is_auto == true && !companionRoutes.isEmpty
     }
 
     /// Image slides, real moment first: when the run has a story photo it
@@ -505,7 +518,7 @@ struct PostCardView: View {
         if let storyPhotoURL {
             result.append((url: storyPhotoURL, flip: nil, corner: .topTrailing))
         }
-        if let media = post.mediaURL {
+        if let media = post.mediaURL, !autoCardMissesCrew {
             // The corner the poster left the inset in. It travels with the
             // post because the inset is BAKED into the picture and this card
             // only lays an invisible target over it — guess it and the tap
@@ -669,7 +682,7 @@ struct PostCardView: View {
     /// the run as the indoor card. nil = nothing to flip to.
     private var mapSlide: MediaSlide? {
         if let coords = routeSlideCoordinates { return .route(coords: coords) }
-        if !companionRoutes.isEmpty, post.is_auto != true { return .route(coords: []) }
+        if !companionRoutes.isEmpty, post.is_auto != true || autoCardMissesCrew { return .route(coords: []) }
         if let stats = workoutCardStats { return .statsCard(stats: stats) }
         return nil
     }
