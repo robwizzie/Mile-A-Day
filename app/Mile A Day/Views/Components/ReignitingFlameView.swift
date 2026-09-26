@@ -27,10 +27,22 @@ enum FlameRevivalOrigin: Equatable {
     }
 }
 
-struct ReignitingFlameView: View {
+struct ReignitingFlameView: View, Animatable {
     var showsFace: Bool
     var size: CGFloat = 220
     var progress: CGFloat
+    /// The swell is driven by `withAnimation { progress = 1 }`, so the view
+    /// must be ANIMATABLE: without this SwiftUI evaluated the body once at
+    /// progress 1 and only the animatable modifiers glided there. The body's
+    /// `scaleEffect` did — the dressed outfit, drawn in `Canvas`es from a plain
+    /// scale number, can't — so for 1.5 s a squashed stub of a flame stood
+    /// under full-size sunglasses, a floating companion and a trail. Now the
+    /// body is rebuilt every frame at the interpolated progress and every
+    /// layer reads the same value.
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
     var intensity: CGFloat = 1
     var origin: FlameRevivalOrigin = .coal
     /// Flamey's look (`FlameyFacts.look()`) on the Fun celebration: the
@@ -99,6 +111,11 @@ struct ReignitingFlameView: View {
             }
 
             flameFigure(phase: phase, blink: blink)
+                // Every value in here is already interpolated (animatableData
+                // above), so an enclosing animation must not ALSO tween the
+                // figure's own scale — that second, differently-timed tween
+                // is what pulled the body away from its outfit.
+                .transaction { $0.animation = nil }
                 .opacity(flameFadeIn)
         }
     }

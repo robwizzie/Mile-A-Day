@@ -3,6 +3,7 @@
 // import graph: it imports nothing from its siblings.
 
 import { OWNER_NOT_PRIVATE_SQL } from "../visibilityService.js";
+import { CLIENT_FEATURES, supportsClientFeatureSql } from "../clientFeatures.js";
 import { postHypedByViewerMatchSql, postHypeMatchSql } from "../hypeService.js";
 
 // Shared circle + symmetric-block fragment. `$1` is always the viewer id.
@@ -103,6 +104,21 @@ export const displayMovingSecondsSql = (w: string) => `(CASE
 export const authorFlameySql = (u: string) => `CASE WHEN ${u}.dashboard_style = 'fun'
 	THEN jsonb_build_object('look', ${u}.flamey_look, 'name', ${u}.flamey_name) END`;
 
+/**
+ * SQL: `is_auto` as THIS viewer (`$1`) should see it.
+ *
+ * A live auto card (media_url = '') has no picture: current builds draw it
+ * from the workout, its route and the stats snapshot. A build that predates
+ * that (`live_auto_card_v1` undeclared) hides the route slide and the stats
+ * card on anything flagged auto and shows its media — which is nothing — so
+ * for THEM the row is served as an ordinary post, whose existing code draws
+ * exactly the live route slide (or the stats card when routeless) instead.
+ * Real auto cards with a baked picture are served as they always were.
+ * Viewer-only: nothing is written, and every internal read keeps `p.is_auto`.
+ */
+export const AUTO_FLAG_SQL = `(p.is_auto AND (p.media_url <> ''
+	OR ${supportsClientFeatureSql("$1", CLIENT_FEATURES.liveAutoCardV1)}))`;
+
 const POST_COLUMNS = `
 	p.post_id,
 	p.user_id,
@@ -179,7 +195,7 @@ const POST_COLUMNS = `
 	p.share_to_story,
 	p.story_expires_at,
 	p.created_at,
-	p.is_auto,
+	${AUTO_FLAG_SQL} AS is_auto,
 	p.include_route,
 	p.pinned_at,
 	(SELECT w.workout_type FROM workouts w WHERE w.workout_id = p.workout_id) AS workout_type`;
@@ -441,10 +457,16 @@ export const VIEWER_WAS_ON_THIS_WALK = `(p.buddy_session_id IS NOT NULL AND EXIS
  * Deliberately carries NO consent gate: that belongs to the route (a trace is
  * where you were), not to how far someone went on a walk they are credited on.
  */
+// The walk is the credit row's session, else the POST's — the same order
+// BUDDY_GROUP_JSON reads it in. A row credited without its session (a legacy
+// coauthor list on a post whose session was resolved onto `posts` only) was
+// counted in "3 of you" while every one of its routes resolved to nothing.
+const CREW_SESSION_SQL = `COALESCE(pca.buddy_session_id, p.buddy_session_id)`;
+
 const CREW_WORKOUT_ID_SQL = `COALESCE(
 			pca.workout_id,
 			(SELECT bsp.workout_id FROM buddy_session_participants bsp
-			  WHERE bsp.session_id = pca.buddy_session_id
+			  WHERE bsp.session_id = ${CREW_SESSION_SQL}
 				AND bsp.user_id = pca.user_id),
 			-- Not linked yet. The link is stamped by reconcileBuddySessions
 			-- only when the workout syncs AFTER the Finish tap, and by
@@ -463,7 +485,7 @@ const CREW_WORKOUT_ID_SQL = `COALESCE(
 			         - (COALESCE(w.total_duration, 0) || ' seconds')::interval)
 			        <= COALESCE(bs.ended_at, bs.started_at + INTERVAL '6 hours')
 			           + INTERVAL '10 minutes'
-			  WHERE bs.id = pca.buddy_session_id AND bs.started_at IS NOT NULL
+			  WHERE bs.id = ${CREW_SESSION_SQL} AND bs.started_at IS NOT NULL
 			  ORDER BY w.device_end_date DESC
 			  LIMIT 1)
 		)`;
@@ -538,7 +560,7 @@ const crewWorkoutSelect = (expr: string) => `(
 const CREW_DISTANCE_SQL = `COALESCE(
 	(SELECT COALESCE(bsp.final_distance_miles, bsp.distance_miles)
 	   FROM buddy_session_participants bsp
-	  WHERE bsp.session_id = pca.buddy_session_id
+	  WHERE bsp.session_id = ${CREW_SESSION_SQL}
 		AND bsp.user_id = pca.user_id),
 	${crewWorkoutSelect("w.distance")}
 )`;

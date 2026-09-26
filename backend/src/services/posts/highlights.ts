@@ -150,15 +150,22 @@ export async function listUserHighlights(
 						WHERE cpca.post_id = p.post_id
 							AND cpca.user_id = i.slide_key
 							AND cpca.status = 'accepted'),
-					p.media_url
+					-- A live auto card has no picture ('') — it is drawn from the
+					-- walk on the phone — so it can't be a circle's face.
+					NULLIF(p.media_url, '')
 				)
 				FROM post_highlight_items i
 				JOIN posts p ON p.post_id = i.post_id
 				WHERE i.highlight_id = h.highlight_id
 					AND ${highlightMemberWhere("$1", "h.user_id")}
-				-- The chosen cover wins; otherwise the first member does, so a
-				-- highlight always has a face even after its cover is deleted.
-				ORDER BY (p.post_id = h.cover_post_id) DESC, i.sort_index, i.added_at
+				-- A member that HAS a picture first; then the chosen cover wins,
+				-- otherwise the first member does, so a highlight always has a
+				-- face even after its cover is deleted.
+				ORDER BY (NULLIF(p.media_url, '') IS NOT NULL OR EXISTS (
+						SELECT 1 FROM post_coauthors cpcb
+						WHERE cpcb.post_id = p.post_id AND cpcb.user_id = i.slide_key
+							AND cpcb.status = 'accepted' AND cpcb.media_url IS NOT NULL)) DESC,
+					(p.post_id = h.cover_post_id) DESC, i.sort_index, i.added_at
 				LIMIT 1
 			)) AS cover_media_url,
 			(

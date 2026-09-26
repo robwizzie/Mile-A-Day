@@ -375,6 +375,25 @@ async function main() {
     "drawn",
   );
 
+  // ── 5b. A credit row that lost its session still resolves through the
+  // POST's. "3 of you" already read p.buddy_session_id; the routes read only
+  // the credit row's, so such a card counted everyone and drew one line.
+  await db.query(
+    `UPDATE post_coauthors SET buddy_session_id = NULL WHERE post_id = $1 AND user_id = $2`,
+    [postId, PAL],
+  );
+  check(
+    "a crew route resolves through the post's session",
+    Array.isArray((await crewEntry(OUT, postId, PAL))?.route)
+      ? (await crewEntry(OUT, postId, PAL)).route.length
+      : null,
+    3,
+  );
+  await db.query(
+    `UPDATE post_coauthors SET buddy_session_id = $3 WHERE post_id = $1 AND user_id = $2`,
+    [postId, PAL, sessionId],
+  );
+
   // ── 6. "No map on this one" covers the whole card, not just the poster ──
   await db.query(`UPDATE posts SET include_route = FALSE WHERE post_id = $1`, [
     postId,

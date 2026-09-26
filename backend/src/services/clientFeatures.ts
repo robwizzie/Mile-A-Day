@@ -178,6 +178,19 @@ export const CLIENT_FEATURES = {
    * has the affected widget on its home screen (widgetRefreshService).
    */
   widgetRefreshPushV1: "widget_refresh_push_v1",
+
+  /**
+   * The build draws AUTO cards live — the route art or the indoor card, from
+   * the workout, its route and `stats_snapshot` — and never needs their
+   * media. It posts auto cards WITHOUT an image (`media_url` absent, stored
+   * as '') and ignores the baked picture on older ones.
+   *
+   * Gated per VIEWER (`AUTO_FLAG_SQL`): a build without it hides the route
+   * slide on anything flagged auto and shows the media instead, which for a
+   * live card is nothing, so those viewers are served the row as an ordinary
+   * post — the shape their code already draws live.
+   */
+  liveAutoCardV1: "live_auto_card_v1",
 } as const;
 
 export type ClientFeature =

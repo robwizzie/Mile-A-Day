@@ -424,8 +424,17 @@ enum RunPostService {
         return nil
     }
 
-    /// Render the auto image (route map or stats card), upload it, and create the
-    /// linked feed post. Called when the user skips the post-run photo prompt.
+    /// Create the walk's AUTO card — as DATA, never a picture. Called when the
+    /// user skips the post-run photo prompt.
+    ///
+    /// The card used to be baked on this phone (route art or the indoor card,
+    /// rendered to a 1080×1350 image), uploaded and posted as media. Every
+    /// viewer now draws it LIVE from what the post already links to: the
+    /// workout, its route (server-side, so a Stealth walk simply has none)
+    /// and `stats_snapshot`. So nothing is rendered, uploaded or hosted, the
+    /// card animates like every other route card, and a buddy walk's card
+    /// draws the whole crew's lines as they sync instead of the one line this
+    /// phone knew when the walk ended.
     ///
     /// Deliberately NOT gated on `PostedWorkoutRegistry`. The server already
     /// refuses to let an auto card overwrite a deliberate post (`updateGuard`
@@ -440,51 +449,23 @@ enum RunPostService {
         // each call site so every route into the photo-less card — skipping the
         // prompt, backing out of the composer, sharing to a story only, and
         // whatever gets added next — honours it from one place.
-        //
-        // Nothing else changes: the fresh-post window still opens, the prompt
-        // still appears, and posting a photo still works normally. All this
-        // removes is the card that would have gone up in the photo's place.
         guard NotificationPreferences.load().autoPostWithoutPhoto else { return }
 
         let stats = todayStats(workoutId: workoutId)
-        let workout = HealthKitManager.shared.todaysWorkouts.first { $0.uuid.uuidString == workoutId }
-
-        var image: UIImage?
-        // Stealth Mode: this card is a PICTURE of the map, uploaded as media —
-        // the one route leak no server-side gate can see. A stealth walk
-        // falls through to the stats card.
-        if let workout, !StealthModeStore.shared.isStealth(workout) {
-            let coords = await HealthKitManager.shared.fetchAllRouteLocations(for: workout)
-                .map { $0.coordinate }
-            if coords.count >= 2 {
-                // Same accent the feed uses for this workout type — the baked
-                // card and the live cards must speak one color language.
-                image = await renderRouteImage(
-                    coordinates: coords, color: ActivityCardView.color(workoutType),
-                    stats: stats, workoutType: workoutType
-                )
-            }
-        }
-        if image == nil {
-            image = renderStatsCard(stats: stats, workoutType: workoutType)
-        }
-        guard let finalImage = image else { return }
-
         do {
-            let mediaUrl = try await PostService.uploadMedia(finalImage)
             do {
                 // isAuto — the server may replace this card in place with a
                 // later photo post, but it never counts as the user's one post
                 // per workout.
-                _ = try await createAutoPost(mediaUrl: mediaUrl, workoutId: workoutId, stats: stats)
+                _ = try await createAutoPost(workoutId: workoutId, stats: stats)
             } catch let APIError.badRequest(message)
                         where message == "auto_post_workout_unavailable" || message == "auto_post_stats_mismatch" {
                 // HealthKit/backend sync can lag the prompt by a beat. Keep the
-                // skip action reliable: publish the rendered card unlinked
-                // instead of making "Skip" look broken. The raw workout card can
-                // still appear later if the sync catches up.
+                // skip action reliable: publish the card unlinked instead of
+                // making "Skip" look broken. The raw workout card can still
+                // appear later if the sync catches up.
                 print("[RunPostService] linked auto post rejected (\(message)); retrying unlinked")
-                _ = try await createAutoPost(mediaUrl: mediaUrl, workoutId: nil, stats: stats)
+                _ = try await createAutoPost(workoutId: nil, stats: stats)
             }
         } catch {
             print("[RunPostService] autoPostMile failed: \(error)")
@@ -492,7 +473,7 @@ enum RunPostService {
     }
 
     @MainActor
-    private static func createAutoPost(mediaUrl: String, workoutId: String?, stats: RunStatsInput) async throws -> PostItem {
+    private static func createAutoPost(workoutId: String?, stats: RunStatsInput) async throws -> PostItem {
         // A buddy walk's auto card is the WALK's card, not a solo one. The
         // server resolves the session from the workout regardless (older
         // builds), but saying it here also credits the crew in roster order
@@ -503,7 +484,8 @@ enum RunPostService {
             .filter { $0.userId != BuddySessionService.shared.currentUserId }
             .map(\.userId) ?? []
         return try await PostService.createPost(
-            mediaUrl: mediaUrl,
+            // No picture: the card is drawn live (see autoPostMile).
+            mediaUrl: nil,
             caption: nil,
             workoutId: workoutId,
             shareToFeed: true,
@@ -513,116 +495,6 @@ enum RunPostService {
             coauthorUserIds: crew.isEmpty ? nil : crew,
             buddySessionId: session?.id
         )
-    }
-
-    // MARK: - Rendering
-
-    /// The rider badge for a baked card, or nil when we cannot say who this
-    /// is.
-    ///
-    /// A placeholder `currentUser` is named "You", and `AvatarView.initials`
-    /// turns that into "YO" — which is how a real account's auto post shipped
-    /// with a stranger's initials riding its route line. `SessionIdentity`
-    /// signs that session out on the next enforce, but a bake can happen in
-    /// the window before it, and an image is permanent once uploaded: it is
-    /// the one artifact of this state that outlives the session.
-    ///
-    /// No badge is the honest render. The card is the walk, not the walker.
-    @MainActor
-    static func bakedAvatar() -> RouteArtAvatar? {
-        let user = UserManager.shared.currentUser
-        guard !UserManager.shared.restoreFailed,
-              let id = user.backendUserId, !id.isEmpty,
-              !user.name.isEmpty
-        else { return nil }
-        return RouteArtAvatar(name: user.name, imageURL: user.profileImageUrl)
-    }
-
-    @MainActor
-    static func renderStatsCard(stats: RunStatsInput, workoutType: String) -> UIImage? {
-        // The routeless bake is the indoor card's still frame (track or
-        // treadmill face — the POSTER's dashboard style picks, since a PNG is
-        // rendered once on their device; it can't animate, but the visual
-        // language matches the live cards). Avatar is cache-only: this isn't
-        // async, and RouteAvatarBadge's initials fallback keeps the render
-        // deterministic on a miss.
-        //
-        // The card lays itself out at design size (360×450) — scale up to the
-        // 1080×1350 upload size. Rendering AT 1080 with scale 1 is the classic
-        // bug: point sizes become raw pixels and the whole card reads tiny.
-        let card = IndoorWorkoutCard(
-            stats: stats.snapshot,
-            workoutType: workoutType,
-            avatar: bakedAvatar(),
-            // Baked on the POSTER's phone: the cheerleader is their own.
-            isOwn: true,
-            still: true
-        )
-        .frame(width: RunStatsCardView.designSize.width,
-               height: RunStatsCardView.designSize.height)
-        let renderer = ImageRenderer(content: card)
-        renderer.scale = 1080 / RunStatsCardView.designSize.width
-        renderer.isOpaque = true
-        return renderer.uiImage
-    }
-
-    /// The route as the branded art card at upload size — the same face the
-    /// live feed slide draws (canvas + glow line + the poster's badge settled
-    /// at the end + mile ticks), baked to a PNG. One `ImageRenderer` pass:
-    /// the art canvas is pure SwiftUI, which is what lets the old
-    /// MKMapSnapshotter+CoreGraphics composite go (map tiles were the only
-    /// reason it existed — they don't render through SwiftUI's renderer).
-    @MainActor
-    static func renderRouteImage(
-        coordinates: [CLLocationCoordinate2D],
-        color: Color,
-        stats: RunStatsInput,
-        workoutType: String
-    ) async -> UIImage? {
-        guard coordinates.count >= 2 else { return nil }
-
-        // Await the avatar once — this runs at post time, not in a scroll. A
-        // miss falls back to initials, so the render is deterministic either
-        // way (RouteAvatarBadge never touches AsyncImage).
-        let avatar = bakedAvatar()
-        var avatarImages: [String: UIImage] = [:]
-        // Flattened deliberately: `avatar?.imageURL` is `String??`, and a
-        // single `if let` would bind a `String?`.
-        if let key = avatar?.imageURL ?? nil,
-           let image = await RouteAvatarImageLoader.loadImage(for: key) {
-            avatarImages[key] = image
-        }
-
-        // Ghost-map underlay for the bake, same as the live cards. A failed
-        // snapshot (offline) just bakes the pure canvas.
-        let underlay = await RouteMapSnapshot.generate(
-            coordinates: coordinates, size: RunStatsCardView.designSize)
-
-        let content = ZStack(alignment: .topLeading) {
-            RouteArtView.still(
-                coordinates: coordinates,
-                routeColor: color,
-                authorAvatar: avatar,
-                avatarImages: avatarImages,
-                underlay: underlay,
-                paletteDate: Date(),
-                size: RunStatsCardView.designSize
-            )
-            // Stats band + activity/date chips, laid out in the same 360×450
-            // design space the live slides scale from.
-            RouteStatsOverlayView(stats: stats, workoutType: workoutType)
-                .frame(width: RunStatsCardView.designSize.width,
-                       height: RunStatsCardView.designSize.height,
-                       alignment: .topLeading)
-        }
-        .frame(width: RunStatsCardView.designSize.width,
-               height: RunStatsCardView.designSize.height)
-
-        // Design size → 1080×1350 upload, same scale rule as renderStatsCard.
-        let renderer = ImageRenderer(content: content)
-        renderer.scale = 1080 / RunStatsCardView.designSize.width
-        renderer.isOpaque = true
-        return renderer.uiImage
     }
 
     private static func todayText() -> String {

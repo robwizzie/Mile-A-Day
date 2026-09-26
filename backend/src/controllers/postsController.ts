@@ -214,8 +214,19 @@ export async function createPostController(
     // flow) — store the bare path, signatures are minted per-response.
     const mediaUrl =
       typeof media_url === "string" ? stripMediaQuery(media_url) : media_url;
+    // A LIVE auto card carries no picture at all: the card is drawn on the
+    // viewer's phone from the workout, its route and the stats snapshot, so
+    // there is nothing to upload, host or sweep. Stored as '' — the column is
+    // NOT NULL, and '' is what every "has a photo?" read already treats as
+    // none (crewPosts, workoutService.has_photo, photoLock, push images).
+    // Viewers whose build predates live cards are served the row in a shape
+    // their existing code draws live (`AUTO_FLAG_SQL`, postSql).
+    const liveAutoCard =
+      is_auto === true && (mediaUrl === undefined || mediaUrl === null || mediaUrl === "");
     // Validate media_url points at our own posts upload dir and exists on disk.
-    if (
+    if (liveAutoCard) {
+      // nothing to validate
+    } else if (
       typeof mediaUrl !== "string" ||
       !mediaUrl.startsWith(POSTS_MEDIA_PREFIX) ||
       mediaUrl.includes("..")
@@ -224,8 +235,8 @@ export async function createPostController(
         .status(400)
         .json({ error: "A valid uploaded media_url is required" });
     }
-    const onDisk = path.join(process.cwd(), mediaUrl.replace(/^\//, ""));
-    if (!fs.existsSync(onDisk)) {
+    const onDisk = liveAutoCard ? "" : path.join(process.cwd(), mediaUrl.replace(/^\//, ""));
+    if (!liveAutoCard && !fs.existsSync(onDisk)) {
       return res
         .status(400)
         .json({ error: "media_url does not reference an uploaded file" });
@@ -233,14 +244,14 @@ export async function createPostController(
     // Ownership: upload filenames are `<userId>-<ts>-<rand>.jpg`, and media
     // urls are visible to the whole circle — without this check anyone could
     // republish a friend's photo (including story-only photos) as their own.
-    if (!path.basename(mediaUrl).startsWith(`${userId}-`)) {
+    if (!liveAutoCard && !path.basename(mediaUrl).startsWith(`${userId}-`)) {
       return res
         .status(403)
         .json({ error: "media_url must reference your own upload" });
     }
     // FRONT & BACK's second frame. A 400 rather than a silent drop: the user
     // shot two pictures and half of one arriving is worse than being told.
-    const dualMediaUrl = normalizeDualMediaUrl(userId, dual_media_url);
+    const dualMediaUrl = liveAutoCard ? null : normalizeDualMediaUrl(userId, dual_media_url);
     if (dualMediaUrl === false) {
       return res
         .status(400)
@@ -400,7 +411,7 @@ export async function createPostController(
 
     const post = await createPost({
       userId,
-      mediaUrl,
+      mediaUrl: liveAutoCard ? "" : mediaUrl,
       dualMediaUrl,
       dualInsetCorner,
       caption: typeof caption === "string" ? caption.trim() || null : null,

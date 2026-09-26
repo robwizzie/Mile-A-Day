@@ -585,7 +585,9 @@ struct UserProfileDetailView: View {
                 savedToday: friendSavedToday != nil,
                 alreadyNudged: nudgeStatus.map { $0.nudgedToday && !$0.unlimitedNudges } ?? false,
                 onNudged: { markNudgeSent() },
-                onUnavailable: { withAnimation(.easeInOut(duration: 0.25)) { flameyUnavailable = true } }
+                onUnavailable: { withAnimation(.easeInOut(duration: 0.25)) { flameyUnavailable = true } },
+                badges: userBadges,
+                catalogBadges: catalogBadges
             )
         }
     }

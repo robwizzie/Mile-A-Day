@@ -10,6 +10,7 @@ import {
   getData,
   Loading,
   mediaSrc,
+  LiveCardTile,
   postData,
   SegmentedControl,
   StatCard,
@@ -381,18 +382,26 @@ function PostsBrowser() {
               className="group relative overflow-hidden rounded-lg border border-white/10 bg-black/40"
             >
               <div className="relative aspect-[3/4]">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={mediaSrc(p.media_url)}
-                  alt=""
-                  className={`h-full w-full object-cover ${
+                {p.media_url ? (
+                  <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={mediaSrc(p.media_url)}
+                    alt=""
+                    className={`h-full w-full object-cover ${
+                      p.deleted_at ? "opacity-40" : ""
+                    }`}
+                    loading="lazy"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.opacity = "0.12";
+                    }}
+                  />
+                  </>
+                ) : (
+                  <LiveCardTile className={`h-full w-full object-cover ${
                     p.deleted_at ? "opacity-40" : ""
-                  }`}
-                  loading="lazy"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.opacity = "0.12";
-                  }}
-                />
+                  }`} />
+                )}
                 <div className="absolute left-1 top-1 flex flex-wrap gap-1">
                   {p.deleted_at && <Chip text="DELETED" tone="bad" />}
                   {p.media_file_exists === false && (
@@ -560,15 +569,21 @@ function PhotoForensics() {
         <ul className="divide-y divide-white/5">
           {rows.map((p) => (
             <li key={p.post_id} className="flex gap-3 py-3">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={mediaSrc(p.media_url)}
-                alt=""
-                className="h-20 w-16 shrink-0 rounded-md border border-white/10 object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.opacity = "0.25";
-                }}
-              />
+              {p.media_url ? (
+                <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={mediaSrc(p.media_url)}
+                  alt=""
+                  className="h-20 w-16 shrink-0 rounded-md border border-white/10 object-cover"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.opacity = "0.25";
+                  }}
+                />
+                </>
+              ) : (
+                <LiveCardTile className="h-20 w-16 shrink-0 rounded-md border border-white/10 object-cover" />
+              )}
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-sm text-white/90">{p.local_date}</span>

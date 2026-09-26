@@ -285,6 +285,11 @@ jobs:
       - name: Badge recalibrate check
         run: node scripts/badge-recalibrate-check.mjs
 
+      # An auto card is DATA, never a picture: accepted with no media, served
+      # as auto to live-card builds and as an ordinary post to older ones.
+      - name: Live auto card check
+        run: node scripts/live-auto-card-check.mjs
+
   website:
     name: Website (lint + build)
     runs-on: ubuntu-latest
