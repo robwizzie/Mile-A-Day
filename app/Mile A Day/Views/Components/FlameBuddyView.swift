@@ -62,6 +62,15 @@ struct FlameBuddyView: View {
     private var effectiveStill: Bool { still || reduceMotion }
     @State private var ignitionDate: Date?
     @State private var smokeDate: Date?
+    /// The ONE instant his size is read at — the figure, the outfit, his
+    /// arms, the mood props, the lift and the bob all burn down on it. The
+    /// figure used to read the 12 fps timeline's date while everything else
+    /// read `Date()` at whenever the body last happened to evaluate (an
+    /// outfit is redrawn only when its inputs change), so by evening the
+    /// flame was a wisp inside glasses, shoes and a companion still sized
+    /// for the morning. Ticked once a minute by `burnClock()`; the day's
+    /// burn-down moves far less than a pixel in that time.
+    @State private var sizingDate = Date()
 
     private var resolvedPhase: StreakFlamePhase {
         if let phase { return phase }
@@ -137,6 +146,20 @@ struct FlameBuddyView: View {
         // When the day rolls over, dayEnd jumps a full day forward and the
         // burn-down scale snaps with it — ease the regrowth instead of popping.
         .animation(effectiveStill ? nil : .easeInOut(duration: 1.4), value: dayEnd)
+        .task(id: dayEnd) { await burnClock() }
+    }
+
+    /// Advances `sizingDate` once a minute while he's burning down. The
+    /// first tick (appear, a new day) eases like the regrowth above; a
+    /// resumed app catches up on its first tick, since the sleep is
+    /// measured on the continuous clock.
+    private func burnClock() async {
+        withAnimation(effectiveStill ? nil : .easeInOut(duration: 1.4)) { sizingDate = Date() }
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(60))
+            guard !Task.isCancelled else { return }
+            if currentVigor(at: Date()) != nil { sizingDate = Date() }
+        }
     }
 
     // Mood gestures are SwiftUI animations on the CONTAINER — Core Animation
@@ -156,7 +179,7 @@ struct FlameBuddyView: View {
             if let look {
                 // Tail feathers: the first child, so behind the figure and
                 // its glow.
-                FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: currentVigor(at: Date())),
+                FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: currentVigor(at: sizingDate)),
                                   side: .behind, still: effectiveStill, reach: wardrobeReach)
             }
 
@@ -165,7 +188,7 @@ struct FlameBuddyView: View {
             // always carried; nothing else may ride it.
             TimelineView(.animation(minimumInterval: 1.0 / 12.0)) { timeline in
                 let t = timeline.date.timeIntervalSinceReferenceDate
-                let vigorNow = currentVigor(at: timeline.date)
+                let vigorNow = currentVigor(at: sizingDate)
 
                 ZStack {
                     if grounded, let vigorNow, vigorNow < 0.45 {
@@ -183,7 +206,7 @@ struct FlameBuddyView: View {
             if let look {
                 // Canvas-drawn, no clock: redrawn only when the look or his
                 // scale changes. Rides the container's bob/hop like the props.
-                FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: currentVigor(at: Date())),
+                FlameyOutfitLayer(look: look, size: size, scale: figureScale(vigor: currentVigor(at: sizingDate)),
                                   side: .front, still: effectiveStill, reach: wardrobeReach,
                                   companionPose: armPose)
             }
@@ -192,18 +215,18 @@ struct FlameBuddyView: View {
             // handle, a cape hangs behind them), under his bubble. Drawn
             // once — no clock; the pose is a rotation, the sway rides the
             // idle bob's phase.
-            armsLayer(vigor: currentVigor(at: Date()), still: effectiveStill)
+            armsLayer(vigor: currentVigor(at: sizingDate), still: effectiveStill)
 
             if let mood {
                 // No clock of its own (see FlameMoodLayer). Shares the
                 // container's bob/hop/pace below, so props ride with him.
-                FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: currentVigor(at: Date())),
+                FlameMoodLayer(mood: mood, size: size, scale: figureScale(vigor: currentVigor(at: sizingDate)),
                                showsBubble: showsMoodBubble, drawsWornProps: look == nil,
                                bubbleStyle: look?.bubble ?? .classicBubble, lift: liftFraction,
                                crest: look.map(FlameyArt.crest) ?? 0, bubbleWidth: bubbleWidth)
             }
 
-            reactionProps(scale: figureScale(vigor: currentVigor(at: Date())))
+            reactionProps(scale: figureScale(vigor: currentVigor(at: sizingDate)))
         }
         .scaleEffect(standFit, anchor: .bottom)
         .rotationEffect(.degrees(wiggle), anchor: .bottom)
@@ -346,7 +369,7 @@ struct FlameBuddyView: View {
     /// now a 60 fps container animation, so the mood props ride it too.
     private var bobOffset: CGFloat {
         guard !effectiveStill else { return 0 }
-        let bodyScale = figureScale(vigor: currentVigor(at: Date()))
+        let bodyScale = figureScale(vigor: currentVigor(at: sizingDate))
         let amplitude: CGFloat = 2.2 * (resolvedPhase == .blazing ? 1 : max(0.35, bodyScale))
         return bobPhase ? -amplitude : amplitude
     }
@@ -376,7 +399,7 @@ struct FlameBuddyView: View {
     }
 
     private var staticFlame: some View {
-        let vigorNow = currentVigor(at: Date())
+        let vigorNow = currentVigor(at: sizingDate)
         return ZStack {
             if grounded, let vigorNow, vigorNow < 0.45 {
                 EmberBaseGlow(size: size, intensity: min(1, (0.45 - vigorNow) / 0.45))
@@ -456,7 +479,7 @@ struct FlameBuddyView: View {
     /// fraction of `size` (the look's lift is in body units).
     private var liftFraction: CGFloat {
         guard let look else { return 0 }
-        return look.bodyLift * figureScale(vigor: currentVigor(at: Date()))
+        return look.bodyLift * figureScale(vigor: currentVigor(at: sizingDate))
     }
 
     // MARK: - Mood: face (content clock — discrete, cheap)
