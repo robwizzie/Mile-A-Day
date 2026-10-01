@@ -63,7 +63,7 @@ struct HypeButton: View {
                         .font(.system(size: 22, weight: .medium))
                         .scaleEffect(pop ? 1.18 : 1)
                         .opacity(isOutOfHypes && !isHyped ? 0.35 : 1)
-                        .frame(width: 36, height: 40)
+                        .frame(width: 44, height: 44) // the 44pt minimum tap target, like Comment and Share beside it
                         .contentShape(Rectangle())
                 } else {
                     let small = style == .smallPill

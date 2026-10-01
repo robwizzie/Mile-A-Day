@@ -29,13 +29,15 @@ struct ProfileView: View {
     /// screen that is ABOUT your streak. The QR button beside it shares the
     /// PROFILE (a way to add you), which is a different thing.
     @State private var showingShareStudio = false
-    @State private var showingSettings = false
     @State private var showingRouteHeatmap = false
     /// Daily goal editor, reachable from the Activity tab's goal row — the
     /// same sheet Settings opens, so there is one place the number is set.
-    @State private var showGoalSheet = false
     /// Sender tapped in "Recent hypes" — opens their profile.
     @State private var hypeProfileUser: BackendUser?
+    /// "See all" on Recent Hypes — the full received list.
+    @State private var showingAllHypes = false
+    /// How many hypes the Activity card shows before "See all".
+    private static let hypePreviewCount = 3
 
     // Friends count shown in the header (Instagram-style), tappable through to
     // the friends list. Owns one FriendService for the count + the list link.
@@ -51,6 +53,7 @@ struct ProfileView: View {
     // Activity tab. Friend profiles still use server rows; your own profile can
     // use richer HealthKit metadata to hide Google Health duplicate rows.
     @State private var ownWorkouts: [FriendWorkout] = []
+    @State private var ownLast7RefreshTask: Task<Void, Never>?
     // Locally deduped per-day totals for the chart. The server can still hold
     // older Google Health duplicate rows, so your own profile should trust the
     // HealthKit-backed local dedupe path instead.
@@ -99,7 +102,11 @@ struct ProfileView: View {
                             totalMiles: userManager.currentUser.totalMiles,
                             friendCount: ownFriendCount,
                             streakDoneToday: ownGoalDoneToday,
-                            streakSavedToday: ownSavedToday
+                            streakSavedToday: ownSavedToday,
+                            // The Miles tile owns lifetime miles now (the
+                            // banner chip and the Performance card are gone),
+                            // so it is also the door to the Total Miles screen.
+                            onTapMiles: { activeSheet = .totalMiles }
                         ) {
                             FriendsListView(friendService: friendService)
                         }
@@ -110,9 +117,8 @@ struct ProfileView: View {
                             profileTokenShelf(tokens)
                         }
 
-                        // Flamey's Closet (Fun only — the row draws nothing
-                        // on Modern).
-                        FlameyClosetProfileRow()
+                        // Flamey's Closet is no longer a header row here: it is
+                        // reached from Settings and the Fun hero's Closet pill.
 
                         // Same four sections as a friend's profile, Activity first.
                         ProfileTabBar(
@@ -161,17 +167,6 @@ struct ProfileView: View {
         .navigationDestination(isPresented: $showingShareProfile) {
             ShareProfileView()
         }
-        .navigationDestination(isPresented: $showingSettings) {
-            // ONE settings page, shared with the Dashboard's gear. It owns its
-            // own confirmations and account actions: a modal attached to THIS
-            // view can't present while that page is pushed on top, which is how
-            // Sign Out came to look like a no-op until you hit Back.
-            MADSettingsView(
-                userManager: userManager,
-                healthManager: healthManager,
-                friendService: friendService
-            )
-        }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .totalMiles:
@@ -208,16 +203,16 @@ struct ProfileView: View {
             refreshOwnLocalLast7Activity()
         }
         .onChange(of: healthManager.cachedWorkouts.count) {
-            refreshOwnLocalLast7Activity()
+            scheduleOwnLocalLast7Refresh()
         }
         .onChange(of: healthManager.todaysDistance) {
-            refreshOwnLocalLast7Activity()
+            scheduleOwnLocalLast7Refresh()
         }
         .onChange(of: dedupOverrides.countAnyway) {
-            refreshOwnLocalLast7Activity()
+            scheduleOwnLocalLast7Refresh()
         }
         .onChange(of: dedupOverrides.excludeAnyway) {
-            refreshOwnLocalLast7Activity()
+            scheduleOwnLocalLast7Refresh()
         }
         .navigationDestination(isPresented: $isShowingBadgeDetail) {
             // Match the BadgesView navigation-push presentation so tapping a
@@ -286,23 +281,22 @@ struct ProfileView: View {
 
     // MARK: - Tab Content
 
-    /// Today's snapshot — streak + goal completion. Mirrors the friend
-    /// profile's Activity tab role: "what's happening right now".
+    /// The recent record — the week, walks, streaks, hypes. Mirrors the
+    /// friend profile's Activity tab role.
     @ViewBuilder
     private var ownActivityTabContent: some View {
-        // Ordered by how close to NOW each block is: today's goal and
-        // challenge, then the week, then walks with people, then streak
-        // history, then what friends said about it. Every card wears the same
-        // flat chrome and caps label (`profileCard` / `ProfileCardLabel`).
+        // Ordered by how close to NOW each block is: the week, then walks
+        // with people, then streak history, then what friends said about it.
+        // Today's goal and challenge are the Dashboard's — the avatar's goal
+        // ring already carries the day here. Every card wears the same flat
+        // chrome and caps label (`profileCard` / `ProfileCardLabel`).
         VStack(spacing: MADTheme.Spacing.md) {
-            dailyGoalRow
-            // Directly under the goal it explains: this is the one screen
-            // where a streak that went up sits beside a mile the owner knows
-            // they haven't run, and the answer has to be in that same glance.
+            // First, when today is token-covered: the one screen where a
+            // streak that went up sits beside a mile the owner knows they
+            // haven't run, and the answer has to be in that same glance.
             if let saved = ownSavedToday {
                 SavedTodayBanner(day: saved, isSelf: true) { showTokenSheet = true }
             }
-            OwnTodayChallengeCard(healthManager: healthManager, userManager: userManager)
             if !ownWorkouts.isEmpty || !(ownDayTotals?.isEmpty ?? true) {
                 Last7DaysChart(
                     workouts: ownWorkouts,
@@ -330,39 +324,93 @@ struct ProfileView: View {
     /// the sender's profile, the way a likes list does.
     private var recentHypesSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            ProfileCardLabel(text: "RECENT HYPES")
-
-            VStack(spacing: 0) {
-                ForEach(Array(receivedHypes.prefix(8).enumerated()), id: \.element.id) { index, hype in
+            HStack {
+                ProfileCardLabel(text: "RECENT HYPES")
+                Spacer()
+                if receivedHypes.count > Self.hypePreviewCount {
                     Button {
                         MADHaptics.tap()
-                        hypeProfileUser = BackendUser(
-                            user_id: hype.sender_id,
-                            username: hype.username,
-                            email: nil,
-                            first_name: hype.first_name,
-                            last_name: hype.last_name,
-                            bio: nil,
-                            profile_image_url: hype.profile_image_url,
-                            apple_id: nil,
-                            auth_provider: nil,
-                            role: nil
-                        )
+                        showingAllHypes = true
                     } label: {
-                        recentHypeRow(hype)
+                        Text("See all")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundColor(MADTheme.Colors.madRed)
                     }
                     .buttonStyle(.plain)
-                    if index < min(receivedHypes.count, 8) - 1 {
-                        Divider().overlay(Color.white.opacity(0.06)).padding(.leading, 52)
-                    }
                 }
             }
+
+            hypeRows(Array(receivedHypes.prefix(Self.hypePreviewCount)))
         }
         .padding(MADTheme.Spacing.md)
         .profileCard()
         .sheet(item: $hypeProfileUser) { user in
             NavigationStack {
                 UserProfileDetailView(user: user, friendService: friendService)
+            }
+        }
+        .sheet(isPresented: $showingAllHypes) {
+            allHypesSheet
+        }
+    }
+
+    /// The full received list, same rows as the card. A row tap closes this
+    /// sheet FIRST and then opens the sender's profile from the card's own
+    /// sheet — two sheets can't be up on one node at once.
+    private var allHypesSheet: some View {
+        NavigationStack {
+            ScrollView {
+                hypeRows(receivedHypes, dismissFirst: true)
+                    .padding(MADTheme.Spacing.md)
+                    .profileCard()
+                    .padding(MADTheme.Spacing.md)
+                    .lockedToScrollWidth()
+            }
+            .scrollContentBackground(.hidden)
+            .background(MADTheme.Colors.appBackgroundGradient.ignoresSafeArea())
+            .navigationTitle("Hypes")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { showingAllHypes = false }
+                }
+            }
+        }
+    }
+
+    private func hypeRows(_ hypes: [ReceivedHype], dismissFirst: Bool = false) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(hypes.enumerated()), id: \.element.id) { index, hype in
+                Button {
+                    MADHaptics.tap()
+                    let user = BackendUser(
+                        user_id: hype.sender_id,
+                        username: hype.username,
+                        email: nil,
+                        first_name: hype.first_name,
+                        last_name: hype.last_name,
+                        bio: nil,
+                        profile_image_url: hype.profile_image_url,
+                        apple_id: nil,
+                        auth_provider: nil,
+                        role: nil
+                    )
+                    if dismissFirst {
+                        showingAllHypes = false
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 450_000_000)
+                            hypeProfileUser = user
+                        }
+                    } else {
+                        hypeProfileUser = user
+                    }
+                } label: {
+                    recentHypeRow(hype)
+                }
+                .buttonStyle(.plain)
+                if index < hypes.count - 1 {
+                    Divider().overlay(Color.white.opacity(0.06)).padding(.leading, 52)
+                }
             }
         }
     }
@@ -406,13 +454,9 @@ struct ProfileView: View {
     }
 
     private static func relativeHypeTime(_ iso: String) -> String {
-        let parse = ISO8601DateFormatter()
-        parse.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = parse.date(from: iso) ?? {
-            parse.formatOptions = [.withInternetDateTime]
-            return parse.date(from: iso)
-        }()
-        guard let date else { return "" }
+        // Memoised parse (fractional, then whole seconds) — a formatter per
+        // row per body pass was the cost here.
+        guard let date = RelativeTime.date(from: iso) else { return "" }
         let secs = Date().timeIntervalSince(date)
         if secs < 60 { return "just now" }
         if secs < 3600 { return "\(Int(secs / 60))m ago" }
@@ -430,42 +474,35 @@ struct ProfileView: View {
             // fast am I", and a race history buried a tap deeper is a race
             // history nobody reads. Self-scoped, so it's own-profile only.
             GhostRacesSection()
-            routeHeatmapCard
+            routeHeatmapRow
         }
     }
 
-    /// Entry point into the full-screen personal route heatmap.
-    private var routeHeatmapCard: some View {
+    /// Entry point into the full-screen personal route heatmap — a slim row
+    /// at the foot of the tab, not a card competing with the stats above it.
+    private var routeHeatmapRow: some View {
         Button {
+            MADHaptics.tap()
             showingRouteHeatmap = true
         } label: {
-            HStack(spacing: MADTheme.Spacing.md) {
-                ZStack {
-                    Circle()
-                        .fill(MADTheme.Colors.madRed.opacity(0.15))
-                        .frame(width: 40, height: 40)
-                    Image(systemName: "map.fill")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(MADTheme.Colors.madRed)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Route Heatmap")
-                        .font(MADTheme.Typography.headline)
-                        .foregroundColor(.primary)
-                    Text("Every walk and run, painted on one map")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
+            HStack(spacing: 10) {
+                Image(systemName: "map.fill")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(MADTheme.Colors.madRed)
+                    .accessibilityHidden(true)
+                Text("Route Heatmap")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white.opacity(0.35))
+                    .accessibilityHidden(true)
             }
-            .padding(MADTheme.Spacing.md)
-            .madLiquidGlass()
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .profileCard()
+            .contentShape(Rectangle())
         }
         .buttonStyle(ScaleButtonStyle())
     }
@@ -515,6 +552,18 @@ struct ProfileView: View {
         }
     }
 
+    /// `todaysDistance` publishes every few seconds during a walk, and a
+    /// workout landing moves several of these inputs at once — coalesce the
+    /// burst into one rebuild.
+    private func scheduleOwnLocalLast7Refresh() {
+        ownLast7RefreshTask?.cancel()
+        ownLast7RefreshTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            refreshOwnLocalLast7Activity()
+        }
+    }
+
     private func refreshOwnLocalLast7Activity() {
         let activity = makeOwnLocalLast7Activity()
         ownDayTotals = activity.dayTotals
@@ -528,11 +577,15 @@ struct ProfileView: View {
             calendar.date(byAdding: .day, value: -offset, to: today)
         }
         let daysToInclude = Set(days)
+        // A workout's local day is the start of its START date, so anything
+        // starting before the oldest day can't land in the window — skip it
+        // before the registry/dedup work rather than walking all of history.
+        let windowStart = days.first ?? today
 
         var grouped: [Date: [HKWorkout]] = [:]
         var seenIds = Set<String>()
 
-        for workout in healthManager.cachedWorkouts {
+        for workout in healthManager.cachedWorkouts where workout.startDate >= windowStart {
             let id = workout.uuid.uuidString
             #if !os(watchOS)
             if DeletedWorkoutRegistry.contains(id) { continue }
@@ -626,7 +679,7 @@ struct ProfileView: View {
     /// Is today's mile in? Clamp the goal first — the tolerance helper is
     /// vacuously true at 0. A locked device reads today's distance as 0, so
     /// the streak's own "done today" stamp also counts. ONE rule for the goal
-    /// ring, the streak tile and the daily-goal row, so they can't disagree.
+    /// ring and the streak tile, so they can't disagree.
     private var ownGoalDoneToday: Bool {
         let goal = userManager.currentUser.goalMiles
         return (goal > 0 && ProgressCalculator.isGoalCompleted(current: healthManager.todaysDistance, goal: goal))
@@ -639,14 +692,14 @@ struct ProfileView: View {
     /// pick the wrong day. Suppressed once the mile is genuinely in: the
     /// server refunds the coverage on that upload, and until the next stats
     /// read lands the payload still carries it. ONE rule for the goal ring,
-    /// the streak tile and the daily-goal row, like `ownGoalDoneToday`.
+    /// the streak tile and the saved-today banner, like `ownGoalDoneToday`.
     private var ownSavedToday: CoveredDate? {
         guard !ownGoalDoneToday else { return nil }
         return tokensState.payload?.today_covered
     }
 
     /// Banner (photo or gradient preset) with the avatar in today's goal ring
-    /// hanging off it, and the wordmark + QR/edit/settings buttons riding the
+    /// hanging off it, and the wordmark + share/edit buttons riding the
     /// top. Tapping the avatar opens Edit Profile, same as the pencil.
     private func profileHero(topInset: CGFloat) -> some View {
         let goal = userManager.currentUser.goalMiles
@@ -672,19 +725,24 @@ struct ProfileView: View {
             HStack(alignment: .center) {
                 ProfileWordmark()
                 Spacer()
+                // Two controls: Share (streak card or QR) and Edit. Settings
+                // lives behind the Dashboard gear only — ONE door to one page.
                 HStack(spacing: 8) {
-                    ProfileBannerButton(systemImage: "square.and.arrow.up", accessibilityLabel: "Share your streak") {
-                        MADHaptics.action()
-                        showingShareStudio = true
-                    }
-                    ProfileBannerButton(systemImage: "qrcode", accessibilityLabel: "Share profile") {
-                        showingShareProfile = true
+                    ProfileBannerMenu(systemImage: "square.and.arrow.up", accessibilityLabel: "Share") {
+                        Button {
+                            MADHaptics.action()
+                            showingShareStudio = true
+                        } label: {
+                            Label("Share my streak", systemImage: "flame")
+                        }
+                        Button {
+                            showingShareProfile = true
+                        } label: {
+                            Label("My QR code", systemImage: "qrcode")
+                        }
                     }
                     ProfileBannerButton(systemImage: "pencil", accessibilityLabel: "Edit profile") {
                         showingEditProfile = true
-                    }
-                    ProfileBannerButton(systemImage: "gearshape.fill", accessibilityLabel: "Settings") {
-                        showingSettings = true
                     }
                 }
             }
@@ -786,124 +844,6 @@ struct ProfileView: View {
         }
     }
 
-    // MARK: - Daily Goal Row
-
-    /// The day's target and whether it's in. The streak number itself lives in
-    /// the header tiles now, so this is only the goal — one compact row rather
-    /// than the old two-card block.
-    private var dailyGoalRow: some View {
-        let done = ownGoalDoneToday
-        let saved = ownSavedToday
-        let goalMiles = userManager.currentUser.goalMiles
-        let remaining = max(0, goalMiles - healthManager.todaysDistance)
-        // Remaining CEILs — never promise the goal is closer than it is.
-        let remainingText = String(format: "%.2f to go", (remaining * 100).rounded(.up) / 100)
-        // A covered day still has miles to run — the token bought the STREAK,
-        // not the mile — so the row keeps counting down and only the status
-        // pill changes. Saying "Done today" here would be a lie the user can
-        // disprove by looking at their own watch.
-        let statusText = done ? "Done today" : remainingText
-        let accent: Color = done ? .green : (saved != nil ? SavedDayStyle.tint : MADTheme.Colors.madRed)
-
-        return HStack(spacing: MADTheme.Spacing.md) {
-            goalIcon(done: done, saved: saved, accent: accent)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("DAILY GOAL")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                    .tracking(1.0)
-                    .foregroundColor(.white.opacity(0.5))
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(String(format: "%.1f", goalMiles))
-                        .font(.system(size: 20, weight: .black, design: .rounded))
-                        .foregroundColor(.white)
-                        .monospacedDigit()
-                    Text("mi")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.55))
-                }
-            }
-
-            Spacer()
-
-            goalStatusPill(text: statusText, done: done, saved: saved != nil)
-
-            goalEditButton
-        }
-        .padding(14)
-        .background(goalRowBackground)
-        .sheet(isPresented: $showGoalSheet) {
-            GoalSettingSheet(
-                currentGoal: userManager.currentUser.goalMiles,
-                onSave: { newGoal in
-                    userManager.setDailyGoal(miles: newGoal)
-                    // The widgets score today against the goal — mirror the
-                    // App Group write Settings does, or the home screen keeps
-                    // the old number.
-                    WidgetDataStore.save(
-                        todayMiles: healthManager.todaysDistance,
-                        goal: newGoal
-                    )
-                }
-            )
-            .presentationDetents([.height(300)])
-        }
-    }
-
-    /// Pencil that opens the goal editor. Lives on the row rather than behind
-    /// Settings alone so the number is changeable where it's read.
-    private var goalEditButton: some View {
-        Button {
-            MADHaptics.tap()
-            showGoalSheet = true
-        } label: {
-            Image(systemName: "pencil")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(.white.opacity(0.8))
-                .frame(width: 30, height: 30)
-                .background(Circle().fill(Color.white.opacity(0.08)))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Edit daily goal")
-    }
-
-    private func goalIcon(done: Bool, saved: CoveredDate?, accent: Color) -> some View {
-        let glyph = done ? "checkmark" : (saved.map { SavedDayStyle.icon(for: $0.kind) } ?? "target")
-        return ZStack {
-            Circle()
-                .fill(accent.opacity(0.15))
-                .frame(width: 40, height: 40)
-            Image(systemName: glyph)
-                .font(.system(size: 17, weight: .bold))
-                .foregroundColor(accent)
-        }
-    }
-
-    private func goalStatusPill(text: String, done: Bool, saved: Bool) -> some View {
-        let accent: Color? = done ? .green : (saved ? SavedDayStyle.tint : nil)
-        let fill: Color = accent.map { $0.opacity(0.12) } ?? Color.white.opacity(0.06)
-        let stroke: Color = accent.map { $0.opacity(0.3) } ?? Color.white.opacity(0.12)
-        return Text(text)
-            .font(.system(size: 12, weight: .heavy, design: .rounded))
-            .monospacedDigit()
-            .foregroundColor(accent ?? .white.opacity(0.7))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(fill))
-            .overlay(Capsule().strokeBorder(stroke, lineWidth: 1))
-    }
-
-    private var goalRowBackground: some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(Color.white.opacity(0.06))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
-            )
-    }
-
     // MARK: - Performance Stats
 
     private var performanceSection: some View {
@@ -919,19 +859,6 @@ struct ProfileView: View {
             }
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: MADTheme.Spacing.md) {
-                Button {
-                    activeSheet = .totalMiles
-                } label: {
-                    MADStatCard(
-                        title: "Total Miles",
-                        value: userManager.currentUser.totalMiles.milesFormatted,
-                        icon: "map.fill",
-                        iconColor: .blue,
-                        backgroundColor: .blue.opacity(0.1)
-                    )
-                }
-                .buttonStyle(ScaleButtonStyle())
-
                 Button {
                     activeSheet = .fastestPace
                 } label: {
@@ -959,8 +886,16 @@ struct ProfileView: View {
                 .buttonStyle(ScaleButtonStyle())
 
                 MADStatCard(
-                    title: "Avg/Day",
-                    value: String(format: "%.1f mi", userManager.currentUser.streak > 0 ? userManager.currentUser.totalMiles / Double(userManager.currentUser.streak) : 0),
+                    title: "Active Days",
+                    value: activeDayStats.map { $0.days.formatted(.number.grouping(.automatic)) } ?? "—",
+                    icon: "calendar.badge.checkmark",
+                    iconColor: .orange,
+                    backgroundColor: .orange.opacity(0.1)
+                )
+
+                MADStatCard(
+                    title: "Avg / Active Day",
+                    value: activeDayStats.map { ($0.miles / Double($0.days)).distanceFormatted } ?? "—",
                     icon: "chart.bar.fill",
                     iconColor: .purple,
                     backgroundColor: .purple.opacity(0.1)
@@ -971,6 +906,10 @@ struct ProfileView: View {
         .madLiquidGlass()
     }
 
+
+    /// Days with counted miles and the miles on them — see
+    /// `HealthKitManager.activeDayStats`. Nil until the index exists.
+    private var activeDayStats: (days: Int, miles: Double)? { healthManager.activeDayStats }
 
     // MARK: - Helpers
 
@@ -1141,112 +1080,6 @@ struct MADSettingsRow: View {
                 .foregroundColor(.secondary)
         }
         .padding(.vertical, MADTheme.Spacing.xs)
-    }
-}
-
-// MARK: - Own Today's Challenge Card
-
-/// Compact "today's daily challenge" status on your own profile — mirrors the
-/// friend-profile row but adds a live progress bar and links into the full
-/// Daily Challenges screen. Reads server-authoritative state from the service.
-private struct OwnTodayChallengeCard: View {
-    @ObservedObject var healthManager: HealthKitManager
-    @ObservedObject var userManager: UserManager
-
-    @State private var challenge: DailyChallenge?
-    @State private var completed = false
-    @State private var progress: Double = 0
-
-    var body: some View {
-        Group {
-            if let challenge = challenge {
-                NavigationLink {
-                    DailyChallengesView(healthManager: healthManager, userManager: userManager)
-                } label: {
-                    card(challenge)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .onAppear(perform: refresh)
-        .onReceive(NotificationCenter.default.publisher(for: ChallengeService.changedNotification)) { _ in
-            refresh()
-        }
-    }
-
-    private func card(_ challenge: DailyChallenge) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(
-                            colors: completed ? [.green, .green.opacity(0.8)] : challenge.gradient,
-                            startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 44, height: 44)
-                    Image(systemName: completed ? "checkmark" : challenge.icon)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(.white)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("TODAY'S CHALLENGE")
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
-                        .tracking(1.0)
-                        .foregroundColor(.white.opacity(0.5))
-                    Text(challenge.title)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                }
-
-                Spacer()
-
-                HStack(spacing: 4) {
-                    Image(systemName: completed ? "checkmark.circle.fill" : "hourglass")
-                        .font(.system(size: 11, weight: .bold))
-                    Text(completed ? "Done" : "In progress")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
-                }
-                .foregroundColor(completed ? .green : .white.opacity(0.55))
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule()
-                        .fill(completed ? Color.green.opacity(0.12) : Color.white.opacity(0.06))
-                        .overlay(Capsule().strokeBorder(
-                            completed ? Color.green.opacity(0.3) : Color.white.opacity(0.12), lineWidth: 1))
-                )
-            }
-
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.white.opacity(0.1))
-                        .frame(height: 6)
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(LinearGradient(
-                            colors: completed ? [.green, .green] : challenge.gradient,
-                            startPoint: .leading, endPoint: .trailing))
-                        .frame(width: max(6, min(progress, 1.0) * geo.size.width), height: 6)
-                        .animation(.easeOut(duration: 0.5), value: progress)
-                }
-            }
-            .frame(height: 6)
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(.white.opacity(0.06))
-                .overlay(RoundedRectangle(cornerRadius: 14)
-                    .stroke(.white.opacity(0.1), lineWidth: 1))
-        )
-    }
-
-    private func refresh() {
-        guard let remote = ChallengeService.shared as? RemoteChallengeService else { return }
-        challenge = remote.todayChallenge
-        completed = remote.todayCompleted
-        progress = remote.todayProgress
     }
 }
 

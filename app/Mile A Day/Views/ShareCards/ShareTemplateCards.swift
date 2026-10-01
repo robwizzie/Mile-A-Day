@@ -95,49 +95,370 @@ struct ShareStatRail: View {
 /// (no face, ungrounded), Fun ⇒ `FlameBuddyView` (Flamey). Used by the
 /// Streak family, which is about the number and so wears the app's own look.
 /// The Flamey family always draws Flamey — he IS that card.
+///
+/// On Fun he wears his look, so he is FITTED (`ShareDressedFigure`): `size`
+/// is the bare figure, and a look that reaches past it (wings, a companion,
+/// a trail, a banner) shrinks him until the WHOLE outfit keeps inside
+/// `maxWidth` × `maxHeight`. `hugsArt` makes the layout frame the outfit's
+/// own width (a corner placement); otherwise it stays `size` wide, centred.
 struct ShareStyleFlame: View {
     let size: CGFloat
+    var maxWidth: CGFloat? = nil
+    var maxHeight: CGFloat? = nil
+    var hugsArt: Bool = false
+    var headroom: CGFloat = ShareFlameyEnvelope.bareGlowAbove
 
     var body: some View {
-        Group {
-            switch DashboardStylePreference.current {
-            case .fun:
-                // No `mood`: the hero's props and bubble are live-dashboard
-                // dressing, and a bubble baked into a picture reads as a
-                // caption nobody wrote.
-                // His look (gear + today's outfit) — the SAME description the
-                // hero draws, still-rendered.
-                FlameBuddyView(health: .blazing, size: size,
+        switch DashboardStylePreference.current {
+        case .fun:
+            // No `mood`: the hero's props and bubble are live-dashboard
+            // dressing, and a bubble baked into a picture reads as a
+            // caption nobody wrote.
+            // His look (gear + today's outfit) — the SAME description the
+            // hero draws, still-rendered.
+            let look = FlameyFacts.look()
+            ShareDressedFigure(envelope: ShareFlameyEnvelope(look: look), size: size,
+                               maxWidth: maxWidth ?? size * 2, maxHeight: maxHeight ?? size * 1.3,
+                               hugsArt: hugsArt, headroom: headroom) { d in
+                FlameBuddyView(health: .blazing, size: d,
                                phase: .blazing, coalWarmth: 1, still: true,
-                               look: FlameyFacts.look())
-            case .modern:
-                ProfessionalFlameView(phase: .blazing, health: .blazing,
-                                      size: size, coalWarmth: 1, still: true)
+                               look: look)
             }
+            .accessibilityHidden(true)
+        case .modern:
+            ProfessionalFlameView(phase: .blazing, health: .blazing,
+                                  size: size, coalWarmth: 1, still: true)
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
         }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
     }
 }
 
 /// Flamey, the character. The REAL `FlameBuddyView`, blazing and still, in a
 /// mood that renders as a still — shades once the mile is banked, the party
-/// hat on a milestone — and never with his speech bubble.
+/// hat on a milestone — and never with his speech bubble. FITTED to his
+/// outfit like `ShareStyleFlame` (`ShareDressedFigure`).
+///
+/// `streakTag` hangs the day count on him as a tilted tag. It sits at his
+/// lower right — unless a companion stands there, when it moves to his
+/// lower left, and under his feet when both sides are taken.
 struct ShareFlamey: View {
     let size: CGFloat
     var mood: FlameMood.Kind? = .done
     var streak: Int = 0
+    /// Total drawn width the outfit may take, centred on the card.
+    var maxWidth: CGFloat = 332
+    /// Layout height the figure (headroom included) may take.
+    var maxHeight: CGFloat? = nil
+    var streakTag: Int? = nil
 
     var body: some View {
-        FlameBuddyView(health: .blazing, size: size,
-                       phase: .blazing, coalWarmth: 1,
-                       mood: mood.map { FlameMood(kind: $0, streak: streak) },
-                       still: true, showsMoodBubble: false,
-                       // Wearing what he wears on the dashboard today; the
-                       // look carries the mood's shades / party hat.
-                       look: FlameyFacts.look(mood: mood))
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
+        // Wearing what he wears on the dashboard today; the look carries the
+        // mood's shades / party hat.
+        let look = FlameyFacts.look(mood: mood)
+        let side = Self.tagSide(ShareFlameyEnvelope(look: look, mood: mood))
+        ShareDressedFigure(envelope: envelope(look: look, tagSide: side), size: size, maxWidth: maxWidth,
+                           maxHeight: maxHeight ?? size * 1.3,
+                           accessory: streakTag.map { tag in
+                               { (fit: ShareDressedFigure<FlameBuddyView>.Fit) in
+                                   AnyView(Self.tag(tag, fit: fit, side: side))
+                               }
+                           }) { d in
+            FlameBuddyView(health: .blazing, size: d,
+                           phase: .blazing, coalWarmth: 1,
+                           mood: mood.map { FlameMood(kind: $0, streak: streak) },
+                           still: true, showsMoodBubble: false,
+                           look: look)
+        }
+        // A tag under his feet takes room the headline would otherwise sit in.
+        .padding(.bottom, streakTag != nil && side == 0 ? Self.tagDrop + 30 : 0)
+        .accessibilityHidden(true)
+    }
+
+    /// The outfit's reach, plus a side tag's: the tag is part of the
+    /// picture, so it is fitted inside the card with him rather than hung
+    /// off an edge a shifted outfit has already reached.
+    private func envelope(look: FlameyLook?, tagSide side: CGFloat) -> ShareFlameyEnvelope {
+        var e = ShareFlameyEnvelope(look: look, mood: mood)
+        guard streakTag != nil, side != 0 else { return e }
+        let reach = 0.48 + Self.tagHalfWidth / size
+        if side > 0 { e.right = max(e.right, reach) } else { e.left = min(e.left, -reach) }
+        return e
+    }
+
+    /// Half the tag's drawn width (two digits, tilted), in points.
+    private static let tagHalfWidth: CGFloat = 46
+
+    private static func tag(_ value: Int, fit: ShareDressedFigure<FlameBuddyView>.Fit,
+                            side: CGFloat) -> some View {
+        let d = fit.figureSize
+        return Text("\(value)")
+            .font(.system(size: 40, weight: .black, design: .rounded))
+            .monospacedDigit()
+            .foregroundColor(Color(red: 0.10, green: 0.05, blue: 0.06))
+            .lineLimit(1)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(MADTheme.Colors.warning))
+            .rotationEffect(.degrees(side == 0 ? -4 : 6 * side))
+            .shadow(color: .black.opacity(0.4), radius: 12, x: 0, y: 8)
+            // Bare, this is where the tag always hung (34pt past the frame's
+            // bottom corner, overlapping his hip); centred under his feet
+            // when both sides are dressed.
+            .position(x: fit.center.x + side * 0.48 * d,
+                      y: fit.center.y + (side == 0 ? 0.5 * d + tagDrop : 0.34 * d))
+    }
+
+    /// +1 his lower right (where it always hung), −1 his lower left, 0 under
+    /// his feet — in that order of preference, by which sides the outfit
+    /// fills (a companion right, a trail or a held prop left, wings both).
+    /// Read off the measured envelope, so a new item needs no list here.
+    private static func tagSide(_ e: ShareFlameyEnvelope) -> CGFloat {
+        let rightBusy = e.right > 0.62
+        let leftBusy = e.left < -0.62
+        return rightBusy ? (leftBusy ? 0 : -1) : 1
+    }
+
+    /// How far a tag under his feet hangs below his size square (its centre),
+    /// and so how much room the card must leave under him for it.
+    private static let tagDrop: CGFloat = 16
+}
+
+/// How far a dressed Flamey actually reaches, in units of his `size` from
+/// the centre of his size square (y down) — MEASURED per item off the real
+/// drawings at full reach (alpha > 25%, `FlameBuddyView` blazing + still),
+/// not guessed. A look's reach is the union of its items'. Bare, his glow
+/// already runs a little past the square; everything else is the outfit:
+/// wings to ±0.92, a companion to +1.07 at his right foot, trails and held
+/// props to −1.17 on his left, a banner or the paparazzi flashes to −1.07
+/// above. An item missing here draws within the bare envelope — a NEW item
+/// that reaches further needs a row, or a share card can clip it.
+struct ShareFlameyEnvelope: Equatable {
+    var left: CGFloat
+    var right: CGFloat
+    var top: CGFloat
+    var bottom: CGFloat
+
+    static let bare = Self(left: -0.45, right: 0.46, top: -0.69, bottom: 0.52)
+
+    /// The bare glow's reach above the size square, in units of size: the
+    /// part of the art that always overflowed the frame and still may.
+    static var bareGlowAbove: CGFloat { -0.5 - bare.top }
+
+    init(left: CGFloat, right: CGFloat, top: CGFloat, bottom: CGFloat) {
+        self.left = left; self.right = right; self.top = top; self.bottom = bottom
+    }
+
+    /// `mood` is the mood his `FlameBuddyView` draws (its props rise
+    /// above him even when a costume keeps the party hat off).
+    init(look: FlameyLook?, mood: FlameMood.Kind? = nil) {
+        self = .bare
+        guard let look else { return }
+        // Tops are kept apart from the shoes' own row: a hover lifts every
+        // OTHER piece with his body, which the per-item rows can't see.
+        var topAbove = Self.bare.top
+        for item in look.items {
+            guard let r = Self.reach(item) else { continue }
+            left = min(left, r.left); right = max(right, r.right)
+            bottom = max(bottom, r.bottom)
+            if item.slot == .feet { top = min(top, r.top) } else { topAbove = min(topAbove, r.top) }
+        }
+        // The rest was measured on combinations: the party mood's props
+        // crest like the party hat whatever he wears, and a companion mirrors
+        // him (arms up); a cape steps the companion out and lays the trail
+        // low and longer.
+        let cape = look[.back].map(FlameyArt.isCape) ?? false
+        if mood == .party {
+            topAbove = min(topAbove, -0.85)
+            if look[.companion] != nil { right += 0.08 }
+        }
+        if cape, look[.companion] != nil { right += 0.07 }
+        if cape, look[.trail] != nil { left -= 0.03 }
+        if look.hoverLift > 0, topAbove < Self.bare.top - 0.01 { topAbove -= look.hoverLift + 0.03 }
+        top = min(top, topAbove)
+    }
+
+    // Generated from the measure pass (union per look, rounded outward).
+    static func reach(_ item: FlameyItem) -> Self? {
+        switch item {
+        case .paparazzi:
+            return Self(left: -0.83, right: 0.83, top: -1.07, bottom: 0.52)
+        case .victoryBanner:
+            return Self(left: -0.45, right: 0.64, top: -1.06, bottom: 0.52)
+        case .partyHat, .headlampHelmet, .crown, .vikingHelmet, .bunnyEars, .countdownHat:
+            return Self(left: -0.45, right: 0.46, top: -0.84, bottom: 0.52)
+        case .ghostSheet:
+            return Self(left: -0.47, right: 0.47, top: -0.83, bottom: 0.52)
+        case .leprechaunHat, .starHat:
+            return Self(left: -0.45, right: 0.46, top: -0.82, bottom: 0.52)
+        case .rocketBoots:
+            return Self(left: -0.45, right: 0.46, top: -0.82, bottom: 0.53)
+        case .beanie:
+            return Self(left: -0.45, right: 0.46, top: -0.81, bottom: 0.52)
+        case .meteorShower:
+            return Self(left: -1.05, right: 0.46, top: -0.80, bottom: 0.52)
+        case .spectralGlow:
+            return Self(left: -0.52, right: 0.52, top: -0.80, bottom: 0.52)
+        case .santaHat, .heartBopper:
+            return Self(left: -0.45, right: 0.46, top: -0.79, bottom: 0.52)
+        case .wingedSandals:
+            return Self(left: -0.45, right: 0.46, top: -0.78, bottom: 0.52)
+        case .prism:
+            return Self(left: -0.58, right: 0.58, top: -0.77, bottom: 0.53)
+        case .eternal:
+            return Self(left: -0.63, right: 0.70, top: -0.76, bottom: 0.52)
+        case .cosmic:
+            return Self(left: -0.58, right: 0.58, top: -0.76, bottom: 0.52)
+        case .pumpkinSuit:
+            return Self(left: -0.45, right: 0.46, top: -0.76, bottom: 0.52)
+        case .nightcap, .cowboyHat:
+            return Self(left: -0.45, right: 0.46, top: -0.75, bottom: 0.52)
+        case .aviatorCap:
+            return Self(left: -0.45, right: 0.46, top: -0.74, bottom: 0.52)
+        case .safariHat, .directorsBeret:
+            return Self(left: -0.45, right: 0.46, top: -0.73, bottom: 0.52)
+        case .astronautHelmet:
+            return Self(left: -0.52, right: 0.52, top: -0.72, bottom: 0.52)
+        case .ballCap, .bucketHat:
+            return Self(left: -0.45, right: 0.46, top: -0.72, bottom: 0.52)
+        case .laurelWreath:
+            return Self(left: -0.45, right: 0.46, top: -0.71, bottom: 0.52)
+        case .megaphone:
+            return Self(left: -1.17, right: 0.46, top: -0.69, bottom: 0.52)
+        case .dustPuffs:
+            return Self(left: -1.09, right: 0.46, top: -0.69, bottom: 0.53)
+        case .checkeredFlag:
+            return Self(left: -1.08, right: 0.46, top: -0.69, bottom: 0.52)
+        case .confettiCannon, .smokeRings, .phoenixFeathers:
+            return Self(left: -1.07, right: 0.46, top: -0.69, bottom: 0.52)
+        case .rainbowStreak:
+            return Self(left: -1.06, right: 0.46, top: -0.69, bottom: 0.52)
+        case .lightningTrail, .fireworks:
+            return Self(left: -1.05, right: 0.46, top: -0.69, bottom: 0.52)
+        case .starTrail:
+            return Self(left: -1.04, right: 0.46, top: -0.69, bottom: 0.52)
+        case .auroraRibbon:
+            return Self(left: -1.00, right: 0.46, top: -0.69, bottom: 0.52)
+        case .emberSparks:
+            return Self(left: -0.95, right: 0.46, top: -0.69, bottom: 0.52)
+        case .goldenWings:
+            return Self(left: -0.92, right: 0.92, top: -0.69, bottom: 0.52)
+        case .speedLines:
+            return Self(left: -0.92, right: 0.46, top: -0.69, bottom: 0.52)
+        case .cometTail:
+            return Self(left: -0.91, right: 0.46, top: -0.69, bottom: 0.52)
+        case .spotlight:
+            return Self(left: -0.74, right: 0.69, top: -0.69, bottom: 0.60)
+        case .gold:
+            return Self(left: -0.63, right: 0.70, top: -0.69, bottom: 0.52)
+        case .stopwatch:
+            return Self(left: -0.61, right: 0.46, top: -0.69, bottom: 0.52)
+        case .pomPoms:
+            return Self(left: -0.61, right: 0.61, top: -0.69, bottom: 0.52)
+        case .foamFinger:
+            return Self(left: -0.58, right: 0.46, top: -0.69, bottom: 0.52)
+        case .flicker:
+            return Self(left: -0.55, right: 0.46, top: -0.69, bottom: 0.52)
+        case .redCape, .blueCape, .royalCape, .championCape:
+            return Self(left: -0.53, right: 0.57, top: -0.69, bottom: 0.52)
+        case .turkeyFeathers:
+            return Self(left: -0.53, right: 0.53, top: -0.69, bottom: 0.52)
+        case .lavaLamp:
+            return Self(left: -0.48, right: 0.47, top: -0.69, bottom: 0.52)
+        case .candy:
+            return Self(left: -0.46, right: 0.46, top: -0.69, bottom: 0.52)
+        case .neonSoles, .lightningKicks:
+            return Self(left: -0.45, right: 0.46, top: -0.69, bottom: 0.56)
+        case .spark, .lantern:
+            return Self(left: -0.45, right: 0.93, top: -0.69, bottom: 0.52)
+        case .firefly:
+            return Self(left: -0.45, right: 0.95, top: -0.69, bottom: 0.52)
+        case .flameyJr:
+            return Self(left: -0.45, right: 0.93, top: -0.69, bottom: 0.53)
+        case .sparkTrio:
+            return Self(left: -0.45, right: 0.98, top: -0.69, bottom: 0.52)
+        case .phoenixChick, .cometPup:
+            return Self(left: -0.45, right: 1.07, top: -0.69, bottom: 0.52)
+        case .friendlyGhost:
+            return Self(left: -0.45, right: 1.00, top: -0.69, bottom: 0.52)
+        default:
+            return nil
+        }
+    }
+}
+
+/// A dressed figure fitted to a card. `size` is the BARE figure; the look's
+/// measured reach (`ShareFlameyEnvelope`) decides how much he shrinks so the
+/// whole outfit keeps inside `maxWidth` (drawn width) and `maxHeight`
+/// (layout height), and the layout frame grows ABOVE the size square for
+/// anything taller than his bare glow — so a crown pushes the headline down
+/// instead of sliding into the kicker. He is centred on the OUTFIT, not on
+/// his body: a companion on his right moves him left, a flag on his left
+/// moves him right, so the group sits in the middle of the card. A bare
+/// Flamey lays out exactly as `size × size` did before.
+struct ShareDressedFigure<Figure: View>: View {
+    let envelope: ShareFlameyEnvelope
+    let size: CGFloat
+    var maxWidth: CGFloat
+    var maxHeight: CGFloat
+    var hugsArt: Bool = false
+    /// How far above his size square solid outfit art (a hat, a flag) may
+    /// rise, in units of the fitted size, before he shrinks for it. Defaults
+    /// to the bare glow's own reach; a tight frame (the milestone ring,
+    /// whose stroke sits just above his glow) passes less.
+    var headroom: CGFloat = ShareFlameyEnvelope.bareGlowAbove
+    var accessory: ((Fit) -> AnyView)? = nil
+    @ViewBuilder let figure: (CGFloat) -> Figure
+
+    struct Fit {
+        /// The size the figure is drawn at.
+        let figureSize: CGFloat
+        /// Its size square's centre, in the layout frame's coordinates.
+        let center: CGPoint
+        let frame: CGSize
+    }
+
+    static func fit(envelope e: ShareFlameyEnvelope, size: CGFloat, maxWidth: CGFloat,
+                    maxHeight: CGFloat, hugsArt: Bool,
+                    headroom: CGFloat = ShareFlameyEnvelope.bareGlowAbove) -> Fit {
+        // Nothing taller than bare: his glow overflows the square as it
+        // always did. Anything taller is solid art, held to `headroom`.
+        let top = e.top >= ShareFlameyEnvelope.bare.top ? -0.5 : min(-0.5, e.top + headroom)
+        let bottom = max(0.5, e.bottom - 0.02)
+        let s = min(1,
+                    maxWidth / ((e.right - e.left) * size),
+                    maxHeight / ((bottom - top) * size))
+        let d = size * s
+        let height = (bottom - top) * d
+        if hugsArt {
+            let width = (e.right - e.left) * d
+            return Fit(figureSize: d, center: CGPoint(x: -e.left * d, y: -top * d),
+                       frame: CGSize(width: width, height: height))
+        }
+        return Fit(figureSize: d,
+                   center: CGPoint(x: d / 2 - (e.left + e.right) / 2 * d, y: -top * d),
+                   frame: CGSize(width: d, height: height))
+    }
+
+    var body: some View {
+        let fit = Self.fit(envelope: envelope, size: size,
+                           maxWidth: maxWidth, maxHeight: maxHeight, hugsArt: hugsArt,
+                           headroom: headroom)
+        let d = fit.figureSize
+        Color.clear
+            .frame(width: fit.frame.width, height: fit.frame.height)
+            .overlay(alignment: .topLeading) {
+                figure(d)
+                    .frame(width: d, height: d)
+                    .offset(x: fit.center.x - d / 2, y: fit.center.y - d / 2)
+            }
+            .overlay(alignment: .topLeading) {
+                if let accessory {
+                    accessory(fit)
+                        .frame(width: fit.frame.width, height: fit.frame.height)
+                }
+            }
     }
 }
 
@@ -547,7 +868,7 @@ struct BoldStreakShareCard: View {
                             .padding(.bottom, 8)
                     }
                     Spacer(minLength: 0)
-                    ShareStyleFlame(size: 92)
+                    ShareStyleFlame(size: 92, maxWidth: 170, maxHeight: 132, hugsArt: true)
                 }
                 ShareLockup()
             }
@@ -602,7 +923,10 @@ struct MilestoneShareCard: View {
                 .fill(Color(red: 0.10, green: 0.05, blue: 0.06))
                 .padding(6)
             VStack(spacing: 0) {
-                ShareStyleFlame(size: 70)
+                ShareStyleFlame(size: 70, maxWidth: 118, maxHeight: 70,
+                                // The ring's stroke sits just above his
+                                // glow: a hat may not climb into it.
+                                headroom: 0.04)
                 Text("DAY")
                     .font(.system(size: 13, weight: .black, design: .rounded))
                     .tracking(4)
@@ -658,7 +982,7 @@ struct FlameyMileShareCard: View {
             ShareGround(glow: MADTheme.Colors.warning, center: UnitPoint(x: 0.5, y: 0.42), strength: 0.42)
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
-                ShareFlamey(size: 220, mood: mileDone ? .done : nil, streak: streak)
+                ShareFlamey(size: 220, mood: mileDone ? .done : nil, streak: streak, maxHeight: 286)
                 Text(headline)
                     .font(.system(size: 52, weight: .black, design: .rounded))
                     .foregroundColor(.white)
@@ -696,21 +1020,8 @@ struct FlameyStreakShareCard: View {
             ShareGround(glow: MADTheme.Colors.warning, center: UnitPoint(x: 0.5, y: 0.35), strength: 0.45)
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
-                ShareFlamey(size: 210, mood: milestone ? .party : .done, streak: streak)
-                    .overlay(alignment: .bottomTrailing) {
-                        Text("\(streak)")
-                            .font(.system(size: 40, weight: .black, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundColor(Color(red: 0.10, green: 0.05, blue: 0.06))
-                            .lineLimit(1)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                .fill(MADTheme.Colors.warning))
-                            .rotationEffect(.degrees(6))
-                            .shadow(color: .black.opacity(0.4), radius: 12, x: 0, y: 8)
-                            .offset(x: 34, y: -4)
-                    }
+                ShareFlamey(size: 210, mood: milestone ? .party : .done, streak: streak,
+                            maxHeight: 280, streakTag: streak)
                 Text(streak == 1 ? "Day one.\nLit." : "\(streak) days.\nStill lit.")
                     .font(.system(size: 46, weight: .black, design: .rounded))
                     .foregroundColor(.white)
@@ -1033,7 +1344,7 @@ struct FlameyWeekShareCard: View {
                     Spacer(minLength: 0)
                     ShareFlamey(size: 180,
                                 mood: recap.goalDays == 7 ? .party : (recap.goalDays >= 4 ? .done : nil),
-                                streak: recap.currentStreak ?? 0)
+                                streak: recap.currentStreak ?? 0, maxHeight: 232)
                     Text(ShareCopy.distance(recap.totalMiles) ?? "0.00 \(DistanceUnits.current.abbreviation)")
                         .font(.system(size: 48, weight: .black, design: .rounded))
                         .monospacedDigit()

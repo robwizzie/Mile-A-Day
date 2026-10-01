@@ -148,21 +148,11 @@ struct WorkoutIndex: Codable {
     }
     
     private func dateKey(from date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar.current
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+        DayKeyFormatter.string(from: date)
     }
     
     private func dateFromKey(_ key: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar.current
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: key)
+        DayKeyFormatter.date(from: key)
     }
 }
 
@@ -273,6 +263,39 @@ final class WorkoutProcessor {
 }
 
 #endif
+
+/// The ONE "yyyy-MM-dd" day-key formatter (the WorkoutIndex's key format:
+/// current calendar + time zone, POSIX locale).
+///
+/// Every caller used to build a fresh `DateFormatter` per call, and the index
+/// is walked a day at a time — hundreds to thousands of formatter builds on
+/// the main thread on every dashboard refresh. Cached, and rebuilt only when
+/// the time zone or calendar actually changes, so a trip across zones still
+/// keys days the way it always did. Dependency-free on purpose: this file is
+/// a Watch member.
+enum DayKeyFormatter {
+    private static let lock = NSLock()
+    private static var cached: (DateFormatter, String)?
+
+    private static func formatter() -> DateFormatter {
+        let tz = TimeZone.current
+        let cal = Calendar.current
+        let signature = "\(tz.identifier)|\(cal.identifier)"
+        lock.lock(); defer { lock.unlock() }
+        if let (f, sig) = cached, sig == signature { return f }
+        let f = DateFormatter()
+        f.calendar = cal
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = tz
+        f.dateFormat = "yyyy-MM-dd"
+        cached = (f, signature)
+        return f
+    }
+
+    static func string(from date: Date) -> String { formatter().string(from: date) }
+    static func date(from key: String) -> Date? { formatter().date(from: key) }
+}
+
 class HealthKitManager: ObservableObject {
     static let shared = HealthKitManager()
     
@@ -366,11 +389,7 @@ class HealthKitManager: ObservableObject {
     @Published var hasLoadedRecentWorkoutsOnce: Bool = false
 
     private static func localDayStamp(for date: Date = Date()) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.calendar = Calendar.current
-        formatter.timeZone = TimeZone.current
-        return formatter.string(from: date)
+        DayKeyFormatter.string(from: date)
     }
 
     func checkInitialDataReady() {
@@ -542,7 +561,7 @@ class HealthKitManager: ObservableObject {
         if Thread.isMainThread {
             // Update cached values (these are @Published properties)
             cachedFastestMilePace = fastestMilePace
-            cachedMostMilesInOneDay = mostMilesInOneDay
+            if cachedMostMilesInOneDay != mostMilesInOneDay { cachedMostMilesInOneDay = mostMilesInOneDay }
             cachedTotalLifetimeMiles = totalLifetimeMiles
             cachedRetroactiveStreak = retroactiveStreak
             lastWorkoutCacheUpdate = Date()
@@ -551,7 +570,9 @@ class HealthKitManager: ObservableObject {
                 guard let self = self else { return }
                 // Update cached values (these are @Published properties)
                 self.cachedFastestMilePace = self.fastestMilePace
-                self.cachedMostMilesInOneDay = self.mostMilesInOneDay
+                if self.cachedMostMilesInOneDay != self.mostMilesInOneDay {
+                    self.cachedMostMilesInOneDay = self.mostMilesInOneDay
+                }
                 self.cachedTotalLifetimeMiles = self.totalLifetimeMiles
                 self.cachedRetroactiveStreak = self.retroactiveStreak
                 self.lastWorkoutCacheUpdate = Date()

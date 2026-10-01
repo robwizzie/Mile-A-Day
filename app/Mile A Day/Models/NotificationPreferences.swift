@@ -220,6 +220,28 @@ struct NotificationPreferences: Codable {
         set { flyoverVisibilityRaw = newValue.rawValue }
     }
 
+    /// Hide start & end: metres trimmed off each end of my routes for
+    /// everyone but me (0 = off). Server-ENFORCED (the trim happens on every
+    /// route read), so this local copy is a mirror — written after a
+    /// successful PUT and adopted from the server on the privacy screens — and
+    /// is what the share studio and my own detail sheets read to show the
+    /// same cut. Same optional-backing pattern (persisted blob); nil = the
+    /// server default, 1/8 mile.
+    private var routePrivacyMetersRaw: Int?
+    /// Defined HERE, not in `RoutePrivacyTrim`: this file is also a Watch
+    /// target member and that one is iPhone-only. Mirrors the server's
+    /// `ROUTE_PRIVACY_OPTIONS`; `RoutePrivacyTrim` reads these.
+    static let routePrivacyOptions: [Int] = [0, 201, 402, 805, 1609]
+    static let defaultRoutePrivacyMeters = 201
+    var routePrivacyMeters: Int {
+        get {
+            guard let raw = routePrivacyMetersRaw, Self.routePrivacyOptions.contains(raw)
+            else { return Self.defaultRoutePrivacyMeters }
+            return raw
+        }
+        set { routePrivacyMetersRaw = newValue }
+    }
+
     var workoutVisibility: WorkoutVisibility {
         get { workoutVisibilityRaw.flatMap(WorkoutVisibility.init(rawValue:)) ?? .friends }
         set { workoutVisibilityRaw = newValue.rawValue }

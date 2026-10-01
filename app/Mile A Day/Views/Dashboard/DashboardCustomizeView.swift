@@ -237,6 +237,38 @@ struct DashboardCustomizeRow: View {
     }
 }
 
+/// "Insights", the Customize row's sibling at the bottom of the dashboard.
+/// It was a header icon; the header now carries only the inbox and settings,
+/// and a destination you browse to belongs with the other quiet rows.
+struct DashboardInsightsRow: View {
+    let style: DashboardStyle
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            MADHaptics.tap()
+            action()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white.opacity(0.55))
+                Text("Insights")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(DashboardCardSurface(style: style))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// Look first, then the cards on the dashboard — in YOUR order, dragged by
 /// the handle — then the ones you could add. The day's cards up top aren't
 /// listed: they never move. Switching the look changes the dashboard live

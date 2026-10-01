@@ -23,10 +23,37 @@ struct BuddyRosterStrip: View {
     /// presents over the workout rather than under it.
     @State private var showInvite = false
     @State private var answeringIds: Set<String> = []
+    /// Who was on the walk when we last looked, so a mid-walk arrival is
+    /// ANNOUNCED rather than just appearing on the roster. Nil until seeded.
+    @State private var seenIds: Set<String>?
+    @State private var arrival: String?
+
+    /// Only the host invites on a close-friends / invite-only walk.
+    private var canInvite: Bool {
+        session.isHost(currentUserId) || session.joinPolicy == .friends
+    }
+
+    private var onWalkIds: [String] {
+        session.activeParticipants.map(\.userId).filter { $0 != currentUserId }.sorted()
+    }
 
     var body: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
             header
+
+            if let arrival {
+                HStack(spacing: 6) {
+                    Image(systemName: "person.crop.circle.badge.plus")
+                        .accessibilityHidden(true)
+                    Text(arrival)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+                .font(MADTheme.Typography.smallBold)
+                .foregroundStyle(MADTheme.Colors.madWhite)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
 
             if session.mode == .coopGoal {
                 CoopGoalBar(session: session)
@@ -54,7 +81,7 @@ struct BuddyRosterStrip: View {
                     // walker is actually looking at. It used to exist only in
                     // the lobby, which is gone the moment the walk starts, so
                     // "text Sam to join" was the whole feature mid-walk.
-                    inviteTile
+                    if canInvite { inviteTile }
                 }
                 .padding(.horizontal, MADTheme.Spacing.xs)
                 // A ScrollView CLIPS its content, and these tiles deliberately
@@ -76,6 +103,32 @@ struct BuddyRosterStrip: View {
         .madLiquidGlassCard()
         .sheet(isPresented: $showInvite) {
             BuddyInviteSheet(session: session)
+        }
+        // The people already walking when this appeared are the baseline,
+        // not arrivals; anyone after that gets a line, a haptic, and a few
+        // seconds on screen — "a friend just appeared" should never be news
+        // you have to notice for yourself.
+        .onAppear { if seenIds == nil { seenIds = Set(onWalkIds) } }
+        .onChange(of: onWalkIds) { _, ids in announceArrivals(ids) }
+    }
+
+    private func announceArrivals(_ ids: [String]) {
+        let now = Set(ids)
+        guard let seen = seenIds else { seenIds = now; return }
+        seenIds = now
+        let names = now.subtracting(seen).compactMap { id in
+            session.participants.first { $0.userId == id }?.displayName
+        }
+        guard let first = names.first else { return }
+        let line = names.count == 1
+            ? "\(first) joined the walk"
+            : "\(first) and \(names.count - 1) more joined the walk"
+        MADHaptics.success()
+        withAnimation(MADTheme.Animation.quick) { arrival = line }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+            if arrival == line {
+                withAnimation(MADTheme.Animation.quick) { arrival = nil }
+            }
         }
     }
 
@@ -212,6 +265,10 @@ struct BuddyRosterStrip: View {
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.9))
 
             Spacer()
+
+            // Who else can drop in — and, for the host, the switch for it,
+            // reachable mid-walk without leaving the tracker.
+            BuddyJoinPolicyControl(session: session, style: .compact)
 
             if session.mode == .raceTime, let endsAt = session.endsAtDate {
                 Text(endsAt, style: .timer)

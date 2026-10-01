@@ -9,14 +9,9 @@ struct TotalMilesDetailView: View {
         userManager.currentUser.totalMiles
     }
 
-    private var streak: Int {
-        userManager.currentUser.streak
-    }
-
-    private var avgPerDay: Double {
-        guard streak > 0 else { return 0 }
-        return totalMiles / Double(streak)
-    }
+    /// Days with miles and the average across them — NOT the current
+    /// streak, which this screen used to show as "Days Active" and divide by.
+    private var activeDays: (days: Int, miles: Double)? { healthManager.activeDayStats }
 
     /// Miles badges from the user's badge list, sorted by mile threshold
     private var milesBadges: [Badge] {
@@ -99,13 +94,13 @@ struct TotalMilesDetailView: View {
         HStack(spacing: MADTheme.Spacing.sm) {
             DashboardStatBox(
                 title: "Days Active",
-                value: "\(streak)",
-                icon: "flame.fill",
+                value: activeDays.map { $0.days.formatted() } ?? "—",
+                icon: "calendar",
                 color: .orange
             )
             DashboardStatBox(
-                title: "Avg/Day",
-                value: String(format: "%.1f mi", avgPerDay),
+                title: "Avg / Active Day",
+                value: activeDays.map { ($0.miles / Double($0.days)).distanceFormatted } ?? "—",
                 icon: "chart.bar.fill",
                 color: MADTheme.Colors.madRed
             )

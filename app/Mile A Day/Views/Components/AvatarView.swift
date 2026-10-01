@@ -11,13 +11,15 @@ struct AvatarView: View {
         Group {
             if let urlPath = imageURL, !urlPath.isEmpty,
                let url = ProfileImageService.fullImageURL(for: urlPath) {
-                AsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    initialsView
-                }
+                // Cached + downsampled to the avatar's own size: AsyncImage
+                // kept no memory cache, so every list row rebuild re-decoded
+                // the full upload and flashed the initials first.
+                CachedThumbnailImage(
+                    url: url,
+                    pointSize: CGSize(width: size, height: size),
+                    placeholder: { initialsView },
+                    failure: { initialsView }
+                )
             } else {
                 initialsView
             }

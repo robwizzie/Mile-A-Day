@@ -61,3 +61,24 @@ export function JOINABLE_WINDOW_SQL(alias: string): string {
  * let them in.
  */
 export const OCCUPYING_STATUSES_SQL = `('invited', 'joined', 'ready', 'active', 'finished')`;
+
+/**
+ * Does the host's "who can join" setting let `viewer` in WITHOUT an invite?
+ * ONE fragment for every door that offers or opens a walk to someone not on
+ * the roster — the joinable list, the Friends-tab decoration and (mirrored
+ * in TypeScript) `joinSession` — so a Join button can never draw for a room
+ * its own endpoint refuses. An invited row always passes: an invite is the
+ * host's (or, on a 'friends' walk, a member's) explicit yes.
+ * NULL = 'friends' = the behaviour every walk had before the setting.
+ */
+export function JOIN_POLICY_ALLOWS_SQL(alias: string, viewer: string): string {
+  return `(${alias}.join_policy IS NULL OR ${alias}.join_policy = 'friends'
+    OR ${alias}.host_user_id = ${viewer}
+    OR (${alias}.join_policy = 'close_friends' AND EXISTS (
+          SELECT 1 FROM close_friends jcf
+           WHERE jcf.user_id = ${alias}.host_user_id AND jcf.close_friend_id = ${viewer}))
+    OR EXISTS (
+          SELECT 1 FROM buddy_session_participants jip
+           WHERE jip.session_id = ${alias}.id AND jip.user_id = ${viewer}
+             AND jip.status = 'invited'))`;
+}

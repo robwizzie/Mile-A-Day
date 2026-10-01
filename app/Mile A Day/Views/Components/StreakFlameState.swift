@@ -20,18 +20,29 @@ enum StreakFlameClock {
         return min(max(end.timeIntervalSince(date) / dayLength, 0), 1)
     }
 
-    /// Perceptual size of a burning flame — tracks the time left in the day as
-    /// directly as possible. A near-linear descent (gentle 0.9 ease for a touch
-    /// more body up top) so the flame shrinks a little every hour: full at the
-    /// day's start, roughly half by midday, a thin wisp as the next midnight
-    /// nears. It never hugs full size and then drops late — that read as a jump
-    /// from normal to small. The flame keeps a small floor while burning so it
-    /// never looks broken; the phase transition to coal renders the true "out"
-    /// state at midnight.
+    /// Perceptual size of a burning flame, by HOURS left in the day.
+    ///
+    /// Urgency isn't linear, so the size isn't either. Twelve hours is plenty
+    /// of time and he should still look like himself; five hours is when it
+    /// starts to matter; under three it's genuinely urgent. The old curve was
+    /// near-linear in the fraction of the day, which put him at ~57% at noon —
+    /// half a flame with half a day to spare. These keyframes are interpolated
+    /// linearly (a kink between them is invisible at a per-minute tick), so the
+    /// shape of the day is legible and tunable in one place. The floor keeps a
+    /// burning flame from ever looking broken; the coal phase is the real
+    /// "out" at midnight.
+    private static let sizeByHoursLeft: [(hours: Double, scale: Double)] = [
+        (0, 0.14), (1, 0.32), (3, 0.55), (5, 0.70), (8, 0.82), (12, 0.90), (24, 1.00),
+    ]
+
     static func flameScale(vigor: Double) -> CGFloat {
-        let v = min(max(vigor, 0), 1)
-        let minScale = 0.08
-        return CGFloat(minScale + (1 - minScale) * pow(v, 0.9))
+        let hours = min(max(vigor, 0), 1) * dayLength / 3600
+        let frames = sizeByHoursLeft
+        guard let upper = frames.firstIndex(where: { $0.hours >= hours }) else { return 1 }
+        guard upper > 0 else { return CGFloat(frames[0].scale) }
+        let lo = frames[upper - 1], hi = frames[upper]
+        let t = (hours - lo.hours) / (hi.hours - lo.hours)
+        return CGFloat(lo.scale + (hi.scale - lo.scale) * t)
     }
 }
 

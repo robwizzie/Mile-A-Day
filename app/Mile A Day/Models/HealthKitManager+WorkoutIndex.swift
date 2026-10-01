@@ -108,7 +108,7 @@ extension HealthKitManager {
                     goals[date] = finalIndex.totalMiles(for: date) >= 0.95
                 }
             }
-            self.dailyMileGoals = goals
+            if self.dailyMileGoals != goals { self.dailyMileGoals = goals }
 
             self.saveCachedData()
 
@@ -198,8 +198,11 @@ extension HealthKitManager {
                         goals[date] = currentIndex.totalMiles(for: date) >= 0.95
                     }
                 }
-                self.dailyMileGoals = goals
-                self.retroactiveStreak = currentIndex.activeStreak()
+                // Assign only on change: each write is a full dashboard
+                // redraw, and this branch runs on every refresh.
+                if self.dailyMileGoals != goals { self.dailyMileGoals = goals }
+                let streak = currentIndex.activeStreak()
+                if self.retroactiveStreak != streak { self.retroactiveStreak = streak }
                 self.saveCachedData()
             }
             return
@@ -221,8 +224,11 @@ extension HealthKitManager {
                         goals[date] = currentIndex.totalMiles(for: date) >= 0.95
                     }
                 }
-                self.dailyMileGoals = goals
-                self.retroactiveStreak = currentIndex.activeStreak()
+                // Assign only on change: each write is a full dashboard
+                // redraw, and this branch runs on every refresh.
+                if self.dailyMileGoals != goals { self.dailyMileGoals = goals }
+                let streak = currentIndex.activeStreak()
+                if self.retroactiveStreak != streak { self.retroactiveStreak = streak }
                 self.saveCachedData()
             }
             return
@@ -302,7 +308,7 @@ extension HealthKitManager {
                     goals[date] = finalUpdatedIndex.totalMiles(for: date) >= 0.95
                 }
             }
-            self.dailyMileGoals = goals
+            if self.dailyMileGoals != goals { self.dailyMileGoals = goals }
 
             self.saveCachedData()
 
@@ -481,10 +487,7 @@ extension HealthKitManager {
     }
 
     func dateFromKey(_ key: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = TimeZone.current
-        return formatter.date(from: key)
+        DayKeyFormatter.date(from: key)
     }
     #endif
 }

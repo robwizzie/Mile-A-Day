@@ -3,6 +3,7 @@
 
 import { PostgresService } from "../DbService.js";
 import { OWNER_NOT_PRIVATE_SQL } from "../visibilityService.js";
+import { servedRouteFrom } from "../routePrivacy.js";
 import {
   postHypedByViewerMatchSql,
   runHypedByViewerMatchSql,
@@ -87,6 +88,8 @@ export interface FeedSegment {
 // One row of the unified feed — either a photo `post` or a raw `workout`
 // activity. Type-specific columns are null for the other kind.
 export interface FeedEntryRow {
+  /** Raw daily-mile workout cards only: the owner's streak on that day. */
+  day_streak?: number | null;
   kind: "post" | "workout";
   id: string;
   sort_ts: string;
@@ -148,6 +151,8 @@ export interface FeedEntryRow {
   // fix's epoch seconds, when the uploading client sent them.
   route_times: number[] | null;
   route_started_at: number | null;
+  // Additive: the route was trimmed for route privacy (non-owner viewers).
+  route_trimmed: boolean | null;
   // Additive: the owner's competitions on the entry's day (both kinds).
   competitions: PostCompetitionRef[] | null;
   // post-only, additive: the competition the poster stickered onto the photo.
@@ -218,16 +223,14 @@ export interface FeedEntryRow {
  */
 const unifiedFeedRouteSql = (expr: string) => `CASE
 				WHEN page.kind = 'post' THEN (
-					SELECT ${expr} FROM workout_routes wr
+					SELECT ${expr} FROM ${servedRouteFrom("wr", "p.workout_id", "page.owner_id", "$1")}
 					WHERE p.include_route
 						AND (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
-						AND wr.workout_id = p.workout_id
 				)
 				ELSE (
-					SELECT ${expr} FROM workout_routes wr
+					SELECT ${expr} FROM ${servedRouteFrom("wr", "wt.workout_id", "page.owner_id", "$1")}
 					WHERE COALESCE(roll.segment_count, 1) <= 1
 						AND (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
-						AND wr.workout_id = wt.workout_id
 				)
 			END`;
 
@@ -298,6 +301,23 @@ const FEED_ENTRY_PROJECTION = `
 			-- routeless alone must never be read as "indoor" (privacy also
 			-- blanks routes).
 			wt.is_indoor,
+			-- Additive: the owner's streak AS OF this card's day, for the RAW
+			-- workout card that completed the day's mile. A photo post stamps
+			-- its streak into stats_snapshot at creation; a raw card had none,
+			-- so the same person's streak showed on their posts and vanished on
+			-- every plain walk. Counted from the current streak's start to the
+			-- card's day, capped at the stored streak (a pause inside the
+			-- streak elides days the span still counts — the cap keeps that
+			-- from ever overstating). NULL off-streak, for posts, and for
+			-- non-anchor workouts (an extra walk isn't the day's mile).
+			CASE
+				WHEN page.kind = 'workout' AND wt.feed_role = 'daily_mile'
+					AND u.streak_start_date IS NOT NULL
+					AND wt.local_date >= u.streak_start_date
+					AND (u.streak_valid_through IS NULL OR wt.local_date <= u.streak_valid_through)
+					AND COALESCE(u.current_streak, 0) > 0
+				THEN LEAST((wt.local_date - u.streak_start_date) + 1, u.current_streak)
+			END AS day_streak,
 			-- Additive, OWNER-ONLY: recorded in Stealth Mode. A stealth workout has
 			-- no workout_routes row (enforced at write), so the route arms below
 			-- are clean by construction; this flag only lets the OWNER's own card
@@ -344,6 +364,9 @@ const FEED_ENTRY_PROJECTION = `
 			-- The replay clock beside the route, under the same gates.
 			${unifiedFeedRouteSql("wr.times")} AS route_times,
 			${unifiedFeedRouteSql(ROUTE_STARTED_AT_EXPR)} AS route_started_at,
+			-- Additive: TRUE when a non-owner was served a route trimmed for
+			-- route privacy (hide start & end); the client fades its ends.
+			${unifiedFeedRouteSql("wr.trimmed")} AS route_trimmed,
 			-- The owner's competitions on the entry's day, both kinds.
 			${competitionsJson("page.owner_id", "COALESCE(p.local_date, wt.local_date)", "p.competition_id")} AS competitions,
 			-- Additive: per-mile splits for the entry's workout, so indoor cards

@@ -18,6 +18,8 @@ import {
   sessionStateController,
   startSessionController,
   startSessionNowController,
+  setJoinPolicyController,
+  mergeSessionController,
   createRoutineController,
   deleteRoutineController,
   historyController,
@@ -63,6 +65,8 @@ router.post("/sessions/:sessionId/start", startSessionController);
 // happening, this one decides it is happening right now — and because a walk
 // already counting down is not in the `status = 'lobby'` window /start needs.
 router.post("/sessions/:sessionId/start-now", startSessionNowController);
+router.post("/sessions/:sessionId/join-policy", setJoinPolicyController);
+router.post("/sessions/:sessionId/merge", mergeSessionController);
 // Host-only: call the walk off entirely, while it's still a lobby or still in
 // the shared countdown. The exit that didn't exist — Leave abandoned a room
 // that then sat open for hours, still invited, still due to auto-start.

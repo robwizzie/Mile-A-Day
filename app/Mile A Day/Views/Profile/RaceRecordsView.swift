@@ -1,13 +1,20 @@
 import SwiftUI
 
-/// Race PR grid for the Stats tab: best time per standard distance. Tap a card
-/// that has a record to open its full history. Self-contained — owns its own
-/// fetch + state, so the parent just drops it in with a user id.
+/// Race PRs for the Stats tab: only the distances that HAVE a record, plus
+/// "See all distances" for the full catalog (empty distances included). Tap a
+/// record to open its history. Self-contained — owns its own fetch + state,
+/// so the parent just drops it in with a user id.
 struct RacePRsSection: View {
     let userId: String?
 
     @State private var records: [String: RaceRecord] = [:]  // keyed by distanceKey
+    @State private var isLoading = true
     @State private var selected: RaceDistance?
+    @State private var showingAllDistances = false
+
+    private var recordedDistances: [RaceDistance] {
+        RaceCatalog.distances.filter { records[$0.key] != nil }
+    }
 
     var body: some View {
         VStack(spacing: MADTheme.Spacing.md) {
@@ -21,32 +28,35 @@ struct RacePRsSection: View {
                 Spacer()
             }
 
-            LazyVGrid(
-                columns: [GridItem(.flexible()), GridItem(.flexible())],
-                spacing: MADTheme.Spacing.md
-            ) {
-                ForEach(RaceCatalog.distances) { dist in
-                    let rec = records[dist.key]
-                    let hasRecord = rec != nil
-                    Button {
-                        if hasRecord { selected = dist }
-                    } label: {
-                        MADStatCard(
-                            title: dist.name,
-                            value: rec.map { RaceCatalog.formatTime($0.durationSec) } ?? "—",
-                            icon: "stopwatch",
-                            iconColor: hasRecord ? MADTheme.Colors.madRed : .gray,
-                            backgroundColor: (hasRecord ? MADTheme.Colors.madRed : Color.gray).opacity(0.1),
-                            // Empty cards reserve the pace line (blank) so every
-                            // card is the same height regardless of having a record.
-                            subtitle: rec.map { RaceCatalog.formatPace(seconds: $0.durationSec, miles: $0.distanceMiles) } ?? " "
-                        )
-                        .opacity(hasRecord ? 1 : 0.55)
-                    }
-                    .buttonStyle(ScaleButtonStyle())
-                    .disabled(!hasRecord)
-                }
+            if isLoading && records.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, MADTheme.Spacing.md)
+            } else if recordedDistances.isEmpty {
+                Text("No race PRs yet. Finish a mile, 5K or longer in one go to set your first.")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                RacePRGrid(distances: recordedDistances, records: records) { selected = $0 }
             }
+
+            Button {
+                MADHaptics.tap()
+                showingAllDistances = true
+            } label: {
+                HStack(spacing: 4) {
+                    Text("See all distances")
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .accessibilityHidden(true)
+                }
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundColor(MADTheme.Colors.madRed)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
         .padding(MADTheme.Spacing.md)
         .madLiquidGlass()
@@ -54,15 +64,87 @@ struct RacePRsSection: View {
         .sheet(item: $selected) { dist in
             RaceHistoryView(userId: userId ?? "", distance: dist)
         }
+        .sheet(isPresented: $showingAllDistances) {
+            RaceAllDistancesView(userId: userId, records: records)
+        }
     }
 
     private func load() async {
+        defer { isLoading = false }
         guard let userId else { return }
         do {
             let recs = try await RaceRecordsService.fetchRecords(userId: userId)
             records = Dictionary(recs.map { ($0.distanceKey, $0) }, uniquingKeysWith: { a, _ in a })
         } catch {
             print("[RacePRs] load failed: \(error)")
+        }
+    }
+}
+
+/// Two-column PR cards. Distances without a record draw dimmed and inert.
+private struct RacePRGrid: View {
+    let distances: [RaceDistance]
+    let records: [String: RaceRecord]
+    let onSelect: (RaceDistance) -> Void
+
+    var body: some View {
+        LazyVGrid(
+            columns: [GridItem(.flexible()), GridItem(.flexible())],
+            spacing: MADTheme.Spacing.md
+        ) {
+            ForEach(distances) { dist in
+                let rec = records[dist.key]
+                let hasRecord = rec != nil
+                Button {
+                    if hasRecord { onSelect(dist) }
+                } label: {
+                    MADStatCard(
+                        title: dist.name,
+                        value: rec.map { RaceCatalog.formatTime($0.durationSec) } ?? "—",
+                        icon: "stopwatch",
+                        iconColor: hasRecord ? MADTheme.Colors.madRed : .gray,
+                        backgroundColor: (hasRecord ? MADTheme.Colors.madRed : Color.gray).opacity(0.1),
+                        // Empty cards reserve the pace line (blank) so every
+                        // card is the same height regardless of having a record.
+                        subtitle: rec.map { RaceCatalog.formatPace(seconds: $0.durationSec, miles: $0.distanceMiles) } ?? " "
+                    )
+                    .opacity(hasRecord ? 1 : 0.55)
+                }
+                .buttonStyle(ScaleButtonStyle())
+                .disabled(!hasRecord)
+            }
+        }
+    }
+}
+
+/// The full catalog — every standard distance, recorded or not — which is
+/// what the Stats tab used to show inline.
+struct RaceAllDistancesView: View {
+    let userId: String?
+    let records: [String: RaceRecord]
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selected: RaceDistance?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                RacePRGrid(distances: RaceCatalog.distances, records: records) { selected = $0 }
+                    .padding(MADTheme.Spacing.md)
+                    .lockedToScrollWidth()
+            }
+            .scrollContentBackground(.hidden)
+            .background(MADTheme.Colors.appBackgroundGradient.ignoresSafeArea())
+            .navigationTitle("Race PRs")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .sheet(item: $selected) { dist in
+                RaceHistoryView(userId: userId ?? "", distance: dist)
+            }
         }
     }
 }
@@ -76,8 +158,8 @@ struct RaceHistoryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var history: [RaceRecord] = []
     @State private var isLoading = true
-    /// Rendered PR card presented in the system share sheet.
-    @State private var shareItem: ShareableImage?
+    /// The PR handed to the Share Studio (preview, Instagram, Save…).
+    @State private var recordShare: MADStoryContent?
 
     private var best: RaceRecord? {
         history.min(by: { $0.durationSec < $1.durationSec })
@@ -106,35 +188,32 @@ struct RaceHistoryView: View {
                 if let best {
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
-                            if let image = renderAchievementShareImage(PRShareCardView(record: prShareRecord(best))) {
-                                shareItem = ShareableImage(image: image)
-                            }
+                            MADHaptics.action()
+                            TelemetryService.record(ShareTelemetry.opened)
+                            recordShare = MADStoryContent(record: shareRecord(best))
                         } label: {
                             Image(systemName: "square.and.arrow.up")
                         }
+                        .accessibilityLabel("Share this record")
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
             }
-            .sheet(item: $shareItem) { item in
-                ShareSheet(items: [item.image])
+            .sheet(item: $recordShare) { content in
+                ShareStudioView(content: content, initialTemplate: .recordStory)
             }
         }
         .task { await load() }
     }
 
-    /// Build the shareable-card model for this distance's best run.
-    private func prShareRecord(_ rec: RaceRecord) -> PRShareRecord {
-        PRShareRecord(
-            icon: "stopwatch.fill",
-            banner: "PERSONAL RECORD",
-            value: RaceCatalog.formatTime(rec.durationSec),
-            unit: "",
-            title: "\(distance.name) PR",
-            caption: "\(RaceCatalog.formatPace(seconds: rec.durationSec, miles: rec.distanceMiles)) · \(formatDate(rec.achievedDate))"
-        )
+    /// The studio's model for this distance's best run.
+    private func shareRecord(_ rec: RaceRecord) -> ShareRecord {
+        ShareRecord(distanceName: distance.name,
+                    durationSeconds: rec.durationSec,
+                    distanceMiles: rec.distanceMiles,
+                    date: FlameyClosetCopy.parseDay(rec.achievedDate))
     }
 
     private func prHeader(_ rec: RaceRecord) -> some View {

@@ -36,6 +36,9 @@ export const SHARE_FAMILY_FEATURES = [
   "share_family_flamey",
   "share_family_stats",
   "share_family_week",
+  "share_family_medal",
+  "share_family_record",
+  "share_family_month",
 ] as const;
 export const WEEKLY_RECAP_OPENED_FEATURE = "weekly_recap_opened";
 export const WEEKLY_RECAP_SHARED_FEATURE = "weekly_recap_shared";

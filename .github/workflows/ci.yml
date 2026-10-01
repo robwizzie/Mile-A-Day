@@ -120,6 +120,29 @@ jobs:
       # would wipe other people's miles) and the per-viewer history hide.
       - name: Buddy live join/leave/cancel/hide check
         run: node scripts/buddy-live-check.mjs
+      # Lobby readiness. A guest is ready only once they've said walk/run and
+      # indoor/outdoor; the host is told exactly once on that transition, and
+      # a running walk's 'active' row is never rewritten by a late answer.
+      - name: Buddy lobby readiness check
+        run: node scripts/buddy-ready-check.mjs
+      # "Who can join": the Friends-tab offer, the joinable list and the join
+      # door must agree on a close-friends / invite-only walk, and only the
+      # host may invite on one.
+      - name: Buddy join policy check
+        run: node scripts/buddy-join-policy-check.mjs
+      # "Combine walks": folding one lobby into a friend's walk brings its
+      # people along, re-invites its invitees, and leaves a pointer behind.
+      - name: Buddy merge check
+        run: node scripts/buddy-merge-check.mjs
+      # The morning briefing: held notifications come back as THEMSELVES
+      # (title, body, tap target) in priority order, the rest as one named
+      # summary; stale nudges drop; quiet hours are the user's own.
+      - name: Morning briefing check
+        run: node scripts/morning-briefing-check.mjs
+      # Blocked accounts: you see (and can undo) who YOU blocked, never who
+      # blocked you.
+      - name: Blocked accounts check
+        run: node scripts/blocks-check.mjs
       # The walk's lifecycle end to end. A scheduled walk was cancelled by the
       # 3h lobby sweep before anyone arrived, local_date was stamped in New
       # York for everyone, a finisher's synced workout only linked if the
@@ -289,6 +312,13 @@ jobs:
       # as auto to live-card builds and as an ordinary post to older ones.
       - name: Live auto card check
         run: node scripts/live-auto-card-check.mjs
+
+      # Hide start & end: every route served to a non-owner is trimmed at
+      # READ by its owner's setting (crew lines by each member's own), clock
+      # re-based in lockstep, a sliver served as no route; the owner always
+      # gets it whole. A read that skips the trim leaks a front door silently.
+      - name: Route privacy check
+        run: node scripts/route-privacy-check.mjs
 
   website:
     name: Website (lint + build)

@@ -581,8 +581,11 @@ struct DailyChallengeCard: View {
     @State private var tomorrowsChallenge: DailyChallenge?
     @State private var challengeProgressValue: Double = 0
     @State private var isCompleted: Bool = false
-    @State private var challengesCompletedCount: Int = ChallengeService.shared.allCompletions().count
-    @State private var challengeStreak: Int = ChallengeService.shared.currentChallengeStreak()
+    // Zero, filled by `refreshFromService()` on appear: a @State default is
+    // evaluated on EVERY init of this struct (each parent redraw) and thrown
+    // away after the first — and both of these decoded a JSON blob.
+    @State private var challengesCompletedCount: Int = 0
+    @State private var challengeStreak: Int = 0
     @State private var opponent: ChallengeOpponent?
     @State private var iconPulse: Bool = false
 
@@ -617,8 +620,21 @@ struct DailyChallengeCard: View {
             // Pick up any cached challenge state immediately (the service restores
             // today's snapshot from UserDefaults) instead of waiting on the network.
             refreshFromService()
-            // Subtle pulse on the icon when not completed — draws the eye without being annoying.
-            iconPulse = true
+            // Subtle pulse on the icon when not completed — draws the eye
+            // without being annoying. Next turn, own transaction: a
+            // repeatForever handed in via `.animation(_:value:)` leaks into
+            // whatever else moves in that update (a card moving into place).
+            guard !reduceMotion, !iconPulse else { return }
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                    iconPulse = true
+                }
+            }
+        }
+        .onDisappear {
+            var reset = Transaction()
+            reset.disablesAnimations = true
+            withTransaction(reset) { iconPulse = false }
         }
     }
 
@@ -749,11 +765,6 @@ struct DailyChallengeCard: View {
                 )
                 .frame(width: 58, height: 58)
                 .scaleEffect(iconPulse && !isCompleted && !reduceMotion ? 1.05 : 1.0)
-                .animation(
-                    (isCompleted || reduceMotion) ? .default :
-                        .easeInOut(duration: 1.8).repeatForever(autoreverses: true),
-                    value: iconPulse
-                )
 
             Circle()
                 .fill(
@@ -2239,56 +2250,55 @@ extension View {
 
 // MARK: - Hero share button
 
-/// The share affordance on BOTH dashboard heroes — one construction, because
-/// the two heroes have forked a shared detail before (their stat line) and this
-/// one has to stay identical.
-///
-/// It replaces a bare `Image` sitting in an overlay, which was decoration and
-/// not a control: it had no gesture of its own, so a tap on it fell through to
-/// whatever was underneath. On the Fun hero that is Flamey's `poke()` — his
-/// frame is 1.5× his size and overflows the left column, offset 28pt UP, so it
-/// covers the top-left corner the glyph was pinned to. Tapping share poked the
-/// flame, and the glyph at 0.35 opacity behind him was barely visible besides.
-///
-/// A real `Button`, and a LABELLED one: the word is what makes it findable,
-/// where a lone glyph is a thing you have to already know. It lives in the top
-/// The hero's share affordance, at the card's top-RIGHT CORNER with the savers
-/// chip inboard of it — action at the corner, status beside it. It sat to the
-/// LEFT of that chip once, which anchored it to nothing: the gap between
-/// Flamey and the stat column, floating mid-card.
-///
-/// It is FILLED where the savers chip is outlined. Wearing that chip's exact
-/// capsule made the two read as a matched pair of which only one was pressable.
-///
-/// A capsule and not a 44pt disc, which is what this first became: the Fun
-/// hero's stat column fills a fixed 258pt frame under this corner, so a 44pt
-/// tall control left it 2pt of clearance (it had 16), and pushing the column
-/// down to buy that back risks clipping its bottom row. The capsule is ~34pt
-/// tall and ~75 wide — a bigger target than the glyph ever was, in an area
-/// nothing else claims.
-struct HeroShareButton: View {
+/// Share, under Flamey's feet beside his Closet pill — same quiet capsule,
+/// so the two read as his two actions. Icon-first to fit his column, and
+/// LABELLED for VoiceOver.
+struct HeroShareIconButton: View {
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: "square.and.arrow.up")
-                    .madFont(size: 12, weight: .bold)
-                    .accessibilityHidden(true)
-                Text("Share")
-                    .madFont(size: 12, weight: .heavy, design: .rounded)
-            }
-            // Filled light, not another outlined chip. Beside the savers
-            // readout the outlined version read as its twin — two pills of
-            // equal weight, one of which happened to be a button. This one is
-            // the only filled thing in the corner, so it reads as the control.
-            .foregroundColor(.black.opacity(0.88))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(Capsule().fill(Color.white.opacity(0.92)))
-            .contentShape(Capsule())
+            Image(systemName: "square.and.arrow.up")
+                .madFont(size: 11, weight: .bold, maxScale: 1.3)
+                .foregroundColor(.white.opacity(0.9))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.white.opacity(0.10)))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Share")
+    }
+}
+
+// MARK: - Log a past workout
+
+/// The quiet way in to manual entry, directly under Start Mile in both
+/// styles. It was a header button once: a fourth icon up top, beside the
+/// inbox and settings, for the rarest action on the screen. Here it reads as
+/// what it is — the other way to get a mile onto today.
+struct LogPastWorkoutLink: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button {
+            MADHaptics.tap()
+            action()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "square.and.pencil")
+                    .madFont(size: 12, weight: .bold, maxScale: 1.3)
+                    .accessibilityHidden(true)
+                Text("Log a past workout")
+                    .madFont(size: 13, weight: .semibold, design: .rounded)
+                    .lineLimit(1)
+            }
+            .foregroundColor(.white.opacity(0.55))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

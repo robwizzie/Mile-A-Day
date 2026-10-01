@@ -10,7 +10,7 @@ import UIKit
 // the card in your head from the labels).
 //
 // A template is a WHOLE card design. It belongs to a FAMILY (Picture / Route /
-// Streak / Flamey / Stats / Week) that the chip row above the carousel jumps
+// Streak / Flamey / Stats / Week / Month, or Medal / Record for an achievement) that the chip row above the carousel jumps
 // between, and it declares which SHAPES it can arrive in. The shape (full
 // story vs transparent sticker) is still its own axis — `MADStoryFormat` —
 // but only offered where a template genuinely renders both; asking the
@@ -23,7 +23,7 @@ import UIKit
 // and Streak whenever there is one — never gate a share on a route.
 
 enum ShareTemplateFamily: String, CaseIterable, Identifiable {
-    case picture, route, streak, flamey, stats, week
+    case picture, route, streak, flamey, stats, week, month, medal, record
 
     var id: String { rawValue }
 
@@ -35,6 +35,9 @@ enum ShareTemplateFamily: String, CaseIterable, Identifiable {
         case .flamey: return "Flamey"
         case .stats: return "Sticker"
         case .week: return "Week"
+        case .month: return "Month"
+        case .medal: return "Medal"
+        case .record: return "Record"
         }
     }
 
@@ -46,6 +49,9 @@ enum ShareTemplateFamily: String, CaseIterable, Identifiable {
         case .flamey: return "face.smiling"
         case .stats: return "square.on.square"
         case .week: return "calendar"
+        case .month: return "calendar.badge.checkmark"
+        case .medal: return "medal.fill"
+        case .record: return "trophy.fill"
         }
     }
 
@@ -61,6 +67,9 @@ enum ShareTemplateFamily: String, CaseIterable, Identifiable {
         case .flamey: return ShareTelemetry.familyFlamey
         case .stats: return ShareTelemetry.familyStats
         case .week: return ShareTelemetry.familyWeek
+        case .month: return ShareTelemetry.familyMonth
+        case .medal: return ShareTelemetry.familyMedal
+        case .record: return ShareTelemetry.familyRecord
         }
     }
 }
@@ -78,6 +87,10 @@ enum ShareTemplate: String, CaseIterable, Identifiable {
     case statsSticker
     // Week
     case weekStory, weekFlamey
+    // Month
+    case monthStory, monthRing, monthFlamey
+    // Achievements
+    case medalStory, recordStory
 
     var id: String { rawValue }
 
@@ -89,6 +102,9 @@ enum ShareTemplate: String, CaseIterable, Identifiable {
         case .flameyMile, .flameyStreak: return .flamey
         case .statsSticker: return .stats
         case .weekStory, .weekFlamey: return .week
+        case .monthStory, .monthRing, .monthFlamey: return .month
+        case .medalStory: return .medal
+        case .recordStory: return .record
         }
     }
 
@@ -109,13 +125,18 @@ enum ShareTemplate: String, CaseIterable, Identifiable {
         case .statsSticker: return "Stats sticker"
         case .weekStory: return "Your week"
         case .weekFlamey: return "Flamey · Your week"
+        case .monthStory: return "Your month"
+        case .monthRing: return "Day ring"
+        case .monthFlamey: return "Flamey · Your month"
+        case .medalStory: return "Medal"
+        case .recordStory: return "Personal record"
         }
     }
 
     /// The shapes this card can arrive in, preferred first.
     var formats: [MADStoryFormat] {
         switch self {
-        case .photoFrame, .routeArt, .streakFlame, .weekStory: return [.story, .sticker]
+        case .photoFrame, .routeArt, .streakFlame, .weekStory, .monthStory, .medalStory, .recordStory: return [.story, .sticker]
         case .statsSticker: return [.sticker]
         default: return [.story]
         }
@@ -124,7 +145,9 @@ enum ShareTemplate: String, CaseIterable, Identifiable {
     /// Does this card draw a stat rail the stat toggle can change?
     var usesStatToggle: Bool {
         switch self {
-        case .streakMilestone, .flameyStreak, .weekStory, .weekFlamey, .streakBold, .photoPolaroid:
+        case .streakMilestone, .flameyStreak, .weekStory, .weekFlamey, .streakBold, .photoPolaroid,
+             .monthStory, .monthRing, .monthFlamey,
+             .medalStory, .recordStory:
             return false
         default:
             return true
@@ -147,6 +170,13 @@ enum ShareTemplate: String, CaseIterable, Identifiable {
         // so none of his cards are offered (Modern keeps its own flame on the
         // Streak family via `ShareStyleFlame`).
         let flamey = DashboardStylePreference.current == .fun
+        // An achievement is its own studio: a medal or a PR has no walk under
+        // it, so none of the walk families could draw anything true.
+        if content.medal != nil { return [.medalStory] }
+        if content.record != nil { return [.recordStory] }
+        if content.month != nil {
+            return flamey ? [.monthStory, .monthRing, .monthFlamey] : [.monthStory, .monthRing]
+        }
         if content.week != nil {
             return flamey ? [.weekStory, .weekFlamey] : [.weekStory]
         }
@@ -248,6 +278,7 @@ enum ShareMilestone {
     static func isMilestone(_ streak: Int) -> Bool {
         StreakMilestone.allCases.contains { $0.days == streak }
             || (streak >= 100 && streak % 100 == 0)
+            || (streak >= 365 && streak % 365 == 0)
     }
 
     static func headline(_ streak: Int) -> String {
@@ -260,6 +291,7 @@ enum ShareMilestone {
         case 365: return "One full year."
         case 730: return "Two full years."
         case 1000: return "A thousand days."
+        case let n where n >= 365 && n % 365 == 0: return "\(n / 365) full years."
         default: return "\(streak) days strong."
         }
     }
@@ -307,6 +339,16 @@ struct ShareCardView: View {
                 WeekShareCard(content: content, format: format)
             case .weekFlamey:
                 FlameyWeekShareCard(content: content)
+            case .monthStory:
+                MonthShareCard(content: content, format: format)
+            case .monthRing:
+                MonthRingShareCard(content: content)
+            case .monthFlamey:
+                FlameyMonthShareCard(content: content)
+            case .medalStory:
+                MedalShareCard(content: content, format: format)
+            case .recordStory:
+                RecordShareCard(content: content, format: format)
             }
         }
         // A baked image must not change with the phone's text size — the

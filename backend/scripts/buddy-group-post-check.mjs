@@ -81,6 +81,16 @@ async function seed() {
        ON CONFLICT (user_id) DO NOTHING`,
       [id, `sub-${id}`, `${id}@example.com`, id, id],
     );
+    // Hide start & end OFF: these seeds are short routes that pin route
+    // GATES byte-for-byte, and the trim would serve them to friends as no
+    // route at all. share_route_maps stays NULL — read exactly like a missing
+    // row (COALESCE(..., true)). The trim is pinned by route-privacy-check.
+    await db.query(
+      `INSERT INTO notification_settings (user_id, share_route_maps, route_privacy_meters)
+       VALUES ($1, NULL, 0)
+       ON CONFLICT (user_id) DO UPDATE SET route_privacy_meters = 0`,
+      [id],
+    );
   }
   // Everyone is an accepted friend of everyone — the point of this check is
   // the buddy-post rules, so nothing must fail for an unrelated circle reason.

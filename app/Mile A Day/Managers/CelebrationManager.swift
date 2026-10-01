@@ -254,6 +254,56 @@ enum StreakMilestone: CaseIterable {
     }
 }
 
+/// The headline moment for a STREAK MILESTONE day (7, 30, 100, 500…).
+///
+/// It is its own celebration, right after the flame, because the flame is the
+/// same screen every day: a 500-day streak landed on exactly the card a
+/// 12-day one gets, and that was the report. Plain Foundation values only —
+/// this file is also compiled into the Watch target.
+///
+/// `achievedOn` is the day the number was reached. Live it is today; a REPLAY
+/// from the medal carries the medal's own date, so the screen can say "this
+/// is how it looked on Sep 30" rather than pretending it happened now.
+struct StreakMilestoneInfo: Equatable {
+    let days: Int
+    let achievedOn: Date
+    /// Lifetime miles at the time, when known. A replay from a medal months
+    /// later doesn't know it, and printing today's total under an old date
+    /// would be a number that was never true on that day.
+    let totalMiles: Double?
+    let isReplay: Bool
+
+    /// Which streak lengths earn this screen. The app's own `StreakMilestone`
+    /// days plus every hundred — the same set the share studio's milestone card
+    /// already treats as a milestone (`ShareMilestone.isMilestone`). Multiples
+    /// of 365 belong to the yearly celebration, which is the bigger version of
+    /// this same moment.
+    static func isCelebrated(_ days: Int) -> Bool {
+        guard days > 0, days % 365 != 0 else { return false }
+        return StreakMilestone.allCases.contains { $0.days == days }
+            || (days >= 100 && days % 100 == 0)
+    }
+
+    var milestone: StreakMilestone? {
+        StreakMilestone.allCases.first { $0.days == days }
+    }
+
+    /// Big moments (100, 250, 500…) get the full show; the minis a lighter one.
+    var isMajor: Bool {
+        milestone?.isMajor ?? (days >= 100)
+    }
+
+    /// One-shot key: one moment per day it was reached, so a later streak
+    /// that reaches 500 again gets its own.
+    var oneShotKey: String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.calendar = Calendar.current
+        f.timeZone = TimeZone.current
+        return "streak-milestone-\(days)-\(f.string(from: achievedOn))"
+    }
+}
+
 // MARK: - Celebration Types
 
 /// Payload for the daily-challenge completion celebration. Visuals (icon, gradient)
@@ -311,6 +361,8 @@ enum CelebrationType: Identifiable, Equatable {
     case milestone(title: String, description: String, icon: String)
     /// Headline yearly streak celebration — fired at every multiple of 365 days.
     case yearMilestone(info: YearlyMilestoneInfo)
+    /// Headline streak-milestone day (7, 30, 100, 500…) — right after the flame.
+    case streakMilestone(info: StreakMilestoneInfo)
     /// One-time welcome summary for a new account with historical data — shows
     /// the COUNT of badges unlocked instead of spamming a popup per badge.
     case badgeSummary(count: Int, badges: [Badge])
@@ -352,6 +404,8 @@ enum CelebrationType: Identifiable, Equatable {
             return "milestone-\(title)"
         case .yearMilestone(let info):
             return "year-milestone-\(info.years)"
+        case .streakMilestone(let info):
+            return info.oneShotKey
         case .badgeSummary:
             return "badge-summary"
         case .badgeBatch(let badges, let retroactive):
@@ -385,6 +439,8 @@ enum CelebrationType: Identifiable, Equatable {
             return t1 == t2
         case (.yearMilestone(let i1), .yearMilestone(let i2)):
             return i1.years == i2.years
+        case (.streakMilestone(let i1), .streakMilestone(let i2)):
+            return i1.days == i2.days
         case (.badgeSummary, .badgeSummary):
             return true // only one welcome summary
         case (.badgeBatch(let b1, let r1), .badgeBatch(let b2, let r2)):
@@ -668,9 +724,10 @@ class CelebrationManager: ObservableObject {
             }
         }
 
-        // Comeback day-3/7 and record moments fire once per era, ever.
+        // Comeback day-3/7, record and streak-milestone moments fire once
+        // per era/day, ever.
         switch celebration {
-        case .comeback, .newRecordStreak:
+        case .comeback, .newRecordStreak, .streakMilestone:
             guard !hasShownComebackOrRecord(id: celebration.id) else {
                 print("[CelebrationManager] ⏭️  \(celebration.id) already shown, skipping")
                 return
@@ -689,14 +746,130 @@ class CelebrationManager: ObservableObject {
             return
         }
 
+        // The milestone screen carries its own medal, so the separate unlock
+        // popup for the SAME streak medal would announce it twice.
+        if case .streakMilestone(let info) = celebration {
+            let medalId = "streak_\(info.days)"
+            celebrationQueue.removeAll { queued in
+                if case .badgeUnlocked(let badge) = queued { return badge.id == medalId }
+                return false
+            }
+        }
+
         print("[CelebrationManager] 🎉 Adding celebration to queue: \(celebration.id)")
         celebrationQueue.append(celebration)
-        celebrationQueue.sort { priority(of: $0) < priority(of: $1) }
+        // Stable by arrival within a priority — Swift's sort isn't, and two
+        // equal-priority medals swapping places between enqueues reads as the
+        // app not knowing its own order.
+        celebrationQueue = celebrationQueue.enumerated()
+            .sorted { a, b in
+                let pa = priority(of: a.element), pb = priority(of: b.element)
+                return pa != pb ? pa < pb : a.offset < b.offset
+            }
+            .map(\.element)
 
-        // If nothing is currently showing and app is active, show the next one
-        if !isShowingCelebration {
-            showNextCelebration()
+        // A photo prompt nobody has touched yet gives way to anything that
+        // belongs before it. That's the "the flame showed up after the photo
+        // prompt" report: the prompt was on screen first, and the queue's
+        // order only ever applied to what was still waiting. Once they've
+        // opened the camera or the library it's theirs and it stays.
+        if let current = currentCelebration,
+           case .postRunPhotoPrompt = current,
+           !photoPromptEngaged,
+           priority(of: celebration) < priority(of: current) {
+            print("[CelebrationManager] ↩️ Photo prompt yields to \(celebration.id)")
+            celebrationQueue.append(current)
+            currentCelebration = nil
+            isShowingCelebration = false
         }
+
+        // Settle before showing: celebrations arrive in BURSTS (the flame,
+        // the record, the leaderboard and the prompt in one pass; a medal
+        // refresh a beat later), and showing the first arrival immediately is
+        // how a low-priority item claimed the screen ahead of the headline.
+        if !isShowingCelebration {
+            scheduleShowNext(after: settleDelay)
+        }
+    }
+
+    /// How long a burst gets to finish arriving before the first one shows.
+    private let settleDelay: TimeInterval = 0.4
+
+    private var pendingShowWork: DispatchWorkItem?
+
+    private func scheduleShowNext(after delay: TimeInterval) {
+        pendingShowWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.showNextCelebration() }
+        pendingShowWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    // MARK: - When the screen isn't ours
+
+    /// Something is covering the root overlay — the workout tracker's cover,
+    /// the buddy recap sheet. A celebration "shown" under one plays to nobody
+    /// and then sits there, out of order, the moment the cover goes away (a
+    /// ghost win from the tracker landed before the flame that way). Keyed by
+    /// reason so two covers can't release each other.
+    @Published private(set) var obscuredBy: Set<String> = []
+
+    func setObscured(_ reason: String, _ obscured: Bool) {
+        if obscured {
+            obscuredBy.insert(reason)
+        } else if obscuredBy.remove(reason) != nil, obscuredBy.isEmpty, !isShowingCelebration {
+            scheduleShowNext(after: settleDelay)
+        }
+    }
+
+    /// The flame's sequence is being built (it awaits the streak and the
+    /// era history first). Anything that arrives meanwhile — a medal from the
+    /// same upload — must wait for it instead of opening the show. Bounded,
+    /// so a hung fetch can never strand the queue.
+    private var holdUntil: Date?
+
+    func holdForGoalSequence(seconds: TimeInterval = 8) {
+        holdUntil = Date().addingTimeInterval(seconds)
+        scheduleShowNext(after: seconds + 0.05)
+    }
+
+    func releaseGoalHold() {
+        guard holdUntil != nil else { return }
+        holdUntil = nil
+        if !isShowingCelebration { scheduleShowNext(after: settleDelay) }
+    }
+
+    private var isHeld: Bool {
+        guard let until = holdUntil else { return false }
+        if until <= Date() { holdUntil = nil; return false }
+        return true
+    }
+
+    /// Set by the photo prompt the moment the user opens the camera, the
+    /// library or a snap — after that it is never preempted.
+    @Published var photoPromptEngaged = false
+
+    /// Calm = nothing on screen, nothing waiting, nothing being built. What a
+    /// surface that should come AFTER the celebrations (the buddy recap) waits
+    /// for.
+    var isCalm: Bool {
+        !isShowingCelebration && celebrationQueue.isEmpty && !isHeld
+    }
+
+    /// Is a milestone moment for this streak length queued, on screen, or
+    /// already seen? The medal refresh asks, so the milestone's own medal
+    /// isn't announced a second time by a popup.
+    func isCelebratingStreakMilestone(days: Int) -> Bool {
+        let matches: (CelebrationType) -> Bool = {
+            if case .streakMilestone(let info) = $0 { return info.days == days }
+            if case .yearMilestone(let info) = $0 { return info.years * 365 == days }
+            return false
+        }
+        if let current = currentCelebration, matches(current) { return true }
+        if celebrationQueue.contains(where: matches) { return true }
+        // Seen TODAY only: a medal that lands days after its milestone screen
+        // played (a late sync) is news in its own right and gets its popup.
+        let todayKey = "streak-milestone-\(days)-\(formatDate(Date()))"
+        return comebackRecordShownKeysRaw.split(separator: "\n").contains { $0 == todayKey }
     }
 
     /// User-initiated replay. Skips the "already shown today" dedup gate so the
@@ -710,12 +883,31 @@ class CelebrationManager: ObservableObject {
         reportDroppedUnseen(dropped)
 
         print("[CelebrationManager] 🔁 Replay requested: \(celebration.id)")
-        celebrationQueue.append(celebration)
-
-        if appIsActive {
-            showNextCelebration()
-        }
+        holdUntil = nil
+        pendingShowWork?.cancel()
+        // Straight onto the screen: a replay is the user asking for it right
+        // now, so none of the automatic gates (settling, covers, the goal
+        // hold) apply to it.
+        currentCelebration = celebration
+        isShowingCelebration = true
     }
+
+    /// Replay several moments back to back, in the order given — the day's
+    /// flame and then its milestone, exactly as they first played.
+    func replaySequence(_ celebrations: [CelebrationType]) {
+        guard let first = celebrations.first else { return }
+        replayCelebration(first)
+        celebrationQueue.append(contentsOf: celebrations.dropFirst())
+    }
+
+    /// Hosts that render celebrations somewhere other than the root overlay
+    /// (a medal replay from a screen that may itself be a sheet, where the
+    /// root overlay would play underneath it). While one is up the root
+    /// container draws nothing, so nothing plays twice.
+    @Published private(set) var detachedHostCount = 0
+
+    func attachDetachedHost() { detachedHostCount += 1 }
+    func detachDetachedHost() { detachedHostCount = max(0, detachedHostCount - 1) }
 
     /// Record a celebration's one-shot flags once the user has actually SEEN it
     /// (i.e. they dismissed it). Marking used to happen in showNextCelebration(),
@@ -735,8 +927,11 @@ class CelebrationManager: ObservableObject {
         if case .flameyUnlocked(let ids) = celebration {
             FlameyUnlockLedger.markAnnounced(Set(ids))
         }
+        if case .postRunPhotoPrompt = celebration {
+            photoPromptEngaged = false
+        }
         switch celebration {
-        case .comeback, .newRecordStreak:
+        case .comeback, .newRecordStreak, .streakMilestone:
             markComebackOrRecordShown(id: celebration.id)
         default:
             break
@@ -814,38 +1009,61 @@ class CelebrationManager: ObservableObject {
 
     /// Priority for ordering celebrations: lower = shown first.
     ///
+    /// ONE running order, the same every day, told as a story: the day (the
+    /// flame), what the day MEANT (a milestone, a record, a comeback), the
+    /// walk itself (a ghost beaten, where you landed among friends, an extra
+    /// mile), the rewards it unlocked (medals, then what Flamey can wear with
+    /// them), the side quests (PRs, the daily challenge), and finally the
+    /// photo of it — the one step that asks something of you, so it goes last.
+    ///
     /// Exhaustive on purpose — a new celebration must be given a deliberate
     /// place in the running order, not silently land wherever a `default`
-    /// happened to put it. (This is the switch that caught `.ghostBeaten`.)
+    /// happened to put it.
     private func priority(of celebration: CelebrationType) -> Int {
         switch celebration {
-        case .badgeSummary: return -2 // One-time welcome — show first
-        case .yearMilestone: return -1 // Headline moment
+        case .badgeSummary: return -1 // one-time welcome for a new account
         case .goalCompleted: return 0
-        case .newRecordStreak: return 1 // crown lands right after the flame
-        case .comeback: return 2 // the emotional beat before the leaderboard
-        // After the streak beats, which are rarer and carry more weight, but
-        // before the social ones: beating the ghost is about the workout that
-        // just ended, so it belongs next to it rather than after a badge.
-        case .ghostBeaten: return 3
-        case .leaderboardMoveUp: return 4 // right after the fire/streak screen
-        case .postGoalWorkout: return 5
-        case .badgeUnlocked: return 6
-        case .badgeBatch: return 6 // the same medal news, just bunched
-        case .milestone: return 7
-        case .challengeCompleted: return 8 // celebrate the daily challenge as a finale
-        case .postRunPhotoPrompt: return 9 // BeReal photo prompt — the very last step
+        // Directly after the flame: the flame counts the streak up to the
+        // number, and this is the number getting its moment.
+        case .yearMilestone: return 1
+        case .streakMilestone: return 1
+        case .newRecordStreak: return 2
+        case .comeback: return 3
+        case .ghostBeaten: return 4
+        case .leaderboardMoveUp: return 5
+        case .postGoalWorkout: return 6
+        case .badgeUnlocked: return 7
+        case .badgeBatch: return 7
         // Right after the medal popups that caused it: the medal is the news,
         // the thing Flamey can wear is the reward.
-        case .flameyUnlocked: return 6
+        case .flameyUnlocked: return 8
+        case .milestone: return 9
+        case .challengeCompleted: return 10
+        case .postRunPhotoPrompt: return 11 // the very last step
         }
     }
 
     /// Show the next celebration in the queue (only when app is active/visible)
     private func showNextCelebration() {
+        guard !isShowingCelebration else { return }
         guard !celebrationQueue.isEmpty else { return }
         guard appIsActive else {
             print("[CelebrationManager] ⏸️ App is not active, deferring celebration until foreground")
+            return
+        }
+        guard obscuredBy.isEmpty else {
+            print("[CelebrationManager] ⏸️ Covered by \(obscuredBy.sorted()), deferring")
+            return
+        }
+        // While the flame's sequence is being built, only what belongs
+        // before it (the one-time welcome) may go first.
+        if isHeld, let first = celebrationQueue.first, priority(of: first) > priority(of: .goalCompleted(stats: .placeholder)) {
+            print("[CelebrationManager] ⏸️ Holding for the goal sequence")
+            // Never strand the queue: come back when the hold runs out, even
+            // if nothing releases it.
+            if let until = holdUntil {
+                scheduleShowNext(after: max(0.05, until.timeIntervalSinceNow + 0.05))
+            }
             return
         }
 
@@ -875,6 +1093,7 @@ class CelebrationManager: ObservableObject {
 
     /// Clear all celebrations (useful for testing or reset)
     func clearAll() {
+        holdUntil = nil
         celebrationQueue.removeAll()
         currentCelebration = nil
         isShowingCelebration = false

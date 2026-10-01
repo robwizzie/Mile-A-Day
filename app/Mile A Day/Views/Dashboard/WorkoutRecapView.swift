@@ -24,6 +24,10 @@ struct WorkoutRecapView: View {
     var raceSplits: [BestEffortStore.RaceSplit] = []
     var raceGhostName: String = "your ghost"
     var onDistanceAdjusted: ((Double) -> Void)? = nil
+    /// A buddy walk shares ONCE, as the crew, on the buddy recap that comes
+    /// after this screen — so this screen drops its own share ask and says
+    /// where the walk goes next instead of offering a second, solo card.
+    var isBuddyWalk: Bool = false
     let onDismiss: () -> Void
 
     @State private var treadmillBaselineDistance: Double?
@@ -358,7 +362,23 @@ struct WorkoutRecapView: View {
     /// post: they just finished. This screen had no path to sharing at all —
     /// the card builder was only reachable from the Dashboard, which is not
     /// where anyone is standing thirty seconds after a walk.
+    @ViewBuilder
     private var recapActions: some View {
+        if isBuddyWalk {
+            VStack(spacing: 10) {
+                Text("Next: how the crew did, then one post for all of you.")
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.65))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                doneButton
+            }
+        } else {
+            soloRecapActions
+        }
+    }
+
+    private var soloRecapActions: some View {
         VStack(spacing: 10) {
             Button {
                 MADHaptics.tap()
@@ -414,7 +434,9 @@ struct WorkoutRecapView: View {
             goalMet: ProgressCalculator.isGoalCompleted(
                 current: healthManager.todaysDistance,
                 goal: max(UserManager.shared.currentUser.goalMiles, 0.01)
-            )
+            ),
+            // Seeds the studio's hide-start-&-end cut like the server's.
+            workoutId: workoutId
         )
     }
 
@@ -436,7 +458,7 @@ struct WorkoutRecapView: View {
 
     private var doneButton: some View {
         Button(action: onDismiss) {
-            Text("Back to Dashboard")
+            Text(isBuddyWalk ? "Continue" : "Back to Dashboard")
                 .font(.title3)
                 .fontWeight(.semibold)
                 .foregroundColor(.white)

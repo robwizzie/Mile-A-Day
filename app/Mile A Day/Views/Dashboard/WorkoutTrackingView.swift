@@ -206,6 +206,15 @@ struct WorkoutTrackingView: View {
         buddySessionId ?? adoptedBuddySessionId
     }
 
+    /// The running workout's own answers to the buddy lobby's questions, for
+    /// a mid-walk join (see `BuddyMidWalkJoinStrip.Answers`).
+    private var midWalkJoinAnswers: BuddyMidWalkJoinStrip.Answers {
+        BuddyMidWalkJoinStrip.Answers(
+            isRunning: selectedActivityType == .running,
+            locationType: selectedLocationType == .indoor ? .indoor : .outdoor
+        )
+    }
+
     private var raceActivityKey: String {
         selectedActivityType == .running ? "running" : "walking"
     }
@@ -810,7 +819,7 @@ struct WorkoutTrackingView: View {
                             // mid-workout. Renders nothing when there's nobody
                             // to join and nothing to rejoin, so an ordinary
                             // solo run is untouched.
-                            BuddyMidWalkJoinStrip { sessionId in
+                            BuddyMidWalkJoinStrip(answers: midWalkJoinAnswers) { sessionId in
                                 adoptedBuddySessionId = sessionId
                                 onBuddySessionAdopted?(sessionId)
                                 // The workout is already persisted without a
@@ -1987,6 +1996,7 @@ struct WorkoutTrackingView: View {
             onDistanceAdjusted: { newDistance in
                 recapDistance = newDistance
             },
+            isBuddyWalk: effectiveBuddySessionId != nil,
             onDismiss: { dismiss() }
         )
     }
@@ -2329,8 +2339,9 @@ struct WorkoutTrackingView: View {
               buddyService.session?.me(buddyService.currentUserId)?.status != .finished,
               InProgressWorkoutStore.load()?.isActive != true else { return false }
         hasAutoStartedBuddyWorkout = true
-        selectedActivityType =
-            (buddyService.session?.isRunning ?? false) ? .running : .walking
+        // This person's OWN answer from the lobby (a friend can run beside
+        // a walker), falling back to the host's plan when they gave none.
+        selectedActivityType = buddyService.myIsRunning ? .running : .walking
         // NOT hardcoded outdoor any more. This line picks the INSTRUMENT —
         // outdoor measures with GPS, which indoors never returns a fix that
         // clears the 50m accuracy gate — so a buddy walker on a treadmill

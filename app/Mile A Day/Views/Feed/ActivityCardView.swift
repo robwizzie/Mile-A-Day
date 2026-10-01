@@ -4,10 +4,10 @@ import CoreLocation
 /// A raw walk/run in the unified feed — a run its author DIDN'T post. Renders
 /// in the same visual language as PostCardView so the feed reads uniformly no
 /// matter what a friend's device did: identical author header (avatar, name,
-/// "Walk · 1.08 mi · 2d", menu), a full 4:5 media slide — the GPS route with
-/// the standard stats band and the Flyover chip, or the indoor card when
-/// there's no route (the exact face an auto post bakes into its image) — and
-/// the same hype/comment footer. There is no PHOTO | MAP toggle here because
+/// "Walk · 1.08 mi · 2d", menu), one compact (1:1) media slide — the GPS
+/// route with the standard stats band, or the routeless card when there's no
+/// route (the same faces an auto post draws) — and the same footer: actions
+/// with FLYOVER/SPLITS trailing, then streak · time on one line. There is no PHOTO | MAP toggle here because
 /// a raw run has no photo: the map IS the card. The functional difference stays honest:
 /// no photo or caption — those belong to posts the author chose to make.
 /// Double-tapping anywhere on the body hypes, like posts.
@@ -107,7 +107,6 @@ struct ActivityCardView: View {
             // hype by accident.
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 media
-                mediaControls
                 // Only when the mile took several goes — a normal single-workout
                 // day renders exactly as it did before.
                 if entry.isStitchedMile, let segments = entry.segments, segments.count > 1 {
@@ -239,30 +238,24 @@ struct ActivityCardView: View {
         }
     }
 
-    /// FLYOVER · SPLITS in a row UNDER the media, never on it — one position
-    /// on every card and every face. See `PostCardView.mediaControls`: there
-    /// is no corner of a 4:5 card that is reliably empty, and a chip placed
-    /// per-face both covers something and moves as you swipe.
+    /// FLYOVER · SPLITS, never on the media — one position on every card.
+    /// See `PostCardView.actionRow`: they share the hype/comment/share row
+    /// when it fits and drop to their own row above it when it doesn't.
     @ViewBuilder
-    private var mediaControls: some View {
-        if canPlayFlyover || hasSplits {
-            HStack(spacing: 8) {
-                if canPlayFlyover { flyoverChip }
-                if hasSplits { splitsChip }
-                Spacer(minLength: 0)
-            }
+    private func mediaControlChips(compactSplits: Bool) -> some View {
+        if canPlayFlyover { flyoverChip }
+        if hasSplits {
+            SplitsChipButton(accent: accent, iconOnly: compactSplits) { showSplits = true }
         }
     }
+
+    private var hasMediaControls: Bool { canPlayFlyover || hasSplits }
 
     private var splitBars: [WorkoutSplitBar] {
         WorkoutSplitBar.bars(from: entry.splits)
     }
 
     private var hasSplits: Bool { !splitBars.isEmpty }
-
-    private var splitsChip: some View {
-        SplitsChipButton(accent: accent) { showSplits = true }
-    }
 
     private func routeSlide(_ coords: [CLLocationCoordinate2D]) -> some View {
         RouteArtView(
@@ -271,21 +264,16 @@ struct ActivityCardView: View {
             pointTimes: entry.route_times,
             authorAvatar: RouteArtAvatar(name: entry.displayName, imageURL: entry.profile_image_url),
             onSnapshot: { routeArtSnapshot = $0 },
-            paletteDate: RelativeTime.date(from: entry.sort_ts)
+            paletteDate: RelativeTime.date(from: entry.sort_ts),
+            routeTrimmed: entry.route_trimmed ?? false
         )
         .frame(maxWidth: .infinity)
-        .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        // A raw workout never has a photo, so its map is the compact box —
+        // the same card ~20% shorter (see `FeedMediaAspect`).
+        .aspectRatio(FeedMediaAspect.compact, contentMode: .fit)
         .overlay {
             if let stats = overlayStats {
-                // Lays out at the baked card's 360×450 design size; the slide
-                // is the same 4:5, so scaling by width alone reproduces the
-                // auto post's look pixel-for-pixel (see PostCardView).
-                GeometryReader { geo in
-                    RouteStatsOverlayView(stats: stats, workoutType: entry.workout_type ?? "running")
-                        .scaleEffect(geo.size.width / RunStatsCardView.designSize.width,
-                                     anchor: .topLeading)
-                }
-                .allowsHitTesting(false)
+                RouteStatsBandOverlay(stats: stats, workoutType: entry.workout_type ?? "running")
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
@@ -317,8 +305,8 @@ struct ActivityCardView: View {
         }
     }
 
-    /// The route slide's floating zoom copy, on demand — 720×900 keeps the
-    /// post slides' 4:5 so the lift is pixel-identical.
+    /// The route slide's floating zoom copy, on demand — the slide's own
+    /// aspect at 2× the design width, so the lift is pixel-identical.
     private func routeZoomComposite(_ coords: [CLLocationCoordinate2D]) -> UIImage? {
         let type = entry.workout_type ?? "running"
         let stats = overlayStats
@@ -328,33 +316,31 @@ struct ActivityCardView: View {
             authorAvatar: RouteArtAvatar(name: entry.displayName, imageURL: entry.profile_image_url),
             underlay: routeArtSnapshot,
             paletteDate: RelativeTime.date(from: entry.sort_ts),
-            size: CGSize(width: 720, height: 900)
+            routeTrimmed: entry.route_trimmed ?? false,
+            size: CGSize(width: 720, height: 720 / FeedMediaAspect.compact)
         ) {
             if let stats {
-                RouteStatsOverlayView(stats: stats, workoutType: type)
-                    .frame(width: RunStatsCardView.designSize.width,
-                           height: RunStatsCardView.designSize.height,
-                           alignment: .topLeading)
-                    .scaleEffect(720 / RunStatsCardView.designSize.width, anchor: .topLeading)
+                RouteStatsBandOverlay(stats: stats, workoutType: type)
+                    .frame(width: 720, height: 720 / FeedMediaAspect.compact)
             }
         }
     }
 
-    /// Routeless runs: the animated indoor card (track or treadmill face by
-    /// the viewer's dashboard style), fed by the entry's splits when the
-    /// server sent them.
+    /// Routeless runs: the routeless card (track when HealthKit says indoor,
+    /// the mile ribbon otherwise; Fun or Modern by the AUTHOR's style), fed
+    /// by the entry's splits when the server sent them. Compact, like the
+    /// route face — a raw workout has no photo to be 4:5 for.
     private var workoutCardSlide: some View {
         indoorCard(still: false)
             .frame(maxWidth: .infinity)
-            .aspectRatio(4.0 / 5.0, contentMode: .fit)
             .instagramZoomable(
                 imageProvider: {
                     // One helper for live + zoom, so the pinch copy can't
                     // drift from the cell it lifted out of.
                     let renderer = ImageRenderer(content:
                         indoorCard(still: true)
-                            .frame(width: RunStatsCardView.designSize.width,
-                                   height: RunStatsCardView.designSize.height)
+                            .frame(width: FeedMediaAspect.designSize(FeedMediaAspect.compact).width,
+                                   height: FeedMediaAspect.designSize(FeedMediaAspect.compact).height)
                     )
                     renderer.scale = 2
                     renderer.isOpaque = true
@@ -373,32 +359,51 @@ struct ActivityCardView: View {
             isIndoor: entry.is_indoor,
             authorFlamey: entry.author_flamey,
             isOwn: entry.is_self,
+            aspect: FeedMediaAspect.compact,
             still: still
         )
     }
 
+    /// The card's bottom, as tight as it reads: the actions row (FLYOVER /
+    /// SPLITS trailing on it when they fit) and ONE quiet line under it for
+    /// the streak and the time — they used to be two more rows.
     private var footer: some View {
-        HStack(alignment: .center, spacing: 14) {
-            hypeControl
-            footerIconButton(
-                icon: "bubble.right",
-                label: commentActionLabel,
-                accessibilityLabel: "Comments",
-                action: { onOpenComments?() }
-            )
-            .disabled(onOpenComments == nil)
-            if canShareRouteImage {
-                footerIconButton(
-                    icon: "paperplane",
-                    label: nil,
-                    accessibilityLabel: "Share route",
-                    action: shareRoute
-                )
+        VStack(alignment: .leading, spacing: 0) {
+            FeedActionRow(hasControls: hasMediaControls) {
+                footerActions
+            } controls: { compact in
+                mediaControlChips(compactSplits: compact)
             }
-            Spacer(minLength: 0)
+            FeedMetaLine(streak: entry.day_streak, timestamp: absoluteTimestamp)
         }
         .padding(.horizontal, 2)
         .padding(.bottom, 2)
+    }
+
+    @ViewBuilder
+    private var footerActions: some View {
+        hypeControl
+        footerIconButton(
+            icon: "bubble.right",
+            label: commentActionLabel,
+            accessibilityLabel: "Comments",
+            action: { onOpenComments?() }
+        )
+        .disabled(onOpenComments == nil)
+        if canShareRouteImage {
+            footerIconButton(
+                icon: "paperplane",
+                label: nil,
+                accessibilityLabel: "Share route",
+                action: shareRoute
+            )
+        }
+    }
+
+    /// When the walk happened — "OCT 1 · 1:25 PM", the post cards' format.
+    private var absoluteTimestamp: String? {
+        guard let date = RelativeTime.date(from: entry.sort_ts) else { return nil }
+        return FeedTimestamp.timestamp(for: date)
     }
 
     /// Clap + count, exactly as on a post card: the clap hypes (your own run
@@ -419,7 +424,7 @@ struct ActivityCardView: View {
                     Text("\(count)")
                         .madFont(size: 14, weight: .heavy, design: .rounded, monospacedDigit: true)
                         .foregroundColor(.white.opacity(0.92))
-                        .frame(minHeight: 40)
+                        .frame(minWidth: 24, minHeight: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -451,6 +456,7 @@ struct ActivityCardView: View {
             avatar: RouteArtAvatar(name: entry.displayName,
                                    imageURL: entry.profile_image_url)
         )
+        storyShare?.workoutId = entry.workout_id
     }
 
     private func footerIconButton(
@@ -461,15 +467,20 @@ struct ActivityCardView: View {
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 4) {
+                // Secondary to Hype on purpose: a step smaller and dimmer than
+                // the clap, so the row reads as one primary action and two
+                // quiet ones of equal weight, with the counts kept.
                 Image(systemName: icon)
-                    .madFont(size: 22, weight: .medium, maxScale: 1.4)
+                    .madFont(size: 20, weight: .regular, maxScale: 1.4)
                 if let label {
                     Text(label)
-                        .madFont(size: 14, weight: .heavy, design: .rounded, monospacedDigit: true)
+                        .madFont(size: 13, weight: .semibold, design: .rounded, monospacedDigit: true)
                 }
             }
-            .foregroundColor(.white.opacity(0.92))
-            .frame(minWidth: 36, minHeight: 40)
+            .foregroundColor(.white.opacity(0.62))
+            // 44pt in both directions — the dimmer glyph is no reason for a
+            // smaller target.
+            .frame(minWidth: 44, minHeight: 44)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

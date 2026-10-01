@@ -1,0 +1,2 @@
+ALTER TABLE "buddy_sessions" ADD COLUMN "join_policy" text;--> statement-breakpoint
+ALTER TABLE "buddy_sessions" ADD CONSTRAINT "buddy_sessions_join_policy_check" CHECK (join_policy IS NULL OR join_policy = ANY (ARRAY['friends'::text, 'close_friends'::text, 'invite_only'::text]));

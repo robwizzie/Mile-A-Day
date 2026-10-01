@@ -223,6 +223,8 @@ struct ModernDashboardBody: View {
     @ObservedObject var friendService: FriendService
     let hasActiveWorkout: Bool
     @Binding var showWorkoutView: Bool
+    /// Opens the manual-entry sheet DashboardView hosts.
+    let onLogPastWorkout: () -> Void
 
     private var state: (distance: Double, goal: Double, progress: Double, completed: Bool) {
         let distance = healthManager.todaysDistance
@@ -252,7 +254,10 @@ struct ModernDashboardBody: View {
             // grows only as far as that column honestly holds.
             .madTypeCap(.madFixedChromeCap)
 
-            DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
+            VStack(spacing: 6) {
+                DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
+                LogPastWorkoutLink(action: onLogPastWorkout)
+            }
 
             BuddyWalkPill(hasActiveWorkout: hasActiveWorkout)
 
@@ -286,6 +291,8 @@ struct FunDashboardBody: View {
     @ObservedObject var friendService: FriendService
     let hasActiveWorkout: Bool
     @Binding var showWorkoutView: Bool
+    /// Opens the manual-entry sheet DashboardView hosts.
+    let onLogPastWorkout: () -> Void
 
     private var state: (distance: Double, goal: Double, progress: Double, completed: Bool) {
         let distance = healthManager.todaysDistance
@@ -318,7 +325,8 @@ struct FunDashboardBody: View {
             FunStartCard(
                 trustedDone: state.completed && healthManager.hasFreshTodaysDistance,
                 hasActiveWorkout: hasActiveWorkout,
-                showWorkoutView: $showWorkoutView
+                showWorkoutView: $showWorkoutView,
+                onLogPastWorkout: onLogPastWorkout
             )
 
             HStack(alignment: .top, spacing: 12) {
@@ -330,8 +338,7 @@ struct FunDashboardBody: View {
             .madTypeCap(.madFixedChromeCap)
 
             // Everything below the day's cards is the user's to arrange
-            // (DashboardCards): default here is Streak Tokens, the daily
-            // challenge and friends' activity — what always shipped.
+            // (DashboardCards): default here is just the daily challenge.
             DashboardCardsBlock(
                 style: .fun,
                 healthManager: healthManager,
@@ -467,13 +474,19 @@ private struct ModernHeroCard: View {
                 .frame(width: 172, height: 176)
                 .layoutPriority(1)
 
-                HeroStatColumn(
-                    currentDistance: currentDistance,
-                    steps: healthManager.todaysSteps,
-                    fastestPace: healthManager.todaysFastestPace,
-                    timeLeftText: formattedTimeOnly,
-                    statusColor: statusColor
-                )
+                // Savers head the stat column — beside the streak they
+                // protect, instead of a lone chip in the card's top corner.
+                VStack(alignment: .leading, spacing: 6) {
+                    saversLine
+                        .padding(.leading, 4)
+                    HeroStatColumn(
+                        currentDistance: currentDistance,
+                        goalMiles: userManager.currentUser.goalMiles,
+                        fastestPace: healthManager.todaysFastestPace,
+                        timeLeftText: formattedTimeOnly,
+                        statusColor: statusColor
+                    )
+                }
                 .frame(maxWidth: .infinity)
             }
 
@@ -487,14 +500,6 @@ private struct ModernHeroCard: View {
         .padding(18)
         .padding(.top, 20)
         .background(heroBackground)
-        .overlay(alignment: .topTrailing) {
-            tokensChip
-                // Horizontal inset matches the card's own 18, so the chip's
-                // right edge lines up with the stats beneath it instead of
-                // hanging 4pt further out.
-                .padding(.horizontal, 18)
-                .padding(.top, 14)
-        }
         .sheet(isPresented: $showTokens) {
             StreakTokensDetailView()
         }
@@ -523,27 +528,32 @@ private struct ModernHeroCard: View {
         .overlay(Capsule().strokeBorder(statusColor.opacity(0.22), lineWidth: 1))
     }
 
-    private var tokensChip: some View {
-        Button {
-            showTokens = true
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "shield.lefthalf.filled")
-                    .accessibilityLabel("Streak savers")
-                    .madFont(size: 11, weight: .bold)
-                Text("\(readyTokens)")
-                    .madFont(size: 12, weight: .black, design: .rounded, monospacedDigit: true)
-                Text(readyTokens == 1 ? "saver" : "savers")
-                    .madFont(size: 11, weight: .heavy, design: .rounded)
+    /// "🛡 3 savers" — one tappable line under the streak, opening the
+    /// tokens screen. Hidden until the token status has loaded.
+    @ViewBuilder
+    private var saversLine: some View {
+        if tokensState.payload != nil {
+            Button {
+                showTokens = true
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .madFont(size: 8, weight: .black)
+                        .accessibilityHidden(true)
+                    Text("\(readyTokens) \(readyTokens == 1 ? "saver" : "savers")")
+                        .madFont(size: 9, weight: .black, design: .rounded)
+                        .tracking(0.6)
+                        .textCase(.uppercase)
+                }
+                .foregroundColor(readyTokens > 0 ? MADTheme.Colors.success : .white.opacity(0.5))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .contentShape(Rectangle())
             }
-            .foregroundColor(.white.opacity(0.88))
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(Capsule().fill(Color.cyan.opacity(0.10)))
-            .overlay(Capsule().strokeBorder(Color.cyan.opacity(0.22), lineWidth: 1))
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(readyTokens) streak savers ready")
+            .accessibilityHint("Opens your streak tokens")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(readyTokens) streak savers ready")
     }
 
     private var readyTokens: Int {
@@ -747,18 +757,24 @@ private struct ModernHeroDivider: View {
     }
 }
 
-/// The stat lines beside the streak hero — today's mileage, steps, and either
-/// today's best pace or the time left to run.
+/// The stat lines beside the streak hero — today's mileage, today's best
+/// pace and the time left to run.
 ///
 /// BOTH dashboard styles render this exact view. They used to build their own
 /// columns and had drifted apart (Fun showed two stats, Modern three, with
 /// different labels), so the same day read as different numbers depending on
-/// which dashboard you had picked. Anything added here lands on both.
+/// which dashboard you had picked. Anything added here lands on both. Steps
+/// aren't here: the Steps tile sits directly below the hero, and the same
+/// number twice in one screenful read as clutter. The middle row answers the
+/// question the day is asking: "how far to go?" until the goal is met, then
+/// today's best pace (or that the goal's done). A bare "Best pace --" read as
+/// a stat with no answer, and didn't say whether it meant today, the streak
+/// or all time — it was always today's.
 private struct HeroStatColumn: View {
     let currentDistance: Double
-    let steps: Int
+    let goalMiles: Double
     let fastestPace: TimeInterval?
-    /// Time until local midnight, e.g. "6h 30m". Shown when there's no pace yet.
+    /// Time until local midnight, e.g. "6h 30m".
     let timeLeftText: String
     let statusColor: Color
 
@@ -772,39 +788,46 @@ private struct HeroStatColumn: View {
                 tint: MADTheme.Colors.madRed
             )
             ModernHeroDivider()
-            ModernHeroStatLine(
-                icon: "shoeprints.fill",
-                value: steps.formatted(),
-                unit: "steps",
-                label: "Steps",
-                tint: stepTint
-            )
+            middleLine
             ModernHeroDivider()
-            if let pace = fastestPace {
-                ModernHeroStatLine(
-                    icon: "timer",
-                    value: Self.formatPace(pace),
-                    unit: DistanceUnits.current.paceSuffix,
-                    label: "Best pace",
-                    tint: MADTheme.Colors.walkBlue
-                )
-            } else {
-                ModernHeroStatLine(
-                    icon: "clock.fill",
-                    value: timeLeftText.isEmpty ? "--" : timeLeftText,
-                    unit: "left",
-                    label: "Left today",
-                    tint: statusColor
-                )
-            }
+            ModernHeroStatLine(
+                icon: "clock.fill",
+                value: timeLeftText.isEmpty ? "--" : timeLeftText,
+                unit: "left",
+                label: "Left today",
+                tint: statusColor
+            )
         }
     }
 
-    private var stepTint: Color {
-        if steps >= 10000 { return MADTheme.Colors.success }
-        if steps >= 7500 { return MADTheme.Colors.warning }
-        if steps >= 5000 { return .yellow }
-        return .orange
+    @ViewBuilder
+    private var middleLine: some View {
+        let goal = max(goalMiles, 0.01)
+        if !ProgressCalculator.isGoalCompleted(current: currentDistance, goal: goal) {
+            ModernHeroStatLine(
+                icon: "flag.checkered",
+                value: max(goal - currentDistance, 0).distanceToGoText,
+                unit: DistanceUnits.current.abbreviation,
+                label: "To go",
+                tint: MADTheme.Colors.walkBlue
+            )
+        } else if let pace = fastestPace {
+            ModernHeroStatLine(
+                icon: "timer",
+                value: Self.formatPace(pace),
+                unit: DistanceUnits.current.paceSuffix,
+                label: "Today's best pace",
+                tint: MADTheme.Colors.walkBlue
+            )
+        } else {
+            ModernHeroStatLine(
+                icon: "checkmark.circle.fill",
+                value: "Done",
+                unit: "",
+                label: "Today's goal",
+                tint: MADTheme.Colors.success
+            )
+        }
     }
 
     /// `pace` is MINUTES per mile; shown per display unit.
@@ -886,7 +909,9 @@ private struct ModernStepsTile: View {
 
 private struct ModernBadgesTile: View {
     @ObservedObject var userManager: UserManager
-    @ObservedObject var healthManager: HealthKitManager
+    /// Not observed: nothing here reads it, and observing it redrew the tile
+    /// (and re-sorted the medal catalogue) on every HealthKit publish.
+    let healthManager: HealthKitManager
     /// The tile's fixed height, grown with the text inside it. 168 exactly
     /// at the default text size; `.title2` because that's the style of the
     /// value that dominates the tile. BOTH tiles declare it identically so the
@@ -897,8 +922,16 @@ private struct ModernBadgesTile: View {
         userManager.currentUser.badges.filter { !$0.isLocked }.count
     }
 
+    /// `getAllBadges()` builds and sorts the whole catalogue, and `total` is
+    /// read three times a pass. The count only moves when the shelf does.
+    private static var totalCache: (shelf: Int, total: Int)?
+
     private var total: Int {
-        userManager.currentUser.getAllBadges().count
+        let shelf = userManager.currentUser.badges.count
+        if let cached = Self.totalCache, cached.shelf == shelf { return cached.total }
+        let value = userManager.currentUser.getAllBadges().count
+        Self.totalCache = (shelf, value)
+        return value
     }
 
     private var progress: Double {
@@ -1606,19 +1639,26 @@ private struct FlameBuddyHeroCard: View {
                         // holds savers + Share. Below the ground, clear of the
                         // rocket boots' jets and of his hit area (the frame
                         // ends ~208pt down).
-                        if !injuryPause.isPaused {
-                            HeroClosetButton()
-                                .offset(y: Self.groundBaseline + top + 32)
+                        // Share rides beside it: the card is about HIM, and
+                        // "share him" belongs with "dress him", not in a
+                        // corner row of chips competing with the streak.
+                        HStack(spacing: 6) {
+                            if !injuryPause.isPaused { HeroClosetButton() }
+                            HeroShareIconButton {
+                                MADHaptics.action()
+                                showShareSheet = true
+                            }
                         }
+                        .offset(y: Self.groundBaseline + top + 32)
                     }
                     .frame(width: leftWidth, height: geo.size.height, alignment: .top)
 
                     funStatRows
-                        // Clears the savers chip in the corner above — at 8 the
-                        // streak box sat right against it. Moves down with
-                        // him, so the stats stay level with his body and the
-                        // bubble shares the top band with the chips.
-                        .padding(.top, 24 + top)
+                        // Moves down with him, so the stats stay level with
+                        // his body. Nothing sits in the top corner any more
+                        // (savers live in the streak box, Share under his
+                        // feet), so the column starts right at the top band.
+                        .padding(.top, 6 + top)
                         .frame(width: rightWidth, height: geo.size.height, alignment: .top)
                 }
                 .onAppear { heroFrameWidth = geo.size.width }
@@ -1632,28 +1672,6 @@ private struct FlameBuddyHeroCard: View {
         .padding(18)
         .padding(.top, 18)
         .background(cardBackground)
-        // Share sits beside the savers chip, NOT in the top-left corner where
-        // it first went: Flamey's frame is 1.5× his size and offset 28pt up, so
-        // it overflows the left column into that corner, covered the glyph, and
-        // — since the glyph was a bare Image with no gesture — swallowed its
-        // taps into `poke()`. The top-right is the one corner of this card
-        // nothing else reaches.
-        .overlay(alignment: .topTrailing) {
-            // ACTION at the corner, STATUS inboard of it. The two were the
-            // other way round, which left the Share button floating in the gap
-            // between Flamey and the stat column — anchored to nothing, and
-            // reading as a twin of the savers chip rather than as the one
-            // thing in this corner you can press.
-            HStack(spacing: 6) {
-                tokensChip
-                HeroShareButton {
-                    MADHaptics.action()
-                    showShareSheet = true
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 14)
-        }
         .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .onTapGesture {
             MADHaptics.action()
@@ -1760,6 +1778,9 @@ private struct FlameBuddyHeroCard: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.55)
                 }
+                // Savers belong to the streak they protect — they sat in a
+                // chip row at the card's top edge, reading as a stray badge.
+                saversLine
             }
         }
         .padding(.horizontal, 10)
@@ -1775,27 +1796,32 @@ private struct FlameBuddyHeroCard: View {
         )
     }
 
-    private var tokensChip: some View {
-        Button {
-            showTokens = true
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "shield.lefthalf.filled")
-                    .accessibilityLabel("Streak savers")
-                    .madFont(size: 11, weight: .bold)
-                Text("\(readyTokens)")
-                    .madFont(size: 12, weight: .black, design: .rounded, monospacedDigit: true)
-                Text(readyTokens == 1 ? "saver" : "savers")
-                    .madFont(size: 11, weight: .heavy, design: .rounded)
+    /// "🛡 3 savers" — one tappable line under the streak, opening the
+    /// tokens screen. Hidden until the token status has loaded.
+    @ViewBuilder
+    private var saversLine: some View {
+        if tokensState.payload != nil {
+            Button {
+                showTokens = true
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .madFont(size: 8, weight: .black)
+                        .accessibilityHidden(true)
+                    Text("\(readyTokens) \(readyTokens == 1 ? "saver" : "savers")")
+                        .madFont(size: 9, weight: .black, design: .rounded)
+                        .tracking(0.6)
+                        .textCase(.uppercase)
+                }
+                .foregroundColor(readyTokens > 0 ? MADTheme.Colors.success : .white.opacity(0.5))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .contentShape(Rectangle())
             }
-            .foregroundColor(.white.opacity(0.90))
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(Capsule().fill(Color.green.opacity(0.12)))
-            .overlay(Capsule().strokeBorder(Color.green.opacity(0.26), lineWidth: 1))
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(readyTokens) streak savers ready")
+            .accessibilityHint("Opens your streak tokens")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(readyTokens) streak savers ready")
     }
 
     private var readyTokens: Int {
@@ -1855,7 +1881,7 @@ private struct FlameBuddyHeroCard: View {
 
             HeroStatColumn(
                 currentDistance: currentDistance,
-                steps: healthManager.todaysSteps,
+                goalMiles: userManager.currentUser.goalMiles,
                 fastestPace: healthManager.todaysFastestPace,
                 timeLeftText: formattedTimeOnly,
                 statusColor: statusColor
@@ -2068,10 +2094,14 @@ private struct FunStartCard: View {
     let trustedDone: Bool
     let hasActiveWorkout: Bool
     @Binding var showWorkoutView: Bool
+    let onLogPastWorkout: () -> Void
 
     var body: some View {
         VStack(spacing: 10) {
-            DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
+            VStack(spacing: 6) {
+                DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
+                LogPastWorkoutLink(action: onLogPastWorkout)
+            }
             BuddyWalkPill(hasActiveWorkout: hasActiveWorkout)
         }
     }
