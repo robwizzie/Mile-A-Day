@@ -911,8 +911,8 @@ struct PostCardView: View {
     }
 
     /// The run itself as the animated indoor card — the second face when a
-    /// photo post has no GPS route to show (track or treadmill face by the
-    /// viewer's dashboard style). The card-level double-tap covers it. Zooms
+    /// photo post has no GPS route to show (Fun or Modern by the AUTHOR's
+    /// dashboard style). The card-level double-tap covers it. Zooms
     /// like every other slide; the card is pure SwiftUI so its zoom copy
     /// renders on demand at pinch-begin as a still frame of the same inputs.
     private func workoutCardSlide(_ stats: PostStats) -> some View {
@@ -1200,7 +1200,8 @@ struct PostCardView: View {
             companionAvatars: companionRouteAvatars,
             onSnapshot: { routeArtSnapshot = $0 },
             paletteDate: RelativeTime.date(from: post.created_at),
-            highlightedRouteId: highlightedRouteId
+            highlightedRouteId: highlightedRouteId,
+            flamey: cardFlamey
         )
         .frame(maxWidth: .infinity)
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
@@ -1244,6 +1245,13 @@ struct PostCardView: View {
         return hasRoute && (isMine || post.flyover_allowed != false)
     }
 
+    /// The AUTHOR's Flamey when they're on Fun (nil = the Modern card) —
+    /// their style decides their card, never the viewer's. A coauthor viewing
+    /// still sees the poster's, since `is_self` is "you POSTED this".
+    private var cardFlamey: FlameyLook? {
+        FeedCardFlamey.look(authorFlamey: post.author_flamey, isOwn: post.is_self)
+    }
+
     /// The route slide's floating zoom copy, on demand. 720×900 keeps the
     /// photo slides' 4:5 so the lift is pixel-identical.
     private func routeZoomComposite(_ coords: [CLLocationCoordinate2D]) -> UIImage? {
@@ -1258,6 +1266,7 @@ struct PostCardView: View {
             underlay: routeArtSnapshot,
             paletteDate: RelativeTime.date(from: post.created_at),
             highlightedRouteId: highlightedRouteId,
+            flamey: cardFlamey,
             size: CGSize(width: 720, height: 900)
         ) {
             if let stats {

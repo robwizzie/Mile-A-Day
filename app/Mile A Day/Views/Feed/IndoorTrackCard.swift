@@ -1,10 +1,15 @@
 import SwiftUI
 import UIKit
 
-/// The Modern indoor face: the workout as laps of a glowing stadium track —
-/// the runner's badge circles the lane with a comet tail while the lap
-/// counter and headline count up. Distance → laps is a real mapping
-/// (1 mile ≈ 4 laps of a 400m track), so the scene is earned, not canned.
+/// The routeless face: the workout as laps of a glowing stadium track — the
+/// runner's badge circles the lane with a comet tail while the lap counter
+/// and headline count up. Distance → laps is a real mapping (1 mile ≈ 4 laps
+/// of a 400m track), so the scene is earned, not canned.
+///
+/// A Fun AUTHOR's card (`funLook` set) is the same scene warmed up: their
+/// Flamey takes the infield beside the lap counter, a "GO SPARKY!" cheer
+/// rides the top straight, and embers rise off the canvas. A Modern author's
+/// card is the clean track.
 struct IndoorTrackCard: View {
     let stats: PostStats
     let workoutType: String?
@@ -12,12 +17,11 @@ struct IndoorTrackCard: View {
     var avatar: RouteArtAvatar? = nil
     /// nil = unknown — the scaffold's chip doesn't draw then.
     var isIndoor: Bool? = nil
-    /// Fun-dashboard viewers get Flamey standing trackside, cheering the
-    /// laps on (transform/opacity motion only — the feed-cell perf rule),
-    /// dressed as the AUTHOR's Flamey. nil = no cheerleader.
-    var cheerLook: FlameyLook? = nil
+    /// The AUTHOR's Flamey when they're on Fun — the Fun scene. nil = the
+    /// Modern track. Motion is transform/opacity only (the feed-cell rule).
+    var funLook: FlameyLook? = nil
     /// The author's name for him ("Sparky"), nil = unnamed/"Flamey".
-    var cheerName: String? = nil
+    var funName: String? = nil
     var still: Bool = false
 
     /// 0 → `laps`, set once OUTSIDE `withAnimation`; every consumer (comet
@@ -41,7 +45,8 @@ struct IndoorTrackCard: View {
 
     var body: some View {
         IndoorCardScaffold(stats: stats, workoutType: workoutType, splits: splits,
-                           isIndoor: isIndoor, still: still, revealDuration: runDuration) {
+                           isIndoor: isIndoor, still: still, revealDuration: runDuration,
+                           fun: funLook != nil) {
             trackHero
                 // Compressible: on the smallest screens the 4:5 card hasn't
                 // 130pt to spare once the pace wave row is present — the
@@ -98,26 +103,22 @@ struct IndoorTrackCard: View {
                         .animation(lapAnimation, value: lapProgress)
                 }
 
-                // Lap counter in the infield.
-                VStack(spacing: 1) {
-                    Text(String(format: "%.1f", laps))
-                        .modifier(CountUpNumberModifier(value: Double(shownLaps), format: "%.1f"))
-                        .font(.system(size: 26, weight: .black, design: .rounded))
-                        .foregroundColor(.white)
-                        .monospacedDigit()
-                        .animation(effectiveStill ? nil : lapAnimation, value: lapProgress)
-                    Text("LAPS")
-                        .font(.system(size: 9, weight: .heavy, design: .rounded))
-                        .tracking(3)
-                        .foregroundColor(.white.opacity(0.5))
-                }
-                .position(x: rect.midX, y: rect.midY)
-
-                if let cheerLook {
-                    TrackCheerleader(look: cheerLook, name: cheerName, still: still)
-                        // Trackside, tucked into the space the stadium's
-                        // rounded end leaves at the bottom-leading corner.
-                        .position(x: max(rect.minX + 2, 20), y: rect.maxY - 18)
+                if let funLook {
+                    // Fun: Flamey owns the infield, the laps beside him, and
+                    // his cheer rides the top straight (the runner passes
+                    // OVER it — it's drawn first).
+                    HStack(spacing: 8) {
+                        TrackFlamey(look: funLook, still: effectiveStill,
+                                    size: min(56, rect.height * 0.62))
+                        lapCounter(shownLaps, numberSize: 22)
+                    }
+                    .position(x: rect.midX, y: rect.midY + 2)
+                    TrackCheerBubble(text: FeedCardFlamey.cheer(name: funName), still: effectiveStill)
+                        .position(x: rect.midX, y: rect.minY - 3)
+                } else {
+                    // Lap counter in the infield.
+                    lapCounter(shownLaps, numberSize: 26)
+                        .position(x: rect.midX, y: rect.midY)
                 }
 
                 // The runner: their badge, or a bright dot when no identity
@@ -141,6 +142,21 @@ struct IndoorTrackCard: View {
                 .modifier(RouteRiderEffect(progress: shownLaps, metrics: metrics, wraps: true))
                 .animation(effectiveStill ? nil : lapAnimation, value: lapProgress)
             }
+        }
+    }
+
+    private func lapCounter(_ shownLaps: CGFloat, numberSize: CGFloat) -> some View {
+        VStack(spacing: 1) {
+            Text(String(format: "%.1f", laps))
+                .modifier(CountUpNumberModifier(value: Double(shownLaps), format: "%.1f"))
+                .font(.system(size: numberSize, weight: .black, design: .rounded))
+                .foregroundColor(.white)
+                .monospacedDigit()
+                .animation(effectiveStill ? nil : lapAnimation, value: lapProgress)
+            Text("LAPS")
+                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .tracking(3)
+                .foregroundColor(.white.opacity(0.5))
         }
     }
 
@@ -221,53 +237,68 @@ struct IndoorTrackCard: View {
     }
 }
 
-/// Flamey, trackside — the Fun dashboard's mascot cheering the laps on. The
-/// figure renders ONCE (fixed flicker, legacy phase-less form per the
-/// dashboard rules) and everything that moves is a compositor transform or
-/// opacity on that cached layer: an excited hop + waggle, and a "GO!" bubble
-/// pulsing above. No TimelineView, no per-frame redraw (the retired treadmill
-/// face's mistake).
-private struct TrackCheerleader: View {
+/// The Fun author's Flamey in the infield, both arms up, hopping the laps
+/// on. The figure renders ONCE and everything that moves is a compositor
+/// transform on that layer — no TimelineView, no per-frame redraw (the
+/// retired treadmill face's mistake). The hop starts on the next turn, never
+/// inside `onAppear`'s own commit (ios.md).
+private struct TrackFlamey: View {
     let look: FlameyLook
-    var name: String? = nil
     let still: Bool
+    var size: CGFloat = 52
     @State private var hop = false
-    @State private var cheer = false
 
     var body: some View {
-        VStack(spacing: 2) {
-            // His name when the author gave him one — "GO SPARKY!" —
-            // else (or when it wouldn't fit trackside) the plain cheer.
-            Text(name.flatMap { $0.count <= 8 ? "GO \($0.uppercased())!" : nil } ?? "GO!")
-                .font(.system(size: 9, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .fixedSize(horizontal: true, vertical: false)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(Color.white.opacity(0.16)))
-                .opacity((still || cheer) ? 1 : 0.15)
-                .offset(y: cheer ? -1 : 2)
-            // The AUTHOR's Flamey (resolved by IndoorWorkoutCard), in his
-            // colour and outfit, both arms up cheering. Compact: it's a 38pt
-            // figure. FlameyDressedFigure scales a compact look so his legs
-            // keep the trackside spot the height it always was.
-            FlameyDressedFigure(look: look, health: .healthy, size: 38,
-                                scale: FlameHealth.healthy.bodyScale, arms: .cheer)
-            .rotationEffect(.degrees(hop ? 4 : -4))
-            .offset(y: hop ? -3 : 0)
-        }
-        .onAppear {
-            guard !still, !UIAccessibility.isReduceMotionEnabled else { return }
-            withAnimation(.easeInOut(duration: 0.3).repeatForever(autoreverses: true)) {
-                hop = true
+        FlameyDressedFigure(look: look, health: .healthy, size: size,
+                            scale: FlameHealth.healthy.bodyScale, arms: .cheer)
+            .rotationEffect(.degrees(still ? 0 : (hop ? 5 : -5)), anchor: .bottom)
+            .offset(y: still ? 0 : (hop ? -4 : 0))
+            .onAppear {
+                guard !still else { return }
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.32).repeatForever(autoreverses: true)) {
+                        hop = true
+                    }
+                }
             }
-            withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
-                cheer = true
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+/// "GO SPARKY!" on the top straight — a warm capsule that pulses by scale
+/// and opacity only.
+private struct TrackCheerBubble: View {
+    let text: String
+    let still: Bool
+    @State private var pulse = false
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10, weight: .heavy, design: .rounded))
+            .tracking(0.6)
+            .foregroundColor(.white)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(
+                Capsule().fill(LinearGradient(
+                    colors: [MADTheme.Colors.warning, MADTheme.Colors.madRed],
+                    startPoint: .leading, endPoint: .trailing))
+            )
+            .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
+            .scaleEffect(still ? 1 : (pulse ? 1.06 : 0.96))
+            .onAppear {
+                guard !still else { return }
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                        pulse = true
+                    }
+                }
             }
-        }
-        .allowsHitTesting(false)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 

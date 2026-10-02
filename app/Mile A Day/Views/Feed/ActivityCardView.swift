@@ -271,7 +271,8 @@ struct ActivityCardView: View {
             pointTimes: entry.route_times,
             authorAvatar: RouteArtAvatar(name: entry.displayName, imageURL: entry.profile_image_url),
             onSnapshot: { routeArtSnapshot = $0 },
-            paletteDate: RelativeTime.date(from: entry.sort_ts)
+            paletteDate: RelativeTime.date(from: entry.sort_ts),
+            flamey: cardFlamey
         )
         .frame(maxWidth: .infinity)
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
@@ -295,6 +296,11 @@ struct ActivityCardView: View {
             imageProvider: { routeZoomComposite(coords) },
             onDoubleTap: doubleTapHype
         )
+    }
+
+    /// The AUTHOR's Flamey when they're on Fun (nil = the Modern card).
+    private var cardFlamey: FlameyLook? {
+        FeedCardFlamey.look(authorFlamey: entry.author_flamey, isOwn: entry.is_self)
     }
 
     private var canPlayFlyover: Bool {
@@ -328,6 +334,7 @@ struct ActivityCardView: View {
             authorAvatar: RouteArtAvatar(name: entry.displayName, imageURL: entry.profile_image_url),
             underlay: routeArtSnapshot,
             paletteDate: RelativeTime.date(from: entry.sort_ts),
+            flamey: cardFlamey,
             size: CGSize(width: 720, height: 900)
         ) {
             if let stats {
@@ -340,8 +347,8 @@ struct ActivityCardView: View {
         }
     }
 
-    /// Routeless runs: the animated indoor card (track or treadmill face by
-    /// the viewer's dashboard style), fed by the entry's splits when the
+    /// Routeless runs: the animated indoor card (Fun or Modern by the
+    /// AUTHOR's dashboard style), fed by the entry's splits when the
     /// server sent them.
     private var workoutCardSlide: some View {
         indoorCard(still: false)

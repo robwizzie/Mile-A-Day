@@ -7,16 +7,13 @@ import SwiftUI
 /// was on a treadmill OR because the owner shares no maps, and the two must
 /// read identically (the same rule the buddy wizard's copy follows).
 ///
-/// One face for everyone — the stadium track. The VIEWER's
-/// `DashboardStylePreference` decides whether Flamey stands trackside
-/// cheering at all (the Fun dashboard's mascot joins the scene, the Modern
-/// one keeps it clean); WHICH Flamey is the AUTHOR's: their look from the
-/// post's `author_flamey` (served only for a Fun author), your own when it's
-/// your post, and the plain basic Flamey otherwise — a Modern author, or an
-/// older server that doesn't send the field. Never the viewer's outfit on
-/// somebody else's walk: that put your crown on their post. (An earlier
-/// build had a whole separate treadmill face for Fun; retired — one scene,
-/// one small delight.)
+/// One scene — the stadium track — in the AUTHOR's style (`FeedCardFlamey`):
+/// a Fun author's card puts their Flamey in the infield with a cheer and an
+/// ember glow, a Modern author's card is the clean track. The viewer's own
+/// dashboard style decides nothing about somebody else's walk — it used to
+/// (Flamey trackside for any Fun VIEWER), which made a Fun friend's card look
+/// Modern to a Modern viewer and vice versa. Never the viewer's outfit on
+/// somebody else's walk either: that put your crown on their post.
 struct IndoorWorkoutCard: View {
     let stats: PostStats
     let workoutType: String?
@@ -42,17 +39,10 @@ struct IndoorWorkoutCard: View {
             splits: splits,
             avatar: avatar,
             isIndoor: isIndoor,
-            cheerLook: cheerLook,
-            cheerName: isOwn ? FlameyFacts.name : authorFlamey?.displayName,
+            funLook: FeedCardFlamey.look(authorFlamey: authorFlamey, isOwn: isOwn),
+            funName: FeedCardFlamey.name(authorFlamey: authorFlamey, isOwn: isOwn),
             still: still
         )
-    }
-
-    /// Who cheers trackside — nil (no cheerleader) for a Modern viewer.
-    private var cheerLook: FlameyLook? {
-        guard DashboardStylePreference.current == .fun else { return nil }
-        if isOwn, let own = FlameyFacts.look(detail: .compact) { return own }
-        return (authorFlamey ?? AuthorFlamey()).resolved()
     }
 }
 
@@ -70,6 +60,8 @@ struct IndoorCardScaffold<Hero: View>: View {
     /// How long the headline takes to count up — each face passes its hero's
     /// own duration so number and scene land together.
     var revealDuration: Double = 1.6
+    /// A Fun author's card: an ember glow over the canvas and warm labels.
+    var fun: Bool = false
     @ViewBuilder var hero: () -> Hero
 
     /// Flipped once outside `withAnimation`; the headline's Animatable
@@ -90,6 +82,9 @@ struct IndoorCardScaffold<Hero: View>: View {
     var body: some View {
         ZStack {
             ArtCanvasBackground(accent: accent)
+            if fun {
+                FunEmberLayer(still: effectiveStill)
+            }
 
             VStack(spacing: 0) {
                 HStack {
@@ -149,7 +144,7 @@ struct IndoorCardScaffold<Hero: View>: View {
                 Text("MILES")
                     .font(.system(size: 11, weight: .heavy, design: .rounded))
                     .tracking(5)
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(fun ? MADTheme.Colors.warning : .white.opacity(0.6))
 
                 if splits.count >= 2 {
                     PaceWaveStrip(bars: splits, accent: accent, still: effectiveStill)
