@@ -27,6 +27,79 @@ enum WhatsNewCatalog {
     /// names, no "beta"), one short line per feature.
     static let releases: [WhatsNewRelease] = [
         WhatsNewRelease(
+            id: 5,
+            versionLabel: "October 2026 Update",
+            headline: "Flamey gets a wardrobe",
+            features: [
+                WhatsNewFeature(
+                    icon: "tshirt.fill",
+                    title: "Flamey's Closet",
+                    blurb: "On the Fun dashboard, every medal you earn unlocks something for Flamey to wear. Dress him up, give him a name, and save your favorite outfits.",
+                    tint: .orange
+                ),
+                WhatsNewFeature(
+                    icon: "flame.fill",
+                    title: "Your Flamey, on your walks",
+                    blurb: "Friends on Fun now bring their Flamey to the feed: he runs their route beside them, and cheers from the track on walks without a map.",
+                    tint: MADTheme.Colors.madRed
+                ),
+                WhatsNewFeature(
+                    icon: "figure.walk",
+                    title: "Every walk looks like a walk",
+                    blurb: "Walks without a map get their own card: laps of a track indoors, a mile-by-mile pace ribbon everywhere else, clearly marked indoor or outdoor.",
+                    tint: MADTheme.Colors.walkBlue
+                ),
+                WhatsNewFeature(
+                    icon: "gift.fill",
+                    title: "Holiday medals",
+                    blurb: "Get your mile in on a holiday and take home a medal for it, plus something festive for Flamey.",
+                    tint: .purple
+                ),
+                WhatsNewFeature(
+                    icon: "camera.on.rectangle.fill",
+                    title: "Front & Back photos",
+                    blurb: "One press takes both cameras, mid-walk or after. Move the small photo to any corner, and tap it on the feed to flip the two.",
+                    tint: .teal
+                ),
+                WhatsNewFeature(
+                    icon: "square.and.arrow.up.fill",
+                    title: "A new way to share",
+                    blurb: "Swipe through finished cards for your walk, your streak, or your Flamey, then send one straight to Instagram Stories, Messages, or your photos.",
+                    tint: .pink
+                ),
+                WhatsNewFeature(
+                    icon: "calendar.badge.clock",
+                    title: "Weekly Recap",
+                    blurb: "Every Saturday evening, your week in review: miles, your best day, and how your friends did.",
+                    tint: .indigo
+                ),
+                WhatsNewFeature(
+                    icon: "mappin.slash",
+                    title: "Hide where you start and finish",
+                    blurb: "Friends see your route with the first and last stretch trimmed off, so your front door stays yours. Choose how much in Settings.",
+                    tint: .gray
+                ),
+                WhatsNewFeature(
+                    icon: "person.3.fill",
+                    title: "Buddy Walks, your rules",
+                    blurb: "Choose who can join your walk, and when two friends start at once, combine into one walk with a single tap.",
+                    tint: .mint
+                ),
+                WhatsNewFeature(
+                    icon: "mic.fill",
+                    title: "Start with Siri",
+                    blurb: "Start your mile from Siri, Shortcuts, the Action Button, or Control Center.",
+                    tint: Color(red: 1.0, green: 0.84, blue: 0.35)
+                ),
+                WhatsNewFeature(
+                    icon: "globe",
+                    title: "Now in more languages",
+                    blurb: "Mile A Day speaks Spanish, Portuguese, French, and German, and follows your text size setting.",
+                    tint: .green
+                ),
+            ]
+        ),
+        WhatsNewRelease(
             id: 4,
             versionLabel: "September 2026 Update",
             headline: "Nobody walks alone",
