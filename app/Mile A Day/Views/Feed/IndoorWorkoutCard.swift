@@ -101,17 +101,26 @@ struct IndoorCardScaffold<Hero: View>: View {
                     // nil (older rows) makes no claim, because a blank route
                     // can also be a privacy choice.
                     if let isIndoor {
-                        HStack(spacing: 4) {
+                        // Same weight as the activity capsule beside it — it
+                        // is the other half of "what was this walk", and the
+                        // two scenes below (track vs trail) agree with it.
+                        let tint = isIndoor ? Color.white.opacity(0.85) : MADTheme.Colors.success
+                        HStack(spacing: 5) {
                             Image(systemName: isIndoor ? "house.fill" : "sun.max.fill")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(.system(size: 11, weight: .bold))
                             Text(isIndoor ? "INDOOR" : "OUTDOOR")
-                                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                                .tracking(1.2)
+                                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                                .tracking(1.4)
+                                .lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
                         }
-                        .foregroundColor(.white.opacity(0.65))
-                        .padding(.horizontal, 9).padding(.vertical, 6)
-                        .background(Capsule().fill(Color.white.opacity(0.08)))
+                        .foregroundColor(tint)
+                        .padding(.horizontal, 11).padding(.vertical, 6)
+                        .background(Capsule().fill(tint.opacity(0.15)))
+                        .overlay(Capsule().stroke(tint.opacity(0.35), lineWidth: 1))
                         .padding(.leading, 6)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(isIndoor ? "Indoor" : "Outdoor")
                     }
                     Spacer()
                     if let date = stats.date, !date.isEmpty {

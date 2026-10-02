@@ -10,6 +10,10 @@ import UIKit
 /// Flamey takes the infield beside the lap counter, a "GO SPARKY!" cheer
 /// rides the top straight, and embers rise off the canvas. A Modern author's
 /// card is the clean track.
+///
+/// A walk HealthKit flagged OUTDOOR (`isIndoor == false`) that reached the
+/// card without its map draws a decorative trail over hills instead — laps
+/// of a stadium misdescribed every outdoor walk whose map wasn't shared.
 struct IndoorTrackCard: View {
     let stats: PostStats
     let workoutType: String?
@@ -47,12 +51,22 @@ struct IndoorTrackCard: View {
         IndoorCardScaffold(stats: stats, workoutType: workoutType, splits: splits,
                            isIndoor: isIndoor, still: still, revealDuration: runDuration,
                            fun: funLook != nil) {
-            trackHero
-                // Compressible: on the smallest screens the 4:5 card hasn't
-                // 130pt to spare once the pace wave row is present — the
-                // stadium scene derives everything from its geometry, so it
-                // shrinks instead of overflowing the card.
-                .frame(minHeight: 100, idealHeight: 130, maxHeight: 130)
+            Group {
+                // OUTDOOR only when HealthKit said so: a walk outside whose
+                // map didn't come along (maps off, a bridged app with no
+                // GPS, a multi-leg day) is not laps of a track. nil and
+                // indoor keep the stadium.
+                if isIndoor == false {
+                    outdoorHero
+                } else {
+                    trackHero
+                }
+            }
+            // Compressible: on the smallest screens the 4:5 card hasn't
+            // 130pt to spare once the pace wave row is present — both
+            // scenes derive everything from their geometry, so they shrink
+            // instead of overflowing the card.
+            .frame(minHeight: 100, idealHeight: 130, maxHeight: 130)
         }
         .task { await animateIn() }
         .task(id: avatar?.imageURL) {
@@ -121,27 +135,132 @@ struct IndoorTrackCard: View {
                         .position(x: rect.midX, y: rect.midY)
                 }
 
-                // The runner: their badge, or a bright dot when no identity
-                // was handed in.
-                Group {
-                    if let avatar {
-                        // Cache fallback so a still render (ImageRenderer runs
-                        // no tasks) and a freshly recycled cell both get the
-                        // photo when it's already warm.
-                        RouteAvatarBadge(
-                            name: avatar.name,
-                            image: avatarImage ?? RouteAvatarImageLoader.cachedImage(for: avatar.imageURL),
-                            size: 22, ring: accent)
-                    } else {
-                        Circle()
-                            .fill(.white)
-                            .frame(width: 10, height: 10)
-                            .shadow(color: accent, radius: 5)
-                    }
-                }
-                .modifier(RouteRiderEffect(progress: shownLaps, metrics: metrics, wraps: true))
-                .animation(effectiveStill ? nil : lapAnimation, value: lapProgress)
+                runner
+                    .modifier(RouteRiderEffect(progress: shownLaps, metrics: metrics, wraps: true))
+                    .animation(effectiveStill ? nil : lapAnimation, value: lapProgress)
             }
+        }
+    }
+
+    /// The runner: their badge, or a bright dot when no identity was handed in.
+    @ViewBuilder
+    private var runner: some View {
+        if let avatar {
+            // Cache fallback so a still render (ImageRenderer runs no tasks)
+            // and a freshly recycled cell both get the photo when it's
+            // already warm.
+            RouteAvatarBadge(
+                name: avatar.name,
+                image: avatarImage ?? RouteAvatarImageLoader.cachedImage(for: avatar.imageURL),
+                size: 22, ring: accent)
+        } else {
+            Circle()
+                .fill(.white)
+                .frame(width: 10, height: 10)
+                .shadow(color: accent, radius: 5)
+        }
+    }
+
+    /// The OUTDOOR face for a walk whose map isn't on the card: a winding
+    /// trail over rolling hills that draws on while the runner rides it to a
+    /// finish flag. The trail is DECORATIVE — the same shape for every walk,
+    /// never a hint of where anyone went (the card can be mapless because
+    /// its owner keeps maps private). A Fun author's Flamey waits at the
+    /// flag, cheering.
+    private var outdoorHero: some View {
+        GeometryReader { geo in
+            let rect = CGRect(origin: .zero, size: geo.size).insetBy(dx: 16, dy: 14)
+            let points = Self.trailPoints(in: rect)
+            let metrics = RouteArtMetrics(points: points)
+            let trail = Path(RoutePolyline.path(through: points))
+            // 0 → 1 over the same clock the headline counts on; the Shape's
+            // trim and the rider's effect interpolate between the two
+            // endpoints this expression is evaluated at.
+            let drawn: CGFloat = effectiveStill ? 1 : min(1, lapProgress / CGFloat(laps))
+            let finish = points.last ?? CGPoint(x: rect.maxX, y: rect.minY)
+            ZStack(alignment: .topLeading) {
+                Self.hills(in: geo.size, height: 0.42, phase: 0)
+                    .fill(Color.white.opacity(0.05))
+                Self.hills(in: geo.size, height: 0.26, phase: 1.7)
+                    .fill(Color.white.opacity(0.07))
+
+                // The whole trail, faint and dotted — where the walk is headed.
+                trail.stroke(Color.white.opacity(0.16),
+                             style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [0.1, 7]))
+
+                // The walked part — same glow/casing/line recipe as a route.
+                Group {
+                    trail.trim(from: 0, to: drawn)
+                        .stroke(accent.opacity(0.3),
+                                style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
+                        .blur(radius: 3)
+                    trail.trim(from: 0, to: drawn)
+                        .stroke(Color.black.opacity(0.45),
+                                style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
+                    trail.trim(from: 0, to: drawn)
+                        .stroke(accent,
+                                style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+                }
+                .animation(effectiveStill ? nil : lapAnimation, value: lapProgress)
+
+                if let start = points.first {
+                    Circle()
+                        .fill(Color.white.opacity(0.85))
+                        .frame(width: 7, height: 7)
+                        .position(start)
+                }
+
+                Image(systemName: "flag.checkered")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.white)
+                    .position(x: finish.x + 6, y: finish.y - 12)
+                    .accessibilityHidden(true)
+
+                if let funLook {
+                    // Waiting just under the flag, cheering the walker home.
+                    TrackFlamey(look: funLook, still: effectiveStill,
+                                size: min(46, rect.height * 0.5))
+                        .position(x: finish.x - 34, y: min(rect.maxY - 18, finish.y + 34))
+                    TrackCheerBubble(text: FeedCardFlamey.cheer(name: funName), still: effectiveStill)
+                        .position(x: rect.midX, y: rect.minY + 2)
+                }
+
+                runner
+                    .modifier(RouteRiderEffect(progress: drawn, metrics: metrics))
+                    .animation(effectiveStill ? nil : lapAnimation, value: lapProgress)
+            }
+        }
+    }
+
+    /// The decorative trail: a gentle S rising from bottom-left to the top
+    /// right, sampled densely so the rider's arc length is smooth.
+    static func trailPoints(in rect: CGRect, samples: Int = 96) -> [CGPoint] {
+        guard rect.width > 0, rect.height > 0 else { return [] }
+        let amplitude = rect.height * 0.2
+        return (0...samples).map { i -> CGPoint in
+            let t = CGFloat(i) / CGFloat(samples)
+            let x = rect.minX + rect.width * t
+            let rise = rect.maxY - 6 - (rect.height - 20) * t
+            let y = rise + amplitude * sin(t * .pi * 2.4) * (1 - t * 0.5)
+            return CGPoint(x: x, y: min(rect.maxY - 4, max(rect.minY + 10, y)))
+        }
+    }
+
+    /// A band of rolling hills along the bottom of the scene.
+    static func hills(in size: CGSize, height: CGFloat, phase: CGFloat) -> Path {
+        Path { p in
+            let base = size.height
+            let top = size.height * (1 - height)
+            p.move(to: CGPoint(x: 0, y: base))
+            let steps = 48
+            for i in 0...steps {
+                let t = CGFloat(i) / CGFloat(steps)
+                let wave = (sin(t * .pi * 3 + phase) + 1) / 2
+                p.addLine(to: CGPoint(x: size.width * t,
+                                      y: top + (base - top) * 0.45 * wave))
+            }
+            p.addLine(to: CGPoint(x: size.width, y: base))
+            p.closeSubpath()
         }
     }
 
