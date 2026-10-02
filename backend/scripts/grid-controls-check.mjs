@@ -145,9 +145,12 @@ async function seed() {
        VALUES ($1, $2, $3, $4, $5) ON CONFLICT (user_id) DO NOTHING`,
       [id, `sub-${id}`, `${id}@example.com`, id, id],
     );
+    // Hide start & end OFF: these seeds are short routes that pin route
+    // GATES byte-for-byte, and the trim would serve them to friends as no
+    // route at all. The trim is pinned by route-privacy-check.
     await db.query(
-      `INSERT INTO notification_settings (user_id) VALUES ($1)
-       ON CONFLICT DO NOTHING`,
+      `INSERT INTO notification_settings (user_id, route_privacy_meters) VALUES ($1, 0)
+       ON CONFLICT (user_id) DO UPDATE SET route_privacy_meters = 0`,
       [id],
     );
   }

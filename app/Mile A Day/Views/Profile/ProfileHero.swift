@@ -127,9 +127,9 @@ struct ProfileBannerView: View {
     }
 }
 
-/// The round glass buttons that ride the banner (QR, edit, settings). Same
-/// 38pt circle as `MADTabHeader`'s standard style, on a darker fill so they
-/// hold up over a photo.
+/// The round glass buttons that ride the banner (share, edit). Same 38pt
+/// circle as `MADTabHeader`'s standard style, on a darker fill so they hold
+/// up over a photo.
 struct ProfileBannerButton: View {
     let systemImage: String
     let accessibilityLabel: String
@@ -137,19 +137,44 @@ struct ProfileBannerButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(width: 38, height: 38)
-                .background(
-                    Circle()
-                        .fill(Color.black.opacity(0.35))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-                )
-                .contentShape(Circle())
+            ProfileBannerGlyph(systemImage: systemImage)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// A banner button that opens a menu instead of acting — the same circle, so
+/// the Share menu sits beside Edit as one set.
+struct ProfileBannerMenu<Content: View>: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        Menu(content: content) {
+            ProfileBannerGlyph(systemImage: systemImage)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// The glyph-in-a-glass-circle both banner controls draw.
+private struct ProfileBannerGlyph: View {
+    let systemImage: String
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundColor(.white)
+            .frame(width: 38, height: 38)
+            .background(
+                Circle()
+                    .fill(Color.black.opacity(0.35))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+            )
+            .contentShape(Circle())
     }
 }
 
@@ -351,7 +376,7 @@ struct NextMilestoneChip: View {
 
 // MARK: - Hero layout
 
-/// Banner + top bar + milestone, with the avatar (in its goal ring) hanging
+/// Banner + top bar, with the avatar (in its goal ring) hanging
 /// off the banner's bottom edge. The space the hanging ring needs is RESERVED
 /// with padding rather than drawn with an offset, so whatever the caller puts
 /// underneath lays out against the real bounds.
@@ -359,9 +384,9 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
     let bannerURL: String?
     let bannerStyle: ProfileBannerStyle
     var bannerLocalImage: UIImage? = nil
-    /// nil = unknown (a profile whose stats aren't loaded or shared) → no chip.
+    /// Retained for API compatibility; the banner no longer draws a chip.
     let totalMiles: Double?
-    /// Mile-medal rungs from the badge catalog (see `MileMilestones`).
+    /// Retained for API compatibility (see `MileMilestones`).
     var milestoneThresholds: [Double] = []
     let goalProgress: Double?
     let goalComplete: Bool
@@ -392,13 +417,11 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
                 .padding(.horizontal, gutter)
                 .padding(.top, topInset + 10)
         }
-        .overlay(alignment: .bottomTrailing) {
-            if let totalMiles {
-                NextMilestoneChip(totalMiles: totalMiles, thresholds: milestoneThresholds)
-                    .padding(.trailing, gutter)
-                    .padding(.bottom, 14)
-            }
-        }
+        // No milestone chip on the banner any more: lifetime miles already
+        // reads on the Miles tile and on the Total Miles screen, and a third
+        // copy in the banner was clutter. `totalMiles`/`milestoneThresholds`
+        // stay in the API so callers keep compiling; `NextMilestoneChip`
+        // stays available for any surface that wants the rung on its own.
         .padding(.bottom, hang + labelReserve)
         .overlay(alignment: .bottomLeading) {
             Button {
@@ -503,6 +526,9 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
     /// shield — never green, which would claim miles that weren't run, and
     /// never the open-day red, which would contradict the number above it.
     var streakSavedToday: CoveredDate? = nil
+    /// When set, the Miles tile is a button (own profile → Total Miles
+    /// detail). Nil keeps it a plain tile, as on a friend's profile.
+    var onTapMiles: (() -> Void)? = nil
     @ViewBuilder var friendsDestination: () -> FriendsDestination
 
     var body: some View {
@@ -513,7 +539,17 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
                 accent: streakAccent,
                 trailingIcon: streakIcon
             )
-            tile(label: DistanceUnits.current.plural.uppercased(), value: milesText, accent: nil)
+            if let onTapMiles {
+                Button {
+                    MADHaptics.tap()
+                    onTapMiles()
+                } label: {
+                    tile(label: DistanceUnits.current.plural.uppercased(), value: milesText, accent: nil, chevron: true)
+                }
+                .buttonStyle(.plain)
+            } else {
+                tile(label: DistanceUnits.current.plural.uppercased(), value: milesText, accent: nil)
+            }
             NavigationLink(destination: friendsDestination()) {
                 tile(
                     label: friendCount == 1 ? "FRIEND" : "FRIENDS",

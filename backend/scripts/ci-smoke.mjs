@@ -117,8 +117,13 @@ async function seed() {
 			 VALUES ($1, $2, $3, $4, $5) ON CONFLICT (user_id) DO NOTHING`,
       [id, `${name}@ci.local`, `ci-sub-${name}`, `ci_${name}`, name],
     );
+    // route_privacy_meters = 0 (hide start & end OFF): these seeds are 3-point
+    // routes that pin route GATES and the clock's plumbing byte-for-byte, and
+    // any trim would serve them as no route at all. The trim itself is pinned
+    // by route-privacy-check.mjs.
     await db.query(
-      `INSERT INTO notification_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+      `INSERT INTO notification_settings (user_id, route_privacy_meters) VALUES ($1, 0)
+       ON CONFLICT (user_id) DO UPDATE SET route_privacy_meters = 0`,
       [id],
     );
     await db

@@ -1,6 +1,11 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/auth.js";
-import { blockUser, unblockUser } from "../services/moderationService.js";
+import { signMediaUrlsDeep } from "../services/mediaSigningService.js";
+import {
+  blockUser,
+  listBlockedUsers,
+  unblockUser,
+} from "../services/moderationService.js";
 
 export async function blockUserController(
   req: AuthenticatedRequest,
@@ -30,5 +35,18 @@ export async function unblockUserController(
   } catch (error: any) {
     console.error("Error unblocking user:", error.message);
     res.status(500).json({ error: "Error unblocking user" });
+  }
+}
+
+/** GET /blocks — who the caller has blocked (never who blocked them). */
+export async function listBlockedUsersController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    res.json({ users: signMediaUrlsDeep(await listBlockedUsers(req.userId!)) });
+  } catch (error: any) {
+    console.error("Error listing blocked users:", error.message);
+    res.status(500).json({ error: "Error listing blocked users" });
   }
 }

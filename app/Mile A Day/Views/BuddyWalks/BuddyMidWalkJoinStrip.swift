@@ -26,6 +26,16 @@ import SwiftUI
 /// would therefore only ever run once the offer it was meant to discover had
 /// already appeared. The tracker owns the refresh instead.
 struct BuddyMidWalkJoinStrip: View {
+    /// What the workout already recording IS. Someone joining from the
+    /// tracker has answered the lobby's two questions by starting it, so the
+    /// join carries those answers rather than a remembered guess that could
+    /// disagree with the instrument actually measuring them.
+    struct Answers {
+        let isRunning: Bool
+        let locationType: BuddyLocationType
+    }
+
+    var answers: Answers? = nil
     /// Called with the session id once the join lands, so the tracker can adopt
     /// it into the workout in flight.
     let onJoined: (String) -> Void
@@ -59,12 +69,31 @@ struct BuddyMidWalkJoinStrip: View {
                 action: { await join(sessionId: rejoinId) }
             )
         } else if let offer, let sessionId = offer.buddySessionId {
-            strip(
-                icon: "person.2.fill",
-                title: "Join \(offer.displayName)",
-                subtitle: "Walk together from here — your miles keep counting",
-                action: { await join(sessionId: sessionId) }
-            )
+            if offer.canJoinRoomDirectly {
+                strip(
+                    icon: "person.2.fill",
+                    title: "Join \(offer.displayName)",
+                    subtitle: "Walk together from here — your miles keep counting",
+                    action: { await join(sessionId: sessionId) }
+                )
+            } else if offer.buddyMyRequestStatus == "requested" {
+                // Asked already — say so, and don't offer the same tap twice.
+                strip(
+                    icon: "hourglass",
+                    title: "Asked to join \(offer.displayName)",
+                    subtitle: "You'll join as soon as they let you in",
+                    action: {}
+                )
+            } else {
+                // Their host isn't your friend: this walk is ASK-only. A plain
+                // Join here was refused by the server every time.
+                strip(
+                    icon: "hand.raised.fill",
+                    title: "Ask to join \(offer.displayName)",
+                    subtitle: "Someone on the walk lets you in — your miles keep counting",
+                    action: { await ask(sessionId: sessionId) }
+                )
+            }
         }
     }
 
@@ -117,12 +146,35 @@ struct BuddyMidWalkJoinStrip: View {
         .disabled(isBusy)
     }
 
+    private func ask(sessionId: String) async {
+        guard !isBusy else { return }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await buddy.requestToJoin(sessionId: sessionId)
+            MADHaptics.success()
+        } catch {
+            MADHaptics.error()
+            buddy.errorMessage =
+                (error as? LocalizedError)?.errorDescription ?? "Couldn't ask to join that walk."
+        }
+        await buddy.refreshFriendsOutNow()
+    }
+
     private func join(sessionId: String) async {
         guard !isBusy else { return }
         isBusy = true
         defer { isBusy = false }
         do {
-            try await buddy.join(sessionId: sessionId)
+            if let answers {
+                try await buddy.join(
+                    sessionId: sessionId,
+                    locationType: answers.locationType,
+                    isRunning: answers.isRunning
+                )
+            } else {
+                try await buddy.join(sessionId: sessionId)
+            }
             MADHaptics.success()
             onJoined(sessionId)
         } catch {

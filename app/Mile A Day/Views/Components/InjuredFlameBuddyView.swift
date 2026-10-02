@@ -112,8 +112,8 @@ struct InjuredFlameBuddyView: View {
     /// Two corrections live here, both of which produced visibly wrong props
     /// when assumed away:
     ///  1. the body frame is `figureSize * 0.82` WIDE, not the full frame;
-    ///  2. it is then `.scaleEffect`-ed by `flameScale(vigor:)` — 0.816 at our
-    ///     vigor, not 1 — anchored to the frame's BOTTOM when grounded, so the
+    ///  2. it is then `.scaleEffect`-ed by `flameScale(vigor:)` — below 1 at our
+    ///     paused vigor — anchored to the frame's BOTTOM when grounded, so the
     ///     top edge moves down while the bottom stays put.
     private var bodyRect: CGRect {
         let scale = StreakFlameClock.flameScale(vigor: Double(pausedVigor))

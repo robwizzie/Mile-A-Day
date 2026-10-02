@@ -65,6 +65,7 @@ import { backfillLongestStreaks } from "./db/backfillLongestStreaks.js";
 import { backfillHolidayMedals } from "./db/backfillHolidayMedals.js";
 import { repairBadgeEarnedDates } from "./db/repairBadgeEarnedDates.js";
 import { backfillRetroBadges } from "./db/backfillRetroBadges.js";
+import { backfillRoutePrivacyBounds } from "./db/backfillRoutePrivacyBounds.js";
 import {
   getUnifiedFeed,
   getStoriesRail,
@@ -428,6 +429,11 @@ runPendingMigrations()
       // everyone (what Recalibrate now does per user). Award-only, silent,
       // one user at a time, done-marker `badge_retro_v1` in maintenance_runs.
       void backfillRetroBadges();
+      // Same contract: cache every stored route's hide-start-&-end cut
+      // (workout_routes.privacy_bounds). A row it hasn't reached is trimmed
+      // at read anyway — this only makes that read cheap. Marker
+      // `route_privacy_bounds_v1`.
+      void backfillRoutePrivacyBounds();
       // Same contract again: compute-and-store the streak snapshot for every
       // active user the new columns (0057) haven't been written for. Until a
       // row is reached it reads its old stored value (as before); a few

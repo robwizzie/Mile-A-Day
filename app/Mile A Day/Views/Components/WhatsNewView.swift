@@ -225,8 +225,9 @@ enum WhatsNewCatalog {
 enum WhatsNewManager {
     private static let seenKey = "whatsNewSeenReleaseId"
 
-    /// Auto-present once per release — but never on a brand-new install
-    /// (the welcome tour owns that moment; we just mark the release seen).
+    /// Auto-present once per release — but never to a brand-new account:
+    /// `AppStateManager.completeUsernameSetup` marks the release seen (the
+    /// tour flag below can't, onboarding sets it before the dashboard reads).
     static var shouldAutoPresent: Bool {
         let seen = UserDefaults.standard.integer(forKey: seenKey)
         guard WhatsNewCatalog.latest.id > seen else { return false }

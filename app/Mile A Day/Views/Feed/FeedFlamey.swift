@@ -1,36 +1,17 @@
 import SwiftUI
 
-/// Whose look a walk/run card wears: the AUTHOR's dashboard style, never the
-/// viewer's. A friend on Fun gets Flamey on their cards, a friend on Modern
-/// gets the plain card, and a viewer's own setting decides nothing about
-/// somebody else's walk.
-///
-/// The server's signal is `author_flamey` — non-null ONLY when the author's
-/// `users.dashboard_style` is 'fun' (reported by their app on every launch
-/// via `DashboardStyleReporter`). So nil means Modern, a pre-field build that
-/// never reported, or an older server, and every one of those draws the
-/// plain card. On your own posts the local preference is fresher than the
-/// copy the post carries, so it wins.
+/// The Flamey a ROUTE card or grid tile draws: the author's, when they're
+/// on Fun, else nil (the Modern card). A thin view over
+/// `RoutelessCardStyle.resolve` — the ONE rule the routeless card already
+/// uses — so every walk surface agrees on whose style it wears: the
+/// AUTHOR's, never the viewer's.
 @MainActor
 enum FeedCardFlamey {
-    /// The Flamey to draw on this card, or nil for the Modern card.
     static func look(authorFlamey: AuthorFlamey?, isOwn: Bool) -> FlameyLook? {
-        if isOwn {
-            // `FlameyFacts.look` is nil on Modern — exactly the rule.
-            return FlameyFacts.look(detail: .compact)
+        if case .fun(let look, _) = RoutelessCardStyle.resolve(authorFlamey: authorFlamey, isOwn: isOwn) {
+            return look
         }
-        return authorFlamey?.resolved()
-    }
-
-    /// His name for the cheer ("GO SPARKY!"), nil = unnamed.
-    static func name(authorFlamey: AuthorFlamey?, isOwn: Bool) -> String? {
-        isOwn ? FlameyFacts.name : authorFlamey?.displayName
-    }
-
-    /// The cheer, sized for a card: his name when it fits, else the plain one.
-    static func cheer(name: String?) -> String {
-        if let name, name.count <= 8 { return "GO \(name.uppercased())!" }
-        return "GO GO GO!"
+        return nil
     }
 }
 

@@ -11,8 +11,11 @@ extension HealthKitManager {
         // CRITICAL FIX: If index exists, use it for streak and total miles
         if let index = workoutIndex {
             DispatchQueue.main.async {
-                self.retroactiveStreak = index.activeStreak()
-                self.totalLifetimeMiles = index.totalLifetimeMiles
+                let streak = index.activeStreak()
+                if self.retroactiveStreak != streak { self.retroactiveStreak = streak }
+                if self.totalLifetimeMiles != index.totalLifetimeMiles {
+                    self.totalLifetimeMiles = index.totalLifetimeMiles
+                }
                 self.saveCachedData()
             }
             // Continue calculating other stats (fastest pace, most miles) from cached workouts
@@ -36,7 +39,15 @@ extension HealthKitManager {
             let mostMilesInDay: Double = 0.0
             let mostMilesWorkouts: [HKWorkout] = []
 
+            // With an index, `processWorkoutsByDay` ignores the grouping and
+            // reads the index — so don't group the WHOLE history on the main
+            // thread (a dateComponents per workout) just to throw it away.
+            #if !os(watchOS)
+            let workoutsByDay = workoutIndex == nil
+                ? self.groupWorkoutsByDeviceDay(workouts: workouts) : [:]
+            #else
             let workoutsByDay = self.groupWorkoutsByDeviceDay(workouts: workouts)
+            #endif
             self.processWorkoutsByDay(workoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
 
             // Early return - we're done, no need to fetch
@@ -175,9 +186,11 @@ extension HealthKitManager {
             let indexMostMiles = index.mostMilesInOneDay
             log("[HealthKit] ✅ Index available, skipping old streak calculation. Using index streak: \(index.activeStreak()), mostMilesInOneDay: \(indexMostMiles)")
             DispatchQueue.main.async {
-                self.retroactiveStreak = index.activeStreak()
-                self.mostMilesInOneDay = indexMostMiles
-                self.mostMilesWorkouts = [] // Index has no HKWorkouts; use empty (stats still correct)
+                // Assign only on change — each write redraws the dashboard.
+                let streak = index.activeStreak()
+                if self.retroactiveStreak != streak { self.retroactiveStreak = streak }
+                if self.mostMilesInOneDay != indexMostMiles { self.mostMilesInOneDay = indexMostMiles }
+                if !self.mostMilesWorkouts.isEmpty { self.mostMilesWorkouts = [] } // Index has no HKWorkouts; use empty (stats still correct)
                 self.saveCachedData() // Save correct value from index
             }
             return // Skip old calculation entirely

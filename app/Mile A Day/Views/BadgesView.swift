@@ -16,6 +16,9 @@ struct BadgesView: View {
     /// the local flag, so the filter doesn't empty out as soon as the user lands here.
     @State private var newBadgeIdsAtOpen: Set<String> = []
     @State private var didFirstAppear = false
+    /// HOW each of your medals was earned (`earned_detail` summaries), read
+    /// once per visit — never per tile, since it decodes a UserDefaults blob.
+    @State private var earnedSummaries: [String: String] = [:]
 
     var body: some View {
         ZStack {
@@ -62,6 +65,7 @@ struct BadgesView: View {
                 )
                 selectedFilter = initialFilter
             }
+            earnedSummaries = MedalStory.summaries()
 
             // Show confetti for new badges
             if userManager.hasNewBadges {
@@ -82,6 +86,7 @@ struct BadgesView: View {
         }
         .task {
             await userManager.refreshBadgesFromServer()
+            earnedSummaries = MedalStory.summaries()
         }
         .confetti(isShowing: $showConfetti)
         .navigationDestination(isPresented: $isShowingDetail) {
@@ -93,30 +98,21 @@ struct BadgesView: View {
     }
     
     // MARK: - Stats Header
-    
+
+    /// Earned X of Y, the completion ring, the rarest medal on the shelf and
+    /// the rarity split — one card, read left to right.
     private var badgeStatsHeader: some View {
-        let earnedCount = userManager.currentUser.badges.filter { !$0.isLocked }.count
+        let earned = userManager.currentUser.badges.filter { !$0.isLocked }
+        let earnedCount = earned.count
         let totalCount = userManager.currentUser.getAllBadges().count
         let progress = totalCount > 0 ? Double(earnedCount) / Double(totalCount) : 0
-        
+        let rarest = MedalStory.rarest(in: earned)
+
         return VStack(spacing: 16) {
-            HStack(spacing: 20) {
-                // Earned count
-                VStack(spacing: 4) {
-                    Text("\(earnedCount)")
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                    Text("Earned")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.6))
-                }
-                
-                // Progress ring
+            HStack(spacing: 18) {
                 ZStack {
                     Circle()
-                        .stroke(.white.opacity(0.1), lineWidth: 8)
-                        .frame(width: 80, height: 80)
-                    
+                        .stroke(.white.opacity(0.1), lineWidth: 7)
                     Circle()
                         .trim(from: 0, to: progress)
                         .stroke(
@@ -125,69 +121,93 @@ struct BadgesView: View {
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             ),
-                            style: StrokeStyle(lineWidth: 8, lineCap: .round)
+                            style: StrokeStyle(lineWidth: 7, lineCap: .round)
                         )
-                        .frame(width: 80, height: 80)
                         .rotationEffect(.degrees(-90))
-                    
                     Text(ProgressCalculator.formatProgress(progress))
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
-                
-                // Total count
-                VStack(spacing: 4) {
-                    Text("\(totalCount)")
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.5))
-                    Text("Total")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.6))
+                .frame(width: 76, height: 76)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text("\(earnedCount)")
+                                .font(.system(size: 30, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                            Text("of \(totalCount)")
+                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                .foregroundColor(.white.opacity(0.5))
+                        }
+                        .lineLimit(1)
+                        Text("medals earned")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+
+                    if let rarest {
+                        HStack(spacing: 8) {
+                            MedalView(badge: rarest, size: 24, showShimmer: false)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("RAREST")
+                                    .font(.system(size: 9, weight: .black, design: .rounded))
+                                    .tracking(1.2)
+                                    .foregroundColor(rarest.rarity.color)
+                                Text(rarest.name)
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
                 }
+                Spacer(minLength: 0)
             }
-            
+
             // Rarity breakdown
-            HStack(spacing: 16) {
+            HStack(spacing: 8) {
                 rarityCounter(for: .legendary)
                 rarityCounter(for: .rare)
                 rarityCounter(for: .common)
             }
         }
-        .padding(20)
+        .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 20)
-                .fill(.white.opacity(0.08))
+                .fill(.white.opacity(0.06))
                 .overlay(
                     RoundedRectangle(cornerRadius: 20)
-                        .stroke(.white.opacity(0.1), lineWidth: 1)
+                        .stroke(.white.opacity(0.08), lineWidth: 1)
                 )
         )
     }
-    
+
     private func rarityCounter(for rarity: BadgeRarity) -> some View {
         let count = userManager.currentUser.badges.filter { !$0.isLocked && $0.rarity == rarity }.count
-        
-        return HStack(spacing: 6) {
+
+        return HStack(spacing: 5) {
             Circle()
                 .fill(rarity.color)
-                .frame(width: 8, height: 8)
-            
+                .frame(width: 7, height: 7)
             Text("\(count)")
-                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
-            
             Text(rarity.rawValue.capitalized)
                 .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundColor(.white.opacity(0.55))
+                .lineLimit(1)
+                .fixedSize()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            Capsule()
-                .fill(rarity.color.opacity(0.15))
-        )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity)
+        .background(Capsule().fill(rarity.color.opacity(0.13)))
     }
-    
+
     // MARK: - Filter Section
     
     private var filterSection: some View {
@@ -278,6 +298,8 @@ struct BadgesView: View {
         return (family, tier)
     }
 
+    private static let shimmeringMedalLimit = 3
+
     private var filterProgressCaption: some View {
         let earned = filteredBadges.filter { !$0.isLocked }.count
         let total = filteredBadges.count
@@ -294,20 +316,37 @@ struct BadgesView: View {
     }
 
     private var badgesGridView: some View {
-        LazyVGrid(
+        let badges = filteredBadges
+        let user = userManager.currentUser
+        // Only the few most recently earned medals sweep. Every shimmer is a
+        // repeatForever re-composite of a 3D-tilted, shadowed disc, and a full
+        // shelf of them kept the whole grid re-rendering offscreen. At rest a
+        // medal with and without the sweep is the same picture.
+        let shimmering = Set(
+            badges.filter { !$0.isLocked }
+                .sorted { $0.dateAwarded > $1.dateAwarded }
+                .prefix(Self.shimmeringMedalLimit)
+                .map(\.id)
+        )
+        return LazyVGrid(
             columns: [
                 GridItem(.flexible(), spacing: 16),
                 GridItem(.flexible(), spacing: 16)
             ],
             spacing: 16
         ) {
-            ForEach(filteredBadges, id: \.id) { badge in
+            ForEach(badges, id: \.id) { badge in
                 Button {
                     badge.isLocked ? MADHaptics.tap() : MADHaptics.action()
                     selectedBadge = badge
                     isShowingDetail = true
                 } label: {
-                    PremiumBadgeCard(badge: badge)
+                    PremiumBadgeCard(
+                        badge: badge,
+                        showShimmer: shimmering.contains(badge.id),
+                        progress: badge.isLocked ? MedalProgress.forLocked(badge, user: user) : nil,
+                        earnedStory: badge.isLocked ? nil : MedalStory.measuredLine(for: badge, summaries: earnedSummaries)
+                    )
                 }
                 .buttonStyle(BadgeCardButtonStyle())
             }
@@ -340,143 +379,296 @@ struct BadgesView: View {
 
 // MARK: - Premium Badge Card
 
+/// One medal tile. Every tile is the same height whatever it says: the medal,
+/// a two-line name, then a fixed footer — rarity, then either WHEN it was
+/// earned (plus the measured line, for the families that have one) or, while
+/// locked, how close you are (or what it asks, when we can't measure it).
 struct PremiumBadgeCard: View {
     let badge: Badge
-    
-    private var badgeIcon: String {
-        // Shared resolver covers every category, incl. story / hype / competition.
-        iconName(for: badge)
-    }
-    
-    var body: some View {
-        VStack(spacing: 14) {
-            // Badge medal — premium shared MedalView in a fixed 110pt frame so
-            // locked and unlocked cards line up.
-            ZStack {
-                MedalView(badge: badge, size: 88)
+    var showShimmer: Bool = true
+    /// Locked medals only: an honest measure of how close the viewer is.
+    var progress: MedalProgress? = nil
+    /// Earned medals only: a line worth reading ("You ran a 7:42 mile").
+    var earnedStory: String? = nil
 
-                // NEW tag
+    static let footerHeight: CGFloat = 52
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                MedalView(badge: badge, size: 84, showShimmer: showShimmer)
+            }
+            .frame(width: 104, height: 100)
+            .overlay(alignment: .topTrailing) {
                 if badge.isNew && !badge.isLocked {
                     newTag
-                        .offset(x: 30, y: -34)
                 }
             }
-            .frame(width: 110, height: 110)
             // Fun only: the Flamey item this medal unlocks, on its corner.
             .overlay(alignment: .bottomTrailing) {
                 FlameyMedalItemGlyphLive(badgeId: badge.id, earned: !badge.isLocked)
                     .offset(x: 2, y: -4)
             }
 
-            // Badge name — reserves 2 lines of space so every card is the same height
             Text(badge.name)
                 .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundColor(badge.isLocked ? .white.opacity(0.4) : .white)
+                .foregroundColor(badge.isLocked ? .white.opacity(0.45) : .white)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
+                .minimumScaleFactor(0.85)
                 .frame(height: 36, alignment: .top)
-            
-            // Rarity pill
-            Text(badge.rarity.rawValue.uppercased())
-                .font(.system(size: 9, weight: .black, design: .rounded))
-                .tracking(1.2)
-                .foregroundColor(badge.isLocked ? .white.opacity(0.25) : badge.rarity.color)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule()
-                        .fill(badge.isLocked ? Color.white.opacity(0.05) : badge.rarity.color.opacity(0.15))
-                )
-            
-            // Date or status
-            if badge.isLocked {
-                Text("TAP TO VIEW")
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .tracking(0.5)
-                    .foregroundColor(.white.opacity(0.25))
-            } else {
-                Text(badge.dateAwarded.formattedShortDate)
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.5))
-            }
+
+            footer
+                .frame(height: Self.footerHeight, alignment: .top)
         }
-        .padding(.vertical, 18)
+        .padding(.top, 14)
+        .padding(.bottom, 14)
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity)
         .background(cardBackground)
+        .accessibilityElement(children: .combine)
     }
-    
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 20)
-            .fill(
-                LinearGradient(
-                    colors: badge.isLocked ? [
-                        Color.white.opacity(0.03),
-                        Color.white.opacity(0.02)
-                    ] : [
-                        badge.rarity.color.opacity(0.08),
-                        Color.white.opacity(0.05)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 20)
-                    .stroke(
-                        LinearGradient(
-                            colors: badge.isLocked ? [
-                                Color.white.opacity(0.06),
-                                Color.white.opacity(0.02)
-                            ] : [
-                                badge.rarity.color.opacity(0.3),
-                                badge.rarity.color.opacity(0.1)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            )
-    }
-    
-    private var medalGradientColors: [Color] {
-        switch badge.rarity {
-        case .legendary:
-            return [
-                Color(red: 1.0, green: 0.85, blue: 0.4),
-                Color(red: 0.85, green: 0.55, blue: 0.15)
-            ]
-        case .rare:
-            return [
-                Color(red: 0.7, green: 0.5, blue: 0.9),
-                Color(red: 0.5, green: 0.3, blue: 0.75)
-            ]
-        case .common:
-            return [
-                Color(red: 0.45, green: 0.65, blue: 0.95),
-                Color(red: 0.3, green: 0.5, blue: 0.8)
-            ]
+
+    @ViewBuilder
+    private var footer: some View {
+        VStack(spacing: 6) {
+            rarityLine
+            if badge.isLocked {
+                if let progress {
+                    MedalProgressBar(fraction: progress.fraction, tint: badge.rarity.color)
+                        .padding(.horizontal, 6)
+                    Text(progress.label)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(.white.opacity(0.6))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                } else {
+                    Text(badge.description)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.4))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.9)
+                }
+            } else {
+                if let earnedStory {
+                    Text(earnedStory)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.78))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.85)
+                } else {
+                    Text("Earned \(MedalStory.shortDate(badge.dateAwarded))")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                        .lineLimit(1)
+                }
+            }
         }
     }
-    
+
+    /// "LEGENDARY" — or, when a measured line takes the footer, "LEGENDARY · SEP 30"
+    /// so the date is never lost. Locked medals say what they WILL be, dimmed.
+    private var rarityLine: some View {
+        HStack(spacing: 4) {
+            if badge.isLocked {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 7, weight: .black))
+                    .accessibilityHidden(true)
+            }
+            Text(rarityText)
+                .font(.system(size: 9, weight: .black, design: .rounded))
+                .tracking(1.0)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .foregroundColor(badge.isLocked ? .white.opacity(0.32) : badge.rarity.color)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(badge.isLocked ? Color.white.opacity(0.05) : badge.rarity.color.opacity(0.15))
+        )
+    }
+
+    private var rarityText: String {
+        let rarity = badge.rarity.rawValue.uppercased()
+        if !badge.isLocked, earnedStory != nil {
+            return "\(rarity) · \(MedalStory.shortDate(badge.dateAwarded).uppercased())"
+        }
+        return rarity
+    }
+
+    private var cardBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: 20)
+        return shape
+            .fill(
+                LinearGradient(
+                    colors: badge.isLocked
+                        ? [Color.white.opacity(0.035), Color.white.opacity(0.02)]
+                        : [badge.rarity.color.opacity(0.13), Color.white.opacity(0.04)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            // Earned tiles wear their rarity as a light along the top edge.
+            .overlay(alignment: .top) {
+                if !badge.isLocked {
+                    LinearGradient(
+                        colors: [.clear, badge.rarity.color.opacity(0.9), .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(height: 2)
+                    .padding(.horizontal, 22)
+                }
+            }
+            .overlay(
+                shape.stroke(
+                    badge.isLocked ? Color.white.opacity(0.06) : badge.rarity.color.opacity(0.28),
+                    lineWidth: 1
+                )
+            )
+    }
+
     private var newTag: some View {
         Text("NEW")
             .font(.system(size: 8, weight: .black, design: .rounded))
             .foregroundColor(.white)
             .padding(.horizontal, 6)
             .padding(.vertical, 4)
-            .background(
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [MADTheme.Colors.madRed, MADTheme.Colors.madRed.opacity(0.8)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            )
+            .background(Capsule().fill(MADTheme.Colors.madRed))
             .overlay(Capsule().stroke(Color.white.opacity(0.3), lineWidth: 1))
+            .offset(x: 4, y: 2)
+    }
+}
+
+/// A thin capsule bar — the locked tile's "how close".
+struct MedalProgressBar: View {
+    let fraction: Double
+    let tint: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.1))
+                Capsule()
+                    .fill(tint.opacity(0.85))
+                    .frame(width: max(4, geo.size.width * min(max(fraction, 0), 1)))
+            }
+        }
+        .frame(height: 5)
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Medal progress & story
+
+/// What a LOCKED medal can honestly say about how close you are. Mirrors
+/// `BadgeDetailView.lockedProgressCard` family-for-family (same inputs, same
+/// targets) so the tile and the screen it opens never disagree; families that
+/// screen doesn't measure (pace has no bar there either) return nil and the
+/// tile shows the requirement instead. A measure at or past the target on a
+/// still-locked medal is a sync lag, not progress — nil there too, rather
+/// than a full bar under a lock.
+struct MedalProgress: Equatable {
+    let fraction: Double
+    let label: String
+
+    static func forLocked(_ badge: Badge, user: User) -> MedalProgress? {
+        guard badge.isLocked else { return nil }
+        let id = badge.id
+        if id.hasPrefix("streak_") || id.hasPrefix("consistency_") {
+            guard let target = number(in: id), target > 0 else { return nil }
+            let current = max(0, user.streak)
+            guard current < target else { return nil }
+            return MedalProgress(fraction: Double(current) / Double(target),
+                                 label: "\(current) of \(target) days")
+        }
+        if id.hasPrefix("miles_") {
+            guard let target = number(in: id), target > 0 else { return nil }
+            return distance(current: user.totalMiles, target: Double(target), prefix: nil)
+        }
+        if id.hasPrefix("daily_") {
+            guard let target = dailyTargetMiles[id] else { return nil }
+            return distance(current: user.mostMilesInOneDay, target: target, prefix: "Best day ")
+        }
+        return nil
+    }
+
+    /// Miles in, display unit out: "41.2 / 100 mi" (or km).
+    private static func distance(current: Double, target: Double, prefix: String?) -> MedalProgress? {
+        let cur = max(0, current)
+        guard cur < target else { return nil }
+        let curShown = ((cur.inDisplayUnit * 10).rounded(.down)) / 10
+        let targetShown = target.inDisplayUnit
+        let targetText = targetShown.rounded() == targetShown || targetShown >= 100
+            ? String(format: "%.0f", targetShown.rounded())
+            : String(format: "%.1f", targetShown)
+        let label = "\(prefix ?? "")\(String(format: "%.1f", curShown)) / \(targetText) \(DistanceUnits.current.abbreviation)"
+        return MedalProgress(fraction: cur / target, label: label)
+    }
+
+    private static func number(in id: String) -> Int? {
+        id.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap { Int($0) }.first
+    }
+
+    /// Same table as `BadgeDetailView.dailyTargetMiles` (private there).
+    private static let dailyTargetMiles: [String: Double] = [
+        "daily_2": 2, "daily_3": 3.1, "daily_5": 5, "daily_8": 8, "daily_10": 10,
+        "daily_10k": 6.2, "daily_half": 13.1, "daily_15": 15, "daily_20": 20,
+        "daily_marathon": 26.2, "daily_50k": 31, "daily_ultra": 50,
+    ]
+}
+
+/// The little stories medals tell on the grid and the showcase.
+enum MedalStory {
+    /// This account's "how earned" summaries by badge id (the server's
+    /// `earned_detail.summary`). Own medals only — the store is per account.
+    static func summaries() -> [String: String] {
+        BadgeEarnedDetails.all().compactMapValues { entry in
+            guard let s = entry.summary, !s.isEmpty else { return nil }
+            return s
+        }
+    }
+
+    /// A summary only when it carries something MEASURED — the pace you ran,
+    /// the distance of the day, the margin over a ghost, the holiday walk. A
+    /// streak or a lifetime-miles summary only restates the medal's own name
+    /// ("You reached a 30-day streak" under "30 Day Streak"), so those tiles
+    /// keep their date instead.
+    static func measuredLine(for badge: Badge, summaries: [String: String]) -> String? {
+        guard let summary = summaries[badge.id] else { return nil }
+        let measured = ["pace_", "daily_", "holiday_", "ghost_margin_"]
+        return measured.contains(where: { badge.id.hasPrefix($0) }) ? summary : nil
+    }
+
+    /// "Sep 30" this year, "Sep 30, 2025" otherwise.
+    static func shortDate(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.component(.year, from: date) == cal.component(.year, from: Date()) {
+            return date.formatted(.dateTime.month(.abbreviated).day())
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day().year())
+    }
+
+    /// "Legendary · Sep 30" — the fallback line when there's no summary.
+    static func rarityAndDate(_ badge: Badge) -> String {
+        "\(badge.rarity.rawValue.capitalized) · \(shortDate(badge.dateAwarded))"
+    }
+
+    /// The rarest earned medal; ties go to the most recently earned.
+    static func rarest(in earned: [Badge]) -> Badge? {
+        func weight(_ r: BadgeRarity) -> Int {
+            switch r { case .legendary: return 3; case .rare: return 2; case .common: return 1 }
+        }
+        return earned.max { a, b in
+            let wa = weight(a.rarity), wb = weight(b.rarity)
+            if wa != wb { return wa < wb }
+            return a.dateAwarded < b.dateAwarded
+        }
     }
 }
 

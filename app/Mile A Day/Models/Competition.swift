@@ -611,6 +611,17 @@ struct Competition: Codable, Identifiable {
         return c
     }()
 
+    /// "YYYY-MM-DD" for the daily/monthly interval keys. One shared instance:
+    /// the key builders run per row and per calendar cell, and an
+    /// `ISO8601DateFormatter` is expensive to create (and thread-safe to share).
+    /// Its time zone is the formatter default (GMT), exactly as the per-call
+    /// formatters it replaces had it.
+    static let intervalDayKeyFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate]
+        return f
+    }()
+
     /// The weekly interval key ("YYYY-MM-DD" for the day that begins the 7-day window
     /// containing `date`). Weekly windows are anchored to the competition's start_date —
     /// week 1 is start..start+6, week 2 is start+7..start+13, etc. — so this MUST match
@@ -720,9 +731,9 @@ struct Competition: Codable, Identifiable {
         // Start date is in the past — competition is finished only after the end_date day
         // has fully elapsed in ET (matches backend `c.end_date < TODAY_ET` behavior).
         if let endStr = end_date, let endDate = Self.etDateFormatter.date(from: endStr) {
-            var et = Calendar(identifier: .gregorian)
-            et.timeZone = TimeZone(identifier: "America/New_York")!
-            if let endOfEndDay = et.date(byAdding: .day, value: 1, to: endDate), endOfEndDay <= now {
+            // The shared ET calendar — `status` is read many times per render,
+            // and building a Calendar each time was the cost.
+            if let endOfEndDay = Self.etCalendar.date(byAdding: .day, value: 1, to: endDate), endOfEndDay <= now {
                 return .finished
             }
         }
@@ -809,8 +820,7 @@ struct Competition: Codable, Identifiable {
         let interval = options.interval ?? .day
         let calendar = Calendar.current
         let now = Date()
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
+        let formatter = Self.intervalDayKeyFormatter
         let key: String
         switch interval {
         case .day:
@@ -1579,6 +1589,10 @@ struct NotificationSettingsResponse: Codable {
     /// "friends" | "self" — who may launch flyovers of my routes.
     /// Optional: absent on older server builds (treat as "friends").
     let flyover_visibility: String?
+    /// Hide start & end, in metres (0 = off). The EFFECTIVE value — the
+    /// server resolves an unset preference to its default. Optional: absent
+    /// on older server builds (the feature doesn't exist there).
+    var route_privacy_meters: Int? = nil
     /// Do collabs I'm tagged in join my profile's Posts grid? Server-enforced
     /// (the grid is a SQL query), so this is the authority, not the local copy.
     /// Optional: absent on older server builds (treat as on).

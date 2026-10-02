@@ -41,7 +41,12 @@ struct SocialFeedView: View {
     /// completing a mile) instead of showing stale posts until a manual pull.
     var isActiveTab: Bool = false
 
-    @StateObject private var healthManager = HealthKitManager.shared
+    /// NOT observed. The feed reads one HealthKit value while rendering
+    /// (today's distance, for `mileDone`, mirrored below); everything else is
+    /// read in action handlers. Observing the manager — 30 published values —
+    /// re-ran this body, and every card in it, on each HealthKit publish.
+    private var healthManager: HealthKitManager { HealthKitManager.shared }
+    @State private var todaysDistance: Double = HealthKitManager.shared.todaysDistance
     @StateObject private var userManager = UserManager.shared
     /// One stable service for profiles opened from the feed. Creating a fresh
     /// FriendService inside the sheet closure re-instantiated it on every feed
@@ -127,7 +132,7 @@ struct SocialFeedView: View {
     /// is the first half of the gate on posting.
     private var mileDone: Bool {
         ProgressCalculator.isGoalCompleted(
-            current: healthManager.todaysDistance,
+            current: todaysDistance,
             goal: userManager.currentUser.goalMiles
         )
     }
@@ -357,6 +362,9 @@ struct SocialFeedView: View {
     var body: some View {
         VStack(spacing: 0) {
             MADTabHeader(title: "Feed")
+                .onReceive(HealthKitManager.shared.$todaysDistance.removeDuplicates()) {
+                    todaysDistance = $0
+                }
                 // The composer is a fullScreenCover, not a sheet: a sheet's
                 // swipe-down flipped this binding without ever calling
                 // onFinished, so a fully composed draft evaporated AND the
@@ -414,6 +422,10 @@ struct SocialFeedView: View {
                         weeklyRecapTeaserCard
                             .padding(.horizontal, MADTheme.Spacing.md)
                     }
+
+                    // One-time, dismissible: hide start & end now exists and
+                    // is on. Renders nothing once seen.
+                    RoutePrivacyIntroCard()
 
                     Divider()
                         .overlay(Color.white.opacity(0.08))

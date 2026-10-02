@@ -386,8 +386,10 @@ class UserManager: ObservableObject {
             date: Date()
         )
 
-        // Check for retroactive badges after updating stats
-        checkForRetroactiveBadges()
+        // No medal fetch here any more: this runs on every dashboard
+        // refresh, and each call was a network round trip that republished
+        // the whole user. Medals refresh after uploads, on foreground
+        // (`refreshBadgesIfStale`) and on the Medals/Profile screens.
 
         // CRITICAL FIX: Save data to persist streak update
         // Without this, streak updates are only in memory and revert when app reopens
@@ -723,6 +725,7 @@ class UserManager: ObservableObject {
                 let today = calendar.startOfDay(for: Date())
                 let fresh = fetched.filter {
                     !existingIds.contains($0.id) && !suppressedBadgeIDs.contains($0.id)
+                        && !Self.isAnnouncedByStreakMilestone($0)
                 }
                 let earnedToday = fresh.filter { calendar.startOfDay(for: $0.dateAwarded) >= today }
                 let earlier = fresh.filter { calendar.startOfDay(for: $0.dateAwarded) < today }
@@ -737,8 +740,17 @@ class UserManager: ObservableObject {
                 // Only against a shelf we actually had: with no local list
                 // (a lost persisted blob) EVERY medal diffs as fresh, and that
                 // is a restore, not news.
+                //
+                // ONE medal is a medal, not a batch: the 500-day medal for a
+                // streak reached late last night arrives dated yesterday, and
+                // the "you unlocked medals" batch card read as a pile landing
+                // at once. A single one gets its own popup.
                 if !earlier.isEmpty && !existingIds.isEmpty {
-                    CelebrationManager.shared.addCelebration(.badgeBatch(badges: earlier, retroactive: true))
+                    if earlier.count == 1, let only = earlier.first {
+                        CelebrationManager.shared.addCelebration(.badgeUnlocked(badge: only))
+                    } else {
+                        CelebrationManager.shared.addCelebration(.badgeBatch(badges: earlier, retroactive: true))
+                    }
                 }
             }
         } catch {
@@ -754,6 +766,14 @@ class UserManager: ObservableObject {
     /// `-1` is the uninitialized sentinel so existing users with mid-year streaks aren't
     /// retroactively flooded with year-1/2/3 animations on first launch with this feature.
     @AppStorage("lastCelebratedYearMilestoneStreak") private var lastCelebratedYearMilestoneStreak: Int = -1
+
+    /// A streak medal whose milestone screen is queued, playing or already
+    /// seen — that screen carries the medal, so a popup would say it twice.
+    static func isAnnouncedByStreakMilestone(_ badge: Badge) -> Bool {
+        guard badge.id.hasPrefix("streak_"),
+              let days = Int(badge.id.dropFirst("streak_".count)) else { return false }
+        return CelebrationManager.shared.isCelebratingStreakMilestone(days: days)
+    }
 
     /// More medals than this earned TODAY in one refresh become one card
     /// (`.badgeBatch`) instead of a popup each.
@@ -867,6 +887,24 @@ class UserManager: ObservableObject {
     /// for the same milestone day.
     private func suppressedBadgeIDsForYearly() -> Set<String> {
         ["streak_365", "streak_730"]
+    }
+    #endif
+
+    #if !os(watchOS)
+    private var lastBadgeRefreshAt: Date?
+
+    /// Foreground / goal-time medal refresh, throttled to once a minute.
+    ///
+    /// Medals are awarded by MORE than uploads — hypes, posts, nudges, a buddy
+    /// walk's finish all re-run the evaluator — but the app only re-fetched
+    /// after an upload or on the Medals/Profile screens. A medal awarded any
+    /// other way sat unseen until one of those, often the next day, and then
+    /// arrived dated "yesterday" as a retroactive card. That is the 500-day
+    /// medal report.
+    func refreshBadgesIfStale() async {
+        if let last = lastBadgeRefreshAt, Date().timeIntervalSince(last) < 60 { return }
+        lastBadgeRefreshAt = Date()
+        await refreshBadgesFromServer()
     }
     #endif
 

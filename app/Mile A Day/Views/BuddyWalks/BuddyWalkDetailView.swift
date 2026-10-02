@@ -41,6 +41,9 @@ struct BuddyWalkDetailView: View {
     /// lines up with the decoded points — what puts this crew's flyover on
     /// real time like the feed card's.
     @State private var routeClocks: [String: RouteClock] = [:]
+    /// Participants whose line the server served trimmed (hide start & end):
+    /// everyone's but the viewer's own, unless they turned it off.
+    @State private var routesTrimmed: Set<String> = []
 
     private struct RouteClock {
         let times: [Double]
@@ -300,7 +303,8 @@ struct BuddyWalkDetailView: View {
             guard let coords = routes[pair.element.userId], coords.count >= 2 else { return nil }
             return CompanionRoute(id: pair.element.userId, coordinates: coords,
                                   color: companionColors[pair.offset],
-                                  pointTimes: routeClocks[pair.element.userId]?.times)
+                                  pointTimes: routeClocks[pair.element.userId]?.times,
+                                  trimmedForPrivacy: routesTrimmed.contains(pair.element.userId))
         }
     }
 
@@ -334,7 +338,8 @@ struct BuddyWalkDetailView: View {
                                 uniquingKeysWith: { first, _ in first }
                             ),
                             onSnapshot: { routeArtSnapshot = $0 },
-                            paletteDate: walk.startedAtDate
+                            paletteDate: walk.startedAtDate,
+                            routeTrimmed: routesTrimmed.contains(lead.userId)
                         )
                         .frame(maxWidth: .infinity)
                         .aspectRatio(4.0 / 5.0, contentMode: .fit)
@@ -705,8 +710,8 @@ struct BuddyWalkDetailView: View {
         isLoadingRoutes = true
         defer { isLoadingRoutes = false }
         let service = friendService
-        let loaded: [(String, [CLLocationCoordinate2D], RouteClock?)] = await withTaskGroup(
-            of: (String, [CLLocationCoordinate2D], RouteClock?)?.self
+        let loaded: [(String, [CLLocationCoordinate2D], RouteClock?, Bool)] = await withTaskGroup(
+            of: (String, [CLLocationCoordinate2D], RouteClock?, Bool)?.self
         ) { group in
             for person in targets {
                 guard let workoutId = person.workoutId else { continue }
@@ -721,18 +726,19 @@ struct BuddyWalkDetailView: View {
                     if let times = detail?.route_times, times.count == coords.count {
                         clock = RouteClock(times: times, startedAt: detail?.route_started_at)
                     }
-                    return (userId, coords, clock)
+                    return (userId, coords, clock, detail?.route_trimmed ?? false)
                 }
             }
-            var out: [(String, [CLLocationCoordinate2D], RouteClock?)] = []
+            var out: [(String, [CLLocationCoordinate2D], RouteClock?, Bool)] = []
             for await result in group {
                 if let result { out.append(result) }
             }
             return out
         }
-        for (userId, coords, clock) in loaded {
+        for (userId, coords, clock, trimmed) in loaded {
             routes[userId] = coords
             if let clock { routeClocks[userId] = clock }
+            if trimmed { routesTrimmed.insert(userId) }
         }
     }
 

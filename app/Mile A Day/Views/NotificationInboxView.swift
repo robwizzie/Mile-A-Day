@@ -35,12 +35,27 @@ struct NotificationInboxView: View {
     /// focus (e.g., "just show me what's happening in my competitions").
     @State private var filter: NotificationFilter = .all
 
+    /// The list as drawn: one entry per row, with the bucket header that
+    /// precedes it, plus the chip counts. Rebuilt where the list's MEMBERSHIP
+    /// or the filter changes (`rebuildRows`), never in `body` — it parses
+    /// every timestamp and was re-run on every pass. Rows hold an INDEX, so
+    /// in-place edits (read dots) still draw from `notifications`.
+    @State private var rows: [InboxRow] = []
+    @State private var filterCounts: [NotificationFilter: Int] = [:]
+
+    struct InboxRow: Identifiable {
+        let id: String
+        let index: Int
+        let header: String?
+    }
+
     enum NotificationFilter: Hashable, CaseIterable {
-        case all, friends, comps, achievements
+        case all, forYou, friends, comps, achievements
 
         var title: String {
             switch self {
             case .all: return "All"
+            case .forYou: return "For you"
             case .friends: return "Friends"
             case .comps: return "Comps"
             case .achievements: return "Awards"
@@ -50,11 +65,21 @@ struct NotificationInboxView: View {
         var icon: String {
             switch self {
             case .all: return "tray.full.fill"
+            case .forYou: return "person.crop.circle.fill"
             case .friends: return "person.2.fill"
             case .comps: return "trophy.fill"
             case .achievements: return "medal.fill"
             }
         }
+
+        static let forYouTypes: Set<String> = [
+            "mention", "post_comment", "story_reaction",
+            "friend_request", "friend_request_accepted",
+            "coauthor_invite", "coauthor_accepted",
+            "competition_invite", "buddy_invite", "buddy_join_request",
+            "crew_photo", "challenge_won",
+            "streak_assist_offer", "streak_assist_request", "streak_assist_accepted",
+        ]
 
         /// Notification types that belong to this category. `all` returns
         /// nil — caller skips the filter step entirely.
@@ -62,6 +87,11 @@ struct NotificationInboxView: View {
             switch self {
             case .all:
                 return true
+            case .forYou:
+                // Addressed to YOU — someone said something to you, asked
+                // you something, or tagged you. The morning triage: after a
+                // night of hypes and friends' miles, this is the shortlist.
+                return Self.forYouTypes.contains(type)
             case .friends:
                 // Streak rescues are friend activity too — without these two
                 // they'd only ever surface under All (nothing else matches
@@ -168,28 +198,33 @@ struct NotificationInboxView: View {
     /// undifferentiated stream. Filter chips sit inline at the top of the
     /// feed (scroll away with content — not sticky).
     private var feedScrollView: some View {
+        // Headers and rows are all DIRECT children of the LazyVStack — nested
+        // in a per-bucket VStack, "Older" (most of the history) built every
+        // row at once. Spacing is per child so the gaps match the old nesting
+        // (lg between sections, 8 under a header, 6 between rows).
         ScrollView {
-            LazyVStack(spacing: MADTheme.Spacing.lg) {
+            LazyVStack(spacing: 0) {
                 filterChipsBar
 
-                let groups = groupedNotifications
-                if groups.isEmpty {
+                if rows.isEmpty {
                     filteredEmptyState
                         .padding(.top, 60)
+                        .padding(.top, MADTheme.Spacing.lg)
                 } else {
-                    ForEach(groups, id: \.title) { group in
-                        VStack(alignment: .leading, spacing: 8) {
-                            feedSectionHeader(group.title)
-                            VStack(spacing: 6) {
-                                ForEach(group.items) { notification in
-                                    notificationRow(notification)
-                                        .onAppear {
-                                            if notification.id == notifications.last?.id && hasMore {
-                                                loadMore()
-                                            }
-                                        }
+                    ForEach(rows) { row in
+                        if let header = row.header {
+                            feedSectionHeader(header)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, MADTheme.Spacing.lg)
+                        }
+                        if let notification = notification(for: row) {
+                            notificationRow(notification)
+                                .padding(.top, row.header != nil ? 8 : 6)
+                                .onAppear {
+                                    if notification.id == notifications.last?.id && hasMore {
+                                        loadMore()
+                                    }
                                 }
-                            }
                         }
                     }
                 }
@@ -199,6 +234,7 @@ struct NotificationInboxView: View {
                         .scaleEffect(0.8)
                         .tint(MADTheme.Colors.madRed)
                         .padding()
+                        .padding(.top, MADTheme.Spacing.lg)
                 }
             }
             .padding(.horizontal, MADTheme.Spacing.md)
@@ -230,6 +266,7 @@ struct NotificationInboxView: View {
         return Button {
             withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
                 filter = f
+                rebuildRows()
             }
         } label: {
             HStack(spacing: 7) {
@@ -271,7 +308,7 @@ struct NotificationInboxView: View {
     }
 
     private func countFor(filter f: NotificationFilter) -> Int {
-        notifications.filter { f.matches($0.type) }.count
+        filterCounts[f] ?? 0
     }
 
     /// Empty state shown when the active filter excludes every notification
@@ -288,7 +325,7 @@ struct NotificationInboxView: View {
             Text("No \(filter.title.lowercased()) notifications")
                 .madFont(size: 14, weight: .bold, design: .rounded)
                 .foregroundColor(.white.opacity(0.6))
-            Button("Show all") { filter = .all }
+            Button("Show all") { filter = .all; rebuildRows() }
                 .madFont(size: 12, weight: .bold, design: .rounded)
                 .foregroundColor(MADTheme.Colors.madRed)
                 .padding(.top, 4)
@@ -319,43 +356,57 @@ struct NotificationInboxView: View {
     }
 
     /// Groups notifications into Today / Yesterday / Earlier this week /
-    /// Older buckets, after applying the active category filter. Buckets
-    /// with zero items don't render.
-    private var groupedNotifications: [(title: String, items: [InAppNotification])] {
+    /// Older buckets, after applying the active category filter, flattened to
+    /// rows. Buckets with zero items don't render. Call after any change to
+    /// the list's membership or to `filter`.
+    private func rebuildRows() {
         let cal = Calendar.current
         let now = Date()
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
         func bucket(for n: InAppNotification) -> Int {
-            // Parse created_at with or without fractional seconds.
-            var date: Date? = formatter.date(from: n.created_at)
-            if date == nil {
-                formatter.formatOptions = [.withInternetDateTime]
-                date = formatter.date(from: n.created_at)
-                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            }
-            guard let d = date else { return 3 }
+            guard let d = RelativeTime.date(from: n.created_at) else { return 3 }
             if cal.isDateInToday(d) { return 0 }
             if cal.isDateInYesterday(d) { return 1 }
             let days = cal.dateComponents([.day], from: d, to: now).day ?? 0
             return days < 7 ? 2 : 3
         }
 
-        // Apply category filter before bucketing — if the filter excludes
-        // everything, the caller renders `filteredEmptyState`.
-        let filtered = notifications.filter { filter.matches($0.type) }
-
-        var buckets: [Int: [InAppNotification]] = [:]
-        for n in filtered {
-            buckets[bucket(for: n), default: []].append(n)
+        var counts: [NotificationFilter: Int] = [:]
+        var buckets: [Int: [Int]] = [:]
+        for (index, n) in notifications.enumerated() {
+            for f in NotificationFilter.allCases where f.matches(n.type) {
+                counts[f, default: 0] += 1
+            }
+            // Apply category filter before bucketing — if the filter excludes
+            // everything, the feed renders `filteredEmptyState`.
+            if filter.matches(n.type) {
+                buckets[bucket(for: n), default: []].append(index)
+            }
         }
 
         let titles = ["Today", "Yesterday", "Earlier this week", "Older"]
-        return titles.enumerated().compactMap { (idx, title) in
-            guard let items = buckets[idx], !items.isEmpty else { return nil }
-            return (title: title, items: items)
+        var built: [InboxRow] = []
+        for (idx, title) in titles.enumerated() {
+            guard let indices = buckets[idx], !indices.isEmpty else { continue }
+            for (position, index) in indices.enumerated() {
+                built.append(InboxRow(
+                    id: notifications[index].id,
+                    index: index,
+                    header: position == 0 ? title : nil
+                ))
+            }
         }
+        rows = built
+        filterCounts = counts
+    }
+
+    /// The live notification for a row. Validated, since a row is an index
+    /// into the array and must never draw somebody else's notification.
+    private func notification(for row: InboxRow) -> InAppNotification? {
+        if row.index < notifications.count, notifications[row.index].id == row.id {
+            return notifications[row.index]
+        }
+        return notifications.first { $0.id == row.id }
     }
 
     private func showToast(_ message: String) {
@@ -465,14 +516,7 @@ struct NotificationInboxView: View {
     /// local calendar date — not a rolling 48-hour window. Matches the
     /// "Today" / "Yesterday" buckets users already see in the feed.
     private func isFromTodayOrYesterday(_ dateString: String) -> Bool {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        var date = formatter.date(from: dateString)
-        if date == nil {
-            formatter.formatOptions = [.withInternetDateTime]
-            date = formatter.date(from: dateString)
-        }
-        guard let d = date else { return false }
+        guard let d = RelativeTime.date(from: dateString) else { return false }
         let cal = Calendar.current
         return cal.isDateInToday(d) || cal.isDateInYesterday(d)
     }
@@ -580,6 +624,14 @@ struct NotificationInboxView: View {
     private func handleNotificationTap(_ notification: InAppNotification) {
         if !notification.is_read {
             markRead(notification)
+        }
+        // Medals and challenges (yours or a friend's) open their own screen.
+        if let destination = NotificationDestination.from(
+            type: notification.type, data: notification.data ?? [:]
+        ) {
+            dismiss()
+            NotificationDestinationLink.shared.openAfterDismiss(destination)
+            return
         }
 
         let type = notification.type
@@ -1141,18 +1193,19 @@ struct NotificationInboxView: View {
         iconForType(type).1
     }
 
+    /// Built once — this runs per row, per body pass. (A timestamp without
+    /// fractional seconds has always drawn in the full style; kept as-is.)
+    private static let abbreviatedRelative: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
+    private static let fullRelative = RelativeDateTimeFormatter()
+
     private func relativeTime(_ dateString: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = formatter.date(from: dateString) else {
-            // Try without fractional seconds
-            formatter.formatOptions = [.withInternetDateTime]
-            guard let date = formatter.date(from: dateString) else { return dateString }
-            return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
-        }
-        let relative = RelativeDateTimeFormatter()
-        relative.unitsStyle = .abbreviated
-        return relative.localizedString(for: date, relativeTo: Date())
+        guard let date = RelativeTime.date(from: dateString) else { return dateString }
+        let formatter = dateString.contains(".") ? Self.abbreviatedRelative : Self.fullRelative
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 
     // MARK: - Data Loading
@@ -1171,6 +1224,7 @@ struct NotificationInboxView: View {
             let response = try await friendService.getInboxNotifications()
             await MainActor.run {
                 notifications = response.notifications
+                rebuildRows()
                 unreadCount = response.unread_count
                 hasMore = response.notifications.count >= 50
                 isLoading = false
@@ -1211,6 +1265,7 @@ struct NotificationInboxView: View {
                 let response = try await friendService.getInboxNotifications(offset: notifications.count)
                 await MainActor.run {
                     notifications.append(contentsOf: response.notifications)
+                    rebuildRows()
                     hasMore = response.notifications.count >= 50
                     isLoading = false
                 }
@@ -1266,6 +1321,7 @@ private struct NotificationPostThumb: View {
     let url: URL?
     var locked: Bool = false
 
+    @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
     @State private var failed = false
 
@@ -1298,9 +1354,12 @@ private struct NotificationPostThumb: View {
         .task(id: url) { await load() }
     }
 
+    /// Decoded at the thumb's own 48pt, off the main thread — the full
+    /// upload decoded at first draw was a main-thread stall per row.
     private func load() async {
         guard !locked, let url else { return }
-        if let cached = FeedImageCache.image(for: url) {
+        let pixels = CGSize(width: 48 * displayScale, height: 48 * displayScale)
+        if let cached = FeedImageCache.image(for: url, pixelSize: pixels) {
             image = cached
             return
         }
@@ -1308,15 +1367,9 @@ private struct NotificationPostThumb: View {
         // showing someone else's post while the right one downloads.
         image = nil
         failed = false
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            guard let loaded = UIImage(data: data) else {
-                failed = true
-                return
-            }
-            FeedImageCache.store(loaded, for: url)
+        if let loaded = await FeedImageLoader.thumbnail(for: url, pixelSize: pixels) {
             image = loaded
-        } catch {
+        } else if !Task.isCancelled {
             failed = true
         }
     }

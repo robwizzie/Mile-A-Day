@@ -164,10 +164,21 @@ struct MADStoryContent: Identifiable {
     var goalMet: Bool? = nil
     /// A week's recap — its presence turns the studio into the WEEK studio.
     var week: WeeklyRecap? = nil
+    /// Last month's recap — its presence turns the studio into the MONTH studio.
+    var month: MonthlyRecapStats? = nil
+    /// An earned medal — its presence turns the studio into the MEDAL studio.
+    var medal: ShareMedal? = nil
+    /// A race PR — its presence turns the studio into the RECORD studio.
+    var record: ShareRecord? = nil
     /// The dark map snapshot behind the "On the map" route card, resolved by
     /// the studio BEFORE rendering (ImageRenderer can't await a snapshotter).
     /// Generated at exactly `MapRouteShareCard.artSize`.
     var mapUnderlay: RouteMapSnapshot? = nil
+    /// The walk's workout id, when the caller has one. Seeds the SAME
+    /// per-walk jitter the server uses for hide-start-&-end, so a shared
+    /// route card is cut where friends' copy is (`trimmedForSharing`).
+    /// Optional: without it the route itself seeds the cut.
+    var workoutId: String? = nil
 
     var hasRoute: Bool { coordinates.count >= 2 }
     var hasPhoto: Bool { photo != nil }
@@ -407,8 +418,10 @@ struct MADStoryCard: View {
 
     private var streakBlock: some View {
         VStack(spacing: 0) {
+            // Sized by `ShareStyleFlame` itself: a dressed Flamey is fitted
+            // to his outfit (a square frame here clipped nothing but let a
+            // crown or a companion run into the number and off the card).
             heroFlame
-                .frame(width: flameSize, height: flameSize)
                 .accessibilityHidden(true)
 
             Text("\(content.streak ?? 0)")
@@ -447,7 +460,9 @@ struct MADStoryCard: View {
     /// cannot be forced from a caller.
     /// The SAME flame the user's own dashboard draws — see `ShareStyleFlame`.
     private var heroFlame: some View {
-        ShareStyleFlame(size: flameSize)
+        ShareStyleFlame(size: flameSize,
+                        maxWidth: format.size.width - (format == .story ? 28 : 44),
+                        maxHeight: flameSize * (format == .story ? 1.25 : 1.12))
     }
 
     /// Equal columns under one hairline, split by hairlines. An `HStack` with

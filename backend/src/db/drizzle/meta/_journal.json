@@ -561,6 +561,48 @@
       "when": 1790303997856,
       "tag": "0079_flamey_name_outfits",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1790861198879,
+      "tag": "0080_buddy_participant_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1790869406405,
+      "tag": "0081_buddy_join_policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1790870828230,
+      "tag": "0082_buddy_merged_into",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1790871979624,
+      "tag": "0083_pending_notification_payload",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1790881750023,
+      "tag": "0084_route_privacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1790881750539,
+      "tag": "0085_route_privacy_trim",
+      "breakpoints": true
     }
   ]
 }

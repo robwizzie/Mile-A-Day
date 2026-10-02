@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import HealthKit
 import UserNotifications
 
@@ -45,7 +46,10 @@ struct MainTabView: View {
     // singleton, so we surface a live, tappable banner above the tab bar on
     // every tab (except Dashboard, which has its own inline banner) so users
     // never lose where their walk/run is.
-    @StateObject private var trackingManager = WorkoutLocationManager.shared
+    /// Mirrors `WorkoutLocationManager.isTracking` — the ONE thing the root
+    /// needs from it. Observing the manager itself redrew the whole app (every
+    /// tab, every sheet binding) on each GPS and pedometer update of a walk.
+    @State private var isTracking = WorkoutLocationManager.shared.isTracking
     @State private var activeWorkoutForBanner: InProgressWorkoutState?
     @State private var showGuidedTour = false
 
@@ -147,7 +151,9 @@ struct MainTabView: View {
             // of sitting on top of the notification banner.
             ServiceOutageBanner()
         }
-        .onChange(of: trackingManager.isTracking) { _, tracking in
+        .onReceive(WorkoutLocationManager.shared.$isTracking.removeDuplicates()) { tracking in
+            guard tracking != isTracking else { return }
+            isTracking = tracking
             activeWorkoutForBanner = tracking ? InProgressWorkoutStore.load() : nil
         }
         .onAppear {
@@ -164,9 +170,12 @@ struct MainTabView: View {
             if DeepLinkRouter.shared.pendingProfileUsername != nil {
                 selectedTab = 3
             }
-            await competitionService.refreshAllData()
-            await friendService.refreshAllData()
-            await refreshUnreadCount()
+            // Independent loads, in parallel: run back to back they put the
+            // last one's data on screen a full round trip per call late.
+            async let competitions: Void = competitionService.refreshAllData()
+            async let friends: Void = friendService.refreshAllData()
+            async let unread: Void = refreshUnreadCount()
+            _ = await (competitions, friends, unread)
             // Sync explicitly, not just via onChange: if the badge is stale
             // from a previous session and the user has since resolved every
             // request elsewhere, the count stays 0 the whole launch, onChange
@@ -197,6 +206,13 @@ struct MainTabView: View {
             let data = notification.userInfo?["data"] as? [String: String] ?? [:]
             if let postId = postTargetForPush(type: type, data: data) {
                 postDeepLink.open(postId)
+                Task { await refreshUnreadCount() }
+                return
+            }
+            // A medal or a challenge opens THAT medal / challenge (yours, or
+            // a friend's on its own screen) — not the tab it lives on.
+            if let destination = NotificationDestination.from(type: type, data: data) {
+                NotificationDestinationLink.shared.open(destination)
                 Task { await refreshUnreadCount() }
                 return
             }
@@ -394,7 +410,7 @@ struct MainTabView: View {
             // over it. (safeAreaInset on a TabView renders on top of the bar, so
             // it covered the tab buttons.) Padded up by ~one tab-bar height; the
             // home indicator is handled by the safe area.
-            if trackingManager.isTracking, selectedTab != 0, let state = activeWorkoutForBanner {
+            if isTracking, selectedTab != 0, let state = activeWorkoutForBanner {
                 InProgressWorkoutBanner(state: state) {
                     // Reuse the Dashboard's resume path so starting/goal
                     // distance are computed correctly.
@@ -445,6 +461,9 @@ struct MainTabView: View {
                 selectedTab = 0
             }
         }
+        // Medal / challenge notifications open their own screen, from any
+        // tab and from a cold launch.
+        .notificationDestinationHost()
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MAD_StartGuidedTour"))) { _ in
             withAnimation(.easeIn(duration: 0.25)) {
                 showGuidedTour = true
@@ -516,7 +535,7 @@ struct MainTabView: View {
         // profile, Settings, a friend's wardrobe, the unlock card, the deep
         // link), here at root for the same reason as the sheets above.
         .flameyClosetHost()
-        .animation(.easeInOut(duration: 0.25), value: trackingManager.isTracking)
+        .animation(.easeInOut(duration: 0.25), value: isTracking)
     }
 
     // MARK: - Configuration
@@ -570,6 +589,14 @@ struct MainTabView: View {
         ) {
             notificationService.pendingNotificationType = nil
             postDeepLink.open(postId)
+            Task { await refreshUnreadCount() }
+            return
+        }
+        if let destination = NotificationDestination.from(
+            type: type, data: notificationService.pendingNotificationData
+        ) {
+            notificationService.pendingNotificationType = nil
+            NotificationDestinationLink.shared.open(destination)
             Task { await refreshUnreadCount() }
             return
         }

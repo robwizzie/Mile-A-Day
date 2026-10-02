@@ -87,6 +87,7 @@ struct BuddyRecapView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
+                        closeOutWalk()
                         buddy.clearFinishedSession()
                         dismiss()
                     }
@@ -491,7 +492,7 @@ struct BuddyRecapView: View {
             }
             .buttonStyle(.plain)
         } else {
-            Text("Finish a walk or run today to share a photo from it.")
+            Text("Photos from this walk can no longer be posted — the posting window closed with the day.")
                 .font(MADTheme.Typography.caption)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
                 .multilineTextAlignment(.center)
@@ -793,6 +794,39 @@ struct BuddyRecapView: View {
                         && $0.userId != buddy.currentUserId
                 }
                 .map(\.displayName))
+    }
+
+    /// Leaving the recap without a photo is the buddy walk's "Skip".
+    ///
+    /// This screen is the walk's ONE share step — the solo photo prompt stands
+    /// down for a buddy walk — so closing it has to do what skipping that
+    /// prompt does: put the walk's route card on the feed (an auto card, which
+    /// credits the crew and which anyone's later photo replaces), and retire
+    /// any solo prompt still keyed to this workout so the same walk is never
+    /// asked about twice.
+    ///
+    /// Only for a walk that just ended: a recap reopened from history or a
+    /// notification days later must not post anything on the way out.
+    private func closeOutWalk() {
+        guard let session = recap?.session,
+              let me = session.me(buddy.currentUserId),
+              me.status == .finished,
+              let workoutId = RunPostService.buddyWorkoutId(
+                  reconciled: me.workoutId,
+                  startedAt: session.startedAtDate,
+                  endedAt: session.endedAtDate
+              )
+        else { return }
+        CelebrationManager.shared.resolvePhotoPrompt(forWorkout: workoutId)
+
+        let endedRecently = (session.endedAtDate ?? Date()).timeIntervalSinceNow > -2 * 60 * 60
+        guard endedRecently,
+              freshWindow.canPostToday,
+              recap?.post == nil,
+              !PostedWorkoutRegistry.hasPost(for: workoutId)
+        else { return }
+        let type = session.isRunning ? "running" : "walking"
+        Task { await RunPostService.autoPostMile(workoutId: workoutId, workoutType: type) }
     }
 
     /// Has this walk already been shared? Reads the same registry the photo

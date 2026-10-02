@@ -266,7 +266,7 @@ export type NotificationType =
   // a summary of comments and hypes on the Compete tab.
   | "activity_digest";
 
-interface PushPayload {
+export interface PushPayload {
   title: string;
   body: string;
   type: NotificationType;
@@ -599,25 +599,42 @@ async function logNotificationSent(
   );
 }
 
+/**
+ * The user's own local hour (0-23) right now: their device's reported UTC
+ * offset, else New York (the zone every quiet-hours check used to assume for
+ * EVERYONE — a 10 PM–8 AM window in Los Angeles was 7 PM–5 AM).
+ */
+export function localHourFor(
+  offsetMinutes: number | null | undefined,
+  now: Date = new Date(),
+): number {
+  if (offsetMinutes === null || offsetMinutes === undefined) {
+    return parseInt(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York",
+        hour: "numeric",
+        hour12: false,
+      }).format(now),
+    ) % 24;
+  }
+  const minutes = now.getUTCHours() * 60 + now.getUTCMinutes() + offsetMinutes;
+  return Math.floor((((minutes % 1440) + 1440) % 1440) / 60);
+}
+
+export function hourInWindow(hour: number, start: number, end: number): boolean {
+  // Spans midnight (e.g. 22 to 8) when start > end.
+  return start > end ? hour >= start || hour < end : hour >= start && hour < end;
+}
+
 export async function isUserInQuietHours(userId: string): Promise<boolean> {
   const prefs = await getNotificationPreferences(userId);
   if (prefs.quiet_hours_start === null || prefs.quiet_hours_end === null)
     return false;
-
-  const now = new Date();
-  const etHour = parseInt(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/New_York",
-      hour: "numeric",
-      hour12: false,
-    }).format(now),
+  return hourInWindow(
+    localHourFor(prefs.timezone_offset_minutes),
+    prefs.quiet_hours_start,
+    prefs.quiet_hours_end,
   );
-
-  if (prefs.quiet_hours_start > prefs.quiet_hours_end) {
-    // Spans midnight (e.g., 22 to 8)
-    return etHour >= prefs.quiet_hours_start || etHour < prefs.quiet_hours_end;
-  }
-  return etHour >= prefs.quiet_hours_start && etHour < prefs.quiet_hours_end;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────
@@ -644,6 +661,34 @@ export async function selectPushTokens(
         "SELECT device_token, environment FROM device_tokens WHERE user_id = $1",
         [userId],
       );
+}
+
+/**
+ * Hold a push for the morning briefing, keeping ALL of it — title, body,
+ * data, category — so it can be delivered as itself later. The old queue kept
+ * the type and title only, which is why a held comment arrived as "You have a
+ * notification you missed" and tapped through to nothing.
+ */
+async function queueForBriefing(
+  userId: string,
+  payload: PushPayload,
+  reason: "quiet" | "cap",
+): Promise<void> {
+  await db.query(
+    `INSERT INTO pending_notifications
+       (user_id, type, competition_id, competition_name, body, data, category, reason)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
+    [
+      userId,
+      payload.type,
+      payload.data?.competition_id ?? null,
+      payload.title,
+      payload.body,
+      payload.data ? JSON.stringify(payload.data) : null,
+      payload.category ?? null,
+      reason,
+    ],
+  );
 }
 
 export async function sendPush(
@@ -692,16 +737,7 @@ export async function sendPush(
       console.log(
         `[Push] Quiet hours for user ${userId}, queueing "${payload.type}"`,
       );
-      await db.query(
-        `INSERT INTO pending_notifications (user_id, type, competition_id, competition_name)
-				VALUES ($1, $2, $3, $4)`,
-        [
-          userId,
-          payload.type,
-          payload.data?.competition_id ?? null,
-          payload.title,
-        ],
-      );
+      await queueForBriefing(userId, payload, "quiet");
       if (chargesBudget) await logNotificationSent(userId, payload.type);
       // Still store in inbox so user can see it later
       storeInbox().catch((err) =>
@@ -720,16 +756,7 @@ export async function sendPush(
       console.log(
         `[Push] Throttled "${payload.type}" for user ${userId} (${dailyCount}/${DAILY_NOTIFICATION_CAP} today)`,
       );
-      await db.query(
-        `INSERT INTO pending_notifications (user_id, type, competition_id, competition_name)
-				VALUES ($1, $2, $3, $4)`,
-        [
-          userId,
-          payload.type,
-          payload.data?.competition_id ?? null,
-          payload.title,
-        ],
-      );
+      await queueForBriefing(userId, payload, "cap");
       if (chargesBudget) await logNotificationSent(userId, payload.type);
       // Still store in inbox
       storeInbox().catch((err) =>
@@ -1072,12 +1099,17 @@ export async function sendOrQueueCompetitionNotification(
   }
 }
 
-interface PendingNotification {
+export interface PendingNotification {
   id: string;
   user_id: string;
   type: string;
-  competition_id: string;
+  competition_id: string | null;
   competition_name: string;
+  body: string | null;
+  data: Record<string, string> | null;
+  category: string | null;
+  reason: string | null;
+  created_at: string;
 }
 
 /**
@@ -1150,22 +1182,32 @@ const DIGEST_LABELS: Partial<Record<NotificationType, [string, string]>> = {
  * the named half is the half most likely to be why the user opens the app.
  */
 function digestBody(pending: PendingNotification[]): string {
-  const counts = new Map<string, { labels: [string, string]; count: number }>();
+  const counts = new Map<
+    string,
+    { labels: [string, string]; count: number; forYou: boolean }
+  >();
   for (const n of pending) {
     const labels = DIGEST_LABELS[n.type as NotificationType] ?? [
       "update",
       "updates",
     ];
+    const forYou = BRIEFING_PRIORITY.includes(n.type as NotificationType);
     // Keyed on the PLURAL, so two types that read the same to a user
     // (streak_lost and streak_broken are both "streak updates") count as one
     // kind instead of two lines saying the same word.
     const entry = counts.get(labels[1]);
-    if (entry) entry.count += 1;
-    else counts.set(labels[1], { labels, count: 1 });
+    if (entry) {
+      entry.count += 1;
+      entry.forYou = entry.forYou || forYou;
+    } else counts.set(labels[1], { labels, count: 1, forYou });
   }
-  // Ties keep insertion order (the query is ordered by created_at and Array
-  // sort is stable), so the same backlog always renders the same sentence.
-  const ranked = [...counts.values()].sort((a, b) => b.count - a.count);
+  // News addressed to the user is named before chatter however many hypes
+  // there were — "a badge" must not become "and 2 more" behind 12 hypes —
+  // then by volume. Ties keep insertion order (the query is ordered by
+  // created_at and Array sort is stable), so a backlog always reads the same.
+  const ranked = [...counts.values()].sort(
+    (a, b) => Number(b.forYou) - Number(a.forYou) || b.count - a.count,
+  );
   const named = ranked.slice(0, 2);
   const rest = pending.length - named.reduce((sum, e) => sum + e.count, 0);
 
@@ -1177,127 +1219,305 @@ function digestBody(pending: PendingNotification[]): string {
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
+/**
+ * What's ADDRESSED TO YOU, in the order a morning should tell you about it.
+ * These are delivered as themselves (their own title, body and tap target);
+ * everything else held overnight is chatter and becomes one summary line.
+ */
+const BRIEFING_PRIORITY: NotificationType[] = [
+  "friend_request",
+  "mention",
+  "post_comment",
+  "coauthor_invite",
+  "competition_invite",
+  "story_reaction",
+  "friend_request_accepted",
+  "coauthor_accepted",
+  "challenge_won",
+  "badge_earned",
+  "personal_best",
+  "streak_lost",
+  "streak_broken",
+  "crew_photo",
+];
+
+/**
+ * Moot by morning: a "go walk!" nudge or a lead change from last night
+ * describes a day that's over. They stay in the inbox; they don't ring.
+ */
+const STALE_BY_MORNING: NotificationType[] = [
+  "friend_nudge",
+  "competition_nudge",
+  "crew_photo_nudge",
+  "lead_change",
+];
+
+/** How many kinds of "for you" news ring individually before the rest fold
+ * into the summary — enough for a comment, a request and a tag, few enough
+ * that the lock screen isn't a wall. */
+const BRIEFING_INDIVIDUAL_KINDS = 3;
+
+/** The calendar day of `at` in the user's zone (offset minutes; null = ET). */
+function localDateKey(at: Date, offsetMinutes: number | null): string {
+  if (offsetMinutes === null) {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(at);
+  }
+  return new Date(at.getTime() + offsetMinutes * 60_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Is a held row due now? Never while the user is in their own quiet hours.
+ * Quiet-held rows go the moment quiet hours end; cap-held rows once the
+ * capped DAY is over (the cap resets with the day, and a capped "friend
+ * walked" from 3 PM ringing at 4 PM is the noise the cap exists to stop).
+ * The global competition queue keeps its daytime window.
+ */
+function isDue(
+  row: PendingNotification,
+  now: Date,
+  offsetMinutes: number | null,
+): boolean {
+  if (row.reason === "cap") {
+    return localDateKey(new Date(row.created_at), offsetMinutes) < localDateKey(now, offsetMinutes);
+  }
+  if (row.type === "competition_started" || row.type === "competition_finished") {
+    const etHour = localHourFor(null, now);
+    return etHour >= 9 && etHour < 22;
+  }
+  return true;
+}
+
+/**
+ * The MORNING BRIEFING: deliver what was held overnight (or past the daily
+ * cap) so nothing that matters gets lost in a count. Runs hourly; each user
+ * is served when THEIR quiet hours end, in their own time zone.
+ *
+ * It used to be one 9 AM New York flush that collapsed everything into "3
+ * comments, 2 hypes and 4 more" — so a friend request or a mention became a
+ * number beside the hypes — and re-sent a single held push as "You have a
+ * notification you missed" with no body and nowhere to tap.
+ *
+ * Now, per user: stale nudges and lead changes are dropped (still in the
+ * inbox); up to `BRIEFING_INDIVIDUAL_KINDS` kinds of "for you" news ring as
+ * themselves — same title, body and tap target as if they'd been sent live,
+ * several of one kind as the newest plus "+N more"; everything else becomes
+ * ONE summary line. Re-deliveries skip the inbox: the row was written when
+ * the push was first held.
+ */
 export async function flushBatchedNotifications(): Promise<void> {
   const pending = await db.query<PendingNotification>(
-    `SELECT id, user_id, type, competition_id, competition_name
-		FROM pending_notifications
-		WHERE sent_at IS NULL
-		ORDER BY user_id, created_at`,
+    `SELECT id, user_id, type, competition_id, competition_name,
+            body, data, category, reason, created_at
+       FROM pending_notifications
+      WHERE sent_at IS NULL
+      ORDER BY user_id, created_at`,
   );
-
   if (pending.length === 0) return;
 
-  // Group by user
-  const byUser: Record<string, PendingNotification[]> = {};
+  const byUser = new Map<string, PendingNotification[]>();
   for (const row of pending) {
-    if (!byUser[row.user_id]) byUser[row.user_id] = [];
-    byUser[row.user_id].push(row);
+    const list = byUser.get(row.user_id);
+    if (list) list.push(row);
+    else byUser.set(row.user_id, [row]);
   }
 
-  for (const [userId, notifications] of Object.entries(byUser)) {
-    const compNotifs = notifications.filter(
-      (n) =>
-        n.type === "competition_started" || n.type === "competition_finished",
-    );
-    const otherNotifs = notifications.filter(
-      (n) =>
-        n.type !== "competition_started" && n.type !== "competition_finished",
-    );
-
-    // Handle competition start/finish notifications (batch into digest)
-    if (compNotifs.length > 0) {
-      const starts = compNotifs.filter((n) => n.type === "competition_started");
-      const finishes = compNotifs.filter(
-        (n) => n.type === "competition_finished",
-      );
-
-      let title: string;
-      let body: string;
-      let type: NotificationType;
-
-      if (starts.length > 0 && finishes.length > 0) {
-        title = "Competition updates";
-        body =
-          "You have several updates to your competitions — open to check in";
-        type = "competition_updates";
-      } else if (starts.length === 1) {
-        title = "Competition started";
-        body = `${starts[0].competition_name} has begun!`;
-        type = "competition_started";
-      } else if (starts.length > 1) {
-        title = "Competitions started";
-        body = "Multiple competitions have started — open to check in";
-        type = "competition_started";
-      } else if (finishes.length === 1) {
-        title = "Competition finished";
-        body = `${finishes[0].competition_name} has finished!`;
-        type = "competition_finished";
-      } else {
-        title = "Competitions finished";
-        body = "Multiple competitions have finished — open to check in";
-        type = "competition_finished";
-      }
-
-      // NO FLUSH_OPTS here, deliberately: competition_started/finished are the
-      // one kind queued by sendOrQueueCompetitionNotification, which inserts
-      // straight into pending_notifications without charging the ledger. They
-      // are also HIGH_PRIORITY, so sendPush's own queueing branches never see
-      // them — this digest is their FIRST charge, not a second one.
-      await sendPush(userId, { title, body, type });
+  const now = new Date();
+  let delivered = 0;
+  for (const [userId, rows] of byUser) {
+    const prefs = await getNotificationPreferences(userId);
+    const offset = prefs.timezone_offset_minutes ?? null;
+    if (
+      prefs.quiet_hours_start !== null &&
+      prefs.quiet_hours_end !== null &&
+      hourInWindow(localHourFor(offset, now), prefs.quiet_hours_start, prefs.quiet_hours_end)
+    ) {
+      continue; // Still their night.
     }
+    const due = rows.filter((r) => isDue(r, now, offset));
+    if (due.length === 0) continue;
 
-    // Handle other throttled notifications (send digest summary)
-    if (otherNotifs.length > 0) {
-      if (otherNotifs.length === 1) {
-        // Single throttled notification: send it directly
-        const n = otherNotifs[0];
-        await sendPush(
-          userId,
-          {
-            title: n.competition_name || "Notification", // competition_name stores the original title
-            body: `You have a notification you missed`,
-            type: (n.type as NotificationType) || "competition_updates",
-          },
-          FLUSH_OPTS,
-        );
-      } else {
-        // Multiple: send a digest that SAYS what it holds. "You have 40
-        // notifications" is a number, not news — it tells the user nothing
-        // about whether opening the app is worth it, and the one thing in
-        // there they'd have wanted is indistinguishable from the other 39.
-        //
-        // The type decides where the tap lands, and only the inbox can show a
-        // digest's contents: `activity_digest` for devices that route it,
-        // `competition_updates` (the Compete tab) for the shipped builds that
-        // don't.
-        const routesDigest = await userSupports(
-          userId,
-          CLIENT_FEATURES.activityDigestV1,
-        ).catch(() => false);
-        await sendPush(
-          userId,
-          {
-            title: "While you were away",
-            body: digestBody(otherNotifs),
-            type: routesDigest ? "activity_digest" : "competition_updates",
-            data: { missed_count: String(otherNotifs.length) },
-          },
-          FLUSH_OPTS,
-        );
-      }
-    }
+    await deliverBriefing(userId, due, now, offset);
+    delivered += due.length;
+    await db.query(
+      `UPDATE pending_notifications SET sent_at = NOW() WHERE id = ANY($1::uuid[])`,
+      [due.map((r) => r.id)],
+    );
   }
 
-  // Mark all as sent
-  const ids = pending.map((n) => n.id);
-  await db.query(
-    `UPDATE pending_notifications SET sent_at = NOW() WHERE id = ANY($1::uuid[])`,
-    [ids],
-  );
+  if (delivered > 0) {
+    console.log(`[Push] Morning briefing delivered ${delivered} held notifications`);
+  }
+}
 
-  console.log(
-    `[Push] Flushed ${pending.length} batched notifications for ${Object.keys(byUser).length} users`,
+/** What a briefing will send, decided without sending — exported so a check
+ * can pin the ordering and folding rules without a live APNs. */
+export interface BriefingPlan {
+  /** Rung as themselves (skipInbox: their inbox row already exists). */
+  individual: PushPayload[];
+  /** The one summary line for everything else, if anything is left. */
+  summary: { title: string; body: string; count: number } | null;
+  /** Rows dropped as stale by morning. */
+  droppedStale: number;
+  competition: PendingNotification[];
+}
+
+export function planBriefing(
+  rows: PendingNotification[],
+  now: Date,
+  offset: number | null,
+): BriefingPlan {
+  const competition = rows.filter(
+    (n) => n.type === "competition_started" || n.type === "competition_finished",
   );
+  const today = localDateKey(now, offset);
+  const nonComp = rows.filter(
+    (n) => n.type !== "competition_started" && n.type !== "competition_finished",
+  );
+  const others = nonComp.filter(
+    (n) =>
+      !(
+        STALE_BY_MORNING.includes(n.type as NotificationType) &&
+        localDateKey(new Date(n.created_at), offset) < today
+      ),
+  );
+  const droppedStale = nonComp.length - others.length;
+
+  // Group by type, newest last (rows arrive ordered by created_at).
+  const groups = new Map<string, PendingNotification[]>();
+  for (const n of others) {
+    const g = groups.get(n.type);
+    if (g) g.push(n);
+    else groups.set(n.type, [n]);
+  }
+  const forYou = [...groups.entries()]
+    .filter(([type]) => BRIEFING_PRIORITY.includes(type as NotificationType))
+    .sort(
+      ([a], [b]) =>
+        BRIEFING_PRIORITY.indexOf(a as NotificationType) -
+        BRIEFING_PRIORITY.indexOf(b as NotificationType),
+    )
+    .slice(0, BRIEFING_INDIVIDUAL_KINDS);
+
+  const individual: PushPayload[] = forYou.map(([, group]) => {
+    const newest = group[group.length - 1];
+    if (newest.body === null) {
+      // Held before payloads were kept: the old one-liner is all we have.
+      return {
+        title: newest.competition_name || "Notification",
+        body:
+          group.length > 1
+            ? `You have ${group.length} notifications you missed`
+            : "You have a notification you missed",
+        type: newest.type as NotificationType,
+      };
+    }
+    return {
+      title: newest.competition_name,
+      body: group.length > 1 ? `${newest.body} · +${group.length - 1} more` : newest.body,
+      type: newest.type as NotificationType,
+      ...(newest.data ? { data: newest.data } : {}),
+      ...(newest.category ? { category: newest.category } : {}),
+    };
+  });
+
+  const ringing = new Set(forYou.map(([type]) => type));
+  const rest = others.filter((n) => !ringing.has(n.type));
+  if (rest.length === 1 && rest[0].body !== null && individual.length === 0) {
+    // One thing held, and it isn't "for you": still deliver it as itself.
+    const n = rest[0];
+    individual.push({
+      title: n.competition_name,
+      body: n.body!,
+      type: n.type as NotificationType,
+      ...(n.data ? { data: n.data } : {}),
+    });
+    return { individual, summary: null, droppedStale, competition };
+  }
+  const summary =
+    rest.length === 0
+      ? null
+      : {
+          title: individual.length > 0 ? "Also while you were away" : "While you were away",
+          body: digestBody(rest),
+          count: rest.length,
+        };
+  return { individual, summary, droppedStale, competition };
+}
+
+async function deliverBriefing(
+  userId: string,
+  rows: PendingNotification[],
+  now: Date,
+  offset: number | null,
+): Promise<void> {
+  const plan = planBriefing(rows, now, offset);
+  // Competition start/finish keep their own digest (they were never charged
+  // to the cap — see the note on FLUSH_OPTS).
+  if (plan.competition.length > 0) await deliverCompetitionDigest(userId, plan.competition);
+  for (const payload of plan.individual) {
+    await sendPush(userId, payload, { ...FLUSH_OPTS, skipInbox: true });
+  }
+  if (!plan.summary) return;
+  // The summary says what it holds; the type decides where it lands (only
+  // the inbox can show a digest's contents) — `activity_digest` for devices
+  // that route it, `competition_updates` for shipped builds that don't.
+  const routesDigest = await userSupports(userId, CLIENT_FEATURES.activityDigestV1).catch(
+    () => false,
+  );
+  await sendPush(
+    userId,
+    {
+      title: plan.summary.title,
+      body: plan.summary.body,
+      type: routesDigest ? "activity_digest" : "competition_updates",
+      data: { missed_count: String(plan.summary.count) },
+    },
+    FLUSH_OPTS,
+  );
+}
+
+async function deliverCompetitionDigest(
+  userId: string,
+  compNotifs: PendingNotification[],
+): Promise<void> {
+  const starts = compNotifs.filter((n) => n.type === "competition_started");
+  const finishes = compNotifs.filter((n) => n.type === "competition_finished");
+
+  let title: string;
+  let body: string;
+  let type: NotificationType;
+  let data: Record<string, string> | undefined;
+
+  if (starts.length > 0 && finishes.length > 0) {
+    title = "Competition updates";
+    body = "You have several updates to your competitions — open to check in";
+    type = "competition_updates";
+  } else if (starts.length === 1) {
+    title = "Competition started";
+    body = `${starts[0].competition_name} has begun!`;
+    type = "competition_started";
+    data = starts[0].competition_id ? { competition_id: starts[0].competition_id } : undefined;
+  } else if (starts.length > 1) {
+    title = "Competitions started";
+    body = "Multiple competitions have started — open to check in";
+    type = "competition_started";
+  } else if (finishes.length === 1) {
+    title = "Competition finished";
+    body = `${finishes[0].competition_name} has finished!`;
+    type = "competition_finished";
+    data = finishes[0].competition_id ? { competition_id: finishes[0].competition_id } : undefined;
+  } else {
+    title = "Competitions finished";
+    body = "Multiple competitions have finished — open to check in";
+    type = "competition_finished";
+  }
+
+  // NO FLUSH_OPTS here, deliberately: competition_started/finished are the
+  // one kind queued by sendOrQueueCompetitionNotification, which inserts
+  // straight into pending_notifications without charging the ledger. They
+  // are also HIGH_PRIORITY, so sendPush's own queueing branches never see
+  // them — this digest is their FIRST charge, not a second one.
+  await sendPush(userId, { title, body, type, ...(data ? { data } : {}) });
 }
 
 // ─── Nudge Rate Limiting ─────────────────────────────────────────────

@@ -19,6 +19,10 @@ import {
   isWorkoutVisibility,
   WORKOUT_VISIBILITY_VALUES,
 } from "../services/visibilityService.js";
+import {
+  isRoutePrivacyMeters,
+  ROUTE_PRIVACY_OPTIONS,
+} from "../services/routePrivacy.js";
 
 /**
  * The Weekly Recap switch under both names: `weekly_recap_enabled` (the
@@ -68,6 +72,18 @@ export async function updatePreferences(
     ) {
       return res.status(400).json({
         error: `workout_visibility must be one of: ${WORKOUT_VISIBILITY_VALUES.join(", ")}`,
+      });
+    }
+    // Hide start & end: one of the offered distances (metres), or null for
+    // the default.
+    const { route_privacy_meters } = req.body;
+    if (
+      route_privacy_meters !== undefined &&
+      route_privacy_meters !== null &&
+      !isRoutePrivacyMeters(route_privacy_meters)
+    ) {
+      return res.status(400).json({
+        error: `route_privacy_meters must be one of: ${ROUTE_PRIVACY_OPTIONS.join(", ")}, or null`,
       });
     }
     if (

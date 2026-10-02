@@ -76,8 +76,28 @@ export type BuddyActivityType = (typeof BUDDY_ACTIVITY_TYPES)[number];
  * NULL on the row means "never chosen", which every client reads as outdoor —
  * the value every buddy walk hard-coded before this existed.
  */
+/**
+ * Who may join a walk WITHOUT an invite. Host-chosen, changeable in any open
+ * phase. `friends` = any friend of the host (the original behaviour);
+ * `close_friends` = only the host's close friends; `invite_only` = nobody
+ * uninvited. Under anything but `friends` only the HOST can invite, or a
+ * member could walk anyone past the host's choice.
+ */
+export const BUDDY_JOIN_POLICIES = ["friends", "close_friends", "invite_only"] as const;
+export type BuddyJoinPolicy = (typeof BUDDY_JOIN_POLICIES)[number];
+
 export const BUDDY_LOCATION_TYPES = ["outdoor", "indoor"] as const;
 export type BuddyLocationType = (typeof BUDDY_LOCATION_TYPES)[number];
+
+/**
+ * Walk vs run, PER PARTICIPANT. The session's `activity_type` is the host's
+ * plan; this is what each person is actually recording, chosen in the lobby
+ * before they count as ready. NULL = never chosen (every client predating the
+ * field), which reads as the session's own activity.
+ */
+export const BUDDY_PARTICIPANT_ACTIVITY_TYPES = ["walking", "running"] as const;
+export type BuddyParticipantActivityType =
+  (typeof BUDDY_PARTICIPANT_ACTIVITY_TYPES)[number];
 
 /**
  * Hard cap on participants.
@@ -127,6 +147,8 @@ export interface BuddySessionRow {
   activity_type: string;
   status: BuddySessionStatus;
   origin: BuddyOrigin;
+  join_policy: BuddyJoinPolicy | null;
+  merged_into: string | null;
   scheduled_start_at: string | null;
   started_at: string | null;
   ends_at: string | null;
@@ -152,6 +174,7 @@ export interface BuddyParticipantRow {
   final_distance_miles: number | null;
   place: number | null;
   location_type: BuddyLocationType | null;
+  activity_type: BuddyParticipantActivityType | null;
   hidden_at: string | null;
 }
 
@@ -200,6 +223,9 @@ export interface BuddyParticipantView {
   /// null as outdoor. Shown on the roster so the group can see that the person
   /// whose pace looks different is on a treadmill.
   location_type: BuddyLocationType | null;
+  /// Walking or running, as THIS person chose in the lobby. Null until they
+  /// have (and from every older client) — read as the session's activity.
+  activity_type: BuddyParticipantActivityType | null;
 }
 
 /**
@@ -244,6 +270,10 @@ export interface BuddySessionState {
    * and one 'requested' row inside that array would fail its whole snapshot.
    */
   join_requests: BuddyJoinRequestView[];
+  /** Who may join without an invite (additive; 'friends' for old rows). */
+  join_policy: BuddyJoinPolicy;
+  /** The walk this lobby was combined into, when it was (additive). */
+  merged_into: string | null;
 }
 
 // ─── History ────────────────────────────────────────────────────────────

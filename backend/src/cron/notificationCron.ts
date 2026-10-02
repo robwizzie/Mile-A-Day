@@ -70,6 +70,10 @@ export function startNotificationCron(): void {
   // current local hour matches their configured reminder hour and who haven't
   // completed today's mile. Per-user TZ filtering is in the SQL.
   cron.schedule("0 * * * *", async () => {
+    // The morning briefing: whatever was held for quiet hours (or the daily
+    // cap) goes out the hour each user's OWN quiet hours end, in their zone —
+    // not at one 9 AM New York flush for everyone.
+    await runJob("notifications.morning_briefing", flushBatchedNotifications);
     await runJob("notifications.daily_reminders", sendPendingDailyReminders);
     // Expire stale pending-friend-notification rows (ask-mode). Lazy expiry on
     // read already guarantees correctness; this is hygiene to keep the table tidy.

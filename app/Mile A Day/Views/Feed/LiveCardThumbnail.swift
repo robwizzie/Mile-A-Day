@@ -55,6 +55,9 @@ struct LiveCardThumbnail: View {
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            // Static, so flattened into one layer: the glow's blur is drawn
+            // once instead of re-run by the compositor on every grid scroll.
+            .drawingGroup()
         }
         .accessibilityHidden(true)
     }

@@ -33,6 +33,8 @@ struct CompetitionsListView: View {
     @ObservedObject private var weeklyService = WeeklyChallengeService.shared
     @State private var competitionToEdit: Competition?
     @State private var actionError: String?
+    /// Last refresh from this screen that succeeded — gates the tab-switch one.
+    @State private var lastListRefreshAt: Date?
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -197,17 +199,16 @@ struct CompetitionsListView: View {
             Task { await consumePendingCompetition() }
         }
         .onAppear {
-            Task {
-                await competitionService.refreshAllData()
-                trophyService.updateTrophies(from: competitionService.competitions)
+            // onAppear fires on every tab switch; a list fetched seconds ago
+            // isn't worth refetching. Foreground, pull and create still force.
+            if let last = lastListRefreshAt, Date().timeIntervalSince(last) < Self.appearRefreshInterval {
+                return
             }
+            Task { await refreshListAndTrophies() }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
-            Task {
-                await competitionService.refreshAllData()
-                trophyService.updateTrophies(from: competitionService.competitions)
-            }
+            Task { await refreshListAndTrophies() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
             guard let type = notification.userInfo?["type"] as? String else { return }
@@ -219,6 +220,18 @@ struct CompetitionsListView: View {
             // Refresh after the create sheet closes.
             guard createRequest == nil else { return }
             Task { await competitionService.refreshAllData() }
+        }
+    }
+
+    private static let appearRefreshInterval: TimeInterval = 30
+
+    private func refreshListAndTrophies() async {
+        await competitionService.refreshAllData()
+        trophyService.updateTrophies(from: competitionService.competitions)
+        // Only a refresh that landed earns the skip — a failed one must retry
+        // on the next appear.
+        if competitionService.errorMessage == nil {
+            lastListRefreshAt = Date()
         }
     }
 

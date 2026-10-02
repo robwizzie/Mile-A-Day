@@ -43,18 +43,23 @@ struct BuddyLobbyView: View {
     /// Join requests being answered, so a double tap can't answer twice.
     @State private var answeringIds: Set<String> = []
 
-    /// Nil until the first snapshot lands; then TRUE only for someone who
-    /// arrived at a walk that was already moving.
+    /// Has this person said how they're going (walk or run) and where
+    /// (indoor or outdoor)? Nil until the first snapshot lands.
     ///
-    /// This screen is the one every buddy session passes through, and it hands
-    /// off to the tracker the instant `started_at` is in the past — which for a
-    /// late joiner is immediately, on the first 0.1s tick. That's correct for
-    /// the person who was standing in the lobby when the host pressed Start,
-    /// and wrong for someone who just tapped Join on a walk an hour deep: they
-    /// get no lobby at all, so there is nowhere to ask them the one question
-    /// that decides whether their phone can measure them (treadmill or street).
-    /// So the hand-off waits on an explicit tap for them, and only for them.
-    @State private var needsJoinConfirm: Bool?
+    /// A guest isn't READY until they have — and nobody is handed into the
+    /// walk without it. This used to be latched only for someone arriving at a
+    /// walk already moving, so a guest who was sitting in the lobby when the
+    /// host pressed Start went straight through the countdown with whatever
+    /// the phone remembered from last time, and someone who joined during the
+    /// countdown was never asked at all. Now the rule is the same for every
+    /// door: the host answered in setup; everyone else answers here, before
+    /// the countdown, after it, or on arriving late.
+    @State private var choicesConfirmed: Bool?
+    /// The confirm's request is in flight.
+    @State private var isConfirming = false
+    @State private var isCombining = false
+    /// Optimistic copy of this guest's walk/run answer, like `pendingLocation`.
+    @State private var pendingIsRun: Bool?
 
     /// Optimistic copy of this user's own indoor/outdoor answer.
     ///
@@ -101,7 +106,10 @@ struct BuddyLobbyView: View {
                     // "Waiting for the host to start…" for a walk that no
                     // longer exists, forever, since polling has stopped too.
                     cancelledPanel(session)
-                } else if let remaining = secondsUntilStart(session), remaining > 0 {
+                } else if let remaining = secondsUntilStart(session), remaining > 0,
+                          choicesConfirmed == true {
+                    // Not yet answered → the lobby (with its questions) stays
+                    // up under the countdown instead; see `choicesConfirmed`.
                     countdown(remaining: remaining, session: session)
                 } else {
                     lobby(session)
@@ -132,16 +140,15 @@ struct BuddyLobbyView: View {
         .onAppear { buddy.startPolling() }
     }
 
-    /// Decide ONCE, on the first snapshot, whether this user arrived late.
-    ///
-    /// Latched rather than derived, because the answer must not change when the
-    /// host presses Start while somebody is looking at the lobby — that person
-    /// was here first and should flow straight into the countdown.
+    /// Decide ONCE, on the first snapshot, whether this user still has to
+    /// answer. The host answered in setup; a guest already marked ready on the
+    /// server (they confirmed, then the screen was rebuilt) has too. Everyone
+    /// else is asked — including a guest whose walk has already started.
     private func seedJoinGate(_ session: BuddySessionState) {
-        guard needsJoinConfirm == nil else { return }
-        needsJoinConfirm =
-            session.status == .active
-            && (session.startedAtDate.map { $0 <= Date() } ?? true)
+        guard choicesConfirmed == nil else { return }
+        choicesConfirmed =
+            session.isHost(buddy.currentUserId)
+            || session.me(buddy.currentUserId)?.status == .ready
     }
 
     // MARK: - Arrivals
@@ -399,9 +406,26 @@ struct BuddyLobbyView: View {
             ScrollView {
                 VStack(spacing: MADTheme.Spacing.lg) {
                     planHeader(session)
-                    peopleCard(session)
-                    locationCard(session)
-                        .padding(.horizontal, MADTheme.Spacing.md)
+                    if let twin = buddy.twinWalk {
+                        twinWalkCard(twin)
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                    if !buddy.leftBehindNames.isEmpty {
+                        leftBehindNote
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                    }
+                    if session.isHost(buddy.currentUserId) {
+                        peopleCard(session)
+                        locationCard(session)
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                    } else {
+                        // A guest's one job here comes first: say how
+                        // they're going. Who's here sits under it.
+                        readyCard(session)
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                        peopleCard(session)
+                    }
                     ghostRaceRow(session)
                         .padding(.horizontal, MADTheme.Spacing.md)
                     Color.clear.frame(height: 4)
@@ -412,6 +436,27 @@ struct BuddyLobbyView: View {
                 // dashboard prefetch, so the friend row would be empty exactly
                 // when someone is trying to pull people in.
                 await buddy.loadCandidates()
+            }
+            // Watch for the friend standing next to you who ALSO pressed
+            // start: their open walk (or an invite to it) surfaces as the
+            // "combine" card. Host-only and lobby-only, like the card.
+            .task(id: session.id) {
+                while !Task.isCancelled,
+                      buddy.session?.status == .lobby,
+                      buddy.session?.isHost(buddy.currentUserId) == true {
+                    async let open: Void = buddy.refreshJoinableFriendSessions()
+                    async let mine: Void = buddy.refreshMySessions()
+                    _ = await (open, mine)
+                    try? await Task.sleep(nanoseconds: 8_000_000_000)
+                }
+            }
+            .animation(MADTheme.Animation.standard, value: buddy.twinWalk)
+            // A combine moves this screen to a DIFFERENT walk (ours folded
+            // into theirs, or theirs into ours as a guest): re-read who still
+            // has to answer, and who counts as already here.
+            .onChange(of: session.id) { _, _ in
+                choicesConfirmed = nil
+                seenInIds = nil
             }
 
             WizardFooter { actions(session) }
@@ -469,6 +514,70 @@ struct BuddyLobbyView: View {
         return "\(goalText(goal, mode: session.mode)) · \(activity)"
     }
 
+    // MARK: - Two walks at once
+
+    /// "Aaron started a walk too" — the Spotify-Jam moment. Two friends who
+    /// both pressed start end up in two lobbies a metre apart; this folds
+    /// ours (and whoever's in it) into theirs in one tap.
+    private func twinWalkCard(_ twin: BuddySessionService.TwinWalk) -> some View {
+        WizardPanel {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                HStack(spacing: MADTheme.Spacing.md) {
+                    AvatarView(name: twin.hostName, imageURL: twin.hostImageURL, size: 40)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(twin.hostName) started a \(twin.isRunning ? "run" : "walk") too")
+                            .font(MADTheme.Typography.bodyBold)
+                            .foregroundStyle(Color.white)
+                            .lineLimit(2)
+                        Text("Combine them — everyone here comes with you.")
+                            .font(MADTheme.Typography.caption)
+                            .foregroundStyle(Color.white.opacity(0.65))
+                    }
+                    Spacer(minLength: 0)
+                }
+                WizardPrimaryButton(
+                    title: "Combine into \(twin.hostName)'s",
+                    icon: "arrow.triangle.merge",
+                    isBusy: isCombining,
+                    isEnabled: !isCombining
+                ) {
+                    MADHaptics.action()
+                    combine(into: twin.sessionId)
+                }
+            }
+        }
+    }
+
+    private var leftBehindNote: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.circle")
+                .foregroundStyle(MADTheme.Colors.warning)
+                .accessibilityHidden(true)
+            Text("\(buddy.leftBehindNames.joined(separator: ", ")) couldn't come along — that walk isn't open to them. Invite them from here if the host lets you.")
+                .font(MADTheme.Typography.caption)
+                .foregroundStyle(Color.white.opacity(0.75))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func combine(into sessionId: String) {
+        guard !isCombining else { return }
+        isCombining = true
+        Task {
+            do {
+                try await buddy.combine(into: sessionId)
+                MADHaptics.success()
+                // A different room: forget the old one's arrivals baseline.
+                seenInIds = nil
+            } catch {
+                buddy.errorMessage =
+                    (error as? LocalizedError)?.errorDescription ?? "Couldn't combine the walks."
+            }
+            isCombining = false
+        }
+    }
+
     // MARK: - People
 
     /// Everyone in one card: who's here, and — one tap away — who else could be.
@@ -497,9 +606,7 @@ struct BuddyLobbyView: View {
 
     private func peopleCard(_ session: BuddySessionState) -> some View {
         let people = session.lobbyParticipants
-        let here = people.filter {
-            $0.status == .joined || $0.status == .ready || $0.status == .active
-        }.count
+        let here = people.filter { isReady($0) }.count
         let present = Set(people.map(\.userId))
         let invitable = buddy.candidates.filter { !present.contains($0.userId) }
         let isHost = session.isHost(buddy.currentUserId)
@@ -510,6 +617,9 @@ struct BuddyLobbyView: View {
             $0.userId == buddy.currentUserId
                 && ($0.status == .joined || $0.status == .ready || $0.status == .active)
         }
+        // On a close-friends or invite-only walk only the HOST invites (the
+        // server refuses anyone else) — so only the host gets the tiles.
+        let canInvite = amIn && (isHost || session.joinPolicy == .friends)
 
         return WizardPanel {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
@@ -518,10 +628,14 @@ struct BuddyLobbyView: View {
                         .font(MADTheme.Typography.headline)
                         .foregroundStyle(Color.white)
                     Spacer()
-                    Text(waitingText(here: here, total: people.count))
+                    Text(waitingText(ready: here, total: people.count))
                         .font(MADTheme.Typography.caption)
                         .foregroundStyle(Color.white.opacity(here == people.count ? 0.95 : 0.6))
                 }
+
+                // Said up front, so a friend dropping in mid-walk is something
+                // the host chose, not a surprise.
+                BuddyJoinPolicyControl(session: session)
 
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 68), spacing: MADTheme.Spacing.sm)],
@@ -553,7 +667,7 @@ struct BuddyLobbyView: View {
                     joinRequestsSection(session)
                 }
 
-                if amIn, !invitable.isEmpty {
+                if canInvite, !invitable.isEmpty {
                     Divider().background(Color.white.opacity(0.2))
 
                     Text("Tap to invite")
@@ -570,7 +684,7 @@ struct BuddyLobbyView: View {
                     }
                 }
 
-                if amIn, invitable.isEmpty, people.count <= 1 {
+                if canInvite, invitable.isEmpty, people.count <= 1 {
                     // Host, alone, with nobody left to ask. Say so plainly
                     // instead of leaving a card that looks like it's still
                     // loading.
@@ -587,10 +701,20 @@ struct BuddyLobbyView: View {
     /// "Everyone's in" is wrong when you're on your own — there is no everyone
     /// yet, and the phrase reads as though the walk is ready to go when the
     /// whole point of the screen is that nobody has been asked.
-    private func waitingText(here: Int, total: Int) -> String {
+    private func waitingText(ready: Int, total: Int) -> String {
         if total <= 1 { return "Just you so far" }
-        if here == total { return "Everyone's in" }
-        return "\(here) of \(total)"
+        if ready == total { return "Everyone's ready" }
+        return "\(ready) of \(total) ready"
+    }
+
+    /// Ready = said how they're going. The host did in setup; a guest does it
+    /// in this lobby; anyone already moving is past the question.
+    private func isReady(_ participant: BuddyParticipant) -> Bool {
+        switch participant.status {
+        case .ready, .active, .finished: return true
+        case .joined: return participant.isHost
+        default: return false
+        }
     }
 
     /// One face. Presence is carried by the avatar — ringed and full strength
@@ -640,11 +764,10 @@ struct BuddyLobbyView: View {
                 .foregroundStyle(Color.white.opacity(isIn ? 1 : 0.5))
                 .lineLimit(1)
 
-            // "Joined", not "In": the word under a face is the one place the
-            // arrival is spelled out, and "In" reads as a fragment.
-            Text(isIn ? "Joined" : statusWord(participant.status))
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundStyle(Color.white.opacity(isIn ? 0.95 : 0.45))
+            // The word under a face says where they are in getting ready:
+            // in the room but still choosing, or ready — and how they're
+            // coming, so the host can see the treadmill runner before Start.
+            rosterStatus(participant, isIn: isIn)
         }
         // The poll is what surfaces an arrival, so this keys on the value that
         // changed rather than an onAppear that already ran.
@@ -826,6 +949,35 @@ struct BuddyLobbyView: View {
         }
     }
 
+    @ViewBuilder
+    private func rosterStatus(_ participant: BuddyParticipant, isIn: Bool) -> some View {
+        if let session, isIn, isReady(participant) {
+            let running = participant.isRunning(in: session)
+            HStack(spacing: 3) {
+                Image(systemName: running ? "figure.run" : "figure.walk")
+                    .font(.system(size: 9, weight: .bold))
+                    .accessibilityHidden(true)
+                if participant.resolvedLocationType == .indoor {
+                    Image(systemName: BuddyLocationType.indoor.icon)
+                        .font(.system(size: 9, weight: .bold))
+                        .accessibilityHidden(true)
+                }
+                Text(participant.status == .active ? "Moving" : "Ready")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(Color.white.opacity(0.95))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(participant.status == .active ? "Moving" : "Ready"), "
+                    + "\(running ? "running" : "walking")"
+                    + (participant.resolvedLocationType == .indoor ? ", indoors" : ""))
+        } else {
+            Text(isIn ? "Choosing…" : statusWord(participant.status))
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(Color.white.opacity(isIn ? 0.7 : 0.45))
+        }
+    }
+
     private func statusWord(_ status: BuddyParticipantStatus) -> String {
         switch status {
         case .invited: return "Invited"
@@ -908,6 +1060,145 @@ struct BuddyLobbyView: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - Getting ready (guests)
+
+    /// This guest's walk/run answer, if they've GIVEN one: their tap, else
+    /// what the server has from an earlier answer in this walk. Deliberately
+    /// no default — answering both questions is what makes them ready, so a
+    /// pre-filled guess would either make them ready without asking or sit
+    /// there looking answered while nothing happened.
+    private func answeredIsRun(_ session: BuddySessionState) -> Bool? {
+        if let pendingIsRun { return pendingIsRun }
+        guard let mine = session.me(buddy.currentUserId)?.activityType else { return nil }
+        return mine == "running"
+    }
+
+    /// Same for indoor/outdoor. The join always sends a remembered location,
+    /// so the server's value only counts as an ANSWER once the walk/run one
+    /// exists too (both are written together by `setMyChoices`).
+    private func answeredLocation(_ session: BuddySessionState) -> BuddyLocationType? {
+        if let pendingLocation { return pendingLocation }
+        guard let me = session.me(buddy.currentUserId), me.activityType != nil else { return nil }
+        return me.locationType
+    }
+
+    /// Walk/run to act on once they're in: their answer, else the host's plan.
+    private func selectedIsRun(_ session: BuddySessionState) -> Bool {
+        answeredIsRun(session) ?? session.isRunning
+    }
+
+    /// A guest's two questions. Answering the second one IS "ready" — there
+    /// is no third button. Changing an answer afterwards just updates it.
+    private func readyCard(_ session: BuddySessionState) -> some View {
+        let confirmed = choicesConfirmed == true
+        let isRun = answeredIsRun(session)
+        let location = answeredLocation(session)
+        return WizardPanel {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                HStack(spacing: 6) {
+                    Text(confirmed ? "You're ready" : "How are you going?")
+                        .font(MADTheme.Typography.smallBold)
+                        .foregroundStyle(Color.white)
+                    if confirmed {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(MADTheme.Colors.success)
+                            .accessibilityHidden(true)
+                    }
+                    Spacer()
+                    if isConfirming {
+                        ProgressView().tint(.white).scaleEffect(0.8)
+                    } else {
+                        Text("Just for you")
+                            .font(MADTheme.Typography.caption)
+                            .foregroundStyle(Color.white.opacity(0.55))
+                    }
+                }
+
+                HStack(spacing: 4) {
+                    choiceChip(title: "Walk", icon: "figure.walk", isOn: isRun == false) {
+                        pendingIsRun = false
+                    }
+                    choiceChip(title: "Run", icon: "figure.run", isOn: isRun == true) {
+                        pendingIsRun = true
+                    }
+                }
+                .padding(4)
+                .background(Capsule().fill(Color.white.opacity(0.12)))
+
+                HStack(spacing: 4) {
+                    ForEach(BuddyLocationType.allCases) { option in
+                        choiceChip(title: option.title, icon: option.icon,
+                                   isOn: location == option) {
+                            pendingLocation = option
+                        }
+                    }
+                }
+                .padding(4)
+                .background(Capsule().fill(Color.white.opacity(0.12)))
+
+                if let location {
+                    Text(location.subtitle)
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(Color.white.opacity(0.6))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func choiceChip(title: String, icon: String, isOn: Bool, select: @escaping () -> Void) -> some View {
+        Button {
+            // Re-tapping an answer is a no-op once it's saved, but stays a
+            // retry while it isn't (a failed save leaves them un-ready).
+            guard !isOn || choicesConfirmed != true else { return }
+            MADHaptics.tap()
+            withAnimation(MADTheme.Animation.quick) { select() }
+            if let session { saveAnswersIfComplete(session) }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(MADTheme.Typography.smallBold)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 40)
+            .background(Capsule().fill(isOn ? accent : .clear))
+            .foregroundStyle(isOn ? WizardPalette.onAccent : Color.white.opacity(0.7))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+
+    /// The moment both questions have an answer, send them with "ready" in
+    /// one write — that's what tells the host — and let the hand-off through.
+    /// An answer changed afterwards is sent the same way. On a walk that's
+    /// already running there's no lobby to be ready in: the answers still go,
+    /// and answering is what starts them.
+    private func saveAnswersIfComplete(_ session: BuddySessionState) {
+        guard let isRun = answeredIsRun(session),
+              let location = answeredLocation(session) else { return }
+        let started = session.status == .active
+        isConfirming = true
+        Task {
+            do {
+                try await buddy.setMyChoices(
+                    locationType: location,
+                    isRunning: isRun,
+                    ready: started ? nil : true
+                )
+                if choicesConfirmed != true { MADHaptics.success() }
+                withAnimation(MADTheme.Animation.quick) { choicesConfirmed = true }
+            } catch {
+                buddy.errorMessage =
+                    (error as? LocalizedError)?.errorDescription
+                    ?? "Couldn't save that — check your connection and tap your choice again."
+            }
+            isConfirming = false
+        }
+    }
+
     // MARK: - Ghost race
 
     /// Race your own ghost alongside your buddies.
@@ -982,13 +1273,11 @@ struct BuddyLobbyView: View {
 
     @ViewBuilder
     private func actions(_ session: BuddySessionState) -> some View {
-        if needsJoinConfirm == true {
-            // Arrived at a walk already in progress. There is no Start to
-            // wait for and no countdown to share — the only thing left is
-            // this person saying they're ready, which is also what keeps
-            // them on this screen long enough to answer the indoor/outdoor
-            // question above.
-            joinNowPanel(session)
+        if !session.isHost(buddy.currentUserId), choicesConfirmed != true {
+            // A guest who hasn't said how they're going. Before the start
+            // that makes them READY (and tells the host); once the walk is
+            // moving it is what lets them in.
+            confirmPanel(session)
         } else if session.isScheduledPending {
             // A booked walk starts itself — the server promotes it on time
             // whether or not anyone has the app open. The host still gets
@@ -1010,9 +1299,10 @@ struct BuddyLobbyView: View {
                     .multilineTextAlignment(.center)
             }
         } else {
-            Text("Waiting for the host to start…")
+            Text("You're ready — waiting for \(hostName(session)) to start")
                 .font(MADTheme.Typography.body)
                 .foregroundStyle(Color.white.opacity(0.75))
+                .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, MADTheme.Spacing.sm)
         }
@@ -1021,22 +1311,36 @@ struct BuddyLobbyView: View {
             .padding(.top, 2)
     }
 
-    /// The late arrival's Start button.
+    /// A guest who hasn't answered yet: no button — answering both questions
+    /// above is the confirm. Just say so, and once the walk is moving, that
+    /// answering is how they get in.
     @ViewBuilder
-    private func joinNowPanel(_ session: BuddySessionState) -> some View {
-        WizardPrimaryButton(
-            title: session.isRunning ? "Start my run" : "Start my walk",
-            icon: "figure.2"
-        ) {
-            MADHaptics.emphasis()
-            // Nothing to call: the join already landed this user 'active'
-            // server-side. All this releases is the hand-off gate.
-            needsJoinConfirm = false
-        }
-        Text(alreadyMovingNote(session))
+    private func confirmPanel(_ session: BuddySessionState) -> some View {
+        let started = session.status == .active
+        Text(started
+             ? "Pick walk or run and where you are to join in"
+             : "Pick walk or run and where you are — you're ready as soon as you do")
+            .font(MADTheme.Typography.bodyBold)
+            .foregroundStyle(Color.white.opacity(0.9))
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, MADTheme.Spacing.xs)
+        Text(confirmNote(session, started: started))
             .font(MADTheme.Typography.caption)
             .foregroundStyle(Color.white.opacity(0.6))
             .multilineTextAlignment(.center)
+    }
+
+    private func confirmNote(_ session: BuddySessionState, started: Bool) -> String {
+        guard started else { return "\(hostName(session)) will see you're ready" }
+        if let start = session.startedAtDate, start > now {
+            return "\(hostName(session)) started the walk — you'll start as soon as you answer"
+        }
+        return alreadyMovingNote(session)
+    }
+
+    private func hostName(_ session: BuddySessionState) -> String {
+        session.participants.first(where: \.isHost)?.displayName ?? "the host"
     }
 
     /// "Sam is already out — you'll start from here." Names who, because the
@@ -1097,8 +1401,13 @@ struct BuddyLobbyView: View {
     private func startNote(_ session: BuddySessionState) -> String? {
         let others = session.lobbyParticipants.filter { $0.userId != buddy.currentUserId }
         if others.isEmpty { return "Invite someone above, or head out on your own" }
+        let choosing = others.filter { $0.status == .joined }
+        if let first = choosing.first {
+            let who = choosing.count == 1 ? first.displayName : "\(choosing.count) people"
+            return "\(who) still choosing — start whenever, they'll be asked before they join in"
+        }
         if readyCount(session) < 2 { return "They can join once you're moving" }
-        return nil
+        return "Everyone's ready — start whenever you like"
     }
 
     private func readyCount(_ session: BuddySessionState) -> Int {
@@ -1128,9 +1437,9 @@ struct BuddyLobbyView: View {
         // them. The server's own window is what decides whether the cancel
         // actually lands; this only stops the UI racing the user.
         guard !holdHandOff else { return }
-        // A late arrival taps their way in — see `needsJoinConfirm`. Nil means
-        // no snapshot has landed yet, so nothing has been decided.
-        guard needsJoinConfirm == false else { return }
+        // Nobody walks in without saying how — see `choicesConfirmed`. Nil
+        // means no snapshot has landed yet, so nothing has been decided.
+        guard choicesConfirmed == true else { return }
         guard let startedAt = session.startedAtDate, startedAt <= now else { return }
         performHandOff(session)
     }

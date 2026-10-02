@@ -568,8 +568,7 @@ extension CompetitionDetailView {
     // MARK: - Interval Helpers
     func intervalKey(for date: Date) -> String {
         let calendar = Calendar.current
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
+        let formatter = Competition.intervalDayKeyFormatter
         let interval = competition.options.interval ?? .day
 
         switch interval {
@@ -750,11 +749,9 @@ struct DailyActivityCalendar: View {
     }
 
     private let weekdayLabels = ["S", "M", "T", "W", "T", "F", "S"]
-    private let isoDateFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withFullDate]
-        return f
-    }()
+    // Shared, not stored: a stored formatter was rebuilt on every init of
+    // this view, i.e. on most parent renders. Same options, same (GMT) zone.
+    private var isoDateFormatter: ISO8601DateFormatter { Competition.intervalDayKeyFormatter }
 
     private var goal: Double {
         switch competition.type {
@@ -1012,7 +1009,11 @@ struct DailyActivityCalendar: View {
     /// Streak-specific day status for the focused user. Nil when not focused on
     /// a streaks comp, or when the day falls outside the active window — the
     /// cell then renders its standard aggregate look.
-    private func streakStatus(for date: Date) -> FocusedDayStatus? {
+    ///
+    /// `misses` lets the calendar grid pass `missedDates(for:)` computed once
+    /// per render — it walks every day since the start, and was being rebuilt
+    /// for each missed cell.
+    private func streakStatus(for date: Date, misses precomputedMisses: [Date]? = nil) -> FocusedDayStatus? {
         guard isStreakComp, let user = focusedUser else { return nil }
         let cal = Calendar.current
         let day = cal.startOfDay(for: date)
@@ -1029,7 +1030,7 @@ struct DailyActivityCalendar: View {
         if hit { return .completed }
 
         // Past miss — figure out which miss-number this day is.
-        let misses = missedDates(for: user)
+        let misses = precomputedMisses ?? missedDates(for: user)
         guard let idx = misses.firstIndex(where: { cal.isDate($0, inSameDayAs: day) }) else {
             return nil
         }
@@ -1362,6 +1363,7 @@ struct DailyActivityCalendar: View {
 
     private var calendarGrid: some View {
         let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+        let focusedMisses = isStreakComp ? focusedUser.map { missedDates(for: $0) } : nil
         return LazyVGrid(columns: columns, spacing: 4) {
             ForEach(Array(monthCells.enumerated()), id: \.offset) { _, date in
                 if let date = date {
@@ -1381,7 +1383,7 @@ struct DailyActivityCalendar: View {
                             isInRange: isInRange(date),
                             isSelected: selectedDay.map { Calendar.current.isDate($0, inSameDayAs: date) } ?? false,
                             accent: effectiveAccent,
-                            streakStatus: streakStatus(for: date),
+                            streakStatus: streakStatus(for: date, misses: focusedMisses),
                             activityDots: activityTypes(on: date)
                         )
                     }
