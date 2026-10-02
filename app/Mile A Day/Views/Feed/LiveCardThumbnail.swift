@@ -3,7 +3,9 @@ import CoreLocation
 
 /// The small face of a post that has no picture — an AUTO card — drawn live
 /// from the walk: its route's shape glowing in the activity colour on the
-/// Route Art canvas, or (routeless) the activity glyph on that canvas.
+/// Route Art canvas, or (routeless) the activity glyph on that canvas — or,
+/// for a Fun AUTHOR (`FeedCardFlamey`), their Flamey cheering on a warm glow,
+/// matching the card it opens.
 ///
 /// Auto cards used to be a baked image uploaded with the post, so a grid tile
 /// was just that picture shrunk. They're data now (`RunPostService`), and a
@@ -14,10 +16,13 @@ import CoreLocation
 struct LiveCardThumbnail: View {
     let coordinates: [CLLocationCoordinate2D]?
     let workoutType: String?
+    /// The author's Flamey when they're on Fun; nil = the Modern tile.
+    let flamey: FlameyLook?
 
     init(post: PostItem) {
         coordinates = post.routeCoordinates
         workoutType = post.workout_type
+        flamey = FeedCardFlamey.look(authorFlamey: post.author_flamey, isOwn: post.is_self)
     }
 
     var body: some View {
@@ -36,6 +41,12 @@ struct LiveCardThumbnail: View {
                         .stroke(accent,
                                 style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
                         .padding(inset)
+                } else if let flamey {
+                    // Static: a grid builds dozens of these at once.
+                    FunEmberLayer(still: true)
+                    FlameyDressedFigure(look: flamey, health: .healthy,
+                                        size: min(geo.size.width, geo.size.height) * 0.5,
+                                        scale: FlameHealth.healthy.bodyScale, arms: .cheer)
                 } else {
                     Image(systemName: ActivityCardView.icon(workoutType))
                         .font(.system(size: min(geo.size.width, geo.size.height) * 0.3, weight: .bold))

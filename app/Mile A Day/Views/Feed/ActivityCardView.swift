@@ -265,7 +265,8 @@ struct ActivityCardView: View {
             authorAvatar: RouteArtAvatar(name: entry.displayName, imageURL: entry.profile_image_url),
             onSnapshot: { routeArtSnapshot = $0 },
             paletteDate: RelativeTime.date(from: entry.sort_ts),
-            routeTrimmed: entry.route_trimmed ?? false
+            routeTrimmed: entry.route_trimmed ?? false,
+            flamey: cardFlamey
         )
         .frame(maxWidth: .infinity)
         // A raw workout never has a photo, so its map is the compact box —
@@ -283,6 +284,11 @@ struct ActivityCardView: View {
             imageProvider: { routeZoomComposite(coords) },
             onDoubleTap: doubleTapHype
         )
+    }
+
+    /// The AUTHOR's Flamey when they're on Fun (nil = the Modern card).
+    private var cardFlamey: FlameyLook? {
+        FeedCardFlamey.look(authorFlamey: entry.author_flamey, isOwn: entry.is_self)
     }
 
     private var canPlayFlyover: Bool {
@@ -317,6 +323,7 @@ struct ActivityCardView: View {
             underlay: routeArtSnapshot,
             paletteDate: RelativeTime.date(from: entry.sort_ts),
             routeTrimmed: entry.route_trimmed ?? false,
+            flamey: cardFlamey,
             size: CGSize(width: 720, height: 720 / FeedMediaAspect.compact)
         ) {
             if let stats {

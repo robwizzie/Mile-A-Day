@@ -23,6 +23,9 @@ struct DistanceRibbonCard: View {
     var splits: [WorkoutSplitBar] = []
     var avatar: RouteArtAvatar? = nil
     var style: RoutelessCardStyle = .modern
+    /// HealthKit's flag: `false` labels the card OUTDOOR, nil (unknown) says
+    /// nothing. Never true here — an indoor walk draws the track.
+    var isIndoor: Bool? = nil
     var still: Bool = false
 
     @State private var revealed = false
@@ -37,7 +40,7 @@ struct DistanceRibbonCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             RoutelessHeaderRow(style: style, accent: accent, workoutType: workoutType,
-                               pace: stats.pace)
+                               pace: stats.pace, isIndoor: isIndoor)
             Spacer(minLength: 6)
             RoutelessDistanceHeadline(style: style, distance: distance, size: 66,
                                       revealed: revealed, still: effectiveStill,

@@ -60,7 +60,8 @@ enum RoutelessCardStyle {
 ///   tinted by its pace. Deliberately silent about WHY there's no map:
 ///   routeless can be a privacy choice (maps off, stealth) or a device that
 ///   recorded no trace, and a friend must not be able to tell those apart.
-///   It never says "indoor", and never "map hidden".
+///   It never says "map hidden"; it says OUTDOOR only when HealthKit
+///   flagged the walk outdoor (the flag, never the missing map).
 ///
 /// Each scene comes in the AUTHOR's style (`RoutelessCardStyle`).
 struct IndoorWorkoutCard: View {
@@ -91,7 +92,7 @@ struct IndoorWorkoutCard: View {
                                 avatar: avatar, style: style, still: still)
             } else {
                 DistanceRibbonCard(stats: stats, workoutType: workoutType, splits: splits,
-                                   avatar: avatar, style: style, still: still)
+                                   avatar: avatar, style: style, isIndoor: isIndoor, still: still)
             }
         }
         // Beside a photo this is a page of the carousel, whose page dots sit
@@ -111,7 +112,7 @@ struct IndoorWorkoutCard: View {
         if let d = stats.distance, d > 0 { parts.append("\(d.milesText) miles") }
         if let p = stats.pace, p > 0 { parts.append("pace \(RunStatsStickerView.paceText(p)) per mile") }
         if let t = stats.duration, t > 0 { parts.append("time \(RunStatsStickerView.durationText(t))") }
-        if isIndoor == true { parts.append("indoors") }
+        if let isIndoor { parts.append(isIndoor ? "indoors" : "outdoors") }
         return parts.joined(separator: ", ")
     }
 }
@@ -155,7 +156,10 @@ struct RoutelessHeaderRow: View {
     let accent: Color
     let workoutType: String?
     let pace: Double?
-    var showsIndoor: Bool = false
+    /// HealthKit's indoor flag: true ⇒ INDOOR, false ⇒ OUTDOOR, nil ⇒ no
+    /// chip. Only the FLAG may say where a walk was — a missing map can be a
+    /// privacy choice, so routeless alone never claims either.
+    var isIndoor: Bool? = nil
 
     var body: some View {
         let type = RoutelessType(style: style)
@@ -175,16 +179,24 @@ struct RoutelessHeaderRow: View {
             .padding(.vertical, style.isFun ? 5 : 0)
             .background(Capsule().fill(style.isFun ? accent.opacity(0.16) : .clear))
             Spacer(minLength: 0)
-            if showsIndoor {
+            if let isIndoor {
+                // Same height as the activity capsule, tinted so it reads at
+                // a glance: outdoor in the success green, indoor in white.
+                let tint = isIndoor ? Color.white.opacity(0.75) : MADTheme.Colors.success
                 HStack(spacing: 4) {
-                    Image(systemName: "house.fill").font(.system(size: 9, weight: .bold))
-                    Text("INDOOR")
+                    Image(systemName: isIndoor ? "house.fill" : "sun.max.fill")
+                        .font(.system(size: 10, weight: .bold))
+                    Text(isIndoor ? "INDOOR" : "OUTDOOR")
                         .font(.system(size: 10, weight: .heavy, design: type.design))
                         .tracking(1.2)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
-                .foregroundColor(.white.opacity(0.6))
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Capsule().fill(Color.white.opacity(style.isFun ? 0.09 : 0.06)))
+                .foregroundColor(tint)
+                .padding(.horizontal, 9).padding(.vertical, 5)
+                .background(Capsule().fill(tint.opacity(style.isFun ? 0.16 : 0.12)))
+                .overlay(Capsule().stroke(tint.opacity(0.3), lineWidth: 1))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(isIndoor ? "Indoor" : "Outdoor")
             }
         }
         .lineLimit(1)

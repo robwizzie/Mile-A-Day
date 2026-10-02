@@ -43,7 +43,7 @@ struct IndoorTrackCard: View {
     var body: some View {
         VStack(spacing: 0) {
             RoutelessHeaderRow(style: style, accent: accent, workoutType: workoutType,
-                               pace: stats.pace, showsIndoor: true)
+                               pace: stats.pace, isIndoor: true)
             trackHero
                 .frame(maxWidth: .infinity, minHeight: 90, maxHeight: .infinity)
                 .padding(.vertical, 6)

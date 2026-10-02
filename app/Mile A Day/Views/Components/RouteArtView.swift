@@ -181,6 +181,9 @@ struct RouteArtView: View {
     var routeTrimmed: Bool = false
     /// The OWNER's own full line: the stretches friends never see, dimmed.
     var privacyHint: RoutePrivacyHint? = nil
+    /// A Fun author's Flamey (`FeedCardFlamey.look`), running the route beside
+    /// their badge. nil = the plain (Modern) card — every non-feed caller.
+    var flamey: FlameyLook? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -247,7 +250,9 @@ struct RouteArtView: View {
                     animationsEnabled: !reduceMotion,
                     highlightedRouteId: highlightedRouteId,
                     routeTrimmed: routeTrimmed,
-                    privacyHint: privacyHint
+                    privacyHint: privacyHint,
+                    flamey: flamey,
+                    stillFrame: reduceMotion
                 )
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: highlightedRouteId)
             }
@@ -384,6 +389,7 @@ struct RouteArtView: View {
         highlightedRouteId: String? = nil,
         routeTrimmed: Bool = false,
         privacyHint: RoutePrivacyHint? = nil,
+        flamey: FlameyLook? = nil,
         size: CGSize
     ) -> some View {
         let layout = RouteArtLayout(
@@ -417,7 +423,9 @@ struct RouteArtView: View {
                 ridersVisible: true,
                 highlightedRouteId: highlightedRouteId,
                 routeTrimmed: routeTrimmed,
-                privacyHint: privacyHint
+                privacyHint: privacyHint,
+                flamey: flamey,
+                stillFrame: true
             )
         }
         .frame(width: size.width, height: size.height)
@@ -440,6 +448,7 @@ struct RouteArtView: View {
         highlightedRouteId: String? = nil,
         routeTrimmed: Bool = false,
         privacyHint: RoutePrivacyHint? = nil,
+        flamey: FlameyLook? = nil,
         size: CGSize,
         @ViewBuilder overlay: () -> Overlay
     ) -> UIImage? {
@@ -465,6 +474,7 @@ struct RouteArtView: View {
                 highlightedRouteId: highlightedRouteId,
                 routeTrimmed: routeTrimmed,
                 privacyHint: privacyHint,
+                flamey: flamey,
                 size: size
             )
             overlay()
@@ -495,12 +505,16 @@ private struct RouteArtLayout {
     /// Per line, the steps that are NOT walked ground (`RouteGaps`) — the
     /// author's under `authorId`, everyone else's under their own id.
     let breaksById: [String: Set<Int>]
+    /// The canvas the projection fills — lets the stage keep a rider's
+    /// companion on the side of the line that has room.
+    let size: CGSize
 
     static let authorId = "author"
 
     init(coordinates: [CLLocationCoordinate2D], pointTimes: [Double]?,
          companionRoutes: [CompanionRoute],
          size: CGSize, snapshot: RouteMapSnapshot?) {
+        self.size = size
         // Framing covers EVERY trace — same rule as the map view's region:
         // framing on the author alone runs a buddy off the edge. (The
         // snapshot was generated over the same combined list.)
@@ -627,6 +641,10 @@ private struct RouteArtStage: View {
     /// See `RouteArtView.routeTrimmed` / `privacyHint`.
     var routeTrimmed: Bool = false
     var privacyHint: RoutePrivacyHint? = nil
+    /// See `RouteArtView.flamey`.
+    var flamey: FlameyLook? = nil
+    /// A baked or Reduce Motion frame — Flamey stands still.
+    var stillFrame: Bool = false
 
     private static let authorId = RouteArtLayout.authorId
 
@@ -703,6 +721,19 @@ private struct RouteArtStage: View {
                                size: 20, animationIndex: index + 1)
                         .opacity(emphasis(companion.id))
                 }
+            }
+            // A Fun author's Flamey runs beside their badge — same effect,
+            // same animation, so he is welded to the tip exactly like it.
+            // He keeps to the side of the line with room at the finish.
+            if let flamey, let metrics = layout.authorMetrics {
+                let end = metrics.point(atFraction: 1)
+                let side: CGFloat = end.x < layout.size.width * 0.3 ? 1 : -1
+                RouteFlameyRunner(look: flamey, finished: showEndMarkers, still: stillFrame,
+                                  size: max(26, layout.size.width / 12))
+                    .offset(x: side * max(22, layout.size.width / 16), y: -6)
+                    .modifier(RouteRiderEffect(progress: trimProgress, metrics: metrics))
+                    .animation(lineAnimation(0), value: trimProgress)
+                    .opacity(ridersVisible ? emphasis(Self.authorId) : 0)
             }
             if let authorAvatar, let metrics = layout.authorMetrics {
                 riderBadge(authorAvatar, metrics: metrics, color: routeColor,
