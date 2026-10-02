@@ -2,7 +2,8 @@ import SwiftUI
 
 // MARK: - Share Studio
 //
-// THE share surface — walks, the day, the streak and the week all open it.
+// THE share surface — walks, the day, the streak, the week, medals and race
+// PRs all open it.
 //
 // What it is, and why (the Strava / Duolingo lesson): a CAROUSEL of finished
 // cards, one page per template, each a live preview of exactly what will
@@ -12,7 +13,7 @@ import SwiftUI
 // option at once, and "what will this look like?" is never a question.
 //
 // Layout, top to bottom:
-//   * family chips (Picture · Route · Streak · Flamey · Sticker, or Week) —
+//   * family chips (Picture · Route · Streak · Flamey · Sticker, or Week / Month) —
 //     one tap jumps the carousel to that family; they also say at a glance
 //     what kinds of card this walk can make;
 //   * the carousel — paged, the focused card full size and its neighbours
@@ -77,6 +78,11 @@ struct ShareStudioView: View {
     @State private var busy = false
 
     init(content: MADStoryContent, link: URL? = nil, initialTemplate: ShareTemplate? = nil) {
+        // Hide start & end: a share card publishes the user's OWN route to
+        // the open web, so it is cut exactly as friends see it (and a walk
+        // too short to survive the cut offers no Route card at all). The ONE
+        // door every share passes through — callers hand over the full line.
+        let content = content.trimmedForSharing()
         self.content = content
         self.link = link
         self.initialTemplate = initialTemplate
@@ -173,7 +179,7 @@ struct ShareStudioView: View {
 
     private var header: some View {
         ZStack {
-            Text(content.week != nil ? "Share your week" : "Share")
+            Text(headerTitle)
                 .font(.system(size: 16, weight: .heavy, design: .rounded))
                 .foregroundColor(.white)
             HStack {
@@ -195,6 +201,14 @@ struct ShareStudioView: View {
             .padding(.horizontal, 20)
         }
         .frame(height: 44)
+    }
+
+    private var headerTitle: String {
+        if content.medal != nil { return "Share your medal" }
+        if content.record != nil { return "Share your record" }
+        if content.week != nil { return "Share your week" }
+        if content.month != nil { return "Share your month" }
+        return "Share"
     }
 
     private var familyChips: some View {
@@ -659,7 +673,16 @@ struct ShareStudioView: View {
     /// The accent taken DEEP so it reads as a ground and the sticker is the
     /// thing you see (full strength it was the loudest thing on screen).
     private func stickerTop(_ template: ShareTemplate) -> Color {
-        let accent: Color = template.family == .week || template.family == .streak
+        // A medal stands on its own metal's light (the rarity palette the
+        // card draws it in), so the sticker lands in a story that matches it.
+        if template.family == .medal, let medal = content.medal {
+            return Self.deepened(medal.palette.glow, amount: 0.6)
+        }
+        // A perfect month stands on legendary gold, like the card itself.
+        if template.family == .month, let month = content.month {
+            return Self.deepened(month.isPerfect ? ShareMonth.gold.glow : MADTheme.Colors.madRed, amount: 0.65)
+        }
+        let accent: Color = template.family == .week || template.family == .streak || template.family == .record
             ? MADTheme.Colors.madRed : content.routeColor
         return Self.deepened(accent, amount: 0.65)
     }
@@ -705,6 +728,9 @@ enum ShareTelemetry {
     static let familyFlamey = "share_family_flamey"
     static let familyStats = "share_family_stats"
     static let familyWeek = "share_family_week"
+    static let familyMedal = "share_family_medal"
+    static let familyRecord = "share_family_record"
+    static let familyMonth = "share_family_month"
 
     static let weeklyRecapOpened = "weekly_recap_opened"
     static let weeklyRecapShared = "weekly_recap_shared"

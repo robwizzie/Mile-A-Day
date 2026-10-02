@@ -384,8 +384,7 @@ struct CompetitionCard: View {
     /// from any view scope without crossing actor boundaries.
     static func todayIntervalKey(for competition: Competition) -> String {
         let cal = Calendar.current
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
+        let formatter = Competition.intervalDayKeyFormatter
         let now = Date()
         switch competition.options.interval ?? .day {
         case .day:

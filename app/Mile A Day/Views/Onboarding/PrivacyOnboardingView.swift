@@ -222,7 +222,10 @@ struct PrivacyOnboardingView: View {
         Task {
             let response = try? await friendService.updateNotificationSettings(settings)
             await MainActor.run {
-                if let response { StealthModeStore.shared.apply(response) }
+                if let response {
+                    StealthModeStore.shared.apply(response)
+                    RoutePrivacySync.adopt(response)
+                }
                 UserDefaults.standard.set(true, forKey: Self.seenKey)
                 isSaving = false
                 onDone()

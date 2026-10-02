@@ -30,6 +30,8 @@ struct BuddyWalksSection: View {
     /// off the walk's post (the poster's line, else the first crew line), one
     /// fetch per tile that needs it, three tiles at most.
     @State private var tileRoutes: [String: [CLLocationCoordinate2D]] = [:]
+    /// Walk ids whose tile line was served trimmed (hide start & end).
+    @State private var tileRoutesTrimmed: Set<String> = []
 
     private var viewerId: String? { buddy.currentUserId }
 
@@ -149,7 +151,8 @@ struct BuddyWalksSection: View {
                     coordinates: coords,
                     routeColor: walk.accentColor,
                     showsMileMarkers: false,
-                    paletteDate: walk.startedAtDate
+                    paletteDate: walk.startedAtDate,
+                    routeTrimmed: tileRoutesTrimmed.contains(walk.id)
                 )
                 .allowsHitTesting(false)
             } else {
@@ -282,10 +285,14 @@ struct BuddyWalksSection: View {
             guard let postId = walk.postId,
                   let entry = try? await PostService.fetchPost(postId: postId),
                   let item = entry.asPostItem() else { continue }
-            let coords = item.routeCoordinates
-                ?? item.acceptedCoauthors.compactMap(\.routeCoordinates).first
+            let crewLine = item.acceptedCoauthors.first { $0.routeCoordinates != nil }
+            let coords = item.routeCoordinates ?? crewLine?.routeCoordinates
+            let trimmed = item.routeCoordinates != nil
+                ? (item.route_trimmed ?? false)
+                : (crewLine?.route_trimmed ?? false)
             if let coords, coords.count >= 2 {
                 tileRoutes[walk.id] = coords
+                if trimmed { tileRoutesTrimmed.insert(walk.id) }
             }
         }
     }

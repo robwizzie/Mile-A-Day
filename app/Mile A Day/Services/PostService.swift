@@ -126,6 +126,9 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     /// clock" — never index one by the other without checking.
     var route_times: [Double]? = nil
     var route_started_at: Double? = nil
+    /// The server trimmed this line's start & end for route privacy (it is
+    /// not the viewer's own). Nil on older servers and when there's no route.
+    var route_trimmed: Bool? = nil
     /// MY two switches on this shared post, and non-nil ONLY on my own row —
     /// one person's curation isn't the crew's to read, so the server nulls
     /// them for everyone else (and every older server omits them entirely).
@@ -273,6 +276,10 @@ struct PostItem: Codable, Identifiable {
     /// under exactly the route's gates; nil on older servers and older uploads.
     var route_times: [Double]? = nil
     var route_started_at: Double? = nil
+    /// Hide start & end: the server served `route` trimmed for route privacy
+    /// (the viewer isn't the author) — draw it fading in and out, no start
+    /// pin. Nil on older servers and when there's no route.
+    var route_trimmed: Bool? = nil
     /// The competitions the author was in on this post's day. Nil = none, or
     /// an older server.
     var competitions: [PostCompetitionRef]? = nil
@@ -610,6 +617,8 @@ struct FeedEntry: Codable, Identifiable {
     /// CodingKeys below like everything else here.
     let route_times: [Double]?
     let route_started_at: Double?
+    /// Hide start & end — see `PostItem.route_trimmed`. Listed in CodingKeys.
+    var route_trimmed: Bool? = nil
     /// The owner's competitions on the entry's day (both kinds). Nil = none.
     let competitions: [PostCompetitionRef]?
     /// The competition the poster stickered onto the photo, when they did.
@@ -622,6 +631,10 @@ struct FeedEntry: Codable, Identifiable {
     let splits: [FeedSplit]?
     /// HealthKit's indoor flag — nil means UNKNOWN, never "outdoor".
     let is_indoor: Bool?
+    /// Raw workout cards: the owner's streak on that day, for the walk that
+    /// completed the day's mile (posts carry theirs in `stats_snapshot`).
+    /// nil from older servers, off-streak, and on extra walks.
+    let day_streak: Int?
     /// May the viewer launch this entry's flyover (author's
     /// flyover_visibility)? nil = older server ⇒ behave as before the gate.
     let flyover_allowed: Bool?
@@ -690,7 +703,8 @@ struct FeedEntry: Codable, Identifiable {
         // synthesis for the whole struct (Xcode Cloud build 413).
         case workout_id, workout_type, feed_role, distance, total_duration
         case moving_seconds, calories, steps, route, splits, is_indoor, flyover_allowed
-        case route_times, route_started_at, competitions, competition_id
+        case day_streak
+        case route_times, route_started_at, route_trimmed, competitions, competition_id
         case stealth, author_flamey
         case segment_count, segments
         case is_self, is_hyped, hype_count, comment_count, comment_preview
@@ -740,6 +754,7 @@ struct FeedEntry: Codable, Identifiable {
             workout_type: workout_type,
             route: route,
             route_times: route_times, route_started_at: route_started_at,
+            route_trimmed: route_trimmed,
             competitions: competitions,
             competition_id: competition_id,
             splits: splits, is_indoor: is_indoor,
@@ -1603,6 +1618,41 @@ enum BlockService {
 
     static func unblock(userId: String) async throws {
         _ = try await APIClient.fancyFetch(endpoint: "/blocks/\(userId)", method: .DELETE, responseType: OK.self)
+    }
+
+    /// Someone this user blocked. `blockedAt` is whole-second ISO (the
+    /// server formats it), so it's safe to parse with `.iso8601`.
+    struct BlockedUser: Decodable, Identifiable, Equatable {
+        let userId: String
+        let username: String?
+        let firstName: String?
+        let lastName: String?
+        let profileImageUrl: String?
+        let blockedAt: String?
+
+        var id: String { userId }
+
+        var displayName: String {
+            let full = [firstName, lastName].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " ")
+            if !full.isEmpty { return full }
+            return username ?? "Someone"
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case userId = "user_id"
+            case username
+            case firstName = "first_name"
+            case lastName = "last_name"
+            case profileImageUrl = "profile_image_url"
+            case blockedAt = "blocked_at"
+        }
+    }
+
+    private struct BlockedList: Decodable { let users: [BlockedUser] }
+
+    /// Who this user has blocked, newest first (never who blocked them).
+    static func list() async throws -> [BlockedUser] {
+        try await APIClient.fancyFetch(endpoint: "/blocks", responseType: BlockedList.self).users
     }
 }
 

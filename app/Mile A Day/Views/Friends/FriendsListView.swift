@@ -44,26 +44,6 @@ struct FriendsListView: View {
     @State private var bellShakeIds: Set<String> = []
     @State private var bellAnimatedIds: Set<String> = []
 
-    // Personal rank — fetched on appear so the hero card can show "#4 of 8 this week"
-    // without coupling to the leaderboard view's state.
-    @State private var myRankEntry: LeaderboardEntry?
-    @State private var myRankTotal: Int = 0
-
-    // "Today" tab — rolling-48h workout feed + inline hype state.
-    @State private var feedItems: [FeedWorkoutItem] = []
-    @State private var isLoadingFeed = false
-    @State private var hasLoadedFeed = false
-    @State private var hypesRemaining: Int?
-    /// Admin/founder roles bypass the daily hype cap — pill shows ∞.
-    @State private var hypesUnlimited = false
-    @State private var hypingWorkoutIds: Set<String> = []
-    // Rows the user has tapped open to reveal the duration/pace/calories/steps strip.
-    @State private var expandedWorkoutIds: Set<String> = []
-    // Double-tap-to-hype, mirroring the feed cards: per-row clap-burst trigger
-    // plus a shared debounce so triple-taps don't fire two bursts.
-    @State private var rowHypeBursts: [String: Int] = [:]
-    @State private var lastDoubleTapAt = Date.distantPast
-
     // Shared namespace so a friend row can slide smoothly between
     // "Cheer Them On" and "Done Today" when their status flips.
     @Namespace private var friendRowNamespace
@@ -217,11 +197,29 @@ struct FriendsListView: View {
         // backend. Nothing else on this tab fetches either.
         healthManager.fetchTodaysDistance()
 
+        // The groups below share no inputs, so they run side by side — run
+        // one after another, the page waited on six round-trips in a row.
+        // Only stats → tokens keeps its order (see below).
+
         // Presence is the one thing on this screen that is only true for the
         // next few minutes, so it is always re-pulled rather than trusted from
         // whenever the dashboard last looked.
-        await buddy.refreshFriendsOutNow()
+        async let presence: Void = buddy.refreshFriendsOutNow()
 
+        async let graph: Void = refreshFriendGraph(force: force)
+
+        async let selfStats: Void = {
+            // Streak (raise-only) + fastest pace + the gated tokens payload.
+            await SelfStatsRefresher.refreshBackendStats(userManager: userManager)
+            // Rescuable friends + meters (no-op {active:false} until the server
+            // enables streak features for this user). Runs after the stats call so
+            // the fuller of the two payloads is the one that lands last.
+            await tokensState.refreshStatus()
+        }()
+        _ = await (presence, graph, selfStats)
+    }
+
+    private func refreshFriendGraph(force: Bool) async {
         if force || (friendService.friends.isEmpty && friendService.friendRequests.isEmpty && friendService.sentRequests.isEmpty) {
             // refreshAllData re-fetches nudge statuses internally.
             await friendService.refreshAllData()
@@ -230,15 +228,6 @@ struct FriendsListView: View {
             // list itself is already loaded.
             await loadNudgeStatuses()
         }
-
-        // Streak (raise-only) + fastest pace + the gated tokens payload.
-        await SelfStatsRefresher.refreshBackendStats(userManager: userManager)
-        // Rescuable friends + meters (no-op {active:false} until the server
-        // enables streak features for this user). Runs after the stats call so
-        // the fuller of the two payloads is the one that lands last.
-        await tokensState.refreshStatus()
-        await loadMyRank()
-        await loadFeed(force: force)
     }
 
     // MARK: - Streak Assist (in-row rescue)
@@ -375,13 +364,16 @@ struct FriendsListView: View {
         .padding(.bottom, MADTheme.Spacing.xs)
     }
 
-    // MARK: - Friends Mode Body — hero card + split sections
+    // MARK: - Friends Mode Body — split sections
 
     private var friendsHome: some View {
         ScrollView {
-            VStack(spacing: MADTheme.Spacing.lg) {
-                personalHeroCard
-
+            // Lazy so the Done Today section (and its rows' avatars/rings) isn't
+            // built until it nears the screen. The rows themselves stay grouped
+            // in each section's card, which is what draws its background.
+            // No "your day" hero up top: the Dashboard owns your own day and
+            // the Leaderboard mode owns rank — this list is about friends.
+            LazyVStack(spacing: MADTheme.Spacing.lg) {
                 if friendService.isLoading && friendService.friends.isEmpty {
                     friendsSkeletonList
                 } else if friendService.friends.isEmpty {
@@ -453,520 +445,33 @@ struct FriendsListView: View {
         )
     }
 
-    // MARK: - Today (rolling-48h workout feed + hypes)
-
-    private var feedView: some View {
-        ScrollView {
-            VStack(spacing: MADTheme.Spacing.md) {
-                if isLoadingFeed && feedItems.isEmpty {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
-                        .padding(.top, MADTheme.Spacing.xxl)
-                } else if feedItems.isEmpty {
-                    FriendEmptyStateView(
-                        title: "No Activity Yet",
-                        message: "When you and your friends log workouts, they'll show up here — give each other some hype 👏.",
-                        systemImage: "hands.clap",
-                        actionTitle: "Add Friends",
-                        action: { showingSearch = true }
-                    )
-                    .padding(.top, MADTheme.Spacing.lg)
-                } else {
-                    ForEach(groupedFeed(), id: \.title) { group in
-                        feedSectionHeader(group.title)
-                        ForEach(group.items) { feedRow($0) }
-                    }
-                }
-            }
-            .padding(.horizontal, MADTheme.Spacing.md)
-            .padding(.top, MADTheme.Spacing.md)
-            .padding(.bottom, MADTheme.Spacing.xxl)
-            .lockedToScrollWidth()
-        }
-        .scrollIndicators(.hidden)
-    }
-
-    private func feedSectionHeader(_ title: String) -> some View {
-        HStack {
-            Text(title)
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
-                .tracking(1.2)
-                .foregroundColor(.white.opacity(0.4))
-            Spacer()
-        }
-        .padding(.top, MADTheme.Spacing.sm)
-        .padding(.horizontal, 4)
-    }
-
-    private func feedRow(_ item: FeedWorkoutItem) -> some View {
-        let expanded = expandedWorkoutIds.contains(item.workout_id)
-        let completedMile = item.distance >= ProgressCalculator.dailyGoalTolerance
-
-        return VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                // Avatar opens the friend's profile.
-                Button {
-                    selectedUser = makeBackendUser(from: item)
-                } label: {
-                    AvatarView(name: item.displayName, imageURL: item.profile_image_url, size: 44)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(item.displayName)'s profile")
-
-                // Tapping the body expands the row to reveal workout details.
-                Button {
-                    MADHaptics.tap()
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
-                        if expanded { expandedWorkoutIds.remove(item.workout_id) }
-                        else { expandedWorkoutIds.insert(item.workout_id) }
-                    }
-                } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text(item.displayName)
-                                .font(.system(size: 15, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                            if completedMile {
-                                Image(systemName: "checkmark.seal.fill")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(.green)
-                            }
-                        }
-                        HStack(spacing: 5) {
-                            Image(systemName: workoutIcon(item.workout_type))
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundColor(workoutColor(item.workout_type))
-                            Text("\(workoutVerb(item.workout_type)) \(String(format: "%.2f", item.distance)) mi")
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .foregroundColor(.white.opacity(0.8))
-                            Text("· \(relativeTime(item.completed_at))")
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.45))
-                                .lineLimit(1)
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.white.opacity(0.3))
-                                .rotationEffect(.degrees(expanded ? 180 : 0))
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                // Trailing: social-proof tally + the hype action.
-                HStack(spacing: 8) {
-                    if let count = item.hype_count, count > 0 {
-                        HypeTally(count: count)
-                    }
-                    if !item.is_self {
-                        HypeButton(
-                            isHyped: item.is_hyped,
-                            isBusy: hypingWorkoutIds.contains(item.workout_id),
-                            isOutOfHypes: !hypesUnlimited
-                                && (hypesRemaining ?? HypeService.dailyLimit) <= 0
-                                && !item.is_hyped
-                        ) {
-                            // Same clap burst as double-tapping the row — the
-                            // button and the gesture feel identical (and match
-                            // the feed cards' behavior).
-                            rowHypeBursts[item.workout_id, default: 0] += 1
-                            MADHaptics.action()
-                            Task { await sendHype(for: item) }
-                        }
-                    }
-                }
-            }
-            .padding(12)
-
-            if expanded {
-                workoutDetailStrip(item)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(completedMile ? Color.green.opacity(0.06) : Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(completedMile ? Color.green.opacity(0.18) : Color.white.opacity(0.08), lineWidth: 1)
-                )
-        )
-        .contentShape(Rectangle())
-        // Double-tap anywhere on the row hypes, same as double-tapping a feed
-        // card. simultaneousGesture so the avatar/expand buttons keep working.
-        .simultaneousGesture(
-            TapGesture(count: 2).onEnded { doubleTapHype(item) }
-        )
-        .overlay(
-            HypeBurstView(trigger: rowHypeBursts[item.workout_id] ?? 0)
-                .scaleEffect(0.55) // full-size burst overwhelms a compact row
-        )
-    }
-
-    /// Inline stats revealed when a feed row is tapped open: time, pace,
-    /// calories, and (when present) steps. Pulled straight from the feed
-    /// payload so there's no extra fetch.
-    private func workoutDetailStrip(_ item: FeedWorkoutItem) -> some View {
-        HStack(spacing: 8) {
-            detailStat(icon: "clock.fill", value: item.durationText, label: "Time")
-            detailStat(icon: "speedometer", value: item.paceText, label: "Min/Mi")
-            detailStat(icon: "flame.fill", value: item.caloriesText, label: "Cal")
-            if let steps = item.stepsText {
-                detailStat(icon: "shoeprints.fill", value: steps, label: "Steps")
-            }
-        }
-    }
-
-    private func detailStat(icon: String, value: String, label: String) -> some View {
-        VStack(spacing: 3) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .bold))
-                .foregroundColor(.white.opacity(0.65))
-            Text(value)
-                .font(.system(size: 14, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(label.uppercased())
-                .font(.system(size: 8, weight: .heavy, design: .rounded))
-                .tracking(0.6)
-                .foregroundColor(.white.opacity(0.4))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 11)
-                .fill(Color.white.opacity(0.05))
-        )
-    }
-
-    private func makeBackendUser(from item: FeedWorkoutItem) -> BackendUser {
-        BackendUser(
-            user_id: item.user_id,
-            username: item.username,
-            email: nil,
-            first_name: item.first_name,
-            last_name: item.last_name,
-            bio: nil,
-            profile_image_url: item.profile_image_url,
-            apple_id: nil,
-            auth_provider: nil,
-            role: nil
-        )
-    }
-
-    // MARK: Feed helpers
-
-    private struct FeedGroup { let title: String; let items: [FeedWorkoutItem] }
-
-    private func groupedFeed() -> [FeedGroup] {
-        let cal = Calendar.current
-        var today: [FeedWorkoutItem] = []
-        var yesterday: [FeedWorkoutItem] = []
-        var earlier: [FeedWorkoutItem] = []
-        for item in feedItems {
-            guard let date = parseFeedDate(item.completed_at) else { earlier.append(item); continue }
-            if cal.isDateInToday(date) { today.append(item) }
-            else if cal.isDateInYesterday(date) { yesterday.append(item) }
-            else { earlier.append(item) }
-        }
-        var groups: [FeedGroup] = []
-        if !today.isEmpty { groups.append(FeedGroup(title: "TODAY", items: today)) }
-        if !yesterday.isEmpty { groups.append(FeedGroup(title: "YESTERDAY", items: yesterday)) }
-        if !earlier.isEmpty { groups.append(FeedGroup(title: "EARLIER", items: earlier)) }
-        return groups
-    }
-
-    private func parseFeedDate(_ s: String) -> Date? {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = iso.date(from: s) { return d }
-        iso.formatOptions = [.withInternetDateTime]
-        if let d = iso.date(from: s) { return d }
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "UTC")
-        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
-        if let d = f.date(from: s) { return d }
-        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
-        return f.date(from: s)
-    }
-
-    private func relativeTime(_ s: String) -> String {
-        guard let date = parseFeedDate(s) else { return "" }
-        let secs = Date().timeIntervalSince(date)
-        if secs < 60 { return "just now" }
-        if secs < 3600 { return "\(Int(secs / 60))m ago" }
-        if secs < 6 * 3600 { return "\(Int(secs / 3600))h ago" }
-        let f = DateFormatter()
-        f.dateFormat = "h:mm a"
-        return f.string(from: date)
-    }
-
-    private func workoutVerb(_ type: String) -> String {
-        switch type.lowercased() {
-        case "running": return "ran"
-        case "walking": return "walked"
-        case "cycling": return "biked"
-        case "hiking": return "hiked"
-        default: return "logged"
-        }
-    }
-
-    private func workoutIcon(_ type: String) -> String {
-        switch type.lowercased() {
-        case "running": return "figure.run"
-        case "walking": return "figure.walk"
-        case "cycling": return "figure.outdoor.cycle"
-        case "hiking": return "figure.hiking"
-        default: return "figure.run"
-        }
-    }
-
-    private func workoutColor(_ type: String) -> Color {
-        MADTheme.workoutColor(type)
-    }
-
-    /// Double-tap on a row = hype, mirroring the feed cards: clap burst +
-    /// haptic play every time (celebration is free), the hype itself only
-    /// fires when the row isn't already hyped.
-    private func doubleTapHype(_ item: FeedWorkoutItem) {
-        guard !item.is_self else { return }
-        let now = Date()
-        guard now.timeIntervalSince(lastDoubleTapAt) > 0.35 else { return }
-        lastDoubleTapAt = now
-
-        rowHypeBursts[item.workout_id, default: 0] += 1
-        MADHaptics.action()
-        if !item.is_hyped {
-            Task { await sendHype(for: item) }
-        }
-    }
-
-    private func sendHype(for item: FeedWorkoutItem) async {
-        guard !item.is_hyped, !hypingWorkoutIds.contains(item.workout_id) else { return }
-        hypingWorkoutIds.insert(item.workout_id)
-        defer { hypingWorkoutIds.remove(item.workout_id) }
-
-        // Optimistic, like the feed cards: flip the row + bump the tally
-        // immediately so double-tap feels instant, reconcile on failure.
-        setHyped(item.workout_id, hyped: true, countDelta: 1)
-
-        let label = "\(workoutVerb(item.workout_type)) \(String(format: "%.2f", item.distance)) mi"
-        let context = HypeContext(contextType: "mile", contextId: item.workout_id, contextLabel: label)
-        do {
-            let response = try await HypeService.sendHype(targetUserId: item.user_id, context: context)
-            hypesRemaining = response.hypes_remaining
-            hypesUnlimited = response.unlimited ?? hypesUnlimited
-            MADHaptics.success()
-        } catch let error as APIError {
-            switch error {
-            case .conflict:
-                // Already hyped this workout server-side — keep the hyped
-                // state but undo the optimistic bump (the server's count
-                // already includes this one).
-                setHyped(item.workout_id, hyped: true, countDelta: -1)
-            case .rateLimited:
-                setHyped(item.workout_id, hyped: false, countDelta: -1)
-                hypesRemaining = 0
-                MADHaptics.warning()
-            default:
-                setHyped(item.workout_id, hyped: false, countDelta: -1)
-                print("[FriendsListView] hype failed: \(error)")
-            }
-        } catch {
-            setHyped(item.workout_id, hyped: false, countDelta: -1)
-            print("[FriendsListView] hype failed: \(error)")
-        }
-    }
-
-    private func setHyped(_ workoutId: String, hyped: Bool, countDelta: Int) {
-        guard let idx = feedItems.firstIndex(where: { $0.workout_id == workoutId }) else { return }
-        feedItems[idx].is_hyped = hyped
-        feedItems[idx].hype_count = max((feedItems[idx].hype_count ?? 0) + countDelta, 0)
-    }
-
-    private func loadFeed(force: Bool = false) async {
-        if hasLoadedFeed && !force { return }
-        isLoadingFeed = true
-        do {
-            feedItems = try await friendService.fetchFriendsFeed()
-        } catch {
-            print("[FriendsListView] feed load failed: \(error)")
-        }
-        if let status = try? await HypeService.status() {
-            hypesRemaining = status.hypes_remaining
-            hypesUnlimited = status.unlimited ?? false
-        }
-        isLoadingFeed = false
-        hasLoadedFeed = true
-    }
-
-    // MARK: Personal hero card
-
-    /// Top card showing the user's own progress + streak + rank. Tapping it
-    /// jumps to the Leaderboard mode so they can see the full standings.
-    private var personalHeroCard: some View {
-        let goal = max(userManager.currentUser.goalMiles, 0.01)
-        let today = healthManager.todaysDistance
-        let progress = min(today / goal, 1.0)
-        // Tolerance, not a strict compare: 0.996 mi displays as "1.00 mi" and
-        // counts server-side, so a strict check flipped the card to
-        // "not done" (and to streak-danger red after 9pm) on a completed day.
-        let isComplete = ProgressCalculator.isGoalCompleted(current: today, goal: goal)
-        let streak = userManager.currentUser.streak
-        // Streak-saver: active streak + not done + past 9pm = visual escalation.
-        // Pulls the card toward red to signal genuine risk of losing the streak.
-        let hour = Calendar.current.component(.hour, from: Date())
-        let streakInDanger = streak > 0 && !isComplete && hour >= 21
-
-        return Button {
-            MADHaptics.tap()
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
-                topMode = .leaderboard
-            }
-        } label: {
-            HStack(spacing: MADTheme.Spacing.md) {
-                ZStack {
-                    Circle()
-                        .stroke(Color.white.opacity(0.08), lineWidth: 5)
-                        .frame(width: 78, height: 78)
-                    Circle()
-                        .trim(from: 0, to: progress)
-                        .stroke(
-                            isComplete ? Color.green : MADTheme.Colors.madRed,
-                            style: StrokeStyle(lineWidth: 5, lineCap: .round)
-                        )
-                        .rotationEffect(.degrees(-90))
-                        .frame(width: 78, height: 78)
-                    VStack(spacing: 0) {
-                        Text(String(format: today >= 10 ? "%.1f" : "%.2f", today))
-                            .font(.system(size: 18, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
-                        Text("mi today")
-                            .font(.system(size: 9, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.5))
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(heroHeadline(isComplete: isComplete))
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundColor(heroHeadlineColor(isComplete: isComplete))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                        StreakFlameChip(streak: streak, glyphSize: 11, numberSize: 13)
-                    }
-
-                    Text(heroSubtitle(isComplete: isComplete))
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.55))
-                        .lineLimit(2)
-                }
-
-                Spacer(minLength: 4)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.white.opacity(0.4))
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(Color.white.opacity(0.06)))
-            }
-            .padding(MADTheme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(streakInDanger ? MADTheme.Colors.madRed.opacity(0.10) : Color.white.opacity(0.04))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .strokeBorder(
-                                streakInDanger ? MADTheme.Colors.madRed.opacity(0.5) : Color.white.opacity(0.08),
-                                lineWidth: streakInDanger ? 1.5 : 1
-                            )
-                    )
-                    .shadow(color: streakInDanger ? MADTheme.Colors.madRed.opacity(0.25) : .clear, radius: 12, y: 4)
-            )
-            .overlay(alignment: .topTrailing) {
-                if streakInDanger {
-                    HStack(spacing: 3) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 9, weight: .bold))
-                        Text("STREAK AT RISK")
-                            .font(.system(size: 9, weight: .heavy, design: .rounded))
-                            .tracking(0.8)
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(MADTheme.Colors.madRed))
-                    .offset(x: -10, y: -8)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Time-aware headline. Communicates urgency as the day winds down so
-    /// users get a gentle reminder before midnight risks the streak.
-    private func heroHeadline(isComplete: Bool) -> String {
-        if isComplete { return "You're on a roll" }
-        let hour = Calendar.current.component(.hour, from: Date())
-        switch hour {
-        case 5..<12: return "Good morning"
-        case 12..<17: return "Halfway through"
-        case 17..<20: return "Strong finish"
-        default: return "Time's running short"   // 20:00–04:59 — late or pre-dawn
-        }
-    }
-
-    /// Red headline when the day is nearly over and the mile isn't done —
-    /// reinforces the urgency in the copy.
-    private func heroHeadlineColor(isComplete: Bool) -> Color {
-        if isComplete { return .white }
-        let hour = Calendar.current.component(.hour, from: Date())
-        return hour >= 20 ? .orange : .white
-    }
-
-    private func heroSubtitle(isComplete: Bool) -> String {
-        if let entry = myRankEntry {
-            let prefix = isComplete ? "Goal complete" : "Keep going"
-            return "\(prefix) · Ranked #\(entry.rank) this week"
-        }
-        return isComplete ? "Goal complete · Tap to see the leaderboard" : "Tap to see the leaderboard"
-    }
-
     // MARK: Split sections
 
+    // Both sections sort by today's miles, descending. The miles are read once
+    // per friend before sorting — the comparator used to hit the published
+    // dictionary twice per comparison, every body pass.
+    private func friendsByMilesDescending(completed: Bool) -> [BackendUser] {
+        let statuses = nudgeStatuses
+        return friendService.friends
+            .compactMap { friend -> (BackendUser, Double)? in
+                let status = statuses[friend.user_id]
+                guard (status?.has_completed_mile ?? false) == completed else { return nil }
+                return (friend, status?.today_miles ?? 0)
+            }
+            .sorted { $0.1 > $1.1 }
+            .map(\.0)
+    }
+
     private var incompleteFriends: [BackendUser] {
-        friendService.friends
-            .filter { friend in
-                !(nudgeStatuses[friend.user_id]?.has_completed_mile ?? false)
-            }
-            // Sort by progress descending so the closest-to-done friends bubble
-            // to the top — they're the most satisfying to nudge.
-            .sorted { lhs, rhs in
-                let lhsMi = nudgeStatuses[lhs.user_id]?.today_miles ?? 0
-                let rhsMi = nudgeStatuses[rhs.user_id]?.today_miles ?? 0
-                return lhsMi > rhsMi
-            }
+        // Sort by progress descending so the closest-to-done friends bubble
+        // to the top — they're the most satisfying to nudge.
+        friendsByMilesDescending(completed: false)
     }
 
     private var completedFriends: [BackendUser] {
-        friendService.friends
-            .filter { friend in
-                nudgeStatuses[friend.user_id]?.has_completed_mile ?? false
-            }
-            // Highest miles first — rewards the day's top performers with
-            // visibility at the top of the section.
-            .sorted { lhs, rhs in
-                let lhsMi = nudgeStatuses[lhs.user_id]?.today_miles ?? 0
-                let rhsMi = nudgeStatuses[rhs.user_id]?.today_miles ?? 0
-                return lhsMi > rhsMi
-            }
+        // Highest miles first — rewards the day's top performers with
+        // visibility at the top of the section.
+        friendsByMilesDescending(completed: true)
     }
 
     @ViewBuilder
@@ -1251,29 +756,6 @@ struct FriendsListView: View {
         }
         let percent = ProgressCalculator.formatProgress(min(todayMiles / goal, 1.0))
         return "\(String(format: "%.2f / %.0f mi", todayMiles, goal)) · \(percent)"
-    }
-
-    // MARK: Personal rank fetch
-
-    /// Reads the viewer's rank within their friend group for THIS week.
-    /// Used by the hero card subtitle. Silently no-ops on failure — the card
-    /// just falls back to a generic subtitle.
-    private func loadMyRank() async {
-        do {
-            let page = try await LeaderboardService.fetch(
-                metric: .milesRan,
-                period: .week,
-                limit: 1,
-                offset: 0
-            )
-            await MainActor.run {
-                self.myRankEntry = page.current_user_entry
-                self.myRankTotal = page.total_count
-            }
-        } catch {
-            // Hero card subtitle silently falls back — no UI noise required.
-            print("[FriendsList] loadMyRank failed: \(error)")
-        }
     }
 
     // MARK: - Nudge Button (only shown when friend hasn't completed goal)

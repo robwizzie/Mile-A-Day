@@ -773,6 +773,8 @@ export async function getWorkoutRouteController(
       route: detail?.route ?? null,
       route_times: detail?.route_times ?? null,
       route_started_at: detail?.route_started_at ?? null,
+      // Additive: the line was trimmed for route privacy (hide start & end).
+      route_trimmed: detail?.route_trimmed ?? false,
     });
   } catch (error: any) {
     console.error("Error getting workout route:", error.message);

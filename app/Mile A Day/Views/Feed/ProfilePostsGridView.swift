@@ -199,12 +199,12 @@ struct ProfilePostsGridView: View {
             fullScreenDestination = .highlight(highlight)
         } label: {
             VStack(spacing: 6) {
-                AsyncImage(url: highlight.coverURL) { phase in
-                    switch phase {
-                    case .success(let image): image.resizable().scaledToFill()
-                    default: Color.white.opacity(0.06)
-                    }
-                }
+                CachedThumbnailImage(
+                    url: highlight.coverURL,
+                    pointSize: CGSize(width: 64, height: 64),
+                    placeholder: { Color.white.opacity(0.06) },
+                    failure: { Color.white.opacity(0.06) }
+                )
                 .frame(width: 64, height: 64)
                 .clipShape(Circle())
                 .overlay(
@@ -482,15 +482,12 @@ struct ProfilePostsGridView: View {
     private func storyCard(_ post: PostItem) -> some View {
         VStack(spacing: 6) {
             Button { openReader(.stories, post) } label: {
-                AsyncImage(url: post.mediaURL) { phase in
-                    switch phase {
-                    case .success(let image): image.resizable().scaledToFill()
-                    case .failure:
-                        ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) }
-                    default:
-                        ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
-                    }
-                }
+                CachedThumbnailImage(
+                    url: post.mediaURL,
+                    pointSize: CGSize(width: 108, height: 135),
+                    placeholder: { ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) } },
+                    failure: { ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) } }
+                )
                 .frame(width: 108, height: 135)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(
@@ -679,15 +676,12 @@ struct ProfilePostsGridView: View {
                         // is a spinner forever).
                         LiveCardThumbnail(post: post)
                     } else {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image): image.resizable().scaledToFill()
-                            case .failure:
-                                ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) }
-                            default:
-                                ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
-                            }
-                        }
+                        // Decoded at TILE size (measured), not the full upload.
+                        CachedThumbnailImage(
+                            url: url,
+                            placeholder: { ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) } },
+                            failure: { ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) } }
+                        )
                     }
                 }
             )

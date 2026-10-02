@@ -204,7 +204,8 @@ struct HighlightViewerView: View {
                     // has no picture and is its route, drawn live.
                     RouteArtView(
                         coordinates: item.post.routeCoordinates ?? [],
-                        routeColor: ActivityCardView.color(item.post.workout_type)
+                        routeColor: ActivityCardView.color(item.post.workout_type),
+                        routeTrimmed: item.post.route_trimmed ?? false
                     )
                     .frame(width: geo.size.width, height: geo.size.height)
                 } else if item.slideImageURL == nil {
@@ -994,7 +995,8 @@ struct HighlightEditorView: View {
                             // draws it.
                             RouteArtView(
                                 coordinates: post.routeCoordinates ?? [],
-                                routeColor: ActivityCardView.color(post.workout_type)
+                                routeColor: ActivityCardView.color(post.workout_type),
+                                routeTrimmed: post.route_trimmed ?? false
                             )
                         } else {
                             AsyncImage(url: face.url) { phase in

@@ -143,6 +143,10 @@ struct BuddyFlowModifier: ViewModifier {
                     ) {
                         if let id = recapSessionId {
                             BuddyRecapView(sessionId: id)
+                                // A sheet over the root celebration overlay:
+                                // anything queued meanwhile waits for it.
+                                .onAppear { CelebrationManager.shared.setObscured("buddyRecap", true) }
+                                .onDisappear { CelebrationManager.shared.setObscured("buddyRecap", false) }
                         }
                     }
             )

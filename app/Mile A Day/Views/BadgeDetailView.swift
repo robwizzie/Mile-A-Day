@@ -17,8 +17,9 @@ struct BadgeDetailView: View {
     @State private var shimmerOffset: CGFloat = -300
     @State private var glowPulse = false
     @State private var ribbonDrop = false
-    /// Rendered badge card presented in the system share sheet.
-    @State private var shareItem: ShareableImage?
+    /// The medal handed to the Share Studio (preview, Instagram, Save…).
+    @State private var medalShare: MADStoryContent?
+    @State private var replayingCelebration = false
 
     private var trackedBadgeIds: Set<String> {
         Set(trackedBadgeIdsRaw.split(separator: ",").map(String.init))
@@ -153,61 +154,14 @@ struct BadgeDetailView: View {
     
     // MARK: - Medal Section
     
+    /// The medal hanging from its neck ribbon — one object, so nothing floats.
     private var medalSection: some View {
-        VStack(spacing: 0) {
-            // Ribbon
-            ribbonView
-                .opacity(ribbonDrop ? 1 : 0)
-                .offset(y: ribbonDrop ? 0 : -30)
-
-            // Medal — premium tiltable 3D medal with live shimmer.
-            // Overlaps the bottom of the ribbon slightly so they connect visually.
-            ZStack {
-                // Outer glow rings
-                if !badge.isLocked {
-                    ForEach(0..<3, id: \.self) { i in
-                        Circle()
-                            .stroke(badge.rarity.color.opacity(0.15 - Double(i) * 0.04), lineWidth: 1)
-                            .frame(width: 190 + CGFloat(i * 30), height: 190 + CGFloat(i * 30))
-                    }
-                }
-
-                TiltableMedal(badge: badge, size: 156)
-            }
-            .offset(y: -12)
-        }
-        .frame(maxWidth: .infinity)
+        TiltableMedal(badge: badge, size: 156, hanging: true)
+            .opacity(ribbonDrop ? 1 : 0)
+            .offset(y: ribbonDrop ? 0 : -24)
+            .frame(maxWidth: .infinity)
     }
-    
-    private var ribbonView: some View {
-        VStack(spacing: 0) {
-            // Ribbon top
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: badge.isLocked ? [
-                            Color.gray,
-                            Color.gray.opacity(0.7)
-                        ] : [
-                            badge.rarity.color,
-                            badge.rarity.color.opacity(0.8)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: 40, height: 50)
-            
-            // Ribbon bottom tails
-            HStack(spacing: 0) {
-                RibbonTail(isLeft: true, color: badge.isLocked ? .gray : badge.rarity.color)
-                RibbonTail(isLeft: false, color: badge.isLocked ? .gray : badge.rarity.color)
-            }
-            .frame(width: 40)
-        }
-        .shadow(color: .black.opacity(0.2), radius: 5, x: 0, y: 3)
-    }
-    
+
     private var medalGradientColors: [Color] {
         switch badge.rarity {
         case .legendary:
@@ -237,37 +191,154 @@ struct BadgeDetailView: View {
     
     // MARK: - Details Section
     
+    // MARK: - Replay
+
+    /// Only medals for a day that HAS its own celebration — a streak milestone
+    /// (`StreakMilestoneInfo.isCelebrated`) or a full year — get a replay.
+    /// Every other medal's "celebration" is just its unlock card, which this
+    /// screen already is.
+    private var hasMilestoneCelebration: Bool {
+        guard badge.id.hasPrefix("streak_"),
+              let days = Int(badge.id.dropFirst("streak_".count)), days > 0 else { return false }
+        return StreakMilestoneInfo.isCelebrated(days) || days % 365 == 0
+    }
+
+    /// The moment this medal was earned, played again. A streak medal replays
+    /// the milestone screen as it looked THAT day (its own date, the yearly
+    /// show for a multiple of 365); any other medal replays its unlock.
+    private var replayCelebration: CelebrationType {
+        if badge.id.hasPrefix("streak_"), let days = Int(badge.id.dropFirst("streak_".count)), days > 0 {
+            if days % 365 == 0 {
+                let start = Calendar.current.date(byAdding: .day, value: -(days - 1), to: badge.dateAwarded)
+                return .yearMilestone(info: YearlyMilestoneInfo(
+                    years: days / 365,
+                    totalMiles: userManager?.currentUser.totalMiles ?? UserManager.shared.currentUser.totalMiles,
+                    totalStreakDays: days,
+                    streakStartDate: start
+                ))
+            }
+            return .streakMilestone(info: StreakMilestoneInfo(
+                days: days,
+                achievedOn: badge.dateAwarded,
+                totalMiles: nil,
+                isReplay: true
+            ))
+        }
+        return .badgeUnlocked(badge: badge)
+    }
+
+    private var replayCelebrationButton: some View {
+        Button {
+            MADHaptics.action()
+            replayingCelebration = true
+        } label: {
+            actionLabel("Replay", icon: "sparkles", tint: badge.rarity.color.opacity(0.28))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Replay celebration")
+        // Its own cover, never the root overlay: this screen can itself be a
+        // sheet (the Closet, a friend's wardrobe), and the root overlay plays
+        // UNDER a sheet. The cover closes itself when the celebration ends.
+        .fullScreenCover(isPresented: $replayingCelebration) {
+            CelebrationReplayHost(celebration: replayCelebration) {
+                replayingCelebration = false
+            }
+        }
+    }
+
+    /// Three groups, each spaced as one thing: WHAT it is (status, name, the
+    /// line about it — tight), WHY you have it (how it was earned, what it
+    /// unlocks for Flamey, the competition behind it), and what you can DO
+    /// (one row of actions at the bottom). It used to be seven blocks at one
+    /// even spacing, with buttons scattered between cards, and read as a pile.
     private var detailsSection: some View {
-        VStack(spacing: 20) {
-            // Status pill
-            statusPill
-            
-            // Name
-            Text(badge.name)
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
-            
-            // Content based on state
+        VStack(spacing: 22) {
+            VStack(spacing: 10) {
+                statusPill
+
+                Text(badge.name)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+
+                if !badge.isLocked {
+                    Text(badge.description)
+                        .font(.system(size: 16, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                }
+            }
+
             if badge.isLocked {
                 lockedContent
             } else {
-                unlockedContent
+                VStack(spacing: 12) {
+                    // HOW it was earned ("You ran a 7:42 mile · Aug 14, 2026"
+                    // + View workout) — else what it asks for and the day.
+                    MedalHowEarnedCard(badge: badge, requirement: getUnlockText())
+                    // Fun only: what this medal dresses Flamey in.
+                    FlameyMedalUnlockCardLive(badgeId: badge.id, earned: true)
+                    if badge.id.hasPrefix("comp_") {
+                        CompetitionBadgeSection(badgeId: badge.id)
+                    }
+                }
+
+                earnedActions
             }
 
-            // Fun only: what this medal dresses Flamey in, and the way there.
-            FlameyMedalUnlockCardLive(badgeId: badge.id, earned: !badge.isLocked)
-
-            // Competition badges: show the competitions behind this medal.
-            if badge.id.hasPrefix("comp_") {
-                CompetitionBadgeSection(badgeId: badge.id)
+            if badge.isLocked {
+                // Fun only: what this medal will dress Flamey in, and the way there.
+                FlameyMedalUnlockCardLive(badgeId: badge.id, earned: false)
+                if badge.id.hasPrefix("comp_") {
+                    CompetitionBadgeSection(badgeId: badge.id)
+                }
             }
         }
-        .padding(.horizontal, 32)
+        .padding(.horizontal, 28)
         .padding(.bottom, 60)
     }
-    
+
+    /// The earned medal's actions, side by side: Share always, Replay only
+    /// where there's a celebration to replay.
+    private var earnedActions: some View {
+        HStack(spacing: 10) {
+            Button {
+                MADHaptics.action()
+                TelemetryService.record(ShareTelemetry.opened)
+                medalShare = MADStoryContent(medal: .forOwnBadge(badge))
+            } label: {
+                actionLabel("Share", icon: "square.and.arrow.up", tint: Color.white.opacity(0.14))
+            }
+            .buttonStyle(.plain)
+            .sheet(item: $medalShare) { content in
+                ShareStudioView(content: content, initialTemplate: .medalStory)
+            }
+
+            if hasMilestoneCelebration {
+                replayCelebrationButton
+            }
+        }
+    }
+
+    private func actionLabel(_ title: String, icon: String, tint: Color) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .foregroundColor(.white)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(Capsule().fill(tint))
+        .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
+    }
+
     private var statusPill: some View {
         HStack(spacing: 8) {
             if badge.isLocked {
@@ -327,30 +398,6 @@ struct BadgeDetailView: View {
                     Capsule()
                         .stroke(Color.cyan.opacity(0.3), lineWidth: isTracked ? 0 : 1)
                 )
-            }
-
-            // Share button — only for earned medals.
-            if !badge.isLocked {
-                Button {
-                    if let image = renderAchievementShareImage(BadgeShareCardView(badge: badge)) {
-                        shareItem = ShareableImage(image: image)
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text("Share")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(Capsule().fill(Color.white.opacity(0.14)))
-                    .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
-                }
-                .sheet(item: $shareItem) { item in
-                    ShareSheet(items: [item.image])
-                }
             }
 
             // Your progress (when we have user stats)
@@ -574,21 +621,6 @@ struct BadgeDetailView: View {
         }
     }
     
-    private var unlockedContent: some View {
-        VStack(spacing: 14) {
-            Text(badge.description)
-                .font(.system(size: 16, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.7))
-                .multilineTextAlignment(.center)
-                .lineSpacing(4)
-            
-
-            // HOW it was earned ("You ran a 7:42 mile · Aug 14, 2026" + View
-            // workout) — else what it asks for and the day it was earned.
-            MedalHowEarnedCard(badge: badge, requirement: getUnlockText())
-        }
-    }
-    
     // MARK: - Unlock Text
     
     private func getUnlockText() -> String {
@@ -658,43 +690,6 @@ struct BadgeDetailView: View {
                 glowPulse = true
             }
         }
-    }
-}
-
-// MARK: - Ribbon Tail Shape
-
-struct RibbonTail: View {
-    let isLeft: Bool
-    let color: Color
-    
-    var body: some View {
-        Path { path in
-            let width: CGFloat = 20
-            let height: CGFloat = 25
-            
-            if isLeft {
-                path.move(to: CGPoint(x: 0, y: 0))
-                path.addLine(to: CGPoint(x: width, y: 0))
-                path.addLine(to: CGPoint(x: width, y: height))
-                path.addLine(to: CGPoint(x: width * 0.5, y: height * 0.6))
-                path.addLine(to: CGPoint(x: 0, y: height))
-            } else {
-                path.move(to: CGPoint(x: 0, y: 0))
-                path.addLine(to: CGPoint(x: width, y: 0))
-                path.addLine(to: CGPoint(x: width, y: height))
-                path.addLine(to: CGPoint(x: width * 0.5, y: height * 0.6))
-                path.addLine(to: CGPoint(x: 0, y: height))
-            }
-            path.closeSubpath()
-        }
-        .fill(
-            LinearGradient(
-                colors: [color, color.opacity(0.7)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        .frame(width: 20, height: 25)
     }
 }
 

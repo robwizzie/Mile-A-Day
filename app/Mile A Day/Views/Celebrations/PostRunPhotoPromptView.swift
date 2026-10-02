@@ -190,6 +190,12 @@ struct PostRunPhotoPromptView: View {
                 }
             }
         }
+        // Once they've reached for the camera, the library or a snap, this
+        // prompt is theirs: nothing that arrives later may pull it out from
+        // under them (CelebrationManager only preempts an untouched prompt).
+        .onChange(of: composerLaunch != nil) { _, open in if open { manager.photoPromptEngaged = true } }
+        .onChange(of: showGallery) { _, open in if open { manager.photoPromptEngaged = true } }
+        .onChange(of: showLibraryImport) { _, open in if open { manager.photoPromptEngaged = true } }
         .onAppear {
             midRunSnaps = MidRunPhotoStash.entries()
             // This prompt is the LAST celebration in the queue (priority 9), so

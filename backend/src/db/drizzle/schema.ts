@@ -548,6 +548,14 @@ export const workoutRoutes = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
+    // Route privacy (hide start & end), PRECOMPUTED: for each offered setting
+    // in metres ("201","402","805","1609") the 1-based [first, last] point a
+    // non-owner may see, or null when what's left would be a sliver. Written
+    // with the route by the sync upsert (mad_route_privacy_bounds) and filled
+    // for older rows by db/backfillRoutePrivacyBounds.ts. A cache, never the
+    // truth: NULL (or a setting not listed) is computed at read instead, so
+    // every route is trimmed whether or not this has reached it.
+    privacyBounds: jsonb("privacy_bounds"),
   },
   (table) => [
     foreignKey({
@@ -701,8 +709,19 @@ export const notificationSettings = pgTable(
     // the static map but not the guided tour of their street. Default
     // 'friends' — and the privacy onboarding sheet asks explicitly.
     flyoverVisibility: text("flyover_visibility").default("friends").notNull(),
+    // Hide where my walks START and END from everyone but me (Strava's "hide
+    // start/end"), in metres of path trimmed off each end of every route a
+    // non-owner is served. NULL = the default (1/8 mile, 201 m) — deliberately
+    // no column default, so every existing user is covered from the deploy
+    // with no backfill; 0 = off. Applied at READ by `mad_route_view_bounds`
+    // (migration 0085), so a change reaches everything already posted.
+    routePrivacyMeters: integer("route_privacy_meters"),
   },
   (table) => [
+    check(
+      "notification_settings_route_privacy_meters_check",
+      sql`route_privacy_meters IS NULL OR (route_privacy_meters >= 0 AND route_privacy_meters <= 1609)`,
+    ),
     check(
       "notification_settings_workout_visibility_check",
       sql`workout_visibility = ANY (ARRAY['public'::text, 'friends'::text, 'private'::text])`,
@@ -900,6 +919,15 @@ export const pendingNotifications = pgTable(
     type: text().notNull(),
     competitionId: text("competition_id"),
     competitionName: text("competition_name"),
+    // The WHOLE push, so the morning briefing can deliver it as itself
+    // instead of "You have a notification you missed" with nowhere to tap.
+    // NULL on rows queued before these existed (they flush the old way).
+    body: text(),
+    data: jsonb(),
+    category: text(),
+    // Why it was held: 'quiet' (the user's quiet hours) or 'cap' (the daily
+    // cap). NULL = legacy row / the global competition queue.
+    reason: text(),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "string",
@@ -2436,6 +2464,15 @@ export const buddySessions = pgTable(
     // Which door people actually came through. Worth measuring before investing
     // in the proximity handshake.
     origin: text().notNull(),
+    // Who may join WITHOUT an invite: 'friends' (any friend of the host — the
+    // behaviour every walk had before this existed), 'close_friends' (only the
+    // host's close friends), 'invite_only'. NULL = 'friends', so every row and
+    // every client predating the field keeps exactly what it had.
+    joinPolicy: text("join_policy"),
+    // Set when the host folded this lobby into a friend's walk ("Combine
+    // walks"): the row is cancelled and everyone on it moved there. Clients
+    // still polling it follow this to the walk they're now on.
+    mergedInto: varchar("merged_into", { length: 32 }),
     // Phase 4 (scheduled long-distance sessions). NULL for everything today.
     scheduledStartAt: timestamp("scheduled_start_at", {
       withTimezone: true,
@@ -2498,6 +2535,10 @@ export const buddySessions = pgTable(
       "buddy_sessions_origin_check",
       sql`origin = ANY (ARRAY['invite'::text, 'code'::text, 'join_active'::text, 'nearby'::text])`,
     ),
+    check(
+      "buddy_sessions_join_policy_check",
+      sql`join_policy IS NULL OR join_policy = ANY (ARRAY['friends'::text, 'close_friends'::text, 'invite_only'::text])`,
+    ),
   ],
 );
 
@@ -2534,6 +2575,11 @@ export const buddySessionParticipants = pgTable(
     // choice decides which instrument that phone measures with (GPS vs
     // pedometer). NULL = never chosen, which the client reads as outdoor.
     locationType: text("location_type"),
+    // Walk vs run is PER PARTICIPANT too, for the same reason: it is what that
+    // person's own workout records, and a friend running beside a walker is
+    // still on the walk. NULL = never chosen (every pre-field client), which
+    // reads as the session's own `activity_type`.
+    activityType: text("activity_type"),
     // The walker has MANUALLY paused (their instruction, not the tracker's
     // movement guess — the roster must never render an auto-pause, which is a
     // deliberately lenient chip that flaps). Written on every progress report,
@@ -2598,6 +2644,10 @@ export const buddySessionParticipants = pgTable(
     check(
       "buddy_session_participants_location_type_check",
       sql`location_type IS NULL OR location_type = ANY (ARRAY['outdoor'::text, 'indoor'::text])`,
+    ),
+    check(
+      "buddy_session_participants_activity_type_check",
+      sql`activity_type IS NULL OR activity_type = ANY (ARRAY['walking'::text, 'running'::text])`,
     ),
   ],
 );

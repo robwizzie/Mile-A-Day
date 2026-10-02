@@ -243,3 +243,22 @@ struct RouteStatsOverlayView: View {
                height: RunStatsCardView.designSize.height)
     }
 }
+
+/// The route face's stats band fitted to a media box of ANY aspect: laid out
+/// at the 360×450 design size, scaled by WIDTH, and pinned to the BOTTOM — so
+/// the same band sits on a 4:5 slide beside a photo and on the 1:1 box a
+/// photo-less card uses. (Anchored top-leading it only ever fitted 4:5: on a
+/// shorter box the distance fell off the bottom edge.)
+struct RouteStatsBandOverlay: View {
+    let stats: RunStatsInput
+    let workoutType: String
+
+    var body: some View {
+        GeometryReader { geo in
+            RouteStatsOverlayView(stats: stats, workoutType: workoutType)
+                .scaleEffect(geo.size.width / RunStatsCardView.designSize.width, anchor: .bottomLeading)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .bottomLeading)
+        }
+        .allowsHitTesting(false)
+    }
+}

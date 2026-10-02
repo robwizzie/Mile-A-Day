@@ -406,9 +406,14 @@ export async function sendPendingDailyReminders(): Promise<void> {
           data = { kind: "win_back", days_quiet: String(lapse.days_quiet) };
         } else if (duel) {
           copy = duelCopy(duel);
+          data = { kind: "duel" };
         } else {
           const challenge = await challengeForNotification(user_id, local_date);
           copy = challenge ? challengeCopy(challenge) : GENERIC_COPY;
+          // Additive, string-only: says WHICH reminder this is, so a current
+          // build opens the challenge it names instead of the dashboard.
+          // Shipped builds ignore the keys and route it as they always have.
+          if (challenge) data = { kind: "challenge", challenge_key: challenge.key };
         }
         // Same type as every other reminder: shipped builds route it to the
         // dashboard, it honours the reminder switch and quiet hours, and it

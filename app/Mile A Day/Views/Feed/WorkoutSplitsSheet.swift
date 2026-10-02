@@ -6,6 +6,9 @@ import SwiftUI
 struct SplitsChipButton: View {
     /// The workout's colour — the glyph's tint.
     var accent: Color = MADTheme.Colors.madRed
+    /// The glyph alone — what `FeedActionRow` asks for when the labelled chip
+    /// won't share the action row. Same control, same VoiceOver label.
+    var iconOnly: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -15,20 +18,24 @@ struct SplitsChipButton: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chart.bar.fill")
-                    .font(.system(size: 10, weight: .black))
+                    .font(.system(size: iconOnly ? 12 : 10, weight: .black))
                     .foregroundColor(accent)
-                Text("SPLITS")
-                    .font(.system(size: 12, weight: .heavy, design: .rounded))
-                    .tracking(0.6)
-                    .foregroundColor(.white)
-                    // Constant text, so a published width can't run away —
-                    // and without it a squeezed row wraps the word inside its
-                    // own capsule instead of the row re-arranging.
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
+                if !iconOnly {
+                    Text("SPLITS")
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .tracking(0.6)
+                        .foregroundColor(.white)
+                        // Constant text, so a published width can't run away —
+                        // and without it a squeezed row wraps the word inside its
+                        // own capsule instead of the row re-arranging.
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, iconOnly ? 9 : 10)
             .padding(.vertical, 8)
+            // The glyph alone keeps a 44pt-wide target.
+            .frame(minWidth: iconOnly ? 44 : nil)
             // Lifted off the card's ground, not the black glass it wore when
             // it sat ON a photo: both call sites moved into the control row
             // under the media, and a 55%-black capsule on a dark card reads as

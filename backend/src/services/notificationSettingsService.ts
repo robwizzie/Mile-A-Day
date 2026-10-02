@@ -4,6 +4,10 @@ import {
   isWorkoutVisibility,
   type WorkoutVisibility,
 } from "./visibilityService.js";
+import {
+  DEFAULT_ROUTE_PRIVACY_METERS,
+  isRoutePrivacyMeters,
+} from "./routePrivacy.js";
 
 const db = PostgresService.getInstance();
 
@@ -66,6 +70,12 @@ export interface NotificationPreferences {
   // share_route_maps still gates the coords themselves; this only puts the
   // guided tour behind its own switch.
   flyover_visibility: FlyoverVisibility;
+  // Hide start & end: metres trimmed off each end of my routes for everyone
+  // but me (jittered per route, see routePrivacy.ts). Served as the
+  // EFFECTIVE value — a NULL column (never set) reads as the 1/8-mile
+  // default — so a client never has to know the default. 0 = off. Accepts
+  // one of ROUTE_PRIVACY_OPTIONS, or null to return to the default.
+  route_privacy_meters: number;
 }
 
 export type FlyoverVisibility = "friends" | "self";
@@ -105,6 +115,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   auto_posts_on_profile: true,
   workout_visibility: DEFAULT_WORKOUT_VISIBILITY,
   flyover_visibility: DEFAULT_FLYOVER_VISIBILITY,
+  route_privacy_meters: DEFAULT_ROUTE_PRIVACY_METERS,
 };
 
 export async function getNotificationPreferences(
@@ -158,6 +169,10 @@ function prefsFromRow(row: any): NotificationPreferences {
     flyover_visibility: isFlyoverVisibility(row.flyover_visibility)
       ? row.flyover_visibility
       : DEFAULT_FLYOVER_VISIBILITY,
+    route_privacy_meters:
+      typeof row.route_privacy_meters === "number"
+        ? row.route_privacy_meters
+        : DEFAULT_ROUTE_PRIVACY_METERS,
   };
 }
 
@@ -231,6 +246,19 @@ export async function updateNotificationPreferences(
       value: isFlyoverVisibility(prefs.flyover_visibility)
         ? prefs.flyover_visibility
         : undefined,
+    },
+    {
+      // null = back to the default (the column stays NULL, so a later
+      // change of default reaches this user too); anything off-catalogue is
+      // ignored here — the controller 400s it first.
+      key: "route_privacy_meters",
+      value:
+        (prefs as { route_privacy_meters?: unknown }).route_privacy_meters ===
+        null
+          ? null
+          : isRoutePrivacyMeters(prefs.route_privacy_meters)
+            ? prefs.route_privacy_meters
+            : undefined,
     },
   ];
 

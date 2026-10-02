@@ -7,10 +7,19 @@ import SwiftUI
 
 struct CelebrationContainerView: View {
     @ObservedObject var manager = CelebrationManager.shared
+    /// The root overlay (MainTabView) is the one host. A DETACHED host is a
+    /// cover raised by a screen that may itself sit inside a sheet (a medal's
+    /// "Replay celebration"), where the root overlay would play underneath it
+    /// — while one is up, the root draws nothing so nothing plays twice.
+    var isDetached = false
+
+    private var isActiveHost: Bool {
+        isDetached || manager.detachedHostCount == 0
+    }
 
     var body: some View {
         Group {
-            if manager.isShowingCelebration, let celebration = manager.currentCelebration {
+            if isActiveHost, manager.isShowingCelebration, let celebration = manager.currentCelebration {
                 celebrationView(for: celebration)
                     .transition(.asymmetric(
                         insertion: .scale.combined(with: .opacity),
@@ -51,6 +60,9 @@ struct CelebrationContainerView: View {
         case .yearMilestone(let info):
             YearlyMilestoneCelebrationView(info: info)
 
+        case .streakMilestone(let info):
+            StreakMilestoneCelebrationView(info: info)
+
         case .badgeSummary(let count, let badges):
             BadgeSummaryCelebrationView(count: count, badges: badges)
 
@@ -83,6 +95,39 @@ struct CelebrationContainerView: View {
 
         case .flameyUnlocked(let itemIds):
             FlameyUnlockCelebrationHost(itemIds: itemIds)
+        }
+    }
+}
+
+/// A full-screen host for replaying ONE celebration from a screen that may be
+/// a sheet itself. Registers as the detached host (so the root overlay stands
+/// down), starts the replay, and closes once the celebration — and anything
+/// replayed after it — has been dismissed.
+struct CelebrationReplayHost: View {
+    let celebration: CelebrationType
+    let onFinished: () -> Void
+    @ObservedObject private var manager = CelebrationManager.shared
+    @State private var started = false
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            CelebrationContainerView(isDetached: true)
+        }
+        .onAppear {
+            guard !started else { return }
+            started = true
+            manager.attachDetachedHost()
+            manager.replayCelebration(celebration)
+        }
+        .onDisappear { manager.detachDetachedHost() }
+        .onChange(of: manager.isShowingCelebration) { _, showing in
+            guard started, !showing else { return }
+            // dismissCurrentCelebration shows the next one after a beat; only
+            // close once there's nothing left to show.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                if !manager.isShowingCelebration { onFinished() }
+            }
         }
     }
 }

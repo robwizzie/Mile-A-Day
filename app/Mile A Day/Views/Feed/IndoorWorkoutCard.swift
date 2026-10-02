@@ -1,187 +1,263 @@
 import SwiftUI
 
-/// The routeless workout's 4:5 card, animated — what draws where a route slide
-/// would when there is no GPS trace to draw.
+/// The aspect ratios a feed card's media box can take.
 ///
-/// Deliberately never says "indoor": a card can be routeless because the walk
-/// was on a treadmill OR because the owner shares no maps, and the two must
-/// read identically (the same rule the buddy wizard's copy follows).
+/// PHOTOS are 4:5 — that's what they're composed for, and every page of a
+/// carousel that holds one must be that size too (the TabView sizes once). A
+/// card with NO photo page (a raw walk, an auto card, a routeless workout) is
+/// drawn by us at whatever size we ask for, so it asks for less: 1:1 shows the
+/// same card ~20% shorter and puts more of the feed on screen at once.
+enum FeedMediaAspect {
+    static let photo: CGFloat = 4.0 / 5.0
+    static let compact: CGFloat = 1.0
+
+    /// The zoom copy's design size for an aspect — 360 wide like
+    /// `RunStatsCardView.designSize`, so the floating copy is the live card.
+    static func designSize(_ aspect: CGFloat) -> CGSize {
+        CGSize(width: 360, height: (360 / max(aspect, 0.1)).rounded())
+    }
+}
+
+/// Whose look a routeless card wears — the AUTHOR's dashboard style.
 ///
-/// One face for everyone — the stadium track. The VIEWER's
-/// `DashboardStylePreference` decides whether Flamey stands trackside
-/// cheering at all (the Fun dashboard's mascot joins the scene, the Modern
-/// one keeps it clean); WHICH Flamey is the AUTHOR's: their look from the
-/// post's `author_flamey` (served only for a Fun author), your own when it's
-/// your post, and the plain basic Flamey otherwise — a Modern author, or an
-/// older server that doesn't send the field. Never the viewer's outfit on
-/// somebody else's walk: that put your crown on their post. (An earlier
-/// build had a whole separate treadmill face for Fun; retired — one scene,
-/// one small delight.)
+/// A friend on Fun gets the playful card with THEIR Flamey (dressed as they
+/// dressed him, named what they named him) cheering the walk on; a friend on
+/// Modern gets the clean card with no mascot. The signal is `author_flamey`,
+/// which the server sends ONLY for an author whose `dashboard_style` is Fun —
+/// so an older server (no key for anyone) reads as Modern for everyone, the
+/// calm default. Your OWN card follows your own current style from local
+/// facts, which is fresher than the post's copy.
+enum RoutelessCardStyle {
+    case fun(look: FlameyLook, name: String?)
+    case modern
+
+    var isFun: Bool {
+        if case .fun = self { return true }
+        return false
+    }
+
+    @MainActor
+    static func resolve(authorFlamey: AuthorFlamey?, isOwn: Bool) -> RoutelessCardStyle {
+        if isOwn {
+            // `FlameyFacts.look` is nil on Modern — exactly the switch wanted.
+            guard let own = FlameyFacts.look(detail: .compact) else { return .modern }
+            return .fun(look: own, name: FlameyFacts.name)
+        }
+        guard let authorFlamey else { return .modern }
+        return .fun(look: authorFlamey.resolved(), name: authorFlamey.displayName)
+    }
+}
+
+/// The routeless workout's card — what draws where a route slide would when
+/// there is no GPS trace to draw.
+///
+/// TWO scenes, chosen by what the data actually says:
+/// - `is_indoor == true` — a treadmill or indoor track, so a TRACK: the
+///   distance as laps of a 400 m lane with the runner's badge circling it.
+/// - anything else (outdoor, or unknown) — a walk whose map simply isn't
+///   here, so NO track: an outdoor walk read as "8.8 LAPS" contradicts
+///   itself. It's the distance as a mile-by-mile ribbon instead, each mile
+///   tinted by its pace. Deliberately silent about WHY there's no map:
+///   routeless can be a privacy choice (maps off, stealth) or a device that
+///   recorded no trace, and a friend must not be able to tell those apart.
+///   It never says "indoor", and never "map hidden".
+///
+/// Each scene comes in the AUTHOR's style (`RoutelessCardStyle`).
 struct IndoorWorkoutCard: View {
     let stats: PostStats
     let workoutType: String?
     var splits: [WorkoutSplitBar] = []
     var avatar: RouteArtAvatar? = nil
-    /// HealthKit's indoor flag from the wire — nil (older data) means UNKNOWN
-    /// and the card makes no claim; routeless alone is never "indoor".
+    /// HealthKit's indoor flag from the wire — nil (older data) means UNKNOWN,
+    /// which draws the ribbon: routeless alone is never "indoor".
     var isIndoor: Bool? = nil
     /// The author's Flamey off the wire (nil = not a Fun author / older
-    /// server ⇒ the basic Flamey).
+    /// server ⇒ the Modern card).
     var authorFlamey: AuthorFlamey? = nil
-    /// The viewer IS the author — their own current look, from local facts
-    /// (fresher than the post's copy, and what the auto-post bake needs).
+    /// The viewer IS the author — their own current style and look.
     var isOwn: Bool = false
-    /// Final frame for `ImageRenderer` (zoom composites, baked auto-post
-    /// images) — no tasks, no motion.
+    /// 1:1 when this is the card's only face, 4:5 beside a photo.
+    var aspect: CGFloat = FeedMediaAspect.photo
+    /// Final frame for `ImageRenderer` (the pinch-zoom copy) — no tasks, no
+    /// motion.
     var still: Bool = false
 
     var body: some View {
-        IndoorTrackCard(
-            stats: stats,
-            workoutType: workoutType,
-            splits: splits,
-            avatar: avatar,
-            isIndoor: isIndoor,
-            cheerLook: cheerLook,
-            cheerName: isOwn ? FlameyFacts.name : authorFlamey?.displayName,
-            still: still
-        )
+        let style = RoutelessCardStyle.resolve(authorFlamey: authorFlamey, isOwn: isOwn)
+        let accent = ActivityCardView.color(workoutType)
+        Group {
+            if isIndoor == true {
+                IndoorTrackCard(stats: stats, workoutType: workoutType, splits: splits,
+                                avatar: avatar, style: style, still: still)
+            } else {
+                DistanceRibbonCard(stats: stats, workoutType: workoutType, splits: splits,
+                                   avatar: avatar, style: style, still: still)
+            }
+        }
+        // Beside a photo this is a page of the carousel, whose page dots sit
+        // over the bottom edge — keep the last row clear of them (the 1:1
+        // card is always alone, so it has no dots).
+        .padding(.bottom, aspect < 0.9 ? 14 : 0)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(RoutelessCardBackground(style: style, accent: accent))
+        .aspectRatio(aspect, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
     }
 
-    /// Who cheers trackside — nil (no cheerleader) for a Modern viewer.
-    private var cheerLook: FlameyLook? {
-        guard DashboardStylePreference.current == .fun else { return nil }
-        if isOwn, let own = FlameyFacts.look(detail: .compact) { return own }
-        return (authorFlamey ?? AuthorFlamey()).resolved()
+    private var accessibilitySummary: String {
+        var parts = [ActivityCardView.verb(workoutType, paceSecondsPerMile: stats.pace)]
+        if let d = stats.distance, d > 0 { parts.append("\(d.milesText) miles") }
+        if let p = stats.pace, p > 0 { parts.append("pace \(RunStatsStickerView.paceText(p)) per mile") }
+        if let t = stats.duration, t > 0 { parts.append("time \(RunStatsStickerView.durationText(t))") }
+        if isIndoor == true { parts.append("indoors") }
+        return parts.joined(separator: ", ")
     }
 }
 
-/// The shared chrome both indoor faces render inside: canvas background,
-/// activity capsule + date header, count-up MILES headline, the pace wave,
-/// one row of stat tiles, and the brand mark — the `FeedWorkoutCard` language
-/// with a hero scene in the middle.
-struct IndoorCardScaffold<Hero: View>: View {
-    let stats: PostStats
-    let workoutType: String?
-    var splits: [WorkoutSplitBar] = []
-    /// nil = unknown — the chip simply doesn't draw.
-    var isIndoor: Bool? = nil
-    var still: Bool = false
-    /// How long the headline takes to count up — each face passes its hero's
-    /// own duration so number and scene land together.
-    var revealDuration: Double = 1.6
-    @ViewBuilder var hero: () -> Hero
+// MARK: - Shared chrome
 
-    /// Flipped once outside `withAnimation`; the headline's Animatable
-    /// modifier interpolates on its own `.animation(_:value:)` (ios.md: a
-    /// plain Text on this state would only ever show 0 and the total).
-    @State private var revealed = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Reduce Motion renders the finished frame, same as a baked still.
-    private var effectiveStill: Bool { still || reduceMotion }
-
-    private var accent: Color { ActivityCardView.color(workoutType) }
-    // Pace-aware: a third-party bridge stamping a walk as `.other` would
-    // otherwise print "MOVED" on a card that plainly shows a walk's pace.
-    private var icon: String { ActivityCardView.icon(workoutType, paceSecondsPerMile: stats.pace) }
-    private var verb: String { ActivityCardView.verb(workoutType, paceSecondsPerMile: stats.pace) }
-    private var distance: Double { max(0, stats.distance ?? 0) }
+/// The canvas. Fun is the Route Art canvas (dot grid, activity glow) — the
+/// same ground a Fun author's route cards stand on. Modern is a flat graphite
+/// ground with one quiet accent wash: no texture, nothing that isn't data.
+struct RoutelessCardBackground: View {
+    let style: RoutelessCardStyle
+    let accent: Color
 
     var body: some View {
-        ZStack {
+        if style.isFun {
             ArtCanvasBackground(accent: accent)
-
-            VStack(spacing: 0) {
-                HStack {
-                    HStack(spacing: 5) {
-                        Image(systemName: icon).font(.system(size: 12, weight: .bold))
-                        Text(verb.uppercased())
-                            .font(.system(size: 11, weight: .heavy, design: .rounded))
-                            .tracking(1.4)
-                    }
-                    .foregroundColor(accent)
-                    .padding(.horizontal, 11).padding(.vertical, 6)
-                    .background(Capsule().fill(accent.opacity(0.15)))
-                    // Indoor/outdoor, only when the data actually says —
-                    // nil (older rows) makes no claim, because a blank route
-                    // can also be a privacy choice.
-                    if let isIndoor {
-                        HStack(spacing: 4) {
-                            Image(systemName: isIndoor ? "house.fill" : "sun.max.fill")
-                                .font(.system(size: 10, weight: .bold))
-                            Text(isIndoor ? "INDOOR" : "OUTDOOR")
-                                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                                .tracking(1.2)
-                        }
-                        .foregroundColor(.white.opacity(0.65))
-                        .padding(.horizontal, 9).padding(.vertical, 6)
-                        .background(Capsule().fill(Color.white.opacity(0.08)))
-                        .padding(.leading, 6)
-                    }
-                    Spacer()
-                    if let date = stats.date, !date.isEmpty {
-                        Text(date)
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.55))
-                    }
-                }
-
-                Spacer(minLength: 6)
-
-                hero()
-                    .frame(maxWidth: .infinity)
-
-                Spacer(minLength: 6)
-
-                // Layout against the FINAL number so nothing shifts while the
-                // interpolated overlay counts up under it.
-                Text(distance.milesText)
-                    .modifier(CountUpNumberModifier(
-                        value: (effectiveStill || revealed) ? distance : 0, format: "%.2f",
-                        floorsMiles: true))
-                    .font(.system(size: 46, weight: .black, design: .rounded))
-                    .foregroundColor(.white)
-                    .monospacedDigit()
-                    .minimumScaleFactor(0.5)
-                    .lineLimit(1)
-                    .shadow(color: .black.opacity(0.4), radius: 6, y: 3)
-                    .animation(effectiveStill ? nil : .easeOut(duration: revealDuration), value: revealed)
-                Text("MILES")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
-                    .tracking(5)
-                    .foregroundColor(.white.opacity(0.6))
-
-                if splits.count >= 2 {
-                    PaceWaveStrip(bars: splits, accent: accent, still: effectiveStill)
-                        .padding(.top, 8)
-                        .padding(.horizontal, 6)
-                }
-
-                Spacer(minLength: 8)
-
-                WorkoutStatTileGrid(stats: stats, accent: accent, maxTiles: 2)
-
-                // Nothing is reserved anywhere in this layout for the host's
-                // controls, and nothing needs to be: the feed's FLYOVER/SPLITS
-                // chips and its PHOTO | STATS toggle sit in a row UNDER the
-                // media now, not on it. They were overlaid once and the corner
-                // they picked was always somebody's — the top row here, which
-                // cost a 30pt strip that pushed this whole scene down.
-                MADLogoMark(size: 28, opacity: 0.9)
-                    .padding(.top, 12)
+        } else {
+            ZStack {
+                LinearGradient(colors: [Color(white: 0.10), Color(white: 0.035)],
+                               startPoint: .top, endPoint: .bottom)
+                RadialGradient(colors: [accent.opacity(0.16), .clear],
+                               center: .init(x: 0.85, y: 0.05), startRadius: 4, endRadius: 260)
             }
-            .padding(18)
-            // Same as FeedWorkoutCard: keep the brand row above the paging
-            // carousel's page dots.
-            .padding(.bottom, 16)
         }
-        .aspectRatio(4.0 / 5.0, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-        .task {
-            guard !effectiveStill, !revealed else { return }
-            try? await Task.sleep(for: .milliseconds(300))
-            revealed = true
+    }
+}
+
+/// Type for the two styles: Fun is rounded and heavy (the mascot's voice);
+/// Modern is SF Pro, tighter, a weight lighter — the Modern dashboard's.
+struct RoutelessType {
+    let style: RoutelessCardStyle
+    var design: Font.Design { style.isFun ? .rounded : .default }
+    var heroWeight: Font.Weight { style.isFun ? .black : .bold }
+    var valueWeight: Font.Weight { style.isFun ? .heavy : .semibold }
+}
+
+/// "🚶 WALKED" (+ "INDOOR" on the track scene). No date: the header above the
+/// media already says "2h" and the footer prints the exact time.
+struct RoutelessHeaderRow: View {
+    let style: RoutelessCardStyle
+    let accent: Color
+    let workoutType: String?
+    let pace: Double?
+    var showsIndoor: Bool = false
+
+    var body: some View {
+        let type = RoutelessType(style: style)
+        HStack(spacing: 6) {
+            HStack(spacing: 5) {
+                // Pace-aware: a third-party bridge stamping a walk as `.other`
+                // would otherwise print "MOVED" on a card that plainly shows a
+                // walk's pace.
+                Image(systemName: ActivityCardView.icon(workoutType, paceSecondsPerMile: pace))
+                    .font(.system(size: 11, weight: .bold))
+                Text(ActivityCardView.verb(workoutType, paceSecondsPerMile: pace).uppercased())
+                    .font(.system(size: 11, weight: .heavy, design: type.design))
+                    .tracking(1.4)
+            }
+            .foregroundColor(accent)
+            .padding(.horizontal, style.isFun ? 10 : 0)
+            .padding(.vertical, style.isFun ? 5 : 0)
+            .background(Capsule().fill(style.isFun ? accent.opacity(0.16) : .clear))
+            Spacer(minLength: 0)
+            if showsIndoor {
+                HStack(spacing: 4) {
+                    Image(systemName: "house.fill").font(.system(size: 9, weight: .bold))
+                    Text("INDOOR")
+                        .font(.system(size: 10, weight: .heavy, design: type.design))
+                        .tracking(1.2)
+                }
+                .foregroundColor(.white.opacity(0.6))
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Capsule().fill(Color.white.opacity(style.isFun ? 0.09 : 0.06)))
+            }
         }
+        .lineLimit(1)
+    }
+}
+
+/// "2.19 MI", counting up once. Laid out against the FINAL number so nothing
+/// shifts while the overlay counts.
+struct RoutelessDistanceHeadline: View {
+    let style: RoutelessCardStyle
+    let distance: Double
+    var size: CGFloat = 48
+    let revealed: Bool
+    let still: Bool
+    var duration: Double = 1.6
+
+    var body: some View {
+        let type = RoutelessType(style: style)
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(distance.milesText)
+                .modifier(CountUpNumberModifier(value: (still || revealed) ? distance : 0,
+                                                format: "%.2f", floorsMiles: true))
+                .font(.system(size: size, weight: type.heroWeight, design: type.design))
+                .tracking(style.isFun ? 0 : -1)
+                .foregroundColor(.white)
+                .monospacedDigit()
+                .animation(still ? nil : .easeOut(duration: duration), value: revealed)
+            Text("MI")
+                .font(.system(size: size * 0.3, weight: .heavy, design: type.design))
+                .foregroundColor(.white.opacity(0.6))
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.5)
+        .shadow(color: .black.opacity(style.isFun ? 0.35 : 0), radius: 5, y: 2)
+    }
+}
+
+/// PACE · TIME as two small label-over-value columns — the two numbers every
+/// walk has, without a tile grid's boxes and padding.
+struct RoutelessStatPair: View {
+    let style: RoutelessCardStyle
+    let accent: Color
+    let stats: PostStats
+    var alignment: HorizontalAlignment = .trailing
+
+    private struct Item { let label: String; let value: String }
+
+    private var items: [Item] {
+        var out: [Item] = []
+        if let p = stats.pace, p > 0 { out.append(Item(label: "PACE", value: "\(RunStatsStickerView.paceText(p))/mi")) }
+        if let d = stats.duration, d > 0 { out.append(Item(label: "TIME", value: RunStatsStickerView.durationText(d))) }
+        return out
+    }
+
+    var body: some View {
+        let type = RoutelessType(style: style)
+        HStack(alignment: .top, spacing: 16) {
+            ForEach(items, id: \.label) { item in
+                VStack(alignment: alignment, spacing: 2) {
+                    Text(item.label)
+                        .font(.system(size: 9, weight: .heavy, design: type.design))
+                        .tracking(1.2)
+                        .foregroundColor(style.isFun ? accent : .white.opacity(0.45))
+                    Text(item.value)
+                        .font(.system(size: 17, weight: type.valueWeight, design: type.design))
+                        .monospacedDigit()
+                        .foregroundColor(.white)
+                }
+            }
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 

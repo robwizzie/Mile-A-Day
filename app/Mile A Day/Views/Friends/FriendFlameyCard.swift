@@ -316,16 +316,23 @@ struct FriendFlameyCard: View {
         mood.holiday = look.holiday
         mood.isAnniversary = look.isAnniversary
         let size = Self.buddySize
+        let health = FriendFlameyDay.health(for: kind)
+        // Exactly the room his ART needs above his square — the dressed look
+        // at TODAY's size, and no speech-bubble reserve: on a friend's card
+        // he doesn't talk over his head (his mood is the headline beside him,
+        // and a poke's reply replaces it there). The two-line bubble reserve
+        // was the band of empty card that sat above him and his name.
+        let headroom = max(0, FlameyArt.extentAboveView(
+            look: look, size: size, scale: health.bodyScale, fit: 1, bubble: false
+        ).rounded(.up))
         return ZStack(alignment: .bottom) {
             FlameyStageGround()
                 .frame(width: size * 1.1, height: 14)
                 .offset(y: 3)
-            FlameBuddyView(health: FriendFlameyDay.health(for: kind), size: size, mood: mood, look: look)
+            FlameBuddyView(health: health, size: size, mood: mood, showsMoodBubble: false, look: look)
                 .frame(width: size, height: size)
         }
-        // Headroom for the bubble, which draws above his tip — and for his
-        // legs, which stand him taller when he wears shoes.
-        .frame(width: size * 1.3, height: size + 62 + look.standLift * size, alignment: .bottom)
+        .frame(width: size * 1.3, height: size + headroom, alignment: .bottom)
         .padding(.bottom, 10)
         .contentShape(Rectangle())
         .onTapGesture { poke(kind: kind) }
@@ -345,7 +352,10 @@ struct FriendFlameyCard: View {
                 .foregroundColor(Color(red: 1.0, green: 0.72, blue: 0.35))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-            Text(FriendFlameyDay.headline(kind, streak: streak))
+            // A poke's reply takes the headline's place for a moment — his
+            // voice, said beside him rather than in a bubble over his head.
+            Text(pokeQuip.map { "“\($0)”" } ?? FriendFlameyDay.headline(kind, streak: streak))
+                .animation(.easeInOut(duration: 0.2), value: pokeQuip)
                 .font(.system(size: 18, weight: .heavy, design: .rounded))
                 .foregroundColor(.white)
                 .lineLimit(2)

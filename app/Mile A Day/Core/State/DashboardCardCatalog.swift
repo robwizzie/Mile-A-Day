@@ -75,13 +75,12 @@ enum DashboardCard: String, CaseIterable, Identifiable {
         }
     }
 
-    /// What each style ships with, in order — exactly the cards it showed
-    /// before any of this was movable.
+    /// What each style ships with: just the daily challenge, on both. Fun
+    /// used to add Streak Tokens and friends' activity, which made a first
+    /// dashboard a long scroll; both are one toggle away in Customize. A user
+    /// who customised has a non-empty string and never reads this.
     static func defaults(for style: DashboardStyle) -> [DashboardCard] {
-        switch style {
-        case .fun: return [.streakTokens, .dailyChallenge, .friendActivity]
-        case .modern: return [.dailyChallenge]
-        }
+        [.dailyChallenge]
     }
 }
 

@@ -3,6 +3,7 @@
 // import graph: it imports nothing from its siblings.
 
 import { OWNER_NOT_PRIVATE_SQL } from "../visibilityService.js";
+import { servedRouteFrom } from "../routePrivacy.js";
 import { CLIENT_FEATURES, supportsClientFeatureSql } from "../clientFeatures.js";
 import { postHypedByViewerMatchSql, postHypeMatchSql } from "../hypeService.js";
 
@@ -490,8 +491,11 @@ const CREW_WORKOUT_ID_SQL = `COALESCE(
 			  LIMIT 1)
 		)`;
 
+// Each crew member's line is served through THEIR OWN route-privacy setting
+// (servedRouteFrom, owner = pca.user_id): hide-start-&-end is about where
+// that person lives, never the poster's choice. The viewer's own line is full.
 const crewRouteSelect = (expr: string) => `(
-	SELECT ${expr} FROM workout_routes wr
+	SELECT ${expr} FROM ${servedRouteFrom("wr", CREW_WORKOUT_ID_SQL, "pca.user_id", "$1")}
 	WHERE p.include_route
 		AND (
 			COALESCE(
@@ -502,7 +506,6 @@ const crewRouteSelect = (expr: string) => `(
 			)
 			OR pca.user_id = $1
 		)
-		AND wr.workout_id = ${CREW_WORKOUT_ID_SQL}
 )`;
 const CREW_ROUTE_SQL = crewRouteSelect("wr.route");
 // The first fix's instant as epoch seconds: a plain number survives every
@@ -606,6 +609,9 @@ const MULTI_COAUTHORS_JSON = `(
 		-- The replay clock, same gates as the route it describes.
 		'route_times', ${crewRouteSelect("wr.times")},
 		'route_started_at', ${crewRouteSelect(ROUTE_STARTED_AT_EXPR)},
+		-- Additive: TRUE when this line was trimmed for route privacy (hide
+		-- start & end) — the client fades its ends. Same gates.
+		'route_trimmed', ${crewRouteSelect("wr.trimmed")},
 		-- A participant's own curation, readable only BY that participant.
 		-- Returning it to the whole crew would publish "bob kept this out of
 		-- his friends' feeds" to bob's friends, which is the opposite of what
@@ -728,7 +734,7 @@ export const COAUTHOR_COLUMNS = `
  * needs the coordinates.
  */
 const authorRouteSelect = (expr: string) => `(
-	SELECT ${expr} FROM workout_routes wr
+	SELECT ${expr} FROM ${servedRouteFrom("wr", "p.workout_id", "p.user_id", "$1")}
 	WHERE p.include_route
 		AND (
 			COALESCE(
@@ -738,14 +744,14 @@ const authorRouteSelect = (expr: string) => `(
 			)
 			OR p.user_id = $1
 		)
-		AND wr.workout_id = p.workout_id
 )`;
 const AUTHOR_ROUTE_SQL = authorRouteSelect("wr.route");
 // The author's replay clock, under exactly the route's gates (it describes
 // the route, so it is withheld with it).
 const AUTHOR_ROUTE_TIMING_SQL = `
 	${authorRouteSelect("wr.times")} AS route_times,
-	${authorRouteSelect(ROUTE_STARTED_AT_EXPR)} AS route_started_at`;
+	${authorRouteSelect(ROUTE_STARTED_AT_EXPR)} AS route_started_at,
+	${authorRouteSelect("wr.trimmed")} AS route_trimmed`;
 
 /**
  * SQL: the competitions `userExpr` was in on `dateExpr` — the card's

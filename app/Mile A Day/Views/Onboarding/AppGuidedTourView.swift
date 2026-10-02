@@ -5,6 +5,10 @@ import SwiftUI
 /// it posts a `MAD_SwitchTab` notification to flip the underlying tab, then
 /// shows a floating coach-mark card explaining what they're looking at.
 struct AppGuidedTourView: View {
+    /// Stamped when the tour ends (Done or End Tour) — the dashboard's
+    /// getting-started checklist reads it.
+    static let seenKey = "hasSeenAppGuidedTour"
+
     let onComplete: () -> Void
 
     @State private var step = 0
@@ -77,6 +81,7 @@ struct AppGuidedTourView: View {
 
             Button {
                 switchToTab(0)
+                UserDefaults.standard.set(true, forKey: Self.seenKey)
                 onComplete()
             } label: {
                 Text("End Tour")
@@ -188,6 +193,7 @@ struct AppGuidedTourView: View {
             Button {
                 if isLast {
                     switchToTab(0)
+                    UserDefaults.standard.set(true, forKey: Self.seenKey)
                     onComplete()
                 } else {
                     navigate(to: step + 1)

@@ -25,7 +25,7 @@ struct BadgeUnlockCelebrationView: View {
     @State private var showButtons = false
     @State private var hasStartedAnimation: Bool = false
     /// Rendered badge card presented in the system share sheet.
-    @State private var shareItem: ShareableImage?
+    @State private var medalShare: MADStoryContent?
     
     // Haptic generators
     private let impactGenerator = UIImpactFeedbackGenerator(style: .heavy)
@@ -265,9 +265,8 @@ struct BadgeUnlockCelebrationView: View {
 
                                 Button {
                                     triggerHaptic()
-                                    if let image = renderAchievementShareImage(BadgeShareCardView(badge: badge)) {
-                                        shareItem = ShareableImage(image: image)
-                                    }
+                                    TelemetryService.record(ShareTelemetry.opened)
+                                    medalShare = MADStoryContent(medal: .forOwnBadge(badge))
                                 } label: {
                                     HStack(spacing: 10) {
                                         Image(systemName: "square.and.arrow.up")
@@ -287,8 +286,8 @@ struct BadgeUnlockCelebrationView: View {
                                             )
                                     )
                                 }
-                                .sheet(item: $shareItem) { item in
-                                    ShareSheet(items: [item.image])
+                                .sheet(item: $medalShare) { content in
+                                    ShareStudioView(content: content, initialTemplate: .medalStory)
                                 }
 
                                 Button {

@@ -563,7 +563,11 @@ struct PostShareStepView: View {
                 authorAvatar: RouteArtAvatar(
                     name: UserManager.shared.currentUser.name,
                     imageURL: UserManager.shared.currentUser.profileImageUrl
-                )
+                ),
+                // Hide start & end: the stretches friends won't get, dimmed —
+                // this preview promises "as friends will actually get it".
+                privacyHint: RoutePrivacyHint.forOwnRoute(
+                    coordinates: coords, workoutId: vm.stats.workoutId)
             )
             .frame(width: routePreviewWidth, height: routePreviewWidth * 5 / 4)
             .overlay {

@@ -102,6 +102,8 @@ export interface PostCoauthor {
   // them; a length mismatch with `route` means "no times".
   route_times?: number[] | null;
   route_started_at?: number | null;
+  // Additive: their line was trimmed for route privacy (hide start & end).
+  route_trimmed?: boolean | null;
   // THIS participant's own two switches on the shared post, and null for
   // everybody except the participant themselves — one person's curation is not
   // another's to read. `on_feed` = does the post reach MY friends' feeds
@@ -175,6 +177,9 @@ export interface PostRow {
   // uploading client sent none.
   route_times?: number[] | null;
   route_started_at?: number | null;
+  // Additive: TRUE when the viewer (not the author) was served a route
+  // trimmed for route privacy — hide start & end. Null when no route.
+  route_trimmed?: boolean | null;
   // Additive: the competitions the AUTHOR was in on the post's day, so a
   // card can say "competing in …" (see COMPETITIONS_JSON). Null when none.
   competitions?: PostCompetitionRef[] | null;

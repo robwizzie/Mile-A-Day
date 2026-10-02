@@ -1,7 +1,11 @@
 import { PostgresService } from "./DbService.js";
 import { mileHypeKeyMatchSql } from "./hypeService.js";
 import { getUserLocalToday } from "./workoutService.js";
-import { buddySessionsEnabled, JOINABLE_WINDOW_SQL } from "./buddyFeatures.js";
+import {
+  buddySessionsEnabled,
+  JOINABLE_WINDOW_SQL,
+  JOIN_POLICY_ALLOWS_SQL,
+} from "./buddyFeatures.js";
 import { CLIENT_FEATURES, userSupports } from "./clientFeatures.js";
 import { BUDDY_MAX_PARTICIPANTS } from "../types/buddy.js";
 
@@ -280,6 +284,7 @@ export async function friendsOutNow(userId: string): Promise<FriendOutNow[]> {
             -- The SAME window the joinable list and the request door use —
             -- one shared fragment, because this row's button posts to those
             -- endpoints and a bound that differs draws a button that 400s.
+            AND ${JOIN_POLICY_ALLOWS_SQL("bs", "$1")}
             AND ${JOINABLE_WINDOW_SQL("bs")}
             -- Already in it? Then it isn't an offer. A pending request is
             -- NOT "in": the row stays so the button can say "Requested".

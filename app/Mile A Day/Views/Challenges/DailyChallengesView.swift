@@ -23,6 +23,8 @@ struct DailyChallengesView: View {
     @State private var isTodayComplete: Bool = false
     @State private var opponent: ChallengeOpponent?
     @State private var challengeStreak: Int = ChallengeService.shared.currentChallengeStreak()
+    /// The six-medal grid is long; it sits behind a disclosure row.
+    @State private var showMedals = false
     @State private var matchupHistory: RemoteChallengeService.MatchupHistoryDTO? =
         (ChallengeService.shared as? RemoteChallengeService)?.matchupHistory
 
@@ -58,11 +60,10 @@ struct DailyChallengesView: View {
 
             ScrollView {
                 VStack(spacing: 20) {
+                    // Stats and tomorrow's preview ride INSIDE the hero
+                    // (`heroFooter`) — they were two more cards above the
+                    // things this screen is actually for.
                     heroCard
-                    if let tomorrow = tomorrowsChallenge {
-                        tomorrowPreviewCard(tomorrow)
-                    }
-                    statsRow
                     if let history = matchupHistory, !history.matchups.isEmpty {
                         matchupsSection(history)
                     }
@@ -126,61 +127,6 @@ struct DailyChallengesView: View {
             matchupHistory = remote.matchupHistory
         }
         challengeStreak = ChallengeService.shared.currentChallengeStreak()
-    }
-
-    // MARK: - Tomorrow Preview
-
-    private func tomorrowPreviewCard(_ challenge: DailyChallenge) -> some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: challenge.gradient,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 44, height: 44)
-                    .opacity(0.85)
-                Image(systemName: challenge.icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text("COMING TOMORROW")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .tracking(1.2)
-                    .foregroundColor(.white.opacity(0.55))
-                Text(challenge.title)
-                    .font(.system(size: 16, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
-                Text(challenge.description)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.65))
-                    .lineLimit(2)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(.white.opacity(0.05))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(
-                            LinearGradient(
-                                colors: [
-                                    (challenge.gradient.first ?? .white).opacity(0.25),
-                                    Color.white.opacity(0.05)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                )
-        )
     }
 
     // MARK: - Hero
@@ -260,6 +206,8 @@ struct DailyChallengesView: View {
                 Text("No challenge today")
                     .foregroundColor(.white.opacity(0.6))
             }
+
+            heroFooter
         }
         .padding(18)
         .background(heroBackground)
@@ -287,39 +235,64 @@ struct DailyChallengesView: View {
             )
     }
 
-    // MARK: - Stats
+    // MARK: - Hero footer (stats + tomorrow)
 
-    private var statsRow: some View {
-        HStack(spacing: 12) {
-            statTile(icon: "checkmark.seal.fill", color: .yellow, value: "\(totalCompletions)", label: "Completed")
-            statTile(icon: "flame.fill", color: .orange, value: "\(challengeStreak)", label: "Day Streak")
-            statTile(icon: "trophy.fill", color: MADTheme.Colors.madRed, value: "\(earnedMedalsCount)/\(Self.milestones.count)", label: "Medals")
+    /// The old stats row and "Coming tomorrow" card, folded into the hero as
+    /// one inline stat line and one preview line.
+    private var heroFooter: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 1)
+
+            HStack(spacing: 0) {
+                inlineStat(icon: "checkmark.seal.fill", color: .yellow, value: "\(totalCompletions)", label: "Completed")
+                inlineStat(icon: "flame.fill", color: .orange, value: "\(challengeStreak)", label: "Day streak")
+                inlineStat(icon: "trophy.fill", color: MADTheme.Colors.madRed, value: "\(earnedMedalsCount)/\(Self.milestones.count)", label: "Medals")
+            }
+
+            if let tomorrow = tomorrowsChallenge {
+                HStack(spacing: 8) {
+                    Image(systemName: tomorrow.icon)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(tomorrow.gradient.first ?? .white)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill((tomorrow.gradient.first ?? .white).opacity(0.18)))
+                        .accessibilityHidden(true)
+                    (Text("Tomorrow: ").foregroundColor(.white.opacity(0.55))
+                        + Text(tomorrow.title).foregroundColor(.white))
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 0)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityHint(Text(tomorrow.description))
+            }
         }
     }
 
-    private func statTile(icon: String, color: Color, value: String, label: String) -> some View {
-        VStack(spacing: 6) {
+    private func inlineStat(icon: String, color: Color, value: String, label: String) -> some View {
+        HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(color)
-            Text(value)
-                .font(.system(size: 22, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-            Text(label)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.6))
-                .lineLimit(1)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(value)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Text(label)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(.white.opacity(0.06))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(.white.opacity(0.1), lineWidth: 1)
-                )
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Head-to-Head record
@@ -406,29 +379,64 @@ struct DailyChallengesView: View {
 
     private var medalsGallery: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("MEDAL COLLECTION")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .tracking(1.2)
-                    .foregroundColor(.white.opacity(0.6))
-                Spacer()
-                Text("\(earnedMedalsCount)/\(Self.milestones.count)")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-            }
-
-            LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)],
-                spacing: 14
-            ) {
-                ForEach(Self.milestones, id: \.id) { ms in
-                    NavigationLink {
-                        BadgeDetailView(badge: badgeFor(ms), userManager: userManager)
-                    } label: {
-                        PremiumBadgeCard(badge: badgeFor(ms))
-                    }
-                    .buttonStyle(PlainButtonStyle())
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) { showMedals.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "rosette")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.yellow)
+                        .accessibilityHidden(true)
+                    Text(showMedals ? "Challenge medals" : "See challenge medals")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Text("\(earnedMedalsCount)/\(Self.milestones.count)")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(.white.opacity(0.6))
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white.opacity(0.5))
+                        .rotationEffect(.degrees(showMedals ? 180 : 0))
+                        .accessibilityHidden(true)
                 }
+                .padding(.vertical, 12)
+                .padding(.horizontal, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(.white.opacity(0.06))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(.white.opacity(0.1), lineWidth: 1)
+                        )
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(Text(showMedals ? "Expanded" : "Collapsed"))
+
+            if showMedals {
+                medalsGrid
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    private var medalsGrid: some View {
+        LazyVGrid(
+            columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)],
+            spacing: 14
+        ) {
+            ForEach(Self.milestones, id: \.id) { ms in
+                NavigationLink {
+                    BadgeDetailView(badge: badgeFor(ms), userManager: userManager)
+                } label: {
+                    PremiumBadgeCard(badge: badgeFor(ms))
+                }
+                .buttonStyle(PlainButtonStyle())
             }
         }
     }
