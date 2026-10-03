@@ -135,7 +135,6 @@ struct PostCardView: View {
             // out so double-tapping a button can't hype by accident.
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 media
-                crewGroupLine
                 // The names-to-colours key belongs to the map, so it shows only
                 // while the map face is up — under it rather than on it, since
                 // the stats band owns the bottom of that face.
@@ -794,30 +793,17 @@ struct PostCardView: View {
 
     /// The leading half of the control row, shared by both arrangements so the
     /// two candidates cannot drift into offering different things.
-    /// (`.animation` on the Group, not `withAnimation` at the swipe — the page
-    /// changes from the TabView's own gesture, which this view never wraps.)
     ///
-    /// FLYOVER and SPLITS are about the route, so on a two-faced card they
-    /// show only while the MAP face is up — on a photo they are noise. They
-    /// are HIDDEN, never removed: they keep their slot, so the row's height
-    /// and `ViewThatFits`' choice of arrangement are identical on both faces
-    /// and the card doesn't reflow mid-swipe. A single-face card shows them
-    /// as before (that face is the map/indoor card whenever they exist).
+    /// FLYOVER and SPLITS show on EVERY face. They used to hide while a photo
+    /// was up (keeping their slot, so the row didn't reflow mid-swipe), which
+    /// read as the post having no flyover at all — and left an empty gap
+    /// beside a lone PHOTO | MAP toggle. They are controls of the WALK, not
+    /// of the map page: the flyover and the splits sheet open over the card
+    /// whichever face is showing, so there is nothing to hide them for.
     @ViewBuilder
     private func mediaControlChips(compactSplits: Bool) -> some View {
-        let shown = chipsOnCurrentFace
-        Group {
-            if canPlayFlyover { flyoverChip }
-            if hasSplits { splitsChip(iconOnly: compactSplits) }
-        }
-        .opacity(shown ? 1 : 0)
-        .allowsHitTesting(shown)
-        .accessibilityHidden(!shown)
-        .animation(.easeInOut(duration: 0.2), value: shown)
-    }
-
-    private var chipsOnCurrentFace: Bool {
-        !hasFaceToggle || currentFace == .map
+        if canPlayFlyover { flyoverChip }
+        if hasSplits { splitsChip(iconOnly: compactSplits) }
     }
 
     /// The post's per-mile splits, shaped for drawing. Empty on older servers,
@@ -1050,19 +1036,25 @@ struct PostCardView: View {
     @ViewBuilder
     private var crewGroupLine: some View {
         if let group = post.buddy_group, group.crew_size > 1, group.distance_miles > 0 {
+            // A quiet line under the actions (Instagram's "liked by" slot),
+            // not a tinted capsule between the photo and its controls — the
+            // pill there pushed the controls off the media and read as a
+            // button that did nothing.
             HStack(spacing: 6) {
                 Image(systemName: "figure.2")
                     .madFont(size: 12, weight: .bold)
-                Text("\(group.distance_miles.milesText) mi between the \(group.crew_size) of you")
-                    .madFont(size: 13, weight: .heavy, design: .rounded)
+                    .foregroundColor(ActivityCardView.color(post.workout_type))
+                    .accessibilityHidden(true)
+                (Text(group.distance_miles.distanceFormatted)
+                    .foregroundColor(.white)
+                 + Text(" between the \(group.crew_size) of you")
+                    .foregroundColor(.white.opacity(0.6)))
+                    .madFont(size: 13, weight: .bold, design: .rounded)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
-            .foregroundColor(ActivityCardView.color(post.workout_type))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule().fill(ActivityCardView.color(post.workout_type).opacity(0.14))
-            )
-            .padding(.horizontal, 2)
+            .padding(.top, 2)
+            .accessibilityElement(children: .combine)
         }
     }
 
@@ -1300,6 +1292,7 @@ struct PostCardView: View {
             } trailing: {
                 if hasFaceToggle { faceToggle }
             }
+            crewGroupLine
             footerMeta
             captionLine
             commentPreview
