@@ -76,6 +76,10 @@ struct ShareStudioView: View {
     @State private var messageItem: ShareMessageItem?
     @State private var toast: String?
     @State private var busy = false
+    /// True while the carousel is being dragged or is decelerating. Baking a
+    /// page (`ImageRenderer`, on the main thread) waits for this to clear —
+    /// a bake landing mid-swipe is a dropped frame the finger feels.
+    @State private var isScrolling = false
 
     init(content: MADStoryContent, link: URL? = nil, initialTemplate: ShareTemplate? = nil) {
         // Hide start & end: a share card publishes the user's OWN route to
@@ -169,6 +173,9 @@ struct ShareStudioView: View {
         .onChange(of: selection) { _, newValue in
             MADHaptics.tap()
             if let newValue { cacheRender(of: newValue) }
+        }
+        .onChange(of: isScrolling) { _, scrolling in
+            if !scrolling { cacheRender(of: current) }
         }
         .sheet(item: $shareItems) { items in
             ActivityViewController(activityItems: items.items)
@@ -280,8 +287,12 @@ struct ShareStudioView: View {
                 .frame(height: pageHeight)
             }
             .contentMargins(.horizontal, margin, for: .scrollContent)
-            .scrollTargetBehavior(.viewAligned)
+            // One card per swipe: a plain `.viewAligned` let a flick coast
+            // past two or three cards and settle wherever it ran out, which
+            // is what made the carousel feel loose.
+            .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
             .scrollPosition(id: $selection)
+            .modifier(ScrollActivityTracker(isScrolling: $isScrolling))
             .onAppear {
                 // `scrollPosition(id:)` doesn't reliably honour its INITIAL
                 // value on a lazy stack — open on the requested card
@@ -295,7 +306,10 @@ struct ShareStudioView: View {
 
     @ViewBuilder
     private func page(_ template: ShareTemplate, index: Int, width: CGFloat) -> some View {
-        let live = abs(index - currentIndex) <= 1
+        // ±2, not ±1: `selection` flips at the swipe's MIDPOINT, so with
+        // ±1 the card peeking in at the far edge was still a placeholder
+        // when it came into view and popped to its real self mid-swipe.
+        let live = abs(index - currentIndex) <= 2
         let pageFormat = effectiveFormat(template)
         ZStack {
             if live {
@@ -312,7 +326,14 @@ struct ShareStudioView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(Color.white.opacity(template == current ? 0.16 : 0.06), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.55), radius: 22, x: 0, y: 12)
+        // The shadow is cast by a plain SHAPE behind the card, never by the
+        // card itself: `.shadow` on the composited card re-rendered the whole
+        // card offscreen every frame its scroll transition scaled it.
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.black)
+                .shadow(color: .black.opacity(0.55), radius: 22, x: 0, y: 12)
+        )
     }
 
     /// The real card, scaled — layout is the card's own; only pixels shrink.
@@ -559,7 +580,8 @@ struct ShareStudioView: View {
     /// fling past six cards must not bake six of them.
     private func cacheRender(of template: ShareTemplate) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-            guard selection == template else { return }
+            // Still moving: the idle transition calls back in once it settles.
+            guard selection == template, !isScrolling else { return }
             let pageFormat = effectiveFormat(template)
             let key = cacheKey(template, format: pageFormat)
             guard renderCache[key] == nil else { return }
@@ -700,6 +722,24 @@ struct ShareStudioView: View {
             blue: Double(b + (floor.2 - b) * amount),
             opacity: Double(a)
         )
+    }
+}
+
+/// Reports whether a scroll view is moving (dragged or decelerating). iOS 18
+/// says so directly; on iOS 17 it stays false and the bake's own delay is
+/// the only guard.
+private struct ScrollActivityTracker: ViewModifier {
+    @Binding var isScrolling: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollPhaseChange { _, phase in
+                let moving = phase != .idle
+                if moving != isScrolling { isScrolling = moving }
+            }
+        } else {
+            content
+        }
     }
 }
 

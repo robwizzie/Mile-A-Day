@@ -1233,16 +1233,23 @@ struct WeekShareCard: View {
                 ShareCopy.kickerText("YOUR WEEK · \(recap.rangeText.uppercased())")
                 ShareCopy.hero((recap.totalMiles ?? 0).distanceText, size: 104)
                     .padding(.top, 10)
-                if let delta = recap.deltaFraction {
+                // Only a week UP on the last is worth printing on a card
+                // somebody chose to post — "↘ 12%" under their total read as
+                // the card arguing with them. (The recap screen keeps both.)
+                if let delta = recap.deltaFraction, delta >= 0.01 {
                     WeekDeltaChip(delta: delta)
                         .padding(.top, 10)
                 }
-                Spacer(minLength: 0)
+                // The total owns the top; the story of the week sits as ONE
+                // block at the bottom (headline over the days over the rail).
+                // Two spacers left the headline floating in the middle with
+                // a hole on each side.
+                Spacer(minLength: 24)
                 headline(recap)
-                Spacer(minLength: 0)
                 ShareWeekStrip(recap: recap)
+                    .padding(.top, 26)
                 ShareStatRail(stats: WeekShareCard.rail(recap, limit: 3))
-                    .padding(.top, 18)
+                    .padding(.top, 20)
                 ShareLockup()
             }
             .padding(28)
@@ -1296,8 +1303,11 @@ struct WeekShareCard: View {
         return [days == 7 ? "7 for 7." : "\(days) of 7 goal days."]
     }
 
+    /// Goal days are already the row of seven right above the rail (and often
+    /// the headline too), so the rail leads with what the card doesn't say
+    /// yet; goal days only fill a slot nothing else can.
     static func rail(_ recap: WeeklyRecap, limit: Int) -> [MADStoryStat] {
-        var out: [MADStoryStat] = [MADStoryStat(value: "\(recap.goalDays)/7", label: "GOAL DAYS")]
+        var out: [MADStoryStat] = []
         if let streak = recap.currentStreak, streak > 0 {
             out.append(MADStoryStat(value: "\(streak)", label: "STREAK", tint: MADTheme.Colors.warning))
         }
@@ -1305,6 +1315,12 @@ struct WeekShareCard: View {
             out.append(MADStoryStat(value: "#\(rank)", label: "OF \(of) FRIENDS"))
         } else if let workouts = recap.workouts, workouts > 0 {
             out.append(MADStoryStat(value: "\(workouts)", label: workouts == 1 ? "WORKOUT" : "WORKOUTS"))
+        }
+        if let seconds = recap.totalDurationSeconds, seconds >= 60 {
+            out.append(MADStoryStat(value: WeeklyRecapView.durationText(seconds), label: "MOVING"))
+        }
+        if out.count < limit {
+            out.insert(MADStoryStat(value: "\(recap.goalDays)/7", label: "GOAL DAYS"), at: 0)
         }
         return Array(out.prefix(limit))
     }
