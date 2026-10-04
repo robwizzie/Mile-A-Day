@@ -62,6 +62,17 @@ struct DashboardView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// Controls presentation of the in‑progress workout tracking UI.
     @State private var showWorkoutView = false
+    /// Whether the tracker is ACTUALLY on screen, from the cover content's own
+    /// appear/disappear. `showWorkoutView` only says a presentation was
+    /// requested: when iOS drops one (something else presenting at that
+    /// instant — the usual case is the cold-launch auto-resume after a phone
+    /// died mid-walk), the flag stays `true` with nothing up, and every Resume
+    /// tap after that is a true→true no-op. The button "went nowhere" until
+    /// a relaunch reset the state. See `reconcileDroppedTrackerPresentation`.
+    @State private var trackerOnScreen = false
+    /// Automatic re-presentations spent on a dropped cover, so a screen that
+    /// keeps refusing can't loop. Reset whenever the tracker really appears.
+    @State private var trackerPresentRetries = 0
     /// Walk/run pre-answered for the tracker's wizard by a Start My Mile
     /// request (TrackerLaunchModifier). Cleared when the cover dismisses.
     @State private var trackerPreselectedActivity: HKWorkoutActivityType?
@@ -796,6 +807,11 @@ struct DashboardView: View {
                     onBuddySessionAdopted: { activeBuddySessionId = $0 },
                     preselectedActivity: trackerPreselectedActivity
                 )
+                .onAppear {
+                    trackerOnScreen = true
+                    trackerPresentRetries = 0
+                }
+                .onDisappear { trackerOnScreen = false }
             }
             // Buddy Walks flow: pill → setup steps → lobby (synced countdown)
             // → the normal tracker → recap. All of it lives in one
@@ -1056,7 +1072,14 @@ struct DashboardView: View {
             // behind it. Released in the cover's onDismiss, after the goal
             // hold is set, so the flame still goes first.
             .onChange(of: showWorkoutView) { _, showing in
-                if showing { celebrationManager.setObscured("tracker", true) }
+                if showing {
+                    celebrationManager.setObscured("tracker", true)
+                    // A requested cover that never shows is otherwise
+                    // invisible: check it actually arrived.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        reconcileDroppedTrackerPresentation()
+                    }
+                }
             }
             .onChange(of: celebrationManager.isShowingCelebration) { wasShowing, isShowing in
                 // When a celebration finishes, surface any leftover pendings the
@@ -1966,6 +1989,29 @@ struct DashboardView: View {
         Self.headerDateFormatter.string(from: Date())
     }
 
+
+    /// The tracker cover was requested and never came up. Put the flag back to
+    /// the truth (so the next Resume tap is a real false→true transition),
+    /// release the celebration hold the request took (`onDismiss` never runs
+    /// for a cover that never presented, so nothing else would), surface the
+    /// Resume banner, and — for an active workout — try once more on the next
+    /// beat, since whatever was presenting has usually gone by then.
+    private func reconcileDroppedTrackerPresentation() {
+        guard showWorkoutView, !trackerOnScreen else { return }
+        showWorkoutView = false
+        celebrationManager.setObscured("tracker", false)
+        let hasActive = InProgressWorkoutStore.load()?.isActive == true
+        hasActiveWorkout = hasActive
+        showInProgressBanner = hasActive
+        guard hasActive, trackerPresentRetries < 1 else { return }
+        trackerPresentRetries += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            guard !showWorkoutView, !trackerOnScreen,
+                  InProgressWorkoutStore.load()?.isActive == true else { return }
+            showInProgressBanner = false
+            showWorkoutView = true
+        }
+    }
 
     @ViewBuilder
     private var inProgressBannerSection: some View {
