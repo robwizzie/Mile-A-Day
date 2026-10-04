@@ -320,6 +320,13 @@ jobs:
       - name: Route privacy check
         run: node scripts/route-privacy-check.mjs
 
+      # The photo prompt's "who sees this walk": a per-post on_profile keeps a
+      # post off (or on) the author's grid without touching its feed reach,
+      # and a per-walk hide keeps one raw workout card out of friends' feeds
+      # (owner exempt, writable before sync, reversible).
+      - name: Walk audience check
+        run: node scripts/walk-audience-check.mjs
+
   website:
     name: Website (lint + build)
     runs-on: ubuntu-latest

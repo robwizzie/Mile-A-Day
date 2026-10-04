@@ -207,6 +207,7 @@ export async function createPostController(
     competition_id,
     dual_media_url,
     dual_inset_corner,
+    on_profile,
   } = req.body ?? {};
 
   try {
@@ -425,6 +426,10 @@ export async function createPostController(
       isAuto: typeof is_auto === "boolean" ? is_auto : undefined,
       includeRoute:
         typeof include_route === "boolean" ? include_route : undefined,
+      // The author's per-post grid choice from the photo prompt / share step.
+      // Anything but a boolean is "not chosen" (NULL), never a 400: the post
+      // matters more than a malformed preference about where it's filed.
+      onProfile: typeof on_profile === "boolean" ? on_profile : undefined,
       coauthorUserId:
         typeof coauthor_user_id === "string" ? coauthor_user_id : null,
       // Multi-person collab (Buddy Walks). Absent on every shipped client, so

@@ -2008,6 +2008,14 @@ export const posts = pgTable(
     // no other. Nullable with no default: absent means the poster added none,
     // which is what every existing row and every shipped client means.
     competitionId: varchar("competition_id", { length: 32 }),
+    // on_profile: the AUTHOR's per-post answer to "does this go on my Posts
+    // grid". NULL = follow the account rules (every pre-existing row, and
+    // every shipped client, which never sends it), FALSE = keep it off my grid
+    // while it stays in friends' feeds, TRUE = keep it on even when
+    // `auto_posts_on_profile` would hide a photo-less route card. Grid-ONLY:
+    // never consulted by reach, the feed or Tagged — hiding a post from your
+    // profile must not delete it from anyone's feed.
+    onProfile: boolean("on_profile"),
   },
   (table) => [
     // "Has this session been posted?" — asked on every recap open. Partial
@@ -2340,6 +2348,37 @@ export const userBlocks = pgTable(
     primaryKey({
       columns: [table.blockerId, table.blockedId],
       name: "user_blocks_pkey",
+    }),
+  ],
+);
+
+// "Just me" for ONE walk: the owner asked that this workout's raw card stay
+// out of friends' feeds. Its own table, keyed by the HealthKit uuid with NO
+// foreign key to workouts, because the choice is made on the photo prompt —
+// usually BEFORE the phone has synced the workout — and a row that had to wait
+// for the workout to exist would lose the race the camera hold (10 min) is the
+// only thing currently winning. Presence = hidden; deleting the row restores
+// the card. (user_id, workout_id) so a row can only ever describe the
+// caller's own workout, synced or not. Read by every raw-workout-card
+// surface (unified feed, legacy feed, direct workout access), owner exempt.
+export const workoutFeedHides = pgTable(
+  "workout_feed_hides",
+  {
+    userId: text("user_id").notNull(),
+    workoutId: varchar("workout_id", { length: 255 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "workout_feed_hides_user_id_fkey",
+    }).onDelete("cascade"),
+    primaryKey({
+      columns: [table.userId, table.workoutId],
+      name: "workout_feed_hides_pkey",
     }),
   ],
 );

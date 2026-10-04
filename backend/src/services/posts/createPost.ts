@@ -33,6 +33,9 @@ export interface CreatePostInput {
   // original always-upsert behavior so shipped app versions don't break).
   isAuto?: boolean;
   includeRoute?: boolean;
+  // The author's per-post grid choice (posts.on_profile). Undefined = NULL =
+  // follow the account rules, which is what every shipped client gets.
+  onProfile?: boolean;
   // Collab post: invite this accepted friend as coauthor (status 'pending'
   // until they accept). Ignored for auto posts.
   coauthorUserId?: string | null;
@@ -380,7 +383,11 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       ? ""
       : `,
 					is_auto = EXCLUDED.is_auto,
-					include_route = EXCLUDED.include_route`;
+					include_route = EXCLUDED.include_route,
+					-- Wholesale with the other flags: a photo replacing the walk's
+					-- auto card in place is a new decision about the grid, and an
+					-- inherited FALSE would hide the photo the user just shared.
+					on_profile = EXCLUDED.on_profile`;
   const rows = await db.query<PostRow>(
     `
 		WITH inserted AS (
@@ -389,7 +396,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 				local_date, share_to_feed, share_to_story, story_expires_at,
 				is_auto, include_route, coauthor_user_id, coauthor_status,
 				coauthor_workout_id, posted_fresh, buddy_session_id,
-				competition_id, dual_media_url, dual_inset_corner
+				competition_id, dual_media_url, dual_inset_corner, on_profile
 			)
 			VALUES (
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
@@ -426,7 +433,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 						AND cu.user_id = $1
 						AND cu.invite_status = 'accepted'
 				),
-				$15, $16
+				$15, $16, $17::boolean
 			)
 				ON CONFLICT ${conflictTarget}
 				DO UPDATE SET
@@ -496,6 +503,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       input.competitionId ?? null,
       input.dualMediaUrl ?? null,
       input.dualInsetCorner ?? null,
+      typeof input.onProfile === "boolean" ? input.onProfile : null,
     ],
   );
   if (rows[0]) {
