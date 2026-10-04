@@ -503,6 +503,23 @@ class WorkoutService: ObservableObject {
         )
     }
 
+    /// "Off the feed" for ONE walk — the photo prompt's audience choice. Keeps
+    /// that workout's card out of friends' feeds (I still see it), and is
+    /// reversible. Works before the workout has synced: the server keys the
+    /// choice by uuid, because the prompt opens the moment the walk ends.
+    func setFeedHidden(workoutId: String, hidden: Bool) async throws -> WorkoutFeedHiddenResponse {
+        guard let currentUserId = getCurrentUserId() else {
+            throw WorkoutServiceError.notAuthenticated
+        }
+        struct Body: Encodable { let hidden: Bool }
+        return try await makeRequest(
+            endpoint: "/workouts/\(currentUserId)/workout/\(workoutId)/feed-hidden",
+            method: .PUT,
+            body: try JSONEncoder().encode(Body(hidden: hidden)),
+            responseType: WorkoutFeedHiddenResponse.self
+        )
+    }
+
     func deleteWorkout(workoutId: String) async throws -> WorkoutDeleteResponse {
         guard let currentUserId = getCurrentUserId() else {
             throw WorkoutServiceError.notAuthenticated
@@ -556,6 +573,10 @@ class WorkoutService: ObservableObject {
 }
 
 // MARK: - Delete Response
+
+struct WorkoutFeedHiddenResponse: Codable {
+    let hidden: Bool
+}
 
 struct StealthHideResponse: Codable {
     let stealth: Bool

@@ -358,8 +358,10 @@ struct DashboardView: View {
             return
         }
 
-        // Already shown today → nothing to do.
+        // Already shown today → nothing to do — except make sure the day's
+        // photo prompt wasn't lost along the way.
         guard !celebrationManager.hasShownGoalCelebrationToday else {
+            recoverLostPhotoPrompt()
             return
         }
 
@@ -468,6 +470,39 @@ struct DashboardView: View {
                     celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: promptWorkout.id, workoutType: promptWorkout.type))
                 }
             }
+        }
+    }
+
+    /// Re-offer a photo prompt that was queued but never SEEN.
+    ///
+    /// The flame stamps "shown today" when it's dismissed; the prompt queued
+    /// behind it stamps only when IT is dismissed. Anything that ends the
+    /// session in between — the app killed or jettisoned while the
+    /// leaderboard or a medal was up, say — left the walk with neither its
+    /// prompt nor its route card, and nothing would ever ask again, because
+    /// the goal sequence that queues the prompt runs once a day. This runs on
+    /// the same level-triggered checks as the flame (foreground, fresh
+    /// HealthKit data, the tracker closing) and only when the show is calm,
+    /// so it can never cut into a sequence that's still playing.
+    private func recoverLostPhotoPrompt() {
+        guard autoShareRunsToFeed,
+              !isPreparingGoalCelebration,
+              celebrationManager.isCalm,
+              FreshPostWindowManager.shared.canPostToday else { return }
+        var candidates: [(id: String, type: String)] = []
+        if let goal = goalCompletionPromptWorkout { candidates.append(goal) }
+        // The newest walk only once the extra-mile check has already counted
+        // it — otherwise that check is about to offer it the normal way.
+        if substantiveWorkoutCount <= celebrationManager.lastPostGoalWorkoutCount,
+           let latest = latestFinishedPromptWorkout,
+           !candidates.contains(where: { $0.id == latest.id }) {
+            candidates.append(latest)
+        }
+        for workout in candidates
+        where celebrationManager.needsPhotoPrompt(for: workout.id)
+            && soloPhotoPromptAllowed(for: workout.id) {
+            print("[Dashboard] 📸 Re-offering an unseen photo prompt for \(workout.id)")
+            celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: workout.id, workoutType: workout.type))
         }
     }
 

@@ -443,13 +443,29 @@ enum RunPostService {
     /// and a client-side guard would be WRONG in one real case: a photo shared
     /// to a story only still consumes the run's one user-post slot, but leaves
     /// the FEED with no card, which is exactly what this is for.
+    ///
+    /// `audience` is the photo prompt's explicit "who sees this walk" choice.
+    /// When it's given it decides everything — including `.offFeed`, which
+    /// posts nothing AND keeps the walk's raw workout card out of friends'
+    /// feeds. When it's nil (the buddy recap's close-out) the standing
+    /// `autoPostWithoutPhoto` preference decides, exactly as before.
     @MainActor
-    static func autoPostMile(workoutId: String, workoutType: String) async {
-        // "Only walks I photographed reach my feed." Gated HERE rather than at
-        // each call site so every route into the photo-less card — skipping the
-        // prompt, backing out of the composer, sharing to a story only, and
-        // whatever gets added next — honours it from one place.
-        guard NotificationPreferences.load().autoPostWithoutPhoto else { return }
+    static func autoPostMile(workoutId: String, workoutType: String,
+                             audience: WalkAudience? = nil) async {
+        if let audience {
+            guard audience.postsCard else {
+                await keepOffFeed(workoutId: workoutId)
+                return
+            }
+        } else {
+            // "Only walks I photographed reach my feed." Gated HERE rather than
+            // at each call site so every route into the photo-less card honours
+            // it from one place.
+            guard NotificationPreferences.load().autoPostWithoutPhoto else { return }
+        }
+        // nil (no explicit choice) omits the key, so the server follows the
+        // account's grid rules exactly as it always has.
+        let onProfile = audience?.onProfile
 
         let stats = todayStats(workoutId: workoutId)
         do {
@@ -457,7 +473,7 @@ enum RunPostService {
                 // isAuto — the server may replace this card in place with a
                 // later photo post, but it never counts as the user's one post
                 // per workout.
-                _ = try await createAutoPost(workoutId: workoutId, stats: stats)
+                _ = try await createAutoPost(workoutId: workoutId, stats: stats, onProfile: onProfile)
             } catch let APIError.badRequest(message)
                         where message == "auto_post_workout_unavailable" || message == "auto_post_stats_mismatch" {
                 // HealthKit/backend sync can lag the prompt by a beat. Keep the
@@ -465,15 +481,43 @@ enum RunPostService {
                 // making "Skip" look broken. The raw workout card can still
                 // appear later if the sync catches up.
                 print("[RunPostService] linked auto post rejected (\(message)); retrying unlinked")
-                _ = try await createAutoPost(workoutId: nil, stats: stats)
+                _ = try await createAutoPost(workoutId: nil, stats: stats, onProfile: onProfile)
             }
         } catch {
             print("[RunPostService] autoPostMile failed: \(error)")
         }
     }
 
+    /// "Off the feed" for one walk: keep its raw workout card out of friends'
+    /// feeds. The server holds a just-synced card back for the 10-minute camera
+    /// window anyway, so this nearly always lands before anyone could have
+    /// seen it — but a phone that's offline at the prompt would otherwise lose
+    /// the choice outright, so it retries a few times with backoff. An older
+    /// server answers 404, which is final (it can't honour the choice).
     @MainActor
-    private static func createAutoPost(workoutId: String?, stats: RunStatsInput) async throws -> PostItem {
+    static func keepOffFeed(workoutId: String) async {
+        let delays: [UInt64] = [0, 5, 30, 120]
+        for (attempt, delay) in delays.enumerated() {
+            if delay > 0 { try? await Task.sleep(nanoseconds: delay * 1_000_000_000) }
+            do {
+                _ = try await WorkoutService().setFeedHidden(workoutId: workoutId, hidden: true)
+                return
+            } catch WorkoutServiceError.invalidResponse {
+                // WorkoutService maps a 404 here: an older server has no such
+                // route, and asking again won't change that.
+                print("[RunPostService] server can't hide walks from the feed yet")
+                return
+            } catch WorkoutServiceError.notAuthenticated {
+                return
+            } catch {
+                print("[RunPostService] keepOffFeed attempt \(attempt + 1) failed: \(error)")
+            }
+        }
+    }
+
+    @MainActor
+    private static func createAutoPost(workoutId: String?, stats: RunStatsInput,
+                                       onProfile: Bool? = nil) async throws -> PostItem {
         // A buddy walk's auto card is the WALK's card, not a solo one. The
         // server resolves the session from the workout regardless (older
         // builds), but saying it here also credits the crew in roster order
@@ -493,7 +537,8 @@ enum RunPostService {
             stats: stats.snapshot,
             isAuto: true,
             coauthorUserIds: crew.isEmpty ? nil : crew,
-            buddySessionId: session?.id
+            buddySessionId: session?.id,
+            onProfile: onProfile
         )
     }
 

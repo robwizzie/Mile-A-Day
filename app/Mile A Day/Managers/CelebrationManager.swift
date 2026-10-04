@@ -876,8 +876,16 @@ class CelebrationManager: ObservableObject {
     /// user can re-watch (and re-share) the same celebration from anywhere in the app.
     /// Clears any pending queue first so the replay shows immediately.
     func replayCelebration(_ celebration: CelebrationType) {
-        let dropped = celebrationQueue
-        celebrationQueue.removeAll()
+        // A waiting photo prompt survives the clear and plays after the
+        // replay: dropping it lost the walk's post outright, since nothing
+        // re-arms a prompt once the goal sequence that queued it has run.
+        var kept = celebrationQueue.filter(Self.isPhotoPrompt)
+        if let current = currentCelebration, Self.isPhotoPrompt(current),
+           !kept.contains(current) {
+            kept.insert(current, at: 0)
+        }
+        let dropped = celebrationQueue.filter { !Self.isPhotoPrompt($0) }
+        celebrationQueue = kept
         currentCelebration = nil
         isShowingCelebration = false
         reportDroppedUnseen(dropped)
@@ -987,9 +995,18 @@ class CelebrationManager: ObservableObject {
         markConsumed(currentCelebration)
         // Clear remaining queue when user wants to navigate away — but report
         // what was dropped, so still-unseen one-shots can re-arm.
+        //
+        // Except the photo prompt. "View badges" on a medal (or any other
+        // navigating dismiss) mid-sequence used to wipe it with the rest, and
+        // it was the one item nothing could bring back: the goal sequence that
+        // queued it had already run, so the walk got neither its prompt nor
+        // its route card. It stays queued and comes up once the navigation
+        // has settled.
+        var keepsPhotoPrompt = false
         if action != .none {
-            let dropped = celebrationQueue
-            celebrationQueue.removeAll()
+            let dropped = celebrationQueue.filter { !Self.isPhotoPrompt($0) }
+            celebrationQueue = celebrationQueue.filter(Self.isPhotoPrompt)
+            keepsPhotoPrompt = !celebrationQueue.isEmpty
             reportDroppedUnseen(dropped)
         }
 
@@ -1000,6 +1017,23 @@ class CelebrationManager: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.pendingAction = action
         }
+        if keepsPhotoPrompt {
+            scheduleShowNext(after: 1.5)
+        }
+    }
+
+    private static func isPhotoPrompt(_ celebration: CelebrationType) -> Bool {
+        if case .postRunPhotoPrompt = celebration { return true }
+        return false
+    }
+
+    /// Would a photo prompt for this workout still be news — never offered
+    /// (offering stamps at dismissal) and not already posted some other way?
+    /// Read by the dashboard's recovery pass, which re-offers a prompt that
+    /// was lost before anyone saw it (e.g. the app was killed while it sat
+    /// queued behind the flame, which is stamped as shown on its own).
+    func needsPhotoPrompt(for workoutId: String) -> Bool {
+        !hasPromptedPhoto(for: workoutId) && !PostedWorkoutRegistry.hasPost(for: workoutId)
     }
     
     /// Clear the pending action (should be called after handling it)

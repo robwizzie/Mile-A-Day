@@ -28,6 +28,8 @@ struct NotificationSettingsView: View {
     }
     /// Local master switch for the post-run photo prompt + auto-sharing the mile.
     @AppStorage("autoShareRunsToFeed") private var autoShareRunsToFeed = true
+    /// "Walks without a photo" — the photo prompt's default audience.
+    @State private var skipAudience = WalkAudience.storedDefault
     @ObservedObject private var notificationService = MADNotificationService.shared
     @StateObject private var friendService = FriendService()
 
@@ -202,11 +204,10 @@ struct NotificationSettingsView: View {
                         settingsToggle("Share when I'm out right now", isOn: $prefs.shareLivePresence,
                             description: "Friends tracking at the same time see you're out on a walk or run — never your location")
                         settingsDivider
-                        settingsToggle("Photo prompt after a run", isOn: $autoShareRunsToFeed,
-                            description: "Ask for a photo of your mile when you finish. Turn it off and nothing is posted automatically at all")
+                        settingsToggle("Photo prompt after a walk or run", isOn: $autoShareRunsToFeed,
+                            description: "Ask for a photo when you finish — it joins your route and stats as one post. Turn it off and nothing is posted for you")
                         settingsDivider
-                        settingsToggle("Post my route when I skip", isOn: $prefs.autoPostWithoutPhoto,
-                            description: "Skipping the photo still puts your route and stats on the feed. Turn off to keep the feed to walks you actually photographed")
+                        skipAudienceRow
                         settingsDivider
                         settingsToggle("New posts from friends", isOn: $prefs.friendPostsEnabled,
                             description: "Get notified when a friend shares a photo")
@@ -442,6 +443,58 @@ struct NotificationSettingsView: View {
         }
         .padding(MADTheme.Spacing.md)
         .madLiquidGlass()
+    }
+
+    // MARK: - Walks without a photo
+
+    /// The photo prompt's "who sees this walk" default — the same three
+    /// answers, so the setting and the screen where the choice is actually
+    /// made can't describe two different things. Replaces the old "Post my
+    /// route when I skip" switch, whose OFF never kept a walk off the feed
+    /// (friends still got its workout card).
+    private var skipAudienceRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Text("Walks without a photo")
+                    .font(MADTheme.Typography.body)
+                Spacer(minLength: 8)
+                Menu {
+                    Picker("Walks without a photo", selection: skipAudienceBinding) {
+                        ForEach(WalkAudience.allCases) { option in
+                            Label(option.title, systemImage: option.icon).tag(option)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(skipAudience.title)
+                            .lineLimit(1)
+                            .fixedSize()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(MADTheme.Colors.madRed)
+                }
+            }
+            Text("\(skipAudience.explanation(noun: "walk")) The photo prompt starts here, and you can change it for any walk.")
+                .font(.system(size: 11, design: .rounded))
+                .foregroundColor(.white.opacity(0.35))
+                .padding(.leading, 2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var skipAudienceBinding: Binding<WalkAudience> {
+        Binding(
+            get: { skipAudience },
+            set: { newValue in
+                skipAudience = newValue
+                // Keeps the synced switch (and the buddy recap, which reads
+                // it) in step; sent to the server on Save like the rest.
+                prefs.autoPostWithoutPhoto = newValue.postsCard
+                WalkAudience.remember(newValue)
+            }
+        )
     }
 
     // MARK: - Settings Toggle
@@ -746,6 +799,13 @@ struct NotificationSettingsView: View {
                 prefs.autoPostWithoutPhoto != autoPost {
                 prefs.autoPostWithoutPhoto = autoPost
                 changed = true
+                // A phone with no remembered default (a reinstall, a new
+                // phone) shows what the server restored, not a stale derive.
+                if !WalkAudience.hasRememberedChoice {
+                    skipAudience = autoPost
+                        ? (prefs.autoPostsOnProfile ? .feedAndProfile : .feedOnly)
+                        : .offFeed
+                }
             }
             if let autoOnProfile = settings.auto_posts_on_profile,
                 prefs.autoPostsOnProfile != autoOnProfile {

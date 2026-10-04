@@ -1022,7 +1022,14 @@ enum PostService {
         // when the sticker is actually ON — the server re-checks the author's
         // membership before storing it, and stores nothing when they aren't in
         // it, so this is a claim rather than an authorization.
-        competitionId: String? = nil
+        competitionId: String? = nil,
+        // The AUTHOR's per-post grid choice ("Show on my profile"). nil omits
+        // the key — the server stores NULL and follows the account rules, which
+        // is exactly what an older server does with a key it doesn't know.
+        // false keeps the post off my grid while it still reaches friends'
+        // feeds; true puts a photo-less route card on it even when
+        // "Only show routes with photos" would hide it.
+        onProfile: Bool? = nil
     ) async throws -> PostItem {
         struct Body: Encodable {
             let media_url: String?
@@ -1040,6 +1047,8 @@ enum PostService {
             let buddy_session_id: String?
             let photo_source: String?
             let competition_id: String?
+            /// Synthesized `encode` uses `encodeIfPresent`, so nil is omitted.
+            let on_profile: Bool?
         }
         let bodyData = try JSONEncoder().encode(
             Body(
@@ -1057,7 +1066,8 @@ enum PostService {
                 coauthor_user_ids: coauthorUserIds,
                 buddy_session_id: buddySessionId,
                 photo_source: photoSource?.rawValue,
-                competition_id: competitionId
+                competition_id: competitionId,
+                on_profile: onProfile
             )
         )
         return try await APIClient.fancyFetch(
