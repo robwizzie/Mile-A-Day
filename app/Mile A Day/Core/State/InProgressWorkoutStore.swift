@@ -197,6 +197,22 @@ enum InProgressWorkoutStore {
     private static let maxRoutePoints = 5000 // Prevent unbounded growth
     private static let maxStateStaleness: TimeInterval = 86400 // 24 hours
 
+    /// The last state this process wrote or decoded, so `load()` is a copy
+    /// instead of a JSON decode. The blob carries every route point (up to
+    /// 5000, ~1 MB) and it was decoded several times a SECOND on the main
+    /// thread during a walk — the tracker's 1 Hz tick, the distance persist,
+    /// the in-progress banner's timer, and `DashboardView.inProgressState`
+    /// on every body pass behind the cover. On a long walk that saturated the
+    /// main thread (the tracker stopped answering taps, Stop included) and
+    /// burned enough background CPU to get the app terminated mid-walk, which
+    /// is what flips the Live Activity to TRACKING INTERRUPTED. Coherent
+    /// because this enum is the only reader/writer of the key and only the
+    /// main app process uses it. `cacheLoaded` distinguishes "cached nothing"
+    /// (cleared) from "not read yet".
+    private static let cacheLock = NSLock()
+    private static var cachedState: InProgressWorkoutState?
+    private static var cacheLoaded = false
+
     // MARK: - Single Workout Enforcement
 
     /// Check if a workout is currently locked (active)
@@ -212,7 +228,6 @@ enum InProgressWorkoutStore {
             return false
         }
         UserDefaults.standard.set(true, forKey: workoutLockKey)
-        UserDefaults.standard.synchronize()
         print("[InProgressWorkoutStore] ✅ Workout lock acquired")
         return true
     }
@@ -220,7 +235,6 @@ enum InProgressWorkoutStore {
     /// Release workout lock
     static func releaseLock() {
         UserDefaults.standard.set(false, forKey: workoutLockKey)
-        UserDefaults.standard.synchronize()
         print("[InProgressWorkoutStore] ✅ Workout lock released")
     }
 
@@ -244,7 +258,16 @@ enum InProgressWorkoutStore {
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(updatedState)
             UserDefaults.standard.set(data, forKey: storageKey)
-            UserDefaults.standard.synchronize() // Force immediate flush
+            // No `synchronize()`: the write already reached cfprefsd, which
+            // persists it even if this process is killed. synchronize only
+            // WAITS on that daemon — synchronous IPC on the main thread, every
+            // save of a blob up to ~1 MB, and a main thread parked in a kernel
+            // wait is exactly what a background scene-update watchdog kills
+            // (0x8BADF00D, "stuck", ~0% app CPU).
+            cacheLock.lock()
+            cachedState = updatedState
+            cacheLoaded = true
+            cacheLock.unlock()
             print("[InProgressWorkoutStore] ✅ Saved workout state: \(updatedState.currentDistance) mi, \(updatedState.routePoints.count) points")
         } catch {
             print("[InProgressWorkoutStore] ❌ Failed to save state: \(error)")
@@ -253,46 +276,66 @@ enum InProgressWorkoutStore {
 
     /// Load the last in‑progress workout snapshot with validation
     static func load() -> InProgressWorkoutState? {
-        guard let data = UserDefaults.standard.data(forKey: storageKey) else {
-            print("[InProgressWorkoutStore] ℹ️ No saved workout state found")
+        cacheLock.lock()
+        let cached = cacheLoaded ? Optional(cachedState) : nil
+        cacheLock.unlock()
+
+        let decoded: InProgressWorkoutState
+        if let cached {
+            guard let state = cached else { return nil }
+            decoded = state
+        } else {
+            guard let data = UserDefaults.standard.data(forKey: storageKey) else {
+                cacheLock.lock()
+                cachedState = nil
+                cacheLoaded = true
+                cacheLock.unlock()
+                return nil
+            }
+            do {
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                decoded = try decoder.decode(InProgressWorkoutState.self, from: data)
+            } catch {
+                print("[InProgressWorkoutStore] ❌ Failed to decode state: \(error)")
+                clear() // Clear corrupted data
+                return nil
+            }
+            cacheLock.lock()
+            cachedState = decoded
+            cacheLoaded = true
+            cacheLock.unlock()
+        }
+
+        let state = decoded
+
+        // Validate state freshness
+        let staleness = Date().timeIntervalSince(state.lastSaveTime)
+        if staleness > maxStateStaleness {
+            print("[InProgressWorkoutStore] ⚠️ State is stale (\(Int(staleness/3600))h old), clearing")
+            clear()
             return nil
         }
 
-        do {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            let state = try decoder.decode(InProgressWorkoutState.self, from: data)
-
-            // Validate state freshness
-            let staleness = Date().timeIntervalSince(state.lastSaveTime)
-            if staleness > maxStateStaleness {
-                print("[InProgressWorkoutStore] ⚠️ State is stale (\(Int(staleness/3600))h old), clearing")
-                clear()
-                return nil
-            }
-
-            // Validate state integrity
-            guard state.isActive else {
-                print("[InProgressWorkoutStore] ⚠️ Loaded inactive state, clearing")
-                clear()
-                return nil
-            }
-
-            print("[InProgressWorkoutStore] ✅ Loaded workout state: \(state.currentDistance) mi, \(state.routePoints.count) points")
-            return state
-        } catch {
-            print("[InProgressWorkoutStore] ❌ Failed to decode state: \(error)")
-            clear() // Clear corrupted data
+        // Validate state integrity
+        guard state.isActive else {
+            print("[InProgressWorkoutStore] ⚠️ Loaded inactive state, clearing")
+            clear()
             return nil
         }
+
+        return state
     }
 
     /// Clear any persisted in‑progress workout and release lock
     static func clear() {
         routePointBuffer.removeAll()
         UserDefaults.standard.removeObject(forKey: storageKey)
+        cacheLock.lock()
+        cachedState = nil
+        cacheLoaded = true
+        cacheLock.unlock()
         releaseLock()
-        UserDefaults.standard.synchronize()
         print("[InProgressWorkoutStore] 🗑️ Cleared workout state and lock")
     }
 

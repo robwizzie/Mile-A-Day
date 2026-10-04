@@ -98,6 +98,14 @@ struct DashboardView: View {
     /// (up to thousands of GPS points) — too expensive to do per render,
     /// so views read this flag and it's refreshed on appear / cover dismiss.
     @State private var hasActiveWorkout = false
+    /// An in-progress workout found while the app was launched in the
+    /// BACKGROUND (a silent push, a HealthKit/BGTask wake). Presenting the
+    /// tracker then runs its recovery — GPS, the dead-man notification, a
+    /// fresh Live Activity — for a walk the user isn't on, with no screen to
+    /// see it on: the Live Activity went stale into TRACKING INTERRUPTED and
+    /// "Is your workout still tracking?" fired five minutes later, on a phone
+    /// in a pocket. Held here and presented on the next `.active`.
+    @State private var trackerDeferredForForeground = false
 
     @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStyle.modern.rawValue
     @State private var showDashboardStyleChooser = false
@@ -852,7 +860,13 @@ struct DashboardView: View {
                 let active = InProgressWorkoutStore.load()?.isActive == true
                 hasActiveWorkout = active
                 if active {
-                    showWorkoutView = true
+                    if UIApplication.shared.applicationState == .background {
+                        trackerDeferredForForeground = true
+                    } else {
+                        showWorkoutView = true
+                    }
+                } else {
+                    WorkoutLocationManager.retireOrphanedSession()
                 }
 
                 // First-run welcome tour: wait a beat for layout to settle, and
@@ -1008,6 +1022,16 @@ struct DashboardView: View {
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
+                    // A workout surfaced during a background launch waits for
+                    // the user; with none on disk, retire anything a workout
+                    // left behind (Live Activity, watchdog, a zombie session).
+                    let active = InProgressWorkoutStore.load()?.isActive == true
+                    hasActiveWorkout = active
+                    if active, trackerDeferredForForeground, !showWorkoutView {
+                        showWorkoutView = true
+                    }
+                    trackerDeferredForForeground = false
+                    if !active { WorkoutLocationManager.retireOrphanedSession() }
                     celebrationManager.onAppBecameActive()
                     // Medals awarded while we were away (a friend's hype, a
                     // buddy walk's finish, a background sync) — fetched now,
@@ -1967,6 +1991,11 @@ struct DashboardView: View {
                         }
                     }
                     InProgressWorkoutStore.clear()
+                    // The store was the only thing cleared here: the tracking
+                    // session kept running (GPS, watchdog, heartbeat), and the
+                    // tracker then opened on the start wizard over it — a
+                    // workout with no Stop button.
+                    WorkoutLocationManager.retireOrphanedSession()
                     showInProgressBanner = false
                 }
             } message: {

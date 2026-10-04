@@ -97,6 +97,10 @@ struct WorkoutTrackingView: View {
     /// system started deferring updates (frozen activity on the lock screen).
     @State private var lastActivityPushDate: Date = .distantPast
     @State private var lastPushedDistance: Double = -1
+    /// When the 1 Hz tick last wrote the recovery snapshot. Every write
+    /// re-encodes the whole route (up to ~1 MB), so it is throttled — see
+    /// `updateLiveActivity`.
+    @State private var lastStatePersistDate: Date = .distantPast
     /// Live buddy roster, when this workout is part of a Buddy Walk.
     @ObservedObject private var buddyService = BuddySessionService.shared
     /// One-shot guard so the buddy auto-start can't fire twice if the view's
@@ -111,6 +115,12 @@ struct WorkoutTrackingView: View {
     /// mile still counts (Health access is fine) — no scary blocking alert.
     @State private var showSaveFallbackToast = false
     @State private var endWorkoutTimeoutTask: DispatchWorkItem? // Timeout for end workout flow
+    /// Keeps the process alive through the async HealthKit save. Ending the
+    /// workout stops location updates — the only thing that kept the app
+    /// running in the background — so a user who taps End and pockets the
+    /// phone was suspended mid-chain: no save, no cleanup, and the 10s
+    /// timeout couldn't fire either.
+    @State private var finishBackgroundTask: UIBackgroundTaskIdentifier = .invalid
     @State private var trackingMetricsHeight: CGFloat = 0 // Measured height of the scrollable metrics area
     @State private var workoutSession: HKWorkoutSession?
     @State private var workoutBuilder: HKWorkoutBuilder?
@@ -895,7 +905,11 @@ struct WorkoutTrackingView: View {
                 withAnimation { hypeToast = nil }
             }
             // Carry the hype onto the Live Activity right away — the 30s
-            // cadence would otherwise sit on the moment.
+            // cadence would otherwise sit on the moment. Only mid-workout:
+            // `updateLiveActivity` creates an activity when it holds none, so
+            // a hype landing on the recap would raise a new one for a walk
+            // that is over — and it would read TRACKING INTERRUPTED 3 min later.
+            guard isTracking, !isStopping else { return }
             lastActivityPushDate = .distantPast
             updateLiveActivity()
         }
@@ -2103,6 +2117,8 @@ struct WorkoutTrackingView: View {
             // do a final Live Activity update and state save so the Dynamic Island
             // shows current data while the view is gone.
             if isTracking && !isStopping {
+                // The one save that must not wait behind the 5s throttle.
+                lastStatePersistDate = .distantPast
                 updateLiveActivity()
             }
 
@@ -2152,6 +2168,11 @@ struct WorkoutTrackingView: View {
             if startBuddyWorkoutIfReady() { return }
 
             guard let saved = InProgressWorkoutStore.load(), saved.isActive else {
+                // Opening on the start wizard. If a tracking session is still
+                // running underneath with no workout on disk, nothing on this
+                // screen can stop it — retire it (and its Live Activity and
+                // watchdog) rather than leave a walk only a force-quit ends.
+                WorkoutLocationManager.retireOrphanedSession()
                 applyPreselectedActivity()
                 return
             }
@@ -2885,9 +2906,16 @@ struct WorkoutTrackingView: View {
         // Cleaned once here — despiked, smoothed, simplified — because this
         // is the single point every route consumer flows through (HealthKit
         // route → backend sync → feed maps).
+        let persistedState = InProgressWorkoutStore.load()
         let routeLocations = WorkoutRouteCleanup.cleaned(
-            (InProgressWorkoutStore.load()?.routePoints ?? []).map { $0.toCLLocation() }
+            (persistedState?.routePoints ?? []).map { $0.toCLLocation() }
         )
+        // Read the Stealth latch NOW. `markEnded()` below flips the state
+        // inactive, and `load()` deletes an inactive state on its next read —
+        // so reading it later (as the metadata block used to) always came back
+        // nil, and a walk started in Stealth with the toggle turned off
+        // mid-walk lost its stealth stamp.
+        let latchedStealth = persistedState?.stealth == true
 
         // The user has ENDED this workout — record that synchronously, before
         // the async HealthKit save. finishCleanup() clears the store only at
@@ -2901,6 +2929,21 @@ struct WorkoutTrackingView: View {
         timer = nil
         locationManager.stopTracking()
         livePresence.endSession()
+
+        // End the Live Activity NOW, at the user's decision, not at the far
+        // end of the HealthKit chain. Location updates just stopped, so
+        // nothing keeps the process alive any more; a user who taps End and
+        // locks the phone was suspended before `finishCleanup` ran, the
+        // activity was never ended, and three minutes later its staleDate
+        // turned it into TRACKING INTERRUPTED — on a walk they had finished.
+        endLiveActivity()
+
+        // And ask for the time the save chain needs.
+        if finishBackgroundTask == .invalid {
+            finishBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "FinishWorkout") {
+                endFinishBackgroundTask()
+            }
+        }
 
         // Safety timeout: if HealthKit callbacks never fire, force-cleanup after 10s
         let timeout = DispatchWorkItem { [self] in
@@ -3116,7 +3159,7 @@ struct WorkoutTrackingView: View {
         // The sync reads this back off the HKWorkout and keeps the trace on
         // the phone; the route is still written to HealthKit below (the owner
         // keeps their own map in Apple Fitness).
-        if InProgressWorkoutStore.load()?.stealth == true || StealthModeStore.shared.isOn {
+        if latchedStealth || StealthModeStore.shared.isOn {
             metadata[StealthModeStore.metadataKey] = true
         }
         let addMetadataThenSave = {
@@ -3228,6 +3271,8 @@ struct WorkoutTrackingView: View {
         pendingRaceStamp = nil
         GhostCoach.shared.stop()
 
+        endFinishBackgroundTask()
+
         // Show result to user. The mile counts via GPS/pedometer sync whether
         // or not the HealthKit write succeeded, so a failed save is never a lost
         // workout — tailor the messaging to the cause instead of alarming.
@@ -3245,6 +3290,12 @@ struct WorkoutTrackingView: View {
                 dismiss()
             }
         }
+    }
+
+    private func endFinishBackgroundTask() {
+        guard finishBackgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(finishBackgroundTask)
+        finishBackgroundTask = .invalid
     }
 
     // MARK: - Live Activity Management
@@ -3373,8 +3424,11 @@ struct WorkoutTrackingView: View {
         let realTimeElapsed = activeElapsedTime
         let paused = locationManager.isPaused
 
-        // Update Live Activity (if we have one)
-        if workoutActivity == nil {
+        // Update Live Activity (if we have one). Only CREATE one for a
+        // workout that is actually running — this is reached from the hype
+        // handler and the disappear hook too, and an activity raised for a
+        // workout that isn't recording goes stale into TRACKING INTERRUPTED.
+        if workoutActivity == nil, isTracking, InProgressWorkoutStore.load() != nil {
             startLiveActivity()
         }
         if let activity = workoutActivity {
@@ -3450,6 +3504,14 @@ struct WorkoutTrackingView: View {
         }
 
         // Persist state for recovery (only update EXISTING state, never create new).
+        // Throttled: each save re-encodes every route point, and doing it once
+        // a second on the main thread is what made a long walk's tracker stop
+        // answering taps. Distance has its own 2s persist in the location
+        // manager, pauses write through on each edge, and the clock is derived
+        // from `startTime` — so 5s loses nothing a relaunch needs.
+        let now = Date()
+        guard now.timeIntervalSince(lastStatePersistDate) >= 5 else { return }
+        lastStatePersistDate = now
         InProgressWorkoutStore.flushRoutePoints()
         if var existingState = InProgressWorkoutStore.load() {
             existingState.elapsedTime = realTimeElapsed
@@ -3508,6 +3570,10 @@ struct WorkoutTrackingView: View {
         Task {
             let allActivities = Activity<WorkoutActivityAttributes>.activities
             for orphanedActivity in allActivities {
+                // Skip anything already ended (including the one just ended
+                // above) — re-ending it `.immediate` would cut its 5s linger.
+                guard orphanedActivity.activityState == .active
+                        || orphanedActivity.activityState == .stale else { continue }
                 if orphanedActivity.id != endedActivityID {
                     print("🗑️ Cleaning up orphaned Live Activity: \(orphanedActivity.id)")
                     await orphanedActivity.end(nil, dismissalPolicy: .immediate)
