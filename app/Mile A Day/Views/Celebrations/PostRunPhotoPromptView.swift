@@ -3,23 +3,17 @@ import CoreLocation
 
 /// The finale after a walk or run: "make it a post".
 ///
-/// What this screen has to get across, in order:
-///   1. A photo isn't a separate thing — it JOINS the walk's route and stats
-///      as one post. So the hero is a preview of that post: the walk's real
-///      route card with an empty photo frame clipped onto it, waiting.
-///   2. Where it goes. Walks used to reach friends' feeds whether or not a
-///      photo was added, and land on the grid only sometimes, and nothing
-///      here said so. Now the screen asks: Feed + profile / Feed only / Off
-///      the feed (`WalkAudience`), and every button names what it will do.
-///   3. That it's fun. Cards fan in, the frame floats, and on the Fun
-///      dashboard your own Flamey is standing by in shades.
+/// The hero is a preview of what gets posted — the walk's real route card
+/// with an empty photo frame clipped onto it — because the thing people
+/// didn't get is that a photo JOINS the walk's route and stats as one post,
+/// rather than being something separate. Cards fan in and the frame floats;
+/// on the Fun dashboard the user's own Flamey stands by.
 ///
-/// Mechanics unchanged from before: taking a photo publishes it through the
-/// composer (which the audience seeds); skipping posts the route/stats card
-/// per the audience — or, for "Off the feed", keeps the walk's raw card out
-/// of friends' feeds as well (`RunPostService.autoPostMile`). Snaps taken
-/// MID-run lead the screen when there are any; the stash is cleared once
-/// this prompt resolves, whichever path is taken.
+/// Mechanics are unchanged: taking a photo publishes it through the composer;
+/// skipping hands the walk to `RunPostService.autoPostMile`, which follows the
+/// "Post my route when I skip" setting. Snaps taken MID-run lead the screen
+/// when there are any; the stash is cleared once this prompt resolves,
+/// whichever path is taken.
 struct PostRunPhotoPromptView: View {
     let workoutId: String
     let workoutType: String
@@ -51,12 +45,6 @@ struct PostRunPhotoPromptView: View {
     @State private var showLibraryImport = false
     @State private var importError: String?
 
-    /// Who sees this walk. Opens on the remembered default.
-    @State private var audience: WalkAudience = WalkAudience.storedDefault
-    /// The user changed it on THIS screen (vs. it being the default).
-    @State private var audienceTouched = false
-    /// "Use this for future walks".
-    @State private var rememberAudience = false
     /// The walk's own stats, resolved once — the same figures the card bakes.
     @State private var stats: RunStatsInput?
     /// The walk's real GPS trace for the preview card, when friends will
@@ -75,7 +63,14 @@ struct PostRunPhotoPromptView: View {
     /// Fun dashboard only — nil on Modern, where Flamey doesn't exist.
     private var flameyLook: FlameyLook? { FlameyFacts.look(mood: .done, detail: .compact) }
 
-    private static let cardSize = CGSize(width: 128, height: 160)
+    /// Does skipping still put a route/stats card on the feed? Read so the
+    /// note under Skip can't promise something the setting has turned off —
+    /// `RunPostService.autoPostMile` is what enforces it.
+    private var postsCardOnSkip: Bool {
+        NotificationPreferences.load().autoPostWithoutPhoto
+    }
+
+    private static let cardSize = CGSize(width: 140, height: 175)
 
     var body: some View {
         ZStack {
@@ -101,9 +96,9 @@ struct PostRunPhotoPromptView: View {
                 }
 
             ScrollView {
-                VStack(spacing: MADTheme.Spacing.md) {
+                VStack(spacing: MADTheme.Spacing.lg) {
                     header
-                        .padding(.top, MADTheme.Spacing.md)
+                        .padding(.top, MADTheme.Spacing.xl)
 
                     if midRunSnaps.isEmpty {
                         previewStack
@@ -118,10 +113,6 @@ struct PostRunPhotoPromptView: View {
                         countdownPill
                             .opacity(appeared ? 1 : 0)
                     }
-
-                    audienceCard
-                        .opacity(appeared ? 1 : 0)
-                        .offset(y: appeared ? 0 : 16)
                 }
                 .padding(.horizontal, MADTheme.Spacing.lg)
                 .padding(.bottom, MADTheme.Spacing.md)
@@ -154,8 +145,6 @@ struct PostRunPhotoPromptView: View {
         .onChange(of: composerLaunch != nil) { _, open in if open { manager.photoPromptEngaged = true } }
         .onChange(of: showGallery) { _, open in if open { manager.photoPromptEngaged = true } }
         .onChange(of: showLibraryImport) { _, open in if open { manager.photoPromptEngaged = true } }
-        // Choosing an audience is engaging with the prompt too.
-        .onChange(of: audience) { _, _ in manager.photoPromptEngaged = true }
         .onAppear {
             midRunSnaps = MidRunPhotoStash.entries()
             if stats == nil { stats = RunPostService.todayStats(workoutId: workoutId) }
@@ -165,7 +154,8 @@ struct PostRunPhotoPromptView: View {
             // there's nothing to offer: the walk's own photos are still
             // postable, so the screen stays and swaps its primary button (see
             // `cameraOpen`). Only a day with no qualifying workout at all takes
-            // the skip path, which follows the default audience. Deferred a
+            // the skip path, where the walk still gets its card per the
+            // setting (an `is_auto` post, exempt from both tiers). Deferred a
             // tick because resolving a celebration from inside its own
             // onAppear mutates the manager mid-update.
             guard freshWindow.canPostToday else {
@@ -205,8 +195,7 @@ struct PostRunPhotoPromptView: View {
                 initialPrimaryWasFront: launch.primaryWasFront,
                 // Leaving returns to this prompt with the snaps intact —
                 // "‹ Back", not "Cancel", so nobody fears losing photos.
-                backNavigation: true,
-                initialShowOnProfile: composerStartsOnProfile
+                backNavigation: true
             ) { outcome in
                 composerLaunch = nil
                 switch outcome {
@@ -220,29 +209,17 @@ struct PostRunPhotoPromptView: View {
                     return
                 case .published(let toFeed, _):
                     didAct = true
-                    commitAudienceMemory()
                     if !toFeed {
-                        // Photo to a story only — the feed still gets what the
-                        // audience says (the route card, or nothing at all).
+                        // Photo to a story only — the feed still gets the
+                        // walk's route/stats card (per the setting).
                         Task {
-                            await RunPostService.autoPostMile(
-                                workoutId: workoutId, workoutType: workoutType, audience: audience)
+                            await RunPostService.autoPostMile(workoutId: workoutId, workoutType: workoutType)
                         }
                     }
                     finish()
                 }
             }
         }
-    }
-
-    /// "Feed only" turns the composer's "Show on my profile" off — but only
-    /// when the user actually CHOSE it, here or as a remembered default. When
-    /// it's merely derived from the photo-first grid setting ("only show
-    /// routes with photos"), a photo is exactly what that setting wants ON the
-    /// grid.
-    private var composerStartsOnProfile: Bool {
-        guard audience == .feedOnly else { return true }
-        return !(audienceTouched || WalkAudience.hasRememberedChoice)
     }
 
     // MARK: - Background
@@ -310,11 +287,11 @@ struct PostRunPhotoPromptView: View {
             let lead = midRunSnaps.count == 1
                 ? "You snapped a photo out there."
                 : "You snapped \(midRunSnaps.count) photos out there."
-            return "\(lead) Tap one and it joins your route and stats as one post."
+            return "\(lead) Tap one to add it to your post."
         }
         return cameraOpen
-            ? "Add a photo and it joins your route and stats as one post — just how friends will see it."
-            : "The camera's closed, but any photo you took on this \(noun) can still go up today."
+            ? "Add a photo and it joins your route and stats in one post."
+            : "Any photo you took on this \(noun) can still go up today."
     }
 
     // MARK: - Hero: a preview of the post
@@ -334,13 +311,13 @@ struct PostRunPhotoPromptView: View {
                 .overlay(alignment: .topLeading) { cardTag("ROUTE & STATS", icon: "map.fill") }
                 .shadow(color: .black.opacity(0.45), radius: 14, y: 8)
                 .rotationEffect(.degrees(appeared ? -7 : 0))
-                .offset(x: appeared ? -64 : 0, y: appeared ? 6 : 0)
+                .offset(x: appeared ? -68 : 0, y: appeared ? 6 : 0)
 
             photoFrame
                 .frame(width: size.width, height: size.height)
                 .shadow(color: accent.opacity(0.35), radius: 18, y: 8)
                 .rotationEffect(.degrees(appeared ? 6 : 0))
-                .offset(x: appeared ? 64 : 0, y: (appeared ? -6 : 0) + (floating ? -4 : 2))
+                .offset(x: appeared ? 68 : 0, y: (appeared ? -6 : 0) + (floating ? -4 : 2))
 
             // The "+" that says these two become one.
             Image(systemName: "plus")
@@ -357,24 +334,13 @@ struct PostRunPhotoPromptView: View {
             if let look = flameyLook {
                 FlameyDressedFigure(look: look, health: .healthy, size: 64, scale: 1, mood: .done)
                     .frame(width: 64, height: 64)
-                    .offset(x: appeared ? 118 : 60, y: 78 + (floating ? -3 : 0))
+                    .offset(x: appeared ? 126 : 60, y: 84 + (floating ? -3 : 0))
                     .opacity(appeared ? 1 : 0)
                     .accessibilityHidden(true)
             }
         }
-        .frame(height: size.height + 28)
+        .frame(height: size.height + 30)
         .frame(maxWidth: .infinity)
-        // The whole idea in one line, under the picture of it.
-        .overlay(alignment: .bottom) {
-            Text("Your photo + your route & stats = one post")
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundColor(.white.opacity(0.6))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .offset(y: 18)
-                .opacity(appeared ? 1 : 0)
-        }
-        .padding(.bottom, 18)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Preview: your photo joins your \(noun)'s route and stats as one post")
     }
@@ -510,80 +476,6 @@ struct PostRunPhotoPromptView: View {
         .padding(8)
     }
 
-    // MARK: - Who sees it
-
-    private var audienceCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("WHO SEES THIS \(noun.uppercased())")
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                .tracking(1.2)
-                .foregroundColor(.white.opacity(0.45))
-
-            HStack(spacing: 8) {
-                ForEach(WalkAudience.allCases) { option in
-                    audienceTile(option)
-                }
-            }
-
-            Text(audience.explanation(noun: noun))
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.7))
-                .fixedSize(horizontal: false, vertical: true)
-                .id(audience)
-                .transition(.opacity)
-
-            Toggle(isOn: $rememberAudience) {
-                Text("Use this for future \(noun)s")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.85))
-            }
-            .tint(accent)
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
-        )
-        .animation(.easeInOut(duration: 0.2), value: audience)
-    }
-
-    private func audienceTile(_ option: WalkAudience) -> some View {
-        let selected = audience == option
-        return Button {
-            MADHaptics.tap()
-            audience = option
-            audienceTouched = true
-        } label: {
-            VStack(spacing: 6) {
-                Image(systemName: option.icon)
-                    .font(.system(size: 16, weight: .bold))
-                Text(option.title)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .foregroundColor(selected ? .white : .white.opacity(0.6))
-            .frame(maxWidth: .infinity, minHeight: 54)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(selected ? AnyShapeStyle(accent) : AnyShapeStyle(Color.white.opacity(0.06)))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Color.white.opacity(selected ? 0 : 0.1), lineWidth: 1)
-            )
-            .scaleEffect(selected ? 1.03 : 1)
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? [.isSelected] : [])
-    }
-
     // MARK: - Actions
 
     private var actionBar: some View {
@@ -632,15 +524,22 @@ struct PostRunPhotoPromptView: View {
                 .madPrimaryButton(fullWidth: true)
             }
 
-            // Names what skipping DOES under the chosen audience, so nobody
-            // learns afterwards that "Skip" posted their walk.
             Button { skip() } label: {
-                Text(skipTitle)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
+                VStack(spacing: 2) {
+                    Text("Skip")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.75))
+                    // Skipping still posts the walk when the setting says so —
+                    // said quietly here so it's never a surprise later.
+                    if postsCardOnSkip {
+                        Text("Your route and stats will still post")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
@@ -653,14 +552,6 @@ struct PostRunPhotoPromptView: View {
                 .ignoresSafeArea(edges: .bottom)
         )
         .opacity(appeared ? 1 : 0)
-    }
-
-    private var skipTitle: String {
-        switch audience {
-        case .feedAndProfile: return "Post without a photo"
-        case .feedOnly: return "Post to the feed without a photo"
-        case .offFeed: return "Done — keep it off the feed"
-        }
     }
 
     /// The photo frame does what the primary button does.
@@ -871,17 +762,8 @@ struct PostRunPhotoPromptView: View {
     private func skip() {
         guard !didAct else { return }
         didAct = true
-        commitAudienceMemory()
-        let chosen = audience
-        Task {
-            await RunPostService.autoPostMile(workoutId: workoutId, workoutType: workoutType,
-                                              audience: chosen)
-        }
+        Task { await RunPostService.autoPostMile(workoutId: workoutId, workoutType: workoutType) }
         finish()
-    }
-
-    private func commitAudienceMemory() {
-        if rememberAudience { WalkAudience.remember(audience) }
     }
 
     private func finish() {

@@ -739,14 +739,6 @@ export const UNIFIED_FEED_SQL = `
 				AND (c.uid = $1
 					OR GREATEST(w.device_end_date, COALESCE(w.created_at, w.device_end_date))
 						<= NOW() - ${POST_WINDOW_MS} * INTERVAL '1 millisecond')
-				-- "Just me" for this one walk (the photo prompt's audience
-				-- choice): the owner kept its raw card out of friends' feeds.
-				-- A primary-key probe per candidate, owner exempt — it's their
-				-- walk and their own feed still shows it.
-				AND (c.uid = $1 OR NOT EXISTS (
-					SELECT 1 FROM workout_feed_hides wfh
-					WHERE wfh.user_id = w.user_id AND wfh.workout_id = w.workout_id
-				))
 				-- These two NOT EXISTS were ONE clause with an OR between
 				-- p2.workout_id and p2.coauthor_workout_id. Splitting them is the
 				-- identity NOT EXISTS(A OR B) = NOT EXISTS(A) AND NOT EXISTS(B),

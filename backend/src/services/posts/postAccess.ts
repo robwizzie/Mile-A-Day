@@ -141,12 +141,6 @@ export async function visibleWorkoutAuthor(
 			 AND w.deleted_at IS NULL
 			 AND w.exclusion_reason IS NULL
 			 AND (w.user_id = $1 OR COALESCE(ns.share_workouts_to_feed, true) = true)
-			 -- A walk kept to "Just me" isn't on anyone's feed, so it can't be
-			 -- reached through its card either (mirrors the feed's arm).
-			 AND (w.user_id = $1 OR NOT EXISTS (
-				 SELECT 1 FROM workout_feed_hides wfh
-				 WHERE wfh.user_id = w.user_id AND wfh.workout_id = w.workout_id
-			 ))
 			 AND (w.user_id = $1 OR ${OWNER_NOT_PRIVATE_SQL("w.user_id")})
 			 AND (w.user_id = $1 OR EXISTS (
 				 SELECT 1 FROM friendships f

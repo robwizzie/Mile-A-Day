@@ -146,12 +146,7 @@ const userGridWhere = (
   viewer: string,
   author: string,
   storyOnly: string,
-) => `((p.user_id = ${author}
-					-- The author's own per-post "keep this off my grid". Only
-					-- FALSE withholds: NULL (every shipped client) and TRUE keep
-					-- the old answer. Grid-only — the post's feed reach never
-					-- reads this column.
-					AND p.on_profile IS NOT FALSE)
+) => `(p.user_id = ${author}
 				-- Tags are the Tagged tab's job, not the grid's: a collab only
 				-- joins the coauthor's Posts grid while they haven't opted out
 				-- (per-post override, else their tagged_posts_on_profile).
@@ -209,12 +204,6 @@ const userGridWhere = (
 			AND (
 				NOT p.is_auto
 				OR ${AUTO_POST_HAS_PROFILE_PHOTO}
-				-- The author said "on my grid" for THIS walk on the photo
-				-- prompt — the most specific thing anyone has said, so it beats
-				-- the blanket photo-first switch below, exactly like the
-				-- coauthor overrides beside it. Names the grid owner for the
-				-- same reason they do.
-				OR (p.user_id = ${author} AND p.on_profile IS TRUE)
 				-- Each arm names the grid owner, so this can only ever exempt a
 				-- post for the person who explicitly asked for it. Left
 				-- unqualified, the scalar arm read one coauthor's "keep this"

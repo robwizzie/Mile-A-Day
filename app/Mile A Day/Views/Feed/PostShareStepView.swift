@@ -74,7 +74,6 @@ struct PostShareStepView: View {
                                 buddyCrewRow
                             }
                         }
-                        if vm.destination?.toFeed == true { profileToggle }
                         if vm.hasRoute { routeToggle }
                     }
 
@@ -504,34 +503,6 @@ struct PostShareStepView: View {
         // can publish an unshrinkable minimum width is what pushed a card past
         // the screen once already. The row scrolls instead.
         .background(Capsule().fill(Color.white.opacity(0.08)))
-    }
-
-    // MARK: - Profile grid
-
-    /// "Show on my profile" — the other half of where a feed post goes. People
-    /// used to find posts in friends' feeds that never appeared on their own
-    /// grid with nothing on this screen saying either way; now the screen
-    /// names both places and lets them pick.
-    private var profileToggle: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Toggle(isOn: $vm.showOnProfile.animation(.easeInOut)) {
-                Label("Show on my profile", systemImage: "square.grid.3x3.fill")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
-            }
-            .tint(MADTheme.Colors.madRed)
-            Text(vm.showOnProfile
-                 ? "Added to your profile grid as well as friends' feeds."
-                 : "Friends still see it in their feed. It won't appear on your profile grid.")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(Color.white.opacity(0.04))
-        )
     }
 
     // MARK: - Route

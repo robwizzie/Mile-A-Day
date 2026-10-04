@@ -126,8 +126,8 @@ enum PostDestination: String, CaseIterable, Identifiable {
     var footnote: String {
         switch self {
         case .story: return "Disappears in 24 hours — friends who've done their mile can watch."
-        case .feed: return "Goes to friends' feeds and stays there."
-        case .both: return "Posts to your story for 24 hours, and to friends' feeds for good."
+        case .feed: return "Stays on your profile and in friends' feeds."
+        case .both: return "Posts to your story and your permanent feed."
         }
     }
 
@@ -202,12 +202,6 @@ final class PostComposerViewModel: ObservableObject {
     /// stops re-making the same decision every day and only has to remember
     /// once. `.ask` (the default) is exactly the old behaviour.
     @Published var includeRoute = RouteSharingDefault.current.initialIncludeRoute
-    /// "Show on my profile" — whether a FEED post also joins my Posts grid.
-    /// On by default (a photo post always has), seeded off when the photo
-    /// prompt's audience was "Feed only". Only `false` is ever sent: on the
-    /// server a photo post with no choice is already on the grid, so `true`
-    /// would only be a second way of saying the same thing.
-    @Published var showOnProfile = true
     /// The run's actual GPS trace, so the share step can show the map that's
     /// about to be posted rather than asking people to take the toggle on
     /// faith. Read from HealthKit — the same samples the sync ships to the
@@ -660,9 +654,7 @@ final class PostComposerViewModel: ObservableObject {
                 // recording one they turned off would hand the card a chip
                 // for a group they chose not to mention, which is the row this
                 // sticker replaced.
-                competitionId: stickeredCompetitionId,
-                // Grid-only and feed-only: a story isn't on the grid anyway.
-                onProfile: destination.toFeed && !showOnProfile ? false : nil
+                competitionId: stickeredCompetitionId
             )
             // The run now has the user's one deliberate post — the server will
             // 409 `workout_already_posted` on a second, for a story-only share
@@ -1185,9 +1177,6 @@ struct PostComposerView: View {
         initialSecondary: UIImage? = nil,
         initialPrimaryWasFront: Bool = false,
         backNavigation: Bool = false,
-        /// Where "Show on my profile" starts. The photo prompt passes false
-        /// when its audience was "Feed only".
-        initialShowOnProfile: Bool = true,
         // Buddy Walk recap: credit everyone who finished the session.
         buddyCoauthorIds: [String] = [],
         buddySessionId: String? = nil,
@@ -1207,7 +1196,6 @@ struct PostComposerView: View {
         model.buddySessionId = buddySessionId
         model.buddyCrewNames = buddyCrewNames
         model.crewPhotoPostId = crewPhotoPostId
-        model.showOnProfile = initialShowOnProfile
         // EVERY door, not just the wizard. The buddy context used to be
         // supplied only by `BuddyPostWizardView`, so the same photo of the
         // same walk became a crew post from the recap and a solo post from the

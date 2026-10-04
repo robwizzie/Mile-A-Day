@@ -36,10 +36,6 @@ import { checkRaceCompletions } from "../services/competitionService.js";
 import { softDeleteWorkout } from "../services/workoutDeletionService.js";
 import { hideWorkoutRoute } from "../services/stealthService.js";
 import {
-  isValidWorkoutId,
-  setWorkoutFeedHidden,
-} from "../services/workoutFeedHideService.js";
-import {
   notifyFriendsOfMileCompletion,
   notifyFriendsOfExtraWorkout,
   notifyFriendsOfWorkout,
@@ -1024,33 +1020,5 @@ export async function setDuplicateDecisionController(
   } catch (error: any) {
     console.error("Error setting duplicate decision:", error.message);
     res.status(500).json({ error: "Error setting duplicate decision" });
-  }
-}
-
-/**
- * PUT /workouts/:userId/workout/:workoutId/feed-hidden — body `{ hidden }`.
- *
- * The photo prompt's "Off the feed" choice for one walk: keeps that workout's
- * raw card out of friends' feeds (owner still sees it). Self-only. The
- * workout need not be synced yet — see setWorkoutFeedHidden.
- */
-export async function setWorkoutFeedHiddenController(
-  req: AuthenticatedRequest,
-  res: Response,
-) {
-  const workoutId = req.params.workoutId;
-  const hidden = req.body?.hidden;
-  if (!isValidWorkoutId(workoutId)) {
-    return res.status(400).json({ error: "invalid_workout_id" });
-  }
-  if (typeof hidden !== "boolean") {
-    return res.status(400).json({ error: "hidden must be a boolean" });
-  }
-  try {
-    const stored = await setWorkoutFeedHidden(req.userId!, workoutId, hidden);
-    res.json({ ok: true, hidden: stored });
-  } catch (error: any) {
-    console.error("Error setting workout feed visibility:", error.message);
-    res.status(500).json({ error: "Error updating workout" });
   }
 }

@@ -510,12 +510,6 @@ export async function getFriendsWorkoutFeed(
 		-- Respect the owner's share_workouts_to_feed opt-out on this legacy
 		-- feed too, not just the unified feed (the viewer still sees their own).
 		AND (COALESCE(ns.share_workouts_to_feed, true) = true OR w.user_id = $1)
-		-- ...and the per-walk "Just me" choice (workout_feed_hides), same as
-		-- the unified feed.
-		AND (w.user_id = $1 OR NOT EXISTS (
-			SELECT 1 FROM workout_feed_hides wfh
-			WHERE wfh.user_id = w.user_id AND wfh.workout_id = w.workout_id
-		))
 		ORDER BY w.device_end_date DESC
 		LIMIT 100
 		`,

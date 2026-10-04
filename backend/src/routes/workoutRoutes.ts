@@ -18,7 +18,6 @@ import {
   setDuplicateDecisionController,
   resolveDuplicates,
   hideWorkoutRouteController,
-  setWorkoutFeedHiddenController,
 } from "../controllers/workoutController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
 
@@ -46,13 +45,6 @@ router.post(
   "/:userId/workout/:workoutId/stealth",
   requireSelfAccess("userId"),
   hideWorkoutRouteController,
-);
-// "Off the feed" for ONE walk (the photo prompt's audience choice). Self-only;
-// reversible; the workout need not have synced yet.
-router.put(
-  "/:userId/workout/:workoutId/feed-hidden",
-  requireSelfAccess("userId"),
-  setWorkoutFeedHiddenController,
 );
 // Cross-app duplicates (the same run written to HealthKit by two connected
 // apps). Self-only both ways: the read exposes the user's own workout history,
