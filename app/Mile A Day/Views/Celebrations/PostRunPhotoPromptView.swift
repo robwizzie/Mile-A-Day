@@ -75,7 +75,7 @@ struct PostRunPhotoPromptView: View {
     /// Fun dashboard only — nil on Modern, where Flamey doesn't exist.
     private var flameyLook: FlameyLook? { FlameyFacts.look(mood: .done, detail: .compact) }
 
-    private static let cardSize = CGSize(width: 156, height: 195)
+    private static let cardSize = CGSize(width: 128, height: 160)
 
     var body: some View {
         ZStack {
@@ -101,9 +101,9 @@ struct PostRunPhotoPromptView: View {
                 }
 
             ScrollView {
-                VStack(spacing: MADTheme.Spacing.lg) {
+                VStack(spacing: MADTheme.Spacing.md) {
                     header
-                        .padding(.top, MADTheme.Spacing.lg)
+                        .padding(.top, MADTheme.Spacing.md)
 
                     if midRunSnaps.isEmpty {
                         previewStack
@@ -118,9 +118,6 @@ struct PostRunPhotoPromptView: View {
                         countdownPill
                             .opacity(appeared ? 1 : 0)
                     }
-
-                    equationRow
-                        .opacity(appeared ? 1 : 0)
 
                     audienceCard
                         .opacity(appeared ? 1 : 0)
@@ -337,19 +334,19 @@ struct PostRunPhotoPromptView: View {
                 .overlay(alignment: .topLeading) { cardTag("ROUTE & STATS", icon: "map.fill") }
                 .shadow(color: .black.opacity(0.45), radius: 14, y: 8)
                 .rotationEffect(.degrees(appeared ? -7 : 0))
-                .offset(x: appeared ? -54 : 0, y: appeared ? 8 : 0)
+                .offset(x: appeared ? -64 : 0, y: appeared ? 6 : 0)
 
             photoFrame
                 .frame(width: size.width, height: size.height)
                 .shadow(color: accent.opacity(0.35), radius: 18, y: 8)
                 .rotationEffect(.degrees(appeared ? 6 : 0))
-                .offset(x: appeared ? 54 : 0, y: (appeared ? -6 : 0) + (floating ? -5 : 3))
+                .offset(x: appeared ? 64 : 0, y: (appeared ? -6 : 0) + (floating ? -4 : 2))
 
             // The "+" that says these two become one.
             Image(systemName: "plus")
-                .font(.system(size: 18, weight: .black))
+                .font(.system(size: 15, weight: .black))
                 .foregroundColor(.white)
-                .frame(width: 40, height: 40)
+                .frame(width: 34, height: 34)
                 .background(Circle().fill(accent))
                 .overlay(Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: 3))
                 .shadow(color: .black.opacity(0.4), radius: 6, y: 3)
@@ -360,13 +357,24 @@ struct PostRunPhotoPromptView: View {
             if let look = flameyLook {
                 FlameyDressedFigure(look: look, health: .healthy, size: 64, scale: 1, mood: .done)
                     .frame(width: 64, height: 64)
-                    .offset(x: appeared ? 128 : 60, y: 92 + (floating ? -3 : 0))
+                    .offset(x: appeared ? 118 : 60, y: 78 + (floating ? -3 : 0))
                     .opacity(appeared ? 1 : 0)
                     .accessibilityHidden(true)
             }
         }
-        .frame(height: size.height + 50)
+        .frame(height: size.height + 28)
         .frame(maxWidth: .infinity)
+        // The whole idea in one line, under the picture of it.
+        .overlay(alignment: .bottom) {
+            Text("Your photo + your route & stats = one post")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.6))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .offset(y: 18)
+                .opacity(appeared ? 1 : 0)
+        }
+        .padding(.bottom, 18)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Preview: your photo joins your \(noun)'s route and stats as one post")
     }
@@ -407,11 +415,11 @@ struct PostRunPhotoPromptView: View {
                            startPoint: .topLeading, endPoint: .bottomTrailing)
             VStack(spacing: 4) {
                 Image(systemName: isWalk ? "figure.walk" : "figure.run")
-                    .font(.system(size: 30, weight: .bold))
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundColor(.white.opacity(0.9))
                     .padding(.bottom, 4)
                 Text((stats?.distance ?? 0).distanceText)
-                    .font(.system(size: 40, weight: .black, design: .rounded))
+                    .font(.system(size: 34, weight: .black, design: .rounded))
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
@@ -464,18 +472,18 @@ struct PostRunPhotoPromptView: View {
                     ZStack {
                         Circle()
                             .stroke(accent.opacity(0.6), lineWidth: 2)
-                            .frame(width: 64, height: 64)
+                            .frame(width: 54, height: 54)
                             .scaleEffect(floating ? 1.25 : 1)
                             .opacity(floating ? 0 : 0.9)
                         Circle()
                             .fill(accent)
-                            .frame(width: 56, height: 56)
+                            .frame(width: 46, height: 46)
                         Image(systemName: cameraOpen ? "camera.fill" : "photo.on.rectangle.angled")
-                            .font(.system(size: 24, weight: .bold))
+                            .font(.system(size: 20, weight: .bold))
                             .foregroundColor(.white)
                     }
                     Text("Your photo\nhere")
-                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
                         .multilineTextAlignment(.center)
                         .foregroundColor(.white)
                 }
@@ -500,41 +508,6 @@ struct PostRunPhotoPromptView: View {
         .padding(.vertical, 4)
         .background(Capsule().fill(Color.black.opacity(0.55)))
         .padding(8)
-    }
-
-    // MARK: - "Photo + route = one post"
-
-    /// The whole concept in one glance, under the hero.
-    private var equationRow: some View {
-        HStack(spacing: 8) {
-            equationChip("Your photo", icon: "camera.fill")
-            Text("+")
-                .font(.system(size: 14, weight: .black, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
-            equationChip("Route & stats", icon: "map.fill")
-            Text("=")
-                .font(.system(size: 14, weight: .black, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
-            equationChip("One post", icon: "sparkles", highlighted: true)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Your photo plus your route and stats makes one post")
-    }
-
-    private func equationChip(_ text: String, icon: String, highlighted: Bool = false) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon).font(.system(size: 10, weight: .bold))
-            Text(text)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .lineLimit(1)
-                .fixedSize()
-        }
-        .foregroundColor(.white)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 6)
-        .background(
-            Capsule().fill(highlighted ? AnyShapeStyle(accent) : AnyShapeStyle(Color.white.opacity(0.1)))
-        )
     }
 
     // MARK: - Who sees it
@@ -595,7 +568,7 @@ struct PostRunPhotoPromptView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundColor(selected ? .white : .white.opacity(0.6))
-            .frame(maxWidth: .infinity, minHeight: 64)
+            .frame(maxWidth: .infinity, minHeight: 54)
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
