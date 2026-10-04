@@ -95,31 +95,22 @@ struct PostRunPhotoPromptView: View {
                     )
                 }
 
-            ScrollView {
-                VStack(spacing: MADTheme.Spacing.lg) {
-                    header
-                        .padding(.top, MADTheme.Spacing.xl)
-
-                    if midRunSnaps.isEmpty {
-                        previewStack
-                    } else {
-                        midRunSnapStrip
-                    }
-
-                    // The CAMERA is open for this run. A real deadline for
-                    // shooting, not for sharing — the caption says so, so the
-                    // timer reads as an invitation rather than a threat.
-                    if cameraOpen {
-                        countdownPill
-                            .opacity(appeared ? 1 : 0)
-                    }
+            // Centred when it fits (most phones), scrolling when it doesn't
+            // (an SE with mid-run snaps, or large Dynamic Type). Candidates
+            // differ in arrangement only — the content is one builder.
+            ViewThatFits(in: .vertical) {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    promptContent
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, MADTheme.Spacing.lg)
-                .padding(.bottom, MADTheme.Spacing.md)
+                ScrollView {
+                    promptContent
+                }
+                .scrollBounceBehavior(.basedOnSize)
             }
-            .scrollBounceBehavior(.basedOnSize)
             .safeAreaInset(edge: .bottom, spacing: 0) { actionBar }
-            // Import cover rides the ScrollView node — the backdrop owns the
+            // Import cover rides the ViewThatFits node — the backdrop owns the
             // gallery cover and the ZStack owns the composer cover; a third
             // cover on the ZStack would silently drop one (.claude/rules/ios.md).
             .fullScreenCover(isPresented: $showLibraryImport, onDismiss: {
@@ -220,6 +211,30 @@ struct PostRunPhotoPromptView: View {
                 }
             }
         }
+    }
+
+    /// Everything above the buttons.
+    private var promptContent: some View {
+        VStack(spacing: MADTheme.Spacing.md) {
+            header
+                .padding(.top, MADTheme.Spacing.lg)
+
+            if midRunSnaps.isEmpty {
+                previewStack
+            } else {
+                midRunSnapStrip
+            }
+
+            // The CAMERA is open for this run. A real deadline for
+            // shooting, not for sharing — the caption says so, so the
+            // timer reads as an invitation rather than a threat.
+            if cameraOpen {
+                countdownPill
+                    .opacity(appeared ? 1 : 0)
+            }
+        }
+        .padding(.horizontal, MADTheme.Spacing.lg)
+        .padding(.bottom, MADTheme.Spacing.md)
     }
 
     // MARK: - Background
