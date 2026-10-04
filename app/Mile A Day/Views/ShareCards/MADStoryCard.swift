@@ -95,7 +95,7 @@ enum MADStoryFormat: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .story: return "rectangle.portrait.fill"
+        case .story: return "rectangle.portrait"
         case .sticker: return "square.on.square"
         }
     }

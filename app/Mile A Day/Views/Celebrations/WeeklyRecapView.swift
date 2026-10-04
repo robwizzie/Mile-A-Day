@@ -286,7 +286,9 @@ struct WeeklyRecapView: View {
 
     private func streakCard(_ recap: WeeklyRecap, streak: Int) -> some View {
         HStack(spacing: 14) {
-            ShareStyleFlame(size: 64)
+            // Hugging the art: a companion or trail reaches past his 64pt
+            // square and otherwise drew over the "503 day streak" beside him.
+            ShareStyleFlame(size: 64, maxWidth: 112, maxHeight: 84, hugsArt: true)
             VStack(alignment: .leading, spacing: 3) {
                 Text("\(streak) day streak")
                     .font(.system(size: 22, weight: .black, design: .rounded))
