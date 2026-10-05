@@ -5,6 +5,7 @@ import { START_OF_TODAY_ET_SQL, TODAY_ET_DATE_SQL } from "./dailyResetTime.js";
 import { LIVE_PRESENCE_WINDOW_SECONDS } from "./liveTrackingService.js";
 import { DAILY_GOAL_TOLERANCE, getTodayMiles } from "./workoutService.js";
 import { effectiveStreakSql, fetchTodayCoverage } from "./streakFeatureCore.js";
+import { localNowSql } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -29,11 +30,16 @@ const db = PostgresService.getInstance();
 
 export const DISPLAY_KEY_PREFIX = "madk_";
 const KEY_BYTES = 32; // 256-bit secret
-const LAST_USED_STAMP_MS = 10 * 60 * 1000;
+// Short enough that Admin -> Displays can call a board offline after 10 min.
+const LAST_USED_STAMP_MS = 2 * 60 * 1000;
+const FINISHED_WINDOW_MINUTES = 30;
 const COMMUNITY_TTL_MS = 30_000;
 const ALERT_WINDOW_HOURS = 24;
 const MAX_ALERTS = 5;
 const MAX_FRIENDS_RUNNING = 3;
+const MAX_FRIENDS_FINISHED = 3;
+const MAX_AT_RISK_NAMES = 3;
+const AT_RISK_MIN_STREAK = 3; // same floor as the admin "at risk" panel
 
 export function hashDisplayKey(key: string): string {
   return crypto.createHash("sha256").update(key, "utf8").digest("hex");
@@ -137,7 +143,6 @@ export interface DisplayCommunity {
 }
 
 let communityCache: { data: DisplayCommunity; at: number } | null = null;
-
 async function getCommunity(): Promise<DisplayCommunity> {
   if (communityCache && Date.now() - communityCache.at < COMMUNITY_TTL_MS) {
     return communityCache.data;
@@ -206,13 +211,20 @@ export interface DisplayFeed {
     running_now: boolean;
     local_time: string;          // "HH:MM:SS" in the owner's timezone
     minutes_to_midnight: number; // until the owner's local day ends
+    year_ago_miles: number | null; // their own miles on this date last year
   };
   friends_running: { name: string; miles: number }[];
+  /** The owner's friends whose streak is at risk today (their own local day,
+   *  the admin panel's rule). Friends already see each other's daily miles in
+   *  the app; blocks in either direction are excluded. */
+  friends_at_risk: { count: number; top: { name: string; streak: number }[] };
+  /** Friends whose tracked session ended in the last 30 min (same rules). */
+  friends_finished: { id: string; name: string; miles: number }[];
   alerts: { id: string; kind: "nudge" | "hype"; from: string; at: string }[];
 }
 
 export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
-  const [community, meRows, todayMiles, coverage, friends, alerts] = await Promise.all([
+  const [community, meRows, todayMiles, coverage, friends, alerts, finished, atRisk] = await Promise.all([
     getCommunity(),
     db.query<{
       username: string | null;
@@ -220,6 +232,7 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
       running_now: boolean;
       local_time: string;
       minutes_to_midnight: number;
+      year_ago_miles: number | null;
     }>(
       `WITH tz AS (
          SELECT COALESCE((SELECT timezone_offset FROM workouts
@@ -233,7 +246,11 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
                        WHERE s.user_id = u.user_id AND s.ended_at IS NULL
                          AND s.last_seen_at > NOW() - INTERVAL '${LIVE_PRESENCE_WINDOW_SECONDS} seconds') AS running_now,
               to_char(loc.t, 'HH24:MI:SS') AS local_time,
-              (EXTRACT(EPOCH FROM (date_trunc('day', loc.t) + INTERVAL '1 day' - loc.t)) / 60)::int AS minutes_to_midnight
+              (EXTRACT(EPOCH FROM (date_trunc('day', loc.t) + INTERVAL '1 day' - loc.t)) / 60)::int AS minutes_to_midnight,
+              (SELECT SUM(w.distance)::float FROM workouts w
+                WHERE w.user_id = u.user_id
+                  AND w.local_date = (loc.t - INTERVAL '1 year')::date
+                  AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL) AS year_ago_miles
          FROM users u, loc
         WHERE u.user_id = $1`,
       [userId],
@@ -282,6 +299,57 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
         LIMIT ${MAX_ALERTS}`,
       [userId],
     ),
+    // Friends who just FINISHED a tracked session: identical friendship,
+    // presence opt-out and block rules to friends_running above.
+    db.query<{ id: string; name: string; miles: number }>(
+      `SELECT encode(sha256((s.session_id::text || s.ended_at::text)::bytea), 'hex') AS id,
+              u.username AS name, ROUND(s.distance_miles::numeric, 1)::float AS miles
+         FROM friendships f
+         JOIN live_tracking_sessions s
+           ON s.user_id = f.friend_id
+          AND s.ended_at IS NOT NULL
+          AND s.ended_at > NOW() - INTERVAL '${FINISHED_WINDOW_MINUTES} minutes'
+         JOIN users u ON u.user_id = f.friend_id
+         LEFT JOIN notification_settings ns ON ns.user_id = f.friend_id
+        WHERE f.user_id = $1
+          AND f.status = 'accepted'
+          AND u.username IS NOT NULL
+          AND COALESCE(ns.share_live_presence, TRUE) = TRUE
+          AND NOT EXISTS (
+            SELECT 1 FROM user_blocks b
+             WHERE (b.blocker_id = $1 AND b.blocked_id = f.friend_id)
+                OR (b.blocker_id = f.friend_id AND b.blocked_id = $1))
+        ORDER BY s.ended_at DESC
+        LIMIT ${MAX_FRIENDS_FINISHED}`,
+      [userId],
+    ),
+    db.query<{ name: string; streak: number }>(
+      `WITH c AS (
+         SELECT u.user_id, u.username, u.current_streak,
+                (${localNowSql("u.user_id")}) AS local_now
+           FROM friendships f
+           JOIN users u ON u.user_id = f.friend_id
+          WHERE f.user_id = $1
+            AND f.status = 'accepted'
+            AND u.username IS NOT NULL
+            AND u.current_streak >= ${AT_RISK_MIN_STREAK}
+            AND NOT EXISTS (
+              SELECT 1 FROM streak_pauses p
+               WHERE p.user_id = u.user_id AND p.resumed_on IS NULL AND p.expired_at IS NULL)
+            AND NOT EXISTS (
+              SELECT 1 FROM user_blocks b
+               WHERE (b.blocker_id = $1 AND b.blocked_id = f.friend_id)
+                  OR (b.blocker_id = f.friend_id AND b.blocked_id = $1))
+       )
+       SELECT c.username AS name, c.current_streak::int AS streak
+         FROM c
+        WHERE COALESCE((SELECT SUM(w.distance) FROM workouts w
+                         WHERE w.user_id = c.user_id
+                           AND w.local_date = (c.local_now)::date
+                           AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL), 0) < 0.95
+        ORDER BY c.current_streak DESC`,
+      [userId],
+    ),
   ]);
 
   const me = meRows[0];
@@ -298,8 +366,14 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
       running_now: Boolean(me?.running_now),
       local_time: me?.local_time ?? "00:00:00",
       minutes_to_midnight: me?.minutes_to_midnight ?? 0,
+      year_ago_miles: me?.year_ago_miles == null ? null : Math.round(Number(me.year_ago_miles) * 100) / 100,
     },
     friends_running: friends.map((f) => ({ name: f.name, miles: Number(f.miles) || 0 })),
+    friends_at_risk: {
+      count: atRisk.length,
+      top: atRisk.slice(0, MAX_AT_RISK_NAMES).map((r) => ({ name: r.name, streak: Number(r.streak) || 0 })),
+    },
+    friends_finished: finished.map((f) => ({ id: f.id.slice(0, 16), name: f.name, miles: Number(f.miles) || 0 })),
     alerts: alerts.map((a) => ({ id: a.id.slice(0, 16), kind: a.kind, from: a.from, at: a.at })),
   };
 }

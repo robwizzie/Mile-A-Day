@@ -12,6 +12,14 @@ import { CARD, MAD_RED } from "./theme";
  * stops on its next poll.
  */
 
+/** A board polls every ~30 s and the server stamps last_used_at at most every
+ *  2 min, so 10 min of silence means it's unplugged or off Wi-Fi. */
+const OFFLINE_AFTER_MS = 10 * 60 * 1000;
+
+function isOnline(k: { last_used_at: string | null; revoked_at: string | null }, now: number) {
+  return !k.revoked_at && !!k.last_used_at && now - new Date(k.last_used_at).getTime() < OFFLINE_AFTER_MS;
+}
+
 type DisplayKey = {
   id: string;
   username: string | null;
@@ -36,9 +44,19 @@ export function DisplaysTab() {
     setKeys(res.keys);
   }, []);
 
+  const [now, setNow] = useState(() => Date.now());
+
   useEffect(() => {
     load().catch((e) => setError(String(e?.message ?? e)));
+    // Keep the online/offline status current while the tab is open.
+    const t = setInterval(() => {
+      setNow(Date.now());
+      load().catch(() => {});
+    }, 60_000);
+    return () => clearInterval(t);
   }, [load]);
+
+  const offline = (keys ?? []).filter((k) => !k.revoked_at && !isOnline(k, now));
 
   // The plaintext key is shown once; drop it from the page after 2 minutes.
   useEffect(() => {
@@ -78,6 +96,13 @@ export function DisplaysTab() {
 
   return (
     <div className="space-y-6">
+      {offline.length > 0 && (
+        <div className="rounded-xl border border-red-400/30 bg-red-400/10 p-4 text-sm text-red-200">
+          {offline.length === 1 ? "1 display is" : `${offline.length} displays are`} offline:{" "}
+          {offline.map((k) => k.label || k.username).join(", ")}. Not heard from in 10+ minutes
+          (unplugged, or lost Wi-Fi).
+        </div>
+      )}
       <section className={`${CARD} p-5`}>
         <h2 className="text-lg font-bold">New desk display key</h2>
         <p className="mt-1 text-sm text-white/50">
@@ -150,6 +175,7 @@ export function DisplaysTab() {
                 <th className="py-1.5 font-medium">Label</th>
                 <th className="font-medium">User</th>
                 <th className="font-medium">Key</th>
+                <th className="font-medium">Status</th>
                 <th className="font-medium">Last seen</th>
                 <th />
               </tr>
@@ -160,6 +186,17 @@ export function DisplaysTab() {
                   <td className="py-2">{k.label}</td>
                   <td>{k.username ?? "—"}</td>
                   <td className="font-mono text-xs">{k.key_prefix}…</td>
+                  <td>
+                    {k.revoked_at ? null : isOnline(k, now) ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-emerald-300">
+                        <span className="h-2 w-2 rounded-full bg-emerald-400" /> Online
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-red-300">
+                        <span className="h-2 w-2 rounded-full bg-red-400" /> Offline
+                      </span>
+                    )}
+                  </td>
                   <td>{k.last_used_at ? fmtDateTime(k.last_used_at) : "never"}</td>
                   <td className="text-right">
                     {k.revoked_at ? (
