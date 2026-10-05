@@ -253,6 +253,9 @@ struct WorkoutDetailView: View {
                         // The numbers — one home, no repeats across cards.
                         statsSection
 
+                        // Which pair it was done in (private to the owner).
+                        WorkoutShoeCard(workoutId: workoutId, isActive: isActive)
+
                         // The race, if this workout was one. Every completed
                         // race appears here, won or lost — this is the only
                         // surface that shows a loss, which is the point.

@@ -10,6 +10,7 @@ import {
   stealthRouteCleanupStatement,
 } from "./stealthService.js";
 import { VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL } from "./visibilityService.js";
+import { defaultShoeStampStatement } from "./shoeService.js";
 import {
   computeStreakEras,
   type StreakEra,
@@ -343,6 +344,12 @@ export async function uploadWorkouts(
     // route row that pre-dates the workout becoming stealth (a backdated
     // window, or a re-push the conditional insert above left untouched).
     stealthRouteCleanupStatement(
+      userId,
+      workouts.map((w) => w.workoutId),
+    ),
+    // The default shoe onto new on-foot workouts. Only ever INSERTs where no
+    // assignment exists, so a pick made before the sync landed always wins.
+    defaultShoeStampStatement(
       userId,
       workouts.map((w) => w.workoutId),
     ),

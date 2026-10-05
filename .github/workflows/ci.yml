@@ -324,6 +324,12 @@ jobs:
       # gets it whole. A read that skips the trim leaks a front door silently.
       - name: Route privacy check
         run: node scripts/route-privacy-check.mjs
+      # Shoe tracker: the sync stamps the default pair only onto workouts that
+      # ended after it became the default, a pre-sync pick survives the sync,
+      # mileage counts only counted workouts, and no module outside the shoe
+      # service reads the (private) shoe tables.
+      - name: Shoe tracker check
+        run: node scripts/shoes-check.mjs
 
   website:
     name: Website (lint + build)

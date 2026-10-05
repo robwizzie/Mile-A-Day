@@ -266,6 +266,17 @@ struct MADSettingsView: View {
 
             divider
 
+            NavigationLink(destination: ShoesListView()) {
+                MADSettingsRow(
+                    icon: ShoeSymbol.filled,
+                    title: "Shoes",
+                    subtitle: "Mileage on each pair — only you see it",
+                    iconColor: .orange
+                )
+            }
+
+            divider
+
             // The coach speaks on every workout, so its switch belongs on the
             // page everyone opens — not only inside the Ghost Race sheet,
             // which is where it used to live and which you never see on an

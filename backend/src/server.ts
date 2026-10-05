@@ -19,6 +19,7 @@ import badgesRoutes, { publicBadgesRouter } from "./routes/badgesRoutes.js";
 import dailyChallengesRoutes from "./routes/dailyChallengesRoutes.js";
 import weeklyChallengeRoutes from "./routes/weeklyChallengeRoutes.js";
 import dailyStepsRoutes from "./routes/dailyStepsRoutes.js";
+import shoesRoutes from "./routes/shoesRoutes.js";
 import leaderboardRoutes from "./routes/leaderboardRoutes.js";
 import liveTrackingRoutes from "./routes/liveTrackingRoutes.js";
 import ghostRoutes from "./routes/ghostRoutes.js";
@@ -99,6 +100,7 @@ const uploadsDir = path.join(process.cwd(), "uploads", "profile-images");
 fs.mkdirSync(uploadsDir, { recursive: true });
 fs.mkdirSync(path.join(process.cwd(), "uploads", "posts"), { recursive: true });
 fs.mkdirSync(path.join(process.cwd(), "uploads", "profile-banners"), { recursive: true });
+fs.mkdirSync(path.join(process.cwd(), "uploads", "shoes"), { recursive: true });
 
 // Post photos require a signed url (issued on every post/feed response);
 // profile images below stay public. Mounted BEFORE the general static
@@ -351,6 +353,7 @@ app.use("/users", badgesRoutes);
 app.use("/users", dailyChallengesRoutes);
 app.use("/users", weeklyChallengeRoutes);
 app.use("/users", dailyStepsRoutes);
+app.use("/users", shoesRoutes);
 app.use("/friends", friendRoutes);
 app.use("/workouts", workoutRoutes);
 app.use("/competitions", competitionRoutes);

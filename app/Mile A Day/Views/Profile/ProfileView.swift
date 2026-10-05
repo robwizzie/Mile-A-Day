@@ -474,6 +474,9 @@ struct ProfileView: View {
             // fast am I", and a race history buried a tap deeper is a race
             // history nobody reads. Self-scoped, so it's own-profile only.
             GhostRacesSection()
+            // Gear, not performance — but "how many miles on these" is a
+            // stat, and this is the one tab that is only ever your own.
+            ShoesProfileSection()
             routeHeatmapRow
         }
     }
