@@ -4,6 +4,8 @@ import {
   adminCreateDisplayKey,
   adminListDisplayKeys,
   adminRevokeDisplayKey,
+  adminListDisplayMessages,
+  adminSendDisplayMessage,
 } from "../controllers/displayController.js";
 import {
   verifyAppleWeb,
@@ -60,6 +62,8 @@ adminRouter.get("/overview", overview);
 adminRouter.get("/display-keys", adminListDisplayKeys);
 adminRouter.post("/display-keys", adminCreateDisplayKey);
 adminRouter.post("/display-keys/:id/revoke", adminRevokeDisplayKey);
+adminRouter.get("/display-messages", adminListDisplayMessages);
+adminRouter.post("/display-messages", adminSendDisplayMessage);
 adminRouter.get("/miles-by-day", milesByDay);
 adminRouter.get("/engagement", engagement);
 adminRouter.get("/signups-by-day", signupsByDay);

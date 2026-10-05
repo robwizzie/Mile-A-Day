@@ -2,8 +2,11 @@ import type { Request, Response, NextFunction } from "express";
 import { PostgresService } from "../services/DbService.js";
 import {
   createDisplayKey,
+  createDisplayMessage,
   getDisplayFeed,
   listDisplayKeys,
+  listDisplayMessages,
+  sanitizeDisplayText,
   resolveDisplayKey,
   revokeDisplayKey,
 } from "../services/displayService.js";
@@ -98,4 +101,37 @@ export async function adminRevokeDisplayKey(req: Request, res: Response) {
   const ok = await revokeDisplayKey(id);
   if (!ok) return res.status(404).json({ error: "No active key with that id" });
   res.json({ ok: true });
+}
+
+
+// ─── Desk-to-desk messages (admin only) ─────────────────────────────────────
+
+export async function adminListDisplayMessages(_req: Request, res: Response) {
+  noStore(res);
+  res.json({ messages: await listDisplayMessages() });
+}
+
+/** POST /admin/display-messages  JSON { username, text }.
+ *  Sends a short message to that user's desk display(s); expires in 24 h. */
+export async function adminSendDisplayMessage(req: Request, res: Response) {
+  noStore(res);
+  const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
+  const text = sanitizeDisplayText(req.body?.text);
+  if (!username) return res.status(400).json({ error: "username required" });
+  if (!text) return res.status(400).json({ error: "Message is empty after cleanup (letters, numbers and a few emoji only)" });
+  try {
+    const users = await db.query<{ user_id: string }>(
+      `SELECT user_id FROM users WHERE LOWER(username) = LOWER($1) LIMIT 2`,
+      [username],
+    );
+    if (users.length !== 1) {
+      return res.status(404).json({ error: "No single user with that username" });
+    }
+    const fromUserId = ((req as any).userId as string) ?? null;
+    const message = await createDisplayMessage(users[0].user_id, fromUserId, text);
+    res.status(201).json({ message });
+  } catch (err) {
+    console.error("display message failed:", (err as Error)?.message);
+    res.status(500).json({ error: "Could not send message" });
+  }
 }

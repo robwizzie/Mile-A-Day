@@ -19,7 +19,7 @@ import { PostgresService } from "../dist/services/DbService.js";
 import displayRoutes from "../dist/routes/displayRoutes.js";
 import adminRoutes from "../dist/routes/adminRoutes.js";
 import { requireAdmin } from "../dist/middleware/auth.js";
-import { createDisplayKey, hashDisplayKey } from "../dist/services/displayService.js";
+import { createDisplayKey, hashDisplayKey, setReviewSourceForTests } from "../dist/services/displayService.js";
 
 const db = PostgresService.getInstance();
 const P = "display-check-";
@@ -41,6 +41,7 @@ const ALL = [OWNER, ADMIN, RUNNER, HIDDEN, BLOCKED, BLOCKER, STALE, STRANGER, NU
              DONE, OLDDONE, HIDDONE, STRDONE];
 
 let failures = 0;
+const insertedBadges = [];   // catalog rows this check added (removed again at cleanup)
 function check(label, actual, expected) {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
   if (!ok) failures++;
@@ -49,6 +50,13 @@ function check(label, actual, expected) {
 
 async function cleanup() {
   await db.query(`DELETE FROM display_keys WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM display_messages WHERE to_user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM streak_coverage WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM user_badges WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM badges WHERE badge_id = 'display-check-medal'`);
+  if (insertedBadges.length) {
+    await db.query(`DELETE FROM badges WHERE badge_id = ANY($1::text[])`, [insertedBadges]);
+  }
   await db.query(`DELETE FROM in_app_notifications WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM live_tracking_sessions WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM notification_settings WHERE user_id = ANY($1::text[])`, [ALL]);
@@ -127,6 +135,34 @@ async function seed() {
      VALUES ($1, 1, 480, 1.0, 480), ($1, 2, 6, 0.02, 300), ($1, 3, 200, 1.0, 200)`,
     [P + "w1"],
   );
+  // Medals: two that unlock Closet items, one just for the alert.
+  const added = await db.query(
+    `INSERT INTO badges (badge_id, category, name, description, icon, rarity) VALUES
+       ('miles_25', 'miles', 'Quarter Century', 'x', 'x', 'common'),
+       ('streak_30', 'streak', 'Month Strong', 'x', 'x', 'common')
+     ON CONFLICT (badge_id) DO NOTHING
+     RETURNING badge_id`,
+  );
+  insertedBadges.push(...added.map((r) => r.badge_id));
+  await db.query(
+    `INSERT INTO badges (badge_id, category, name, description, icon, rarity)
+     VALUES ('display-check-medal', 'special', 'Test <b>Medal</b> \u{1F525}', 'x', 'x', 'rare')`,
+  );
+  for (const b of ["miles_25", "streak_30", "display-check-medal"]) {
+    await db.query(`INSERT INTO user_badges (user_id, badge_id) VALUES ($1, $2)`, [OWNER, b]);
+  }
+  await db.query(`INSERT INTO user_badges (user_id, badge_id) VALUES ($1, 'display-check-medal')`, [OTHER]);
+  // Owner's Closet: a colour + cap they own, glasses + cape they DON'T.
+  await db.query(
+    `UPDATE users SET flamey_look = $2::jsonb WHERE user_id = $1`,
+    [OWNER, JSON.stringify({ color: "sapphire", head: "ball_cap", eyes: "aviators", back: "red_cape" })],
+  );
+  // A streak token covered the owner's day 3 days ago (heatmap shows -1).
+  await db.query(
+    `INSERT INTO streak_coverage (user_id, local_date, kind)
+     VALUES ($1, ((NOW() AT TIME ZONE 'UTC') - INTERVAL '3 days')::date, 'freeze')`,
+    [OWNER],
+  );
   // ...and 1.5 miles on this date last year (the "1 year ago today" moment).
   await db.query(
     `INSERT INTO workouts (workout_id, user_id, distance, local_date, date, timezone_offset,
@@ -143,6 +179,7 @@ function server() {
   app.use("/display", displayRoutes);
   // Stand-in for authenticateToken: the header says who the caller is.
   app.use((req, _res, next) => { req.userId = req.headers["x-test-user"]; next(); });
+  app.use(express.json());
   app.use("/admin", requireAdmin, adminRoutes);
   return new Promise((resolve) => {
     const s = app.listen(0, () => resolve(s));
@@ -175,15 +212,15 @@ async function main() {
   const body = await res.json();
 
   // ── exact whitelist ──
-  check("top-level fields", Object.keys(body).sort(), ["alerts", "community", "friends_at_risk", "friends_finished", "friends_running", "me", "v"]);
+  check("top-level fields", Object.keys(body).sort(), ["alerts", "community", "friends_at_risk", "friends_finished", "friends_running", "me", "messages", "reviews", "v"]);
   check("community fields", Object.keys(body.community).sort(), [
     "active_7d", "badges_today", "hypes_today", "longest_streak", "miles_today",
     "miles_yesterday_same_time", "new_friends_today", "nudges_today", "out_running_now",
     "photos_shared", "tokens_spent_today", "total_hypes", "total_miles", "total_users"]);
   check("community values are all numbers", Object.values(body.community).every((v) => typeof v === "number"), true);
   check("me fields", Object.keys(body.me).sort(), [
-    "fastest_mile_month", "live_miles", "local_date", "local_time", "longest_run", "mile_done", "miles_today",
-    "minutes_to_midnight", "running_now", "streak", "username", "year_ago_miles"]);
+    "days", "fastest_mile_month", "flamey", "live_miles", "local_date", "local_time", "longest_run", "medals",
+    "mile_done", "miles_today", "minutes_to_midnight", "running_now", "streak", "username", "year_ago_miles"]);
   const text = JSON.stringify(body);
   check("no emails anywhere", text.includes("@"), false);
   check("no real names anywhere", /Secret|Surname/.test(text), false);
@@ -209,6 +246,17 @@ async function main() {
   check("not running → no live miles", body.me.live_miles, null);
   check("my longest run", body.me.longest_run, 1.5);
   check("my fastest mile this month (full splits only)", body.me.fastest_mile_month, 480);
+  check("closet: only owned items, only desk slots", body.me.flamey, { color: "sapphire", head: "ball_cap" });
+  check("my new medals", body.me.medals.length, 3);
+  check("medal fields", Object.keys(body.me.medals[0] ?? {}).sort(), ["age_s", "id", "name"]);
+  check("medal names cleaned", body.me.medals.some((m) => m.name === "TEST BMEDAL/B [FIRE]"), true);
+  check("medal ids are opaque", body.me.medals.every((m) => /^[0-9a-f]{16}$/.test(m.id)), true);
+  check("no reviews on a non-admin's desk", body.reviews, []);
+  check("heatmap: 64 days", body.me.days.length, 64);
+  check("heatmap: today is last", body.me.days[63], 1);
+  check("heatmap: token-covered day", body.me.days[60], -1);
+  check("heatmap: plain numbers only", body.me.days.every((d) => typeof d === "number"), true);
+  check("no messages yet", body.messages, []);
   // ── friends at risk: my friends only, streak >= 3, nothing logged today, not blocked ──
   check("friends at risk", body.friends_at_risk, { count: 2, top: [{ name: "runner", streak: 40 }, { name: "nudger", streak: 9 }] });
 
@@ -242,6 +290,53 @@ async function main() {
   const nudgerFeed = await feed({ authorization: `Display ${made.key}` });
   check("their key shows THEIR data", (await nudgerFeed.json()).me.username, "nudger");
   check("unknown username → 404", (await admin("display-keys?username=nobody-here", "POST")).status, 404);
+
+  // ── App Store reviews: founders' (admins') desks only ──
+  setReviewSourceForTests(async () => ({
+    feed: {
+      entry: [
+        { "im:name": { label: "Mile A Day" }, id: { label: "app" } },          // app metadata entry
+        { id: { label: "r1" }, "im:rating": { label: "5" }, title: { label: "Love it! <3 \u{1F525}" },
+          author: { name: { label: "Jane Q Public" } }, content: { label: "secret body" } },
+        { id: { label: "r2" }, "im:rating": { label: "4" }, title: { label: "great app" } },
+        { id: { label: "r3" }, "im:rating": { label: "9" }, title: { label: "bogus rating" } },
+      ],
+    },
+  }));
+  const adminKey = (await createDisplayKey(ADMIN, "founder desk", ADMIN)).key;
+  const adminFeed = await (await feed({ authorization: `Display ${adminKey}` })).json();
+  check("admin desk gets reviews", adminFeed.reviews.map((r) => [r.stars, r.title]),
+    [[5, "LOVE IT! 3 [FIRE]"], [4, "GREAT APP"]]);
+  check("review fields (no author, no body)", Object.keys(adminFeed.reviews[0] ?? {}).sort(), ["id", "stars", "title"]);
+  check("no reviewer names anywhere", JSON.stringify(adminFeed).includes("Jane"), false);
+  const ownerAgain = await (await feed({ authorization: `Display ${key}` })).json();
+  check("still no reviews for a non-admin", ownerAgain.reviews, []);
+
+  // ── desk messages ──
+  const sendMsg = (body, user = ADMIN) => fetch(`${base}/admin/display-messages`, {
+    method: "POST",
+    headers: { "x-test-user": user, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  check("non-admin cannot send a desk message", (await sendMsg({ username: "owner", text: "hi" }, OWNER)).status, 403);
+  check("non-admin cannot list desk messages", (await admin("display-messages", "GET", OWNER)).status, 403);
+  check("empty message → 400", (await sendMsg({ username: "owner", text: "<<>> \u{1F600}" })).status, 400);
+  check("unknown recipient → 404", (await sendMsg({ username: "nobody-here", text: "hi" })).status, 404);
+  const sent = await sendMsg({ username: "owner", text: "nice mile \u{1F525} <script>alert(1)</script> \u2764\uFE0F" });
+  check("admin can send a desk message", sent.status, 201);
+  check("message is cleaned for the panel", (await sent.json()).message.body, "NICE MILE [FIRE] SCRIPTALERT1/SCRIPT [HEART]");
+  await sendMsg({ username: "other", text: "not for you" });
+  await db.query(
+    `INSERT INTO display_messages (to_user_id, body, expires_at) VALUES ($1, 'OLD', NOW() - INTERVAL '1 minute')`,
+    [OWNER],
+  );
+  const withMsg = await (await feed({ authorization: `Display ${key}` })).json();
+  check("my desk gets only my unexpired message", withMsg.messages.map((m) => [m.from, m.text]),
+    [["admin", "NICE MILE [FIRE] SCRIPTALERT1/SCRIPT [HEART]"]]);
+  check("message fields", Object.keys(withMsg.messages[0] ?? {}).sort(), ["age_s", "from", "id", "text"]);
+  check("message ids are opaque", withMsg.messages.every((m) => /^[0-9a-f]{16}$/.test(m.id)), true);
+  const msgList = await (await admin("display-messages")).json();
+  check("admin can list desk messages", msgList.messages.length >= 2, true);
 
   // ── revoke ──
   const id = list.keys.find((k) => k.username === "owner").id;
