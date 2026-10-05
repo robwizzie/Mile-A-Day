@@ -50,6 +50,10 @@ import {
   DRILLDOWN_KINDS,
   type DrilldownKind,
 } from "../services/adminAnalyticsService.js";
+import {
+  getFriendNetwork,
+  getUserLocations,
+} from "../services/adminNetworkService.js";
 import { signMediaUrlsDeep } from "../services/mediaSigningService.js";
 
 const APPLE_ISS = "https://appleid.apple.com";
@@ -377,6 +381,16 @@ export async function community(_req: Request, res: Response) {
 
 export async function referralGraph(_req: Request, res: Response) {
   res.json(await getReferralGraph());
+}
+
+/** Every friendship as one edge, plus the friend groups found in it. */
+export async function friendNetwork(_req: Request, res: Response) {
+  res.json(await getFriendNetwork());
+}
+
+/** Where people walk, as a coarse grid of counts — never a per-person point. */
+export async function userLocations(_req: Request, res: Response) {
+  res.json(await getUserLocations());
 }
 
 export async function retention(_req: Request, res: Response) {

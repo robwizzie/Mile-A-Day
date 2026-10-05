@@ -97,6 +97,12 @@ jobs:
       - name: Admin analytics panel check
         run: node scripts/admin-analytics-check.mjs
 
+      # The Network tab: friend graph (one edge per pair, pending is not a
+      # friendship), the friend groups found in it, and the where-people-walk
+      # grid (placed by where they mostly walk, never by a front door).
+      - name: Admin network check
+        run: node scripts/admin-network-check.mjs
+
       # The competition a post carries. `CompetitionFlairRow` was removed for
       # announcing a closed group to the poster's whole circle unasked; the
       # opt-in replacement is only as good as its gate. Every failure is

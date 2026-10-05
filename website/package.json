@@ -9,16 +9,23 @@
   },
   "dependencies": {
     "@vercel/analytics": "1.6.1",
+    "d3-force": "^3.0.0",
+    "d3-geo": "^3.1.1",
     "lucide-react": "^0.564.0",
     "next": "16.1.6",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.0",
+    "@types/d3-force": "^3.0.10",
+    "@types/d3-geo": "^3.1.1",
     "@types/node": "^22",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
+    "@types/topojson-client": "^3.1.5",
     "postcss": "^8.5",
     "tailwindcss": "^4.2.0",
     "tw-animate-css": "1.3.3",

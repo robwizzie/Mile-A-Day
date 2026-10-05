@@ -34,6 +34,8 @@ import {
   featureAdoption,
   community,
   referralGraph,
+  friendNetwork,
+  userLocations,
   retention,
   activityRhythms,
   pulse,
@@ -83,6 +85,10 @@ adminRouter.get("/posts/by-day", postsByDay);
 adminRouter.get("/referrals", referrals);
 // Who actually referred whom, resolved from the free-text "a friend" answer.
 adminRouter.get("/referral-graph", referralGraph);
+// The Network tab: the whole friend graph with its groups, and a coarse
+// grid of where people walk (from GPS routes — there is no location column).
+adminRouter.get("/network", friendNetwork);
+adminRouter.get("/network/locations", userLocations);
 
 // Feature-usage analytics: is each feature being used, by how many people,
 // and how often. All bounded aggregates, cached in the service.

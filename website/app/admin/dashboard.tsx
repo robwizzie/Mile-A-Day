@@ -6,6 +6,7 @@ import { UsersTab } from "./_components/Users";
 import { ContentTab } from "./_components/Content";
 import { FeaturesTab } from "./_components/Features";
 import { GrowthTab } from "./_components/Growth";
+import { NetworkTab } from "./_components/Network";
 import { ErrorsTab } from "./_components/Errors";
 import { DiagnosticsTab } from "./_components/Diagnostics";
 import { DisplaysTab } from "./_components/Displays";
@@ -18,6 +19,7 @@ const TABS = [
   { id: "content", label: "Content", render: () => <ContentTab /> },
   { id: "features", label: "Features", render: () => <FeaturesTab /> },
   { id: "growth", label: "Growth", render: () => <GrowthTab /> },
+  { id: "network", label: "Network", render: () => <NetworkTab /> },
   { id: "errors", label: "Errors", render: () => <ErrorsTab /> },
   { id: "crashes", label: "Crashes", render: () => <DiagnosticsTab /> },
   { id: "displays", label: "Displays", render: () => <DisplaysTab /> },
