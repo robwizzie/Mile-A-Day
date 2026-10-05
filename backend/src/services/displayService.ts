@@ -7,6 +7,7 @@ import { DAILY_GOAL_TOLERANCE, getTodayMiles } from "./workoutService.js";
 import { effectiveStreakSql, fetchTodayCoverage } from "./streakFeatureCore.js";
 import { localNowSql } from "./dailyResetTime.js";
 import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
+import { ownedFlameyItems, servedFlameyLook } from "./flameyService.js";
 
 const db = PostgresService.getInstance();
 
@@ -45,6 +46,14 @@ const HEATMAP_DAYS = 64;       // one per pixel column of the panel
 const MESSAGE_TTL_HOURS = 24;
 const MAX_MESSAGES = 3;
 export const MESSAGE_MAX_CHARS = 48;
+const MEDAL_WINDOW_HOURS = 48;
+const MAX_MEDALS = 3;
+/** Flamey's Closet slots the desk can draw (the rest stay off the wire). */
+const DESK_FLAMEY_SLOTS = ["color", "head", "eyes", "costume"] as const;
+// App Store reviews (founder mode): Apple's public customer-reviews feed.
+const APP_STORE_ID = process.env.APP_STORE_ID || "6746970905";
+const REVIEWS_TTL_MS = 15 * 60 * 1000;
+const MAX_REVIEWS = 3;
 
 export function hashDisplayKey(key: string): string {
   return crypto.createHash("sha256").update(key, "utf8").digest("hex");
@@ -196,6 +205,70 @@ export async function listDisplayMessages(): Promise<DisplayMessageRow[]> {
   );
 }
 
+// ─── App Store reviews (founder mode, admins' desks only) ──────────────────
+
+export interface DeskReview { id: string; stars: number; title: string }
+
+/** Parse Apple's public customer-reviews JSON into desk-safe rows: an opaque
+ *  id, the star rating and the title cleaned for the panel. No author name,
+ *  no body. Tolerates the feed's quirks (a lone entry is an object, older
+ *  feeds lead with the app's own metadata entry). */
+export function parseAppReviews(json: unknown): DeskReview[] {
+  const feed = (json as any)?.feed;
+  let entries = feed?.entry ?? [];
+  if (!Array.isArray(entries)) entries = [entries];
+  const out: DeskReview[] = [];
+  for (const e of entries) {
+    const stars = Number(e?.["im:rating"]?.label);
+    const rawId = String(e?.id?.label ?? "");
+    if (!rawId || !(stars >= 1 && stars <= 5)) continue;
+    const title = sanitizeDisplayText(String(e?.title?.label ?? "")) ?? "";
+    out.push({
+      id: crypto.createHash("sha256").update(`review:${rawId}`).digest("hex").slice(0, 16),
+      stars: Math.round(stars),
+      title,
+    });
+    if (out.length >= MAX_REVIEWS) break;
+  }
+  return out;
+}
+
+type ReviewSource = () => Promise<unknown>;
+let reviewSource: ReviewSource = async () => {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const res = await fetch(
+      `https://itunes.apple.com/us/rss/customerreviews/id=${APP_STORE_ID}/sortby=mostrecent/json`,
+      { signal: ctrl.signal, headers: { accept: "application/json" } },
+    );
+    if (!res.ok) throw new Error(`reviews ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+};
+let reviewsCache: { data: DeskReview[]; at: number } | null = null;
+
+/** Tests swap the network source for a fixture. */
+export function setReviewSourceForTests(src: ReviewSource) {
+  reviewSource = src;
+  reviewsCache = null;
+}
+
+async function latestReviews(): Promise<DeskReview[]> {
+  if (reviewsCache && Date.now() - reviewsCache.at < REVIEWS_TTL_MS) return reviewsCache.data;
+  try {
+    const data = parseAppReviews(await reviewSource());
+    reviewsCache = { data, at: Date.now() };
+    return data;
+  } catch {
+    // Apple's feed is down or slow: keep what we had, try again next time.
+    reviewsCache = { data: reviewsCache?.data ?? [], at: Date.now() - REVIEWS_TTL_MS + 60_000 };
+    return reviewsCache.data;
+  }
+}
+
 // ─── Community block (aggregates only, cached) ─────────────────────────────
 
 export interface DisplayCommunity {
@@ -292,7 +365,13 @@ export interface DisplayFeed {
     /** Their own last 64 local days, oldest first: miles that day, or -1 for
      *  a day with no mile that a streak token covered. */
     days: number[];
+    /** Their own Flamey's Closet look, slots the desk draws: item ids only. */
+    flamey: Partial<Record<(typeof DESK_FLAMEY_SLOTS)[number], string>> | null;
+    /** Medals they earned in the last 48 h (newest first). */
+    medals: { id: string; name: string; age_s: number }[];
   };
+  /** Founder mode: newest App Store reviews, only on admins' desks. */
+  reviews: DeskReview[];
   /** Unexpired desk messages sent TO the owner (newest first). */
   messages: { id: string; from: string; text: string; age_s: number }[];
   friends_running: { name: string; miles: number }[];
@@ -306,7 +385,8 @@ export interface DisplayFeed {
 }
 
 export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
-  const [community, meRows, todayMiles, coverage, friends, alerts, finished, atRisk, days, messages] = await Promise.all([
+  const [community, meRows, todayMiles, coverage, friends, alerts, finished, atRisk, days, messages,
+         closetRows, owned, medals, roleRows] = await Promise.all([
     getCommunity(),
     db.query<{
       username: string | null;
@@ -482,7 +562,29 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
         LIMIT ${MAX_MESSAGES}`,
       [userId],
     ),
+    db.query<{ flamey_look: unknown }>(`SELECT flamey_look FROM users WHERE user_id = $1`, [userId]),
+    ownedFlameyItems(userId),
+    // The owner's own newest medals (a badge's display name only).
+    db.query<{ id: string; name: string; age_s: number }>(
+      `SELECT encode(sha256(('medal:' || ub.id::text)::bytea), 'hex') AS id, b.name,
+              EXTRACT(EPOCH FROM (NOW() - ub.earned_at))::int AS age_s
+         FROM user_badges ub
+         JOIN badges b ON b.badge_id = ub.badge_id
+        WHERE ub.user_id = $1 AND ub.earned_at > NOW() - INTERVAL '${MEDAL_WINDOW_HOURS} hours'
+        ORDER BY ub.earned_at DESC
+        LIMIT ${MAX_MEDALS}`,
+      [userId],
+    ),
+    db.query<{ role: string | null }>(`SELECT role FROM users WHERE user_id = $1`, [userId]),
   ]);
+  const isAdmin = roleRows[0]?.role === "admin";
+  const reviews = isAdmin ? await latestReviews() : [];
+  const look = servedFlameyLook(closetRows[0]?.flamey_look, owned);
+  let flamey: Partial<Record<(typeof DESK_FLAMEY_SLOTS)[number], string>> | null = null;
+  for (const slot of DESK_FLAMEY_SLOTS) {
+    const item = look?.[slot];
+    if (typeof item === "string") (flamey ??= {})[slot] = item;
+  }
 
   const me = meRows[0];
   const miles = Number(todayMiles) || 0;
@@ -503,11 +605,18 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
       live_miles: me?.live_miles == null ? null : Math.round(Number(me.live_miles) * 100) / 100,
       longest_run: me?.longest_run == null ? null : Math.round(Number(me.longest_run) * 100) / 100,
       fastest_mile_month: me?.fastest_mile_month == null ? null : Math.round(Number(me.fastest_mile_month)),
+      flamey,
+      medals: medals.map((m) => ({
+        id: m.id.slice(0, 16),
+        name: sanitizeDisplayText(m.name) ?? "MEDAL",
+        age_s: Math.max(0, Number(m.age_s) || 0),
+      })),
       days: days.map((d) => {
         const mi = Number(d.miles) || 0;
         return mi < DAILY_GOAL_TOLERANCE && d.covered ? -1 : Math.round(mi * 10) / 10;
       }),
     },
+    reviews,
     messages: messages.map((m) => ({
       id: m.id.slice(0, 16),
       from: m.from ?? "MILE A DAY",
