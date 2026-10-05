@@ -5,6 +5,7 @@ import { START_OF_TODAY_ET_SQL, TODAY_ET_DATE_SQL } from "./dailyResetTime.js";
 import { LIVE_PRESENCE_WINDOW_SECONDS } from "./liveTrackingService.js";
 import { DAILY_GOAL_TOLERANCE, getTodayMiles } from "./workoutService.js";
 import { effectiveStreakSql, fetchTodayCoverage } from "./streakFeatureCore.js";
+import { getAtRisk } from "./adminAnalyticsService.js";
 
 const db = PostgresService.getInstance();
 
@@ -29,11 +30,15 @@ const db = PostgresService.getInstance();
 
 export const DISPLAY_KEY_PREFIX = "madk_";
 const KEY_BYTES = 32; // 256-bit secret
-const LAST_USED_STAMP_MS = 10 * 60 * 1000;
+// Short enough that Admin -> Displays can call a board offline after 10 min.
+const LAST_USED_STAMP_MS = 2 * 60 * 1000;
+const AT_RISK_TTL_MS = 5 * 60 * 1000;
+const FINISHED_WINDOW_MINUTES = 30;
 const COMMUNITY_TTL_MS = 30_000;
 const ALERT_WINDOW_HOURS = 24;
 const MAX_ALERTS = 5;
 const MAX_FRIENDS_RUNNING = 3;
+const MAX_FRIENDS_FINISHED = 3;
 
 export function hashDisplayKey(key: string): string {
   return crypto.createHash("sha256").update(key, "utf8").digest("hex");
@@ -134,15 +139,27 @@ export interface DisplayCommunity {
   hypes_today: number;
   nudges_today: number;
   miles_yesterday_same_time: number;
+  streaks_at_risk: number;
 }
 
 let communityCache: { data: DisplayCommunity; at: number } | null = null;
+let atRiskCache: { n: number; at: number } | null = null;
+
+/** How many streaks are at risk today: the same rule as the admin panel
+ *  (runner's own local day, not on an injury pause), as a COUNT only. */
+async function streaksAtRisk(): Promise<number> {
+  if (atRiskCache && Date.now() - atRiskCache.at < AT_RISK_TTL_MS) return atRiskCache.n;
+  const n = (await getAtRisk()).length;
+  atRiskCache = { n, at: Date.now() };
+  return n;
+}
 
 async function getCommunity(): Promise<DisplayCommunity> {
   if (communityCache && Date.now() - communityCache.at < COMMUNITY_TTL_MS) {
     return communityCache.data;
   }
   const pub = await getPublicStats();
+  const atRisk = await streaksAtRisk();
   const [row] = await db.query<Record<string, number>>(`
     SELECT
       -- Out on a tracked mile right now, counted the way the app decides
@@ -188,6 +205,7 @@ async function getCommunity(): Promise<DisplayCommunity> {
     hypes_today: row?.hypes_today ?? 0,
     nudges_today: row?.nudges_today ?? 0,
     miles_yesterday_same_time: Math.round((row?.miles_yesterday_same_time ?? 0) * 10) / 10,
+    streaks_at_risk: atRisk,
   };
   communityCache = { data, at: Date.now() };
   return data;
@@ -206,13 +224,16 @@ export interface DisplayFeed {
     running_now: boolean;
     local_time: string;          // "HH:MM:SS" in the owner's timezone
     minutes_to_midnight: number; // until the owner's local day ends
+    year_ago_miles: number | null; // their own miles on this date last year
   };
   friends_running: { name: string; miles: number }[];
+  /** Friends whose tracked session ended in the last 30 min (same rules). */
+  friends_finished: { id: string; name: string; miles: number }[];
   alerts: { id: string; kind: "nudge" | "hype"; from: string; at: string }[];
 }
 
 export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
-  const [community, meRows, todayMiles, coverage, friends, alerts] = await Promise.all([
+  const [community, meRows, todayMiles, coverage, friends, alerts, finished] = await Promise.all([
     getCommunity(),
     db.query<{
       username: string | null;
@@ -220,6 +241,7 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
       running_now: boolean;
       local_time: string;
       minutes_to_midnight: number;
+      year_ago_miles: number | null;
     }>(
       `WITH tz AS (
          SELECT COALESCE((SELECT timezone_offset FROM workouts
@@ -233,7 +255,11 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
                        WHERE s.user_id = u.user_id AND s.ended_at IS NULL
                          AND s.last_seen_at > NOW() - INTERVAL '${LIVE_PRESENCE_WINDOW_SECONDS} seconds') AS running_now,
               to_char(loc.t, 'HH24:MI:SS') AS local_time,
-              (EXTRACT(EPOCH FROM (date_trunc('day', loc.t) + INTERVAL '1 day' - loc.t)) / 60)::int AS minutes_to_midnight
+              (EXTRACT(EPOCH FROM (date_trunc('day', loc.t) + INTERVAL '1 day' - loc.t)) / 60)::int AS minutes_to_midnight,
+              (SELECT SUM(w.distance)::float FROM workouts w
+                WHERE w.user_id = u.user_id
+                  AND w.local_date = (loc.t - INTERVAL '1 year')::date
+                  AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL) AS year_ago_miles
          FROM users u, loc
         WHERE u.user_id = $1`,
       [userId],
@@ -282,6 +308,30 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
         LIMIT ${MAX_ALERTS}`,
       [userId],
     ),
+    // Friends who just FINISHED a tracked session: identical friendship,
+    // presence opt-out and block rules to friends_running above.
+    db.query<{ id: string; name: string; miles: number }>(
+      `SELECT encode(sha256((s.session_id::text || s.ended_at::text)::bytea), 'hex') AS id,
+              u.username AS name, ROUND(s.distance_miles::numeric, 1)::float AS miles
+         FROM friendships f
+         JOIN live_tracking_sessions s
+           ON s.user_id = f.friend_id
+          AND s.ended_at IS NOT NULL
+          AND s.ended_at > NOW() - INTERVAL '${FINISHED_WINDOW_MINUTES} minutes'
+         JOIN users u ON u.user_id = f.friend_id
+         LEFT JOIN notification_settings ns ON ns.user_id = f.friend_id
+        WHERE f.user_id = $1
+          AND f.status = 'accepted'
+          AND u.username IS NOT NULL
+          AND COALESCE(ns.share_live_presence, TRUE) = TRUE
+          AND NOT EXISTS (
+            SELECT 1 FROM user_blocks b
+             WHERE (b.blocker_id = $1 AND b.blocked_id = f.friend_id)
+                OR (b.blocker_id = f.friend_id AND b.blocked_id = $1))
+        ORDER BY s.ended_at DESC
+        LIMIT ${MAX_FRIENDS_FINISHED}`,
+      [userId],
+    ),
   ]);
 
   const me = meRows[0];
@@ -298,8 +348,10 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
       running_now: Boolean(me?.running_now),
       local_time: me?.local_time ?? "00:00:00",
       minutes_to_midnight: me?.minutes_to_midnight ?? 0,
+      year_ago_miles: me?.year_ago_miles == null ? null : Math.round(Number(me.year_ago_miles) * 100) / 100,
     },
     friends_running: friends.map((f) => ({ name: f.name, miles: Number(f.miles) || 0 })),
+    friends_finished: finished.map((f) => ({ id: f.id.slice(0, 16), name: f.name, miles: Number(f.miles) || 0 })),
     alerts: alerts.map((a) => ({ id: a.id.slice(0, 16), kind: a.kind, from: a.from, at: a.at })),
   };
 }

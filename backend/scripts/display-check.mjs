@@ -33,7 +33,12 @@ const STALE = P + "stale";            // friend, session stale → not shown
 const STRANGER = P + "stranger";      // not a friend, running → not shown
 const NUDGER = P + "nudger";          // friend who nudged owner → alert
 const OTHER = P + "other";            // someone else with their own inbox
-const ALL = [OWNER, ADMIN, RUNNER, HIDDEN, BLOCKED, BLOCKER, STALE, STRANGER, NUDGER, OTHER];
+const DONE = P + "done";              // friend, finished 5 min ago → finished
+const OLDDONE = P + "olddone";        // friend, finished 2 h ago → not shown
+const HIDDONE = P + "hiddone";        // friend, finished, opted out → not shown
+const STRDONE = P + "strdone";        // not a friend, finished → not shown
+const ALL = [OWNER, ADMIN, RUNNER, HIDDEN, BLOCKED, BLOCKER, STALE, STRANGER, NUDGER, OTHER,
+             DONE, OLDDONE, HIDDONE, STRDONE];
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -61,7 +66,7 @@ async function seed() {
       [id, `sub-${id}`, `${id}@example.com`, id.slice(P.length), id === ADMIN ? "admin" : "user"],
     );
   }
-  for (const f of [RUNNER, HIDDEN, BLOCKED, BLOCKER, STALE, NUDGER]) {
+  for (const f of [RUNNER, HIDDEN, BLOCKED, BLOCKER, STALE, NUDGER, DONE, OLDDONE, HIDDONE]) {
     await db.query(
       `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1,$2,'accepted'),($2,$1,'accepted')`,
       [OWNER, f],
@@ -75,7 +80,14 @@ async function seed() {
       [id, miles, fresh ? "10" : "900"],
     );
   }
-  await db.query(`INSERT INTO notification_settings (user_id, share_live_presence) VALUES ($1, FALSE)`, [HIDDEN]);
+  await db.query(`INSERT INTO notification_settings (user_id, share_live_presence) VALUES ($1, FALSE), ($2, FALSE)`, [HIDDEN, HIDDONE]);
+  for (const [id, ago] of [[DONE, 5], [OLDDONE, 120], [HIDDONE, 5], [STRDONE, 5]]) {
+    await db.query(
+      `INSERT INTO live_tracking_sessions (user_id, workout_type, distance_miles, last_seen_at, ended_at)
+       VALUES ($1, 'running', 1.23, NOW() - ($2 || ' minutes')::interval, NOW() - ($2 || ' minutes')::interval)`,
+      [id, String(ago)],
+    );
+  }
   await db.query(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1,$2),($3,$1)`, [OWNER, BLOCKED, BLOCKER]);
   // Owner's inbox: a nudge and a hype from NUDGER, a nudge from BLOCKED, an old one, an unrelated type.
   const note = (uid, type, sender, ago) => db.query(
@@ -97,6 +109,15 @@ async function seed() {
      VALUES ($1, $2, 1.02, (NOW() AT TIME ZONE 'UTC')::date, (NOW() AT TIME ZONE 'UTC')::date, 0,
              'running', NOW() - INTERVAL '1 minute', 100, 600)`,
     [P + "w1", OWNER],
+  );
+  // ...and 1.5 miles on this date last year (the "1 year ago today" moment).
+  await db.query(
+    `INSERT INTO workouts (workout_id, user_id, distance, local_date, date, timezone_offset,
+                           workout_type, device_end_date, calories, total_duration)
+     VALUES ($1, $2, 1.5, ((NOW() AT TIME ZONE 'UTC') - INTERVAL '1 year')::date,
+             ((NOW() AT TIME ZONE 'UTC') - INTERVAL '1 year')::date, 0,
+             'running', NOW() - INTERVAL '1 year', 100, 600)`,
+    [P + "w0", OWNER],
   );
 }
 
@@ -137,14 +158,15 @@ async function main() {
   const body = await res.json();
 
   // ── exact whitelist ──
-  check("top-level fields", Object.keys(body).sort(), ["alerts", "community", "friends_running", "me", "v"]);
+  check("top-level fields", Object.keys(body).sort(), ["alerts", "community", "friends_finished", "friends_running", "me", "v"]);
   check("community fields", Object.keys(body.community).sort(), [
     "active_7d", "badges_today", "hypes_today", "longest_streak", "miles_today",
     "miles_yesterday_same_time", "new_friends_today", "nudges_today", "out_running_now",
-    "photos_shared", "tokens_spent_today", "total_hypes", "total_miles", "total_users"]);
+    "photos_shared", "streaks_at_risk", "tokens_spent_today", "total_hypes", "total_miles", "total_users"]);
   check("community values are all numbers", Object.values(body.community).every((v) => typeof v === "number"), true);
   check("me fields", Object.keys(body.me).sort(), [
-    "local_time", "mile_done", "miles_today", "minutes_to_midnight", "running_now", "streak", "username"]);
+    "local_time", "mile_done", "miles_today", "minutes_to_midnight", "running_now", "streak", "username",
+    "year_ago_miles"]);
   const text = JSON.stringify(body);
   check("no emails anywhere", text.includes("@"), false);
   check("no real names anywhere", /Secret|Surname/.test(text), false);
@@ -160,6 +182,13 @@ async function main() {
   // ── friends running: only the one who shares, is fresh, not blocked ──
   check("friends running", body.friends_running, [{ name: "runner", miles: 0.8 }]);
   check("friend item fields", Object.keys(body.friends_running[0] ?? {}).sort(), ["miles", "name"]);
+
+  // ── friends finished: only the friend who shares and finished recently ──
+  check("friends finished", body.friends_finished.map((f) => [f.name, f.miles]), [["done", 1.2]]);
+  check("finished item fields", Object.keys(body.friends_finished[0] ?? {}).sort(), ["id", "miles", "name"]);
+  check("finished ids are opaque", body.friends_finished.every((f) => /^[0-9a-f]{16}$/.test(f.id)), true);
+  check("my miles a year ago", body.me.year_ago_miles, 1.5);
+  check("streaks at risk is a count", Number.isInteger(body.community.streaks_at_risk), true);
 
   // ── alerts: mine, last 24h, nudge/hype only, not from blocked ──
   check("alerts", body.alerts.map((a) => [a.kind, a.from]), [["hype", "nudger"], ["nudge", "nudger"]]);
