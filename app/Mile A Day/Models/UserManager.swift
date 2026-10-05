@@ -258,6 +258,7 @@ class UserManager: ObservableObject {
         // no pause state of its own, so there is nothing to clear there.
         #if !os(watchOS)
         Task { @MainActor in InjuryPauseState.shared.reset() }
+        Task { @MainActor in ShoeStore.shared.reset() }
         #endif
 
         currentUser.appleId = nil

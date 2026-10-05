@@ -3014,3 +3014,104 @@ export const referralAliases = pgTable(
     index("idx_referral_aliases_user").on(table.userId),
   ],
 );
+
+/**
+ * A user's shoes, for per-pair mileage. PRIVATE to the owner: nothing here is
+ * read by a feed, profile, friend or post query, and every route is
+ * `requireSelfAccess` — a shoe is gear, not something friends are shown.
+ * Entered by hand (brand, model as `name`, optional colorway and photo), the
+ * way Strava's gear works.
+ */
+export const shoes = pgTable(
+  "shoes",
+  {
+    shoeId: uuid("shoe_id").defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    name: text().notNull(),
+    brand: text(),
+    colorway: text(),
+    // /uploads/shoes/<file>, written only by the image upload endpoint.
+    imageUrl: text("image_url"),
+    // Miles the pair already had before it was tracked here.
+    startingMiles: doublePrecision("starting_miles").default(0).notNull(),
+    // Optional "replace at" mileage; NULL = no target.
+    replaceAtMiles: doublePrecision("replace_at_miles"),
+    // At most one per user (partial unique index below). `default_since` is
+    // when it BECAME the default: the sync only stamps workouts that ended
+    // after it, so choosing a default never rewrites history.
+    isDefault: boolean("is_default").default(false).notNull(),
+    defaultSince: timestamp("default_since", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    retiredAt: timestamp("retired_at", { withTimezone: true, mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_shoes_user").on(table.userId),
+    uniqueIndex("shoes_one_default_per_user")
+      .on(table.userId)
+      .where(sql`is_default`),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "shoes_user_id_fkey",
+    }).onDelete("cascade"),
+    check(
+      "shoes_name_check",
+      sql`char_length(name) BETWEEN 1 AND 120`,
+    ),
+  ],
+);
+
+/**
+ * Which shoe a workout was done in. Keyed by (user, workout) and with NO
+ * foreign key to `workouts`, on purpose: the app lets you pick the pair on
+ * the recap, i.e. before HealthKit has handed the workout to the sync, and a
+ * per-user key means nobody can pre-claim someone else's workout id (they
+ * are visible in feed payloads). Mileage joins back on BOTH columns.
+ *
+ * `shoe_id` NULL is an explicit "no shoe" — it stops the sync re-stamping the
+ * default on that workout, and it is what a deleted shoe leaves behind.
+ */
+export const workoutShoes = pgTable(
+  "workout_shoes",
+  {
+    userId: text("user_id").notNull(),
+    workoutId: varchar("workout_id", { length: 255 }).notNull(),
+    shoeId: uuid("shoe_id"),
+    // 'default' (stamped by the sync) or 'user' (picked in the app).
+    assignedBy: text("assigned_by").notNull(),
+    assignedAt: timestamp("assigned_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.workoutId],
+      name: "workout_shoes_pkey",
+    }),
+    index("idx_workout_shoes_shoe")
+      .on(table.shoeId)
+      .where(sql`shoe_id IS NOT NULL`),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "workout_shoes_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.shoeId],
+      foreignColumns: [shoes.shoeId],
+      name: "workout_shoes_shoe_id_fkey",
+    }).onDelete("set null"),
+    check(
+      "workout_shoes_assigned_by_check",
+      sql`assigned_by IN ('default', 'user')`,
+    ),
+  ],
+);

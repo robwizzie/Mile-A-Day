@@ -33,6 +33,8 @@ globs: backend/**
 
 - Profile banner: `users.profile_banner_url` (written ONLY by `POST /users/:id/banner/upload` — multer + sharp 1500×500 cover, file under `uploads/profile-banners/`) and `users.profile_banner_style` (one of `BANNER_STYLES` in usersController, or null). `PATCH /users/:id` accepts the style and can only CLEAR the url (`null`/`""`) — accepting a path there would let a profile point at someone else's file. Both nullable, no default; `GET /users/:id` is `SELECT *` so they ride along for free.
 
+- Shoes (`shoes` + `workout_shoes`, `shoeService`) are OWNER-ONLY and entered by hand (brand, model as `name`, optional colorway + camera-roll photo via `POST /users/:id/shoes/:shoeId/image`): every route is `requireSelfAccess`, and nothing outside `shoeService` (and account deletion) may read those tables — `scripts/shoes-check.mjs` fails CI if another module does, so a feed/profile/friend join can't sneak in. `workout_shoes` is keyed (user_id, workout_id) with NO FK to workouts — the recap picks a pair before the workout syncs, and a per-user key stops anyone pre-claiming someone else's workout id. The sync stamps the default (`defaultShoeStampStatement`, spliced last in `uploadWorkouts`) ONLY onto on-foot workouts that ended after `default_since` and have no row (`ON CONFLICT DO NOTHING`), so a full re-sync never sweeps history onto a new pair; `shoe_id` NULL is an explicit "none". Mileage is derived at read through `countedWorkoutSql` + `starting_miles`, never stored.
+
 ## Architecture: Routes -> Controllers -> Services
 - `routes/` - Express Router definitions. Thin: just wire HTTP verbs to controller functions + middleware.
 - `controllers/` - Request/response handling. Parse params/body, call services, format responses.

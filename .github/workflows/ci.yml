@@ -192,6 +192,12 @@ jobs:
       # row direction is a plausible push nobody can tell is wrong.
       - name: Win-back reminder check
         run: node scripts/win-back-check.mjs
+      # Shoe tracker: the sync stamps the default pair only onto workouts that
+      # ended after it became the default, a pre-sync pick survives the sync,
+      # mileage counts only counted workouts, and no module outside the shoe
+      # service reads the (private) shoe tables.
+      - name: Shoe tracker check
+        run: node scripts/shoes-check.mjs
 
   website:
     name: Website (lint + build)

@@ -155,6 +155,10 @@ struct WorkoutRecapView: View {
 
                     statsGrid
 
+                    if let workoutId {
+                        RecapShoePicker(workoutId: workoutId)
+                    }
+
                     if isIndoor, let workoutId {
                         TreadmillDistanceAdjustmentCard(
                             workoutId: workoutId,
@@ -183,6 +187,11 @@ struct WorkoutRecapView: View {
         }
         .task {
             await loadRouteForSharing()
+        }
+        // The shoe picker above draws nothing until it knows there ARE
+        // shoes, so the load has to live on a view that always exists.
+        .task {
+            await ShoeStore.shared.refreshIfStale()
         }
         .onAppear {
             if treadmillBaselineDistance == nil {

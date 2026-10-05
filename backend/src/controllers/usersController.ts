@@ -167,6 +167,10 @@ export async function deleteUser(req: Request, res: Response) {
 	// either leaves orphaned rows or fails outright. competitions.owner/winner are
 	// ON DELETE SET NULL, so the user's competitions survive with a null owner.
 	const p = [userId];
+	const shoeImages = await db.query<{ image_url: string }>(
+		'SELECT image_url FROM shoes WHERE user_id = $1 AND image_url IS NOT NULL',
+		p
+	);
 	await db.transaction([
 		{
 			query: 'DELETE FROM workout_splits WHERE workout_id IN (SELECT workout_id FROM workouts WHERE user_id = $1)',
@@ -218,6 +222,8 @@ export async function deleteUser(req: Request, res: Response) {
 			query: 'DELETE FROM flex_log WHERE sender_id = $1 OR target_id = $1',
 			params: p
 		},
+		{ query: 'DELETE FROM workout_shoes WHERE user_id = $1', params: p },
+		{ query: 'DELETE FROM shoes WHERE user_id = $1', params: p },
 		{ query: 'DELETE FROM users WHERE user_id = $1', params: p }
 	]);
 
@@ -225,6 +231,7 @@ export async function deleteUser(req: Request, res: Response) {
 	// effort — a leftover file is not a reason to fail an account deletion.
 	unlinkUploadQuietly(results[0].profile_image_url);
 	unlinkUploadQuietly(results[0].profile_banner_url);
+	for (const shoe of shoeImages) unlinkUploadQuietly(shoe.image_url);
 
 	res.json({
 		message: `Successfully deleted user ${userId}`
