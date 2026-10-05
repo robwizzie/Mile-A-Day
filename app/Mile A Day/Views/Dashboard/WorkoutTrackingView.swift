@@ -1286,9 +1286,10 @@ struct WorkoutTrackingView: View {
         }
     }
 
-    /// Shown when the workout couldn't be written to Apple Health for a reason
-    /// OTHER than denied access — the mile still counts via sync, so this is a
-    /// calm reassurance rather than a blocking error.
+    /// Shown when the workout couldn't be written to Apple Health (yet) for a
+    /// reason OTHER than denied access. The walk was staged by `stopWorkout`
+    /// and PendingWorkoutSaver re-saves it, so this is a calm reassurance
+    /// rather than a blocking error.
     @ViewBuilder
     private var saveFallbackToast: some View {
         if showSaveFallbackToast {
@@ -1296,7 +1297,11 @@ struct WorkoutTrackingView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .madFont(size: 15, weight: .bold)
                     .foregroundColor(.green)
-                Text("Your mile still counts — it'll sync on your next update.")
+                // "next update" read as an APP update — people on an older
+                // build took it to mean their walk was held until they
+                // upgraded. What it means is: the walk is staged on this
+                // phone and re-saved on the next open (PendingWorkoutSaver).
+                Text("Your walk is saved on this phone — it'll count as soon as Apple Health takes it.")
                     .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
@@ -2916,6 +2921,36 @@ struct WorkoutTrackingView: View {
         // nil, and a walk started in Stealth with the toggle turned off
         // mid-walk lost its stealth stamp.
         let latchedStealth = persistedState?.stealth == true
+        let stealthStamp = latchedStealth || StealthModeStore.shared.isOn
+
+        // Stage the walk on disk BEFORE anything can fail. `markEnded()` and
+        // `finishCleanup()` below take the in-progress store away, and every
+        // number that counts reads an HKWorkout back — so a save that failed,
+        // or only outran the 10s timeout, used to leave the walk existing
+        // NOWHERE while a toast promised it would sync later. Resolved when
+        // HealthKit hands back a workout; otherwise PendingWorkoutSaver
+        // re-saves it on the next foreground. The session id rides the
+        // workout's metadata so a late-landing first save is never doubled.
+        let endDate = Date()
+        let pendingSessionId = persistedState?.workoutUUID ?? UUID().uuidString
+        if let stagedStart = workoutStartDate ?? persistedState?.startTime,
+           endDate > stagedStart, finalDistance > 0 {
+            PendingWorkoutSaveStore.stage(PendingWorkoutSave(
+                sessionId: pendingSessionId,
+                startDate: stagedStart,
+                endDate: endDate,
+                distanceMiles: finalDistance,
+                activityTypeRaw: (selectedActivityType ?? .walking).rawValue,
+                locationTypeRaw: selectedLocationType.rawValue,
+                activeSeconds: activeSeconds,
+                movingSeconds: locationManager.movingSeconds,
+                pauseIntervals: pauseIntervals,
+                stealth: stealthStamp,
+                routePoints: routeLocations.map { WorkoutRoutePoint(from: $0) },
+                stagedAt: endDate,
+                attempts: 0
+            ))
+        }
 
         // The user has ENDED this workout — record that synchronously, before
         // the async HealthKit save. finishCleanup() clears the store only at
@@ -2962,8 +2997,6 @@ struct WorkoutTrackingView: View {
         workoutSession = nil
         workoutBuilder = nil
 
-        let endDate = Date()
-
         // Async chain: add distance sample → end collection → finish workout →
         // attach GPS route → cleanup. Every step proceeds regardless of whether
         // the previous step failed.
@@ -2989,6 +3022,9 @@ struct WorkoutTrackingView: View {
                     if let workout, saved {
                         TrackedWorkoutLedger.shared.record(
                             workoutId: workout.uuid.uuidString, miles: finalDistance)
+                        // Landed — even if the 10s timeout already gave up on
+                        // it and showed the fallback toast.
+                        PendingWorkoutSaveStore.resolve(sessionId: pendingSessionId)
                         DispatchQueue.main.async {
                             self.recapWorkoutId = workout.uuid.uuidString
                         }
@@ -3159,9 +3195,11 @@ struct WorkoutTrackingView: View {
         // The sync reads this back off the HKWorkout and keeps the trace on
         // the phone; the route is still written to HealthKit below (the owner
         // keeps their own map in Apple Fitness).
-        if latchedStealth || StealthModeStore.shared.isOn {
+        if stealthStamp {
             metadata[StealthModeStore.metadataKey] = true
         }
+        // What PendingWorkoutSaver probes for before any re-save.
+        metadata[PendingWorkoutSave.sessionMetadataKey] = pendingSessionId
         let addMetadataThenSave = {
             if metadata.isEmpty {
                 beginSave()
@@ -3273,9 +3311,12 @@ struct WorkoutTrackingView: View {
 
         endFinishBackgroundTask()
 
-        // Show result to user. The mile counts via GPS/pedometer sync whether
-        // or not the HealthKit write succeeded, so a failed save is never a lost
-        // workout — tailor the messaging to the cause instead of alarming.
+        // Show result to user. A failed (or merely slow) save is staged in
+        // PendingWorkoutSaveStore and re-saved on the next foreground, so it is
+        // never a lost workout — tailor the messaging to the cause instead of
+        // alarming. (This comment used to claim the mile counted "via
+        // GPS/pedometer sync" regardless; nothing did that, and the walk was
+        // simply gone.)
         if workoutSaved {
             withAnimation { showRecap = true }
         } else if healthManager.isWorkoutSharingDenied() {
@@ -3284,8 +3325,13 @@ struct WorkoutTrackingView: View {
             showHealthAccessAlert = true
         } else {
             // Transient save failure with Health access intact. Don't block —
-            // show a quiet toast and slip back to the dashboard.
+            // show a quiet toast and slip back to the dashboard, and give the
+            // staged walk its first retry once the in-flight save has had its
+            // chance (a timeout here usually means it lands on its own).
             withAnimation { showSaveFallbackToast = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 65) {
+                Task { await PendingWorkoutSaver.shared.retryIfNeeded() }
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
                 dismiss()
             }
