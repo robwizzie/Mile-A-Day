@@ -27,9 +27,10 @@ public `/public/stats` numbers.
 | Field | Contents |
 |---|---|
 | `v` | `1` |
-| `community` | numbers only: `total_users`, `total_miles`, `miles_today`, `active_7d`, `longest_streak`, `total_hypes`, `photos_shared`, `out_running_now`, `tokens_spent_today`, `badges_today`, `new_friends_today`, `hypes_today`, `nudges_today`, `miles_yesterday_same_time`, `streaks_at_risk` (same rule as the admin panel, count only) |
+| `community` | numbers only: `total_users`, `total_miles`, `miles_today`, `active_7d`, `longest_streak`, `total_hypes`, `photos_shared`, `out_running_now`, `tokens_spent_today`, `badges_today`, `new_friends_today`, `hypes_today`, `nudges_today`, `miles_yesterday_same_time` |
 | `me` | the key owner only: `username`, `mile_done`, `miles_today`, `streak`, `running_now`, `local_time` (`HH:MM:SS`), `minutes_to_midnight`, `year_ago_miles` (their own miles on this date last year, or null) |
 | `friends_running` | ≤ 3 × `{name, miles}`: accepted friends who are live right now, share live presence, and are not blocked in either direction |
+| `friends_at_risk` | `{count, top}`: how many of the owner's friends (streak ≥ 3, not blocked either way, not paused) have nothing logged on their own local day yet; `top` = up to 3 `{name, streak}`, longest first. Friends already see each other's daily miles in the app. |
 | `friends_finished` | ≤ 3 × `{id, name, miles}` — same friends rules as above, for sessions that ended in the last 30 min; `id` is an opaque hash |
 | `alerts` | ≤ 5 × `{id, kind, from, at}`: the owner's own `nudge`/`hype` notifications from the last 24 h. `from` is the sender's username, `id` is an opaque hash. Blocked senders are excluded. |
 

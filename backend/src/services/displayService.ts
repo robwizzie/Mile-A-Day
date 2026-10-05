@@ -5,7 +5,7 @@ import { START_OF_TODAY_ET_SQL, TODAY_ET_DATE_SQL } from "./dailyResetTime.js";
 import { LIVE_PRESENCE_WINDOW_SECONDS } from "./liveTrackingService.js";
 import { DAILY_GOAL_TOLERANCE, getTodayMiles } from "./workoutService.js";
 import { effectiveStreakSql, fetchTodayCoverage } from "./streakFeatureCore.js";
-import { getAtRisk } from "./adminAnalyticsService.js";
+import { localNowSql } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -32,13 +32,14 @@ export const DISPLAY_KEY_PREFIX = "madk_";
 const KEY_BYTES = 32; // 256-bit secret
 // Short enough that Admin -> Displays can call a board offline after 10 min.
 const LAST_USED_STAMP_MS = 2 * 60 * 1000;
-const AT_RISK_TTL_MS = 5 * 60 * 1000;
 const FINISHED_WINDOW_MINUTES = 30;
 const COMMUNITY_TTL_MS = 30_000;
 const ALERT_WINDOW_HOURS = 24;
 const MAX_ALERTS = 5;
 const MAX_FRIENDS_RUNNING = 3;
 const MAX_FRIENDS_FINISHED = 3;
+const MAX_AT_RISK_NAMES = 3;
+const AT_RISK_MIN_STREAK = 3; // same floor as the admin "at risk" panel
 
 export function hashDisplayKey(key: string): string {
   return crypto.createHash("sha256").update(key, "utf8").digest("hex");
@@ -139,27 +140,14 @@ export interface DisplayCommunity {
   hypes_today: number;
   nudges_today: number;
   miles_yesterday_same_time: number;
-  streaks_at_risk: number;
 }
 
 let communityCache: { data: DisplayCommunity; at: number } | null = null;
-let atRiskCache: { n: number; at: number } | null = null;
-
-/** How many streaks are at risk today: the same rule as the admin panel
- *  (runner's own local day, not on an injury pause), as a COUNT only. */
-async function streaksAtRisk(): Promise<number> {
-  if (atRiskCache && Date.now() - atRiskCache.at < AT_RISK_TTL_MS) return atRiskCache.n;
-  const n = (await getAtRisk()).length;
-  atRiskCache = { n, at: Date.now() };
-  return n;
-}
-
 async function getCommunity(): Promise<DisplayCommunity> {
   if (communityCache && Date.now() - communityCache.at < COMMUNITY_TTL_MS) {
     return communityCache.data;
   }
   const pub = await getPublicStats();
-  const atRisk = await streaksAtRisk();
   const [row] = await db.query<Record<string, number>>(`
     SELECT
       -- Out on a tracked mile right now, counted the way the app decides
@@ -205,7 +193,6 @@ async function getCommunity(): Promise<DisplayCommunity> {
     hypes_today: row?.hypes_today ?? 0,
     nudges_today: row?.nudges_today ?? 0,
     miles_yesterday_same_time: Math.round((row?.miles_yesterday_same_time ?? 0) * 10) / 10,
-    streaks_at_risk: atRisk,
   };
   communityCache = { data, at: Date.now() };
   return data;
@@ -227,13 +214,17 @@ export interface DisplayFeed {
     year_ago_miles: number | null; // their own miles on this date last year
   };
   friends_running: { name: string; miles: number }[];
+  /** The owner's friends whose streak is at risk today (their own local day,
+   *  the admin panel's rule). Friends already see each other's daily miles in
+   *  the app; blocks in either direction are excluded. */
+  friends_at_risk: { count: number; top: { name: string; streak: number }[] };
   /** Friends whose tracked session ended in the last 30 min (same rules). */
   friends_finished: { id: string; name: string; miles: number }[];
   alerts: { id: string; kind: "nudge" | "hype"; from: string; at: string }[];
 }
 
 export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
-  const [community, meRows, todayMiles, coverage, friends, alerts, finished] = await Promise.all([
+  const [community, meRows, todayMiles, coverage, friends, alerts, finished, atRisk] = await Promise.all([
     getCommunity(),
     db.query<{
       username: string | null;
@@ -332,6 +323,33 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
         LIMIT ${MAX_FRIENDS_FINISHED}`,
       [userId],
     ),
+    db.query<{ name: string; streak: number }>(
+      `WITH c AS (
+         SELECT u.user_id, u.username, u.current_streak,
+                (${localNowSql("u.user_id")}) AS local_now
+           FROM friendships f
+           JOIN users u ON u.user_id = f.friend_id
+          WHERE f.user_id = $1
+            AND f.status = 'accepted'
+            AND u.username IS NOT NULL
+            AND u.current_streak >= ${AT_RISK_MIN_STREAK}
+            AND NOT EXISTS (
+              SELECT 1 FROM streak_pauses p
+               WHERE p.user_id = u.user_id AND p.resumed_on IS NULL AND p.expired_at IS NULL)
+            AND NOT EXISTS (
+              SELECT 1 FROM user_blocks b
+               WHERE (b.blocker_id = $1 AND b.blocked_id = f.friend_id)
+                  OR (b.blocker_id = f.friend_id AND b.blocked_id = $1))
+       )
+       SELECT c.username AS name, c.current_streak::int AS streak
+         FROM c
+        WHERE COALESCE((SELECT SUM(w.distance) FROM workouts w
+                         WHERE w.user_id = c.user_id
+                           AND w.local_date = (c.local_now)::date
+                           AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL), 0) < 0.95
+        ORDER BY c.current_streak DESC`,
+      [userId],
+    ),
   ]);
 
   const me = meRows[0];
@@ -351,6 +369,10 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
       year_ago_miles: me?.year_ago_miles == null ? null : Math.round(Number(me.year_ago_miles) * 100) / 100,
     },
     friends_running: friends.map((f) => ({ name: f.name, miles: Number(f.miles) || 0 })),
+    friends_at_risk: {
+      count: atRisk.length,
+      top: atRisk.slice(0, MAX_AT_RISK_NAMES).map((r) => ({ name: r.name, streak: Number(r.streak) || 0 })),
+    },
     friends_finished: finished.map((f) => ({ id: f.id.slice(0, 16), name: f.name, miles: Number(f.miles) || 0 })),
     alerts: alerts.map((a) => ({ id: a.id.slice(0, 16), kind: a.kind, from: a.from, at: a.at })),
   };
