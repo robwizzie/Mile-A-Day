@@ -6,6 +6,7 @@ import { LIVE_PRESENCE_WINDOW_SECONDS } from "./liveTrackingService.js";
 import { DAILY_GOAL_TOLERANCE, getTodayMiles } from "./workoutService.js";
 import { effectiveStreakSql, fetchTodayCoverage } from "./streakFeatureCore.js";
 import { localNowSql } from "./dailyResetTime.js";
+import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -212,6 +213,10 @@ export interface DisplayFeed {
     local_time: string;          // "HH:MM:SS" in the owner's timezone
     minutes_to_midnight: number; // until the owner's local day ends
     year_ago_miles: number | null; // their own miles on this date last year
+    local_date: string;          // "YYYY-MM-DD" in the owner's timezone (seasonal looks)
+    live_miles: number | null;   // their own live session distance while running_now
+    longest_run: number | null;  // their longest single run, all time
+    fastest_mile_month: number | null; // their fastest full-mile split this local month, seconds
   };
   friends_running: { name: string; miles: number }[];
   /** The owner's friends whose streak is at risk today (their own local day,
@@ -233,6 +238,10 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
       local_time: string;
       minutes_to_midnight: number;
       year_ago_miles: number | null;
+      local_date: string;
+      live_miles: number | null;
+      longest_run: number | null;
+      fastest_mile_month: number | null;
     }>(
       `WITH tz AS (
          SELECT COALESCE((SELECT timezone_offset FROM workouts
@@ -250,7 +259,21 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
               (SELECT SUM(w.distance)::float FROM workouts w
                 WHERE w.user_id = u.user_id
                   AND w.local_date = (loc.t - INTERVAL '1 year')::date
-                  AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL) AS year_ago_miles
+                  AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL) AS year_ago_miles,
+              to_char(loc.t, 'YYYY-MM-DD') AS local_date,
+              (SELECT s.distance_miles::float FROM live_tracking_sessions s
+                WHERE s.user_id = u.user_id AND s.ended_at IS NULL
+                  AND s.last_seen_at > NOW() - INTERVAL '${LIVE_PRESENCE_WINDOW_SECONDS} seconds') AS live_miles,
+              (SELECT MAX(w.distance)::float FROM workouts w
+                WHERE w.user_id = u.user_id AND w.workout_type = 'running'
+                  AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL) AS longest_run,
+              (SELECT MIN(ws.split_pace)::float FROM workout_splits ws
+                 JOIN workouts w ON w.workout_id = ws.workout_id
+                WHERE w.user_id = u.user_id AND w.workout_type = 'running'
+                  AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+                  AND w.local_date >= date_trunc('month', loc.t)::date
+                  AND ws.split_distance >= 0.999
+                  AND ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}) AS fastest_mile_month
          FROM users u, loc
         WHERE u.user_id = $1`,
       [userId],
@@ -367,6 +390,10 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
       local_time: me?.local_time ?? "00:00:00",
       minutes_to_midnight: me?.minutes_to_midnight ?? 0,
       year_ago_miles: me?.year_ago_miles == null ? null : Math.round(Number(me.year_ago_miles) * 100) / 100,
+      local_date: me?.local_date ?? "1970-01-01",
+      live_miles: me?.live_miles == null ? null : Math.round(Number(me.live_miles) * 100) / 100,
+      longest_run: me?.longest_run == null ? null : Math.round(Number(me.longest_run) * 100) / 100,
+      fastest_mile_month: me?.fastest_mile_month == null ? null : Math.round(Number(me.fastest_mile_month)),
     },
     friends_running: friends.map((f) => ({ name: f.name, miles: Number(f.miles) || 0 })),
     friends_at_risk: {

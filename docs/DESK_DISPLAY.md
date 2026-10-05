@@ -28,7 +28,7 @@ public `/public/stats` numbers.
 |---|---|
 | `v` | `1` |
 | `community` | numbers only: `total_users`, `total_miles`, `miles_today`, `active_7d`, `longest_streak`, `total_hypes`, `photos_shared`, `out_running_now`, `tokens_spent_today`, `badges_today`, `new_friends_today`, `hypes_today`, `nudges_today`, `miles_yesterday_same_time` |
-| `me` | the key owner only: `username`, `mile_done`, `miles_today`, `streak`, `running_now`, `local_time` (`HH:MM:SS`), `minutes_to_midnight`, `year_ago_miles` (their own miles on this date last year, or null) |
+| `me` | the key owner only: `username`, `mile_done`, `miles_today`, `streak`, `running_now`, `local_time` (`HH:MM:SS`), `minutes_to_midnight`, `year_ago_miles` (their own miles on this date last year, or null), `local_date` (for seasonal looks), `live_miles` (their own live distance while running, else null), `longest_run`, `fastest_mile_month` (seconds, full-mile splits only) |
 | `friends_running` | ≤ 3 × `{name, miles}`: accepted friends who are live right now, share live presence, and are not blocked in either direction |
 | `friends_at_risk` | `{count, top}`: how many of the owner's friends (streak ≥ 3, not blocked either way, not paused) have nothing logged on their own local day yet; `top` = up to 3 `{name, streak}`, longest first. Friends already see each other's daily miles in the app. |
 | `friends_finished` | ≤ 3 × `{id, name, miles}` — same friends rules as above, for sessions that ended in the last 30 min; `id` is an opaque hash |
