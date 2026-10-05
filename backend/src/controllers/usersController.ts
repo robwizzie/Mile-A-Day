@@ -16,6 +16,22 @@ import {
 	getPublicStreak,
 	searchUsers as searchUsersByName
 } from '../services/userService.js';
+import {
+	DASHBOARD_STYLES,
+	flameyBlockFor,
+	getFlameyCloset,
+	ownedFlameyItems,
+	parseFlameyLook,
+	saveFlameyLook,
+	parseFlameyName,
+	saveFlameyName,
+	parseFlameyOutfits,
+	readFlameyOutfits,
+	replaceFlameyOutfits,
+	type FlameyBlock
+} from '../services/flameyService.js';
+import { FLAMEY_CATALOG_VERSION } from '../services/flameyCatalog.js';
+import type { AuthenticatedRequest } from '../middleware/auth.js';
 
 const db = PostgresService.getInstance();
 
@@ -30,7 +46,95 @@ export async function getUser(req: Request, res: Response) {
 		});
 	}
 
-	res.json(results[0]);
+	// Additive: a friend's Flamey (Fun dashboard only). `{enabled:false}` for
+	// everyone else, including strangers — see flameyBlockFor. Never fails the
+	// profile read: a broken block degrades to "no Flamey".
+	const flamey = await flameyBlockFor((req as AuthenticatedRequest).userId, req.params.userId).catch(
+		(err: any): FlameyBlock => {
+			console.error('[flamey] block failed:', err?.message ?? err);
+			return { enabled: false };
+		}
+	);
+
+	// The raw closet column never rides the row: it is served only inside the
+	// friends-only `flamey` block, re-validated for ownership.
+	// Same for Flamey's name: friends-only, inside the block.
+	const { flamey_look: _rawLook, flamey_name: _rawName, ...user } = results[0];
+	res.json({ ...user, flamey });
+}
+
+// Flamey's Closet — `GET /users/:id/flamey-closet` (self). The look as served
+// plus what the server says this user owns, so the app can confirm its own
+// badge-derived ownership.
+export async function getFlameyClosetController(req: Request, res: Response) {
+	const closet = await getFlameyCloset(req.params.userId);
+	if (!closet) return res.status(404).json({ error: 'User not found' });
+	res.json(closet);
+}
+
+// `PUT /users/:id/flamey-look` (self). Body `{ look: {slot: item|null} | null }`.
+// Saved regardless of dashboard style — switching styles must never lose a
+// look; display gating is the client's.
+export async function putFlameyLook(req: Request, res: Response) {
+	const userId = req.params.userId;
+	if (!req.body || typeof req.body !== 'object' || !('look' in req.body)) {
+		return res.status(400).json({ error: 'invalid_flamey_look', detail: 'look:missing' });
+	}
+	const owned = await ownedFlameyItems(userId);
+	const parsed = parseFlameyLook(req.body.look, owned);
+	if (!parsed.ok) {
+		return res.status(400).json({ error: 'invalid_flamey_look', detail: parsed.detail });
+	}
+	if (!(await saveFlameyLook(userId, parsed.look))) {
+		return res.status(404).json({ error: 'User not found' });
+	}
+	res.json({
+		look: parsed.look,
+		owned_item_ids: [...owned],
+		catalog_version: FLAMEY_CATALOG_VERSION
+	});
+}
+
+// `PUT /users/:id/flamey-name` (self). Body `{ name: "Sparky" | null }` — null
+// resets to the default. Friends read it (App Review 1.2), so it is validated
+// and moderated: 400 `invalid_flamey_name` + `reason`
+// (too_long | empty | characters | not_allowed).
+export async function putFlameyName(req: Request, res: Response) {
+	const userId = req.params.userId;
+	if (!req.body || typeof req.body !== 'object' || !('name' in req.body)) {
+		return res.status(400).json({ error: 'invalid_flamey_name', reason: 'empty' });
+	}
+	const parsed = parseFlameyName(req.body.name);
+	if (!parsed.ok) {
+		return res.status(400).json({ error: 'invalid_flamey_name', reason: parsed.reason });
+	}
+	if (!(await saveFlameyName(userId, parsed.name))) {
+		return res.status(404).json({ error: 'User not found' });
+	}
+	res.json({ name: parsed.name });
+}
+
+// `GET /users/:id/flamey-outfits` (self): saved outfits in order, each look
+// re-validated for ownership (a revoked medal drops its item, row untouched).
+export async function getFlameyOutfits(req: Request, res: Response) {
+	res.json({ outfits: await readFlameyOutfits(req.params.userId) });
+}
+
+// `PUT /users/:id/flamey-outfits` (self). Body `{ outfits: [{ id?, name, look }] }`
+// REPLACES the list (max 5). Names are moderated like Flamey's name; looks are
+// validated exactly like PUT …/flamey-look. Answers the stored list.
+export async function putFlameyOutfits(req: Request, res: Response) {
+	const userId = req.params.userId;
+	if (!req.body || typeof req.body !== 'object' || !('outfits' in req.body)) {
+		return res.status(400).json({ error: 'invalid_outfits', detail: 'outfits:missing' });
+	}
+	const exists = await db.query('SELECT 1 FROM users WHERE user_id = $1', [userId]);
+	if (!exists.length) return res.status(404).json({ error: 'User not found' });
+	const owned = await ownedFlameyItems(userId);
+	const parsed = parseFlameyOutfits(req.body.outfits, owned);
+	if (!parsed.ok) return res.status(400).json(parsed.body);
+	await replaceFlameyOutfits(userId, parsed.outfits);
+	res.json({ outfits: await readFlameyOutfits(userId, owned) });
 }
 
 export async function searchUsers(req: Request, res: Response) {
@@ -109,6 +213,17 @@ export async function updateUser(req: Request, res: Response) {
 		}
 		values.push(style);
 		updates.push(`profile_banner_style = $${values.length}`);
+	}
+
+	// Which dashboard the app draws — 'fun' (Flamey) or 'modern'. Gates the
+	// friend's-Flamey block and the Flamey poke. Absent = untouched.
+	if (req.body.dashboard_style !== undefined) {
+		const style = req.body.dashboard_style;
+		if (typeof style !== 'string' || !DASHBOARD_STYLES.has(style)) {
+			return res.status(400).json({ error: 'invalid_dashboard_style' });
+		}
+		values.push(style);
+		updates.push(`dashboard_style = $${values.length}`);
 	}
 
 	// Banner image: this PATCH can only CLEAR it. The path is written solely by
@@ -224,6 +339,7 @@ export async function deleteUser(req: Request, res: Response) {
 		},
 		{ query: 'DELETE FROM workout_shoes WHERE user_id = $1', params: p },
 		{ query: 'DELETE FROM shoes WHERE user_id = $1', params: p },
+		{ query: 'DELETE FROM client_diagnostics WHERE user_id = $1', params: p },
 		{ query: 'DELETE FROM users WHERE user_id = $1', params: p }
 	]);
 

@@ -206,6 +206,54 @@ enum BuddyLocationType: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Who can join
+
+/// The host's answer to "who can join this walk without being invited?".
+/// Friends can see a walk that's open to them on the Friends tab and in the
+/// tracker, and join it mid-walk — which is lovely between regulars and
+/// startling the first time if nobody said it could happen. So the lobby says
+/// it, plainly, with this as the one control.
+enum BuddyJoinPolicy: String, CaseIterable, Identifiable {
+    case friends
+    case closeFriends = "close_friends"
+    case inviteOnly = "invite_only"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .friends: return "Friends"
+        case .closeFriends: return "Close friends"
+        case .inviteOnly: return "Invite only"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .friends: return "person.2.fill"
+        case .closeFriends: return "star.fill"
+        case .inviteOnly: return "lock.fill"
+        }
+    }
+
+    /// What it means, said from the host's side.
+    var explanation: String {
+        switch self {
+        case .friends: return "Any of your friends can see you're out and join in."
+        case .closeFriends: return "Only your close friends can see you're out and join in."
+        case .inviteOnly: return "Only people you invite can join."
+        }
+    }
+
+    /// The next walk opens on the last answer — people who keep walks small
+    /// keep them small every time.
+    static let storageKey = "buddyJoinPolicyV1"
+
+    static var remembered: BuddyJoinPolicy {
+        BuddyJoinPolicy(rawValue: UserDefaults.standard.string(forKey: storageKey) ?? "") ?? .friends
+    }
+}
+
 // MARK: - Participant
 
 struct BuddyParticipant: Codable, Identifiable, Equatable {
@@ -221,6 +269,15 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     /// outline — never removed from the roster, because a friend who vanishes
     /// mid-walk reads as a crash.
     let isStale: Bool
+    /// Whole seconds since their last report, computed server-side. Optional:
+    /// absent from every older server, which reads as "we can't say how long"
+    /// and falls back to the plain out-of-range wording.
+    ///
+    /// The point of it is that a stale tile can keep the walker's NUMBER. The
+    /// roster used to blank the distance to a dash, which threw away the one
+    /// thing anyone on the walk wanted to know; "1.20 mi · 4m ago" is not a
+    /// stale lie, it is precisely what we know.
+    let lastHeardSeconds: Int?
     /// They are paused and still on the walk — manually, or by the tracker's
     /// movement gate having gone quiet for a full evidence window
     /// (`WorkoutLocationManager.isPausedForCrew`). Optional twice over: nil
@@ -240,8 +297,18 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     /// Where THIS person is walking. Nil until they've answered, and from an
     /// older server build that doesn't send it — both read as outdoor.
     let locationType: BuddyLocationType?
+    /// "walking" / "running" as THIS person chose in the lobby. Nil until
+    /// they've answered and from every older server — both fall back to the
+    /// session's own activity (`isRunning(in:)`).
+    let activityType: String?
 
     var id: String { userId }
+
+    /// Is this person running? Their own lobby answer, else the host's plan.
+    func isRunning(in session: BuddySessionState) -> Bool {
+        if let activityType { return activityType == "running" }
+        return session.isRunning
+    }
 
     /// The answer to act on. Nil means "never asked", which is exactly the
     /// behaviour every buddy walk had before the question existed.
@@ -257,6 +324,33 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     /// until then.
     var bestDistance: Double { finalDistanceMiles ?? distanceMiles }
 
+    /// "just now" / "4m ago" / "1h ago" — how old this walker's last report
+    /// is, or nil when the server didn't say (older build).
+    ///
+    /// Coarse on purpose: the number exists to tell someone whether their
+    /// friend dropped out a moment ago or twenty minutes back, and a ticking
+    /// seconds counter on a roster tile invites a precision the underlying
+    /// 90-second window doesn't have.
+    var lastHeardAgo: String? {
+        guard let seconds = lastHeardSeconds else { return nil }
+        if seconds < 60 { return "just now" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m ago" }
+        return "\(minutes / 60)h ago"
+    }
+
+    /// The same thing, spoken. VoiceOver reads "4m" as "four em".
+    var lastHeardAgoSpoken: String? {
+        guard let seconds = lastHeardSeconds else { return nil }
+        if seconds < 60 { return "just now" }
+        let minutes = seconds / 60
+        if minutes < 60 {
+            return "\(minutes) minute\(minutes == 1 ? "" : "s") ago"
+        }
+        let hours = minutes / 60
+        return "\(hours) hour\(hours == 1 ? "" : "s") ago"
+    }
+
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
         case username
@@ -267,12 +361,14 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
         case distanceMiles = "distance_miles"
         case durationSeconds = "duration_seconds"
         case isStale = "is_stale"
+        case lastHeardSeconds = "last_heard_seconds"
         case isPaused = "is_paused"
         case isHost = "is_host"
         case place
         case finalDistanceMiles = "final_distance_miles"
         case workoutId = "workout_id"
         case locationType = "location_type"
+        case activityType = "activity_type"
     }
 }
 
@@ -339,6 +435,15 @@ struct BuddySessionState: Codable, Identifiable, Equatable {
     /// People asking to be let in. Optional: absent from a server that
     /// predates the request door, and nil reads as nobody waiting.
     let joinRequests: [BuddyJoinRequest]?
+    /// Who may join without an invite. Raw string, never a closed enum (one
+    /// unknown value would fail the whole snapshot); read via `joinPolicy`.
+    /// nil = an older server = 'friends', which is what every walk was.
+    let joinPolicyRaw: String?
+    /// Set when the host combined this lobby into a friend's walk; the phone
+    /// follows it there (`BuddySessionService.apply`). nil on older servers.
+    let mergedInto: String?
+
+    var joinPolicy: BuddyJoinPolicy { BuddyJoinPolicy(rawValue: joinPolicyRaw ?? "") ?? .friends }
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -357,6 +462,8 @@ struct BuddySessionState: Codable, Identifiable, Equatable {
         case participants
         case groupDistanceMiles = "group_distance_miles"
         case joinRequests = "join_requests"
+        case joinPolicyRaw = "join_policy"
+        case mergedInto = "merged_into"
     }
 
     var pendingJoinRequests: [BuddyJoinRequest] { joinRequests ?? [] }

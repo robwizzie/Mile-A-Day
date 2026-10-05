@@ -14,6 +14,9 @@ class FriendService: ObservableObject {
     /// push, pull-to-refresh) updates the same data all friend rows read.
     @Published var nudgeStatuses: [String: NudgeStatusResponse] = [:]
     @Published var isLoading = false
+    /// `friends` has been answered by the server at least once this session —
+    /// until then an empty list means "not asked", not "no friends".
+    @Published private(set) var hasLoadedFriendsOnce = false
     @Published var errorMessage: String?
     
     // MARK: - Private Properties
@@ -217,6 +220,7 @@ class FriendService: ObservableObject {
         
         let endpoint = "/friends/\(currentUserId)"
         friends = try await makeRequest(endpoint: endpoint, responseType: [BackendUser].self)
+        hasLoadedFriendsOnce = true
     }
     
     /// Get incoming friend requests
@@ -820,6 +824,9 @@ struct WorkoutRouteResponse: Codable {
     /// that fix's epoch seconds). Nil on older servers and older uploads.
     var route_times: [Double]? = nil
     var route_started_at: Double? = nil
+    /// Hide start & end: the line was trimmed for route privacy (the viewer
+    /// isn't its owner). Nil on older servers.
+    var route_trimmed: Bool? = nil
 }
 
 struct FriendWorkout: Codable, Identifiable {

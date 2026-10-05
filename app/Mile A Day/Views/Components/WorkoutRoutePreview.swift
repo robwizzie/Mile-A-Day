@@ -294,8 +294,7 @@ struct WorkoutMediaPreviewCard: View {
     static func photoURL(for post: PostItem?) -> URL? {
         guard let post else { return nil }
         if let story = post.storyPhotoURL { return story }
-        guard post.is_auto != true else { return nil }
-        return post.mediaURL
+        return post.photoURL
     }
 
     private func prepareAndLaunch() {

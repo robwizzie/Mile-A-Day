@@ -24,7 +24,6 @@ struct MADSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStyle.modern.rawValue
-    @AppStorage(RouteSharingDefault.key) private var routeDefaultRaw = RouteSharingDefault.ask.rawValue
     /// Same key the tracking screen's speaker button and the Ghost Race sheet
     /// write, so all three are one switch.
     @AppStorage(GhostCoach.enabledKey) private var coachEnabled = true
@@ -47,14 +46,16 @@ struct MADSettingsView: View {
     @State private var recalibrateResultMessage: String?
     @State private var isBackfillingRoutes = false
     @State private var routeBackfillProgress: String?
+    /// Troubleshooting opens IN PLACE rather than as a pushed page: its two
+    /// actions report through this page's alert, and an alert on a view under
+    /// a pushed page can't present.
+    @State private var troubleshootingExpanded = false
 
     /// The modals this page presents, so a single `.sheet(item:)` drives all of
     /// them. Two `.sheet`s on the same node compete and one silently never
     /// presents — the settings row then reads as a dead button.
     enum SettingsSheet: String, Identifiable {
-        case privacy
         case importHistory
-        case stealth
         var id: String { rawValue }
     }
 
@@ -67,10 +68,12 @@ struct MADSettingsView: View {
                     healthAccessLinkActive = true
                 }
                 yourDaySection
-                feedAndProfileSection
+                notificationsAndPrivacySection
                 healthAndDataSection
-                socialSection
-                learnSection
+                // No FRIENDS section: its one row pushed the Friends tab's own
+                // screen (FriendsListView) a second time, so it configured
+                // nothing the tab doesn't already own.
+                helpSection
                 accountSection
                 #if DEBUG
                 if showsDevelopmentSection {
@@ -81,6 +84,10 @@ struct MADSettingsView: View {
             }
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.vertical, MADTheme.Spacing.md)
+            // Dynamic Type: a list of text, so it grows as far as a list
+            // holds. Inside the ScrollView, i.e. below every sheet this page
+            // presents, so none of them inherits the cap.
+            .madTypeCap(.madListCap)
         }
         .background(MADTheme.Colors.appBackgroundGradient)
         .navigationTitle("Settings")
@@ -90,12 +97,8 @@ struct MADSettingsView: View {
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
-            case .privacy:
-                PrivacySettingsView()
             case .importHistory:
                 ImportHistoryView(userManager: userManager)
-            case .stealth:
-                StealthModeView()
             }
         }
         .sheet(isPresented: $showWhatsNew) {
@@ -193,6 +196,24 @@ struct MADSettingsView: View {
             }
             .padding(.bottom, MADTheme.Spacing.xs)
 
+            // Flamey lives on the Fun dashboard only, so his Closet does too.
+            if selectedStyle == .fun {
+                divider
+
+                Button {
+                    MADHaptics.tap()
+                    FlameyClosetLink.shared.open()
+                } label: {
+                    MADSettingsRow(
+                        icon: "hanger",
+                        title: "\(FlameyNameRules.possessive(FlameyFacts.displayName)) Closet",
+                        subtitle: "Dress \(FlameyFacts.displayName) in what you've earned",
+                        iconColor: .orange
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
             divider
 
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
@@ -270,23 +291,19 @@ struct MADSettingsView: View {
                             .fill(MADTheme.Colors.walkBlue.opacity(0.15))
                             .frame(width: 36, height: 36)
                         Image(systemName: coachEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                            .font(.system(size: 15, weight: .medium))
+                            .madFont(size: 15, weight: .medium, maxScale: 1.3)
                             .foregroundColor(MADTheme.Colors.walkBlue)
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Voice Coach")
-                            .font(MADTheme.Typography.body)
-                            .fontWeight(.medium)
+                            .madFont(size: 17, weight: .medium, design: .rounded)
                             .foregroundColor(.primary)
-                        Text(
-                            coachEnabled
-                                ? "Calls your splits, halfway and your goal out loud"
-                                : "Silent — its lines still show on the tracking screen"
-                        )
-                        .font(MADTheme.Typography.caption)
+                        Text(coachEnabled ? "Calls out splits and your goal" : "Off — lines still show on screen")
+                        .madFont(size: 12, weight: .regular, design: .rounded)
                         .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                     }
 
                     Spacer()
@@ -301,12 +318,14 @@ struct MADSettingsView: View {
                     if !on { GhostCoach.shared.silenceCurrentLine() }
                 }
 
-                // The rest of "it sounds robotic" is a download we cannot make
-                // for them: enhanced and premium voices ship from Settings,
-                // not in the app. Saying where beats leaving it unanswerable.
+                // An OFFER, not a defect notice. The coach picks a modern
+                // preinstalled voice now, so it sounds fine out of the box;
+                // enhanced voices are a ~100MB download only the user can
+                // start, and the copy must not imply the feature is waiting
+                // on it.
                 if coachEnabled, GhostCoach.usingBasicVoice {
-                    Text("Sounds robotic? Only the basic system voice is installed. Settings → Accessibility → Spoken Content → Voices adds a natural one, and the coach picks it up on its own.")
-                        .font(.system(size: 11, design: .rounded))
+                    Text("Richer voices: iOS Settings → Accessibility → Spoken Content → Voices.")
+                        .madFont(size: 11, design: .rounded)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -315,74 +334,35 @@ struct MADSettingsView: View {
         }
     }
 
-    // MARK: - Feed & profile
+    // MARK: - Notifications & privacy
 
-    private var feedAndProfileSection: some View {
-        section("FEED & PROFILE", icon: "square.grid.2x2.fill", iconColor: MADTheme.Colors.madRed) {
-            // The route is the one part of a post you can only decide BEFORE
-            // sharing, and the person it matters most to — whose walks all
-            // start at their front door — was re-making the same decision
-            // every single day and only had to forget once.
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                MADSettingsRow(
-                    icon: "map.fill",
-                    title: "Route Maps on New Posts",
-                    subtitle: currentRouteDefault.subtitle,
-                    iconColor: .teal
-                )
-                Picker("Route maps", selection: $routeDefaultRaw) {
-                    ForEach(RouteSharingDefault.allCases) { option in
-                        Text(option.title).tag(option.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: routeDefaultRaw) { _, _ in MADHaptics.tap() }
-                Text("This controls new post visibility only. If outdoor walks are missing maps entirely, check Health Access and make sure Route is on.")
-                    .font(.system(size: 11, design: .rounded))
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.bottom, MADTheme.Spacing.xs)
-
-            divider
-
-            Button { activeSheet = .stealth } label: {
-                MADSettingsRow(
-                    icon: "eye.slash.fill",
-                    title: "Stealth Mode",
-                    subtitle: StealthModeStore.shared.isOn
-                        ? "On — routes are hidden from friends"
-                        : "Hide where you walk, for good",
-                    iconColor: .gray
-                )
-            }
-            .buttonStyle(.plain)
-
-            divider
-
-            Button { activeSheet = .privacy } label: {
-                MADSettingsRow(
-                    icon: "lock.shield.fill",
-                    title: "Privacy Settings",
-                    subtitle: "Control what others can see",
-                    iconColor: MADTheme.Colors.madRed
-                )
-            }
-            .buttonStyle(.plain)
-
-            divider
-
-            // Named for what it actually holds. It's called "Notifications"
-            // in the code and always has been, but the page is also where
-            // "who can see my workouts", route sharing and tagged-post
-            // curation live — so a user hunting for those was looking for a
-            // page that, by its title, had nothing to do with them.
+    /// Two rows where there were four. Stealth Mode, Privacy Settings and the
+    /// "who sees your workouts" half of the notification page all answer one
+    /// question, so they sit behind ONE Privacy page; each of its rows opens
+    /// the screen that already owns (and saves) that setting.
+    private var notificationsAndPrivacySection: some View {
+        section("NOTIFICATIONS & PRIVACY", icon: "bell.badge.fill", iconColor: MADTheme.Colors.madRed) {
+            // The page still holds the feed/sharing toggles too (they save
+            // together); Privacy links to the same page for those.
             NavigationLink(destination: NotificationSettingsView()) {
                 MADSettingsRow(
                     icon: "bell.fill",
-                    title: "Notifications & Sharing",
-                    subtitle: "Alerts, who sees your workouts, tagged posts",
+                    title: "Notifications",
+                    subtitle: "Alerts, quiet hours and feed sharing",
                     iconColor: MADTheme.Colors.madRed
+                )
+            }
+
+            divider
+
+            NavigationLink(destination: PrivacyHubView(friendService: friendService)) {
+                MADSettingsRow(
+                    icon: "lock.shield.fill",
+                    title: "Privacy",
+                    subtitle: StealthModeStore.shared.isOn
+                        ? "Stealth Mode on · who sees your walks"
+                        : "Who sees your walks, routes and profile",
+                    iconColor: .purple
                 )
             }
         }
@@ -430,36 +410,79 @@ struct MADSettingsView: View {
 
             divider
 
-            Button { Task { await recalibrateStreak() } } label: {
-                MADSettingsRow(
-                    icon: "arrow.triangle.2.circlepath",
-                    title: "Recalibrate Streak",
-                    subtitle: isRecalibratingStreak
-                        ? "Re-syncing your workouts…"
-                        : "Fix a streak that looks too low",
-                    iconColor: .green
-                )
+            // Repair tools, not settings: most people never need them, so
+            // they fold away instead of sitting between real choices.
+            Button {
+                MADHaptics.tap()
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    troubleshootingExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: MADTheme.Spacing.md) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.gray.opacity(0.15))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "wrench.adjustable.fill")
+                            .madFont(size: 15, weight: .medium, maxScale: 1.3)
+                            .foregroundColor(.gray)
+                    }
+                    .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Troubleshooting")
+                            .madFont(size: 17, weight: .medium, design: .rounded)
+                            .foregroundColor(.primary)
+                        Text("Fix a low streak or missing maps")
+                            .madFont(size: 12, weight: .regular, design: .rounded)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .madFont(size: 13, weight: .semibold, maxScale: 1.3)
+                        .foregroundColor(.secondary)
+                        .rotationEffect(.degrees(troubleshootingExpanded ? 180 : 0))
+                        .accessibilityHidden(true)
+                }
+                .padding(.vertical, MADTheme.Spacing.xs)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(isRecalibratingStreak)
+            .accessibilityHint(troubleshootingExpanded ? "Hides the repair tools" : "Shows the repair tools")
 
-            divider
+            if troubleshootingExpanded {
+                divider
 
-            // The automatic sweep heals ~75 workouts a session, two years
-            // back, only after a quiet sync — so an old post's map (and its
-            // Flyover) could take weeks of launches to appear. This runs the
-            // same pipeline to the end, now, and says what it found.
-            Button { Task { await backfillRoutes() } } label: {
-                MADSettingsRow(
-                    icon: "map.fill",
-                    title: "Add Maps to Past Workouts",
-                    subtitle: routeBackfillProgress
-                        ?? "Send routes from Apple Health so older posts get a map and Flyover",
-                    iconColor: .teal
-                )
+                Button { Task { await recalibrateStreak() } } label: {
+                    MADSettingsRow(
+                        icon: "arrow.triangle.2.circlepath",
+                        title: "Recalibrate Streak",
+                        subtitle: isRecalibratingStreak
+                            ? "Re-syncing your workouts…"
+                            : "Fix a streak that looks too low",
+                        iconColor: .green
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isRecalibratingStreak)
+
+                divider
+
+                // The automatic sweep heals ~75 workouts a session, two years
+                // back, only after a quiet sync — so an old post's map (and its
+                // Flyover) could take weeks of launches to appear. This runs the
+                // same pipeline to the end, now, and says what it found.
+                Button { Task { await backfillRoutes() } } label: {
+                    MADSettingsRow(
+                        icon: "map.fill",
+                        title: "Add Maps to Past Workouts",
+                        subtitle: routeBackfillProgress
+                            ?? "Send routes from Apple Health so older posts get a map and Flyover",
+                        iconColor: .teal
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isBackfillingRoutes)
             }
-            .buttonStyle(.plain)
-            .disabled(isBackfillingRoutes)
         }
     }
 
@@ -482,25 +505,10 @@ struct MADSettingsView: View {
         }
     }
 
-    // MARK: - Social
+    // MARK: - Help
 
-    private var socialSection: some View {
-        section("FRIENDS", icon: "person.2.fill", iconColor: .blue) {
-            NavigationLink(destination: FriendsListView(friendService: friendService)) {
-                MADSettingsRow(
-                    icon: "person.2.fill",
-                    title: "Friends & Leaderboard",
-                    subtitle: "Requests, blocked accounts, close friends",
-                    iconColor: .blue
-                )
-            }
-        }
-    }
-
-    // MARK: - Learn
-
-    private var learnSection: some View {
-        section("GETTING AROUND", icon: "questionmark.circle.fill", iconColor: .orange) {
+    private var helpSection: some View {
+        section("HELP", icon: "questionmark.circle.fill", iconColor: .orange) {
             Button {
                 // Pop back to the tab first, then start the tour overlay on
                 // MainTabView after a beat so the navigation stack settles.
@@ -517,6 +525,31 @@ struct MADSettingsView: View {
                     title: "App Tour",
                     subtitle: "Take a guided walkthrough of the app",
                     iconColor: MADTheme.Colors.madRed
+                )
+            }
+            .buttonStyle(.plain)
+
+            divider
+
+            NavigationLink(destination: HelpAndSupportView()) {
+                MADSettingsRow(
+                    icon: "questionmark.circle.fill",
+                    title: "Help & Support",
+                    subtitle: "FAQ and contact",
+                    iconColor: .orange
+                )
+            }
+
+            divider
+
+            // What's New and Language are reference, not settings — they
+            // sit at the bottom of Help rather than in a group of their own.
+            Button { showWhatsNew = true } label: {
+                MADSettingsRow(
+                    icon: "sparkles",
+                    title: "What's New",
+                    subtitle: "See what changed in the latest update",
+                    iconColor: .orange
                 )
             }
             .buttonStyle(.plain)
@@ -540,29 +573,6 @@ struct MADSettingsView: View {
                 )
             }
             .buttonStyle(.plain)
-
-            divider
-
-            Button { showWhatsNew = true } label: {
-                MADSettingsRow(
-                    icon: "sparkles",
-                    title: "What's New",
-                    subtitle: "See what changed in the latest update",
-                    iconColor: .orange
-                )
-            }
-            .buttonStyle(.plain)
-
-            divider
-
-            NavigationLink(destination: HelpAndSupportView()) {
-                MADSettingsRow(
-                    icon: "questionmark.circle.fill",
-                    title: "Help & Support",
-                    subtitle: "FAQ and contact",
-                    iconColor: .orange
-                )
-            }
         }
     }
 
@@ -611,10 +621,10 @@ struct MADSettingsView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
+                    .madFont(size: 12, weight: .semibold)
                     .foregroundColor(iconColor)
                 Text(LocalizedStringKey(title))
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .madFont(size: 11, weight: .heavy, design: .rounded)
                     .tracking(1.2)
                     .foregroundColor(.secondary)
                 Spacer()
@@ -637,13 +647,9 @@ struct MADSettingsView: View {
         DashboardStyle(rawValue: dashboardStyleRaw) ?? .modern
     }
 
-    private var currentRouteDefault: RouteSharingDefault {
-        RouteSharingDefault(rawValue: routeDefaultRaw) ?? .ask
-    }
-
     private var versionFooter: some View {
         Text(versionString)
-            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .madFont(size: 11, weight: .medium, design: .rounded)
             .foregroundColor(.secondary.opacity(0.7))
             .frame(maxWidth: .infinity)
             .padding(.top, MADTheme.Spacing.sm)
@@ -683,11 +689,16 @@ struct MADSettingsView: View {
                 localStreakDays: healthManager.retroactiveStreak
             )
             userManager.updateStreakFromBackend(outcome.streak)
+            await RecalibrateMedals.refresh(userManager: userManager, newBadgeIds: outcome.newBadgeIds)
 
             let dayWord = outcome.streak == 1 ? "day" : "days"
             let workoutWord = outcome.workoutsPushed == 1 ? "workout" : "workouts"
-            recalibrateResultMessage =
+            var message =
                 "Your streak is now \(outcome.streak) \(dayWord). We re-checked \(outcome.workoutsPushed) recent \(workoutWord) and made sure they're all saved to your account."
+            if let medals = RecalibrateMedals.sentence(for: outcome.newBadgeIds) {
+                message += " " + medals
+            }
+            recalibrateResultMessage = message
         } catch {
             recalibrateResultMessage =
                 "We couldn't finish recalibrating right now. Please check your connection and try again."

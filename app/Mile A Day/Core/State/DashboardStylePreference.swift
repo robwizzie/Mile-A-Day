@@ -38,6 +38,7 @@ enum DashboardStylePreference {
             // Mirror into the App Group so the Streak Flame widget can match the
             // chosen style (widgets can't see UserDefaults.standard).
             WidgetDataStore.save(dashboardStyle: newValue.rawValue)
+            Task { @MainActor in DashboardStyleReporter.report() }
         }
     }
 

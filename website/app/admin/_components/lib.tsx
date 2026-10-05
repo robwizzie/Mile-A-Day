@@ -33,6 +33,21 @@ export async function postData<T>(path: string): Promise<T> {
   return body as T;
 }
 
+/**
+ * Stands in for a post with no picture. An AUTO card is drawn live on the
+ * phone from the walk (route art / indoor card) and stores no image at all,
+ * so there is nothing to <img> — a broken-image icon would read as lost media.
+ */
+export function LiveCardTile({ className = "" }: { className?: string }) {
+  return (
+    <div
+      className={`flex items-center justify-center bg-gradient-to-br from-white/[0.06] to-white/[0.02] text-[10px] font-semibold uppercase tracking-wider text-white/40 ${className}`}
+    >
+      Live card
+    </div>
+  );
+}
+
 /** Signed media URLs come back as backend-relative paths — absolutize them. */
 export function mediaSrc(url: string): string {
   if (url.startsWith("/")) {

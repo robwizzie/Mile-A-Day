@@ -102,8 +102,39 @@ enum ClientFeatures {
     /// competitions list.
     static let activityDigestV1 = "activity_digest_v1"
 
+    /// This build handles the `widget_refresh` SILENT push: it declares the
+    /// `remote-notification` background mode (so APNs actually wakes it) and
+    /// `AppDelegate` refreshes the competition / friends-leaderboard widget
+    /// snapshot the push names (`WidgetLiveRefresh`). Paired with the
+    /// `widget_kinds` it reports beside this list — the server only pushes a
+    /// device that has the affected widget installed.
+    static let widgetRefreshPushV1 = "widget_refresh_push_v1"
+
+    /// This build has the Weekly Recap screen (`GET /users/:id/weekly-recap`)
+    /// and routes the `weekly_recap` push to it — the banner, the cold-launch
+    /// path and the inbox row all open the week it names (`data.week_start`).
+    ///
+    /// Older builds have no route for the type, so the server must keep them
+    /// on whatever they got before rather than send a banner that opens
+    /// nothing.
+    static let weeklyRecapV1 = "weekly_recap_v1"
+
+    /// This build draws AUTO cards live — route art or the indoor card, from
+    /// the workout, its route and the stats snapshot — and posts them with NO
+    /// image (`RunPostService.autoPostMile`). It ignores the baked picture on
+    /// older auto cards too (`PostItem.photoURL`).
+    ///
+    /// The server serves an image-less auto card to builds WITHOUT this as an
+    /// ordinary post, the shape their code already draws live; a build that
+    /// has it is told it's auto, which is what keeps it out of "you've
+    /// already shared this walk" and offers the photo that replaces it.
+    static let liveAutoCardV1 = "live_auto_card_v1"
+
     static let supported: [String] = [
         friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1, buddyWalksV1,
         weeklyChallengeV1, buddyGroupPostV1, buddyJoinRequestV1, activityDigestV1,
+        widgetRefreshPushV1,
+        weeklyRecapV1,
+        liveAutoCardV1,
     ]
 }

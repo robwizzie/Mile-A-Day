@@ -26,6 +26,7 @@
 
 import { PostgresService } from "./DbService.js";
 import { FLYOVER_PLAY_FEATURE } from "./telemetryService.js";
+import { getSignatureRows } from "./diagnosticsService.js";
 import { PERSON_REFERRAL_SOURCES, referralHandleSql } from "./userService.js";
 import {
   START_OF_TODAY_ET_SQL,
@@ -1374,6 +1375,7 @@ export const DRILLDOWN_KINDS = [
   "experience_level",
   "trend_day",
   "link_candidates",
+  "diagnostic_signature",
 ] as const;
 
 export type DrilldownKind = (typeof DRILLDOWN_KINDS)[number];
@@ -2198,6 +2200,37 @@ export async function getDrilldown(
           subtitle: `${r.n} workouts`,
           stat: `${Math.round(r.miles)} mi`,
           meta: r.last_at,
+        })),
+      };
+    }
+
+    case "diagnostic_signature": {
+      // Every occurrence of one MetricKit crash/hang group, newest first —
+      // who hit it, on which build, OS and device.
+      if (!id) return null;
+      const { rows, total } = await getSignatureRows(id, DRILLDOWN_LIMIT);
+      if (!rows.length) return null;
+      return {
+        kind,
+        id,
+        title: rows[0].summary ?? `Signature ${id}`,
+        subtitle: `Every occurrence, newest first · signature ${id}`,
+        total,
+        rows: rows.map((r: any) => ({
+          user_id: r.user_id,
+          username: r.username,
+          title: r.username ? `@${r.username}` : String(r.user_id).slice(0, 8),
+          subtitle: [
+            r.app_version
+              ? `v${r.app_version}${r.build ? ` (${r.build})` : ""}`
+              : null,
+            r.os_version,
+            r.device_model,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          stat: String(r.kind).replace(/_/g, " "),
+          meta: dateText(r.occurred_at ?? r.received_at),
         })),
       };
     }

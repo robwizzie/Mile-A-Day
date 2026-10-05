@@ -42,6 +42,12 @@ import {
   deleteCommentController,
   reportCommentController,
 } from "../controllers/commentsController.js";
+import {
+  uploadLimiter,
+  postCreateLimiter,
+  commentLimiter,
+  reportLimiter,
+} from "../middleware/rateLimit.js";
 
 // Post photos are larger than avatars (full-res portrait stories), so allow 8MB.
 const upload = multer({
@@ -67,8 +73,9 @@ router.post("/terms/accept", acceptTermsController);
 router.get("/window", getPostWindowController);
 
 // Media upload, then JSON create referencing the returned media_url.
-router.post("/media", upload.single("image"), uploadPostMedia);
-router.post("/", createPostController);
+// Limiters run BEFORE multer, so a rejected request is never buffered (8MB).
+router.post("/media", uploadLimiter, upload.single("image"), uploadPostMedia);
+router.post("/", postCreateLimiter, createPostController);
 
 // Stories.
 router.get("/stories", getStoriesRailController);
@@ -103,11 +110,19 @@ router.get("/user/:userId", getUserPostsController);
 
 // Comments (Instagram-style, one level of replies).
 router.get("/workouts/:workoutId/comments", listWorkoutCommentsController);
-router.post("/workouts/:workoutId/comments", addWorkoutCommentController);
+router.post(
+  "/workouts/:workoutId/comments",
+  commentLimiter,
+  addWorkoutCommentController,
+);
 router.get("/:postId/comments", listCommentsController);
-router.post("/:postId/comments", addCommentController);
+router.post("/:postId/comments", commentLimiter, addCommentController);
 router.delete("/comments/:commentId", deleteCommentController);
-router.post("/comments/:commentId/report", reportCommentController);
+router.post(
+  "/comments/:commentId/report",
+  reportLimiter,
+  reportCommentController,
+);
 
 // Per-post actions. The bare GET is LAST among the /:postId routes on purpose
 // — it's the most permissive pattern and would otherwise swallow /terms,
@@ -125,12 +140,12 @@ router.post("/:postId/coauthor/route", setCoauthorRouteController);
 router.post("/:postId/coauthor", respondToCoauthorController);
 // Pin/unpin one of your own posts to the top of your grid (author only).
 router.post("/:postId/pin", setPostPinnedController);
-router.post("/:postId/report", reportPostController);
+router.post("/:postId/report", reportLimiter, reportPostController);
 // A buddy walk is one walk, so it gets one post — and everyone on it puts
 // their own photo on THAT post here, rather than opening a second card for the
 // same hour. PUT because re-sending replaces your slide; it is not a second
 // one.
-router.put("/:postId/crew-photo", addCrewPhotoController);
+router.put("/:postId/crew-photo", postCreateLimiter, addCrewPhotoController);
 // The words under your own slide, edited on their own. PATCH rather than the
 // PUT above because it changes one field of a slide that already exists — and
 // because it is NOT a photo reaching the feed, so it does not answer to the

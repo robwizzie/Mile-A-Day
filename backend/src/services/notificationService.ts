@@ -1,3 +1,4 @@
+import { requestWidgetRefresh } from "./widgetRefreshService.js";
 import { PostgresService } from "./DbService.js";
 import {
   sendPush,
@@ -222,8 +223,81 @@ export async function getFriendActivityRecipientPool(
  * Only sends once per day per user, and respects friend notification settings.
  * Caps at 5 friend notifications to avoid spam.
  */
+/**
+ * Drop still-pending pre-goal 'workout' announcements for these walks, because
+ * the mile announcement supersedes them.
+ *
+ * Scoped to the NAMED walks on purpose. Two different walks legitimately
+ * produce two pushes — a short walk announced while the day was incomplete,
+ * then a later one that finishes the mile — and that is not what this guards.
+ * It only ever collapses the case where the SAME workout would be announced
+ * twice. 'extra_workout' is untouched: that row is about a walk taken AFTER
+ * the mile was already done, which is its own event.
+ */
+async function supersedePreGoalWorkoutNotification(
+  userId: string,
+  workoutIds: string[],
+  localDate?: string,
+): Promise<void> {
+  if (workoutIds.length === 0) return;
+  const day = localDate ?? (await getUserLocalDate(userId));
+  // Only supersede once the mile is genuinely reaching friends. That gate
+  // used to be implicit in WHERE this was called from — the one branch of
+  // notifyFriendsOfMileCompletion that queues a deliverable row — which is
+  // exactly what made it miss the common case (see mileIsReachingFriends).
+  // Asking the question directly keeps every protection the placement gave:
+  // an 'ask' confirm card carries no send_after_at and an audience of 'none'
+  // writes no row at all, so neither retires the walk's own announcement.
+  if (!(await mileIsReachingFriends(userId, day))) return;
+  await db.query(
+    `UPDATE pending_friend_notifications SET status = 'expired'
+		 WHERE user_id = $1 AND workout_id = ANY($2::text[])
+			 AND event_type = 'workout' AND status = 'pending'`,
+    [userId, workoutIds],
+  );
+}
+
+/**
+ * Is today's mile announcement actually going to reach this user's friends?
+ *
+ * True for a row already sent, and for one queued with a `send_after_at` the
+ * cron will drain. Deliberately NOT true for an 'ask' confirm card, which
+ * sits in the sender's own inbox with a NULL `send_after_at` until they tap
+ * send and may never go anywhere — a walk's own announcement must not be
+ * retired in favour of a push nobody has agreed to make.
+ */
+async function mileIsReachingFriends(
+  userId: string,
+  localDate: string,
+): Promise<boolean> {
+  const [row] = await db.query(
+    `SELECT 1 FROM pending_friend_notifications
+		 WHERE user_id = $1 AND event_type = 'mile_completed'
+			 AND local_date = $2::date
+			 AND (status = 'sent'
+						OR (status = 'pending' AND send_after_at IS NOT NULL))
+		 LIMIT 1`,
+    [userId, localDate],
+  );
+  return Boolean(row);
+}
+
 export async function notifyFriendsOfMileCompletion(
   userId: string,
+  /**
+   * The walks that could have completed the day — the ones whose own pending
+   * announcement this mile announcement supersedes.
+   *
+   * The edit path knows exactly one (the edit is what crossed the line); the
+   * sync path passes everything the upload carried, since the completing walk
+   * is among them. Never fall back to "today's most recent counted workout":
+   * that is only an approximation, and when an earlier walk crosses the goal
+   * while a later one still has its own announcement queued it expires the
+   * LATER walk's row — a true announcement about a different walk — and
+   * leaves the edited walk's row to send beside the mile, which is the exact
+   * double this exists to collapse. A walk not in this list keeps its row.
+   */
+  supersedeWorkoutIds?: string[],
 ): Promise<boolean> {
   try {
     // Atomically claim this notification slot (prevents race condition duplicates)
@@ -235,7 +309,16 @@ export async function notifyFriendsOfMileCompletion(
       [userId, today],
     );
 
-    if (claimed.length === 0) return false; // Already sent today
+    if (claimed.length === 0) {
+      // Already announced today — by an earlier upload, or by the edit path.
+      // The mile still supersedes any pre-goal row this call is carrying:
+      // whether THIS call is the one that announced it has nothing to do with
+      // whether the walk's own announcement has been made redundant. Welding
+      // the two is what let "goose completed a walk" and "goose got their
+      // mile in!" arrive together, carrying the same stat line.
+      await supersedePreGoalWorkoutNotification(userId, supersedeWorkoutIds ?? []);
+      return false; // Already sent today
+    }
 
     // Get user info
     const [user] = await db.query(
@@ -309,6 +392,23 @@ export async function notifyFriendsOfMileCompletion(
       data: { user_id: userId, kind: "mile_completed", local_date: localDate },
     };
 
+    // ONE walk is ONE announcement. A pre-goal 'workout' row for the SAME
+    // workout is superseded by this one and must not also send.
+    //
+    // The sync path encodes that as an if/else — under the goal announces the
+    // workout, over it announces the mile — but that only holds inside a
+    // single request. Both rows sit pending for ten minutes, and anything that
+    // completes the day in between (`refreshWorkoutEditNotifications` on a
+    // recap distance correction, a re-sync that revises the distance up, a
+    // duplicate resolution that restores excluded miles) fires the mile
+    // announcement while the workout's own row is still queued. The cron then
+    // drains both and a friend gets "rachbee13 completed a walk" and
+    // "rachbee13 got their mile in!" together — and because the edit path
+    // restates pending bodies from the DB, the two carry IDENTICAL stat lines,
+    // which is what makes it read as the app sending everything twice.
+    //
+    // Expired rather than deleted: the row is the record that the event was
+    // raised, and `drainDueScheduled` already skips anything not 'pending'.
     // 'ask' — queue for the sender's explicit confirmation instead of sending.
     if (outgoing === "ask") {
       await queuePendingFriendNotification(
@@ -341,6 +441,13 @@ export async function notifyFriendsOfMileCompletion(
         localDate,
       ],
     );
+
+    // Only now, on the path that actually queues a DELIVERABLE mile row.
+    // Running it above the 'ask' branch retired the walk's announcement in
+    // favour of a confirm card carrying no `send_after_at` — one the cron
+    // never drains — so a runner who never tapped confirm told their friends
+    // nothing at all.
+    await supersedePreGoalWorkoutNotification(userId, supersedeWorkoutIds ?? []);
     return true;
   } catch (err: any) {
     console.error(
@@ -410,6 +517,18 @@ async function notifyFriendsOfWorkoutEvent(
     // of a legitimately-new workout should still be able to fire).
     const localDate = await getUserLocalDate(userId);
     if (workout.local_date !== localDate) return;
+
+    // A 'workout' row is by definition the PRE-goal announcement, so once the
+    // mile is already on its way to friends there is nothing pre-goal left to
+    // announce. The controller encodes this as an if/else on today's miles,
+    // but that only holds within one request: two syncs of the same walk can
+    // interleave, the first reading a short day and queueing this row AFTER
+    // the second has already claimed the mile and swept for rows to supersede.
+    // The supersede can't catch what doesn't exist yet, so the insert declines
+    // instead. 'extra_workout' is untouched — that one is about a walk taken
+    // after the mile was done, which is its own event.
+    if (eventType === "workout" && (await mileIsReachingFriends(userId, localDate)))
+      return;
 
     // Cross-type guard: a workout already announced under the sibling event
     // type must not fire again (e.g. a pre-goal 'workout' getting re-uploaded
@@ -610,7 +729,16 @@ export async function refreshWorkoutEditNotifications(
 				 LIMIT 1`,
       [userId, localDate],
     );
-    if (!announced) await notifyFriendsOfMileCompletion(userId);
+    if (!announced) await notifyFriendsOfMileCompletion(userId, [workoutId]);
+
+    // Unconditional, NOT an `else`. When the mile was announced by an earlier
+    // upload this edit is the moment the walk's own pending row became a
+    // duplicate of it — and the restate above has just given that row the
+    // day-complete numbers, so leaving it queued sends two pushes with
+    // identical stats. `mileIsReachingFriends` inside is what keeps this from
+    // retiring a row the mile isn't actually replacing; running it a second
+    // time after the call above is a no-op (nothing is left 'pending').
+    await supersedePreGoalWorkoutNotification(userId, [workoutId], localDate);
 
     // Restate a mile-completion row queued BEFORE the edit — unless a photo
     // has since been merged into it (notifyFriendsOfPost rewrites the body to
@@ -1382,6 +1510,21 @@ export async function checkLeadChanges(
 						WHERE competition_id = $3 AND user_id = $4`,
             [rank, score, comp.id, uid],
           );
+        }
+
+        // ── Widgets: everyone whose place in this competition just MOVED
+        // (passed, or carried up by a teammate) gets their Competition widget
+        // woken — the banner above, when there is one, can't wake the app.
+        // A NULL prior is "never indexed", not a move. The uploader is
+        // excluded: their own app is the one syncing. Fire-and-forget,
+        // coalesced and capability/widget-gated inside.
+        const moved: string[] = [];
+        for (const [uid, rank] of newRankByUser.entries()) {
+          const prior = previousRank.get(uid);
+          if (prior != null && prior !== rank) moved.push(uid);
+        }
+        if (moved.length > 0) {
+          void requestWidgetRefresh(moved, "competition", userId);
         }
       } catch (err: any) {
         console.error(

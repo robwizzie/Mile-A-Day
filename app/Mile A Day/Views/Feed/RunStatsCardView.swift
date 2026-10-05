@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// Branded 4:5 stats card used as the auto feed image for a run that has no
-/// photo and no GPS route (e.g. a treadmill mile).
+/// Branded 4:5 stats card for a run that has no photo and no GPS route (e.g.
+/// a treadmill mile).
 ///
-/// Laid out at DESIGN size (360×450 — phone-card proportions) and rendered to
-/// 1080×1350 by `RunPostService.renderStatsCard` with `scale = 3`. Never
-/// render this at a 1080-wide frame with scale 1: point sizes would become
-/// raw pixels and everything displays at a third of the intended size (the
-/// original "tiny stats card" bug).
+/// Laid out at DESIGN size (360×450 — phone-card proportions) and scaled to
+/// its slot. If this is ever rendered to an image, render it at design size
+/// with `scale = 3`, never at a 1080-wide frame with scale 1: point sizes
+/// would become raw pixels and everything displays at a third of the
+/// intended size (the original "tiny stats card" bug).
 struct RunStatsCardView: View {
     /// The design-space size the card is laid out against; render scale is
     /// derived from it so the flattened image is exactly 1080×1350.
@@ -241,5 +241,24 @@ struct RouteStatsOverlayView: View {
         }
         .frame(width: RunStatsCardView.designSize.width,
                height: RunStatsCardView.designSize.height)
+    }
+}
+
+/// The route face's stats band fitted to a media box of ANY aspect: laid out
+/// at the 360×450 design size, scaled by WIDTH, and pinned to the BOTTOM — so
+/// the same band sits on a 4:5 slide beside a photo and on the 1:1 box a
+/// photo-less card uses. (Anchored top-leading it only ever fitted 4:5: on a
+/// shorter box the distance fell off the bottom edge.)
+struct RouteStatsBandOverlay: View {
+    let stats: RunStatsInput
+    let workoutType: String
+
+    var body: some View {
+        GeometryReader { geo in
+            RouteStatsOverlayView(stats: stats, workoutType: workoutType)
+                .scaleEffect(geo.size.width / RunStatsCardView.designSize.width, anchor: .bottomLeading)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .bottomLeading)
+        }
+        .allowsHitTesting(false)
     }
 }

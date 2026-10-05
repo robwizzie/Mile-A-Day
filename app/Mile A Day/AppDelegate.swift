@@ -22,6 +22,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // HealthKit step-count observer — start after UIApplication is ready.
         DailyStepsSyncService.shared.start()
 
+        // MetricKit crash/hang reports. Subscribe early so a payload iOS
+        // delivers on this launch isn't missed; the upload itself is deferred
+        // off-main and never blocks launch.
+        DiagnosticsReporter.shared.start()
+
         // If iOS launched us in the background (no UI scene), kick off a sync immediately.
         // For UI launches, the scene lifecycle in Mile_A_DayApp handles the sync.
         if application.applicationState == .background {
@@ -69,11 +74,33 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didReceiveRemoteNotification userInfo: [AnyHashable: Any],
                      fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
-        // Only handle our background_sync silent pushes here. Other push types
+        // Only handle our silent pushes here (widget_refresh, background_sync). Other push types
         // are visible alerts and are handled by UNUserNotificationCenterDelegate.
         let aps = userInfo["aps"] as? [String: Any]
         let contentAvailable = (aps?["content-available"] as? Int) ?? 0
         let type = userInfo["type"] as? String
+
+        // A friend moved something one of our widgets shows (competition
+        // standings, today's head-to-head, the friends leaderboard). Refetch
+        // that snapshot and reload only its widget kind. Hard-capped well
+        // inside iOS's ~30s allowance: whichever of the refresh and the
+        // deadline finishes first calls the handler, exactly once.
+        if contentAvailable == 1, type == "widget_refresh" {
+            let data = userInfo["data"] as? [String: Any]
+            let reason = data?["reason"] as? String
+            let latch = OneShotLatch()
+            let work = Task { @MainActor in
+                let result = await WidgetLiveRefresh.handleRefreshPush(reason: reason)
+                if latch.claim() { completionHandler(result) }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + WidgetLiveRefresh.pushBudgetSeconds) {
+                if latch.claim() {
+                    work.cancel()
+                    completionHandler(.failed)
+                }
+            }
+            return
+        }
 
         guard contentAvailable == 1, type == "background_sync" else {
             completionHandler(.noData)

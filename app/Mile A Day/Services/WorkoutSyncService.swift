@@ -1705,6 +1705,9 @@ class WorkoutSyncService: ObservableObject {
     struct RecalibrateOutcome {
         let streak: Int
         let workoutsPushed: Int
+        /// Medals the server found earned-but-missing over the whole history
+        /// and just awarded (never revokes). Empty on an older server.
+        let newBadgeIds: [String]
     }
 
     /// Reconcile the server with the phone's HealthKit truth, then recompute the
@@ -1747,7 +1750,11 @@ class WorkoutSyncService: ObservableObject {
             responseType: RecalibrateStreakResponse.self
         )
 
-        return RecalibrateOutcome(streak: response.streak, workoutsPushed: workouts.count)
+        return RecalibrateOutcome(
+            streak: response.streak,
+            workoutsPushed: workouts.count,
+            newBadgeIds: response.newBadges ?? []
+        )
     }
 
     /// Compare the backend's workout list against `hkUUIDs` (the set of HealthKit
@@ -1874,7 +1881,15 @@ private struct ManualUploadAck: Decodable {
 /// Response from POST /workouts/:userId/recalibrate-streak.
 private struct RecalibrateStreakResponse: Decodable {
     let streak: Int
+    /// Additive: the medals this recalibrate awarded. nil on older servers.
+    let newBadges: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case streak
+        case newBadges = "new_badges"
+    }
 }
+
 
 // MARK: - Helper Extensions
 

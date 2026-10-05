@@ -17,13 +17,14 @@ enum InstagramStoryShare {
 
     private static let scheme = "instagram-stories"
 
-    /// Meta's App ID, from `MADFacebookAppID` in Info.plist.
+    /// Meta's App ID, from `MADFacebookAppID` in `app/Mile-A-Day-Info.plist`.
     ///
-    /// Meta's docs specify an App ID for `source_application`. Until one is
-    /// registered this returns nil and `isAvailable` is false, so the button
-    /// hides itself — deliberately, because the failure mode of guessing is
-    /// Instagram opening to an empty composer, which reads as the feature
-    /// being broken rather than not yet set up.
+    /// Meta's docs require it as `source_application`. Until one is
+    /// registered this returns nil and `isAvailable` is false, and the Share
+    /// Studio's Instagram Stories button opens the system share sheet instead
+    /// (Instagram's share extension needs no App ID). Pasting the ID into the
+    /// plist is the whole switch — nothing else changes. Never a guess: a
+    /// wrong ID opens Instagram to an empty composer, which reads as broken.
     static var appID: String? {
         guard let raw = Bundle.main.object(forInfoDictionaryKey: "MADFacebookAppID") as? String
         else { return nil }
@@ -86,44 +87,6 @@ enum InstagramStoryShare {
         )
         UIApplication.shared.open(url)
         return true
-    }
-
-    /// The path when the direct handoff isn't available: save the card to
-    /// Photos and open Instagram's story camera, where it is the first thumbnail
-    /// in the roll.
-    ///
-    /// This exists because `isAvailable` needs a Meta App ID, and until one is
-    /// registered it is false — which used to HIDE the Instagram button
-    /// entirely, so the marquee action of the share feature rendered for nobody
-    /// and what users met was two grey buttons. A longer path is not the same
-    /// thing as no path.
-    ///
-    /// Returns false when Instagram isn't installed, so the caller can say so
-    /// rather than leaving a dead tap. The card is saved either way — that part
-    /// is useful on its own.
-    ///
-    /// Both candidates share the `instagram` scheme, which is Instagram's own
-    /// and long-established; only the host differs, so a host this build of
-    /// Instagram doesn't route just opens the app's default screen. That is the
-    /// one case where the guessed-scheme trap in ios.md doesn't bite — the
-    /// scheme decides which APP opens, and here it is the right one either way.
-    @MainActor
-    @discardableResult
-    static func openApp(after image: UIImage) -> Bool {
-        // Save FIRST: the user is about to leave for Instagram, and a picture
-        // that isn't in the roll by then makes the trip pointless.
-        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-
-        // `canOpenURL` answers false for any scheme not in
-        // `LSApplicationQueriesSchemes`, however installed the app is, so
-        // `instagram` is declared there alongside `instagram-stories`.
-        for candidate in ["instagram://camera", "instagram://app"] {
-            if let url = URL(string: candidate), UIApplication.shared.canOpenURL(url) {
-                UIApplication.shared.open(url)
-                return true
-            }
-        }
-        return false
     }
 
     private static func hex(_ color: UIColor) -> String {

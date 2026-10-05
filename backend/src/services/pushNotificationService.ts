@@ -17,6 +17,7 @@ import {
   userSupports,
 } from "./clientFeatures.js";
 import { logError } from "./errorLogService.js";
+import { normalizeWidgetKinds } from "./widgetKinds.js";
 import { START_OF_TODAY_ET_SQL } from "./dailyResetTime.js";
 import fs from "fs";
 import path from "path";
@@ -205,6 +206,8 @@ export type NotificationType =
   // hours defer this to the morning flush, when "one mile starts the next
   // one" is actionable.
   | "streak_lost"
+  // Saturday-evening "your week" (weeklyRecapService). Gated per device on
+  // weekly_recap_v1 at the candidate query — no shipped build routes it.
   | "weekly_recap"
   // Streak tokens (gated by per-user enrollment + the STREAK_FEATURES_DISABLED
   // kill switch; none are high-priority, so quiet hours apply automatically).
@@ -222,6 +225,14 @@ export type NotificationType =
   | "streak_assist_request"
   | "streak_assist_accepted"
   | "streak_assisted"
+  // "You ran it anyway" — a token whose day the user has since earned for
+  // real is handed back (`streak_token_returned` to the spender,
+  // `streak_assist_returned` to the donor whose mile is free again). Each is
+  // about the recipient's OWN account and fires at most once per covered
+  // day, so both are cap-exempt below for the same reason the rest of the
+  // exchange is.
+  | "streak_token_returned"
+  | "streak_assist_returned"
   // Buddy Walks & Runs (gated by BUDDY_SESSIONS + per-user buddy_enrolled_at).
   // Only buddy_invite is high-priority — the rest are follow-ups about a
   // session the user is already in, so quiet hours and the daily cap apply.
@@ -255,7 +266,7 @@ export type NotificationType =
   // a summary of comments and hypes on the Compete tab.
   | "activity_digest";
 
-interface PushPayload {
+export interface PushPayload {
   title: string;
   body: string;
   type: NotificationType;
@@ -498,6 +509,8 @@ const CAP_EXEMPT_TYPES: NotificationType[] = [
   "streak_assist_request",
   "streak_assist_accepted",
   "streak_assisted",
+  "streak_token_returned",
+  "streak_assist_returned",
   // The overnight Head-to-Head verdict: at most one a day, by construction.
   //
   // Deliberately WITHOUT badge_earned / personal_best, which look like the
@@ -516,6 +529,11 @@ const CAP_EXEMPT_TYPES: NotificationType[] = [
   "buddy_join_refused",
   "crew_photo",
   "crew_photo_nudge",
+  // Your own week, once a week (weeklyRecapService, claimed per user+week in
+  // weekly_recap_log): bounded by construction, about nobody's account but
+  // yours. A capped one would be parked for the next morning's digest — i.e.
+  // delivered in a week it isn't about.
+  "weekly_recap",
 ];
 
 /** Single source of truth for "the daily cap does not apply to this type". */
@@ -581,34 +599,119 @@ async function logNotificationSent(
   );
 }
 
+/**
+ * The user's own local hour (0-23) right now: their device's reported UTC
+ * offset, else New York (the zone every quiet-hours check used to assume for
+ * EVERYONE — a 10 PM–8 AM window in Los Angeles was 7 PM–5 AM).
+ */
+export function localHourFor(
+  offsetMinutes: number | null | undefined,
+  now: Date = new Date(),
+): number {
+  if (offsetMinutes === null || offsetMinutes === undefined) {
+    return parseInt(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York",
+        hour: "numeric",
+        hour12: false,
+      }).format(now),
+    ) % 24;
+  }
+  const minutes = now.getUTCHours() * 60 + now.getUTCMinutes() + offsetMinutes;
+  return Math.floor((((minutes % 1440) + 1440) % 1440) / 60);
+}
+
+export function hourInWindow(hour: number, start: number, end: number): boolean {
+  // Spans midnight (e.g. 22 to 8) when start > end.
+  return start > end ? hour >= start || hour < end : hour >= start && hour < end;
+}
+
 export async function isUserInQuietHours(userId: string): Promise<boolean> {
   const prefs = await getNotificationPreferences(userId);
   if (prefs.quiet_hours_start === null || prefs.quiet_hours_end === null)
     return false;
-
-  const now = new Date();
-  const etHour = parseInt(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/New_York",
-      hour: "numeric",
-      hour12: false,
-    }).format(now),
+  return hourInWindow(
+    localHourFor(prefs.timezone_offset_minutes),
+    prefs.quiet_hours_start,
+    prefs.quiet_hours_end,
   );
-
-  if (prefs.quiet_hours_start > prefs.quiet_hours_end) {
-    // Spans midnight (e.g., 22 to 8)
-    return etHour >= prefs.quiet_hours_start || etHour < prefs.quiet_hours_end;
-  }
-  return etHour >= prefs.quiet_hours_start && etHour < prefs.quiet_hours_end;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────
 
+/**
+ * The device tokens `sendPush` rings: all of the user's, or only those that
+ * do / do NOT declare a client feature. The two filtered classes partition
+ * the user's devices (a NULL feature list counts as "does not"), which is
+ * what lets a per-device-variant push reach every device exactly once.
+ * Exported so a check can pin that partition without a live APNs.
+ */
+export async function selectPushTokens(
+  userId: string,
+  deviceFeature?: { feature: string; supported: boolean },
+): Promise<{ device_token: string; environment: string | null }[]> {
+  return deviceFeature
+    ? db.query(
+        `SELECT device_token, environment FROM device_tokens
+         WHERE user_id = $1
+           AND ($2::text = ANY(COALESCE(client_features, '{}'::text[]))) = $3::boolean`,
+        [userId, deviceFeature.feature, deviceFeature.supported],
+      )
+    : db.query(
+        "SELECT device_token, environment FROM device_tokens WHERE user_id = $1",
+        [userId],
+      );
+}
+
+/**
+ * Hold a push for the morning briefing, keeping ALL of it — title, body,
+ * data, category — so it can be delivered as itself later. The old queue kept
+ * the type and title only, which is why a held comment arrived as "You have a
+ * notification you missed" and tapped through to nothing.
+ */
+async function queueForBriefing(
+  userId: string,
+  payload: PushPayload,
+  reason: "quiet" | "cap",
+): Promise<void> {
+  await db.query(
+    `INSERT INTO pending_notifications
+       (user_id, type, competition_id, competition_name, body, data, category, reason)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
+    [
+      userId,
+      payload.type,
+      payload.data?.competition_id ?? null,
+      payload.title,
+      payload.body,
+      payload.data ? JSON.stringify(payload.data) : null,
+      payload.category ?? null,
+      reason,
+    ],
+  );
+}
+
 export async function sendPush(
   userId: string,
   payload: PushPayload,
-  opts: { bypassDailyCap?: boolean; inboxOnly?: boolean } = {},
+  opts: {
+    bypassDailyCap?: boolean;
+    inboxOnly?: boolean;
+    /**
+     * Ring only this user's devices that do (`supported: true`) or do NOT
+     * (`false`) declare `feature` — for a push whose payload differs by build
+     * (weeklyRecapService sends one variant per device class).
+     */
+    deviceFeature?: { feature: string; supported: boolean };
+    /**
+     * Ring devices without writing an inbox row: the second half of a
+     * per-device-variant send, whose first half already wrote the one row.
+     */
+    skipInbox?: boolean;
+  } = {},
 ): Promise<void> {
+  const storeInbox = (): Promise<void> =>
+    opts.skipInbox ? Promise.resolve() : storeInAppNotification(userId, payload);
   // Record it, don't ring. For an event the user has already been told about
   // — a re-hype of something they were pushed about before — the history is
   // still worth keeping and the phone is not worth buzzing. Deliberately the
@@ -634,19 +737,10 @@ export async function sendPush(
       console.log(
         `[Push] Quiet hours for user ${userId}, queueing "${payload.type}"`,
       );
-      await db.query(
-        `INSERT INTO pending_notifications (user_id, type, competition_id, competition_name)
-				VALUES ($1, $2, $3, $4)`,
-        [
-          userId,
-          payload.type,
-          payload.data?.competition_id ?? null,
-          payload.title,
-        ],
-      );
+      await queueForBriefing(userId, payload, "quiet");
       if (chargesBudget) await logNotificationSent(userId, payload.type);
       // Still store in inbox so user can see it later
-      storeInAppNotification(userId, payload).catch((err) =>
+      storeInbox().catch((err) =>
         console.error("[Push] Error storing in-app notification:", err.message),
       );
       return;
@@ -662,36 +756,22 @@ export async function sendPush(
       console.log(
         `[Push] Throttled "${payload.type}" for user ${userId} (${dailyCount}/${DAILY_NOTIFICATION_CAP} today)`,
       );
-      await db.query(
-        `INSERT INTO pending_notifications (user_id, type, competition_id, competition_name)
-				VALUES ($1, $2, $3, $4)`,
-        [
-          userId,
-          payload.type,
-          payload.data?.competition_id ?? null,
-          payload.title,
-        ],
-      );
+      await queueForBriefing(userId, payload, "cap");
       if (chargesBudget) await logNotificationSent(userId, payload.type);
       // Still store in inbox
-      storeInAppNotification(userId, payload).catch((err) =>
+      storeInbox().catch((err) =>
         console.error("[Push] Error storing in-app notification:", err.message),
       );
       return;
     }
   }
 
-  const tokens = await db.query<{
-    device_token: string;
-    environment: string | null;
-  }>("SELECT device_token, environment FROM device_tokens WHERE user_id = $1", [
-    userId,
-  ]);
+  const tokens = await selectPushTokens(userId, opts.deviceFeature);
 
   if (tokens.length === 0) {
     console.log(`[Push] No device tokens found for user ${userId}`);
     // Still store in inbox even without device tokens
-    storeInAppNotification(userId, payload).catch((err) =>
+    storeInbox().catch((err) =>
       console.error("[Push] Error storing in-app notification:", err.message),
     );
     return;
@@ -717,7 +797,7 @@ export async function sendPush(
   }
 
   // Always store in-app notification regardless of push delivery
-  storeInAppNotification(userId, payload).catch((err) =>
+  storeInbox().catch((err) =>
     console.error("[Push] Error storing in-app notification:", err.message),
   );
 }
@@ -755,20 +835,26 @@ export async function registerDeviceToken(
   deviceToken: string,
   environment?: string | null,
   clientFeatures?: unknown,
+  widgetKinds?: unknown,
 ): Promise<void> {
   const tokenEnvironment = normalizeTokenEnvironment(environment);
   // Overwritten on every registration, never merged: capabilities belong to
   // the build currently installed, and a downgrade (or a reinstall of an
   // older TestFlight build) has to be able to take them away again.
   const features = normalizeClientFeatures(clientFeatures);
+  // Same rule for installed widgets — overwritten, so removing a widget stops
+  // its refresh pushes at the next registration. Absent ⇒ NULL (a build that
+  // predates the field), which widgetRefreshService never pushes.
+  const kinds = normalizeWidgetKinds(widgetKinds);
   await db.query(
-    `INSERT INTO device_tokens (user_id, device_token, environment, client_features)
-		VALUES ($1, $2, $3, $4)
+    `INSERT INTO device_tokens (user_id, device_token, environment, client_features, widget_kinds)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (user_id, device_token)
 		DO UPDATE SET environment = EXCLUDED.environment,
 			client_features = EXCLUDED.client_features,
+			widget_kinds = EXCLUDED.widget_kinds,
 			updated_at = NOW()`,
-    [userId, deviceToken, tokenEnvironment, features],
+    [userId, deviceToken, tokenEnvironment, features, kinds],
   );
 }
 
@@ -785,6 +871,60 @@ export async function unregisterDeviceToken(
 // ─── Silent (background) pushes ─────────────────────────────────────
 
 /**
+ * The exact APNs request a silent push makes — headers and body — as a PURE
+ * function, so `scripts/widget-refresh-check.mjs` can pin the shape without a
+ * network. The shape is the whole contract: `apns-push-type: background` with
+ * priority 5 is the ONLY combination APNs accepts for a content-available push
+ * (priority 10 on a background push is rejected on watchOS and throttled on
+ * iOS), and the aps dict must carry NOTHING but `content-available` — an
+ * `alert`, `sound` or `badge` beside it turns a wake-up into a banner.
+ */
+export function buildSilentPushRequest(
+  deviceToken: string,
+  type: string,
+  data: Record<string, string>,
+  topic: string,
+  bearer: string,
+): { headers: Record<string, string>; body: string } {
+  return {
+    headers: {
+      ":method": "POST",
+      ":path": `/3/device/${deviceToken}`,
+      authorization: `bearer ${bearer}`,
+      "apns-topic": topic,
+      "apns-push-type": "background",
+      "apns-priority": "5",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      aps: { "content-available": 1 },
+      type,
+      data,
+    }),
+  };
+}
+
+type SilentPushTransport = (
+  deviceToken: string,
+  type: string,
+  data: Record<string, string>,
+  environment: DeviceTokenEnvironment,
+) => Promise<boolean>;
+
+let silentPushTransportOverride: SilentPushTransport | null = null;
+
+/**
+ * Test seam: route every silent push through `transport` instead of APNs.
+ * Only the check scripts call it (there is no APNs key in CI, and a real send
+ * would need one); pass null to restore the real sender.
+ */
+export function setSilentPushTransportForTesting(
+  transport: SilentPushTransport | null,
+): void {
+  silentPushTransportOverride = transport;
+}
+
+/**
  * APNs silent push. Wakes the app to do background work; renders nothing.
  * Do not call directly — use sendSilentPushToUser.
  */
@@ -794,6 +934,9 @@ function sendSilentPushToDevice(
   data: Record<string, string> = {},
   environment: DeviceTokenEnvironment = defaultTokenEnvironment(),
 ): Promise<boolean> {
+  if (silentPushTransportOverride) {
+    return silentPushTransportOverride(deviceToken, type, data, environment);
+  }
   return new Promise((resolve) => {
     const token = getApnsToken();
     if (!token || !APNS_BUNDLE_ID) {
@@ -802,11 +945,13 @@ function sendSilentPushToDevice(
       return;
     }
 
-    const apnsPayload = JSON.stringify({
-      aps: { "content-available": 1 },
+    const { headers, body: apnsPayload } = buildSilentPushRequest(
+      deviceToken,
       type,
       data,
-    });
+      APNS_BUNDLE_ID,
+      token,
+    );
 
     const client = http2.connect(apnsHostForEnvironment(environment));
 
@@ -816,15 +961,7 @@ function sendSilentPushToDevice(
       resolve(false);
     });
 
-    const req = client.request({
-      ":method": "POST",
-      ":path": `/3/device/${deviceToken}`,
-      authorization: `bearer ${token}`,
-      "apns-topic": APNS_BUNDLE_ID,
-      "apns-push-type": "background",
-      "apns-priority": "5",
-      "content-type": "application/json",
-    });
+    const req = client.request(headers);
 
     let responseData = "";
     let statusCode = 0;
@@ -861,6 +998,29 @@ function sendSilentPushToDevice(
     req.write(apnsPayload);
     req.end();
   });
+}
+
+/**
+ * Silent push to an explicit list of devices (already selected by the caller,
+ * e.g. only the ones declaring a capability). Same no-inbox, no-log, no-cap
+ * contract as sendSilentPushToUser. Returns how many APNs accepted.
+ */
+export async function sendSilentPushToDevices(
+  devices: { device_token: string; environment: string | null }[],
+  type: string,
+  data: Record<string, string> = {},
+): Promise<number> {
+  const results = await Promise.all(
+    devices.map(({ device_token, environment }) =>
+      sendSilentPushToDevice(
+        device_token,
+        type,
+        data,
+        normalizeTokenEnvironment(environment),
+      ),
+    ),
+  );
+  return results.filter(Boolean).length;
 }
 
 /**
@@ -939,12 +1099,17 @@ export async function sendOrQueueCompetitionNotification(
   }
 }
 
-interface PendingNotification {
+export interface PendingNotification {
   id: string;
   user_id: string;
   type: string;
-  competition_id: string;
+  competition_id: string | null;
   competition_name: string;
+  body: string | null;
+  data: Record<string, string> | null;
+  category: string | null;
+  reason: string | null;
+  created_at: string;
 }
 
 /**
@@ -1017,22 +1182,32 @@ const DIGEST_LABELS: Partial<Record<NotificationType, [string, string]>> = {
  * the named half is the half most likely to be why the user opens the app.
  */
 function digestBody(pending: PendingNotification[]): string {
-  const counts = new Map<string, { labels: [string, string]; count: number }>();
+  const counts = new Map<
+    string,
+    { labels: [string, string]; count: number; forYou: boolean }
+  >();
   for (const n of pending) {
     const labels = DIGEST_LABELS[n.type as NotificationType] ?? [
       "update",
       "updates",
     ];
+    const forYou = BRIEFING_PRIORITY.includes(n.type as NotificationType);
     // Keyed on the PLURAL, so two types that read the same to a user
     // (streak_lost and streak_broken are both "streak updates") count as one
     // kind instead of two lines saying the same word.
     const entry = counts.get(labels[1]);
-    if (entry) entry.count += 1;
-    else counts.set(labels[1], { labels, count: 1 });
+    if (entry) {
+      entry.count += 1;
+      entry.forYou = entry.forYou || forYou;
+    } else counts.set(labels[1], { labels, count: 1, forYou });
   }
-  // Ties keep insertion order (the query is ordered by created_at and Array
-  // sort is stable), so the same backlog always renders the same sentence.
-  const ranked = [...counts.values()].sort((a, b) => b.count - a.count);
+  // News addressed to the user is named before chatter however many hypes
+  // there were — "a badge" must not become "and 2 more" behind 12 hypes —
+  // then by volume. Ties keep insertion order (the query is ordered by
+  // created_at and Array sort is stable), so a backlog always reads the same.
+  const ranked = [...counts.values()].sort(
+    (a, b) => Number(b.forYou) - Number(a.forYou) || b.count - a.count,
+  );
   const named = ranked.slice(0, 2);
   const rest = pending.length - named.reduce((sum, e) => sum + e.count, 0);
 
@@ -1044,127 +1219,305 @@ function digestBody(pending: PendingNotification[]): string {
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }
 
+/**
+ * What's ADDRESSED TO YOU, in the order a morning should tell you about it.
+ * These are delivered as themselves (their own title, body and tap target);
+ * everything else held overnight is chatter and becomes one summary line.
+ */
+const BRIEFING_PRIORITY: NotificationType[] = [
+  "friend_request",
+  "mention",
+  "post_comment",
+  "coauthor_invite",
+  "competition_invite",
+  "story_reaction",
+  "friend_request_accepted",
+  "coauthor_accepted",
+  "challenge_won",
+  "badge_earned",
+  "personal_best",
+  "streak_lost",
+  "streak_broken",
+  "crew_photo",
+];
+
+/**
+ * Moot by morning: a "go walk!" nudge or a lead change from last night
+ * describes a day that's over. They stay in the inbox; they don't ring.
+ */
+const STALE_BY_MORNING: NotificationType[] = [
+  "friend_nudge",
+  "competition_nudge",
+  "crew_photo_nudge",
+  "lead_change",
+];
+
+/** How many kinds of "for you" news ring individually before the rest fold
+ * into the summary — enough for a comment, a request and a tag, few enough
+ * that the lock screen isn't a wall. */
+const BRIEFING_INDIVIDUAL_KINDS = 3;
+
+/** The calendar day of `at` in the user's zone (offset minutes; null = ET). */
+function localDateKey(at: Date, offsetMinutes: number | null): string {
+  if (offsetMinutes === null) {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(at);
+  }
+  return new Date(at.getTime() + offsetMinutes * 60_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Is a held row due now? Never while the user is in their own quiet hours.
+ * Quiet-held rows go the moment quiet hours end; cap-held rows once the
+ * capped DAY is over (the cap resets with the day, and a capped "friend
+ * walked" from 3 PM ringing at 4 PM is the noise the cap exists to stop).
+ * The global competition queue keeps its daytime window.
+ */
+function isDue(
+  row: PendingNotification,
+  now: Date,
+  offsetMinutes: number | null,
+): boolean {
+  if (row.reason === "cap") {
+    return localDateKey(new Date(row.created_at), offsetMinutes) < localDateKey(now, offsetMinutes);
+  }
+  if (row.type === "competition_started" || row.type === "competition_finished") {
+    const etHour = localHourFor(null, now);
+    return etHour >= 9 && etHour < 22;
+  }
+  return true;
+}
+
+/**
+ * The MORNING BRIEFING: deliver what was held overnight (or past the daily
+ * cap) so nothing that matters gets lost in a count. Runs hourly; each user
+ * is served when THEIR quiet hours end, in their own time zone.
+ *
+ * It used to be one 9 AM New York flush that collapsed everything into "3
+ * comments, 2 hypes and 4 more" — so a friend request or a mention became a
+ * number beside the hypes — and re-sent a single held push as "You have a
+ * notification you missed" with no body and nowhere to tap.
+ *
+ * Now, per user: stale nudges and lead changes are dropped (still in the
+ * inbox); up to `BRIEFING_INDIVIDUAL_KINDS` kinds of "for you" news ring as
+ * themselves — same title, body and tap target as if they'd been sent live,
+ * several of one kind as the newest plus "+N more"; everything else becomes
+ * ONE summary line. Re-deliveries skip the inbox: the row was written when
+ * the push was first held.
+ */
 export async function flushBatchedNotifications(): Promise<void> {
   const pending = await db.query<PendingNotification>(
-    `SELECT id, user_id, type, competition_id, competition_name
-		FROM pending_notifications
-		WHERE sent_at IS NULL
-		ORDER BY user_id, created_at`,
+    `SELECT id, user_id, type, competition_id, competition_name,
+            body, data, category, reason, created_at
+       FROM pending_notifications
+      WHERE sent_at IS NULL
+      ORDER BY user_id, created_at`,
   );
-
   if (pending.length === 0) return;
 
-  // Group by user
-  const byUser: Record<string, PendingNotification[]> = {};
+  const byUser = new Map<string, PendingNotification[]>();
   for (const row of pending) {
-    if (!byUser[row.user_id]) byUser[row.user_id] = [];
-    byUser[row.user_id].push(row);
+    const list = byUser.get(row.user_id);
+    if (list) list.push(row);
+    else byUser.set(row.user_id, [row]);
   }
 
-  for (const [userId, notifications] of Object.entries(byUser)) {
-    const compNotifs = notifications.filter(
-      (n) =>
-        n.type === "competition_started" || n.type === "competition_finished",
-    );
-    const otherNotifs = notifications.filter(
-      (n) =>
-        n.type !== "competition_started" && n.type !== "competition_finished",
-    );
-
-    // Handle competition start/finish notifications (batch into digest)
-    if (compNotifs.length > 0) {
-      const starts = compNotifs.filter((n) => n.type === "competition_started");
-      const finishes = compNotifs.filter(
-        (n) => n.type === "competition_finished",
-      );
-
-      let title: string;
-      let body: string;
-      let type: NotificationType;
-
-      if (starts.length > 0 && finishes.length > 0) {
-        title = "Competition updates";
-        body =
-          "You have several updates to your competitions — open to check in";
-        type = "competition_updates";
-      } else if (starts.length === 1) {
-        title = "Competition started";
-        body = `${starts[0].competition_name} has begun!`;
-        type = "competition_started";
-      } else if (starts.length > 1) {
-        title = "Competitions started";
-        body = "Multiple competitions have started — open to check in";
-        type = "competition_started";
-      } else if (finishes.length === 1) {
-        title = "Competition finished";
-        body = `${finishes[0].competition_name} has finished!`;
-        type = "competition_finished";
-      } else {
-        title = "Competitions finished";
-        body = "Multiple competitions have finished — open to check in";
-        type = "competition_finished";
-      }
-
-      // NO FLUSH_OPTS here, deliberately: competition_started/finished are the
-      // one kind queued by sendOrQueueCompetitionNotification, which inserts
-      // straight into pending_notifications without charging the ledger. They
-      // are also HIGH_PRIORITY, so sendPush's own queueing branches never see
-      // them — this digest is their FIRST charge, not a second one.
-      await sendPush(userId, { title, body, type });
+  const now = new Date();
+  let delivered = 0;
+  for (const [userId, rows] of byUser) {
+    const prefs = await getNotificationPreferences(userId);
+    const offset = prefs.timezone_offset_minutes ?? null;
+    if (
+      prefs.quiet_hours_start !== null &&
+      prefs.quiet_hours_end !== null &&
+      hourInWindow(localHourFor(offset, now), prefs.quiet_hours_start, prefs.quiet_hours_end)
+    ) {
+      continue; // Still their night.
     }
+    const due = rows.filter((r) => isDue(r, now, offset));
+    if (due.length === 0) continue;
 
-    // Handle other throttled notifications (send digest summary)
-    if (otherNotifs.length > 0) {
-      if (otherNotifs.length === 1) {
-        // Single throttled notification: send it directly
-        const n = otherNotifs[0];
-        await sendPush(
-          userId,
-          {
-            title: n.competition_name || "Notification", // competition_name stores the original title
-            body: `You have a notification you missed`,
-            type: (n.type as NotificationType) || "competition_updates",
-          },
-          FLUSH_OPTS,
-        );
-      } else {
-        // Multiple: send a digest that SAYS what it holds. "You have 40
-        // notifications" is a number, not news — it tells the user nothing
-        // about whether opening the app is worth it, and the one thing in
-        // there they'd have wanted is indistinguishable from the other 39.
-        //
-        // The type decides where the tap lands, and only the inbox can show a
-        // digest's contents: `activity_digest` for devices that route it,
-        // `competition_updates` (the Compete tab) for the shipped builds that
-        // don't.
-        const routesDigest = await userSupports(
-          userId,
-          CLIENT_FEATURES.activityDigestV1,
-        ).catch(() => false);
-        await sendPush(
-          userId,
-          {
-            title: "While you were away",
-            body: digestBody(otherNotifs),
-            type: routesDigest ? "activity_digest" : "competition_updates",
-            data: { missed_count: String(otherNotifs.length) },
-          },
-          FLUSH_OPTS,
-        );
-      }
-    }
+    await deliverBriefing(userId, due, now, offset);
+    delivered += due.length;
+    await db.query(
+      `UPDATE pending_notifications SET sent_at = NOW() WHERE id = ANY($1::uuid[])`,
+      [due.map((r) => r.id)],
+    );
   }
 
-  // Mark all as sent
-  const ids = pending.map((n) => n.id);
-  await db.query(
-    `UPDATE pending_notifications SET sent_at = NOW() WHERE id = ANY($1::uuid[])`,
-    [ids],
-  );
+  if (delivered > 0) {
+    console.log(`[Push] Morning briefing delivered ${delivered} held notifications`);
+  }
+}
 
-  console.log(
-    `[Push] Flushed ${pending.length} batched notifications for ${Object.keys(byUser).length} users`,
+/** What a briefing will send, decided without sending — exported so a check
+ * can pin the ordering and folding rules without a live APNs. */
+export interface BriefingPlan {
+  /** Rung as themselves (skipInbox: their inbox row already exists). */
+  individual: PushPayload[];
+  /** The one summary line for everything else, if anything is left. */
+  summary: { title: string; body: string; count: number } | null;
+  /** Rows dropped as stale by morning. */
+  droppedStale: number;
+  competition: PendingNotification[];
+}
+
+export function planBriefing(
+  rows: PendingNotification[],
+  now: Date,
+  offset: number | null,
+): BriefingPlan {
+  const competition = rows.filter(
+    (n) => n.type === "competition_started" || n.type === "competition_finished",
   );
+  const today = localDateKey(now, offset);
+  const nonComp = rows.filter(
+    (n) => n.type !== "competition_started" && n.type !== "competition_finished",
+  );
+  const others = nonComp.filter(
+    (n) =>
+      !(
+        STALE_BY_MORNING.includes(n.type as NotificationType) &&
+        localDateKey(new Date(n.created_at), offset) < today
+      ),
+  );
+  const droppedStale = nonComp.length - others.length;
+
+  // Group by type, newest last (rows arrive ordered by created_at).
+  const groups = new Map<string, PendingNotification[]>();
+  for (const n of others) {
+    const g = groups.get(n.type);
+    if (g) g.push(n);
+    else groups.set(n.type, [n]);
+  }
+  const forYou = [...groups.entries()]
+    .filter(([type]) => BRIEFING_PRIORITY.includes(type as NotificationType))
+    .sort(
+      ([a], [b]) =>
+        BRIEFING_PRIORITY.indexOf(a as NotificationType) -
+        BRIEFING_PRIORITY.indexOf(b as NotificationType),
+    )
+    .slice(0, BRIEFING_INDIVIDUAL_KINDS);
+
+  const individual: PushPayload[] = forYou.map(([, group]) => {
+    const newest = group[group.length - 1];
+    if (newest.body === null) {
+      // Held before payloads were kept: the old one-liner is all we have.
+      return {
+        title: newest.competition_name || "Notification",
+        body:
+          group.length > 1
+            ? `You have ${group.length} notifications you missed`
+            : "You have a notification you missed",
+        type: newest.type as NotificationType,
+      };
+    }
+    return {
+      title: newest.competition_name,
+      body: group.length > 1 ? `${newest.body} · +${group.length - 1} more` : newest.body,
+      type: newest.type as NotificationType,
+      ...(newest.data ? { data: newest.data } : {}),
+      ...(newest.category ? { category: newest.category } : {}),
+    };
+  });
+
+  const ringing = new Set(forYou.map(([type]) => type));
+  const rest = others.filter((n) => !ringing.has(n.type));
+  if (rest.length === 1 && rest[0].body !== null && individual.length === 0) {
+    // One thing held, and it isn't "for you": still deliver it as itself.
+    const n = rest[0];
+    individual.push({
+      title: n.competition_name,
+      body: n.body!,
+      type: n.type as NotificationType,
+      ...(n.data ? { data: n.data } : {}),
+    });
+    return { individual, summary: null, droppedStale, competition };
+  }
+  const summary =
+    rest.length === 0
+      ? null
+      : {
+          title: individual.length > 0 ? "Also while you were away" : "While you were away",
+          body: digestBody(rest),
+          count: rest.length,
+        };
+  return { individual, summary, droppedStale, competition };
+}
+
+async function deliverBriefing(
+  userId: string,
+  rows: PendingNotification[],
+  now: Date,
+  offset: number | null,
+): Promise<void> {
+  const plan = planBriefing(rows, now, offset);
+  // Competition start/finish keep their own digest (they were never charged
+  // to the cap — see the note on FLUSH_OPTS).
+  if (plan.competition.length > 0) await deliverCompetitionDigest(userId, plan.competition);
+  for (const payload of plan.individual) {
+    await sendPush(userId, payload, { ...FLUSH_OPTS, skipInbox: true });
+  }
+  if (!plan.summary) return;
+  // The summary says what it holds; the type decides where it lands (only
+  // the inbox can show a digest's contents) — `activity_digest` for devices
+  // that route it, `competition_updates` for shipped builds that don't.
+  const routesDigest = await userSupports(userId, CLIENT_FEATURES.activityDigestV1).catch(
+    () => false,
+  );
+  await sendPush(
+    userId,
+    {
+      title: plan.summary.title,
+      body: plan.summary.body,
+      type: routesDigest ? "activity_digest" : "competition_updates",
+      data: { missed_count: String(plan.summary.count) },
+    },
+    FLUSH_OPTS,
+  );
+}
+
+async function deliverCompetitionDigest(
+  userId: string,
+  compNotifs: PendingNotification[],
+): Promise<void> {
+  const starts = compNotifs.filter((n) => n.type === "competition_started");
+  const finishes = compNotifs.filter((n) => n.type === "competition_finished");
+
+  let title: string;
+  let body: string;
+  let type: NotificationType;
+  let data: Record<string, string> | undefined;
+
+  if (starts.length > 0 && finishes.length > 0) {
+    title = "Competition updates";
+    body = "You have several updates to your competitions — open to check in";
+    type = "competition_updates";
+  } else if (starts.length === 1) {
+    title = "Competition started";
+    body = `${starts[0].competition_name} has begun!`;
+    type = "competition_started";
+    data = starts[0].competition_id ? { competition_id: starts[0].competition_id } : undefined;
+  } else if (starts.length > 1) {
+    title = "Competitions started";
+    body = "Multiple competitions have started — open to check in";
+    type = "competition_started";
+  } else if (finishes.length === 1) {
+    title = "Competition finished";
+    body = `${finishes[0].competition_name} has finished!`;
+    type = "competition_finished";
+    data = finishes[0].competition_id ? { competition_id: finishes[0].competition_id } : undefined;
+  } else {
+    title = "Competitions finished";
+    body = "Multiple competitions have finished — open to check in";
+    type = "competition_finished";
+  }
+
+  // NO FLUSH_OPTS here, deliberately: competition_started/finished are the
+  // one kind queued by sendOrQueueCompetitionNotification, which inserts
+  // straight into pending_notifications without charging the ledger. They
+  // are also HIGH_PRIORITY, so sendPush's own queueing branches never see
+  // them — this digest is their FIRST charge, not a second one.
+  await sendPush(userId, { title, body, type, ...(data ? { data } : {}) });
 }
 
 // ─── Nudge Rate Limiting ─────────────────────────────────────────────
@@ -1190,8 +1543,15 @@ export async function logNudge(
   senderId: string,
   targetId: string,
 ): Promise<void> {
+  // The log is pruned after 7 days; the lifetime counter the nudge medals
+  // read is bumped in the SAME statement so the two can never drift.
   await db.query(
-    `INSERT INTO nudge_log (competition_id, sender_id, target_id) VALUES ($1, $2, $3)`,
+    `WITH logged AS (
+       INSERT INTO nudge_log (competition_id, sender_id, target_id) VALUES ($1, $2, $3)
+       RETURNING sender_id
+     )
+     UPDATE users SET nudges_sent_total = nudges_sent_total + 1
+     WHERE user_id IN (SELECT sender_id FROM logged)`,
     [competitionId, senderId, targetId],
   );
 }
@@ -1227,8 +1587,14 @@ export async function logFriendNudge(
   senderId: string,
   targetId: string,
 ): Promise<void> {
+  // Same statement as the lifetime counter — see logNudge.
   await db.query(
-    `INSERT INTO friend_nudge_log (sender_id, target_id) VALUES ($1, $2)`,
+    `WITH logged AS (
+       INSERT INTO friend_nudge_log (sender_id, target_id) VALUES ($1, $2)
+       RETURNING sender_id
+     )
+     UPDATE users SET nudges_sent_total = nudges_sent_total + 1
+     WHERE user_id IN (SELECT sender_id FROM logged)`,
     [senderId, targetId],
   );
 }
@@ -1295,6 +1661,66 @@ export async function fireBadgeEarnedPush(
       icon: badge.icon,
     },
   });
+}
+
+/** How many medals one evaluation may announce one push at a time. */
+export const BADGE_PUSH_BURST_LIMIT = 3;
+
+/**
+ * ONE push for a burst of medals — a Recalibrate that finds seven, or an
+ * upload that crosses several thresholds at once — instead of one banner per
+ * medal. Same `badge_earned` type (every shipped build routes it to the
+ * medals screen) with `badge_id` = the rarest of them so that routing still
+ * has a medal to land on; `count`/`source` are additive, and every value is a
+ * STRING (the inbox decodes `data` as [String: String]).
+ */
+export async function fireBadgeSummaryPush(
+  userId: string,
+  badges: BadgeEarnedPayload[],
+  source: "recalibrate" | "upload",
+): Promise<void> {
+  if (badges.length === 0) return;
+  const rank = { legendary: 0, rare: 1, common: 2 } as const;
+  const lead = [...badges].sort((a, b) => rank[a.rarity] - rank[b.rarity])[0];
+  await sendPush(userId, {
+    title: `🏅 ${badges.length} Medals Unlocked`,
+    body:
+      source === "recalibrate"
+        ? `Recalibrating found ${badges.length} medals you'd already earned, including ${lead.name}.`
+        : `${lead.name} and ${badges.length - 1} more — open your medals to see them all.`,
+    type: "badge_earned",
+    data: {
+      badge_id: lead.badgeId,
+      rarity: lead.rarity,
+      icon: lead.icon,
+      count: String(badges.length),
+      source,
+    },
+  });
+}
+
+/**
+ * Announce medals to their owner: one push each up to
+ * BADGE_PUSH_BURST_LIMIT, one summary push above it. Returns whether the
+ * burst was summarized, so a caller can hold its friend fan-out too.
+ */
+export async function deliverBadgeAwards(
+  userId: string,
+  badges: BadgeEarnedPayload[],
+  source: "recalibrate" | "upload",
+): Promise<{ summarized: boolean }> {
+  if (badges.length > BADGE_PUSH_BURST_LIMIT) {
+    await fireBadgeSummaryPush(userId, badges, source);
+    return { summarized: true };
+  }
+  await Promise.all(
+    badges.map((b) =>
+      fireBadgeEarnedPush(userId, b).catch((err) =>
+        console.error("Error firing badge_earned push:", err?.message ?? err),
+      ),
+    ),
+  );
+  return { summarized: false };
 }
 
 /**

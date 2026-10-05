@@ -1,0 +1,2 @@
+ALTER TABLE "buddy_session_participants" ADD COLUMN "activity_type" text;--> statement-breakpoint
+ALTER TABLE "buddy_session_participants" ADD CONSTRAINT "buddy_session_participants_activity_type_check" CHECK (activity_type IS NULL OR activity_type = ANY (ARRAY['walking'::text, 'running'::text]));

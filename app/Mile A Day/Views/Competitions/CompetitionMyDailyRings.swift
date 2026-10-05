@@ -170,17 +170,10 @@ struct CompetitionMyDailyRings: View {
                 .padding(.vertical, 8)
                 .background(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .fill(.ultraThinMaterial)
+                        .fill(CompeteDesign.surface)
                         .overlay(
                             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                                .stroke(
-                                    LinearGradient(
-                                        colors: gradientColors.map { $0.opacity(0.25) } + [Color.clear],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
-                                )
+                                .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                         )
                 )
             }

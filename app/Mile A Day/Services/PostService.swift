@@ -98,6 +98,14 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     /// for anyone who hasn't added one. Blanked to "" when the earn-to-view
     /// gate withheld it, exactly like the author's `media_url`.
     let media_url: String?
+    /// FRONT & BACK: their slide's swapped arrangement. Nil for a single shot
+    /// and on older servers, and nulled outright by the earn-to-view gate —
+    /// it is the same withheld photo from the other camera.
+    var dual_media_url: String? = nil
+    /// Which corner the inset was BAKED into — "tr"/"tl"/"bl"/"br".
+    /// nil on every post made before the inset could be moved, and on
+    /// every older server, which is exactly top-trailing.
+    var dual_inset_corner: String? = nil
     /// Their own words under their own slide. Nil until they write one, and
     /// on older servers — the card falls back to showing nothing under a
     /// crew slide rather than the author's caption, which isn't theirs.
@@ -118,6 +126,9 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     /// clock" — never index one by the other without checking.
     var route_times: [Double]? = nil
     var route_started_at: Double? = nil
+    /// The server trimmed this line's start & end for route privacy (it is
+    /// not the viewer's own). Nil on older servers and when there's no route.
+    var route_trimmed: Bool? = nil
     /// MY two switches on this shared post, and non-nil ONLY on my own row —
     /// one person's curation isn't the crew's to read, so the server nulls
     /// them for everyone else (and every older server omits them entirely).
@@ -155,6 +166,15 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     var mediaURL: URL? {
         guard let media_url, !media_url.isEmpty else { return nil }
         return ProfileImageService.fullImageURL(for: media_url)
+    }
+
+    /// The other side of their FRONT & BACK, when there is one. Gated on the
+    /// primary surviving too: a withheld photo blanks `media_url` to "" while
+    /// the twin is nulled, and offering a flip from a lock would hand over the
+    /// picture the gate just took away.
+    var dualMediaURL: URL? {
+        guard mediaURL != nil, let dual_media_url, !dual_media_url.isEmpty else { return nil }
+        return ProfileImageService.fullImageURL(for: dual_media_url)
     }
 
     /// Set only when the server withheld a photo this person HAD added — an
@@ -218,6 +238,19 @@ struct PostItem: Codable, Identifiable {
     let last_name: String?
     let profile_image_url: String?
     let media_url: String
+    /// FRONT & BACK: the swapped arrangement of the same two frames — the
+    /// selfie large with the scene inset, where `media_url` is the other way
+    /// round. Nil on every ordinary post and from every older server.
+    ///
+    /// NOT a second half of the photo: both urls are finished 4:5 pictures
+    /// with the inset already baked in, so anything that only reads
+    /// `media_url` still shows a complete front-and-back shot. This is what
+    /// lets the card offer the tap-to-swap.
+    var dual_media_url: String? = nil
+    /// Which corner the inset was BAKED into — "tr"/"tl"/"bl"/"br".
+    /// nil on every post made before the inset could be moved, and on
+    /// every older server, which is exactly top-trailing.
+    var dual_inset_corner: String? = nil
     var caption: String?
     let workout_id: String?
     /// Linked workout's feed role — display framing only: "extra" renders
@@ -243,6 +276,10 @@ struct PostItem: Codable, Identifiable {
     /// under exactly the route's gates; nil on older servers and older uploads.
     var route_times: [Double]? = nil
     var route_started_at: Double? = nil
+    /// Hide start & end: the server served `route` trimmed for route privacy
+    /// (the viewer isn't the author) — draw it fading in and out, no start
+    /// pin. Nil on older servers and when there's no route.
+    var route_trimmed: Bool? = nil
     /// The competitions the author was in on this post's day. Nil = none, or
     /// an older server.
     var competitions: [PostCompetitionRef]? = nil
@@ -264,6 +301,11 @@ struct PostItem: Codable, Identifiable {
     /// OWNER-ONLY: the linked walk was recorded in Stealth Mode (route
     /// withheld for good). Friends always receive false; nil = older server.
     var stealth: Bool? = nil
+    /// The AUTHOR's Flamey — non-nil only when the author is on the Fun
+    /// dashboard (`{"look": {slot: id} | null, "name": … | null}`); nil for a
+    /// Modern author and from every older server. Drawn by the routeless
+    /// card's trackside cheerleader so a post shows ITS author's mascot.
+    var author_flamey: AuthorFlamey? = nil
     /// The run's ACTIVE story photo (profile posts responses) — the real
     /// picture leads wherever it exists; the workout card is secondary.
     var story_photo_url: String?
@@ -387,14 +429,82 @@ struct PostItem: Codable, Identifiable {
 
     var mediaURL: URL? { ProfileImageService.fullImageURL(for: media_url) }
 
+    /// The post's own PHOTO — nil on an AUTO card. An auto card is drawn live
+    /// from the walk (route art / the indoor card), so its media is either
+    /// nothing (current builds post none) or, on older cards, a baked picture
+    /// of that same card, which must not be drawn as if someone took it: it
+    /// froze the poster's line before the crew's synced, froze their outfit,
+    /// and would sit a second, stale copy beside the live one. Every surface
+    /// that shows "the post's picture" reads this, never `mediaURL`.
+    var photoURL: URL? { is_auto == true ? nil : mediaURL }
+
+    /// The FRONT & BACK twin, when this post has one. Withheld alongside the
+    /// primary: the earn-to-view gate blanks `media_url` to "" and nulls this,
+    /// and a flip offered from a lock would serve the very photo being held.
+    var dualMediaURL: URL? {
+        guard !media_url.isEmpty, let dual_media_url, !dual_media_url.isEmpty else { return nil }
+        return ProfileImageService.fullImageURL(for: dual_media_url)
+    }
+
     /// The run's story photo when present and distinct from the post media.
     var storyPhotoURL: URL? {
         guard let story_photo_url, story_photo_url != media_url else { return nil }
         return ProfileImageService.fullImageURL(for: story_photo_url)
     }
 
+    /// The picture that fronts this post on `ownerId`'s profile grid. A buddy
+    /// walk is ONE card, so a crew member who added their own photo has no
+    /// post of their own — on THEIR grid the walk is theirs (the server files
+    /// it there, not under Tagged) and must lead with the photo they took,
+    /// not the first finisher's.
+    func gridLeadPhotoURL(forOwner ownerId: String) -> URL? {
+        if ownerId != user_id,
+           let mine = acceptedCoauthors.first(where: { $0.user_id == ownerId })?.mediaURL {
+            return mine
+        }
+        return storyPhotoURL ?? photoURL
+    }
+
     /// Short "2h", "5m", "now" relative time from created_at.
     var relativeTime: String { RelativeTime.short(from: created_at) }
+}
+
+/// The author's Flamey on a post or feed entry: what they dressed him in
+/// (`look`, the wire `{slot: id}` — null = basic) and his name (null =
+/// "Flamey"). The whole block is null unless the author is on Fun, so its
+/// PRESENCE is the signal. Lenient: a malformed look reads as basic.
+struct AuthorFlamey: Codable, Equatable {
+    var look: FlameyLookChoice?
+    var name: String?
+
+    init(look: FlameyLookChoice? = nil, name: String? = nil) {
+        self.look = look
+        self.name = name
+    }
+
+    private enum CodingKeys: String, CodingKey { case look, name }
+
+    /// Never throws on a bad value: one odd field here must not fail the
+    /// whole feed page it rides on.
+    init(from decoder: Decoder) throws {
+        let c = try? decoder.container(keyedBy: CodingKeys.self)
+        look = (try? c?.decodeIfPresent(FlameyLookChoice.self, forKey: .look)) ?? nil
+        name = (try? c?.decodeIfPresent(String.self, forKey: .name)) ?? nil
+    }
+
+    /// His name, trimmed; nil = "Flamey".
+    var displayName: String? {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (trimmed?.isEmpty == false) ? trimmed : nil
+    }
+
+    /// The author's look, resolved for a small (compact) surface. Only
+    /// what they CHOSE is drawn (the server serves only owned items), plus
+    /// the day's holiday outfit like every Flamey.
+    func resolved(date: Date = Date(), detail: FlameyRenderDetail = .compact) -> FlameyLook {
+        let choice = look ?? .basic
+        return FlameyLook.resolve(owned: Set(choice.items), choice: choice, date: date, mood: [], detail: detail)
+    }
 }
 
 /// Decode a backend `[[lat, lng], ...]` trace into map coordinates. Nil when
@@ -460,6 +570,11 @@ struct FeedEntry: Codable, Identifiable {
     let profile_image_url: String?
     // post-only
     let media_url: String?
+    /// FRONT & BACK's swapped arrangement — see `PostItem.dual_media_url`.
+    /// Needs a CodingKeys case below like every other field here.
+    let dual_media_url: String?
+    /// Which corner the inset was baked into. CodingKeys case too.
+    let dual_inset_corner: String?
     var caption: String?
     let stats_snapshot: PostStats?
     /// The run's story-only photo, when one exists — powers the photo/route
@@ -502,22 +617,32 @@ struct FeedEntry: Codable, Identifiable {
     /// CodingKeys below like everything else here.
     let route_times: [Double]?
     let route_started_at: Double?
+    /// Hide start & end — see `PostItem.route_trimmed`. Listed in CodingKeys.
+    var route_trimmed: Bool? = nil
     /// The owner's competitions on the entry's day (both kinds). Nil = none.
     let competitions: [PostCompetitionRef]?
     /// The competition the poster stickered onto the photo, when they did.
     /// Post entries only. Same CodingKeys rule as everything here.
     let competition_id: String?
     /// Per-mile splits for the entry's workout — the indoor pace wave. Nil on
-    /// older servers, stitched rollups and auto posts. Same CodingKeys rule as
+    /// older servers and stitched rollups (auto posts carry them now: their
+    /// card is drawn live). Same CodingKeys rule as
     /// everything here: listed below, or Codable synthesis dies.
     let splits: [FeedSplit]?
     /// HealthKit's indoor flag — nil means UNKNOWN, never "outdoor".
     let is_indoor: Bool?
+    /// Raw workout cards: the owner's streak on that day, for the walk that
+    /// completed the day's mile (posts carry theirs in `stats_snapshot`).
+    /// nil from older servers, off-streak, and on extra walks.
+    let day_streak: Int?
     /// May the viewer launch this entry's flyover (author's
     /// flyover_visibility)? nil = older server ⇒ behave as before the gate.
     let flyover_allowed: Bool?
     /// OWNER-ONLY: recorded in Stealth Mode. nil = older server.
     let stealth: Bool?
+    /// The author's Flamey (see `PostItem.author_flamey`). Needs its
+    /// CodingKeys case below AND its line in `asPostItem()`.
+    let author_flamey: AuthorFlamey?
     // shared
     let is_self: Bool
     var is_hyped: Bool
@@ -570,15 +695,17 @@ struct FeedEntry: Codable, Identifiable {
         case kind
         case entryId = "id"
         case sort_ts, user_id, username, first_name, last_name, profile_image_url
-        case media_url, caption, stats_snapshot, story_photo_url, is_auto
+        case media_url, dual_media_url, dual_inset_corner
+        case caption, stats_snapshot, story_photo_url, is_auto
         case include_route
         // With an explicit CodingKeys enum, EVERY stored property must be
         // listed (or defaulted) — a new field left out kills Codable
         // synthesis for the whole struct (Xcode Cloud build 413).
         case workout_id, workout_type, feed_role, distance, total_duration
         case moving_seconds, calories, steps, route, splits, is_indoor, flyover_allowed
-        case route_times, route_started_at, competitions, competition_id
-        case stealth
+        case day_streak
+        case route_times, route_started_at, route_trimmed, competitions, competition_id
+        case stealth, author_flamey
         case segment_count, segments
         case is_self, is_hyped, hype_count, comment_count, comment_preview
         case photo_locked, is_fresh
@@ -617,7 +744,9 @@ struct FeedEntry: Codable, Identifiable {
         return PostItem(
             post_id: entryId, user_id: user_id, username: username,
             first_name: first_name, last_name: last_name,
-            profile_image_url: profile_image_url, media_url: media, caption: caption,
+            profile_image_url: profile_image_url, media_url: media,
+            dual_media_url: dual_media_url, dual_inset_corner: dual_inset_corner,
+            caption: caption,
             workout_id: workout_id, feed_role: feed_role,
             stats_snapshot: stats_snapshot, local_date: nil,
             share_to_feed: true, share_to_story: nil, story_expires_at: nil,
@@ -625,11 +754,13 @@ struct FeedEntry: Codable, Identifiable {
             workout_type: workout_type,
             route: route,
             route_times: route_times, route_started_at: route_started_at,
+            route_trimmed: route_trimmed,
             competitions: competitions,
             competition_id: competition_id,
             splits: splits, is_indoor: is_indoor,
             flyover_allowed: flyover_allowed,
             stealth: stealth,
+            author_flamey: author_flamey,
             story_photo_url: story_photo_url,
             is_self: is_self, is_hyped: is_hyped,
             hype_count: hype_count, comment_count: comment_count,
@@ -855,7 +986,19 @@ enum PostService {
     /// a live user post for that destination (one deliberate post per workout —
     /// delete the old one to post again).
     static func createPost(
-        mediaUrl: String,
+        /// nil only for a LIVE auto card (`isAuto`), which has no picture:
+        /// the key is omitted and the server stores none.
+        mediaUrl: String?,
+        /// FRONT & BACK: the swapped arrangement of the same two frames.
+        /// Absent on every ordinary post, and an older server ignores the key
+        /// entirely — in which case the post is simply the primary, which is
+        /// already a complete picture with the inset baked into it.
+        dualMediaUrl: String? = nil,
+        /// Which corner the inset was BAKED into ("tr"/"tl"/"bl"/"br"). The
+        /// feed card lays its swap target over a region of a photograph it
+        /// did not draw, so it has to be told where the poster left it.
+        /// Absent means the original top-trailing.
+        dualInsetCorner: String? = nil,
         caption: String?,
         workoutId: String?,
         shareToFeed: Bool,
@@ -882,7 +1025,9 @@ enum PostService {
         competitionId: String? = nil
     ) async throws -> PostItem {
         struct Body: Encodable {
-            let media_url: String
+            let media_url: String?
+            let dual_media_url: String?
+            let dual_inset_corner: String?
             let caption: String?
             let workout_id: String?
             let share_to_feed: Bool
@@ -899,6 +1044,8 @@ enum PostService {
         let bodyData = try JSONEncoder().encode(
             Body(
                 media_url: mediaUrl,
+                dual_media_url: dualMediaUrl,
+                dual_inset_corner: dualInsetCorner,
                 caption: caption,
                 workout_id: workoutId,
                 share_to_feed: shareToFeed,
@@ -935,15 +1082,29 @@ enum PostService {
         postId: String,
         mediaUrl: String,
         caption: String? = nil,
-        photoSource: PostPhotoSource?
+        photoSource: PostPhotoSource?,
+        /// FRONT & BACK's other frame for THIS slide — same contract as the
+        /// author's, and re-sending without one drops it, because replacing
+        /// your picture replaces the whole of it.
+        dualMediaUrl: String? = nil,
+        /// Which corner this slide's inset was baked into.
+        dualInsetCorner: String? = nil
     ) async throws {
         struct Body: Encodable {
             let media_url: String
             let caption: String?
             let photo_source: String?
+            let dual_media_url: String?
+            let dual_inset_corner: String?
         }
         let bodyData = try JSONEncoder().encode(
-            Body(media_url: mediaUrl, caption: caption, photo_source: photoSource?.rawValue)
+            Body(
+                media_url: mediaUrl,
+                caption: caption,
+                photo_source: photoSource?.rawValue,
+                dual_media_url: dualMediaUrl,
+                dual_inset_corner: dualInsetCorner
+            )
         )
         _ = try await APIClient.fancyFetch(
             endpoint: "/posts/\(postId)/crew-photo",
@@ -1458,6 +1619,41 @@ enum BlockService {
     static func unblock(userId: String) async throws {
         _ = try await APIClient.fancyFetch(endpoint: "/blocks/\(userId)", method: .DELETE, responseType: OK.self)
     }
+
+    /// Someone this user blocked. `blockedAt` is whole-second ISO (the
+    /// server formats it), so it's safe to parse with `.iso8601`.
+    struct BlockedUser: Decodable, Identifiable, Equatable {
+        let userId: String
+        let username: String?
+        let firstName: String?
+        let lastName: String?
+        let profileImageUrl: String?
+        let blockedAt: String?
+
+        var id: String { userId }
+
+        var displayName: String {
+            let full = [firstName, lastName].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " ")
+            if !full.isEmpty { return full }
+            return username ?? "Someone"
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case userId = "user_id"
+            case username
+            case firstName = "first_name"
+            case lastName = "last_name"
+            case profileImageUrl = "profile_image_url"
+            case blockedAt = "blocked_at"
+        }
+    }
+
+    private struct BlockedList: Decodable { let users: [BlockedUser] }
+
+    /// Who this user has blocked, newest first (never who blocked them).
+    static func list() async throws -> [BlockedUser] {
+        try await APIClient.fancyFetch(endpoint: "/blocks", responseType: BlockedList.self).users
+    }
 }
 
 // MARK: - Relative time helper
@@ -1474,8 +1670,31 @@ enum RelativeTime {
         return f
     }()
 
+    /// Parsed timestamps, keyed by the string they came from.
+    ///
+    /// `NSCache` because this is read from view bodies on the main thread and
+    /// from the odd background helper, and it evicts itself under memory
+    /// pressure — an unbounded dictionary of every timestamp the feed has ever
+    /// loaded is not worth the milliseconds.
+    private static let cache: NSCache<NSString, NSDate> = {
+        let c = NSCache<NSString, NSDate>()
+        c.countLimit = 2_000
+        return c
+    }()
+
+    /// An `ISO8601DateFormatter` parse is not cheap, and the feed asks for the
+    /// same answer over and over: `PostCardView` parses `created_at` three
+    /// times per card and `ActivityCardView` parses `sort_ts` four times, on
+    /// every body evaluation, for every card on screen. Memoised, because the
+    /// same string always yields the same date.
     static func date(from iso: String) -> Date? {
-        parser.date(from: iso) ?? parserNoFrac.date(from: iso)
+        let key = iso as NSString
+        if let hit = cache.object(forKey: key) { return hit as Date }
+        guard let parsed = parser.date(from: iso) ?? parserNoFrac.date(from: iso) else {
+            return nil
+        }
+        cache.setObject(parsed as NSDate, forKey: key)
+        return parsed
     }
 
     /// "now", "5m", "2h", "3d" — compact age for feed/story headers.

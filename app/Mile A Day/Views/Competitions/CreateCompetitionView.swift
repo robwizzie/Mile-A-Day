@@ -418,7 +418,7 @@ struct CreateCompetitionView: View {
                     .fill(Color.white.opacity(0.05))
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                            .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
         }
@@ -467,8 +467,10 @@ struct CreateCompetitionView: View {
     var nameSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             Text("Competition Name")
-                .font(MADTheme.Typography.subheadline)
-                .foregroundColor(.white.opacity(0.6))
+                .font(CompeteDesign.eyebrow)
+                .tracking(CompeteDesign.eyebrowTracking)
+                .textCase(.uppercase)
+                .foregroundColor(CompeteDesign.inkFaint)
                 .padding(.horizontal, MADTheme.Spacing.sm)
 
             TextField(
@@ -484,10 +486,10 @@ struct CreateCompetitionView: View {
             .padding(MADTheme.Spacing.lg)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            .stroke(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
             .padding(.horizontal, MADTheme.Spacing.sm)
@@ -505,8 +507,10 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack {
                 Text("Competitors")
-                    .font(MADTheme.Typography.subheadline)
-                    .foregroundColor(.white.opacity(0.6))
+                    .font(CompeteDesign.eyebrow)
+                    .tracking(CompeteDesign.eyebrowTracking)
+                    .textCase(.uppercase)
+                    .foregroundColor(CompeteDesign.inkFaint)
 
                 Spacer()
 
@@ -529,7 +533,7 @@ struct CreateCompetitionView: View {
                         VStack(spacing: MADTheme.Spacing.sm) {
                             ZStack {
                                 Circle()
-                                    .fill(.ultraThinMaterial)
+                                    .fill(CompeteDesign.surface)
                                     .frame(width: 70, height: 70)
 
                                 Circle()
@@ -597,8 +601,10 @@ struct CreateCompetitionView: View {
     var competitionTypeSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             Text("Competition Type")
-                .font(MADTheme.Typography.subheadline)
-                .foregroundColor(.white.opacity(0.6))
+                .font(CompeteDesign.eyebrow)
+                .tracking(CompeteDesign.eyebrowTracking)
+                .textCase(.uppercase)
+                .foregroundColor(CompeteDesign.inkFaint)
                 .padding(.horizontal, MADTheme.Spacing.sm)
 
             Button {
@@ -640,10 +646,10 @@ struct CreateCompetitionView: View {
                 .padding(MADTheme.Spacing.lg)
                 .background(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .fill(.ultraThinMaterial)
+                        .fill(CompeteDesign.surface)
                         .overlay(
                             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                .stroke(CompeteDesign.hairline, lineWidth: 1)
                         )
                 )
             }
@@ -660,8 +666,10 @@ struct CreateCompetitionView: View {
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Allowed Activities")
-                    .font(MADTheme.Typography.subheadline)
-                    .foregroundColor(.white.opacity(0.6))
+                    .font(CompeteDesign.eyebrow)
+                    .tracking(CompeteDesign.eyebrowTracking)
+                    .textCase(.uppercase)
+                    .foregroundColor(CompeteDesign.inkFaint)
 
                 if isStepsUnit {
                     Text("Steps include all activity")
@@ -701,8 +709,10 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Distance Unit")
-                    .font(MADTheme.Typography.subheadline)
-                    .foregroundColor(.white.opacity(0.6))
+                    .font(CompeteDesign.eyebrow)
+                    .tracking(CompeteDesign.eyebrowTracking)
+                    .textCase(.uppercase)
+                    .foregroundColor(CompeteDesign.inkFaint)
 
                 Text(unitOnlyDescription)
                     .font(MADTheme.Typography.caption)
@@ -754,8 +764,10 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(goalLabel)
-                    .font(MADTheme.Typography.subheadline)
-                    .foregroundColor(.white.opacity(0.6))
+                    .font(CompeteDesign.eyebrow)
+                    .tracking(CompeteDesign.eyebrowTracking)
+                    .textCase(.uppercase)
+                    .foregroundColor(CompeteDesign.inkFaint)
 
                 Text(goalDescription)
                     .font(MADTheme.Typography.caption)
@@ -783,7 +795,7 @@ struct CreateCompetitionView: View {
                             .frame(width: 50, height: 50)
                             .background(
                                 Circle()
-                                    .fill(.ultraThinMaterial)
+                                    .fill(CompeteDesign.surface)
                             )
                             .overlay(
                                 Circle()
@@ -824,7 +836,7 @@ struct CreateCompetitionView: View {
                             .frame(width: 50, height: 50)
                             .background(
                                 Circle()
-                                    .fill(.ultraThinMaterial)
+                                    .fill(CompeteDesign.surface)
                             )
                             .overlay(
                                 Circle()
@@ -839,10 +851,10 @@ struct CreateCompetitionView: View {
             .padding(.vertical, MADTheme.Spacing.lg)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            .stroke(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
             .padding(.horizontal, MADTheme.Spacing.sm)
@@ -857,8 +869,10 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("End Condition")
-                    .font(MADTheme.Typography.subheadline)
-                    .foregroundColor(.white.opacity(0.6))
+                    .font(CompeteDesign.eyebrow)
+                    .tracking(CompeteDesign.eyebrowTracking)
+                    .textCase(.uppercase)
+                    .foregroundColor(CompeteDesign.inkFaint)
 
                 Text(targetsUseFirstTo
                     ? "Ends when someone reaches the point target"
@@ -893,8 +907,10 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Competition Length")
-                    .font(MADTheme.Typography.subheadline)
-                    .foregroundColor(.white.opacity(0.6))
+                    .font(CompeteDesign.eyebrow)
+                    .tracking(CompeteDesign.eyebrowTracking)
+                    .textCase(.uppercase)
+                    .foregroundColor(CompeteDesign.inkFaint)
 
                 Text(hasEndDate ? "Choose when the competition ends" : "Competition runs until manually ended")
                     .font(MADTheme.Typography.caption)
@@ -974,10 +990,10 @@ struct CreateCompetitionView: View {
                         .padding(MADTheme.Spacing.md)
                         .background(
                             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                                .fill(.ultraThinMaterial)
+                                .fill(CompeteDesign.surface)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                        .stroke(CompeteDesign.hairline, lineWidth: 1)
                                 )
                         )
                         .onChange(of: customEndDate) { _, newDate in
@@ -1012,8 +1028,10 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Scoring Interval")
-                    .font(MADTheme.Typography.subheadline)
-                    .foregroundColor(.white.opacity(0.6))
+                    .font(CompeteDesign.eyebrow)
+                    .tracking(CompeteDesign.eyebrowTracking)
+                    .textCase(.uppercase)
+                    .foregroundColor(CompeteDesign.inkFaint)
 
                 Text("How often to tally points or progress")
                     .font(MADTheme.Typography.caption)
@@ -1040,8 +1058,10 @@ struct CreateCompetitionView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(selectedType == .streaks ? "Breaks to Lose" : "Points to Win")
-                    .font(MADTheme.Typography.subheadline)
-                    .foregroundColor(.white.opacity(0.6))
+                    .font(CompeteDesign.eyebrow)
+                    .tracking(CompeteDesign.eyebrowTracking)
+                    .textCase(.uppercase)
+                    .foregroundColor(CompeteDesign.inkFaint)
 
                 Text(selectedType == .streaks
                     ? (firstTo == 1 ? "Miss one day and you're out" : "Miss \(firstTo) days and you're out")
@@ -1064,7 +1084,7 @@ struct CreateCompetitionView: View {
                         .frame(width: 44, height: 44)
                         .background(
                             Circle()
-                                .fill(.ultraThinMaterial)
+                                .fill(CompeteDesign.surface)
                         )
                         .overlay(
                             Circle()
@@ -1101,7 +1121,7 @@ struct CreateCompetitionView: View {
                         .frame(width: 44, height: 44)
                         .background(
                             Circle()
-                                .fill(.ultraThinMaterial)
+                                .fill(CompeteDesign.surface)
                         )
                         .overlay(
                             Circle()
@@ -1113,10 +1133,10 @@ struct CreateCompetitionView: View {
             .padding(MADTheme.Spacing.lg)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            .stroke(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
             .padding(.horizontal, MADTheme.Spacing.sm)
@@ -1231,10 +1251,10 @@ struct CreateCompetitionView: View {
                     .padding(.vertical, 12)
                     .background(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .fill(.ultraThinMaterial)
+                            .fill(CompeteDesign.surface)
                             .overlay(
                                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                    .stroke(CompeteDesign.hairline, lineWidth: 1)
                             )
                     )
                     .padding(.horizontal, MADTheme.Spacing.lg)

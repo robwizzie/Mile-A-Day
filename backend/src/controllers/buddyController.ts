@@ -4,11 +4,15 @@ import { BadRequestError } from "../errors/Errors.js";
 import { buddySessionsEnabled } from "../services/buddyFeatures.js";
 import {
   BUDDY_ACTIVITY_TYPES,
+  BUDDY_JOIN_POLICIES,
   BUDDY_LOCATION_TYPES,
+  BUDDY_PARTICIPANT_ACTIVITY_TYPES,
   BUDDY_MODES,
   BUDDY_ORIGINS,
   type BuddyActivityType,
+  type BuddyJoinPolicy,
   type BuddyLocationType,
+  type BuddyParticipantActivityType,
   type BuddyMode,
   type BuddyOrigin,
 } from "../types/buddy.js";
@@ -32,10 +36,13 @@ import {
   respondToJoinRequest,
   recordProgress,
   setBuddyWalkHidden,
-  setParticipantLocationType,
+  updateParticipantSettings,
+  setJoinPolicy,
+  mergeSession,
   setReady,
   getBuddyPartners,
   startSession,
+  startSessionNow,
   updateSession,
 } from "../services/buddySessionService.js";
 import {
@@ -193,6 +200,14 @@ export async function createSessionController(
     if (scheduled === INVALID_SCHEDULE) {
       return res.status(400).json({ error: "invalid_scheduled_start" });
     }
+    const joinPolicy = req.body?.joinPolicy;
+    if (
+      joinPolicy !== undefined &&
+      joinPolicy !== null &&
+      !BUDDY_JOIN_POLICIES.includes(joinPolicy as BuddyJoinPolicy)
+    ) {
+      return res.status(400).json({ error: "invalid_join_policy" });
+    }
 
     const state = await createSession(req.userId!, {
       mode: mode as BuddyMode,
@@ -201,6 +216,7 @@ export async function createSessionController(
       inviteUserIds: inviteUserIds as string[] | undefined,
       origin: origin as BuddyOrigin | undefined,
       scheduledStartAt: scheduled,
+      joinPolicy: (joinPolicy ?? undefined) as BuddyJoinPolicy | undefined,
     });
     res.status(201).json(state);
   } catch (error) {
@@ -319,6 +335,21 @@ function parseLocationType(
   return INVALID_LOCATION;
 }
 
+const INVALID_ACTIVITY = Symbol("invalid_activity_type");
+
+/** Same 400-never-drop rule as location: it decides what the workout records. */
+function parseParticipantActivity(
+  raw: unknown,
+): BuddyParticipantActivityType | undefined | typeof INVALID_ACTIVITY {
+  if (raw === undefined || raw === null) return undefined;
+  if (
+    BUDDY_PARTICIPANT_ACTIVITY_TYPES.includes(raw as BuddyParticipantActivityType)
+  ) {
+    return raw as BuddyParticipantActivityType;
+  }
+  return INVALID_ACTIVITY;
+}
+
 export async function joinSessionController(
   req: AuthenticatedRequest,
   res: Response,
@@ -331,11 +362,16 @@ export async function joinSessionController(
     if (locationType === INVALID_LOCATION) {
       return res.status(400).json({ error: "invalid_location_type" });
     }
+    const activityType = parseParticipantActivity(req.body?.activityType);
+    if (activityType === INVALID_ACTIVITY) {
+      return res.status(400).json({ error: "invalid_activity_type" });
+    }
     res.json(
       await joinSession(req.userId!, {
         sessionId: req.params.sessionId,
         code,
         locationType,
+        activityType,
       }),
     );
   } catch (error) {
@@ -444,15 +480,24 @@ export async function updateParticipantController(
     if (locationType === INVALID_LOCATION) {
       return res.status(400).json({ error: "invalid_location_type" });
     }
-    if (locationType === undefined) {
+    const activityType = parseParticipantActivity(req.body?.activityType);
+    if (activityType === INVALID_ACTIVITY) {
+      return res.status(400).json({ error: "invalid_activity_type" });
+    }
+    const rawReady = req.body?.ready;
+    if (rawReady !== undefined && rawReady !== null && typeof rawReady !== "boolean") {
+      return res.status(400).json({ error: "invalid_ready" });
+    }
+    const ready = typeof rawReady === "boolean" ? rawReady : undefined;
+    if (locationType === undefined && activityType === undefined && ready === undefined) {
       return res.status(400).json({ error: "nothing_to_update" });
     }
     res.json(
-      await setParticipantLocationType(
-        req.params.sessionId,
-        req.userId!,
+      await updateParticipantSettings(req.params.sessionId, req.userId!, {
         locationType,
-      ),
+        activityType,
+        ready,
+      }),
     );
   } catch (error) {
     handleError(res, error, "updating buddy participant");
@@ -519,6 +564,54 @@ export async function leaveSessionController(
   }
 }
 
+/**
+ * POST /buddy/sessions/:sessionId/join-policy — the host's "who can join",
+ * changeable in any open phase.
+ */
+export async function setJoinPolicyController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const policy = req.body?.joinPolicy;
+    if (!BUDDY_JOIN_POLICIES.includes(policy as BuddyJoinPolicy)) {
+      return res.status(400).json({ error: "invalid_join_policy" });
+    }
+    res.json(
+      await setJoinPolicy(req.params.sessionId, req.userId!, policy as BuddyJoinPolicy),
+    );
+  } catch (error) {
+    handleError(res, error, "setting buddy join policy");
+  }
+}
+
+/**
+ * POST /buddy/sessions/:sessionId/merge — "Combine walks": fold this lobby
+ * (caller must host it) into `targetSessionId`. Answers the TARGET's state
+ * plus who couldn't come along.
+ */
+export async function mergeSessionController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const target = req.body?.targetSessionId;
+    if (typeof target !== "string" || target.length === 0) {
+      return res.status(400).json({ error: "target_required" });
+    }
+    const { state, left_behind } = await mergeSession(
+      req.params.sessionId,
+      target,
+      req.userId!,
+    );
+    res.json({ ...state, left_behind });
+  } catch (error) {
+    handleError(res, error, "merging buddy sessions");
+  }
+}
+
 export async function readyController(
   req: AuthenticatedRequest,
   res: Response,
@@ -541,6 +634,19 @@ export async function startSessionController(
     res.json(await startSession(req.params.sessionId, req.userId!));
   } catch (error) {
     handleError(res, error, "starting buddy session");
+  }
+}
+
+/** Host-only: pull `started_at` to now, ending the countdown for everyone. */
+export async function startSessionNowController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    res.json(await startSessionNow(req.params.sessionId, req.userId!));
+  } catch (error) {
+    handleError(res, error, "starting buddy session now");
   }
 }
 

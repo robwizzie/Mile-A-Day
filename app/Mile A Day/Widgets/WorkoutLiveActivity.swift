@@ -119,7 +119,10 @@ private extension WorkoutActivityAttributes.ContentState {
 /// the last pushed static value when no anchor is available.
 private struct LiveTimerText: View {
     let state: WorkoutActivityAttributes.ContentState
-    var font: Font
+    /// Base point size. The view steps it down itself once the clock gains an
+    /// hours field — see `resolvedSize`.
+    var size: CGFloat
+    var weight: Font.Weight = .semibold
     var alignment: TextAlignment = .trailing
 
     var body: some View {
@@ -135,15 +138,111 @@ private struct LiveTimerText: View {
                 Text(staticTime)
             }
         }
-        .font(font)
+        .font(.system(size: resolvedSize, weight: weight, design: .rounded))
         .monospacedDigit()
+        // Belt AND braces, because neither alone is enough. `Text(timerInterval:)`
+        // is rendered by the SYSTEM: this side never sees the string, so it
+        // cannot measure it, and a width that fits "58:12" silently truncated
+        // an hour-long walk to "1:03:…" on the lock screen. The step-down
+        // below handles the predictable case; the scale factor catches the
+        // minute between crossing the hour and the next content push.
+        .lineLimit(1)
+        .minimumScaleFactor(0.5)
         .multilineTextAlignment(alignment)
     }
 
+    /// "58:12" is five glyphs, "1:03:45" is seven — about 40% wider, at the
+    /// one boundary every long walk crosses.
+    private var resolvedSize: CGFloat { isOverAnHour ? size * 0.76 : size }
+
+    private var isOverAnHour: Bool {
+        if let start = state.timerStartDate, !state.showsManualPause {
+            return Date().timeIntervalSince(start) >= 3600
+        }
+        return state.elapsedTime >= 3600
+    }
+
+    /// The frozen value a paused walk falls back to, in the SAME shape the
+    /// system's live clock uses. It was minutes:seconds with no hours field,
+    /// so pausing an hour-long walk changed "1:03:12" into "63:12" — the same
+    /// workout, two different-looking times, on the same line.
     private var staticTime: String {
-        let minutes = Int(state.elapsedTime) / 60
-        let seconds = Int(state.elapsedTime) % 60
-        return String(format: "%d:%02d", minutes, seconds)
+        let total = Int(state.elapsedTime)
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let seconds = total % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
+            : String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+// MARK: - Flamey (Fun only)
+
+/// The streak-risk Live Activity's Flamey: the user's OWN look (not a
+/// generic red buddy), in the hero's `.nervous` mood — critical flame, hands
+/// on his cheeks, the sweat drop — all from FlameyMoodCore.swift, the same
+/// mapping the dashboard uses when the streak is at risk. Fun-only by the
+/// caller (`funStyle`). Compiled into both targets.
+struct LiveActivityWorriedFlamey: View {
+    let size: CGFloat
+
+    var body: some View {
+        let mood = FlameMoodKind.nervous
+        FlameyDressedFigure(look: LiveActivityFlamey.mirroredLook(mood: mood.props), health: .critical, size: size,
+                            scale: FlameHealth.critical.bodyScale, mood: mood)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
+/// A tiny, STATIC Flamey for the Live Activity (a system-rendered snapshot:
+/// no onAppear, no animation). Fun-only, read from the App Group mirror of the
+/// dashboard style; draws nothing on Modern or on a stale activity. His
+/// look is resolved from the same mirrored facts the flame widget uses, and
+/// his mood from the DAY's progress through `FlameMoodKind.forWorkoutProgress`
+/// — the SAME bands the tracker's own Flamey uses (FlameyMoodCore.swift):
+///
+///   < 35%   going    — calm
+///   35–74%  halfway  — calm
+///   75–99%  almost   — sparkles
+///   >= 100% done     — blazing, shades
+///
+/// Compiled into BOTH the app module and the widget extension, so it only
+/// touches API the two copies of the figure/wardrobe share.
+struct LiveActivityFlamey: View {
+    let progress: Double
+    let size: CGFloat
+    var isStale: Bool = false
+
+    static var isFun: Bool { WidgetDataStore.loadDashboardStyle() == "fun" }
+
+    /// His look from the App Group mirror — the SAME facts the flame widget
+    /// resolves (the process can't see the app's store) — on a compact
+    /// surface. Every Live Activity Flamey (this one, the streak-risk one)
+    /// draws through here, so none of them can wear something else.
+    static func mirroredLook(mood: [FlameyItem] = [], date: Date = Date()) -> FlameyLook {
+        FlameyLook.resolve(
+            owned: WidgetDataStore.loadFlameyOwnedItems(),
+            choice: WidgetDataStore.loadFlameyChoice(),
+            date: date,
+            mood: mood,
+            signupDate: WidgetDataStore.loadFlameySignupDate(),
+            detail: .compact
+        )
+    }
+
+    var body: some View {
+        if Self.isFun && !isStale {
+            let mood = FlameMoodKind.forWorkoutProgress(progress)
+            // A small surface: `.compact` keeps colour, head, eyes, chest,
+            // feet and costume, standing on the ground.
+            let health: FlameHealth = mood == .done ? .blazing : .healthy
+            FlameyDressedFigure(look: Self.mirroredLook(mood: mood.props), health: health, size: size,
+                                scale: health.bodyScale, mood: mood)
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
+        }
     }
 }
 
@@ -196,12 +295,8 @@ struct WorkoutLiveActivity: Widget {
                                 .font(.caption2)
                                 .foregroundColor(.white.opacity(0.6))
 
-                            LiveTimerText(
-                                state: context.state,
-                                font: .system(size: 20, weight: .semibold, design: .rounded)
-                            )
-                            .foregroundColor(.white)
-                            .frame(maxWidth: 70, alignment: .trailing)
+                            LiveTimerText(state: context.state, size: 20)
+                                .foregroundColor(.white)
 
                             if context.state.showsManualPause {
                                 Text("PAUSED")
@@ -238,6 +333,10 @@ struct WorkoutLiveActivity: Widget {
                 }
 
                 DynamicIslandExpandedRegion(.bottom) {
+                    HStack(alignment: .bottom, spacing: 10) {
+                    // Fun: a tiny Flamey leading the progress bar (nothing on
+                    // Modern — an EmptyView takes no room in the stack).
+                    LiveActivityFlamey(progress: context.state.dailyProgress, size: 34, isStale: context.isStale)
                     VStack(spacing: 8) {
                         // Progress bar
                         GeometryReader { geometry in
@@ -294,6 +393,7 @@ struct WorkoutLiveActivity: Widget {
                                     .foregroundColor(.white.opacity(0.7))
                             }
                         }
+                    }
                     }
                     .padding(.horizontal, 12)
                 }
@@ -403,7 +503,13 @@ struct WorkoutLiveActivityView: View {
                 }
             }
 
-            Spacer()
+            // Fun: Flamey stands in the gap between the two columns — the
+            // spacers keep both columns exactly where they were, and nothing
+            // caps the timer's width. Modern: nothing, i.e. one Spacer.
+            Spacer(minLength: 0)
+            LiveActivityFlamey(progress: progress, size: 54, isStale: context.isStale)
+                .padding(.top, 10)
+            Spacer(minLength: 0)
 
             // Right side - Time & Progress
             VStack(alignment: .trailing, spacing: 10) {
@@ -416,13 +522,18 @@ struct WorkoutLiveActivityView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.system(size: 11, weight: .bold))
+                                .accessibilityHidden(true)
                             Text("TRACKING INTERRUPTED")
                                 .font(.system(size: 12, weight: .heavy, design: .rounded))
                         }
                         .foregroundColor(.yellow)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         Text("Open Mile A Day to resume")
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.85))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                 } else {
                 VStack(alignment: .trailing, spacing: 2) {
@@ -430,12 +541,8 @@ struct WorkoutLiveActivityView: View {
                         .font(.caption2)
                         .foregroundColor(.white.opacity(0.6))
 
-                    LiveTimerText(
-                        state: context.state,
-                        font: .system(size: 24, weight: .semibold, design: .rounded)
-                    )
-                    .foregroundColor(.white)
-                    .frame(maxWidth: 90, alignment: .trailing)
+                    LiveTimerText(state: context.state, size: 24)
+                        .foregroundColor(.white)
 
                     if context.state.showsManualPause {
                         HStack(spacing: 4) {
@@ -472,6 +579,7 @@ struct WorkoutLiveActivityView: View {
                             .font(.system(size: 11, weight: .heavy, design: .rounded))
                             .foregroundColor(.orange)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                 }
                 }
@@ -504,7 +612,15 @@ struct WorkoutLiveActivityView: View {
                 }
             }
         }
+        // Fill the WHOLE lock-screen card. The gradient used to be a
+        // background on the content alone, so it only covered the content's
+        // own height; the system's card is taller, and with a `.clear` tint
+        // the rest showed through as dark translucent bands above and below.
+        // The frame stretches the content (and the gradient under it) to the
+        // card's height, and the tint is the card's own colour in case the
+        // system ever draws a sliver the view doesn't reach.
         .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             LinearGradient(
                 colors: [
@@ -516,7 +632,7 @@ struct WorkoutLiveActivityView: View {
                 endPoint: .bottomTrailing
             )
         )
-        .activityBackgroundTint(Color.clear)
+        .activityBackgroundTint(Color(red: 0.7, green: 0.2, blue: 0.3))
         .activitySystemActionForegroundColor(.white)
         // Tapping the Live Activity should always take the user back to their
         // in‑progress workout inside the main app.

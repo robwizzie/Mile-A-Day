@@ -135,23 +135,11 @@ struct WeeklyMileChartView: View {
         .onChange(of: healthManager.workoutIndex?.lastUpdated) {
             resetAndAnimate()
         }
+        // "This Week" opens the week itself — the Weekly Recap, whose big
+        // button is "Share your week". Presented here rather than through the
+        // root link because this chart also lives inside pushed screens.
         .sheet(isPresented: $showShareSheet) {
-            EnhancedShareView(
-                user: userManager.currentUser,
-                currentDistance: healthManager.todaysDistance,
-                progress: ProgressCalculator.calculateProgress(
-                    current: healthManager.todaysDistance,
-                    goal: userManager.currentUser.goalMiles
-                ),
-                isGoalCompleted: ProgressCalculator.isGoalCompleted(
-                    current: healthManager.todaysDistance,
-                    goal: userManager.currentUser.goalMiles
-                ),
-                fastestPace: bestFastestPace,
-                mostMiles: healthManager.cachedMostMilesInOneDay > 0
-                    ? healthManager.cachedMostMilesInOneDay
-                    : healthManager.mostMilesInOneDay
-            )
+            WeeklyRecapView()
         }
     }
 
@@ -170,19 +158,31 @@ struct WeeklyMileChartView: View {
 
             Spacer()
 
-            // Share button
+            // The week's recap — a LABELLED control, because a bare share
+            // glyph on a chart is a control you must already know about.
             Button {
+                MADHaptics.tap()
                 showShareSheet = true
             } label: {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .padding(8)
-                    .background(
-                        Circle()
-                            .fill(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.12))
-                    )
+                HStack(spacing: 5) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11, weight: .bold))
+                        .accessibilityHidden(true)
+                    Text("Recap")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .foregroundColor(.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(Color.white.opacity(colorScheme == .dark ? 0.1 : 0.14))
+                )
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Your week recap")
 
             streakBadge
         }

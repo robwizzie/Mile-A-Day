@@ -198,12 +198,20 @@ struct HighlightViewerView: View {
                 // The FACE the owner kept, not the post's lead photo — on a
                 // buddy walk those are routinely different people's pictures,
                 // and playing the author's would ignore the whole choice.
-                if item.slideKey == .map {
+                if item.slideKey == .map
+                    || (item.slideImageURL == nil && (item.post.routeCoordinates?.count ?? 0) >= 2) {
+                    // The map face — or an AUTO card's whole-post face, which
+                    // has no picture and is its route, drawn live.
                     RouteArtView(
                         coordinates: item.post.routeCoordinates ?? [],
-                        routeColor: ActivityCardView.color(item.post.workout_type)
+                        routeColor: ActivityCardView.color(item.post.workout_type),
+                        routeTrimmed: item.post.route_trimmed ?? false
                     )
                     .frame(width: geo.size.width, height: geo.size.height)
+                } else if item.slideImageURL == nil {
+                    // A routeless auto card: its live face, not a spinner.
+                    LiveCardThumbnail(post: item.post)
+                        .frame(width: geo.size.width, height: geo.size.height)
                 } else {
                     AsyncImage(url: item.slideImageURL) { phase in
                         switch phase {
@@ -502,16 +510,19 @@ struct HighlightEditorView: View {
     /// also means a member written before faces existed stays byte-identical.
     /// The route joins the list only when there is actually a line to draw.
     private func faces(of post: PostItem) -> [PostFace] {
+        // An AUTO card has no picture: its whole-post face IS its route, so
+        // it's drawn as the map and no separate "Route" face repeats it.
+        let lead = post.storyPhotoURL ?? post.photoURL
+        let leadIsMap = lead == nil && (post.routeCoordinates?.count ?? 0) >= 2
         var out: [PostFace] = [
-            PostFace(key: .wholePost, name: post.displayName,
-                     url: post.storyPhotoURL ?? post.mediaURL, isMap: false)
+            PostFace(key: .wholePost, name: post.displayName, url: lead, isMap: leadIsMap)
         ]
         for crew in post.acceptedCoauthors {
             guard let url = crew.mediaURL else { continue }
             out.append(PostFace(key: .person(crew.user_id), name: crew.displayName,
                                 url: url, isMap: false))
         }
-        if (post.routeCoordinates?.count ?? 0) >= 2 {
+        if (post.routeCoordinates?.count ?? 0) >= 2, !leadIsMap {
             out.append(PostFace(key: .map, name: "Route", url: nil, isMap: true))
         }
         return out
@@ -610,11 +621,16 @@ struct HighlightEditorView: View {
                     }
                 }
             } else if let post = coverPost {
-                AsyncImage(url: post.storyPhotoURL ?? post.mediaURL) { phase in
-                    switch phase {
-                    case .success(let image): image.resizable().scaledToFill()
-                    default: Color.white.opacity(0.06)
+                if let url = post.storyPhotoURL ?? post.photoURL {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image): image.resizable().scaledToFill()
+                        default: Color.white.opacity(0.06)
+                        }
                     }
+                } else {
+                    // An auto card: its live face.
+                    LiveCardThumbnail(post: post)
                 }
             } else {
                 ZStack {
@@ -659,8 +675,13 @@ struct HighlightEditorView: View {
     /// makes it the cover; the ✕ removes it.
     private var selectionStrip: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // While an uploaded cover is in use, this strip does NOT offer to
+            // replace it. Throwing away a photo the user chose is a real loss
+            // with no undo, so it belongs to the one labelled control that says
+            // so ("Use a photo from inside instead") — not to a 64pt tile in a
+            // scroller people drag past.
             Text(usesCustomCover
-                 ? "IN THIS HIGHLIGHT · TAP ONE TO USE IT AS THE COVER"
+                 ? "IN THIS HIGHLIGHT"
                  : "IN THIS HIGHLIGHT · TAP TO SET THE COVER")
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
                 .tracking(1.0)
@@ -678,8 +699,9 @@ struct HighlightEditorView: View {
 
     private func selectionTile(ref: SlideRef, position: Int) -> some View {
         let post = pickedPost(ref.postId)
-        // A highlight has ONE cover: picking a post's photo has to retire the
-        // uploaded one, or the tap does nothing visible and reads as broken.
+        // A highlight has ONE cover, and an uploaded one outranks any member
+        // photo — so while a custom cover is in use NO tile is ringed. The ring
+        // marks the member photo that would stand in, not a competing choice.
         let isCover = coverPostId == ref.postId && !usesCustomCover
         // The strip shows the FACE that was kept, not the post's lead photo —
         // a strip of buddy walks would otherwise be a row of the same friend's
@@ -687,76 +709,90 @@ struct HighlightEditorView: View {
         let faceURL = post.flatMap {
             PostHighlightItem(post: $0, slideKey: ref.slideKey).slideImageURL
         }
-        return Button {
-            MADHaptics.tap()
-            coverPostId = ref.postId
-            pickedCover = nil
-            if coverImageUrl?.isEmpty == false { coverCleared = true }
-        } label: {
-            AsyncImage(url: faceURL) { phase in
-                switch phase {
-                case .success(let image): image.resizable().scaledToFill()
-                default: Color.white.opacity(0.06)
-                }
-            }
-            .frame(width: 64, height: 64)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(
-                        isCover ? MADTheme.Colors.madRed : Color.white.opacity(0.12),
-                        lineWidth: isCover ? 2 : 1
-                    )
-            )
-            .overlay(alignment: .bottomLeading) {
-                Text("\(position + 1)")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(.black.opacity(0.55)))
-                    .padding(4)
-            }
-            .overlay(alignment: .bottomTrailing) {
-                // Which face this tile is. Only ever drawn when the post has
-                // more than one, so an ordinary photo carries no chrome.
-                if let post, hasChoosableFaces(post) {
-                    Group {
-                        if ref.slideKey == .map {
-                            Image(systemName: "map.fill")
-                                .font(.system(size: 8, weight: .heavy))
-                                .foregroundColor(.white)
-                                .padding(4)
-                                .background(Circle().fill(.black.opacity(0.6)))
-                        } else {
-                            Text(faceName(of: post, key: ref.slideKey))
-                                .font(.system(size: 8, weight: .heavy, design: .rounded))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(.black.opacity(0.6)))
-                        }
+        // ZStack, not an overlay INSIDE the button's label: the remove control
+        // below is a Button, and a Button nested in another Button's label
+        // doesn't reliably get its taps (the same trap as
+        // WorkoutRoutePreviewCard's row and the comment-preview row). A 16pt
+        // glyph on a 64pt tile meant almost every "remove this one" landed on
+        // the tile instead — which used to ALSO discard the uploaded cover, so
+        // the highlight's custom picture vanished on the next save and the only
+        // visible effect was the thing the user had not asked for.
+        return ZStack(alignment: .topTrailing) {
+            Button {
+                MADHaptics.tap()
+                // Sets which member photo stands in as the cover. It no longer
+                // destroys an uploaded one: that is what the labelled control
+                // above is for, and doing it from here made an unrecoverable
+                // change out of a stray tap.
+                coverPostId = ref.postId
+            } label: {
+                AsyncImage(url: faceURL) { phase in
+                    switch phase {
+                    case .success(let image): image.resizable().scaledToFill()
+                    default: Color.white.opacity(0.06)
                     }
-                    .padding(4)
                 }
-            }
-            .overlay(alignment: .topTrailing) {
-                Button {
-                    MADHaptics.tap()
-                    remove(ref)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .heavy))
+                .frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(
+                            isCover ? MADTheme.Colors.madRed : Color.white.opacity(0.12),
+                            lineWidth: isCover ? 2 : 1
+                        )
+                )
+                .overlay(alignment: .bottomLeading) {
+                    Text("\(position + 1)")
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(.black.opacity(0.55)))
                         .padding(4)
-                        .background(Circle().fill(.black.opacity(0.6)))
                 }
-                .buttonStyle(.plain)
-                .padding(3)
+                .overlay(alignment: .bottomTrailing) {
+                    // Which face this tile is. Only ever drawn when the post has
+                    // more than one, so an ordinary photo carries no chrome.
+                    if let post, hasChoosableFaces(post) {
+                        Group {
+                            if ref.slideKey == .map {
+                                Image(systemName: "map.fill")
+                                    .font(.system(size: 8, weight: .heavy))
+                                    .foregroundColor(.white)
+                                    .padding(4)
+                                    .background(Circle().fill(.black.opacity(0.6)))
+                            } else {
+                                Text(faceName(of: post, key: ref.slideKey))
+                                    .font(.system(size: 8, weight: .heavy, design: .rounded))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(Capsule().fill(.black.opacity(0.6)))
+                            }
+                        }
+                        .padding(4)
+                    }
+                }
             }
+            .buttonStyle(.plain)
+
+            // Sibling of the tile, not a child of its label, so this gets its
+            // own taps. Kept small on purpose — the hit area is what was
+            // broken, not the size of the glyph.
+            Button {
+                MADHaptics.tap()
+                remove(ref)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .heavy))
+                    .foregroundColor(.white)
+                    .padding(4)
+                    .background(Circle().fill(.black.opacity(0.6)))
+            }
+            .buttonStyle(.plain)
+            .padding(3)
         }
-        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -809,14 +845,19 @@ struct HighlightEditorView: View {
         } label: {
             Color.clear
                 .aspectRatio(1, contentMode: .fit)
-                .overlay(
-                    AsyncImage(url: post.storyPhotoURL ?? post.mediaURL) { phase in
-                        switch phase {
-                        case .success(let image): image.resizable().scaledToFill()
-                        default: Color.white.opacity(0.05)
+                .overlay {
+                    if let url = post.storyPhotoURL ?? post.photoURL {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image): image.resizable().scaledToFill()
+                            default: Color.white.opacity(0.05)
+                            }
                         }
+                    } else {
+                        // An auto card: its live face.
+                        LiveCardThumbnail(post: post)
                     }
-                )
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -954,7 +995,8 @@ struct HighlightEditorView: View {
                             // draws it.
                             RouteArtView(
                                 coordinates: post.routeCoordinates ?? [],
-                                routeColor: ActivityCardView.color(post.workout_type)
+                                routeColor: ActivityCardView.color(post.workout_type),
+                                routeTrimmed: post.route_trimmed ?? false
                             )
                         } else {
                             AsyncImage(url: face.url) { phase in

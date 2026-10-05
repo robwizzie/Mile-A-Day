@@ -377,9 +377,12 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     // Direct-to-disk persistence of live distance from the background callbacks.
     // The foreground timer normally saves state, but it's suspended in the
     // background — without this, distance accrued while backgrounded is lost if
-    // iOS terminates the app. Throttled to limit UserDefaults writes.
+    // iOS terminates the app. Throttled: every write re-encodes the whole
+    // persisted workout, route included (up to ~1 MB), and in the background
+    // that CPU is what gets a walk terminated. 5s of distance is the most a
+    // relaunch can lose.
     private var lastDistancePersist = Date.distantPast
-    private let distancePersistInterval: TimeInterval = 2.0
+    private let distancePersistInterval: TimeInterval = 5.0
 
     @Published var currentDistance: Double = 0.0 // Distance in miles
     /// THE workout distance — the one number every surface shows AND the one
@@ -914,6 +917,39 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         UNUserNotificationCenter.current().removePendingNotificationRequests(
             withIdentifiers: [Self.watchdogNotificationId]
         )
+    }
+
+    /// Retire everything a workout leaves behind when there is no workout.
+    ///
+    /// "No workout" = nothing active on disk. Three artifacts can outlive one,
+    /// and each was reported as the app "tracking" when it wasn't:
+    ///  - THIS session still running with its state gone (the dashboard's
+    ///    Force Reset cleared the store and left GPS, the watchdog and the
+    ///    heartbeat running; the tracker then opened on the start wizard, with
+    ///    no Stop button, over a workout only killing the app could end);
+    ///  - a workout Live Activity nobody ended — it goes stale three minutes
+    ///    after its last push and reads TRACKING INTERRUPTED forever;
+    ///  - the pending dead-man notification ("Is your workout still
+    ///    tracking?"), which fires five minutes after the process dies.
+    /// Safe at any moment: a starting workout saves its state BEFORE
+    /// `startTracking`, and the finish ends its activity and stops tracking
+    /// in the same turn that marks the state ended.
+    @MainActor
+    static func retireOrphanedSession() {
+        guard InProgressWorkoutStore.load() == nil else { return }
+        let manager = WorkoutLocationManager.shared
+        if manager.isTracking {
+            print("[WorkoutLocationManager] 🧹 Stopping an orphaned tracking session (no workout on disk)")
+            manager.stopTracking()
+            LivePresenceService.shared.endSession()
+        }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [watchdogNotificationId]
+        )
+        UNUserNotificationCenter.current().removeDeliveredNotifications(
+            withIdentifiers: [watchdogNotificationId]
+        )
+        WorkoutLiveActivityKeepAlive.endOrphanedActivities()
     }
 
     func stopTracking() {

@@ -16,12 +16,12 @@ struct DashboardStartMileButton: View {
                         .fill(Color.white.opacity(0.10))
                         .frame(width: 32, height: 32)
                     Image(systemName: hasActiveWorkout ? "play.circle.fill" : "play.fill")
-                        .font(.system(size: 14, weight: .black))
+                        .madFont(size: 14, weight: .black, maxScale: 1.3)
                         .offset(x: hasActiveWorkout ? 0 : 1)
                 }
 
                 Text(buttonTitle)
-                    .font(.system(size: prominent ? 17 : 16, weight: .black, design: .rounded))
+                    .madFont(size: prominent ? 17 : 16, weight: .black, design: .rounded)
                     .tracking(prominent ? 1.2 : 0)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -29,7 +29,7 @@ struct DashboardStartMileButton: View {
                 Spacer(minLength: 0)
 
                 Image(systemName: prominent ? "chevron.right" : "arrow.right")
-                    .font(.system(size: prominent ? 18 : 14, weight: .bold))
+                    .madFont(size: prominent ? 18 : 14, weight: .bold)
                     .foregroundColor(.white.opacity(0.72))
             }
             .foregroundColor(.white)
@@ -87,16 +87,17 @@ struct DashboardMilestoneBar: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 6) {
                     Image(systemName: "flame.fill")
-                        .font(.system(size: 10, weight: .bold))
+                        .madFont(size: 10, weight: .bold)
                         .foregroundColor(.orange)
                     Text(title.uppercased())
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .madFont(size: 10, weight: .heavy, design: .rounded)
                         .tracking(1.0)
                         .foregroundColor(.white.opacity(0.56))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                     Spacer(minLength: 0)
                     Text("Day \(streak) of \(milestone.value)")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
-                        .monospacedDigit()
+                        .madFont(size: 11, weight: .heavy, design: .rounded, monospacedDigit: true)
                         .foregroundColor(.white.opacity(0.70))
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
@@ -125,7 +126,7 @@ struct DashboardMilestoneBar: View {
                         .foregroundColor(.white.opacity(0.42))
                     Spacer(minLength: 0)
                 }
-                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .madFont(size: 9, weight: .heavy, design: .rounded)
                 .tracking(0.6)
                 .monospacedDigit()
             }
@@ -168,12 +169,11 @@ struct WeekMileDaysRow: View {
             if showLabels {
                 HStack {
                     Text("Mile days")
-                        .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        .madFont(size: 14, weight: .heavy, design: .rounded)
                         .foregroundColor(.white)
                     Spacer()
                     Text("\(completedCount) of 7 this week")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .monospacedDigit()
+                        .madFont(size: 12, weight: .bold, design: .rounded, monospacedDigit: true)
                         .foregroundColor(.white.opacity(0.58))
                 }
             }
@@ -187,7 +187,7 @@ struct WeekMileDaysRow: View {
 
                     VStack(spacing: 6) {
                         Text(Self.narrowDayFormatter.string(from: date))
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .madFont(size: 11, weight: .bold, design: .rounded)
                             .foregroundColor(.white.opacity(0.46))
 
                         ZStack {
@@ -198,7 +198,7 @@ struct WeekMileDaysRow: View {
 
                             if completed {
                                 Image(systemName: "checkmark")
-                                    .font(.system(size: 15, weight: .black))
+                                    .madFont(size: 15, weight: .black, maxScale: 1.3)
                                     .foregroundColor(.white)
                             }
 
@@ -223,6 +223,8 @@ struct ModernDashboardBody: View {
     @ObservedObject var friendService: FriendService
     let hasActiveWorkout: Bool
     @Binding var showWorkoutView: Bool
+    /// Opens the manual-entry sheet DashboardView hosts.
+    let onLogPastWorkout: () -> Void
 
     private var state: (distance: Double, goal: Double, progress: Double, completed: Bool) {
         let distance = healthManager.todaysDistance
@@ -248,8 +250,14 @@ struct ModernDashboardBody: View {
                 distanceIsFresh: healthManager.hasFreshTodaysDistance,
                 showWorkoutView: $showWorkoutView
             )
+            // Fixed flame box beside a ~130pt stat column: the hero's text
+            // grows only as far as that column honestly holds.
+            .madTypeCap(.madFixedChromeCap)
 
-            DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
+            VStack(spacing: 6) {
+                DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
+                LogPastWorkoutLink(action: onLogPastWorkout)
+            }
 
             BuddyWalkPill(hasActiveWorkout: hasActiveWorkout)
 
@@ -257,6 +265,9 @@ struct ModernDashboardBody: View {
                 ModernStepsTile(healthManager: healthManager, userManager: userManager)
                 ModernBadgesTile(userManager: userManager, healthManager: healthManager)
             }
+            // Half-width tiles: their height scales (tileHeight), their width
+            // can't.
+            .madTypeCap(.madFixedChromeCap)
 
             // Everything below the day's cards is the user's to arrange
             // (DashboardCards): default here is just the daily challenge.
@@ -269,6 +280,8 @@ struct ModernDashboardBody: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
+        // Everything else on the dashboard is cards whose rows wrap.
+        .madTypeCap(.madCardCap)
     }
 }
 
@@ -278,6 +291,8 @@ struct FunDashboardBody: View {
     @ObservedObject var friendService: FriendService
     let hasActiveWorkout: Bool
     @Binding var showWorkoutView: Bool
+    /// Opens the manual-entry sheet DashboardView hosts.
+    let onLogPastWorkout: () -> Void
 
     private var state: (distance: Double, goal: Double, progress: Double, completed: Bool) {
         let distance = healthManager.todaysDistance
@@ -303,21 +318,27 @@ struct FunDashboardBody: View {
                 distanceIsFresh: healthManager.hasFreshTodaysDistance,
                 showWorkoutView: $showWorkoutView
             )
+            // The stat frame grows with its text (statFrameHeight), but the
+            // column beside Flamey is ~155pt wide, so it caps here.
+            .madTypeCap(.madFixedChromeCap)
 
             FunStartCard(
                 trustedDone: state.completed && healthManager.hasFreshTodaysDistance,
                 hasActiveWorkout: hasActiveWorkout,
-                showWorkoutView: $showWorkoutView
+                showWorkoutView: $showWorkoutView,
+                onLogPastWorkout: onLogPastWorkout
             )
 
             HStack(alignment: .top, spacing: 12) {
                 ModernStepsTile(healthManager: healthManager, userManager: userManager)
                 ModernBadgesTile(userManager: userManager, healthManager: healthManager)
             }
+            // Half-width tiles: their height scales (tileHeight), their width
+            // can't.
+            .madTypeCap(.madFixedChromeCap)
 
             // Everything below the day's cards is the user's to arrange
-            // (DashboardCards): default here is Streak Tokens, the daily
-            // challenge and friends' activity — what always shipped.
+            // (DashboardCards): default here is just the daily challenge.
             DashboardCardsBlock(
                 style: .fun,
                 healthManager: healthManager,
@@ -327,6 +348,8 @@ struct FunDashboardBody: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
+        // Everything else on the dashboard is cards whose rows wrap.
+        .madTypeCap(.madCardCap)
     }
 
     private var statusColor: Color {
@@ -382,11 +405,26 @@ private struct ModernHeroCard: View {
         )
     }
 
+    /// A streak token is carrying today (almost always an Assist a friend's
+    /// mile paid for). The hero must not go on saying "Streak at risk" about
+    /// a day that is already safe — that is the same contradiction the
+    /// friends row had, on the screen the owner looks at most. Suppressed
+    /// once the mile is genuinely in: the server refunds the coverage on that
+    /// upload, and a finished day is a done day.
+    private var savedToday: CoveredDate? {
+        guard !trustedDone else { return nil }
+        return tokensState.payload?.today_covered
+    }
+
     private var statusColor: Color {
         // Nothing about a paused streak is urgent: it can't break today, so the
         // at-risk red (and the amber "running out of day") would be lying.
         if injuryPause.isPaused { return MADTheme.Colors.warning }
         if trustedDone { return .green }
+        // Neither is a covered day. The mile is still worth running (it hands
+        // the token back), so this stays a live colour rather than going
+        // green — but it is not RED.
+        if savedToday != nil { return SavedDayStyle.tint }
         if userManager.currentUser.isStreakAtRisk { return MADTheme.Colors.madRed }
         return .orange
     }
@@ -418,14 +456,13 @@ private struct ModernHeroCard: View {
 
                     VStack(spacing: 0) {
                         Text("\(heroStreakValue)")
-                            .font(.system(size: 34, weight: .black, design: .rounded))
-                            .monospacedDigit()
+                            .madFont(size: 34, weight: .black, design: .rounded, monospacedDigit: true)
                             .foregroundColor(.white)
                             .shadow(color: .black.opacity(0.72), radius: 5, x: 0, y: 2)
                             .lineLimit(1)
                             .minimumScaleFactor(0.60)
                         Text(injuryPause.isPaused ? "DAYS · PAUSED" : "DAYS")
-                            .font(.system(size: 8, weight: .black, design: .rounded))
+                            .madFont(size: 8, weight: .black, design: .rounded)
                             .tracking(1.1)
                             .foregroundColor(injuryPause.isPaused
                                              ? MADTheme.Colors.warning
@@ -437,13 +474,19 @@ private struct ModernHeroCard: View {
                 .frame(width: 172, height: 176)
                 .layoutPriority(1)
 
-                HeroStatColumn(
-                    currentDistance: currentDistance,
-                    steps: healthManager.todaysSteps,
-                    fastestPace: healthManager.todaysFastestPace,
-                    timeLeftText: formattedTimeOnly,
-                    statusColor: statusColor
-                )
+                // Savers head the stat column — beside the streak they
+                // protect, instead of a lone chip in the card's top corner.
+                VStack(alignment: .leading, spacing: 6) {
+                    saversLine
+                        .padding(.leading, 4)
+                    HeroStatColumn(
+                        currentDistance: currentDistance,
+                        goalMiles: userManager.currentUser.goalMiles,
+                        fastestPace: healthManager.todaysFastestPace,
+                        timeLeftText: formattedTimeOnly,
+                        statusColor: statusColor
+                    )
+                }
                 .frame(maxWidth: .infinity)
             }
 
@@ -457,14 +500,6 @@ private struct ModernHeroCard: View {
         .padding(18)
         .padding(.top, 20)
         .background(heroBackground)
-        .overlay(alignment: .topTrailing) {
-            tokensChip
-                // Horizontal inset matches the card's own 18, so the chip's
-                // right edge lines up with the stats beneath it instead of
-                // hanging 4pt further out.
-                .padding(.horizontal, 18)
-                .padding(.top, 14)
-        }
         .sheet(isPresented: $showTokens) {
             StreakTokensDetailView()
         }
@@ -480,10 +515,10 @@ private struct ModernHeroCard: View {
 
     private var statusPill: some View {
         HStack(spacing: 6) {
-            Image(systemName: trustedDone ? "checkmark.circle.fill" : userManager.currentUser.isStreakAtRisk ? "exclamationmark.triangle.fill" : "flame.fill")
-                .font(.system(size: 12, weight: .bold))
+            Image(systemName: statusGlyph(atRisk: "exclamationmark.triangle.fill"))
+                .madFont(size: 12, weight: .bold)
             Text(statusText)
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .madFont(size: 12, weight: .heavy, design: .rounded)
                 .lineLimit(1)
         }
         .foregroundColor(statusColor)
@@ -493,28 +528,32 @@ private struct ModernHeroCard: View {
         .overlay(Capsule().strokeBorder(statusColor.opacity(0.22), lineWidth: 1))
     }
 
-    private var tokensChip: some View {
-        Button {
-            showTokens = true
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "shield.lefthalf.filled")
-                    .accessibilityLabel("Streak savers")
-                    .font(.system(size: 11, weight: .bold))
-                Text("\(readyTokens)")
-                    .font(.system(size: 12, weight: .black, design: .rounded))
-                    .monospacedDigit()
-                Text(readyTokens == 1 ? "saver" : "savers")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+    /// "🛡 3 savers" — one tappable line under the streak, opening the
+    /// tokens screen. Hidden until the token status has loaded.
+    @ViewBuilder
+    private var saversLine: some View {
+        if tokensState.payload != nil {
+            Button {
+                showTokens = true
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .madFont(size: 8, weight: .black)
+                        .accessibilityHidden(true)
+                    Text("\(readyTokens) \(readyTokens == 1 ? "saver" : "savers")")
+                        .madFont(size: 9, weight: .black, design: .rounded)
+                        .tracking(0.6)
+                        .textCase(.uppercase)
+                }
+                .foregroundColor(readyTokens > 0 ? MADTheme.Colors.success : .white.opacity(0.5))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .contentShape(Rectangle())
             }
-            .foregroundColor(.white.opacity(0.88))
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(Capsule().fill(Color.cyan.opacity(0.10)))
-            .overlay(Capsule().strokeBorder(Color.cyan.opacity(0.22), lineWidth: 1))
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(readyTokens) streak savers ready")
+            .accessibilityHint("Opens your streak tokens")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(readyTokens) streak savers ready")
     }
 
     private var readyTokens: Int {
@@ -522,9 +561,19 @@ private struct ModernHeroCard: View {
         return [payload.double_down.held, payload.streak_save.held, payload.streak_assist.held].filter { $0 }.count
     }
 
+    /// Matches `statusText` case for case, so the glyph can never describe a
+    /// different state than the words beside it.
+    private func statusGlyph(atRisk: String) -> String {
+        if trustedDone { return "checkmark.circle.fill" }
+        if let saved = savedToday { return SavedDayStyle.icon(for: saved.kind) }
+        if userManager.currentUser.isStreakAtRisk { return atRisk }
+        return "flame.fill"
+    }
+
     private var statusText: String {
         if injuryPause.isPaused { return "Paused for injury" }
         if trustedDone { return "Done today" }
+        if savedToday != nil { return "Covered today" }
         if !distanceIsFresh { return "Syncing today" }
         if userManager.currentUser.isStreakAtRisk { return "Streak at risk" }
         return timeRemainingText.isEmpty ? "Today's mile" : "\(formattedTimeOnly) left"
@@ -622,9 +671,9 @@ private struct RecordGhostRow: View {
             // stats instead of competing with them.
             HStack(spacing: 5) {
                 Image(systemName: "crown.fill")
-                    .font(.system(size: 9, weight: .black))
+                    .madFont(size: 9, weight: .black)
                 Text("ALL-TIME BEST")
-                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .madFont(size: 10, weight: .black, design: .rounded)
                     .tracking(0.8)
             }
             .foregroundColor(gold)
@@ -636,9 +685,9 @@ private struct RecordGhostRow: View {
             // of them winning.
             HStack(spacing: 5) {
                 Image(systemName: "flame")
-                    .font(.system(size: 9, weight: .bold))
+                    .madFont(size: 9, weight: .bold)
                 Text("BEST \(longest) · \(longest - streak) TO GO")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .madFont(size: 10, weight: .heavy, design: .rounded)
                     .tracking(0.4)
                     .monospacedDigit()
             }
@@ -666,7 +715,7 @@ private struct ModernHeroStatLine: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 14, weight: .bold))
+                .madFont(size: 14, weight: .bold, maxScale: 1.3)
                 .foregroundColor(tint)
                 .frame(width: 28, height: 28)
                 .background(Circle().fill(tint.opacity(0.13)))
@@ -674,22 +723,23 @@ private struct ModernHeroStatLine: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(value)
-                        .font(.system(size: 20, weight: .black, design: .rounded))
-                        .monospacedDigit()
+                        .madFont(size: 20, weight: .black, design: .rounded, monospacedDigit: true)
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.60)
                     Text(unit)
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .madFont(size: 10, weight: .heavy, design: .rounded)
                         .foregroundColor(.white.opacity(0.62))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
 
                 Text(label)
-                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .madFont(size: 10, weight: .black, design: .rounded)
                     .textCase(.uppercase)
                     .foregroundColor(.white.opacity(0.42))
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
 
             Spacer(minLength: 0)
@@ -707,18 +757,24 @@ private struct ModernHeroDivider: View {
     }
 }
 
-/// The stat lines beside the streak hero — today's mileage, steps, and either
-/// today's best pace or the time left to run.
+/// The stat lines beside the streak hero — today's mileage, today's best
+/// pace and the time left to run.
 ///
 /// BOTH dashboard styles render this exact view. They used to build their own
 /// columns and had drifted apart (Fun showed two stats, Modern three, with
 /// different labels), so the same day read as different numbers depending on
-/// which dashboard you had picked. Anything added here lands on both.
+/// which dashboard you had picked. Anything added here lands on both. Steps
+/// aren't here: the Steps tile sits directly below the hero, and the same
+/// number twice in one screenful read as clutter. The middle row answers the
+/// question the day is asking: "how far to go?" until the goal is met, then
+/// today's best pace (or that the goal's done). A bare "Best pace --" read as
+/// a stat with no answer, and didn't say whether it meant today, the streak
+/// or all time — it was always today's.
 private struct HeroStatColumn: View {
     let currentDistance: Double
-    let steps: Int
+    let goalMiles: Double
     let fastestPace: TimeInterval?
-    /// Time until local midnight, e.g. "6h 30m". Shown when there's no pace yet.
+    /// Time until local midnight, e.g. "6h 30m".
     let timeLeftText: String
     let statusColor: Color
 
@@ -732,39 +788,46 @@ private struct HeroStatColumn: View {
                 tint: MADTheme.Colors.madRed
             )
             ModernHeroDivider()
-            ModernHeroStatLine(
-                icon: "shoeprints.fill",
-                value: steps.formatted(),
-                unit: "steps",
-                label: "Steps",
-                tint: stepTint
-            )
+            middleLine
             ModernHeroDivider()
-            if let pace = fastestPace {
-                ModernHeroStatLine(
-                    icon: "timer",
-                    value: Self.formatPace(pace),
-                    unit: DistanceUnits.current.paceSuffix,
-                    label: "Best pace",
-                    tint: MADTheme.Colors.walkBlue
-                )
-            } else {
-                ModernHeroStatLine(
-                    icon: "clock.fill",
-                    value: timeLeftText.isEmpty ? "--" : timeLeftText,
-                    unit: "left",
-                    label: "Left today",
-                    tint: statusColor
-                )
-            }
+            ModernHeroStatLine(
+                icon: "clock.fill",
+                value: timeLeftText.isEmpty ? "--" : timeLeftText,
+                unit: "left",
+                label: "Left today",
+                tint: statusColor
+            )
         }
     }
 
-    private var stepTint: Color {
-        if steps >= 10000 { return MADTheme.Colors.success }
-        if steps >= 7500 { return MADTheme.Colors.warning }
-        if steps >= 5000 { return .yellow }
-        return .orange
+    @ViewBuilder
+    private var middleLine: some View {
+        let goal = max(goalMiles, 0.01)
+        if !ProgressCalculator.isGoalCompleted(current: currentDistance, goal: goal) {
+            ModernHeroStatLine(
+                icon: "flag.checkered",
+                value: max(goal - currentDistance, 0).distanceToGoText,
+                unit: DistanceUnits.current.abbreviation,
+                label: "To go",
+                tint: MADTheme.Colors.walkBlue
+            )
+        } else if let pace = fastestPace {
+            ModernHeroStatLine(
+                icon: "timer",
+                value: Self.formatPace(pace),
+                unit: DistanceUnits.current.paceSuffix,
+                label: "Today's best pace",
+                tint: MADTheme.Colors.walkBlue
+            )
+        } else {
+            ModernHeroStatLine(
+                icon: "checkmark.circle.fill",
+                value: "Done",
+                unit: "",
+                label: "Today's goal",
+                tint: MADTheme.Colors.success
+            )
+        }
     }
 
     /// `pace` is MINUTES per mile; shown per display unit.
@@ -785,17 +848,16 @@ private struct ModernMetricPill: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 13, weight: .bold))
+                .madFont(size: 13, weight: .bold, maxScale: 1.25)
                 .foregroundColor(tint)
                 .frame(width: 24, height: 24)
                 .background(Circle().fill(tint.opacity(0.15)))
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .madFont(size: 10, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.42))
                 Text(value)
-                    .font(.system(size: 15, weight: .heavy, design: .rounded))
-                    .monospacedDigit()
+                    .madFont(size: 15, weight: .heavy, design: .rounded, monospacedDigit: true)
                     .foregroundColor(.white.opacity(0.92))
             }
             Spacer(minLength: 0)
@@ -813,6 +875,11 @@ private struct ModernMetricPill: View {
 private struct ModernStepsTile: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
+    /// The tile's fixed height, grown with the text inside it. 168 exactly
+    /// at the default text size; `.title2` because that's the style of the
+    /// value that dominates the tile. BOTH tiles declare it identically so the
+    /// pair in the dashboard's HStack stays level.
+    @MADScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 168
 
     private var steps: Int { healthManager.todaysSteps }
     private var progress: Double { min(Double(steps) / 10000.0, 1) }
@@ -834,7 +901,7 @@ private struct ModernStepsTile: View {
                         }
                     }
             }
-            .frame(height: 168, alignment: .topLeading)
+            .frame(height: tileHeight, alignment: .topLeading)
         }
         .buttonStyle(.plain)
     }
@@ -842,14 +909,29 @@ private struct ModernStepsTile: View {
 
 private struct ModernBadgesTile: View {
     @ObservedObject var userManager: UserManager
-    @ObservedObject var healthManager: HealthKitManager
+    /// Not observed: nothing here reads it, and observing it redrew the tile
+    /// (and re-sorted the medal catalogue) on every HealthKit publish.
+    let healthManager: HealthKitManager
+    /// The tile's fixed height, grown with the text inside it. 168 exactly
+    /// at the default text size; `.title2` because that's the style of the
+    /// value that dominates the tile. BOTH tiles declare it identically so the
+    /// pair in the dashboard's HStack stays level.
+    @MADScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 168
 
     private var earned: Int {
         userManager.currentUser.badges.filter { !$0.isLocked }.count
     }
 
+    /// `getAllBadges()` builds and sorts the whole catalogue, and `total` is
+    /// read three times a pass. The count only moves when the shelf does.
+    private static var totalCache: (shelf: Int, total: Int)?
+
     private var total: Int {
-        userManager.currentUser.getAllBadges().count
+        let shelf = userManager.currentUser.badges.count
+        if let cached = Self.totalCache, cached.shelf == shelf { return cached.total }
+        let value = userManager.currentUser.getAllBadges().count
+        Self.totalCache = (shelf, value)
+        return value
     }
 
     private var progress: Double {
@@ -877,22 +959,21 @@ private struct ModernBadgesTile: View {
                     medalPreviewStrip
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
+                        .madFont(size: 10, weight: .bold)
                         .foregroundColor(.white.opacity(0.28))
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Medals")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded)
                         .foregroundColor(.white.opacity(0.48))
                     Text("\(earned)/\(total)")
-                        .font(.system(size: 25, weight: .black, design: .rounded))
-                        .monospacedDigit()
+                        .madFont(size: 25, weight: .black, design: .rounded, monospacedDigit: true)
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                     Text("\(ProgressCalculator.formatProgress(progress)) unlocked")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .foregroundColor(.yellow)
                         .lineLimit(1)
                 }
@@ -919,13 +1000,13 @@ private struct ModernBadgesTile: View {
                     .frame(height: 6)
 
                     Text(remaining == 0 ? "Collection complete" : "\(remaining) left to collect")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .madFont(size: 10, weight: .bold, design: .rounded)
                         .foregroundColor(.white.opacity(0.46))
                     .lineLimit(1)
                 }
             }
             .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 168, maxHeight: 168, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: tileHeight, maxHeight: tileHeight, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(Color(red: 0.075, green: 0.075, blue: 0.085))
@@ -978,32 +1059,36 @@ private struct ModernTile<Accessory: View>: View {
     let subtitle: String
     let tint: Color
     @ViewBuilder let accessory: () -> Accessory
+    /// The tile's fixed height, grown with the text inside it. 168 exactly
+    /// at the default text size; `.title2` because that's the style of the
+    /// value that dominates the tile. BOTH tiles declare it identically so the
+    /// pair in the dashboard's HStack stays level.
+    @MADScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 168
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: icon)
-                    .font(.system(size: 15, weight: .bold))
+                    .madFont(size: 15, weight: .bold, maxScale: 1.3)
                     .foregroundColor(tint)
                     .frame(width: 30, height: 30)
                     .background(Circle().fill(tint.opacity(0.15)))
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
+                    .madFont(size: 10, weight: .bold)
                     .foregroundColor(.white.opacity(0.28))
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.48))
                 Text(value)
-                    .font(.system(size: 23, weight: .black, design: .rounded))
-                    .monospacedDigit()
+                    .madFont(size: 23, weight: .black, design: .rounded, monospacedDigit: true)
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                 Text(subtitle)
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .madFont(size: 11, weight: .semibold, design: .rounded)
                     .foregroundColor(tint)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
@@ -1011,7 +1096,7 @@ private struct ModernTile<Accessory: View>: View {
             accessory()
         }
         .padding(14)
-        .frame(maxWidth: .infinity, minHeight: 168, maxHeight: 168, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: tileHeight, maxHeight: tileHeight, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color(red: 0.075, green: 0.075, blue: 0.085))
@@ -1065,17 +1150,17 @@ struct ModernChallengeRow: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Daily Challenge")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded)
                         .foregroundColor(accentColor)
 
                     Text(isCompleted ? "\(challenge.title) complete" : challenge.title)
-                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                        .madFont(size: 17, weight: .heavy, design: .rounded)
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.82)
 
                     Text(challenge.description)
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .madFont(size: 12, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.54))
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1084,7 +1169,7 @@ struct ModernChallengeRow: View {
                 Spacer(minLength: 0)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
+                    .madFont(size: 12, weight: .bold)
                     .foregroundColor(.white.opacity(0.30))
             }
 
@@ -1107,24 +1192,24 @@ struct ModernChallengeRow: View {
     private var placeholderRow: some View {
         HStack(spacing: 12) {
             Image(systemName: "flag.fill")
-                .font(.system(size: 15, weight: .bold))
+                .madFont(size: 15, weight: .bold, maxScale: 1.3)
                 .foregroundColor(.green)
                 .frame(width: 34, height: 34)
                 .background(Circle().fill(Color.green.opacity(0.13)))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("Daily Challenge")
-                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .madFont(size: 15, weight: .heavy, design: .rounded)
                     .foregroundColor(.white)
                 Text("Loading today's challenge")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(0.48))
             }
 
             Spacer()
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 11, weight: .bold))
+                .madFont(size: 11, weight: .bold)
                 .foregroundColor(.white.opacity(0.30))
         }
         .padding(14)
@@ -1133,7 +1218,7 @@ struct ModernChallengeRow: View {
 
     private func challengeIcon(_ challenge: DailyChallenge) -> some View {
         Image(systemName: isCompleted ? "checkmark" : challenge.icon)
-            .font(.system(size: 16, weight: .bold))
+            .madFont(size: 16, weight: .bold, maxScale: 1.3)
             .foregroundColor(accentColor)
             .frame(width: 38, height: 38)
             .background(Circle().fill(accentColor.opacity(0.14)))
@@ -1156,12 +1241,11 @@ struct ModernChallengeRow: View {
 
             HStack {
                 Text(isCompleted ? "Locked in" : progressLabel(progress))
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .foregroundColor(accentColor)
                 Spacer()
                 Text(ProgressCalculator.formatProgress(progress))
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
-                    .monospacedDigit()
+                    .madFont(size: 11, weight: .heavy, design: .rounded, monospacedDigit: true)
                     .foregroundColor(.white.opacity(0.58))
             }
         }
@@ -1172,16 +1256,16 @@ struct ModernChallengeRow: View {
         if let tomorrow = tomorrowsChallenge {
             HStack(spacing: 7) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.white.opacity(0.42))
                 Text("Tomorrow")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .madFont(size: 11, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.48))
                 HStack(spacing: 5) {
                     Image(systemName: tomorrow.icon)
-                        .font(.system(size: 10, weight: .bold))
+                        .madFont(size: 10, weight: .bold)
                     Text(tomorrow.title)
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .lineLimit(1)
                 }
                 .foregroundColor(tomorrow.gradient.first ?? .orange)
@@ -1222,6 +1306,9 @@ struct ModernChallengeRow: View {
 
 private struct FlameBuddyHeroCard: View {
     @ObservedObject private var injuryPause = InjuryPauseState.shared
+    /// Redraws him when the Closet closes — his look is read from
+    /// UserDefaults (`FlameyFacts`), which nothing else here observes.
+    @ObservedObject private var closetLink = FlameyClosetLink.shared
 
     /// The number to print on the hero. A pause FREEZES a specific value, and
     /// `currentUser.streak` is not it: the local copy is quarantined and
@@ -1235,6 +1322,13 @@ private struct FlameBuddyHeroCard: View {
     /// Distance from the hero's top edge to the ground the buddy stands on.
     /// Held constant so the art keeps its footing when the card's height moves.
     private static let groundBaseline: CGFloat = 196
+
+    /// The stat frame's height: 258 exactly at the default text size, grown
+    /// with the column's text (`.largeTitle` grows ~6% at xLarge and ~12% at
+    /// xxLarge, which is about what the column's content measures out to).
+    /// The buddy and its ground are anchored to the TOP and stay put, so the
+    /// extra height lands under the stats, where the text needs it.
+    @MADScaledMetric(relativeTo: .largeTitle) private var statFrameHeight: CGFloat = 258
 
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
@@ -1256,8 +1350,27 @@ private struct FlameBuddyHeroCard: View {
     @State private var pokedAt: Date?
     @State private var pokeQuip: String?
     @State private var pokeClearTask: Task<Void, Never>?
+    /// The local day a poke woke him, so he stays up for the rest of that
+    /// morning — across tab switches and relaunches, not just this view's
+    /// lifetime. A new day's date never matches, so he sleeps in again.
+    @AppStorage("flameyWokenDayV1") private var flameyWokenDay = ""
+    /// The play gesture in flight (high five / refuse / tickle / feed) — the
+    /// buddy view plays it from `reactionAt`; its line rides the poke-quip
+    /// channel, so it can never share the screen with another bubble.
+    @State private var reaction: FlameMood.Reaction?
+    @State private var reactionAt: Date?
+    /// The previous tap, for double-tap detection without delaying the poke.
+    @State private var lastTapAt: Date?
+    /// Today's "Flamey remembers" facts — computed off-main once per
+    /// appearance / day / completion change, never in `body`.
+    @State private var memory: FlameyMemory?
 
     private var trustedDone: Bool { isGoalCompleted && distanceIsFresh }
+
+    /// The same stamp the widget compares against (FlameyMoodCore.swift).
+    private static func localDayStamp(_ date: Date = Date()) -> String {
+        FlameMoodKind.dayStamp(date)
+    }
 
     /// What the flame is feeling: resolved from the same state the phase and
     /// health already read, so it can never disagree with the face.
@@ -1267,11 +1380,106 @@ private struct FlameBuddyHeroCard: View {
             progress: progress,
             isAtRisk: userManager.currentUser.isStreakAtRisk && !trustedDone,
             hasActiveWorkout: hasActiveWorkout,
-            streak: heroStreakValue
+            streak: heroStreakValue,
+            wokenToday: flameyWokenDay == Self.localDayStamp()
         )
         mood.pokedAt = pokedAt
         mood.pokeQuip = pokeQuip
+        mood.reaction = reaction
+        mood.reactionAt = reactionAt
+        let today = Date()
+        mood.holiday = HolidayCalendar.holiday(on: today)
+        mood.isAnniversary = FlameyFacts.signupDate.map { HolidayCalendar.isAnniversary(of: $0, on: today) } ?? false
+        mood.memoryLine = memory?.line(for: mood.kind, dayIndex: FlameyMemory.dayIndex(today))
         return mood
+    }
+
+    /// What he wears — gear from the longest streak, the day's outfit, the
+    /// mood's props — resolved from durable facts, never stored.
+    private func look(for mood: FlameMood) -> FlameyLook? {
+        FlameyFacts.look(mood: mood.kind)
+    }
+
+    /// Recomputes `memory` when any input to it moves.
+    private var memoryKey: String {
+        "\(Self.localDayStamp())|\(heroStreakValue)|\(trustedDone)|\(healthManager.cachedWorkouts.count)|\(healthManager.todaysWorkouts.count)"
+    }
+
+    private func refreshMemory() async {
+        let result = await FlameyMemory.compute(
+            cachedWorkouts: healthManager.cachedWorkouts,
+            todaysWorkouts: healthManager.todaysWorkouts,
+            goalMiles: goalDistance,
+            streak: heroStreakValue,
+            longestStreak: userManager.currentUser.longestStreak ?? 0,
+            doneToday: trustedDone
+        )
+        memory = result
+    }
+
+    /// Shows a line on the poke-quip channel for `seconds`, then hands the
+    /// bubble back to the mood.
+    private func say(_ line: String, for seconds: Double = 2.4) {
+        pokeQuip = line
+        pokeClearTask?.cancel()
+        pokeClearTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(Int(seconds * 1000)))
+            guard !Task.isCancelled else { return }
+            pokeQuip = nil
+        }
+    }
+
+    private func react(_ reaction: FlameMood.Reaction, line: String? = nil) {
+        self.reaction = reaction
+        reactionAt = Date()
+        say(line ?? FlameMood.reactionQuips(reaction).randomElement() ?? "Hey!")
+    }
+
+    /// A tap. The FIRST tap pokes immediately (no double-tap wait delaying
+    /// every poke); a second one within 0.35 s upgrades it to a high five —
+    /// or, before the mile is in, a head-shake: earn it first.
+    private func handleTap() {
+        let now = Date()
+        if let last = lastTapAt, now.timeIntervalSince(last) < 0.35 {
+            lastTapAt = nil
+            if trustedDone {
+                MADHaptics.success()
+                react(.highFive)
+            } else {
+                MADHaptics.warning()
+                react(.refuse)
+            }
+            return
+        }
+        lastTapAt = now
+        poke()
+    }
+
+    /// A horizontal rub across him.
+    private func tickle() {
+        MADHaptics.tap()
+        react(.tickle)
+    }
+
+    /// Long-press: feed him today's Well Earned treat — if at least one whole
+    /// one has been earned today; otherwise he asks for it.
+    private func feed() {
+        // Never a drink: an alcoholic pick feeds him a donut, earned in donuts.
+        let treat = FlameMood.food(for: CalorieTreat.current)
+        let cached = healthManager.cachedWorkouts
+        let todays = healthManager.todaysWorkouts
+        Task { @MainActor in
+            let kcal = await CalorieLedger.workoutKilocalories(
+                period: .today, cachedWorkouts: cached, todaysWorkouts: todays)
+            let earned = treat.kcalPerUnit > 0 ? kcal / treat.kcalPerUnit : 0
+            if earned >= 1 {
+                MADHaptics.success()
+                react(.feed(treat))
+            } else {
+                MADHaptics.tap()
+                say(FlameMood.hungryQuip(treat))
+            }
+        }
     }
 
     /// Tapping the buddy pokes him (the rest of the card still opens the
@@ -1279,14 +1487,19 @@ private struct FlameBuddyHeroCard: View {
     /// up 2.4s, then the mood bubble gets its turn back.
     private func poke() {
         MADHaptics.emphasis()
-        pokeQuip = FlameMood.pokeQuips.randomElement() ?? "Hey!"
-        pokedAt = Date()
-        pokeClearTask?.cancel()
-        pokeClearTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(2400))
-            guard !Task.isCancelled else { return }
-            pokeQuip = nil
+        // The line answers the mood he was IN when poked — so poking a
+        // sleeper gets the startle, and the same poke wakes him (the mood
+        // flips to .groggy: eyes open, zzz's gone). Bedtime is NOT persisted:
+        // he grumbles with his eyes open while the line is up, then dozes
+        // straight back off.
+        let before = mood.kind
+        if before == .sleepy {
+            flameyWokenDay = Self.localDayStamp()
+            // The home-screen Flamey wakes with him (one reload, once a day).
+            WidgetDataStore.save(flameyWokenDay: flameyWokenDay)
         }
+        pokedAt = Date()
+        say(FlameMood.pokeQuips(for: before).randomElement() ?? "Hey!")
     }
     private var health: FlameHealth {
         FlameHealth.forState(
@@ -1306,21 +1519,64 @@ private struct FlameBuddyHeroCard: View {
         )
     }
 
+    /// A streak token is carrying today (almost always an Assist a friend's
+    /// mile paid for). The hero must not go on saying "Streak at risk" about
+    /// a day that is already safe — that is the same contradiction the
+    /// friends row had, on the screen the owner looks at most. Suppressed
+    /// once the mile is genuinely in: the server refunds the coverage on that
+    /// upload, and a finished day is a done day.
+    private var savedToday: CoveredDate? {
+        guard !trustedDone else { return nil }
+        return tokensState.payload?.today_covered
+    }
+
     private var statusColor: Color {
         // Nothing about a paused streak is urgent: it can't break today, so the
         // at-risk red (and the amber "running out of day") would be lying.
         if injuryPause.isPaused { return MADTheme.Colors.warning }
         if trustedDone { return .green }
+        // Neither is a covered day. The mile is still worth running (it hands
+        // the token back), so this stays a live colour rather than going
+        // green — but it is not RED.
+        if savedToday != nil { return SavedDayStyle.tint }
         if userManager.currentUser.isStreakAtRisk { return MADTheme.Colors.madRed }
         return .orange
     }
 
+    /// Buddy size for a stat frame `width` wide (his column is 48% of it).
+    private func buddySize(forWidth width: CGFloat) -> CGFloat {
+        min(max(width * 0.48 * 1.14, 176), min(216, statFrameHeight * 0.90))
+    }
+
+    /// Room reserved ABOVE the usual layout so nothing he wears or says
+    /// leaves the card: his tallest point (hat crest + hover + legs) plus a
+    /// two-line bubble over it (`FlameyArt.extentAboveView`), minus what the
+    /// card already had over him — 36pt of card padding less the frame's
+    /// −28 offset, plus the frame's own slack above his square (0.17·size).
+    /// Measured at the blazing scale (his biggest) so the card doesn't
+    /// breathe as he burns down through the day. A crown on rocket boots
+    /// used to be sliced at the card top and a Pixel bubble sat over the
+    /// "Replay today's celebration" banner above the hero.
+    private func headroom(for look: FlameyLook?, buddySize: CGFloat) -> CGFloat {
+        guard let look, !injuryPause.isPaused else { return 0 }
+        let extent = FlameyArt.extentAboveView(look: look, size: buddySize, scale: FlameHealth.blazing.bodyScale,
+                                               fit: 1 / (1 + look.standLift), bubble: true)
+        return max(0, (extent - (8 + 0.17 * buddySize) + 6).rounded(.up))
+    }
+
+    /// The stat frame's width, measured (the headroom needs his size BEFORE
+    /// the frame's height is set). 0 until the first layout pass.
+    @State private var heroFrameWidth: CGFloat = 0
+
     var body: some View {
-        VStack(spacing: 14) {
+        let currentMood = mood
+        let heroLook = look(for: currentMood)
+        let top = heroFrameWidth > 0 ? headroom(for: heroLook, buddySize: buddySize(forWidth: heroFrameWidth)) : 0
+        return VStack(spacing: 14) {
             GeometryReader { geo in
                 let leftWidth = geo.size.width * 0.48
                 let rightWidth = geo.size.width - leftWidth - 12
-                let buddySize = min(max(leftWidth * 1.14, 176), min(216, geo.size.height * 0.90))
+                let buddySize = buddySize(forWidth: geo.size.width)
 
                 HStack(alignment: .top, spacing: 12) {
                     ZStack(alignment: .top) {
@@ -1329,7 +1585,7 @@ private struct FlameBuddyHeroCard: View {
                         // figure outright. Nothing is burning down, so nothing
                         // should shrink with the clock.
                         if injuryPause.isPaused {
-                            InjuredFlameBuddyView(size: buddySize)
+                            InjuredFlameBuddyView(size: buddySize, look: FlameyFacts.look())
                                 .frame(width: buddySize * 1.50, height: buddySize * 1.34)
                                 .offset(y: -28)
                         } else {
@@ -1339,12 +1595,34 @@ private struct FlameBuddyHeroCard: View {
                                 phase: flamePhase,
                                 dayEnd: StreakFlameClock.nextLocalMidnight(),
                                 coalWarmth: min(progress, 1),
-                                mood: mood
+                                mood: currentMood,
+                                look: heroLook,
+                                // His column is narrow: the stat column sits
+                                // just to his right and the card edge to his
+                                // left, so the cape/trail and companion
+                                // squeeze in close.
+                                wardrobeReach: 0.62
                             )
                             .frame(width: buddySize * 1.50, height: buddySize * 1.34)
-                            .offset(y: -28)
+                            .offset(y: -28 + top)
                             .contentShape(Rectangle())
-                            .onTapGesture { poke() }
+                            // Every play gesture is scoped to HIS hit area,
+                            // so the card's own tap (share) and the page's
+                            // vertical scroll are untouched: taps and the
+                            // long-press are child gestures (they beat the
+                            // card's tap), and the rub only begins on a
+                            // horizontal-dominant drag.
+                            .onTapGesture { handleTap() }
+                            .onLongPressGesture(minimumDuration: 0.5) { feed() }
+                            .flameyRubGesture { tickle() }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(FlameyFacts.displayName)
+                            .accessibilityHint("Tap to poke. Double-tap for a high five once your mile is done.")
+                            .accessibilityAction(named: "Poke") { poke() }
+                            .accessibilityAction(named: "High five") {
+                                if trustedDone { react(.highFive) } else { react(.refuse) }
+                            }
+                            .accessibilityAction(named: "Feed a treat") { feed() }
                         }
 
                         FunHeroGround()
@@ -1353,18 +1631,40 @@ private struct FlameBuddyHeroCard: View {
                             // bottom: the buddy is top-anchored, so tying the
                             // ground to the card height detaches it from the
                             // flame's feet the moment the card grows.
-                            .offset(y: Self.groundBaseline)
+                            .offset(y: Self.groundBaseline + top)
+
+                        // The way into Flamey's Closet, under his feet — his
+                        // own column, and the one free spot on this card: the
+                        // top-left is HIS frame's overflow and the top-right
+                        // holds savers + Share. Below the ground, clear of the
+                        // rocket boots' jets and of his hit area (the frame
+                        // ends ~208pt down).
+                        // Share rides beside it: the card is about HIM, and
+                        // "share him" belongs with "dress him", not in a
+                        // corner row of chips competing with the streak.
+                        HStack(spacing: 6) {
+                            if !injuryPause.isPaused { HeroClosetButton() }
+                            HeroShareIconButton {
+                                MADHaptics.action()
+                                showShareSheet = true
+                            }
+                        }
+                        .offset(y: Self.groundBaseline + top + 32)
                     }
                     .frame(width: leftWidth, height: geo.size.height, alignment: .top)
 
                     funStatRows
-                        // Clears the savers chip in the corner above — at 8 the
-                        // streak box sat right against it.
-                        .padding(.top, 24)
+                        // Moves down with him, so the stats stay level with
+                        // his body. Nothing sits in the top corner any more
+                        // (savers live in the streak box, Share under his
+                        // feet), so the column starts right at the top band.
+                        .padding(.top, 6 + top)
                         .frame(width: rightWidth, height: geo.size.height, alignment: .top)
                 }
+                .onAppear { heroFrameWidth = geo.size.width }
+                .onChange(of: geo.size.width) { _, width in heroFrameWidth = width }
             }
-            .frame(height: 258)
+            .frame(height: statFrameHeight + top)
 
             DashboardMilestoneBar(streak: userManager.currentUser.streak)
                 .padding(.horizontal, 2)
@@ -1372,28 +1672,6 @@ private struct FlameBuddyHeroCard: View {
         .padding(18)
         .padding(.top, 18)
         .background(cardBackground)
-        // Share sits beside the savers chip, NOT in the top-left corner where
-        // it first went: Flamey's frame is 1.5× his size and offset 28pt up, so
-        // it overflows the left column into that corner, covered the glyph, and
-        // — since the glyph was a bare Image with no gesture — swallowed its
-        // taps into `poke()`. The top-right is the one corner of this card
-        // nothing else reaches.
-        .overlay(alignment: .topTrailing) {
-            // ACTION at the corner, STATUS inboard of it. The two were the
-            // other way round, which left the Share button floating in the gap
-            // between Flamey and the stat column — anchored to nothing, and
-            // reading as a twin of the savers chip rather than as the one
-            // thing in this corner you can press.
-            HStack(spacing: 6) {
-                tokensChip
-                HeroShareButton {
-                    MADHaptics.action()
-                    showShareSheet = true
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 14)
-        }
         .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .onTapGesture {
             MADHaptics.action()
@@ -1414,6 +1692,7 @@ private struct FlameBuddyHeroCard: View {
         .sheet(isPresented: $showTokens) {
             StreakTokensDetailView()
         }
+        .task(id: memoryKey) { await refreshMemory() }
         .onAppear {
             updateTimeRemaining()
             timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in updateTimeRemaining() }
@@ -1453,8 +1732,7 @@ private struct FlameBuddyHeroCard: View {
 
         return HStack(alignment: .center, spacing: 8) {
             Text("\(heroStreakValue)")
-                .font(.system(size: 35, weight: .black, design: .rounded))
-                .monospacedDigit()
+                .madFont(size: 35, weight: .black, design: .rounded, monospacedDigit: true)
                 .foregroundColor(.white)
                 .shadow(color: .black.opacity(0.40), radius: 4, x: 0, y: 2)
                 .lineLimit(1)
@@ -1466,7 +1744,7 @@ private struct FlameBuddyHeroCard: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Day Streak")
-                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .madFont(size: 9, weight: .black, design: .rounded)
                     .tracking(1.1)
                     .textCase(.uppercase)
                     .foregroundColor(.white.opacity(0.75))
@@ -1482,9 +1760,9 @@ private struct FlameBuddyHeroCard: View {
                 if atAllTimeBest && !statusIsUrgent {
                     HStack(spacing: 3) {
                         Image(systemName: "crown.fill")
-                            .font(.system(size: 8, weight: .black))
+                            .madFont(size: 8, weight: .black)
                         Text("Best ever")
-                            .font(.system(size: 9, weight: .black, design: .rounded))
+                            .madFont(size: 9, weight: .black, design: .rounded)
                             .tracking(0.9)
                             .textCase(.uppercase)
                     }
@@ -1493,13 +1771,16 @@ private struct FlameBuddyHeroCard: View {
                     .minimumScaleFactor(0.6)
                 } else {
                     Text(statusText)
-                        .font(.system(size: 9, weight: .black, design: .rounded))
+                        .madFont(size: 9, weight: .black, design: .rounded)
                         .tracking(0.5)
                         .textCase(.uppercase)
                         .foregroundColor(statusColor)
                         .lineLimit(1)
                         .minimumScaleFactor(0.55)
                 }
+                // Savers belong to the streak they protect — they sat in a
+                // chip row at the card's top edge, reading as a stray badge.
+                saversLine
             }
         }
         .padding(.horizontal, 10)
@@ -1515,28 +1796,32 @@ private struct FlameBuddyHeroCard: View {
         )
     }
 
-    private var tokensChip: some View {
-        Button {
-            showTokens = true
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "shield.lefthalf.filled")
-                    .accessibilityLabel("Streak savers")
-                    .font(.system(size: 11, weight: .bold))
-                Text("\(readyTokens)")
-                    .font(.system(size: 12, weight: .black, design: .rounded))
-                    .monospacedDigit()
-                Text(readyTokens == 1 ? "saver" : "savers")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+    /// "🛡 3 savers" — one tappable line under the streak, opening the
+    /// tokens screen. Hidden until the token status has loaded.
+    @ViewBuilder
+    private var saversLine: some View {
+        if tokensState.payload != nil {
+            Button {
+                showTokens = true
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .madFont(size: 8, weight: .black)
+                        .accessibilityHidden(true)
+                    Text("\(readyTokens) \(readyTokens == 1 ? "saver" : "savers")")
+                        .madFont(size: 9, weight: .black, design: .rounded)
+                        .tracking(0.6)
+                        .textCase(.uppercase)
+                }
+                .foregroundColor(readyTokens > 0 ? MADTheme.Colors.success : .white.opacity(0.5))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .contentShape(Rectangle())
             }
-            .foregroundColor(.white.opacity(0.90))
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .background(Capsule().fill(Color.green.opacity(0.12)))
-            .overlay(Capsule().strokeBorder(Color.green.opacity(0.26), lineWidth: 1))
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(readyTokens) streak savers ready")
+            .accessibilityHint("Opens your streak tokens")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(readyTokens) streak savers ready")
     }
 
     private var readyTokens: Int {
@@ -1552,13 +1837,12 @@ private struct FlameBuddyHeroCard: View {
 
             VStack(spacing: 2) {
                 Text("\(userManager.currentUser.streak)")
-                    .font(.system(size: 70, weight: .black, design: .rounded))
-                    .monospacedDigit()
+                    .madFont(size: 70, weight: .black, design: .rounded, monospacedDigit: true)
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.50)
                 Text("Day Streak")
-                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .madFont(size: 15, weight: .heavy, design: .rounded)
                     .tracking(4)
                     .foregroundColor(statusColor)
                     .lineLimit(1)
@@ -1587,7 +1871,7 @@ private struct FlameBuddyHeroCard: View {
                 HStack(spacing: 4) {
                     InjuryStatusChip(compact: true)
                     Text("Paused \(active.paused_days) \(active.paused_days == 1 ? "day" : "days")")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .madFont(size: 11, weight: .bold, design: .rounded)
                         .foregroundColor(MADTheme.Colors.warning)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
@@ -1597,7 +1881,7 @@ private struct FlameBuddyHeroCard: View {
 
             HeroStatColumn(
                 currentDistance: currentDistance,
-                steps: healthManager.todaysSteps,
+                goalMiles: userManager.currentUser.goalMiles,
                 fastestPace: healthManager.todaysFastestPace,
                 timeLeftText: formattedTimeOnly,
                 statusColor: statusColor
@@ -1634,10 +1918,10 @@ private struct FlameBuddyHeroCard: View {
 
     private var statusBadge: some View {
         HStack(spacing: 6) {
-            Image(systemName: trustedDone ? "checkmark.circle.fill" : userManager.currentUser.isStreakAtRisk ? "exclamationmark.circle.fill" : "flame.fill")
-                .font(.system(size: 12, weight: .bold))
+            Image(systemName: statusGlyph(atRisk: "exclamationmark.circle.fill"))
+                .madFont(size: 12, weight: .bold)
             Text(statusText)
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .madFont(size: 12, weight: .heavy, design: .rounded)
         }
         .foregroundColor(statusColor)
         .padding(.horizontal, 11)
@@ -1646,9 +1930,19 @@ private struct FlameBuddyHeroCard: View {
         .overlay(Capsule().strokeBorder(statusColor.opacity(0.26), lineWidth: 1))
     }
 
+    /// Matches `statusText` case for case, so the glyph can never describe a
+    /// different state than the words beside it.
+    private func statusGlyph(atRisk: String) -> String {
+        if trustedDone { return "checkmark.circle.fill" }
+        if let saved = savedToday { return SavedDayStyle.icon(for: saved.kind) }
+        if userManager.currentUser.isStreakAtRisk { return atRisk }
+        return "flame.fill"
+    }
+
     private var statusText: String {
         if injuryPause.isPaused { return "Paused for injury" }
         if trustedDone { return "Streak safe" }
+        if savedToday != nil { return "Covered today" }
         if !distanceIsFresh { return "Syncing" }
         if userManager.currentUser.isStreakAtRisk { return "Streak at risk" }
         return "Keep it alive"
@@ -1800,10 +2094,14 @@ private struct FunStartCard: View {
     let trustedDone: Bool
     let hasActiveWorkout: Bool
     @Binding var showWorkoutView: Bool
+    let onLogPastWorkout: () -> Void
 
     var body: some View {
         VStack(spacing: 10) {
-            DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
+            VStack(spacing: 6) {
+                DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
+                LogPastWorkoutLink(action: onLogPastWorkout)
+            }
             BuddyWalkPill(hasActiveWorkout: hasActiveWorkout)
         }
     }

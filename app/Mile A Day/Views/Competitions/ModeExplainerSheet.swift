@@ -61,13 +61,7 @@ struct ModeExplainerSheet: View {
                     Circle()
                         .fill(gradientColors[0].opacity(0.14))
                         .overlay(
-                            Circle().strokeBorder(
-                                LinearGradient(
-                                    colors: gradientColors.map { $0.opacity(0.55) },
-                                    startPoint: .top, endPoint: .bottom
-                                ),
-                                lineWidth: 1.5
-                            )
+                            Circle().strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                         )
                 )
 
@@ -205,7 +199,7 @@ struct ModeExplainerSheet: View {
 
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-            .fill(.ultraThinMaterial)
+            .fill(CompeteDesign.surface)
             .overlay(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
                     .fill(
@@ -218,14 +212,7 @@ struct ModeExplainerSheet: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [gradientColors[0].opacity(0.35), Color.white.opacity(0.06)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
+                    .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
             )
     }
 }

@@ -14,6 +14,15 @@ struct MonthlyRecapStats {
     let bestDayMiles: Double
     let workoutCount: Int
     let streakAtMonthEnd: Int
+    /// The 1st of the month — the share card's calendar starts its grid on
+    /// this day's weekday. Optional and defaulted, like the two below, so the
+    /// memberwise init keeps every existing call working.
+    var monthStart: Date? = nil
+    /// Miles per local day, index 0 = the 1st, `daysInMonth` long — the same
+    /// `byDay` sums the totals above are made of.
+    var dayMiles: [Double]? = nil
+    /// The goal those days were judged against (`activeDays`' threshold).
+    var goalMiles: Double? = nil
 
     var isPerfect: Bool { activeDays >= daysInMonth }
 
@@ -40,6 +49,7 @@ struct MonthlyRecapStats {
         guard !byDay.isEmpty else { return nil }
 
         let effectiveGoal = goal > 0 ? goal : 1.0
+        let daysInMonth = cal.range(of: .day, in: .month, for: startOfPrev)?.count ?? 30
         let monthFormatter = DateFormatter()
         monthFormatter.dateFormat = "MMMM"
         let keyFormatter = DateFormatter()
@@ -52,10 +62,16 @@ struct MonthlyRecapStats {
             activeDays: byDay.values.filter {
                 ProgressCalculator.isGoalCompleted(current: $0, goal: effectiveGoal)
             }.count,
-            daysInMonth: cal.range(of: .day, in: .month, for: startOfPrev)?.count ?? 30,
+            daysInMonth: daysInMonth,
             bestDayMiles: byDay.values.max() ?? 0,
             workoutCount: workoutCount,
-            streakAtMonthEnd: streak
+            streakAtMonthEnd: streak,
+            monthStart: startOfPrev,
+            dayMiles: (0..<daysInMonth).map { offset in
+                guard let day = cal.date(byAdding: .day, value: offset, to: startOfPrev) else { return 0 }
+                return byDay[cal.startOfDay(for: day)] ?? 0
+            },
+            goalMiles: effectiveGoal
         )
     }
 }
@@ -67,6 +83,19 @@ enum MonthlyRecapManager {
     static func shouldAutoPresent(_ stats: MonthlyRecapStats) -> Bool {
         stats.activeDays > 0
             && UserDefaults.standard.string(forKey: seenKey) != stats.monthKey
+    }
+
+    /// The cheap answer, before anything walks the history: has last month's
+    /// recap already been shown? `computePreviousMonth` flattens the whole
+    /// workout index, and the dashboard asked on every appear.
+    static func alreadySeenPreviousMonth(now: Date = Date()) -> Bool {
+        let cal = Calendar.current
+        guard let startOfThisMonth = cal.date(from: cal.dateComponents([.year, .month], from: now)),
+              let startOfPrev = cal.date(byAdding: .month, value: -1, to: startOfThisMonth)
+        else { return false }
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM"
+        return UserDefaults.standard.string(forKey: seenKey) == f.string(from: startOfPrev)
     }
 
     static func markSeen(_ monthKey: String) {
@@ -82,8 +111,9 @@ enum MonthlyRecapManager {
 struct MonthlyRecapView: View {
     let stats: MonthlyRecapStats
     @Environment(\.dismiss) private var dismiss
-    @State private var shareImage: UIImage?
-    @State private var showShareSheet = false
+    /// `.sheet(item:)`, never `isPresented` + a separate image: that pair
+    /// raced, and the first tap presented an empty sheet.
+    @State private var storyShare: MADStoryContent?
 
     private var gold: Color { Color(red: 1.0, green: 0.84, blue: 0.35) }
     private var completionFraction: Double {
@@ -110,16 +140,16 @@ struct MonthlyRecapView: View {
                         recapMetricRow(
                             icon: "trophy.fill",
                             tint: gold,
-                            value: String(format: "%.1f", stats.bestDayMiles),
+                            value: stats.bestDayMiles.distanceText,
                             label: "best day",
-                            detail: "miles"
+                            detail: DistanceUnits.current.abbreviation
                         )
                         recapMetricRow(
                             icon: "figure.run",
                             tint: MADTheme.Colors.walkBlue,
                             value: "\(stats.workoutCount)",
                             label: "workouts",
-                            detail: String(format: "%.1f mi total", stats.totalMiles)
+                            detail: "\(stats.totalMiles.distanceFormatted1) total"
                         )
                     }
 
@@ -135,10 +165,8 @@ struct MonthlyRecapView: View {
             }
         }
         .presentationDragIndicator(.visible)
-        .sheet(isPresented: $showShareSheet) {
-            if let shareImage {
-                ShareSheet(items: [shareImage])
-            }
+        .sheet(item: $storyShare) { content in
+            ShareStudioView(content: content, initialTemplate: .monthStory)
         }
     }
 
@@ -165,12 +193,12 @@ struct MonthlyRecapView: View {
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(String(format: "%.1f", stats.totalMiles))
+                Text(ShareMonth.oneDecimal(stats.totalMiles))
                     .font(.system(size: 64, weight: .black, design: .rounded))
                     .monospacedDigit()
                     .foregroundColor(.white)
                     .minimumScaleFactor(0.78)
-                Text("mi")
+                Text(DistanceUnits.current.abbreviation)
                     .font(.system(size: 20, weight: .heavy, design: .rounded))
                     .foregroundColor(.white.opacity(0.58))
                 Spacer(minLength: 0)
@@ -363,87 +391,20 @@ struct MonthlyRecapView: View {
 
     private func shareRecap() {
         MADHaptics.action()
-        let renderer = ImageRenderer(content: MonthlyRecapShareCard(stats: stats))
-        renderer.scale = 3.0
-        renderer.isOpaque = false
-        if let image = renderer.uiImage {
-            shareImage = image
-            showShareSheet = true
-        }
+        TelemetryService.record(ShareTelemetry.opened)
+        storyShare = stats.storyContent
     }
 }
 
-// MARK: - Share card
-
-/// The postable version — same 600×750 language as the records share cards.
-struct MonthlyRecapShareCard: View {
-    let stats: MonthlyRecapStats
-
-    private var gold: Color { Color(red: 1.0, green: 0.84, blue: 0.35) }
-
-    var body: some View {
-        VStack(spacing: 24) {
-            Text("MY \(stats.monthName.uppercased())")
-                .font(.system(size: 28, weight: .heavy, design: .rounded))
-                .tracking(3)
-                .foregroundColor(.white.opacity(0.85))
-                .padding(.top, 44)
-
-            VStack(spacing: 2) {
-                Text(String(format: "%.1f", stats.totalMiles))
-                    .font(.system(size: 100, weight: .black, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundColor(.white)
-                Text("miles")
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-            }
-
-            if stats.isPerfect {
-                HStack(spacing: 8) {
-                    Image(systemName: "crown.fill")
-                    Text("PERFECT MONTH")
-                        .tracking(2)
-                }
-                .font(.system(size: 20, weight: .heavy, design: .rounded))
-                .foregroundColor(gold)
-            }
-
-            VStack(spacing: 12) {
-                GlassStatRow(
-                    icon: "calendar",
-                    text: "\(stats.activeDays) of \(stats.daysInMonth) days completed",
-                    color: .green,
-                    isDarkMode: true
-                )
-                GlassStatRow(
-                    icon: "trophy.fill",
-                    text: String(format: "Best day: %.1f mi", stats.bestDayMiles),
-                    color: gold,
-                    isDarkMode: true
-                )
-                if stats.streakAtMonthEnd > 0 {
-                    GlassStatRow(
-                        icon: "flame.fill",
-                        text: "\(stats.streakAtMonthEnd)-day streak and counting",
-                        color: .orange,
-                        isDarkMode: true
-                    )
-                }
-            }
-            .padding(.horizontal, 60)
-
-            Spacer()
-
-            ShareCardFooter()
-        }
-        .frame(width: 600, height: 750)
-        .background(
-            ShareCardBackground(
-                accentColor: Color(red: 0.85, green: 0.25, blue: 0.35),
-                isDarkMode: true
-            )
+/// The month, as content for the Share Studio's MONTH templates.
+extension MonthlyRecapStats {
+    var storyContent: MADStoryContent {
+        var content = MADStoryContent(
+            distanceMiles: totalMiles,
+            streak: streakAtMonthEnd > 0 ? streakAtMonthEnd : nil,
+            date: monthStart
         )
-        .padding(8)
+        content.month = self
+        return content
     }
 }

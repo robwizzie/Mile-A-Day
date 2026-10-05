@@ -93,6 +93,61 @@ export const featureEvents = pgTable(
   ],
 );
 
+// MetricKit diagnostics from the iOS app (crashes, hangs, CPU / disk-write
+// exceptions, and the daily metrics summary) — the app ships no third-party
+// crash SDK, so this table IS the crash reporter. Written only by
+// POST /diagnostics/metrickit, which trims each payload, derives `signature`
+// (a stable hash of kind + exception + top frames, for grouping) and caps a
+// user at a fixed number of rows per rolling day. `client_id` makes the
+// client's retry-on-next-launch idempotent. Pruned past 90 days by
+// `diagnostics.prune` (diagnosticsCron). No FK to users, like the other
+// *_log tables: account deletion removes the rows explicitly.
+export const clientDiagnostics = pgTable(
+  "client_diagnostics",
+  {
+    id: bigserial({ mode: "number" }).primaryKey().notNull(),
+    userId: varchar("user_id", { length: 255 }).notNull(),
+    clientId: varchar("client_id", { length: 64 }),
+    kind: varchar({ length: 32 }).notNull(),
+    appVersion: varchar("app_version", { length: 32 }),
+    build: varchar({ length: 32 }),
+    osVersion: varchar("os_version", { length: 64 }),
+    deviceModel: varchar("device_model", { length: 64 }),
+    signature: varchar({ length: 32 }).notNull(),
+    summary: varchar({ length: 300 }),
+    payload: jsonb().notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    occurredAt: timestamp("occurred_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+  },
+  (table) => [
+    index("idx_client_diagnostics_kind_received").using(
+      "btree",
+      table.kind.asc().nullsLast(),
+      table.receivedAt.asc().nullsLast(),
+    ),
+    index("idx_client_diagnostics_signature").using(
+      "btree",
+      table.signature.asc().nullsLast(),
+      table.receivedAt.desc().nullsFirst(),
+    ),
+    index("idx_client_diagnostics_user_received").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.receivedAt.desc().nullsFirst(),
+    ),
+    uniqueIndex("uq_client_diagnostics_user_client").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.clientId.asc().nullsLast(),
+    ),
+  ],
+);
+
 export const workoutSplits = pgTable(
   "workout_splits",
   {
@@ -267,6 +322,29 @@ export const users = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // Which dashboard the app is drawing: 'fun' (Flamey, the mascot) or
+    // 'modern'. Written by `PATCH /users/:id` (validated in usersController);
+    // NULL = unknown, i.e. a build that predates the field — treated exactly
+    // like 'modern' by every Flamey gate (the friend's-Flamey block, the
+    // Flamey poke). Nullable, no default: additive, no table rewrite.
+    dashboardStyle: text("dashboard_style"),
+    // Flamey's Closet: the look the user dressed Flamey in, `{ <slot>: <itemId>
+    // | null }` (see services/flameyCatalog.ts). NULL = "auto" (the app picks
+    // the best owned item per slot); a slot absent from the object is auto for
+    // that slot, an explicit null is bare. Validated for ownership at write AND
+    // re-validated at read (a medal can be revoked). Nullable, no default.
+    flameyLook: jsonb("flamey_look"),
+    // Flamey's NAME, shown to friends beside the mascot. NULL = "Flamey" (the
+    // default is the client's to print, never stored). User-generated and
+    // served to friends, so written only through PUT /users/:id/flamey-name,
+    // which validates + moderates it. Nullable, no default.
+    flameyName: text("flamey_name"),
+    // Lifetime nudges sent (friend + competition), for the nudge medals. The
+    // logs they used to be counted from are pruned after 7 days, so a recount
+    // could never see past the week. Bumped in the same statement as each log
+    // row (logNudge / logFriendNudge); seeded from the surviving logs by its
+    // migration. Constant default: metadata-only ADD COLUMN.
+    nudgesSentTotal: integer("nudges_sent_total").default(0).notNull(),
   },
   (table) => [
     index("idx_users_current_streak_desc").using(
@@ -470,6 +548,14 @@ export const workoutRoutes = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
+    // Route privacy (hide start & end), PRECOMPUTED: for each offered setting
+    // in metres ("201","402","805","1609") the 1-based [first, last] point a
+    // non-owner may see, or null when what's left would be a sliver. Written
+    // with the route by the sync upsert (mad_route_privacy_bounds) and filled
+    // for older rows by db/backfillRoutePrivacyBounds.ts. A cache, never the
+    // truth: NULL (or a setting not listed) is computed at read instead, so
+    // every route is trimmed whether or not this has reached it.
+    privacyBounds: jsonb("privacy_bounds"),
   },
   (table) => [
     foreignKey({
@@ -623,8 +709,19 @@ export const notificationSettings = pgTable(
     // the static map but not the guided tour of their street. Default
     // 'friends' — and the privacy onboarding sheet asks explicitly.
     flyoverVisibility: text("flyover_visibility").default("friends").notNull(),
+    // Hide where my walks START and END from everyone but me (Strava's "hide
+    // start/end"), in metres of path trimmed off each end of every route a
+    // non-owner is served. NULL = the default (1/8 mile, 201 m) — deliberately
+    // no column default, so every existing user is covered from the deploy
+    // with no backfill; 0 = off. Applied at READ by `mad_route_view_bounds`
+    // (migration 0085), so a change reaches everything already posted.
+    routePrivacyMeters: integer("route_privacy_meters"),
   },
   (table) => [
+    check(
+      "notification_settings_route_privacy_meters_check",
+      sql`route_privacy_meters IS NULL OR (route_privacy_meters >= 0 AND route_privacy_meters <= 1609)`,
+    ),
     check(
       "notification_settings_workout_visibility_check",
       sql`workout_visibility = ANY (ARRAY['public'::text, 'friends'::text, 'private'::text])`,
@@ -782,6 +879,12 @@ export const deviceTokens = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
+    // Which home-screen widget kinds this install has placed, self-reported at
+    // registration (WidgetCenter.getCurrentConfigurations). NULL = the build
+    // predates the field or couldn't say — never pushed a widget refresh,
+    // which is the safe direction. No default on purpose: a DEFAULT would
+    // read back on every existing row as "has these widgets".
+    widgetKinds: text("widget_kinds").array(),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "string",
@@ -816,6 +919,15 @@ export const pendingNotifications = pgTable(
     type: text().notNull(),
     competitionId: text("competition_id"),
     competitionName: text("competition_name"),
+    // The WHOLE push, so the morning briefing can deliver it as itself
+    // instead of "You have a notification you missed" with nowhere to tap.
+    // NULL on rows queued before these existed (they flush the old way).
+    body: text(),
+    data: jsonb(),
+    category: text(),
+    // Why it was held: 'quiet' (the user's quiet hours) or 'cap' (the daily
+    // cap). NULL = legacy row / the global competition queue.
+    reason: text(),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "string",
@@ -1460,6 +1572,24 @@ export const streakCoverage = pgTable(
     // Assist only: who rescued this user. Plain text (no FK) so a deleted
     // giver never blocks the receiver's history.
     sourceUser: text("source_user"),
+    // What the spender's token stamp read BEFORE this coverage was written
+    // (`users.<kind>_last_used`), so a refund can put the meter back exactly
+    // where it was rather than guessing. NULL means "never used before this
+    // one" — which is also the correct value to restore. Nullable and
+    // additive: rows written before the refund feature simply can't be
+    // refunded, and `refundEarnedCoverage` skips them rather than inventing a
+    // stamp.
+    priorLastUsed: date("prior_last_used"),
+    // The stamp this spend WROTE. Usually the same as `trigger_date`, but not
+    // for an Assist: the coverage is triggered on the DONOR's day while the
+    // meter is stamped in the RECIPIENT's, and those are different dates
+    // across a timezone. The refund rolls back only while the live stamp
+    // still equals this, so a later spend of the same token is never undone.
+    spentStamp: date("spent_stamp"),
+    // Assist only: the exchange that paid for this day. A refund closes it as
+    // 'refunded', which is what hands the donor's mile back (getDonationBudget
+    // counts only 'pending'/'accepted').
+    offerId: uuid("offer_id"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
@@ -1474,6 +1604,46 @@ export const streakCoverage = pgTable(
       columns: [table.userId, table.localDate],
       name: "streak_coverage_pkey",
     }),
+  ],
+);
+
+// A coverage row that was handed BACK, because the user went and earned the
+// day for real after a token had already carried it.
+//
+// The live row is DELETED rather than flagged, deliberately: `streak_coverage`
+// is read by fifteen-odd queries across the streak walks, the admin analytics
+// and the backfills, none of which carry a "still valid?" predicate — adding
+// one to all of them is a leak waiting to happen, and a day the user actually
+// ran is simply not a covered day any more. This table is the audit trail that
+// deletion would otherwise lose: what was returned, when, and what the token
+// stamp was rolled back to.
+export const streakCoverageRefunds = pgTable(
+  "streak_coverage_refunds",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    localDate: date("local_date").notNull(),
+    kind: varchar({ length: 32 }).notNull(),
+    sourceUser: text("source_user"),
+    offerId: uuid("offer_id"),
+    // The stamp the refund restored the meter to (NULL = "never used").
+    restoredLastUsed: date("restored_last_used"),
+    // When the coverage was originally written.
+    coveredAt: timestamp("covered_at", { withTimezone: true, mode: "string" }),
+    refundedAt: timestamp("refunded_at", {
+      withTimezone: true,
+      mode: "string",
+    })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "streak_coverage_refunds_user_id_fkey",
+    }).onDelete("cascade"),
+    index("streak_coverage_refunds_user_idx").on(table.userId, table.localDate),
   ],
 );
 
@@ -1734,6 +1904,24 @@ export const posts = pgTable(
     postId: uuid("post_id").defaultRandom().primaryKey().notNull(),
     userId: text("user_id").notNull(),
     mediaUrl: text("media_url").notNull(),
+    // FRONT & BACK (the "dual" capture): the SWAPPED composition of the same
+    // two frames — front camera large with the back inset, where `media_url`
+    // is back-large with the front inset. NULL on every ordinary post.
+    //
+    // Two finished pictures rather than two raw frames, deliberately. The
+    // inset is BAKED into both, so `media_url` alone is already a complete,
+    // recognisable front-and-back photo: the profile grid, the story viewer,
+    // the share cards, the website's unfurl, the widgets and every shipped
+    // app build render it correctly with no change at all, and this column is
+    // pure enhancement — the client that understands it lets you tap the
+    // inset to swap which frame is large. Storing two CLEAN frames instead
+    // would have left every one of those surfaces showing half the photo.
+    //
+    // The inset geometry is identical in both, so the swap reads as the small
+    // picture staying put while the big one changes (iOS `DualPhotoLayout` is
+    // the single definition of that rectangle).
+    dualMediaUrl: text("dual_media_url"),
+    dualInsetCorner: text("dual_inset_corner"),
     caption: text(),
     workoutId: varchar("workout_id", { length: 255 }),
     // Denormalized {distance, pace, duration, streak, date} captured at post time
@@ -2276,6 +2464,15 @@ export const buddySessions = pgTable(
     // Which door people actually came through. Worth measuring before investing
     // in the proximity handshake.
     origin: text().notNull(),
+    // Who may join WITHOUT an invite: 'friends' (any friend of the host — the
+    // behaviour every walk had before this existed), 'close_friends' (only the
+    // host's close friends), 'invite_only'. NULL = 'friends', so every row and
+    // every client predating the field keeps exactly what it had.
+    joinPolicy: text("join_policy"),
+    // Set when the host folded this lobby into a friend's walk ("Combine
+    // walks"): the row is cancelled and everyone on it moved there. Clients
+    // still polling it follow this to the walk they're now on.
+    mergedInto: varchar("merged_into", { length: 32 }),
     // Phase 4 (scheduled long-distance sessions). NULL for everything today.
     scheduledStartAt: timestamp("scheduled_start_at", {
       withTimezone: true,
@@ -2338,6 +2535,10 @@ export const buddySessions = pgTable(
       "buddy_sessions_origin_check",
       sql`origin = ANY (ARRAY['invite'::text, 'code'::text, 'join_active'::text, 'nearby'::text])`,
     ),
+    check(
+      "buddy_sessions_join_policy_check",
+      sql`join_policy IS NULL OR join_policy = ANY (ARRAY['friends'::text, 'close_friends'::text, 'invite_only'::text])`,
+    ),
   ],
 );
 
@@ -2374,6 +2575,11 @@ export const buddySessionParticipants = pgTable(
     // choice decides which instrument that phone measures with (GPS vs
     // pedometer). NULL = never chosen, which the client reads as outdoor.
     locationType: text("location_type"),
+    // Walk vs run is PER PARTICIPANT too, for the same reason: it is what that
+    // person's own workout records, and a friend running beside a walker is
+    // still on the walk. NULL = never chosen (every pre-field client), which
+    // reads as the session's own `activity_type`.
+    activityType: text("activity_type"),
     // The walker has MANUALLY paused (their instruction, not the tracker's
     // movement guess — the roster must never render an auto-pause, which is a
     // deliberately lenient chip that flaps). Written on every progress report,
@@ -2438,6 +2644,10 @@ export const buddySessionParticipants = pgTable(
     check(
       "buddy_session_participants_location_type_check",
       sql`location_type IS NULL OR location_type = ANY (ARRAY['outdoor'::text, 'indoor'::text])`,
+    ),
+    check(
+      "buddy_session_participants_activity_type_check",
+      sql`activity_type IS NULL OR activity_type = ANY (ARRAY['walking'::text, 'running'::text])`,
     ),
   ],
 );
@@ -2507,6 +2717,12 @@ export const postCoauthors = pgTable(
     // Null on every pre-existing row and on every participant who hasn't added
     // one, which are the same thing as far as any reader is concerned.
     mediaUrl: text("media_url"),
+    // The FRONT & BACK twin of this participant's slide — the same swapped
+    // composition `posts.dual_media_url` holds for the author's photo, and
+    // null for everyone who shot a single. See that column for why two
+    // finished pictures rather than two raw frames.
+    dualMediaUrl: text("dual_media_url"),
+    dualInsetCorner: text("dual_inset_corner"),
     photoAddedAt: timestamp("photo_added_at", {
       withTimezone: true,
       mode: "string",
@@ -2522,6 +2738,15 @@ export const postCoauthors = pgTable(
     // column can only ever withhold reach that was previously granted, never
     // grant new reach.
     onFeed: boolean("on_feed"),
+    // THIS participant's grid choice, the multi-person mirror of
+    // posts.coauthor_on_profile — "keep this walk on MY Posts grid".
+    //
+    // Needed as its own column for the same reason on_feed was: the scalar
+    // lives on the POST, so on a crew of five it can only ever record ONE
+    // person's answer, and the other four had no way to say yes. NULL = "follow
+    // my tagged_posts_on_profile setting", which is what every pre-existing row
+    // means; an explicit value pins this one walk either way.
+    onProfile: boolean("on_profile"),
     // THIS participant's per-post route consent, overriding their global
     // `share_route_maps` for this one card. Tri-state on purpose and in this
     // order: NULL = "follow my setting", which is what every existing crew
@@ -3012,6 +3237,108 @@ export const referralAliases = pgTable(
       name: "referral_aliases_user_id_fkey",
     }).onDelete("cascade"),
     index("idx_referral_aliases_user").on(table.userId),
+  ],
+);
+
+// Coalescing claim for widget-refresh silent pushes (widgetRefreshService):
+// one row per user, `last_sent_at` is when the last one went out. A NEW table,
+// so no pre-existing rows can read back a DDL-time default — and the column
+// has none anyway: it is only ever written by the claim itself.
+export const widgetRefreshPushes = pgTable(
+  "widget_refresh_pushes",
+  {
+    userId: text("user_id").primaryKey().notNull(),
+    lastSentAt: timestamp("last_sent_at", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
+    lastReason: text("last_reason"),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "widget_refresh_pushes_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
+// One row per completed one-shot maintenance job (post-listen backfills whose
+// "done" can't be read off an index the way backfillLongestStreaks does).
+// Written ONLY when a run finishes, so an interrupted run simply runs again;
+// the jobs themselves are idempotent. A new version of a job takes a new
+// name (e.g. `badge_retro_v2` once the evaluator sees more history, `holiday_medals_v2` once the holiday catalog grows).
+export const maintenanceRuns = pgTable("maintenance_runs", {
+  name: text().primaryKey().notNull(),
+  completedAt: timestamp("completed_at", {
+    withTimezone: true,
+    mode: "string",
+  }).notNull(),
+  detail: jsonb(),
+});
+
+// Flamey's Closet saved outfits: up to 5 named looks per user, in the order
+// the user keeps them (`position`, 0-based). `look` has exactly the shape of
+// `users.flamey_look` and the same rules — validated for ownership at WRITE
+// and re-validated at READ (a revoked medal drops its item, row untouched).
+// The list is REPLACED wholesale by PUT /users/:id/flamey-outfits, keeping an
+// entry's id + created_at when the client sends its id back.
+export const flameyOutfits = pgTable(
+  "flamey_outfits",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    position: integer().notNull(),
+    name: text().notNull(),
+    look: jsonb().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_flamey_outfits_user").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.position.asc().nullsLast(),
+    ),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "flamey_outfits_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
+// Desk display keys (the LED "Mile A Day counter"). A key lets ONE device read
+// GET /display/feed as ONE user: community aggregates + that user's own mile,
+// streak and nudges/hypes. Only the SHA-256 of the key is stored; the key
+// itself is shown once at creation. Created/revoked by admins only.
+export const displayKeys = pgTable(
+  "display_keys",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    keyHash: varchar("key_hash", { length: 64 }).notNull(),
+    keyPrefix: varchar("key_prefix", { length: 16 }).notNull(),
+    label: text().default("").notNull(),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "string" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    unique("display_keys_key_hash_key").on(table.keyHash),
+    index("idx_display_keys_user").using("btree", table.userId.asc().nullsLast()),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "display_keys_user_id_fkey",
+    }).onDelete("cascade"),
   ],
 );
 

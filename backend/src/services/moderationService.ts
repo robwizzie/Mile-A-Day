@@ -92,6 +92,33 @@ export async function blockUser(
   }
 }
 
+/**
+ * The accounts THIS user has blocked, newest first — the list behind
+ * Settings ▸ Privacy ▸ Blocked accounts, which is the only place a block can
+ * be seen or undone. Only the caller's own blocks: who blocked YOU is never
+ * revealed.
+ */
+export async function listBlockedUsers(blockerId: string): Promise<
+  Array<{
+    user_id: string;
+    username: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    profile_image_url: string | null;
+    blocked_at: string;
+  }>
+> {
+  return db.query(
+    `SELECT u.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
+            to_char(b.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS blocked_at
+       FROM user_blocks b
+       JOIN users u ON u.user_id = b.blocked_id
+      WHERE b.blocker_id = $1
+      ORDER BY b.created_at DESC`,
+    [blockerId],
+  );
+}
+
 export async function unblockUser(
   blockerId: string,
   blockedId: string,

@@ -120,6 +120,34 @@ jobs:
       # would wipe other people's miles) and the per-viewer history hide.
       - name: Buddy live join/leave/cancel/hide check
         run: node scripts/buddy-live-check.mjs
+      # Lobby readiness. A guest is ready only once they've said walk/run and
+      # indoor/outdoor; the host is told exactly once on that transition, and
+      # a running walk's 'active' row is never rewritten by a late answer.
+      - name: Buddy lobby readiness check
+        run: node scripts/buddy-ready-check.mjs
+      # "Who can join": the Friends-tab offer, the joinable list and the join
+      # door must agree on a close-friends / invite-only walk, and only the
+      # host may invite on one.
+      - name: Buddy join policy check
+        run: node scripts/buddy-join-policy-check.mjs
+      # "Combine walks": folding one lobby into a friend's walk brings its
+      # people along, re-invites its invitees, and leaves a pointer behind.
+      - name: Buddy merge check
+        run: node scripts/buddy-merge-check.mjs
+      # The morning briefing: held notifications come back as THEMSELVES
+      # (title, body, tap target) in priority order, the rest as one named
+      # summary; stale nudges drop; quiet hours are the user's own.
+      - name: Morning briefing check
+        run: node scripts/morning-briefing-check.mjs
+      # Blocked accounts: you see (and can undo) who YOU blocked, never who
+      # blocked you.
+      - name: Blocked accounts check
+        run: node scripts/blocks-check.mjs
+      # Desk display feed: only a live display key opens it, the response is
+      # an exact whitelist, friends/alerts obey presence + blocks, and key
+      # management is admin-only and never returns the stored hash.
+      - name: Desk display check
+        run: node scripts/display-check.mjs
       # The walk's lifecycle end to end. A scheduled walk was cancelled by the
       # 3h lobby sweep before anyone arrived, local_date was stamped in New
       # York for everyone, a finisher's synced workout only linked if the
@@ -152,6 +180,26 @@ jobs:
       # here too: every shipped client sends no parameters.
       - name: Grid controls + collab switches + highlights check
         run: node scripts/grid-controls-check.mjs
+      # A buddy walk is ONE post for N people, so for everyone but the poster
+      # it arrives shaped like a tag — and every rule written for tags was
+      # applied to it. The feed's two post arms both run through the circle
+      # (author, or the LEGACY SCALAR coauthor, which holds ONE person), and
+      # the grid, the Tagged tab and the "Add to grid" write all asked that
+      # same scalar, so four people on a crew of five were credited on a card
+      # they could not see in their feed, were not tagged in, and could not put
+      # on their profile. Nothing throws; the card is just quietly elsewhere.
+      - name: Buddy walk reach check
+        run: node scripts/buddy-walk-reach-check.mjs
+      # The nightly orphan sweep DELETES files, so every table that can own a
+      # path under /uploads/posts must be a reference it recognises. It knew
+      # only about posts.media_url, which meant a Story Highlight's custom
+      # cover and a crew member's slide on a buddy walk were both unlinked 72h
+      # after they were set, while their rows went on pointing at them — no
+      # error anywhere, just a blank circle days later and a save that then
+      # 400s naming the wrong cause. Silent, permanent loss of a file the user
+      # may have no other copy of.
+      - name: Orphan media sweep check
+        run: node scripts/orphan-sweep-check.mjs
       # Two prod-only push failures, neither reproducible without a shell there.
       # APNS_KEY is pasted into a dashboard in four different shapes and one of
       # them silently produced an unsignable PEM; device-token pruning is the
@@ -192,6 +240,90 @@ jobs:
       # row direction is a plausible push nobody can tell is wrong.
       - name: Win-back reminder check
         run: node scripts/win-back-check.mjs
+      # ONE walk is ONE announcement to friends. Both friend workout pushes are
+      # BUILT at sync and DELIVERED ten minutes later, and which of the two is
+      # right depends on whether the day's mile is complete — a question the
+      # sync path answers with an if/else, i.e. correctly for exactly one
+      # request. Anything completing the day inside that window (a recap
+      # distance correction, a re-sync revising the distance up) raised the
+      # mile announcement beside the walk's own and the cron drained both.
+      - name: Friend notification dedupe check
+        run: node scripts/friend-notification-dedupe-check.mjs
+      # HTTP rate limits. The failures that matter are the silent ones for
+      # real users: a proxy or Cloudflare edge address used as the key (one
+      # bucket locks out everyone), and a 429 from /auth/refresh, which signs
+      # every shipped build out — so refresh must stay its own, generous
+      # bucket. Also pins per-user upload buckets and the kill switch.
+      - name: Rate limit check
+        run: node scripts/rate-limit-check.mjs
+      # The Weekly Recap: the week's counted numbers (a Strava twin must not
+      # count, a 0.96 day meets the goal), the Saturday-19:00-local push hour
+      # across timezones, the per-device gate, the switch and the once-a-week
+      # claim — all of which fail as a plausible number or a missing push.
+      - name: Weekly recap check
+        run: node scripts/weekly-recap-check.mjs
+      # MetricKit crash/hang upload: the app's only crash reporter. A row
+      # that never lands, an untrimmed megabyte payload, a looping client
+      # past the daily cap, a retry stored twice or a signature that stops
+      # grouping are all silent — pinned over real HTTP + auth middleware.
+      - name: MetricKit diagnostics check
+        run: node scripts/diagnostics-check.mjs
+      # Widget refresh silent pushes: only devices declaring the capability
+      # AND reporting the affected widget kind, one per user per coalescing
+      # window, never an inbox row, and a background/priority-5 APNs request.
+      # A silent push renders nothing, so every failure here is invisible.
+      - name: Widget refresh push check
+        run: node scripts/widget-refresh-check.mjs
+      # Flamey (the Fun-dashboard mascot): dashboard_style validation, the
+      # friends-only `flamey` block on GET /users/:id, holiday medals through
+      # the real upload path (goal × tolerance, counted workouts only, silent
+      # for a backdated walk, revoked with the walk), the silent idempotent
+      # backfill, and the Flamey poke's both-sides-Fun gate on the ordinary
+      # nudge's cooldown. All of it fails as an absence nobody reports.
+      - name: Flamey + holiday medals check
+        run: node scripts/flamey-check.mjs
+      # Flamey's Closet: the saved look is validated against the catalog AND
+      # medal ownership at write (400 invalid_flamey_look), re-validated at
+      # read (a revoked medal drops its item, row untouched), self-only
+      # closet/PUT, friends-only in the flamey block, and every catalog badge
+      # id exists. A look that silently reverts is reported by nobody.
+      - name: Flamey closet check
+        run: node scripts/flamey-closet-check.mjs
+      # Flamey's name (moderated UGC shown to friends: grapheme length, emoji,
+      # control chars, blocklist incl. leetspeak), saved outfits (replace
+      # semantics, stable ids, max 5, looks validated at write and re-validated
+      # at read), and `earned_detail` on GET /users/:id/badges across streak /
+      # miles / pace / daily / holiday / count medals — bounded queries for 60
+      # medals. A wrong summary reads plausibly, so pin it.
+      - name: Flamey profile check
+        run: node scripts/flamey-profile-check.mjs
+      # The AUTHOR's Flamey on their cards: `author_flamey` ({look, name}) on
+      # the feed's post AND workout arms, the single-post read, the grid
+      # (== feed), pinned, memories and the created-post shape — only for a
+      # Fun-dashboard author (Modern/NULL ⇒ null), with every other field of
+      # the entry unchanged. A missing one draws the generic Flamey silently.
+      - name: Flamey author look check
+        run: node scripts/flamey-author-look-check.mjs
+      # Medals are judged over the WHOLE history: Recalibrate Streak also
+      # recalibrates medals (a broken 370-day streak keeps streak_365, a sub-8
+      # split, a half-marathon day, a Halloween mile, a pruned nudge log),
+      # answers `new_badges`, is idempotent, never revokes, pushes ONE summary
+      # for a burst; the upload path is all-history too; the retro sweep is
+      # silent and idempotent. A medal nobody gets is reported by nobody.
+      - name: Badge recalibrate check
+        run: node scripts/badge-recalibrate-check.mjs
+
+      # An auto card is DATA, never a picture: accepted with no media, served
+      # as auto to live-card builds and as an ordinary post to older ones.
+      - name: Live auto card check
+        run: node scripts/live-auto-card-check.mjs
+
+      # Hide start & end: every route served to a non-owner is trimmed at
+      # READ by its owner's setting (crew lines by each member's own), clock
+      # re-based in lockstep, a sliver served as no route; the owner always
+      # gets it whole. A read that skips the trim leaks a front door silently.
+      - name: Route privacy check
+        run: node scripts/route-privacy-check.mjs
       # Shoe tracker: the sync stamps the default pair only onto workouts that
       # ended after it became the default, a pre-sync pick survives the sync,
       # mileage counts only counted workouts, and no module outside the shoe

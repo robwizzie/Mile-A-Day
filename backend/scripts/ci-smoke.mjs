@@ -29,6 +29,7 @@ const {
   visiblePostAuthors,
   acceptedCoauthor,
   lockUnearnedPhotos,
+  addCrewPhoto,
 } = await import("../dist/services/postService.js");
 const { canonicalizeMileContext, logHypeIfUnderLimit, hasHypedMile } =
   await import("../dist/services/hypeService.js");
@@ -116,8 +117,13 @@ async function seed() {
 			 VALUES ($1, $2, $3, $4, $5) ON CONFLICT (user_id) DO NOTHING`,
       [id, `${name}@ci.local`, `ci-sub-${name}`, `ci_${name}`, name],
     );
+    // route_privacy_meters = 0 (hide start & end OFF): these seeds are 3-point
+    // routes that pin route GATES and the clock's plumbing byte-for-byte, and
+    // any trim would serve them as no route at all. The trim itself is pinned
+    // by route-privacy-check.mjs.
     await db.query(
-      `INSERT INTO notification_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+      `INSERT INTO notification_settings (user_id, route_privacy_meters) VALUES ($1, 0)
+       ON CONFLICT (user_id) DO UPDATE SET route_privacy_meters = 0`,
       [id],
     );
     await db
@@ -1189,6 +1195,186 @@ assert.equal(
   "finishing the mile unlocks today's photos",
 );
 assert.ok(!earned[0].photo_locked, "completed viewer sees no lock");
+
+// The FRONT & BACK twin is the SAME photo from the other camera, so the gate
+// has to take both or it hands over the picture it just withheld — and the
+// crew's slides carry their own twins for exactly the same reason.
+const dualGated = lockUnearnedPhotos(
+  [
+    row({
+      dual_media_url: "/uploads/posts/ci-bob-dual.jpg",
+      dual_inset_corner: "br",
+      coauthors: [
+        { user_id: CARL, media_url: "/uploads/posts/ci-carl.jpg",
+          dual_media_url: "/uploads/posts/ci-carl-dual.jpg" },
+        { user_id: ALICE, media_url: "/uploads/posts/ci-alice.jpg",
+          dual_media_url: "/uploads/posts/ci-alice-dual.jpg" },
+      ],
+    }),
+  ],
+  ALICE,
+  openGate,
+)[0];
+assert.equal(dualGated.media_url, "", "gated photo is blanked");
+assert.equal(
+  dualGated.dual_media_url,
+  null,
+  "its FRONT & BACK twin is withheld too — it is the same photo",
+);
+assert.equal(
+  dualGated.dual_inset_corner,
+  null,
+  "...and the corner with it — there is no inset left to point at",
+);
+assert.equal(
+  dualGated.coauthors[0].dual_media_url,
+  null,
+  "a crew slide's twin is withheld with the slide",
+);
+assert.equal(
+  dualGated.coauthors[1].dual_media_url,
+  "/uploads/posts/ci-alice-dual.jpg",
+  "the viewer's OWN slide keeps both frames",
+);
+
+// ── FRONT & BACK: two finished pictures, one post ──────────────────────────
+//
+// The whole design rests on the SECOND url reaching every projection the card
+// reads from, and there are three of them (POST_SELECT, the unified feed's own
+// column list, and the crew JSON) — a column added to one and missed in
+// another is invisible: the photo still draws, it just silently stops being
+// tappable on whichever surface was missed.
+{
+  const dualPost = await createPost({
+    userId: BOB,
+    mediaUrl: "/uploads/posts/ci-bob-dual-primary.jpg",
+    dualMediaUrl: "/uploads/posts/ci-bob-dual-swapped.jpg",
+    dualInsetCorner: "bl",
+    caption: "front and back",
+    workoutId: null,
+    localDate,
+    shareToFeed: true,
+    shareToStory: false,
+    statsSnapshot: null,
+    isAuto: false,
+    includeRoute: true,
+  });
+  assert.equal(
+    dualPost.dual_media_url,
+    "/uploads/posts/ci-bob-dual-swapped.jpg",
+    "createPost stores and returns the FRONT & BACK twin",
+  );
+
+  // POST_SELECT — the profile grid, memories, pinned posts. Its own column
+  // list, separate from the feed's.
+  const viaGrid = (await getUserPosts(ALICE, BOB, 30, null)).find(
+    (p) => p.post_id === dualPost.post_id,
+  );
+  assert.equal(
+    viaGrid?.dual_media_url,
+    "/uploads/posts/ci-bob-dual-swapped.jpg",
+    "POST_SELECT serves the twin (profile grid, memories, a tapped push)",
+  );
+  // The corner rides every projection the twin does. The card lays an
+  // invisible tap target over a region of a photograph it did not draw, so a
+  // projection that serves the url without the corner puts that target in
+  // the wrong place — and nothing about that is visible from the server.
+  assert.equal(
+    viaGrid?.dual_inset_corner,
+    "bl",
+    "POST_SELECT serves the corner the inset was baked into",
+  );
+
+  // FEED_ENTRY_PROJECTION — the unified feed and a single post opened from a
+  // push. A DIFFERENT column list; adding the column to one and missing the
+  // other leaves the swap working on some surfaces and not others.
+  const viaFeed = (await getUnifiedFeed(ALICE, 30, null)).find(
+    (e) => e.kind === "post" && e.id === dualPost.post_id,
+  );
+  assert.equal(
+    viaFeed?.dual_media_url,
+    "/uploads/posts/ci-bob-dual-swapped.jpg",
+    "the unified feed serves it too",
+  );
+  assert.equal(
+    viaFeed?.dual_inset_corner,
+    "bl",
+    "...the feed serves the corner too",
+  );
+  assert.equal(
+    (await getFeedEntryForPost(ALICE, dualPost.post_id))?.dual_media_url,
+    "/uploads/posts/ci-bob-dual-swapped.jpg",
+    "...and so does a single post opened by id",
+  );
+  assert.equal(
+    (await getFeedEntryForPost(ALICE, dualPost.post_id))?.dual_inset_corner,
+    "bl",
+    "...corner included",
+  );
+
+  // A crew slide's twin, through the real write path.
+  await db.query(
+    `INSERT INTO post_coauthors (post_id, user_id, status) VALUES ($1, $2, 'accepted')`,
+    [dualPost.post_id, CARL],
+  );
+  assert.ok(
+    await addCrewPhoto(
+      dualPost.post_id,
+      CARL,
+      "/uploads/posts/ci-carl-primary.jpg",
+      null,
+      "/uploads/posts/ci-carl-swapped.jpg",
+      "tl",
+    ),
+    "addCrewPhoto accepts a FRONT & BACK slide",
+  );
+  const withCrew = await getFeedEntryForPost(BOB, dualPost.post_id);
+  const carlSlide = (withCrew?.coauthors ?? []).find((c) => c.user_id === CARL);
+  assert.equal(
+    carlSlide?.dual_media_url,
+    "/uploads/posts/ci-carl-swapped.jpg",
+    "a crew member's slide carries its own twin",
+  );
+  assert.equal(
+    carlSlide?.dual_inset_corner,
+    "tl",
+    "...and its own corner — each slide is its own photo",
+  );
+
+  // Re-adding a SINGLE must drop the old swapped frame with the photo it
+  // belonged to, or the card offers a flip to a picture that is no longer
+  // on it.
+  await addCrewPhoto(
+    dualPost.post_id,
+    CARL,
+    "/uploads/posts/ci-carl-replacement.jpg",
+    null,
+    null,
+  );
+  const replaced = (
+    (await getFeedEntryForPost(BOB, dualPost.post_id))?.coauthors ?? []
+  ).find((c) => c.user_id === CARL);
+  assert.equal(
+    replaced?.media_url,
+    "/uploads/posts/ci-carl-replacement.jpg",
+    "re-adding replaces the slide",
+  );
+  assert.equal(
+    replaced?.dual_media_url,
+    null,
+    "...and a single replacing a dual takes the swapped frame with it",
+  );
+  assert.equal(
+    replaced?.dual_inset_corner,
+    null,
+    "...the corner goes with it, or the tap target outlives its inset",
+  );
+
+  await db.query(`DELETE FROM post_coauthors WHERE post_id = $1`, [
+    dualPost.post_id,
+  ]);
+  await db.query(`DELETE FROM posts WHERE post_id = $1`, [dualPost.post_id]);
+}
 
 // Recent workouts carry has_route / has_photo, so a friend's workout row can
 // show the same Route/Photo chips the owner sees. Bob's run has a GPS route and
@@ -2856,6 +3042,21 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
      VALUES ($1,$2,$3,$4::date,$4::date,0,'walking',($4 || 'T12:00:00Z')::timestamptz,80,1800)
      ON CONFLICT (workout_id) DO NOTHING`,
     ["ci-lastweek-walk", WK, 1.5, midWeek],
+  );
+  // ...carrying a real mile split, because TWO of the twelve rotation entries
+  // measure SPLITS (`personal_best`, `speed_week`) and a walk with none scores
+  // ZERO on them. Without this the assertion below depends on which week the
+  // suite happens to run in: it passed for months and went red the Sunday
+  // `speed_week` became last week's challenge, failing every merge for a week
+  // over nothing to do with the code under test. Pace sits inside the
+  // plausible band (>= MIN_PLAUSIBLE_MILE_SECONDS) and under Speed Week's 600s
+  // bar, and the distance clears DAILY_GOAL_TOLERANCE so the PB filter counts
+  // it too — so every active rotation entry now measures > 0.
+  await db.query(
+    `INSERT INTO workout_splits (workout_id, split_number, split_duration, split_distance, split_pace)
+     VALUES ($1,1,540,1.0,540)
+     ON CONFLICT (workout_id, split_number) DO NOTHING`,
+    ["ci-lastweek-walk"],
   );
 
   const missed = (await getWeeklyChallengeForUser(WK)).last_week;

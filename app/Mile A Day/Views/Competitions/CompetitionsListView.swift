@@ -33,6 +33,8 @@ struct CompetitionsListView: View {
     @ObservedObject private var weeklyService = WeeklyChallengeService.shared
     @State private var competitionToEdit: Competition?
     @State private var actionError: String?
+    /// Last refresh from this screen that succeeded — gates the tab-switch one.
+    @State private var lastListRefreshAt: Date?
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -63,7 +65,7 @@ struct CompetitionsListView: View {
                     ),
                     .init(
                         id: .record,
-                        title: "Record",
+                        title: "History",
                         systemImage: "trophy.fill",
                         badgeCount: 0
                     )
@@ -184,23 +186,29 @@ struct CompetitionsListView: View {
         // A competition asked for by id (feed chip, competition push) — in
         // BOTH lifecycles, since whichever of the tab and the request came
         // first decides which one fires.
-        .task { await consumePendingCompetition() }
+        .task {
+            await consumePendingCompetition()
+            consumePendingCompeteAction()
+        }
+        .onReceive(DeepLinkRouter.shared.$pendingCompeteAction) { action in
+            guard action != nil else { return }
+            consumePendingCompeteAction()
+        }
         .onReceive(DeepLinkRouter.shared.$pendingCompetitionId) { id in
             guard id != nil else { return }
             Task { await consumePendingCompetition() }
         }
         .onAppear {
-            Task {
-                await competitionService.refreshAllData()
-                trophyService.updateTrophies(from: competitionService.competitions)
+            // onAppear fires on every tab switch; a list fetched seconds ago
+            // isn't worth refetching. Foreground, pull and create still force.
+            if let last = lastListRefreshAt, Date().timeIntervalSince(last) < Self.appearRefreshInterval {
+                return
             }
+            Task { await refreshListAndTrophies() }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
-            Task {
-                await competitionService.refreshAllData()
-                trophyService.updateTrophies(from: competitionService.competitions)
-            }
+            Task { await refreshListAndTrophies() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
             guard let type = notification.userInfo?["type"] as? String else { return }
@@ -212,6 +220,18 @@ struct CompetitionsListView: View {
             // Refresh after the create sheet closes.
             guard createRequest == nil else { return }
             Task { await competitionService.refreshAllData() }
+        }
+    }
+
+    private static let appearRefreshInterval: TimeInterval = 30
+
+    private func refreshListAndTrophies() async {
+        await competitionService.refreshAllData()
+        trophyService.updateTrophies(from: competitionService.competitions)
+        // Only a refresh that landed earns the skip — a failed one must retry
+        // on the next appear.
+        if competitionService.errorMessage == nil {
+            lastListRefreshAt = Date()
         }
     }
 
@@ -233,6 +253,22 @@ struct CompetitionsListView: View {
         }
         await competitionService.refreshAllData()
         if let found = find() { selectedCompetition = found }
+    }
+
+    /// "Start a competition" / "Open the weekly challenge" asked for from
+    /// elsewhere (Flamey's Closet). Opens the same sheets this screen's own
+    /// buttons do.
+    private func consumePendingCompeteAction() {
+        let router = DeepLinkRouter.shared
+        guard let action = router.pendingCompeteAction else { return }
+        router.pendingCompeteAction = nil
+        selectedSegment = .compete
+        switch action {
+        case .createCompetition:
+            createRequest = CreateRequest()
+        case .weeklyChallenge:
+            if weeklyService.current != nil { showingWeeklyChallenge = true }
+        }
     }
 
     /// Put the invites section on screen. The Invites segment no longer
@@ -333,10 +369,10 @@ struct CompetitionsListView: View {
         .padding(MADTheme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                .fill(.ultraThinMaterial)
+                .fill(CompeteDesign.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+                        .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                 )
         )
     }
@@ -421,7 +457,7 @@ struct InlineConfirmBanner: View {
         .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
+                .fill(CompeteDesign.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                         .fill(Color.black.opacity(0.2))

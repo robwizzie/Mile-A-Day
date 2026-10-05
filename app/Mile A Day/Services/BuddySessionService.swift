@@ -39,6 +39,9 @@ enum BuddyServiceError: LocalizedError {
         case "already_in": return "You're already in this walk."
         case "join_directly": return "You can join this walk straight away."
         case "not_allowed": return "Only the host, or a friend of theirs, can let them in."
+        case "join_closed": return "This walk is only open to people the host invites."
+        case "same_session": return "That's already your walk."
+        case "invites_host_only": return "Only the host can invite people to this walk."
         default: return "Something went wrong. Try again."
         }
     }
@@ -454,6 +457,9 @@ final class BuddySessionService: ObservableObject {
             // sent it, so every session on record reads 'invite' and the
             // measurement it exists for wasn't running.
             "origin": origin.rawValue,
+            // Who can join without an invite — last walk's answer, which the
+            // lobby shows and lets the host change. Older servers ignore it.
+            "joinPolicy": BuddyJoinPolicy.remembered.rawValue,
         ]
         if mode.needsGoal, let goalValue { payload["goalValue"] = goalValue }
         if let scheduledStartAt {
@@ -531,14 +537,21 @@ final class BuddySessionService: ObservableObject {
     /// call because a walk that is already underway hands the joiner straight
     /// into the tracker: a follow-up PATCH would land after the workout had
     /// already picked its instrument.
+    ///
+    /// `isRunning` is sent only when the caller KNOWS it — the mid-walk strip
+    /// passes what the tracker is already recording. Everyone else is asked in
+    /// the lobby, where the answer is part of becoming ready.
     func join(
         sessionId: String,
-        locationType: BuddyLocationType = BuddyLocationType.remembered
+        locationType: BuddyLocationType = BuddyLocationType.remembered,
+        isRunning: Bool? = nil
     ) async throws {
+        var body: [String: Any] = ["locationType": locationType.rawValue]
+        if let isRunning { body["activityType"] = isRunning ? "running" : "walking" }
         let state = try await request(
             "/buddy/sessions/\(sessionId)/join",
             method: .POST,
-            json: ["locationType": locationType.rawValue],
+            json: body,
             responseType: BuddySessionState.self
         )
         apply(state)
@@ -660,6 +673,47 @@ final class BuddySessionService: ObservableObject {
         }
     }
 
+    /// This user's walk-or-run answer: their own choice, else the host's plan.
+    var myIsRunning: Bool {
+        guard let session else { return false }
+        return session.me(currentUserId)?.isRunning(in: session) ?? session.isRunning
+    }
+
+    /// Remembered across walks, like the location — the same person walks or
+    /// runs most days, so the lobby opens on last time's answer.
+    static let rememberedRunKey = "buddyGuestIsRunV1"
+
+    /// "This is how I'm going, and I'm ready" — the lobby's one confirm.
+    ///
+    /// Both answers and the ready flag go in ONE write, so the host's roster
+    /// never shows someone ready with an answer still missing, and the host's
+    /// "X is ready" push names a person who has actually said how they're
+    /// coming. Throws, unlike `setLocationType`: this gates the hand-off, so a
+    /// failure must be visible rather than leaving someone "ready" only on
+    /// their own phone. `ready: nil` updates the answers without touching
+    /// readiness (a walk already running has no lobby to be ready in).
+    func setMyChoices(
+        locationType: BuddyLocationType,
+        isRunning: Bool,
+        ready: Bool?
+    ) async throws {
+        UserDefaults.standard.set(locationType.rawValue, forKey: BuddyLocationType.storageKey)
+        UserDefaults.standard.set(isRunning, forKey: Self.rememberedRunKey)
+        guard let id = session?.id else { return }
+        var body: [String: Any] = [
+            "locationType": locationType.rawValue,
+            "activityType": isRunning ? "running" : "walking",
+        ]
+        if let ready { body["ready"] = ready }
+        apply(
+            try await request(
+                "/buddy/sessions/\(id)/me",
+                method: .PATCH,
+                json: body,
+                responseType: BuddySessionState.self
+            ))
+    }
+
     func decline(sessionId: String) async {
         _ = try? await request(
             "/buddy/sessions/\(sessionId)/decline",
@@ -667,6 +721,23 @@ final class BuddySessionService: ObservableObject {
             responseType: BuddyOKResponse.self
         )
         invites.removeAll { $0.id == sessionId }
+    }
+
+    /// Host-only, any open phase. Remembered for the next walk too.
+    func setJoinPolicy(_ policy: BuddyJoinPolicy) async {
+        UserDefaults.standard.set(policy.rawValue, forKey: BuddyJoinPolicy.storageKey)
+        guard let id = session?.id else { return }
+        do {
+            apply(
+                try await request(
+                    "/buddy/sessions/\(id)/join-policy",
+                    method: .POST,
+                    json: ["joinPolicy": policy.rawValue],
+                    responseType: BuddySessionState.self
+                ))
+        } catch {
+            errorMessage = friendly(error)
+        }
     }
 
     func setReady(_ ready: Bool) async {
@@ -689,6 +760,32 @@ final class BuddySessionService: ObservableObject {
         apply(
             try await request(
                 "/buddy/sessions/\(id)/start",
+                method: .POST,
+                responseType: BuddySessionState.self
+            ))
+    }
+
+    /// End the shared countdown for EVERYONE — host only, server-side.
+    ///
+    /// The countdown exists so every phone reaches zero on the same wall-clock
+    /// instant. "Start now" used to be a local shortcut past it: it handed the
+    /// session to this phone's tracker and left `started_at` alone, so the
+    /// person who tapped it was walking while the rest of the crew watched a
+    /// number tick down. That is the one thing a walk *together* must not do,
+    /// and it is why this moves the group's clock instead.
+    ///
+    /// Nothing here hands off. The response carries the new `started_at`, in
+    /// the past, and the lobby's own elapsed check fires on the next tick —
+    /// for the host exactly as for everyone else's poll, so one rule starts
+    /// every phone and the host can't get a private head start.
+    ///
+    /// Throws so the caller can report it: a start that silently did nothing
+    /// is worse than a walk that begins eight seconds later.
+    func startNow() async throws {
+        guard let id = session?.id else { return }
+        apply(
+            try await request(
+                "/buddy/sessions/\(id)/start-now",
                 method: .POST,
                 responseType: BuddySessionState.self
             ))
@@ -1019,10 +1116,97 @@ final class BuddySessionService: ObservableObject {
         // `state_version` is bumped by every server-side mutation, which makes
         // it exactly the "did something happen" signal the backoff needs.
         if state.stateVersion != session?.stateVersion { quietPolls = 0 }
+        // Our lobby was combined into a friend's walk — follow it there
+        // instead of landing on "Walk called off" for a walk that's very
+        // much on. We're already on the new roster; this just fetches it.
+        if state.status == .cancelled, let target = state.mergedInto, !target.isEmpty {
+            Task { await follow(to: target) }
+            return
+        }
         session = state
         if state.status == .completed || state.status == .cancelled {
             stopPolling()
         }
+    }
+
+    private func follow(to sessionId: String) async {
+        do {
+            let next = try await request(
+                "/buddy/sessions/\(sessionId)/state", responseType: BuddySessionState.self)
+            apply(next)
+            startPolling()
+        } catch {
+            print("[BuddySessionService] following a combined walk failed: \(error)")
+        }
+    }
+
+    // MARK: - Two walks at once
+
+    /// A friend's walk that looks like the SAME outing as ours — the
+    /// "we both pressed start" case. Either a walk we've been invited to, or
+    /// an open walk hosted by someone on our roster (joined OR invited).
+    /// Only offered to the host of a lobby, the one person who can combine.
+    struct TwinWalk: Equatable {
+        let sessionId: String
+        let hostName: String
+        let hostImageURL: String?
+        let isRunning: Bool
+    }
+
+    var twinWalk: TwinWalk? {
+        guard let mine = session, mine.status == .lobby, mine.isHost(currentUserId) else { return nil }
+        if let invite = invites.first(where: {
+            $0.id != mine.id && ($0.status == .lobby || $0.status == .active)
+        }) {
+            let host = invite.participants.first(where: \.isHost)
+            return TwinWalk(sessionId: invite.id, hostName: host?.displayName ?? "A friend",
+                            hostImageURL: host?.profileImageUrl, isRunning: invite.isRunning)
+        }
+        let crew = Set(mine.participants.map(\.userId))
+        if let open = joinableFriendSessions.first(where: {
+            $0.sessionId != mine.id && crew.contains($0.hostUserId) && ($0.hostIsFriend ?? true)
+        }) {
+            return TwinWalk(sessionId: open.sessionId, hostName: open.hostDisplayName,
+                            hostImageURL: open.hostProfileImageUrl, isRunning: open.isRunning)
+        }
+        return nil
+    }
+
+    /// Who couldn't come along on the last combine (their names), for the
+    /// lobby to say so rather than lose them silently.
+    @Published var leftBehindNames: [String] = []
+
+    /// The merge answers the TARGET's state plus `left_behind`, in one body.
+    private struct MergeResult: Codable {
+        let state: BuddySessionState
+        let leftBehind: [String]
+
+        private enum Keys: String, CodingKey { case leftBehind = "left_behind" }
+
+        init(from decoder: Decoder) throws {
+            state = try BuddySessionState(from: decoder)
+            leftBehind = (try? decoder.container(keyedBy: Keys.self)
+                .decodeIfPresent([String].self, forKey: .leftBehind)) ?? []
+        }
+
+        func encode(to encoder: Encoder) throws { try state.encode(to: encoder) }
+    }
+
+    /// Fold our lobby (and everyone in it) into a friend's walk.
+    func combine(into targetSessionId: String) async throws {
+        guard let mine = session else { return }
+        let names = Dictionary(mine.participants.map { ($0.userId, $0.displayName) },
+                               uniquingKeysWith: { a, _ in a })
+        let result = try await request(
+            "/buddy/sessions/\(mine.id)/merge",
+            method: .POST,
+            json: ["targetSessionId": targetSessionId],
+            responseType: MergeResult.self
+        )
+        apply(result.state)
+        invites.removeAll { $0.id == targetSessionId }
+        startPolling()
+        leftBehindNames = result.leftBehind.compactMap { names[$0] }
     }
 
     /// The walk that just finished, kept after its recap is dismissed.

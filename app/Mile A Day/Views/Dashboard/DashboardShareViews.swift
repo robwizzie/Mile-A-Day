@@ -5,10 +5,9 @@ import UIKit
 //
 // This file also held `StreakCardShareView`, `TodayProgressCardShareView` and
 // `SharePreviewView` — an earlier dashboard share flow that lost its last
-// caller and was never reachable again. `EnhancedShareView` (the sticker
-// builder, opened by tapping either dashboard hero) and `ShareStudioView` (a
-// walk, story-shaped) are what the app shares through now, so those are gone
-// rather than left sitting here reading as live code.
+// caller and was never reachable again. `ShareStudioView` is what the app
+// shares through now — a walk, the day, the streak and the week — so those are
+// gone rather than left sitting here reading as live code.
 
 // MARK: - Share Sheet
 

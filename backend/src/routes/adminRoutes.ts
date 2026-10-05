@@ -1,4 +1,10 @@
 import { Router } from "express";
+import { signInLimiter } from "../middleware/rateLimit.js";
+import {
+  adminCreateDisplayKey,
+  adminListDisplayKeys,
+  adminRevokeDisplayKey,
+} from "../controllers/displayController.js";
 import {
   verifyAppleWeb,
   overview,
@@ -36,16 +42,22 @@ import {
   activation,
   atRisk,
   referralAlias,
+  diagnostics,
 } from "../controllers/adminController.js";
 
 // Public: Sign in with Apple (web) exchange -> admin access token.
 // Mounted BEFORE authenticateToken in server.ts.
 export const adminAuthRouter = Router();
-adminAuthRouter.post("/apple", verifyAppleWeb);
+adminAuthRouter.post("/apple", signInLimiter, verifyAppleWeb);
 
 // Protected: mounted AFTER authenticateToken + requireAdmin in server.ts.
 const adminRouter = Router();
 adminRouter.get("/overview", overview);
+
+// Desk display keys (the LED counter). Plaintext key returned once on create.
+adminRouter.get("/display-keys", adminListDisplayKeys);
+adminRouter.post("/display-keys", adminCreateDisplayKey);
+adminRouter.post("/display-keys/:id/revoke", adminRevokeDisplayKey);
 adminRouter.get("/miles-by-day", milesByDay);
 adminRouter.get("/engagement", engagement);
 adminRouter.get("/signups-by-day", signupsByDay);
@@ -95,6 +107,10 @@ adminRouter.get("/errors/by-user", errorsByUser);
 adminRouter.get("/errors/timeseries", errorTimeseries);
 // Scheduled-job health: last run, duration and error per job since boot.
 adminRouter.get("/cron", cronStatus);
+// MetricKit crashes/hangs from the iOS app: per-version counts and top
+// signatures. One signature's rows open through /drilldown
+// (kind=diagnostic_signature).
+adminRouter.get("/diagnostics", diagnostics);
 // Support tooling: post rows incl. soft-deleted + on-disk file checks, and
 // soft-delete undo — for "my photo disappeared" investigations.
 adminRouter.get("/posts/:userId/forensics", postForensics);

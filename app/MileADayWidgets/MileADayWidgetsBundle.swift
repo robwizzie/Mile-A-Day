@@ -19,6 +19,11 @@ struct MileADayWidgetsBundle: WidgetBundle {
         DailyLeaderboardWidget()
         WorkoutLiveActivity()
         StreakRiskLiveActivity()
+        // Control Center control — iOS 18+. `if #available` inside the
+        // builder keeps the bundle loading on iOS 17, where it's skipped.
+        if #available(iOS 18.0, *) {
+            StartMileControl()
+        }
     }
 }
 

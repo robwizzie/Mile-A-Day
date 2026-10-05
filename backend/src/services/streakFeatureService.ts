@@ -78,6 +78,11 @@ export const METER_WINDOW_DAYS = 365;
 const MIN_NOTIFY_PRIOR_STREAK = 3;
 // A break stays rescuable for this many days after the missed day.
 const ASSIST_RESCUE_WINDOW_DAYS = 2;
+// How far back `refundEarnedCoverage` looks for a covered day the user has
+// since run for real. Wider than the rescue window on purpose: a Watch
+// workout can land a day or two late, and the refund is the difference
+// between "your token came back" and "the app kept it".
+const REFUND_WINDOW_DAYS = 5;
 // One donation per whole mile past the donor's goal that day. Same 0.05 grace
 // as Double Down, so a GPS-shy 1.98 still buys the second one.
 const DONATION_MILE_COST = 1;
@@ -241,22 +246,254 @@ async function recentDayFacts(
   };
 }
 
-/** Insert one coverage row; true when THIS call inserted it (race-safe). */
+/**
+ * Insert one coverage row; true when THIS call inserted it (race-safe).
+ *
+ * `priorLastUsed` is the spender's token stamp as it read BEFORE this write,
+ * and `offerId` the exchange that paid for an Assist. Neither is used while
+ * the coverage stands — they exist so `refundEarnedCoverage` can put the token
+ * back EXACTLY where it was if the user goes and earns the day anyway. Pass
+ * them at every spend site or that day's token is spent for good.
+ */
 async function insertCoverage(
   userId: string,
   localDate: string,
   kind: string,
   triggerDate: string,
   sourceUser: string | null = null,
+  priorLastUsed: string | null = null,
+  offerId: string | null = null,
+  /** The stamp this spend writes; defaults to the trigger day. */
+  spentStamp: string = triggerDate,
 ): Promise<boolean> {
   const rows = await db.query(
-    `INSERT INTO streak_coverage (user_id, local_date, kind, trigger_date, source_user)
-     VALUES ($1, $2::date, $3, $4::date, $5)
+    `INSERT INTO streak_coverage
+       (user_id, local_date, kind, trigger_date, source_user,
+        prior_last_used, spent_stamp, offer_id)
+     VALUES ($1, $2::date, $3, $4::date, $5, $6::date, $7::date, $8::uuid)
      ON CONFLICT (user_id, local_date) DO NOTHING
      RETURNING local_date`,
-    [userId, localDate, kind, triggerDate, sourceUser],
+    [
+      userId,
+      localDate,
+      kind,
+      triggerDate,
+      sourceUser,
+      priorLastUsed,
+      spentStamp,
+      offerId,
+    ],
   );
   return rows.length > 0;
+}
+
+/** `users` column holding a token's last-spent stamp, by coverage kind. */
+const LAST_USED_COLUMN: Record<string, string> = {
+  double_down_recover: "double_down_last_used",
+  streak_save: "streak_save_last_used",
+  streak_assist: "streak_assist_last_used",
+};
+
+/** Who the token belongs to, in the voice of a push. */
+const REFUND_COPY: Record<string, { title: string; body: string }> = {
+  double_down_recover: {
+    title: "\u{1F525} Double Down back in your pocket",
+    body: "You ran the day we'd covered for you, so the token is yours again.",
+  },
+  streak_save: {
+    title: "\u2744\uFE0F Streak Save back in your pocket",
+    body: "You ran the day we'd covered for you, so the token is yours again.",
+  },
+  streak_assist: {
+    title: "\u{1F91D} Streak Assist returned",
+    body: "You ran the day anyway — your Assist is back and your friend's mile is theirs again.",
+  },
+};
+
+export interface CoverageRefund {
+  local_date: string;
+  kind: string;
+  source_user: string | null;
+}
+
+/**
+ * "I ran it anyway" — hand back a token whose day the user has since earned.
+ *
+ * A token buys a day the user did not run. The moment they DO run it, the
+ * coverage is surplus: the day counts on its own merits, so keeping the row
+ * would charge someone for a rescue that turned out not to be needed, park a
+ * blue "saved" marker on a day they genuinely walked, and — the one users
+ * notice — leave `natural_streak` false over a streak with no holes in it.
+ * This is also the only honest answer to a banked-TODAY Assist, which is
+ * routinely spent in the morning on a day that gets run by the evening.
+ *
+ * What comes back, per kind:
+ *   - the RECIPIENT's meter stamp, rolled back to `prior_last_used`. Guarded
+ *     on the stamp still reading this coverage's own `trigger_date`, so a
+ *     LATER spend of the same token is never rolled back over.
+ *   - for an Assist, the DONOR's mile: closing the offer as 'refunded' drops
+ *     it out of `getDonationBudget`'s `used`, which is what frees it to be
+ *     given to someone else the same day.
+ *
+ * Rows written before `prior_last_used` existed carry NULL for it and are
+ * skipped — restoring a stamp we never recorded would silently hand back a
+ * token that had already been re-earned. They are rare (pre-deploy only) and
+ * self-clear as their days age out of the window.
+ *
+ * Idempotent and cheap: one small window query, and a no-op for the ~100% of
+ * uploads by users with no coverage at all.
+ */
+export async function refundEarnedCoverage(
+  userId: string,
+): Promise<CoverageRefund[]> {
+  if (!streakFeaturesGloballyEnabled()) return [];
+  const row = await getStreakFeatureRow(userId);
+  if (!row?.streak_features_at) return [];
+
+  const userToday = await getUserLocalToday(userId);
+  // Bounded to the days a token can still be covering and a workout can still
+  // plausibly land on: the sweep only ever settles d1/d2, an Assist reaches
+  // back ASSIST_RESCUE_WINDOW_DAYS, and a late Watch sync can be a day or two
+  // behind that. Older coverage is settled history.
+  const windowFloor = dateStrMinus(userToday, REFUND_WINDOW_DAYS);
+
+  // The same flat 0.95 rule the streak walk and `recentDayFacts` use — a
+  // refund must never disagree with the walk about whether a day stands on
+  // its own. Goal-scaled would be wrong here for the same reason it is there.
+  const candidates = await db.query<{
+    local_date: string;
+    kind: string;
+    source_user: string | null;
+    prior_last_used: string | null;
+    spent_stamp: string | null;
+    offer_id: string | null;
+  }>(
+    `SELECT to_char(sc.local_date, 'YYYY-MM-DD') AS local_date,
+            sc.kind,
+            sc.source_user,
+            to_char(sc.prior_last_used, 'YYYY-MM-DD') AS prior_last_used,
+            to_char(sc.spent_stamp, 'YYYY-MM-DD') AS spent_stamp,
+            sc.offer_id::text AS offer_id
+       FROM streak_coverage sc
+      WHERE sc.user_id = $1
+        AND sc.local_date >= $2::date
+        AND EXISTS (
+          SELECT 1 FROM workouts w
+           WHERE w.user_id = sc.user_id
+             AND w.local_date = sc.local_date
+             AND w.deleted_at IS NULL
+             AND w.exclusion_reason IS NULL
+          GROUP BY w.local_date
+          HAVING SUM(w.distance) >= 0.95
+        )
+      ORDER BY sc.local_date DESC`,
+    [userId, windowFloor],
+  );
+  if (candidates.length === 0) return [];
+
+  const refunded: CoverageRefund[] = [];
+  for (const c of candidates) {
+    // No recorded prior stamp → we cannot restore the meter truthfully, and
+    // dropping the row without restoring it would take the day AND the token.
+    // Leave it alone; it ages out of the window on its own.
+    if (c.spent_stamp === null) continue;
+
+    // Delete FIRST and only proceed if this call is the one that removed it —
+    // two uploads racing must not both roll the stamp back or refund the same
+    // mile twice.
+    const removed = await db.query<{ created_at: string }>(
+      `DELETE FROM streak_coverage
+        WHERE user_id = $1 AND local_date = $2::date
+        RETURNING created_at`,
+      [userId, c.local_date],
+    );
+    if (removed.length === 0) continue;
+
+    await db.query(
+      `INSERT INTO streak_coverage_refunds
+         (user_id, local_date, kind, source_user, offer_id, restored_last_used, covered_at)
+       VALUES ($1, $2::date, $3, $4, $5::uuid, $6::date, $7)`,
+      [
+        userId,
+        c.local_date,
+        c.kind,
+        c.source_user,
+        c.offer_id,
+        c.prior_last_used,
+        removed[0]?.created_at ?? null,
+      ],
+    );
+
+    const column = LAST_USED_COLUMN[c.kind];
+    if (column) {
+      // Guarded on the stamp STILL being the one this coverage wrote. If the
+      // user has spent the same token again since, that later spend owns the
+      // meter and rolling it back would hand out a second token.
+      await db.query(
+        `UPDATE users SET ${column} = $1::date
+          WHERE user_id = $2 AND ${column} = $3::date`,
+        [c.prior_last_used, userId, c.spent_stamp],
+      );
+    }
+
+    if (c.offer_id) {
+      // Give the donor their mile back — only while the offer is still the
+      // accepted one, so a re-used or expired row is left as it stands.
+      await db.query(
+        `UPDATE streak_assist_offers
+            SET status = 'refunded', resolved_at = NOW()
+          WHERE id = $1::uuid AND status = 'accepted'`,
+        [c.offer_id],
+      );
+    }
+
+    refunded.push({
+      local_date: c.local_date,
+      kind: c.kind,
+      source_user: c.source_user,
+    });
+  }
+
+  if (refunded.length === 0) return [];
+
+  // The day still counts — it is just earned now rather than covered — so the
+  // number should not move. Refresh anyway: `natural_streak` is derived from
+  // coverage, and the stored streak is what every read serves.
+  await refreshCurrentStreak(userId);
+
+  for (const r of refunded) {
+    const copy = REFUND_COPY[r.kind];
+    if (!copy) continue;
+    sendPush(userId, {
+      title: copy.title,
+      body: copy.body,
+      type: "streak_token_returned",
+      data: { local_date: r.local_date, kind: r.kind },
+    }).catch((e: any) =>
+      console.error("[StreakFeatures] refund push failed:", e?.message ?? e),
+    );
+    // Tell the donor their mile is free again — they gave it, so they are the
+    // one person who would otherwise never learn it came back.
+    if (r.kind === "streak_assist" && r.source_user) {
+      displayName(userId)
+        .then((name) =>
+          sendPush(r.source_user!, {
+            title: "\u{1F91D} Your mile came back",
+            body: `${name} ran the day themselves — your spare mile is free to give again.`,
+            type: "streak_assist_returned",
+            data: { user_id: userId, local_date: r.local_date },
+          }),
+        )
+        .catch((e: any) =>
+          console.error(
+            "[StreakFeatures] donor refund push failed:",
+            e?.message ?? e,
+          ),
+        );
+    }
+  }
+
+  return refunded;
 }
 
 /**
@@ -294,6 +531,9 @@ export async function reconcileStreakFeaturesOnUpload(
     missedDay,
     "double_down_recover",
     userToday,
+    null,
+    // Breadcrumb for a refund: what the meter read before this spend.
+    dateOnly(row.double_down_last_used),
   );
   if (!inserted) return;
 
@@ -418,6 +658,8 @@ async function sweepOneUser(
       missedDay,
       "streak_save",
       userToday,
+      null,
+      dateOnly(row.streak_save_last_used),
     );
     if (!inserted) return "none"; // raced with another writer — already covered
     await db.query(
@@ -886,16 +1128,22 @@ export async function respondToAssistOffer(
     if (budget.allowed < budget.used) return { status: "no_miles" };
   }
 
+  const recipientToday = await getUserLocalToday(offer.recipient_id);
   const inserted = await insertCoverage(
     offer.recipient_id,
     offer.target_date,
     "streak_assist",
     ex.donorToday,
     offer.donor_id,
+    // Refund breadcrumbs: the recipient's meter as it read before this spend,
+    // the offer holding the donor's mile, and the stamp actually written —
+    // which is the RECIPIENT's today, not the donor's trigger day.
+    dateOnly(ex.recipientRow.streak_assist_last_used),
+    offerId,
+    recipientToday,
   );
   if (!inserted) return { status: "already_saved" };
 
-  const recipientToday = await getUserLocalToday(offer.recipient_id);
   await db.query(
     // The RECIPIENT's token pays for the coverage — resetting their meter
     // window is what spends it.
@@ -1068,6 +1316,23 @@ export interface StreakFeaturesPayload {
     kind: string;
     source_username: string | null;
   }[];
+  /**
+   * TODAY, when a token is already carrying it — the banked-Assist case, and
+   * the one covered day the client cannot safely infer for itself.
+   *
+   * `frozen_dates` has always contained this row, but every today-scoped
+   * surface (the goal ring, "1.00 mi to go", the friends row, the streak
+   * tile) paints from raw mileage and would have to re-derive the user's
+   * local date to find it — and a device a timezone away from the one the
+   * server files `local_date` under gets that wrong. Served explicitly so
+   * "is today already safe?" is one field, not a date calculation repeated on
+   * six screens. Additive; null whenever today stands on its own.
+   */
+  today_covered: {
+    local_date: string;
+    kind: string;
+    source_username: string | null;
+  } | null;
   natural_streak: boolean;
   streak_at_risk: boolean;
   /**
@@ -1170,6 +1435,7 @@ export async function getStreakFeaturesPayload(
     streak_save: meters.streak_save,
     streak_assist: meters.streak_assist,
     frozen_dates: coverage,
+    today_covered: coverage.find((c) => c.local_date === userToday) ?? null,
     natural_streak: natural,
     streak_at_risk: atRisk,
     // Only worth reporting when they're holding the token that would pay for

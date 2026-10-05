@@ -84,6 +84,16 @@ async function seed() {
        ON CONFLICT (user_id) DO NOTHING`,
       [id, `sub-${id}`, `${id}@example.com`, id, id],
     );
+    // Hide start & end OFF: these seeds are short routes that pin route
+    // GATES byte-for-byte, and the trim would serve them to friends as no
+    // route at all. share_route_maps stays NULL — read exactly like a missing
+    // row (COALESCE(..., true)). The trim is pinned by route-privacy-check.
+    await db.query(
+      `INSERT INTO notification_settings (user_id, share_route_maps, route_privacy_meters)
+       VALUES ($1, NULL, 0)
+       ON CONFLICT (user_id) DO UPDATE SET route_privacy_meters = 0`,
+      [id],
+    );
   }
   for (const a of ALL) {
     for (const b of ALL) {
@@ -118,6 +128,7 @@ async function cleanup() {
   await db.query(`DELETE FROM buddy_session_participants WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM buddy_sessions WHERE host_user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM friendships WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM notification_settings WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM users WHERE user_id = ANY($1::text[])`, [ALL]);
   for (const name of made.splice(0)) {
     try { fs.unlinkSync(path.join(MEDIA_DIR, name)); } catch { /* gone */ }

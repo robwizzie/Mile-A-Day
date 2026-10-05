@@ -33,7 +33,7 @@ struct StreakActiveView: View {
     }
 
     private var rankedUsers: [CompetitionUser] {
-        activeUsers.sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        Competition.ranked(activeUsers)
     }
 
     private var goal: Double { competition.options.goal }
@@ -138,7 +138,7 @@ struct StreakActiveView: View {
         .padding(.horizontal, MADTheme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
+                .fill(CompeteDesign.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                         .stroke(Color.orange.opacity(0.2), lineWidth: 1)
@@ -248,8 +248,10 @@ struct StreakActiveView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             HStack {
                 Text(isToday ? "Standings" : "Day Results")
-                    .font(MADTheme.Typography.title3)
-                    .foregroundColor(.white)
+                    .font(CompeteDesign.eyebrow)
+                    .tracking(CompeteDesign.eyebrowTracking)
+                    .textCase(.uppercase)
+                    .foregroundColor(CompeteDesign.inkFaint)
                 Spacer()
                 Text("\(activeUsers.count) competing")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
@@ -271,10 +273,10 @@ struct StreakActiveView: View {
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                            .stroke(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
         }
@@ -422,7 +424,7 @@ struct StreakActiveView: View {
 
             if showEliminatedUsers {
                 VStack(spacing: 2) {
-                    ForEach(eliminatedUsers.sorted(by: { ($0.score ?? 0) > ($1.score ?? 0) }), id: \.id) { user in
+                    ForEach(Competition.ranked(eliminatedUsers), id: \.id) { user in
                         HStack(spacing: 8) {
                             AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 24)
                                 .opacity(0.4)
@@ -488,7 +490,7 @@ struct StreakActiveView: View {
             .padding(MADTheme.Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                             .stroke(Color.orange.opacity(0.2), lineWidth: 1)

@@ -156,6 +156,24 @@ enum PostPhotoSource: String {
 @MainActor
 final class PostComposerViewModel: ObservableObject {
     @Published var pickedImage: UIImage?
+    /// FRONT & BACK: the other camera's frame. `pickedImage` is always the one
+    /// shown LARGE, so swapping which is which is a straight exchange of these
+    /// two — the editor, the flatten and the published card then all describe
+    /// the same arrangement without anyone tracking a separate "which is big"
+    /// flag that could disagree with the pictures.
+    ///
+    /// nil on every ordinary post, which is what makes the whole feature
+    /// inert until someone chooses it.
+    @Published var dualSecondary: UIImage?
+    /// Whether the LARGE frame is the selfie. Flips with every swap, and is
+    /// read only by `dualHint` — which is the point: the line under the
+    /// canvas names what is actually in the corner right now, so the effect
+    /// of the tap is legible before anyone makes it.
+    @Published var dualPrimaryWasFront = false
+    /// Which corner the inset is baked into. The poster drags it there, and
+    /// it rides the post so the feed card can put its tap target on the
+    /// picture rather than where the picture used to be.
+    @Published var dualInsetCorner: DualInsetCorner = .topTrailing
     /// How `pickedImage` was obtained, so publish can declare it. Set by
     /// whichever affordance produced the photo; seeded to `.camera` for an
     /// `initialImage`, which is always a mid-run snap taken with our camera.
@@ -324,7 +342,12 @@ final class PostComposerViewModel: ObservableObject {
         if !config.isOn(.competition) { config.enabled.append(.competition) }
     }
 
-    init(stats: RunStatsInput, initialImage: UIImage? = nil) {
+    init(
+        stats: RunStatsInput,
+        initialImage: UIImage? = nil,
+        initialSecondary: UIImage? = nil,
+        initialPrimaryWasFront: Bool = false
+    ) {
         self.stats = stats
         var cfg = StickerConfig.load()
         // Drop any remembered stats that aren't available today, and make sure
@@ -341,6 +364,13 @@ final class PostComposerViewModel: ObservableObject {
         // Seed a pre-chosen photo (mid-run snap) AFTER all stored properties
         // are initialized — the @Published setter touches self.
         self.pickedImage = initialImage
+        // A mid-walk FRONT & BACK press arrives as a PAIR and has to be
+        // restored as one, or the walk's best shot publishes as whichever
+        // frame happened to be large and quietly drops the other half.
+        if initialImage != nil, let initialSecondary {
+            self.dualSecondary = initialSecondary
+            self.dualPrimaryWasFront = initialPrimaryWasFront
+        }
         // A mid-run snap was shot DURING the walk and is already in the camera
         // roll, so it's the library tier, not a live capture. Labelling it
         // `.camera` would let the ten-minute countdown reject a photo whose
@@ -426,12 +456,72 @@ final class PostComposerViewModel: ObservableObject {
         }
     }
 
+    var isDualPhoto: Bool { dualSecondary != nil }
+
+    /// The line under the editor canvas. Names the SMALL frame, because that
+    /// is the one you tap and the one about to become large.
+    ///
+    /// It also carries more weight than it used to: the published card no
+    /// longer draws a ⇄ disc on the inset, so this sentence — on your own
+    /// photo, before you post — is where the tap is learned.
+    var dualHint: String {
+        let who = dualPrimaryWasFront ? "The view's" : "You're"
+        return "\(who) in the corner · tap to swap, drag to move"
+    }
+
+    /// Which camera the BIG frame came from, as a plain statement for the
+    /// picker under the canvas.
+    var dualLeadIsFront: Bool { dualPrimaryWasFront }
+
+    /// Put a specific camera in the big frame. Idempotent on purpose: the
+    /// picker's chips are a STATE, so tapping the one already chosen has to
+    /// do nothing rather than toggle it away.
+    func setDualLead(front: Bool) {
+        guard isDualPhoto, front != dualPrimaryWasFront else { return }
+        swapDualFrames()
+    }
+
+    /// Swap which frame is large. Called from the editor's inset tap, and it
+    /// is the SAME gesture the published card offers — learn it once, in the
+    /// place where the consequence is still editable.
+    func swapDualFrames() {
+        guard let secondary = dualSecondary, let primary = pickedImage else { return }
+        pickedImage = secondary
+        dualSecondary = primary
+        dualPrimaryWasFront.toggle()
+    }
+
+    /// Drop the second frame. Any path that replaces the photo has to call
+    /// this, or a fresh single shot inherits the previous capture's other
+    /// half and publishes a flip to a photo of somewhere else.
+    func clearDual() {
+        dualSecondary = nil
+        dualPrimaryWasFront = false
+        // The corner belongs to the pair, not to the canvas: a fresh single
+        // that later becomes a pair starts where every other post's does.
+        dualInsetCorner = .topTrailing
+    }
+
     /// Render the on-screen canvas (photo + sticker) to a flat JPEG-ready image
     /// at ~1080px wide, baking the overlay in. Returns nil if no photo.
-    func flatten() -> UIImage? {
+    ///
+    /// `swapped` renders the FRONT & BACK arrangement the other way round —
+    /// the identical canvas, identical sticker, with the two frames exchanged.
+    /// That second render is what gets uploaded as `dual_media_url`, and the
+    /// reason both are FINISHED pictures rather than raw frames: the primary
+    /// alone already has the inset baked into it, so every surface that only
+    /// knows about `media_url` — the profile grid, a share card, the website's
+    /// link preview, every shipped app build — shows a complete front-and-back
+    /// photo with no changes at all.
+    func flatten(swapped: Bool = false) -> UIImage? {
         guard let image = pickedImage, canvasSize.width > 0 else { return nil }
+        if swapped && dualSecondary == nil { return nil }
+        let big = swapped ? (dualSecondary ?? image) : image
+        let small = swapped ? image : dualSecondary
         let canvas = PostCanvas(
-            image: image,
+            image: big,
+            secondary: small,
+            dualCorner: dualInsetCorner,
             showSticker: stickerEnabled,
             stickerPos: stickerPos,
             stickerScale: stickerScale,
@@ -500,6 +590,15 @@ final class PostComposerViewModel: ObservableObject {
 
         do {
             let mediaUrl = try await PostService.uploadMedia(flat)
+            // The swapped arrangement, uploaded second and only for a FRONT &
+            // BACK. If THIS upload fails the post still goes out as an
+            // ordinary photo rather than failing outright: the primary is
+            // already a complete picture with the inset baked in, and losing
+            // the tap-to-swap is a far smaller loss than losing the post.
+            var dualMediaUrl: String?
+            if isDualPhoto, let swapped = flatten(swapped: true) {
+                dualMediaUrl = try? await PostService.uploadMedia(swapped)
+            }
             if let crewPhotoPostId {
                 // Everything above this line is the ordinary composer — same
                 // camera, same canvas, same flatten. Only the terminal call
@@ -511,7 +610,11 @@ final class PostComposerViewModel: ObservableObject {
                     mediaUrl: mediaUrl,
                     caption: caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         ? nil : caption,
-                    photoSource: photoSource
+                    photoSource: photoSource,
+                    dualMediaUrl: dualMediaUrl,
+                    // Only when there IS a pair: the corner describes an
+                    // inset, and a single photo has none.
+                    dualInsetCorner: dualMediaUrl == nil ? nil : dualInsetCorner.rawValue
                 )
                 // The run's photo moment is spent either way — the picture is
                 // on the feed. Retire the prompt so it can't surface later
@@ -525,6 +628,8 @@ final class PostComposerViewModel: ObservableObject {
             }
             _ = try await PostService.createPost(
                 mediaUrl: mediaUrl,
+                dualMediaUrl: dualMediaUrl,
+                dualInsetCorner: dualMediaUrl == nil ? nil : dualInsetCorner.rawValue,
                 caption: caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : caption,
                 workoutId: stats.workoutId,
                 shareToFeed: destination.toFeed,
@@ -716,6 +821,15 @@ struct ComposerNoticeBanner: View {
 /// ImageRenderer flatten so what you see is exactly what's uploaded.
 struct PostCanvas: View {
     let image: UIImage
+    /// FRONT & BACK's other frame, drawn as the corner inset. nil = an
+    /// ordinary single photo, and this view is then byte-identical to what it
+    /// always rendered.
+    var secondary: UIImage? = nil
+    /// Which corner the inset sits in — baked, so it has to match what the
+    /// post will carry.
+    var dualCorner: DualInsetCorner = .topTrailing
+    /// Live drag only, never set by `flatten`.
+    var dualDragOffset: CGSize = .zero
     let showSticker: Bool
     let stickerPos: CGPoint
     let stickerScale: CGFloat
@@ -726,11 +840,27 @@ struct PostCanvas: View {
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
+                if let secondary {
+                    // The inset sits UNDER the sticker: the stats overlay is
+                    // the thing the poster placed, so it keeps the top of the
+                    // stack. Note what is NOT here — the ⇄ glyph. That is an
+                    // affordance drawn live by whoever offers the tap, and
+                    // baking it into somebody's photograph forever would be a
+                    // watermark nobody asked for.
+                    DualPhotoView(
+                        big: image,
+                        small: secondary,
+                        corner: dualCorner,
+                        offset: dualDragOffset
+                    )
                     .frame(width: geo.size.width, height: geo.size.height)
-                    .clipped()
+                } else {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                }
 
                 if showSticker {
                     RunStatsStickerView(input: input, config: config)
@@ -1001,6 +1131,10 @@ struct PostComposerView: View {
     @State private var showLibraryImport = false
     /// The walk's own snaps, offered right here. See `snapsFromThisWalkButton`.
     @State private var showSnapGallery = false
+    /// Live translation while the inset is being dragged. Lives on the VIEW,
+    /// not the model: it is a gesture in progress, and nothing that renders
+    /// for upload may ever see it.
+    @State private var dualDrag: CGSize = .zero
     /// Whether the stash HAS anything, cached. `hasEntriesToday()` enumerates
     /// the sandbox directory, which is not something to do from a `body` —
     /// the dashboard's photo-waiting banner caches it for the same reason.
@@ -1038,6 +1172,10 @@ struct PostComposerView: View {
         stats: RunStatsInput,
         autoOpenCamera: Bool = false,
         initialImage: UIImage? = nil,
+        /// The other lens of a FRONT & BACK snap chosen before the composer
+        /// opened (the post-run prompt's cards and its gallery).
+        initialSecondary: UIImage? = nil,
+        initialPrimaryWasFront: Bool = false,
         backNavigation: Bool = false,
         // Buddy Walk recap: credit everyone who finished the session.
         buddyCoauthorIds: [String] = [],
@@ -1048,7 +1186,12 @@ struct PostComposerView: View {
         crewPhotoPostId: String? = nil,
         onFinished: @escaping (PostComposeOutcome) -> Void
     ) {
-        let model = PostComposerViewModel(stats: stats, initialImage: initialImage)
+        let model = PostComposerViewModel(
+            stats: stats,
+            initialImage: initialImage,
+            initialSecondary: initialSecondary,
+            initialPrimaryWasFront: initialPrimaryWasFront
+        )
         model.buddyCoauthorIds = buddyCoauthorIds
         model.buddySessionId = buddySessionId
         model.buddyCrewNames = buddyCrewNames
@@ -1097,6 +1240,11 @@ struct PostComposerView: View {
                                     switch result {
                                     case .accepted(let image):
                                         vm.pickedImage = image
+                                        // A library pick is one picture, so
+                                        // any FRONT & BACK frame still held
+                                        // from a previous capture goes with
+                                        // the photo it belonged to.
+                                        vm.clearDual()
                                         // Declares the day tier to the server —
                                         // this photo is bounded by when it was
                                         // SHOT, not by when it's posted.
@@ -1109,6 +1257,8 @@ struct PostComposerView: View {
                                     }
                                 }
                             }
+                        // Directly under the photo it decides the shape of.
+                        dualLeadPicker
                         // A photo snapped DURING this walk/run is a valid post,
                         // not just a fresh camera shot — mirrors the post-run
                         // prompt's "Choose from this walk". Only offered when the
@@ -1207,16 +1357,31 @@ struct PostComposerView: View {
                 // Stamp the source on the SET, not on opening the camera: a
                 // cancelled camera must not relabel a library photo already on
                 // the canvas as a live capture and re-charge it the countdown.
-                MADCameraView(image: Binding(
-                    get: { vm.pickedImage },
-                    set: { image in
-                        vm.pickedImage = image
-                        if image != nil {
-                            vm.photoSource = .camera
-                            vm.errorMessage = nil
+                MADCameraView(
+                    image: Binding(
+                        get: { vm.pickedImage },
+                        set: { image in
+                            vm.pickedImage = image
+                            if image != nil {
+                                // A fresh single REPLACES whatever was on the
+                                // canvas, so the previous capture's other half
+                                // must go with it — otherwise the post ships a
+                                // flip to a photo of somewhere else entirely.
+                                vm.clearDual()
+                                vm.photoSource = .camera
+                                vm.errorMessage = nil
+                            }
                         }
+                    ),
+                    allowsDual: true,
+                    onDualCapture: { capture in
+                        vm.pickedImage = capture.primary
+                        vm.dualSecondary = capture.secondary
+                        vm.dualPrimaryWasFront = capture.primaryWasFront
+                        vm.photoSource = .camera
+                        vm.errorMessage = nil
                     }
-                ))
+                )
             }
             // A stale composite must never survive a trip back to the editor.
             .onChange(of: path) { _, newPath in
@@ -1402,6 +1567,77 @@ struct PostComposerView: View {
         showTermsGate = true
     }
 
+    // MARK: - FRONT & BACK
+
+    /// Which camera leads, as the choice it actually is.
+    ///
+    /// Tapping the inset already swaps, and the hint line says so — but that
+    /// is a GESTURE, and the arrangement is a DECISION the poster is making
+    /// about their own photo. A decision deserves a control that states the
+    /// current answer without being operated: this row says which camera is
+    /// big right now and puts the other one a single tap away, which is also
+    /// the only form in which "I want the selfie to be the big one" is
+    /// answerable by someone who never discovers the tap.
+    ///
+    /// Below the canvas rather than on it. The bottom of the photo already
+    /// holds the hint, the sticker is draggable anywhere, and a control that
+    /// changes what gets published should not be competing with either.
+    @ViewBuilder
+    private var dualLeadPicker: some View {
+        if vm.isDualPhoto {
+            HStack(spacing: 10) {
+                Text("BIG PHOTO")
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.45))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+
+                HStack(spacing: 4) {
+                    dualLeadChip(
+                        title: "Back", icon: "camera.fill", front: false)
+                    dualLeadChip(
+                        title: "Front", icon: "person.fill", front: true)
+                }
+                .padding(4)
+                .background(Capsule().fill(Color.white.opacity(0.08)))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 2)
+            .animation(.spring(response: 0.3, dampingFraction: 0.85), value: vm.dualLeadIsFront)
+        }
+    }
+
+    private func dualLeadChip(title: String, icon: String, front: Bool) -> some View {
+        let selected = vm.dualLeadIsFront == front
+        return Button {
+            guard !selected else { return }
+            MADHaptics.tap()
+            withAnimation(.easeInOut(duration: 0.22)) { vm.setDualLead(front: front) }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .black))
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.system(size: 12, weight: .black, design: .rounded))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .foregroundColor(selected ? .black : .white.opacity(0.7))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                Capsule().fill(selected ? Color.white : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title) camera as the big photo")
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
     // MARK: - Canvas
 
     private var canvasSection: some View {
@@ -1417,6 +1653,9 @@ struct PostComposerView: View {
                         // composer — the key to an Instagram-smooth feel.
                         PostCanvas(
                             image: image,
+                            secondary: vm.dualSecondary,
+                            dualCorner: vm.dualInsetCorner,
+                            dualDragOffset: dualDrag,
                             showSticker: false,
                             stickerPos: vm.stickerPos,
                             stickerScale: vm.stickerScale,
@@ -1433,6 +1672,38 @@ struct PostComposerView: View {
                                 pos: $vm.stickerPos,
                                 scale: $vm.stickerScale,
                                 rotation: $vm.stickerRotation
+                            )
+                        }
+                        // The swap, learned HERE where it is still editable:
+                        // the exact gesture the published card will offer, on
+                        // the exact rectangle, so by the time anyone meets it
+                        // on somebody else's photo they have already done it.
+                        //
+                        // ABOVE the sticker layer, which spans the whole
+                        // canvas: a sticker parked over the inset must not
+                        // swallow the one tap that corner is for, and the
+                        // sticker stays draggable everywhere else.
+                        if vm.isDualPhoto {
+                            DualInsetMover(
+                                canvas: CGSize(width: width, height: height),
+                                corner: vm.dualInsetCorner,
+                                onSwap: {
+                                    MADHaptics.tap()
+                                    withAnimation(.easeInOut(duration: 0.22)) {
+                                        vm.swapDualFrames()
+                                    }
+                                },
+                                // Live, unanimated: the inset has to sit
+                                // under the finger, and a spring on every
+                                // drag frame lags behind it.
+                                onDragChanged: { dualDrag = $0 },
+                                onDrop: { landed in
+                                    guard landed != vm.dualInsetCorner else { return }
+                                    MADHaptics.tap()
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
+                                        vm.dualInsetCorner = landed
+                                    }
+                                }
                             )
                         }
                     }
@@ -1480,7 +1751,17 @@ struct PostComposerView: View {
                         .disabled(showSavedToPhotos)
                     }
                     .overlay(alignment: .bottom) {
-                        if vm.stickerEnabled {
+                        if vm.isDualPhoto {
+                            // Outranks the sticker hint while it is showing:
+                            // dragging a sticker is a thing people already
+                            // expect from a photo editor, and the swap is not.
+                            Text(vm.dualHint)
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .foregroundColor(.white.opacity(0.75))
+                                .padding(.horizontal, 10).padding(.vertical, 4)
+                                .background(Capsule().fill(.black.opacity(0.45)))
+                                .padding(.bottom, 8)
+                        } else if vm.stickerEnabled {
                             Text("Drag · pinch · twist")
                                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                                 .foregroundColor(.white.opacity(0.65))
@@ -1740,7 +2021,19 @@ struct PostComposerView: View {
                 SnapGalleryView(
                     title: "Your snaps",
                     onUse: { entry in
-                        vm.pickedImage = entry.image
+                        // The ORIGINAL off disk — `entries()` decodes at a
+                        // thumbnail size so an uncapped walk can be listed,
+                        // and a post must not inherit that resolution.
+                        let full = MidRunPhotoStash.fullImage(for: entry)
+                        vm.pickedImage = full?.primary ?? entry.image
+                        // Restore the pair, or drop whatever was on the canvas
+                        // before — never inherit the previous shot's other
+                        // half, which would publish a flip to somewhere else.
+                        vm.clearDual()
+                        if let second = full?.secondary ?? entry.secondary {
+                            vm.dualSecondary = second
+                            vm.dualPrimaryWasFront = entry.primaryWasFront
+                        }
                         vm.photoSource = .library
                         vm.errorMessage = nil
                         showSnapGallery = false

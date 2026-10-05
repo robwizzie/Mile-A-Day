@@ -1,0 +1,1 @@
+ALTER TABLE "buddy_sessions" ADD COLUMN "merged_into" varchar(32);

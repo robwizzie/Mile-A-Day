@@ -199,12 +199,12 @@ struct ProfilePostsGridView: View {
             fullScreenDestination = .highlight(highlight)
         } label: {
             VStack(spacing: 6) {
-                AsyncImage(url: highlight.coverURL) { phase in
-                    switch phase {
-                    case .success(let image): image.resizable().scaledToFill()
-                    default: Color.white.opacity(0.06)
-                    }
-                }
+                CachedThumbnailImage(
+                    url: highlight.coverURL,
+                    pointSize: CGSize(width: 64, height: 64),
+                    placeholder: { Color.white.opacity(0.06) },
+                    failure: { Color.white.opacity(0.06) }
+                )
                 .frame(width: 64, height: 64)
                 .clipShape(Circle())
                 .overlay(
@@ -482,15 +482,12 @@ struct ProfilePostsGridView: View {
     private func storyCard(_ post: PostItem) -> some View {
         VStack(spacing: 6) {
             Button { openReader(.stories, post) } label: {
-                AsyncImage(url: post.mediaURL) { phase in
-                    switch phase {
-                    case .success(let image): image.resizable().scaledToFill()
-                    case .failure:
-                        ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) }
-                    default:
-                        ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
-                    }
-                }
+                CachedThumbnailImage(
+                    url: post.mediaURL,
+                    pointSize: CGSize(width: 108, height: 135),
+                    placeholder: { ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) } },
+                    failure: { ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) } }
+                )
                 .frame(width: 108, height: 135)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(
@@ -612,6 +609,7 @@ struct ProfilePostsGridView: View {
                 posts: $posts,
                 initialPostId: reader.postId,
                 onNeedMore: { Task { await loadMore() } },
+                leadPhotoUserId: userId,
                 // This list IS a profile grid, so a collab hidden from the
                 // viewer's grid has to leave it. Only on their OWN profile —
                 // someone else's grid isn't theirs to curate.
@@ -626,6 +624,7 @@ struct ProfilePostsGridView: View {
                 posts: $pinnedPosts,
                 initialPostId: reader.postId,
                 onNeedMore: {},
+                leadPhotoUserId: userId,
                 dropsCollabsHiddenFromProfile: isSelf
             )
         case .stories:
@@ -653,7 +652,7 @@ struct ProfilePostsGridView: View {
     private func thumbnail(_ post: PostItem) -> some View {
         // The real picture leads when the run has one; the workout card is only
         // the face of the post when no photo exists.
-        let url = post.storyPhotoURL ?? post.mediaURL
+        let url = post.gridLeadPhotoURL(forOwner: userId)
         return Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay(
@@ -671,16 +670,18 @@ struct ProfilePostsGridView: View {
                                 .font(.system(size: 20, weight: .bold))
                                 .foregroundColor(.white.opacity(0.9))
                         }
+                    } else if url == nil {
+                        // No picture — an auto card, drawn live from its walk
+                        // (it used to be a baked image; `AsyncImage(nil)` here
+                        // is a spinner forever).
+                        LiveCardThumbnail(post: post)
                     } else {
-                        AsyncImage(url: url) { phase in
-                            switch phase {
-                            case .success(let image): image.resizable().scaledToFill()
-                            case .failure:
-                                ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) }
-                            default:
-                                ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
-                            }
-                        }
+                        // Decoded at TILE size (measured), not the full upload.
+                        CachedThumbnailImage(
+                            url: url,
+                            placeholder: { ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) } },
+                            failure: { ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) } }
+                        )
                     }
                 }
             )
@@ -811,13 +812,20 @@ struct ProfilePostsGridView: View {
         isSelf && post.user_id == currentUserId
     }
 
-    /// Is this a collab the VIEWER is tagged in, on their own profile, from a
+    /// Is this a collab the VIEWER is credited on, on their own profile, from a
     /// server that knows about the grid split?
+    ///
+    /// Credited means EITHER representation, for the same reason `canHighlight`
+    /// above does: the legacy scalar `coauthor_user_id` holds one person, so on
+    /// a buddy walk of five it named the first participant and left the other
+    /// four with no control at all over a walk they took. `coauthor_on_profile`
+    /// still gates the whole thing — nil there means an older server that
+    /// doesn't offer the split, and a toggle it can't honour is worse than none.
     private func canCurateOnProfile(_ post: PostItem) -> Bool {
-        isSelf
-            && post.hasAcceptedCoauthor
-            && post.coauthor_user_id == currentUserId
-            && post.coauthor_on_profile != nil
+        guard isSelf, let me = currentUserId else { return false }
+        guard post.coauthor_on_profile != nil else { return false }
+        return (post.hasAcceptedCoauthor && post.coauthor_user_id == me)
+            || post.acceptedCoauthors.contains { $0.user_id == me }
     }
 
     @ViewBuilder

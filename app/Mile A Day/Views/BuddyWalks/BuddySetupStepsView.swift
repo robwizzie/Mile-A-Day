@@ -44,6 +44,10 @@ struct BuddySetupStepsView: View {
     @State private var repeatDays: Set<Int> = []
     /// The archive of walks already taken, from the "You've walked with" header.
     @State private var showHistory = false
+    /// A selected friend's already-open walk, offered before creating a
+    /// second one beside it.
+    @State private var pendingTwin: JoinableFriendSession?
+    @State private var joiningId: String?
 
     /// Last setup, restored on open.
     ///
@@ -54,7 +58,10 @@ struct BuddySetupStepsView: View {
     /// user still lands on the zero-config default (Just Together, walking).
     @AppStorage("buddyLastModeV1") private var lastModeRaw = BuddyMode.together.rawValue
     @AppStorage("buddyLastIsRunV1") private var lastIsRun = false
-    @AppStorage("buddyLastInviteesV1") private var lastInvitees = ""
+    // Invitees are deliberately NOT restored. They were, and "2 selected"
+    // then meant a regular near the top plus last week's new friend ticked
+    // way down the list — someone who wasn't there today, invited by
+    // accident. Recent partners are one tap away in "You've walked with".
     /// One-shot: restoring must not fight the user's taps on a later re-render.
     @State private var didRestore = false
 
@@ -144,10 +151,23 @@ struct BuddySetupStepsView: View {
             async let partners: Void = buddy.loadPartners()
             async let sessions: Void = buddy.refreshMySessions()
             _ = await (candidates, routines, partners, sessions)
-            // Re-run once the list has landed: a cold launch can open this
-            // before the prefetch finishes, and a remembered friend can only
-            // be re-selected once they're actually in the list.
-            restoreInvitees()
+            // Friends' walks starting right now — offered at the top so two
+            // people standing together end up in ONE walk.
+            await buddy.refreshJoinableFriendSessions()
+        }
+        .confirmationDialog(
+            pendingTwin.map { "\($0.hostDisplayName) already started a \($0.isRunning ? "run" : "walk")" } ?? "",
+            isPresented: Binding(get: { pendingTwin != nil }, set: { if !$0 { pendingTwin = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingTwin
+        ) { twin in
+            Button("Join \(twin.hostDisplayName)'s \(twin.isRunning ? "run" : "walk")") {
+                join(twin)
+            }
+            Button("Start my own anyway") { Task { await create() } }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Join theirs and you'll walk together in one group instead of two.")
         }
         .sheet(isPresented: $showHistory) {
             // "Walk with Sam again" from inside the setup flow means exactly
@@ -199,6 +219,7 @@ struct BuddySetupStepsView: View {
     private var stepContent: some View {
         switch step {
         case .who:
+            startingNowSection
             invitesSection
             partnersSection
             friendSection
@@ -393,6 +414,147 @@ struct BuddySetupStepsView: View {
             return "\(invite.mode.title) · \(number) \(unit) · \(activity)"
         }
         return "\(invite.mode.title) · \(activity)"
+    }
+
+    // MARK: - Starting now
+
+    /// Friends' walks open right now that this user isn't already invited to
+    /// (those show as invites below) — the Spotify-Jam door: join theirs
+    /// rather than starting a second walk a metre away.
+    private var startingNow: [JoinableFriendSession] {
+        let invited = Set(buddy.invites.map(\.id))
+        return buddy.joinableFriendSessions.filter {
+            !invited.contains($0.sessionId) && ($0.hostIsFriend ?? true)
+        }
+    }
+
+    @ViewBuilder
+    private var startingNowSection: some View {
+        if !startingNow.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                sectionTitle("Starting now")
+                VStack(spacing: 0) {
+                    ForEach(Array(startingNow.prefix(3).enumerated()), id: \.element.id) { index, open in
+                        if index > 0 { Divider().background(Color.white.opacity(0.12)) }
+                        startingNowRow(open)
+                    }
+                }
+                .background(panel())
+            }
+        }
+    }
+
+    private func startingNowRow(_ open: JoinableFriendSession) -> some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            AvatarView(name: open.hostDisplayName, imageURL: open.hostProfileImageUrl, size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(open.hostDisplayName)'s \(open.isRunning ? "run" : "walk")")
+                    .font(MADTheme.Typography.bodyBold)
+                    .foregroundStyle(Color.white)
+                    .lineLimit(1)
+                Text(open.status == .active
+                     ? "Out now · \(open.participantCount) in"
+                     : "Waiting to start · \(open.participantCount) in")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(Color.white.opacity(0.6))
+            }
+            Spacer(minLength: 0)
+            Button {
+                MADHaptics.action()
+                join(open)
+            } label: {
+                Group {
+                    if joiningId == open.sessionId {
+                        ProgressView().tint(WizardPalette.onAccent)
+                    } else {
+                        Text("Join")
+                    }
+                }
+                .font(MADTheme.Typography.smallBold)
+                .frame(width: 72, height: 36)
+                .background(Capsule().fill(WizardPalette.accent))
+                .foregroundStyle(WizardPalette.onAccent)
+            }
+            .buttonStyle(.plain)
+            .disabled(joiningId != nil)
+        }
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.vertical, MADTheme.Spacing.sm + 2)
+    }
+
+    private func join(_ open: JoinableFriendSession) {
+        guard joiningId == nil else { return }
+        joiningId = open.sessionId
+        Task {
+            do {
+                try await buddy.join(sessionId: open.sessionId)
+                if let joined = buddy.session { onCreated(joined) }
+            } catch {
+                buddy.errorMessage =
+                    (error as? LocalizedError)?.errorDescription ?? "Couldn't join that walk."
+            }
+            joiningId = nil
+        }
+    }
+
+    /// An open walk hosted by someone you've ticked — create would make a
+    /// second walk beside theirs.
+    private var twinForSelection: JoinableFriendSession? {
+        startingNow.first { selected.contains($0.hostUserId) }
+    }
+
+    // MARK: - Inviting tray
+
+    private var selectedPeople: [BuddyCandidate] {
+        buddy.candidates.filter { selected.contains($0.userId) }
+    }
+
+    /// "Aaron", "Aaron & Jess", "Aaron, Jess & 2 more" — names, not a count,
+    /// so the button says exactly who'll be invited.
+    private var selectedNamesText: String {
+        let names = selectedPeople.map(\.displayName)
+        switch names.count {
+        case 0: return "\(selected.count)"
+        case 1: return names[0]
+        case 2: return "\(names[0]) & \(names[1])"
+        default: return "\(names[0]), \(names[1]) & \(names.count - 2) more"
+        }
+    }
+
+    private var invitingTray: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Text("Inviting")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(Color.white.opacity(0.6))
+                ForEach(selectedPeople) { person in
+                    Button {
+                        MADHaptics.tap()
+                        withAnimation(MADTheme.Animation.quick) { _ = selected.remove(person.userId) }
+                    } label: {
+                        HStack(spacing: 6) {
+                            AvatarView(name: person.displayName, imageURL: person.profileImageUrl, size: 22)
+                            Text(person.displayName)
+                                .font(MADTheme.Typography.smallBold)
+                                .lineLimit(1)
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .heavy))
+                                .foregroundStyle(Color.white.opacity(0.6))
+                                .accessibilityHidden(true)
+                        }
+                        .foregroundStyle(Color.white)
+                        .padding(.leading, 3)
+                        .padding(.trailing, 10)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Color.white.opacity(0.14)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove \(person.displayName)")
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+        .frame(height: 30)
     }
 
     // MARK: - Partners
@@ -727,11 +889,7 @@ struct BuddySetupStepsView: View {
             HStack {
                 sectionTitle("Who's coming?")
                 Spacer()
-                if !selected.isEmpty {
-                    Text("\(selected.count) invited")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundStyle(Color.white.opacity(0.85))
-                }
+
             }
 
             if buddy.candidates.isEmpty {
@@ -813,6 +971,9 @@ struct BuddySetupStepsView: View {
     /// can't advance on a tap) and Create on the goal sub-step.
     private var footer: some View {
         WizardFooter {
+            // Everyone who'll be invited, always on screen — however far down
+            // the list they were ticked. Tap ✕ to drop one.
+            if !selected.isEmpty { invitingTray }
             WizardPrimaryButton(
                 title: primaryTitle,
                 icon: step == .who ? "arrow.right" : "figure.2",
@@ -821,6 +982,11 @@ struct BuddySetupStepsView: View {
                 MADHaptics.action()
                 if step == .who {
                     advance(to: .activity)
+                } else if let twin = twinForSelection {
+                    // Someone you're inviting already has a walk open —
+                    // the "we both pressed start" case, caught before it
+                    // happens.
+                    pendingTwin = twin
                 } else {
                     Task { await create() }
                 }
@@ -847,11 +1013,9 @@ struct BuddySetupStepsView: View {
     private var primaryTitle: String {
         if isCreating { return "Creating…" }
         if step == .who {
-            if selected.isEmpty { return "Next" }
-            return selected.count == 1 ? "Next with 1" : "Next with \(selected.count)"
+            return selected.isEmpty ? "Next" : "Next with \(selectedNamesText)"
         }
-        if selected.isEmpty { return "Create lobby" }
-        return selected.count == 1 ? "Create & invite 1" : "Create & invite \(selected.count)"
+        return selected.isEmpty ? "Create lobby" : "Create & invite \(selectedNamesText)"
     }
 
     // MARK: - Helpers
@@ -878,27 +1042,11 @@ struct BuddySetupStepsView: View {
             if saved.needsGoal { goal = saved.defaultGoal }
         }
         isRun = lastIsRun
-        restoreInvitees()
-    }
-
-    /// Re-select whoever you walked with last time — but ONLY if they're still
-    /// an eligible candidate. Someone who has since unfriended, opted out or
-    /// dropped off a buddy-capable build must not silently reappear in the
-    /// invite list, where the server would drop them anyway and the host would
-    /// never learn why.
-    private func restoreInvitees() {
-        guard selected.isEmpty, !lastInvitees.isEmpty, !buddy.candidates.isEmpty else {
-            return
-        }
-        let remembered = Set(lastInvitees.split(separator: ",").map(String.init))
-        let stillThere = Set(buddy.candidates.map(\.userId))
-        selected = remembered.intersection(stillThere)
     }
 
     private func rememberSetup() {
         lastModeRaw = mode.rawValue
         lastIsRun = isRun
-        lastInvitees = selected.sorted().joined(separator: ",")
     }
 
     private func create() async {

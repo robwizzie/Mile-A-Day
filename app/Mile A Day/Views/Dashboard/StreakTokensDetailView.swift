@@ -76,6 +76,110 @@ enum StreakTokenKind {
             return "One every 30 days — the countdown starts the day you spend one, so a brand-new account is already holding its first. Holding one is half of a save; a friend's spare mile is the other half."
         }
     }
+
+    /// WHO has to do something for this token to fire.
+    ///
+    /// The single most confusing thing about the set, by a distance: two of
+    /// them spend themselves and one cannot be spent alone, and until this
+    /// was stated the app only ever showed a meter — so a user holding three
+    /// tokens had no idea which of them they were supposed to *do* something
+    /// with. It's a badge rather than a sentence because it belongs on every
+    /// surface the token appears on, including the 100pt-wide dashboard tile.
+    var usage: TokenUsage {
+        switch self {
+        case .doubleDown: return .youRunIt
+        case .save: return .automatic
+        case .assist: return .withAFriend
+        }
+    }
+
+    /// The instruction, in the imperative where there is one to give.
+    var howToUse: String {
+        switch self {
+        case .doubleDown:
+            return "Nothing to tap. Miss a day, then run double your goal before the next midnight — we back-fill the missed day as soon as the miles sync."
+        case .save:
+            return "Nothing to tap and nothing to decide. Miss a day you don't run back, and this spends itself the next morning. We always tell you when it does."
+        case .assist:
+            return "The only one you choose. Tap “Ask a friend” when your streak is on the line, or hand someone a mile you ran past your own goal. It spends only once you've both said yes."
+        }
+    }
+
+    /// When, exactly — the question a meter can never answer.
+    var whenItFires: String {
+        switch self {
+        case .doubleDown: return "The day after a miss, the moment your second mile lands."
+        case .save: return "The morning after a miss you didn't run back."
+        case .assist: return "The moment the other person accepts."
+        }
+    }
+}
+
+/// Who acts for a token to be spent. Three tokens, three completely different
+/// answers — and the app used to state none of them.
+enum TokenUsage {
+    /// Spent for you. You are told, never asked.
+    case automatic
+    /// Yours to earn back by running; no button exists.
+    case youRunIt
+    /// Needs a second person, so there is something to tap.
+    case withAFriend
+
+    var label: String {
+        switch self {
+        case .automatic: return "AUTOMATIC"
+        case .youRunIt: return "YOU RUN IT"
+        case .withAFriend: return "YOU + A FRIEND"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .automatic: return "sparkles"
+        case .youRunIt: return "figure.run"
+        case .withAFriend: return "person.2.fill"
+        }
+    }
+
+    /// One line under the badge, for surfaces with room for it.
+    var summary: String {
+        switch self {
+        case .automatic: return "Spends itself when you need it."
+        case .youRunIt: return "Earn the day back by running."
+        case .withAFriend: return "Ask, or be asked. Both must agree."
+        }
+    }
+}
+
+/// The "who acts" badge. Deliberately monochrome-on-glass rather than tinted
+/// per token: it answers a question ABOUT the token, so tinting it the
+/// token's own colour would fold it back into the decoration it needs to
+/// stand apart from.
+struct TokenUsageBadge: View {
+    let usage: TokenUsage
+    var compact: Bool = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: usage.icon)
+                .font(.system(size: compact ? 7 : 9, weight: .black))
+                .accessibilityHidden(true)
+            Text(usage.label)
+                .font(.system(size: compact ? 8 : 10, weight: .black, design: .rounded))
+                .tracking(0.5)
+        }
+        .foregroundColor(.white.opacity(0.85))
+        .lineLimit(1)
+        // The dashboard tile is ~94pt of usable width and "YOU + A FRIEND"
+        // is the longest label, so the compact badge has to be allowed to
+        // shrink rather than push the three tiles out of the row.
+        .minimumScaleFactor(compact ? 0.6 : 0.8)
+        .padding(.horizontal, compact ? 5 : 8)
+        .padding(.vertical, compact ? 2.5 : 4)
+        .background(Capsule().fill(Color.white.opacity(0.10)))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
+        .accessibilityLabel("Used: \(usage.label.lowercased())")
+    }
 }
 
 // MARK: - Token medallion (the token itself — a minted coin, not an emoji)
@@ -296,6 +400,31 @@ struct StreakTokensCard: View {
                         )
                     }
 
+                    // A token holding TODAY leads the card: it is the one
+                    // thing on this screen that explains a streak number the
+                    // rest of the dashboard's mileage doesn't account for.
+                    if let today = payload.today_covered {
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: SavedDayStyle.icon(for: today.kind))
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.top, 1)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("\(SavedDayStyle.todayHeadline(for: today)) — \(SavedDayStyle.credit(for: today))")
+                                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                                Text("Run your mile anyway and the token comes back.")
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                    .foregroundColor(SavedDayStyle.tint.opacity(0.75))
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                            }
+                        }
+                        .foregroundColor(SavedDayStyle.tint)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
                     if payload.streak_at_risk {
                         HStack(spacing: 6) {
                             Image(systemName: "bolt.fill")
@@ -435,13 +564,25 @@ struct StreakTokensCard: View {
             TokenMedallion(kind: kind, held: held, progress: progress, size: 58)
                 // Earned tokens breathe gently — alive, not static.
                 .scaleEffect(held && pulse ? 1.014 : 1.0)
-                .animation(
-                    held
-                        ? .easeInOut(duration: 2.2).repeatForever(autoreverses: true)
-                        : .default,
-                    value: pulse
-                )
-                .onAppear { if !reduceMotion { pulse = true } }
+                // Started on the NEXT turn, in its own transaction, never as
+                // `.animation(repeatForever, value:)`: that form hands the
+                // endless repeat to every change in the same update, and the
+                // dashboard swaps this card in WHILE it's moving into place —
+                // so after a Fun → Modern → Fun switch the tokens bobbed up
+                // and down forever.
+                .onAppear {
+                    guard !reduceMotion else { return }
+                    DispatchQueue.main.async {
+                        withAnimation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true)) {
+                            pulse = true
+                        }
+                    }
+                }
+                .onDisappear {
+                    var reset = Transaction()
+                    reset.disablesAnimations = true
+                    withTransaction(reset) { pulse = false }
+                }
                 // Transient "+1 run day" chip when a fresh payload moved
                 // this meter forward — the bar visibly ticks, not just sits.
                 .overlay(alignment: .top) {
@@ -468,7 +609,12 @@ struct StreakTokensCard: View {
                 .foregroundColor(.white.opacity(held ? 0.95 : 0.6))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-            Text(tokenSubtitle(kind))
+            // "Who acts" instead of the old mood copy ("Get a boost when you
+            // need it most"), which said nothing three times. This is the
+            // question people actually had about a token they were holding.
+            TokenUsageBadge(usage: kind.usage, compact: true)
+                .opacity(held ? 1 : 0.65)
+            Text(kind.usage.summary)
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                 .foregroundColor(.white.opacity(held ? 0.70 : 0.46))
                 .multilineTextAlignment(.center)
@@ -491,14 +637,6 @@ struct StreakTokensCard: View {
         .frame(maxWidth: .infinity)
         .frame(minHeight: 190)
         .background(tokenTileBackground(kind: kind, held: held))
-    }
-
-    private func tokenSubtitle(_ kind: StreakTokenKind) -> String {
-        switch kind {
-        case .doubleDown: return "Protect your streak if you miss a day."
-        case .save: return "Save your streak when life happens."
-        case .assist: return "Get a boost when you need it most."
-        }
     }
 
     private func tokenTileBackground(kind: StreakTokenKind, held: Bool) -> some View {
@@ -524,6 +662,13 @@ struct StreakTokensDetailView: View {
     @ObservedObject var tokensState = StreakTokensState.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showPureFlameInfo = false
+    /// Token cards whose "How it works" is open (by `kind.raw`). Collapsed by
+    /// default: the badge and "when it fires" line answer the live question.
+    @State private var expandedTokens: Set<String> = []
+    /// "How tokens work" — the shared rules — collapsed by default; its
+    /// headline promise stays visible either way.
+    @State private var rulesExpanded = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The receipts: every day a token actually carried.
     ///
@@ -600,6 +745,13 @@ struct StreakTokensDetailView: View {
                             if payload.streak_at_risk {
                                 atRiskBanner(payload)
                             }
+                            // Today first, when a token is holding it: this
+                            // sheet is where someone lands after noticing a
+                            // streak that went up beside a mile they know
+                            // they haven't run.
+                            if let today = payload.today_covered {
+                                SavedTodayBanner(day: today, isSelf: true)
+                            }
 
                             tokenCard(
                                 kind: .doubleDown,
@@ -614,6 +766,7 @@ struct StreakTokensDetailView: View {
                             tokenCard(kind: .save, meter: payload.streak_save, unit: "run days")
                             tokenCard(kind: .assist, meter: payload.streak_assist, unit: "days")
 
+                            rulesCard
                             naturalCard(payload.natural_streak)
                             savedDaysCard
                         } else {
@@ -635,6 +788,109 @@ struct StreakTokensDetailView: View {
                 }
             }
             .task { await tokensState.refreshStatus() }
+        }
+    }
+
+    /// The three rules that apply to every token, which no per-token card
+    /// can own. The first one is the important one: a token is not a day off,
+    /// and running the day anyway costs you nothing — the server hands the
+    /// token straight back. Without that stated, a covered day reads as "well,
+    /// that's spent, might as well rest", which is the exact opposite of what
+    /// the feature is for.
+    private var rulesCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                MADHaptics.tap()
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+                    rulesExpanded.toggle()
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Text("How tokens work")
+                            .font(.system(size: 15, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .rotationEffect(.degrees(rulesExpanded ? 180 : 0))
+                            .accessibilityHidden(true)
+                    }
+                    // The one rule that must never hide behind a tap: a
+                    // token is not a day off.
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "arrow.uturn.backward.circle.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(SavedDayStyle.tint)
+                            .padding(.top, 1)
+                            .accessibilityHidden(true)
+                        Text("Run it anyway and the token comes back.")
+                            .font(.system(size: 13, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white.opacity(0.9))
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(rulesExpanded ? "Hides the details" : "Shows the rules every token follows")
+
+            if rulesExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("A token buys a day you missed. Go and run that day for real and we return the token — and, for an Assist, your friend's mile goes back to them too.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 21)
+                    rule(
+                        icon: "shield.fill",
+                        tint: SavedDayStyle.tint,
+                        title: "A saved day shows blue, not green",
+                        detail: "Everywhere a day appears — your week chart, your profile, a friend's — a day a token carried is blue and says which token did it. It is never drawn as a missed day."
+                    )
+                    rule(
+                        icon: "flame.fill",
+                        tint: Color(red: 1.0, green: 0.84, blue: 0.35),
+                        title: "One at a time, and only for a real gap",
+                        detail: "Tokens never bridge two missed days in a row, and a streak that used one rests its Pure Flame until your next untouched run."
+                    )
+                }
+                .transition(.opacity)
+            }
+        }
+        .padding(MADTheme.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+                )
+        )
+    }
+
+    private func rule(icon: String, tint: Color, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(tint)
+                .frame(width: 22)
+                .padding(.top, 1)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(detail)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -698,20 +954,98 @@ struct StreakTokensDetailView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("How to earn")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundColor(kind.tint)
-                Text(kind.howToEarn)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            // HOW IT'S USED comes before HOW TO EARN on purpose. Someone
+            // reading this sheet is almost always holding at least one token
+            // already (enrollment back-fills a year), so "what do I do with
+            // it" is the live question and "how do I get another" is the
+            // follow-up. The badge + "when it fires" line stay visible while
+            // collapsed — they ARE the answer; the prose is behind the tap.
+            tokenHowItWorks(kind: kind)
 
             TokenMeterBar(kind: kind, meter: meter, unit: unit)
         }
         .padding(MADTheme.Spacing.md)
         .background(detailTokenBackground(kind: kind, held: meter.held))
+    }
+
+    /// The collapsed "How it works" row: usage badge + when it fires, one
+    /// tap from the full instruction and how to earn another. Collapsed by
+    /// default — three tokens' worth of paragraphs was the wall of text.
+    private func tokenHowItWorks(kind: StreakTokenKind) -> some View {
+        let expanded = expandedTokens.contains(kind.raw)
+        return VStack(alignment: .leading, spacing: 8) {
+            Button {
+                MADHaptics.tap()
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+                    if expanded {
+                        expandedTokens.remove(kind.raw)
+                    } else {
+                        expandedTokens.insert(kind.raw)
+                    }
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text("How it's used")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(kind.tint)
+                        TokenUsageBadge(usage: kind.usage)
+                        Spacer(minLength: 4)
+                        Text(expanded ? "Less" : "How it works")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(.secondary.opacity(0.8))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .rotationEffect(.degrees(expanded ? 180 : 0))
+                            .accessibilityHidden(true)
+                    }
+                    HStack(alignment: .top, spacing: 5) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .padding(.top, 2)
+                            .accessibilityHidden(true)
+                        Text(kind.whenItFires)
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(.secondary.opacity(0.8))
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(expanded ? "Hides the details" : "Shows how to use and earn this token")
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(kind.howToUse)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.primary.opacity(0.75))
+                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("How to earn")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(kind.tint)
+                        Text(kind.howToEarn)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .transition(.opacity)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+        )
     }
 
     private func detailTokenBackground(kind: StreakTokenKind, held: Bool) -> some View {
@@ -751,17 +1085,15 @@ struct StreakTokensDetailView: View {
                             PureFlameBadge(size: 15)
                         }
                     }
+                    // Short on purpose — the sheet behind the tap holds the
+                    // full explainer.
                     Text(natural
-                         ? "Your streak is \(ProgressCalculator.formatProgress(1)) natural — every day earned on the day. The gold seal shows beside your name."
-                         : "A token kept this streak alive, so the badge is resting. It returns with your next untouched streak.")
+                         ? "Every day earned on the day — the gold seal is yours."
+                         : "Resting — a token kept this streak alive.")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("A status, not a token — nothing to spend. Tap to learn more.")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundColor(.secondary.opacity(0.7))
-                        .multilineTextAlignment(.leading)
                 }
 
                 Spacer(minLength: 0)
@@ -850,12 +1182,6 @@ private struct TokenMeterBar: View {
                                 .frame(width: 42)
                                 .rotationEffect(.degrees(12))
                                 .offset(x: shimmer ? fillWidth + 16 : -58)
-                                .animation(
-                                    .linear(duration: 2.2)
-                                        .repeatForever(autoreverses: false)
-                                        .delay(0.8),
-                                    value: shimmer
-                                )
                         }
                     }
                     .frame(width: fillWidth)
@@ -879,7 +1205,14 @@ private struct TokenMeterBar: View {
             withAnimation(.spring(response: 0.7, dampingFraction: 0.85).delay(0.15)) {
                 grown = true
             }
-            if fraction > 0.1 { shimmer = true }
+            // Next turn, own transaction — see the medallion's pulse.
+            if fraction > 0.1 {
+                DispatchQueue.main.async {
+                    withAnimation(.linear(duration: 2.2).repeatForever(autoreverses: false).delay(0.8)) {
+                        shimmer = true
+                    }
+                }
+            }
         }
     }
 

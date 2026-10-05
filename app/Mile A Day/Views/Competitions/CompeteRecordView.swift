@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The "Record" segment — your competition identity.
+/// The "History" segment — your competition identity. (The type keeps the
+/// Record name: it is what the backend calls the payload it serves.)
 ///
 /// Wins and losses used to be invisible: `TrophyCaseView` counted medals and a
 /// win rate, but only behind a small gold pill that appeared once you'd already
@@ -126,7 +127,7 @@ struct CompeteRecordView: View {
                     .fill(Color.white.opacity(0.04))
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+                            .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
 
@@ -169,7 +170,7 @@ struct CompeteRecordView: View {
                     .fill(Color.white.opacity(0.04))
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+                            .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
         }
@@ -201,7 +202,7 @@ struct CompeteRecordView: View {
 
     private var history: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            CompeteSectionHeader(title: "History", systemImage: "clock.arrow.circlepath", accent: .white.opacity(0.6))
+            CompeteSectionHeader(title: "Past competitions", accent: .white.opacity(0.6))
 
             VStack(spacing: 8) {
                 ForEach(finished, id: \.competition_id) { competition in

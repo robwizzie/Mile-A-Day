@@ -57,6 +57,15 @@ struct StreakFeaturesPayload: Codable {
     let streak_save: StreakTokenMeter
     let streak_assist: StreakTokenMeter
     let frozen_dates: [CoveredDate]
+    /// TODAY, when a token is already carrying it.
+    ///
+    /// `frozen_dates` contains this row too, but finding it means re-deriving
+    /// the user's local date on every today-scoped surface — and a device in
+    /// a different zone from the one the server files `local_date` under gets
+    /// that wrong. The server resolves it once; every screen reads one field.
+    /// Optional: absent on servers predating it, which degrades to the old
+    /// behaviour rather than failing the whole stats decode.
+    let today_covered: CoveredDate?
     let natural_streak: Bool
     let streak_at_risk: Bool
     /// The user's OWN day a friend's donated mile could cover — only sent when
@@ -231,6 +240,7 @@ struct StreakFeaturesStatus: Codable {
     let streak_save: StreakTokenMeter?
     let streak_assist: StreakTokenMeter?
     let frozen_dates: [CoveredDate]?
+    let today_covered: CoveredDate?
     let natural_streak: Bool?
     let streak_at_risk: Bool?
     let my_savable_day: SavableDay?

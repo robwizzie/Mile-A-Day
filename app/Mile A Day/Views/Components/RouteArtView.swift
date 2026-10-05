@@ -79,19 +79,20 @@ private struct DotGridTexture: View {
         Canvas { context, size in
             let pitch: CGFloat = 14
             let radius: CGFloat = 1
+            // ONE path, one fill: the dots never overlap, so this is the same
+            // pixels as ~800 separate fills at a fraction of the cost.
+            var dots = Path()
             var y: CGFloat = pitch / 2
             while y < size.height {
                 var x: CGFloat = pitch / 2
                 while x < size.width {
-                    context.fill(
-                        Path(ellipseIn: CGRect(x: x - radius, y: y - radius,
-                                               width: radius * 2, height: radius * 2)),
-                        with: .color(.white.opacity(0.05))
-                    )
+                    dots.addEllipse(in: CGRect(x: x - radius, y: y - radius,
+                                               width: radius * 2, height: radius * 2))
                     x += pitch
                 }
                 y += pitch
             }
+            context.fill(dots, with: .color(.white.opacity(0.05)))
         }
         .allowsHitTesting(false)
     }
@@ -151,6 +152,11 @@ struct GhostMapUnderlay: View {
 struct RouteArtView: View {
     let coordinates: [CLLocationCoordinate2D]
     let routeColor: Color
+    /// The author's route clock (`workout_routes.times`), when there is one.
+    /// Only the clock can tell a straight mile of road from the drive between
+    /// two halves of a paused walk — see `RouteGaps`. Absent ⇒ drawn exactly
+    /// as before.
+    var pointTimes: [Double]? = nil
     /// Everyone else on this walk who shared a route — same contract as
     /// `WorkoutRouteMapView.companionRoutes` (colours assigned by the caller
     /// via `CrewRoutePalette` so the legend can't disagree with the lines).
@@ -168,6 +174,16 @@ struct RouteArtView: View {
     /// others dim — `"author"` for the poster, else a `CompanionRoute.id`.
     /// nil = everyone equal. Driven by the card's legend chips.
     var highlightedRouteId: String? = nil
+    /// The server served the author's line trimmed for route privacy (hide
+    /// start & end — the viewer isn't its owner): it fades in and out and
+    /// draws no pins. Companions carry their own `trimmedForPrivacy`.
+    /// Defaulted, so an unwired caller draws exactly as before.
+    var routeTrimmed: Bool = false
+    /// The OWNER's own full line: the stretches friends never see, dimmed.
+    var privacyHint: RoutePrivacyHint? = nil
+    /// A Fun author's Flamey (`FeedCardFlamey.look`), running the route beside
+    /// their badge. nil = the plain (Modern) card — every non-feed caller.
+    var flamey: FlameyLook? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -188,11 +204,20 @@ struct RouteArtView: View {
     /// `.task` through `FeedImageCache`; until (or unless) a photo lands the
     /// badge shows initials.
     @State private var avatarImages: [String: UIImage] = [:]
+    /// The last layout and what it was built from — projecting every point
+    /// (haversine, gaps, laning) on every body pass was the card's main cost.
+    @State private var layoutMemo = RouteArtLayoutMemo()
+
+    /// Routes this session has already drawn on, by route + size. A recycled
+    /// feed cell resets every @State, so without this each scroll-back replayed
+    /// the whole draw-on (and its blurred glow) — it lands finished instead.
+    private static var finishedDraws: Set<String> = []
 
     var body: some View {
         GeometryReader { geo in
-            let layout = RouteArtLayout(
+            let layout = layoutMemo.layout(
                 coordinates: coordinates,
+                pointTimes: pointTimes,
                 companionRoutes: companionRoutes,
                 size: geo.size,
                 snapshot: snapshot
@@ -223,10 +248,15 @@ struct RouteArtView: View {
                     showEndMarkers: showEndMarkers,
                     ridersVisible: ridersVisible,
                     animationsEnabled: !reduceMotion,
-                    highlightedRouteId: highlightedRouteId
+                    highlightedRouteId: highlightedRouteId,
+                    routeTrimmed: routeTrimmed,
+                    privacyHint: privacyHint,
+                    flamey: flamey,
+                    stillFrame: reduceMotion
                 )
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: highlightedRouteId)
             }
+            .onAppear { landIfAlreadyDrawn(size: renderSize(geo.size)) }
             // Keyed on whole-point size (same rule as the map view): scroll
             // jitter must not re-snapshot, a real resize must.
             .task(id: renderSize(geo.size)) {
@@ -242,7 +272,7 @@ struct RouteArtView: View {
                 // The draw waits for the underlay attempt to resolve either
                 // way — animating on the fit projection and then re-projecting
                 // onto streets would visibly jump the line.
-                await animateIn()
+                await animateIn(size: size)
             }
             .task(id: avatarKeySignature) { await loadAvatars() }
         }
@@ -256,21 +286,21 @@ struct RouteArtView: View {
     /// wait happens in the caller task above). Every beat's reasoning lives in
     /// the comments there: the start pin in its OWN update, `trimProgress`
     /// set OUTSIDE `withAnimation`, the comet faded then removed.
-    private func animateIn() async {
+    private func animateIn(size: CGSize) async {
         guard !hasAnimated else { return }
         hasAnimated = true
-        if reduceMotion {
+        let key = drawKey(size)
+        if reduceMotion || Self.finishedDraws.contains(key) {
             // Land the finished frame with no draw-on. The stage's
-            // `.animation(_:value:)` modifiers are nil'd below, so these
-            // writes don't animate either.
-            showStartMarkers = true
-            ridersVisible = true
-            trimProgress = 1.0
-            showEndMarkers = true
-            cometOpacity = 0
-            cometVisible = false
+            // `.animation(_:value:)` modifiers are nil'd under Reduce Motion,
+            // and the transaction covers an already-drawn route.
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            withTransaction(instant) { landFinished() }
+            Self.finishedDraws.insert(key)
             return
         }
+        defer { Self.finishedDraws.insert(key) }
         try? await Task.sleep(for: .milliseconds(300))
         withAnimation(.easeOut(duration: 0.3)) {
             showStartMarkers = true
@@ -287,6 +317,40 @@ struct RouteArtView: View {
         }
         try? await Task.sleep(for: .milliseconds(500))
         cometVisible = false
+    }
+
+    private func landFinished() {
+        showStartMarkers = true
+        ridersVisible = true
+        trimProgress = 1.0
+        showEndMarkers = true
+        cometOpacity = 0
+        cometVisible = false
+    }
+
+    private func drawKey(_ size: CGSize) -> String {
+        RouteMapSnapshot.signature(
+            coordinates: coordinates + companionRoutes.flatMap(\.coordinates), size: size)
+    }
+
+    /// A route already drawn this session whose underlay is still cached
+    /// lands finished BEFORE its first frame, on the snapshot's projection —
+    /// so a scroll-back shows the card exactly as it was left. (No cached
+    /// underlay ⇒ the task resolves it, then `animateIn` lands it instantly.)
+    private func landIfAlreadyDrawn(size: CGSize) {
+        guard !hasAnimated, size.width > 1, size.height > 1,
+              Self.finishedDraws.contains(drawKey(size)),
+              let cached = RouteMapSnapshot.cached(
+                coordinates: coordinates + companionRoutes.flatMap(\.coordinates), size: size)
+        else { return }
+        hasAnimated = true
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) {
+            snapshot = cached
+            landFinished()
+        }
+        onSnapshot?(cached)
     }
 
     private var allAvatars: [RouteArtAvatar] {
@@ -314,6 +378,7 @@ struct RouteArtView: View {
     static func still(
         coordinates: [CLLocationCoordinate2D],
         routeColor: Color,
+        pointTimes: [Double]? = nil,
         companionRoutes: [CompanionRoute] = [],
         authorAvatar: RouteArtAvatar? = nil,
         companionAvatars: [String: RouteArtAvatar] = [:],
@@ -322,10 +387,14 @@ struct RouteArtView: View {
         underlay: RouteMapSnapshot? = nil,
         paletteDate: Date? = nil,
         highlightedRouteId: String? = nil,
+        routeTrimmed: Bool = false,
+        privacyHint: RoutePrivacyHint? = nil,
+        flamey: FlameyLook? = nil,
         size: CGSize
     ) -> some View {
         let layout = RouteArtLayout(
             coordinates: coordinates,
+            pointTimes: pointTimes,
             companionRoutes: companionRoutes,
             size: size,
             snapshot: underlay
@@ -352,7 +421,11 @@ struct RouteArtView: View {
                 showStartMarkers: true,
                 showEndMarkers: true,
                 ridersVisible: true,
-                highlightedRouteId: highlightedRouteId
+                highlightedRouteId: highlightedRouteId,
+                routeTrimmed: routeTrimmed,
+                privacyHint: privacyHint,
+                flamey: flamey,
+                stillFrame: true
             )
         }
         .frame(width: size.width, height: size.height)
@@ -373,6 +446,9 @@ struct RouteArtView: View {
         underlay: RouteMapSnapshot? = nil,
         paletteDate: Date? = nil,
         highlightedRouteId: String? = nil,
+        routeTrimmed: Bool = false,
+        privacyHint: RoutePrivacyHint? = nil,
+        flamey: FlameyLook? = nil,
         size: CGSize,
         @ViewBuilder overlay: () -> Overlay
     ) -> UIImage? {
@@ -396,6 +472,9 @@ struct RouteArtView: View {
                 underlay: underlay,
                 paletteDate: paletteDate,
                 highlightedRouteId: highlightedRouteId,
+                routeTrimmed: routeTrimmed,
+                privacyHint: privacyHint,
+                flamey: flamey,
                 size: size
             )
             overlay()
@@ -423,9 +502,19 @@ private struct RouteArtLayout {
     /// lines. Riders and end dots follow these same points, never the raw
     /// projection, so a badge sits on the line it belongs to.
     let companionPoints: [String: [CGPoint]]
+    /// Per line, the steps that are NOT walked ground (`RouteGaps`) — the
+    /// author's under `authorId`, everyone else's under their own id.
+    let breaksById: [String: Set<Int>]
+    /// The canvas the projection fills — lets the stage keep a rider's
+    /// companion on the side of the line that has room.
+    let size: CGSize
 
-    init(coordinates: [CLLocationCoordinate2D], companionRoutes: [CompanionRoute],
+    static let authorId = "author"
+
+    init(coordinates: [CLLocationCoordinate2D], pointTimes: [Double]?,
+         companionRoutes: [CompanionRoute],
          size: CGSize, snapshot: RouteMapSnapshot?) {
+        self.size = size
         // Framing covers EVERY trace — same rule as the map view's region:
         // framing on the author alone runs a buddy off the edge. (The
         // snapshot was generated over the same combined list.)
@@ -438,8 +527,12 @@ private struct RouteArtLayout {
             projector = projection.point(for:)
         }
         project = projector
+        var breaks: [String: Set<Int>] = [:]
+        let authorBreaks = RouteGaps.breakIndices(coordinates: coordinates, times: pointTimes)
+        breaks[Self.authorId] = authorBreaks
         if coordinates.count >= 2 {
-            let metrics = RouteArtMetrics(coordinates: coordinates, project: projector)
+            let metrics = RouteArtMetrics(coordinates: coordinates, project: projector,
+                                          breaks: authorBreaks)
             authorMetrics = metrics.isDrawable ? metrics : nil
         } else {
             // A crew card whose author walked indoors (or shares no maps)
@@ -453,15 +546,69 @@ private struct RouteArtLayout {
         let laneUnit = max(3, size.width / 72)
         for (index, companion) in companionRoutes.enumerated()
         where companion.coordinates.count >= 2 {
-            let raw = RouteArtMetrics(coordinates: companion.coordinates, project: projector)
+            let theirBreaks = RouteGaps.breakIndices(
+                coordinates: companion.coordinates, times: companion.pointTimes)
+            breaks[companion.id] = theirBreaks
+            let raw = RouteArtMetrics(coordinates: companion.coordinates, project: projector,
+                                      breaks: theirBreaks)
             guard raw.isDrawable else { continue }
+            // Laning shifts every point sideways and drops none, so the break
+            // indices carry over to the laned copy unchanged.
             let laned = RouteLaneOffset.offset(
                 raw.points, by: RouteLaneOffset.lane(index: index, unit: laneUnit))
-            byId[companion.id] = RouteArtMetrics(points: laned)
+            byId[companion.id] = RouteArtMetrics(points: laned, breaks: theirBreaks)
             pointsById[companion.id] = laned
         }
         companionMetrics = byId
         companionPoints = pointsById
+        breaksById = breaks
+    }
+}
+
+/// Holds the live view's last `RouteArtLayout` and rebuilds it only when its
+/// inputs change. A class in @State so the body can refresh it in place.
+/// Coordinates are compared by count + a coarse sample (the snapshot cache's
+/// rule), not point by point.
+private final class RouteArtLayoutMemo {
+    private struct Key: Equatable {
+        var size: CGSize
+        var snapshotImage: ObjectIdentifier?
+        var companionIds: [String]
+        var sample: [Double]
+    }
+    private var key: Key?
+    private var cached: RouteArtLayout?
+
+    func layout(coordinates: [CLLocationCoordinate2D], pointTimes: [Double]?,
+                companionRoutes: [CompanionRoute],
+                size: CGSize, snapshot: RouteMapSnapshot?) -> RouteArtLayout {
+        var sample: [Double] = [Double(pointTimes?.count ?? -1), pointTimes?.last ?? -1]
+        Self.append(coordinates, to: &sample)
+        for companion in companionRoutes {
+            sample += [Double(companion.pointTimes?.count ?? -1), companion.pointTimes?.last ?? -1]
+            Self.append(companion.coordinates, to: &sample)
+        }
+        let k = Key(size: size,
+                    snapshotImage: snapshot.map { ObjectIdentifier($0.image) },
+                    companionIds: companionRoutes.map(\.id),
+                    sample: sample)
+        if let cached, k == key { return cached }
+        let made = RouteArtLayout(coordinates: coordinates, pointTimes: pointTimes,
+                                  companionRoutes: companionRoutes, size: size, snapshot: snapshot)
+        key = k
+        cached = made
+        return made
+    }
+
+    private static func append(_ coordinates: [CLLocationCoordinate2D], to k: inout [Double]) {
+        k.append(Double(coordinates.count))
+        let stride = max(1, coordinates.count / 8)
+        var i = 0
+        while i < coordinates.count {
+            k += [coordinates[i].latitude, coordinates[i].longitude]
+            i += stride
+        }
+        if let last = coordinates.last { k += [last.latitude, last.longitude] }
     }
 }
 
@@ -491,8 +638,15 @@ private struct RouteArtStage: View {
     var animationsEnabled: Bool = true
     /// See `RouteArtView.highlightedRouteId`.
     var highlightedRouteId: String? = nil
+    /// See `RouteArtView.routeTrimmed` / `privacyHint`.
+    var routeTrimmed: Bool = false
+    var privacyHint: RoutePrivacyHint? = nil
+    /// See `RouteArtView.flamey`.
+    var flamey: FlameyLook? = nil
+    /// A baked or Reduce Motion frame — Flamey stands still.
+    var stillFrame: Bool = false
 
-    private static let authorId = "author"
+    private static let authorId = RouteArtLayout.authorId
 
     private func lineAnimation(_ index: Int) -> Animation? {
         animationsEnabled ? RouteDrawTiming.lineAnimation(index: index) : nil
@@ -522,7 +676,7 @@ private struct RouteArtStage: View {
                 }
             }
 
-            if layout.authorMetrics != nil {
+            if let authorMetrics = layout.authorMetrics {
                 RouteOverlay(
                     coordinates: coordinates,
                     project: layout.project,
@@ -530,7 +684,13 @@ private struct RouteArtStage: View {
                     trimProgress: trimProgress,
                     cometOpacity: cometOpacity,
                     showStartMarker: showStartMarkers,
-                    showEndMarker: showEndMarkers && authorAvatar == nil
+                    showEndMarker: showEndMarkers && authorAvatar == nil,
+                    // The metrics already hold `coordinates.map(project)` —
+                    // the same points, not projected a second time.
+                    overridePoints: authorMetrics.points,
+                    breaks: layout.breaksById[Self.authorId] ?? [],
+                    fadesEnds: routeTrimmed,
+                    privacyKept: privacyHint?.kept
                 )
                 .opacity(emphasis(Self.authorId))
                 .animation(lineAnimation(0), value: trimProgress)
@@ -562,6 +722,19 @@ private struct RouteArtStage: View {
                         .opacity(emphasis(companion.id))
                 }
             }
+            // A Fun author's Flamey runs beside their badge — same effect,
+            // same animation, so he is welded to the tip exactly like it.
+            // He keeps to the side of the line with room at the finish.
+            if let flamey, let metrics = layout.authorMetrics {
+                let end = metrics.point(atFraction: 1)
+                let side: CGFloat = end.x < layout.size.width * 0.3 ? 1 : -1
+                RouteFlameyRunner(look: flamey, finished: showEndMarkers, still: stillFrame,
+                                  size: max(26, layout.size.width / 12))
+                    .offset(x: side * max(22, layout.size.width / 16), y: -6)
+                    .modifier(RouteRiderEffect(progress: trimProgress, metrics: metrics))
+                    .animation(lineAnimation(0), value: trimProgress)
+                    .opacity(ridersVisible ? emphasis(Self.authorId) : 0)
+            }
             if let authorAvatar, let metrics = layout.authorMetrics {
                 riderBadge(authorAvatar, metrics: metrics, color: routeColor,
                            size: 26, animationIndex: 0)
@@ -581,7 +754,9 @@ private struct RouteArtStage: View {
                 cometOpacity: cometOpacity,
                 showStartMarker: false,
                 showEndMarker: showEndMarkers && rider(for: companion) == nil,
-                overridePoints: points
+                overridePoints: points,
+                breaks: layout.breaksById[companion.id] ?? [],
+                fadesEnds: companion.trimmedForPrivacy
             )
             .opacity(emphasis(companion.id))
             .animation(lineAnimation(index + 1), value: trimProgress)

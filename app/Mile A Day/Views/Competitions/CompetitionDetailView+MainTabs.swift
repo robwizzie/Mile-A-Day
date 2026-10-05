@@ -279,42 +279,47 @@ extension CompetitionDetailView {
     }
 
     // MARK: - Tab Selector
+
+    /// An underline tab bar, not a segmented pill tray.
+    ///
+    /// These three are PAGES of one screen, and an inset pill tray reads as a
+    /// filter on the card under it — the icons made it busier still, three more
+    /// glyphs above a board that is already carrying medals and avatars. An
+    /// underline is the app's own idiom for sections of a screen (`ProfileTabBar`).
     var mainTabSelector: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 0) {
             ForEach(CompetitionMainTab.allCases) { tab in
+                let isOn = selectedMainTab == tab
                 Button {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         selectedMainTab = tab
                     }
                     MADHaptics.tap()
                 } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 11, weight: .heavy))
+                    VStack(spacing: 7) {
                         Text(tab.label)
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundColor(isOn ? CompeteDesign.ink : CompeteDesign.inkFaint)
+                            .lineLimit(1)
+
+                        Rectangle()
+                            .fill(isOn ? CompeteDesign.accent(competition.type) : Color.clear)
+                            .frame(height: 2)
                     }
-                    .foregroundColor(selectedMainTab == tab ? .white : .white.opacity(0.5))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
                     .frame(maxWidth: .infinity)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(selectedMainTab == tab ? Color.white.opacity(0.12) : Color.clear)
-                    )
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(4)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                )
-        )
+        // BEHIND the tabs, not over them: an overlay rule draws on top of the
+        // selected tab's 2pt underline and shaves it to look 1pt.
+        .background(alignment: .bottom) {
+            Rectangle()
+                .fill(CompeteDesign.rowRule)
+                .frame(height: 1)
+                .accessibilityHidden(true)
+        }
     }
 
     // MARK: - Today's Race Tab Content
@@ -396,8 +401,10 @@ extension CompetitionDetailView {
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             Text("Today's Status")
-                .font(MADTheme.Typography.title3)
-                .foregroundColor(.white)
+                .font(CompeteDesign.eyebrow)
+                .tracking(CompeteDesign.eyebrowTracking)
+                .textCase(.uppercase)
+                .foregroundColor(CompeteDesign.inkFaint)
                 .padding(.horizontal, MADTheme.Spacing.sm)
 
             VStack(spacing: MADTheme.Spacing.sm) {
@@ -463,17 +470,10 @@ extension CompetitionDetailView {
             .padding(MADTheme.Spacing.lg)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(
-                                LinearGradient(
-                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) } + [Color.clear],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
+                            .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
         }

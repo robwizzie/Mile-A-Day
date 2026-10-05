@@ -110,8 +110,10 @@ struct CompetitionLobbyTeamsSection: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Text("Teams")
-                    .font(MADTheme.Typography.title3)
-                    .foregroundColor(.white)
+                    .font(CompeteDesign.eyebrow)
+                    .tracking(CompeteDesign.eyebrowTracking)
+                    .textCase(.uppercase)
+                    .foregroundColor(CompeteDesign.inkFaint)
                 Spacer()
                 if isWorking { ProgressView().tint(.white).scaleEffect(0.8) }
             }
@@ -143,10 +145,10 @@ struct CompetitionLobbyTeamsSection: View {
             .padding(MADTheme.Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            .stroke(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
         }

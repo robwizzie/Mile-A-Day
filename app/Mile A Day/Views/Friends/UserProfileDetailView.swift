@@ -15,10 +15,16 @@ struct UserProfileDetailView: View {
     @ObservedObject private var closeFriends = CloseFriendsService.shared
     @Environment(\.dismiss) private var dismiss
 
-    // Close-friends star: one-time explainer the first time someone adds a
-    // close friend, so the privacy model ("they're never told") is clear.
-    @AppStorage("hasSeenCloseFriendHint") private var hasSeenCloseFriendHint = false
+    // Close-friend switch (in the ••• menu, whose item subtitle carries the
+    // "they're never told" explanation that used to be a one-time caption).
     @State private var closeFriendActionInProgress = false
+    @State private var showUnfriendConfirm = false
+    /// The friend's rescue state, fetched once here so the Save Streak chip
+    /// can render ONLY when there is something to do (see `saveStreakChip`).
+    @State private var rescueStatus: FriendRescueStatus?
+    /// The viewer's dashboard style — half of FriendFlameyCard's own
+    /// visibility rule, mirrored so the Nudge pill can step aside for it.
+    @AppStorage(DashboardStylePreference.key) private var viewerDashboardStyle = DashboardStyle.modern.rawValue
 
     @State private var userStats: UserStats?
     /// Today's miles off the stats payload, for the goal ring. Held beside
@@ -39,11 +45,32 @@ struct UserProfileDetailView: View {
     /// than on `userStats` because that is a locally-built view model, not the
     /// decoded response.
     @State private var friendCoveredDays: [CoveredDate]?
+
+    /// A token holding THEIR day today.
+    ///
+    /// Two sources, in that order: the nudge status (batched, serves the
+    /// friend's own local day resolved server-side) and, as a fallback, the
+    /// covered-day list from their stats keyed on the viewer's calendar. The
+    /// second is only right when the two of them share a day — which is the
+    /// common case, and better than drawing an untouched ring over a streak
+    /// that just went up. Suppressed once their mile is genuinely in.
+    private var friendSavedToday: CoveredDate? {
+        // Either completion signal settles it — the two arrive from different
+        // fetches and can disagree for a second, and a covered chip drawn
+        // over a finished day is the one direction that reads as a bug.
+        guard userStats?.hasCompletedGoalToday != true,
+              nudgeStatus?.has_completed_mile != true
+        else { return nil }
+        if let covered = nudgeStatus?.today_covered { return covered }
+        return CoveredDateIndex(friendCoveredDays).today
+    }
     @State private var isLoadingStats = false
     @State private var isPrivate = false
     @State private var actionInProgress = false
-    @State private var workoutLimit = 10
-    @State private var isLoadingMoreWorkouts = false
+    /// How many workouts the profile fetches; the Activity tab previews
+    /// `workoutPreviewCount` of them and "See all" pages the rest.
+    private let workoutLimit = 10
+    private let workoutPreviewCount = 3
     @State private var hasLoadedInitial = false
     @State private var selectedWorkout: FriendWorkout?
     @State private var friendTodayChallenge: RemoteChallengeService.FriendTodayDTO?
@@ -61,6 +88,8 @@ struct UserProfileDetailView: View {
     @State private var nudgeStatus: NudgeStatusResponse?
     @State private var isNudging = false
     @State private var nudgeFeedback: NudgeFeedback?
+    /// A Flamey poke got 403 flamey_unavailable — no Flamey this visit.
+    @State private var flameyUnavailable = false
 
     // Compete-together sheet — opens CreateCompetitionView with this friend
     // pre-selected. Sheet state lives here so the CTA can present the
@@ -74,10 +103,6 @@ struct UserProfileDetailView: View {
 
     enum FriendProfileTab: Hashable {
         case activity, posts, stats, badges
-    }
-
-    private var canLoadMore: Bool {
-        hasLoadedInitial && friendWorkouts.count >= workoutLimit
     }
 
     var body: some View {
@@ -108,14 +133,11 @@ struct UserProfileDetailView: View {
                         // Streak · Miles · Friends. Friends is tappable to browse.
                         profileStatTiles
 
-                        // Friendship state + close-friend star on one row, then
-                        // the things you can DO for a friend (save streak,
-                        // nudge, compete) on the next.
+                        // ONE row of things to do: [Nudge] [Compete] [•••] for a
+                        // friend (friendship + close friend live in the menu),
+                        // the Add / Accept / Requested pill for anyone else.
                         if !isCurrentUser() {
                             relationshipRow
-                        }
-                        if !isCurrentUser(), friendService.isFriend(user) {
-                            actionRow
                         }
 
                         if isPrivate {
@@ -218,8 +240,20 @@ struct UserProfileDetailView: View {
             // feed) hasn't loaded its friends list yet. Running them in
             // parallel made the gate misread friends as strangers, so today's
             // distance never loaded.
-            await friendService.refreshAllData()
-            await loadNudgeStatus()
+            //
+            // Only the three lists the relationship gates read — not
+            // refreshAllData, whose trailing nudge-status sweep re-fetched every
+            // friend's day and re-rendered the friends list under this screen
+            // for a status this screen loads for one person below.
+            let service = friendService
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { try? await service.loadFriends() }
+                group.addTask { try? await service.loadFriendRequests() }
+                group.addTask { try? await service.loadSentRequests() }
+            }
+            async let nudge: Void = loadNudgeStatus()
+            async let rescue: Void = loadRescueStatus()
+            _ = await (nudge, rescue)
         }
         .task {
             await closeFriends.loadIfNeeded()
@@ -232,35 +266,24 @@ struct UserProfileDetailView: View {
         }
     }
 
-    // MARK: - Relationship pills
+    // MARK: - Relationship row
 
-    /// Friendship state and the close-friend switch as two EQUAL pills — the
-    /// same 12pt / 14×9 metric as Nudge and Compete underneath, so the four
-    /// read as one 2×2 set instead of a wide green lozenge next to a lone star.
+    /// A friend gets the action row; anyone else gets the one pill that
+    /// moves the friendship forward (Add / Accept / Requested).
     @ViewBuilder
     private var relationshipRow: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                friendStatusPill
-                if friendService.isFriend(user) {
-                    closeFriendPill
-                }
-            }
-            if friendService.isFriend(user), !hasSeenCloseFriendHint {
-                Text("Close friends can get notifications others don't. They're never told.")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.45))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
-            }
+        if friendService.isFriend(user) {
+            actionRow
+        } else {
+            friendStatusPill
         }
     }
 
+    /// Only ever called for a NON-friend — a friend's status lives in the
+    /// ••• menu (`moreMenu`), not as a disabled "Friends" pill.
     @ViewBuilder
     private var friendStatusPill: some View {
-        if friendService.isFriend(user) {
-            actionPill(icon: "checkmark", title: "Friends", tint: .green, busy: false, enabled: false) {}
-        } else if friendService.hasPendingRequest(from: user) {
+        if friendService.hasPendingRequest(from: user) {
             actionPill(icon: "person.badge.plus", title: "Accept Request", tint: MADTheme.Colors.madRed,
                        busy: actionInProgress, enabled: !actionInProgress) { handleAcceptRequest() }
         } else if friendService.hasSentRequest(to: user) {
@@ -271,21 +294,70 @@ struct UserProfileDetailView: View {
         }
     }
 
-    /// Adds/removes this friend from the user's private close list.
-    /// Optimistic via CloseFriendsService; the other user is never told.
-    private var closeFriendPill: some View {
+    /// The ••• pill: friendship status + Remove Friend, and the private
+    /// close-friend switch (its explanation rides as the item's subtitle —
+    /// the other user is never told). A yellow star on the pill keeps "they're
+    /// a close friend" visible without a whole pill for it.
+    private var moreMenu: some View {
         let isClose = closeFriends.isClose(user.user_id)
-        return actionPill(
-            icon: isClose ? "star.fill" : "star",
-            title: isClose ? "Close Friend" : "Add Close Friend",
-            tint: isClose ? .yellow : .white.opacity(0.7),
-            busy: closeFriendActionInProgress,
-            enabled: !closeFriendActionInProgress,
-            filled: isClose
-        ) {
-            handleCloseFriendToggle()
+        return Menu {
+            Section("You're friends") {
+                Button {
+                    handleCloseFriendToggle()
+                } label: {
+                    Label {
+                        Text(isClose ? "Remove from Close Friends" : "Add to Close Friends")
+                        Text("Close friends can get notifications others don't. They're never told.")
+                    } icon: {
+                        Image(systemName: isClose ? "star.slash" : "star")
+                    }
+                }
+                .disabled(closeFriendActionInProgress)
+
+                Button(role: .destructive) {
+                    showUnfriendConfirm = true
+                } label: {
+                    Label("Remove Friend", systemImage: "person.badge.minus")
+                }
+            }
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white.opacity(0.8))
+                    .frame(width: 46, height: 34)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.05))
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                    )
+                if isClose {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.yellow)
+                        .offset(x: -6, y: 5)
+                }
+            }
+            .contentShape(Capsule())
         }
-        .accessibilityLabel(isClose ? "Remove from close friends" : "Add to close friends")
+        .accessibilityLabel("More options for \(user.displayName)")
+        .accessibilityValue(isClose ? "Close friend" : "Friend")
+    }
+
+    private func handleUnfriend() {
+        Task {
+            do {
+                try await friendService.removeFriend(user)
+            } catch {
+                await MainActor.run {
+                    showProfileNudgeFeedback(NudgeFeedback(
+                        icon: "xmark.circle",
+                        message: "Couldn't remove \(user.displayName). Try again.",
+                        isError: true
+                    ))
+                }
+            }
+        }
     }
 
     /// The one pill metric every action on this screen uses.
@@ -295,7 +367,6 @@ struct UserProfileDetailView: View {
         tint: Color,
         busy: Bool,
         enabled: Bool,
-        filled: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
         Button {
@@ -322,8 +393,8 @@ struct UserProfileDetailView: View {
             .frame(maxWidth: .infinity)
             .background(
                 Capsule()
-                    .fill(filled ? tint.opacity(0.08) : Color.white.opacity(0.05))
-                    .overlay(Capsule().strokeBorder(tint.opacity(filled ? 0.4 : 0.15), lineWidth: 1))
+                    .fill(tint.opacity(0.08))
+                    .overlay(Capsule().strokeBorder(tint.opacity(0.4), lineWidth: 1))
             )
             .contentShape(Capsule())
         }
@@ -334,7 +405,6 @@ struct UserProfileDetailView: View {
     private func handleCloseFriendToggle() {
         guard !closeFriendActionInProgress else { return }
         closeFriendActionInProgress = true
-        hasSeenCloseFriendHint = true
         MADHaptics.tap()
         Task {
             do {
@@ -428,7 +498,8 @@ struct UserProfileDetailView: View {
             // The catalog's mile-medal rungs, once the Badges fetch lands.
             milestoneThresholds: MileMilestones.thresholds(from: catalogBadges),
             goalProgress: progress,
-            goalComplete: userStats?.hasCompletedGoalToday ?? false
+            goalComplete: userStats?.hasCompletedGoalToday ?? false,
+            goalSavedToday: friendSavedToday
         ) {
             AvatarView(
                 name: user.displayName,
@@ -456,7 +527,8 @@ struct UserProfileDetailView: View {
             streak: userStats?.streak ?? 0,
             totalMiles: userStats?.totalMiles ?? 0,
             friendCount: friendCount,
-            streakDoneToday: userStats?.hasCompletedGoalToday ?? false
+            streakDoneToday: userStats?.hasCompletedGoalToday ?? false,
+            streakSavedToday: friendSavedToday
         ) {
             UserFriendsListView(
                 userId: user.user_id,
@@ -468,19 +540,25 @@ struct UserProfileDetailView: View {
 
     // MARK: - Tab Content
 
-    /// Today's snapshot + week chart + daily challenge + recent workouts.
-    /// Default landing tab — the most time-sensitive info.
+    /// Their Flamey, today's challenge, the week, a short workouts preview and
+    /// walks together. Default landing tab — the most time-sensitive info.
+    /// Today's DISTANCE is not repeated here: the hero ring, its label and the
+    /// stat tiles already carry it (a TODAY card used to say it a third time).
     @ViewBuilder
     private var activityTabContent: some View {
-        // Ordered by how close to NOW each block is: today, the week, walks
-        // together, their recent workouts, then streak history. One flat card
-        // style throughout (`profileCard` / `ProfileCardLabel`).
         VStack(spacing: MADTheme.Spacing.md) {
-            // TODAY, as one group: how far they are and the challenge they
-            // were served, tight together (8pt) so they read as one thought.
+            // Their Flamey first: the friendliest thing on the page, and the
+            // poke is the quickest thing to do for them. Renders only when
+            // THEY are Fun (the server's `flamey` block) and so is the viewer
+            // (checked inside the card).
+            friendFlameyCard
+            // TODAY, as one group, tight together (8pt) so it reads as one
+            // thought: why their streak stands on a day with no miles on it
+            // (worth saying in full to a VIEWER, who may well be the person
+            // whose mile paid for it), then the challenge they were served.
             VStack(spacing: MADTheme.Spacing.sm) {
-                if !isCurrentUser(), friendService.isFriend(user) {
-                    friendTodayProgressCard
+                if !isCurrentUser(), friendService.isFriend(user), let saved = friendSavedToday {
+                    SavedTodayBanner(day: saved, isSelf: false)
                 }
                 if let today = friendTodayChallenge {
                     FriendTodayChallengeRow(
@@ -490,23 +568,7 @@ struct UserProfileDetailView: View {
                     )
                 }
             }
-            // Then what they've actually DONE — the workouts, the most concrete
-            // thing on the page — before the week's shape around them.
-            if !friendWorkouts.isEmpty {
-                VStack(spacing: MADTheme.Spacing.sm) {
-                    FriendWorkoutsSection(
-                        workouts: friendWorkouts,
-                        onWorkoutTap: { workout in selectedWorkout = workout },
-                        // Only the owner is told when one of their workouts
-                        // isn't counting, and only the owner can overrule it.
-                        isOwnProfile: isCurrentUser(),
-                        ownerUserId: user.user_id
-                    )
-                    if canLoadMore && !isLoadingMoreWorkouts {
-                        loadMoreButton
-                    }
-                }
-            }
+            // The week's shape, then the workouts inside it.
             if !isCurrentUser(), !friendWorkouts.isEmpty {
                 Last7DaysChart(
                     workouts: friendWorkouts,
@@ -516,25 +578,115 @@ struct UserProfileDetailView: View {
                     isSelf: false
                 )
             }
+            if !friendWorkouts.isEmpty {
+                recentWorkoutsPreview
+            }
             // "12 walks together" — the number is only interesting next to the
             // person it's about, and the row opens the history already filtered
-            // to them. Friends only, matching the today-progress card above:
-            // buddy walks are a friends-only feature, so offering one to a
-            // stranger's profile is a button that can't work. Own profile gets
-            // the full section instead.
+            // to them. Friends only: buddy walks are a friends-only feature, so
+            // offering one to a stranger's profile is a button that can't work.
             if !isCurrentUser(), friendService.isFriend(user) {
                 BuddyWalksTogetherRow(
                     userId: user.user_id, displayName: user.displayName)
             }
-            // History last: the streaks they've run, the longest view back.
-            HallOfStreaksSection(userId: user.user_id, isSelf: isCurrentUser())
         }
     }
 
-    /// Performance metrics (streak, total miles, best pace, best day, etc.)
+    /// The newest few workouts in the profile card grammar, with "See all"
+    /// pushing the full list (and its Load more) — ten rows here buried
+    /// everything below them.
+    private var recentWorkoutsPreview: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            ProfileCardLabel(text: "RECENT WORKOUTS")
+            VStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(friendWorkouts.prefix(workoutPreviewCount)) { workout in
+                    Button {
+                        selectedWorkout = workout
+                    } label: {
+                        // Only the owner is told when one of their workouts
+                        // isn't counting, and only the owner can overrule it.
+                        FriendWorkoutRow(workout: workout, showChevron: true,
+                                         isOwnProfile: isCurrentUser(), ownerUserId: user.user_id)
+                    }
+                    .buttonStyle(ScaleButtonStyle())
+                }
+            }
+            if friendWorkouts.count > workoutPreviewCount {
+                NavigationLink {
+                    FriendAllWorkoutsView(
+                        user: user,
+                        friendService: friendService,
+                        initialWorkouts: friendWorkouts,
+                        initialLimit: workoutLimit,
+                        isOwnProfile: isCurrentUser()
+                    )
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("See all workouts")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .bold))
+                            .accessibilityHidden(true)
+                    }
+                    .foregroundColor(MADTheme.Colors.madRed)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(MADTheme.Spacing.md)
+        .profileCard()
+    }
+
+    /// Mirrors FriendFlameyCard's OWN visibility: their server `flamey` block
+    /// is enabled (only ever for a friend, only for a Fun target), no poke
+    /// this visit learned it's unavailable, and the viewer is Fun too. When
+    /// it's on screen the Flamey poke IS the nudge (same endpoint, same
+    /// cooldown), so the Nudge pill steps aside — one nudge surface.
+    private var friendFlameyVisible: Bool {
+        !isCurrentUser()
+            && !flameyUnavailable
+            && viewerDashboardStyle == DashboardStyle.fun.rawValue
+            && FriendFlameyFacts(
+                block: fullUser?.flamey,
+                ownerName: user.first_name ?? user.username ?? user.displayName) != nil
+    }
+    /// "Aaron's Flamey". Friends only (the block is only ever enabled for
+    /// one), hidden for good this visit if a poke learns Flamey is
+    /// unavailable (either side left Fun).
+    @ViewBuilder
+    private var friendFlameyCard: some View {
+        if !isCurrentUser(), !flameyUnavailable,
+           let facts = FriendFlameyFacts(
+               block: fullUser?.flamey,
+               ownerName: user.first_name ?? user.username ?? user.displayName) {
+            FriendFlameyCard(
+                friendId: user.user_id,
+                facts: facts,
+                streak: nudgeStatus?.current_streak ?? userStats?.streak ?? 0,
+                todayMiles: nudgeStatus?.today_miles ?? friendTodayMiles,
+                goalMiles: userStats?.goalMiles ?? 1.0,
+                isDone: nudgeStatus?.has_completed_mile == true || userStats?.hasCompletedGoalToday == true,
+                savedToday: friendSavedToday != nil,
+                alreadyNudged: nudgeStatus.map { $0.nudgedToday && !$0.unlimitedNudges } ?? false,
+                onNudged: { markNudgeSent() },
+                onUnavailable: { withAnimation(.easeInOut(duration: 0.25)) { flameyUnavailable = true } },
+                badges: userBadges,
+                catalogBadges: catalogBadges
+            )
+        }
+    }
+
+    /// Performance (best pace, best day, 7-day average), then the streaks
+    /// they've run — the long view back lives with the other numbers.
     @ViewBuilder
     private var statsTabContent: some View {
-        FriendStatsView(user: user, stats: userStats)
+        VStack(spacing: MADTheme.Spacing.md) {
+            FriendStatsView(user: user, stats: userStats, last7DayMiles: last7DayMiles)
+            HallOfStreaksSection(userId: user.user_id, isSelf: isCurrentUser())
+        }
     }
 
     /// Badge collection — pinned showcase + side-by-side comparison grid.
@@ -572,19 +724,20 @@ struct UserProfileDetailView: View {
         }
     }
 
-    // MARK: - Action Row (Save Streak + Nudge + Compete)
+    // MARK: - Action Row (Nudge + Compete + •••, Save Streak beneath)
 
-    /// Pills for the actions you can take on a friend's profile. Nudge is
-    /// hidden when the friend has already completed today; Compete is always
-    /// there. Save Streak renders itself only when there's a break to rescue —
-    /// it deliberately does NOT displace Nudge (a friend can have both a broken
-    /// streak to save AND today's mile still to run, and the two do different
-    /// jobs), so when all three apply the row wraps onto two lines rather than
-    /// squeezing three pills into one.
+    /// ONE row for a friend: [Nudge] [Compete] [•••]. Nudge is hidden when
+    /// they've already completed today, and when their Flamey card is on
+    /// screen (the poke is the nudge). Friendship status, Remove Friend and
+    /// the close-friend switch live in the ••• menu. The Save Streak CTA can't
+    /// live in a Menu (it owns a confirmation dialog), so it renders under the
+    /// row — but ONLY while a save is actually in play (`saveStreakChip`);
+    /// the "can't be saved because…" captions it would otherwise print are
+    /// left off this screen.
     @ViewBuilder
     private var actionRow: some View {
         let nudgeIsAvailable: Bool = {
-            guard let status = nudgeStatus else { return false }
+            guard let status = nudgeStatus, !friendFlameyVisible else { return false }
             return !status.has_completed_mile
         }()
 
@@ -594,27 +747,61 @@ struct UserProfileDetailView: View {
                     nudgeProfileButton
                 }
                 competeTogetherButton
+                moreMenu
             }
+            saveStreakChip
+        }
+        .confirmationDialog(
+            "Remove \(user.displayName) as a friend?",
+            isPresented: $showUnfriendConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Remove Friend", role: .destructive) { handleUnfriend() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You will no longer be friends with this person.")
+        }
+    }
 
-            // Under the pills: a CTA when a save is possible, a one-line
-            // caption when it isn't (see SaveFriendStreakView's prominent
-            // info state), nothing at all when there's no break.
+    /// The Donate-a-Mile CTA, in its actionable states only: the live offer,
+    /// the locked "run x mi further today" pill (closable this afternoon),
+    /// and the in-flight / "Mile offered" result. Phases the CTA can only
+    /// EXPLAIN (needs an update, no token, beyond rescue) draw nothing here.
+    /// The status is fetched once and handed down as `preloaded`, so the
+    /// view's own model doesn't fetch a second time.
+    @ViewBuilder
+    private var saveStreakChip: some View {
+        if let rescue = rescueStatus,
+           rescue.alreadyOffered
+            || rescue.available
+            || (!rescue.friendNotEnrolled && rescue.needsMoreMiles) {
             SaveFriendStreakView(
                 friendId: user.user_id,
                 friendName: user.username ?? user.displayName,
                 style: .prominent,
+                preloaded: rescue,
                 onSaved: { restored in
                     showProfileNudgeFeedback(NudgeFeedback(
                         icon: "paperplane.fill",
                         message: "Mile offered — \(user.displayName) can use it to get back to \(restored) days.",
                         isError: false
                     ))
-                    // Their flame (and today's card) should read the restored
-                    // length immediately, not on the next cold open.
+                    // Their flame should read the restored length
+                    // immediately, not on the next cold open.
                     Task { await refreshProfileData() }
                     loadUserData()
                 }
             )
+        }
+    }
+
+    private func loadRescueStatus() async {
+        guard !isCurrentUser(), friendService.isFriend(user) else { return }
+        do {
+            let status = try await StreakFeatureService.rescueStatus(friendId: user.user_id)
+            await MainActor.run { rescueStatus = status }
+        } catch {
+            print("[UserProfile] loadRescueStatus failed: \(error)")
         }
     }
 
@@ -666,6 +853,7 @@ struct UserProfileDetailView: View {
 
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await loadNudgeStatus() }
+            group.addTask { await loadRescueStatus() }
             group.addTask { await loadFriendTodayChallenge() }
             group.addTask { await loadBadges() }
             group.addTask {
@@ -678,109 +866,6 @@ struct UserProfileDetailView: View {
                     }
                 }
             }
-        }
-    }
-
-    // MARK: - Today Progress
-    /// Today's distance + completion + streak. Renders only for friends (not
-    /// self, not strangers) since the data comes from the nudge-status fetch
-    /// which is gated on friendship.
-    @ViewBuilder
-    private var friendTodayProgressCard: some View {
-        if let status = nudgeStatus {
-            let today = status.today_miles ?? 0
-            let goal: Double = 1.0
-            let progress = min(today / goal, 1.0)
-            let isComplete = status.has_completed_mile
-            let streak = status.current_streak ?? 0
-            let remaining = max(0, goal - today)
-
-            HStack(spacing: MADTheme.Spacing.md) {
-                // Progress ring with miles in the center.
-                ZStack {
-                    Circle()
-                        .stroke(Color.white.opacity(0.08), lineWidth: 5)
-                        .frame(width: 72, height: 72)
-                    Circle()
-                        .trim(from: 0, to: progress)
-                        .stroke(
-                            isComplete ? Color.green : Color.orange,
-                            style: StrokeStyle(lineWidth: 5, lineCap: .round)
-                        )
-                        .rotationEffect(.degrees(-90))
-                        .frame(width: 72, height: 72)
-                    VStack(spacing: 0) {
-                        Text(String(format: today >= 10 ? "%.1f" : "%.2f", today))
-                            .font(.system(size: 16, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
-                        Text("mi")
-                            .font(.system(size: 9, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.5))
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("TODAY")
-                        .font(.system(size: 10, weight: .heavy, design: .rounded))
-                        .tracking(1.0)
-                        .foregroundColor(.white.opacity(0.5))
-
-                    HStack(spacing: 6) {
-                        Text(isComplete ? "Goal complete" : String(format: "%.2f mi to go", remaining))
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundColor(isComplete ? .green : .white)
-                            .lineLimit(1)
-                        if isComplete {
-                            StreakFlameChip(streak: streak)
-                        }
-                    }
-
-                    Text(isComplete
-                        ? String(format: "%.2f mi · Goal 1 mi", today)
-                        : "\(ProgressCalculator.formatProgress(progress)) of today's mile")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.5))
-                }
-
-                Spacer()
-            }
-            .padding(MADTheme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(0.04))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .strokeBorder(
-                                isComplete ? Color.green.opacity(0.3) : Color.white.opacity(0.08),
-                                lineWidth: 1
-                            )
-                    )
-            )
-        } else {
-            // Loading skeleton while nudge status fetches.
-            HStack(spacing: MADTheme.Spacing.md) {
-                Circle()
-                    .fill(Color.white.opacity(0.06))
-                    .frame(width: 72, height: 72)
-                VStack(alignment: .leading, spacing: 6) {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.white.opacity(0.06))
-                        .frame(width: 60, height: 9)
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.white.opacity(0.06))
-                        .frame(width: 140, height: 13)
-                }
-                Spacer()
-            }
-            .padding(MADTheme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(0.04))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                    )
-            )
         }
     }
 
@@ -891,19 +976,7 @@ struct UserProfileDetailView: View {
                 try await friendService.nudgeFriend(user.user_id)
                 await MainActor.run {
                     isNudging = false
-                    FlexNudgeTracker.markFriendNudgeSent(friendId: user.user_id)
-                    // Preserve existing miles/completion in the optimistic update.
-                    // Unlimited nudgers keep "Nudge again" available.
-                    let unlimited = nudgeStatus?.unlimitedNudges ?? false
-                    nudgeStatus = NudgeStatusResponse(
-                        can_nudge: unlimited,
-                        has_completed_mile: nudgeStatus?.has_completed_mile ?? false,
-                        already_nudged_today: !unlimited,
-                        today_miles: nudgeStatus?.today_miles,
-                        current_streak: nudgeStatus?.current_streak,
-                        has_nudged_today: true,
-                        unlimited_nudges: nudgeStatus?.unlimited_nudges
-                    )
+                    markNudgeSent()
                     MADHaptics.success()
                     showProfileNudgeFeedback(NudgeFeedback(
                         icon: "bell.badge.fill",
@@ -923,6 +996,28 @@ struct UserProfileDetailView: View {
                 }
             }
         }
+    }
+
+    /// The optimistic "nudged today" state, shared by the Nudge pill and a
+    /// Flamey poke (the two spend the same daily nudge).
+    private func markNudgeSent() {
+        FlexNudgeTracker.markFriendNudgeSent(friendId: user.user_id)
+        // Preserve existing miles/completion in the optimistic update.
+        // Unlimited nudgers keep "Nudge again" available.
+        let unlimited = nudgeStatus?.unlimitedNudges ?? false
+        nudgeStatus = NudgeStatusResponse(
+            can_nudge: unlimited,
+            has_completed_mile: nudgeStatus?.has_completed_mile ?? false,
+            already_nudged_today: !unlimited,
+            today_miles: nudgeStatus?.today_miles,
+            current_streak: nudgeStatus?.current_streak,
+            has_nudged_today: true,
+            unlimited_nudges: nudgeStatus?.unlimited_nudges,
+            // Sending a nudge doesn't change whether a token is
+            // holding their day — carry it, or the banner blinks
+            // out the moment the bell is tapped.
+            today_covered: nudgeStatus?.today_covered
+        )
     }
 
     private func loadNudgeStatus() async {
@@ -986,31 +1081,6 @@ struct UserProfileDetailView: View {
                 )
                 .shadow(color: .black.opacity(0.4), radius: 12, y: 6)
         )
-    }
-
-    // MARK: - Load More Button
-    private var loadMoreButton: some View {
-        Button {
-            loadMoreWorkouts()
-        } label: {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                if isLoadingMoreWorkouts {
-                    ProgressView()
-                        .tint(MADTheme.Colors.madRed)
-                } else {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                    Text("Load More Workouts")
-                        .font(MADTheme.Typography.headline)
-                }
-            }
-            .foregroundColor(MADTheme.Colors.madRed)
-            .frame(maxWidth: .infinity)
-            .padding(MADTheme.Spacing.md)
-            .madLiquidGlass()
-        }
-        .buttonStyle(ScaleButtonStyle())
-        .disabled(isLoadingMoreWorkouts)
     }
 
     // MARK: - Private Account View
@@ -1121,28 +1191,112 @@ struct UserProfileDetailView: View {
             }
         }
     }
+}
 
-    private func loadMoreWorkouts() {
-        guard !isLoadingMoreWorkouts else { return }
+// MARK: - All Workouts (friend profile "See all")
 
-        let newLimit = workoutLimit + 10
-        isLoadingMoreWorkouts = true
+/// The full workouts list behind the profile's three-row preview, with the
+/// Load More paging the profile used to carry inline. Seeded with what the
+/// profile already fetched so it opens instantly; owns its own paging state
+/// from there.
+struct FriendAllWorkoutsView: View {
+    let user: BackendUser
+    @ObservedObject var friendService: FriendService
+    let initialWorkouts: [FriendWorkout]
+    let initialLimit: Int
+    var isOwnProfile: Bool = false
 
+    @State private var workouts: [FriendWorkout] = []
+    @State private var limit = 10
+    @State private var didSeed = false
+    @State private var isLoadingMore = false
+    @State private var selectedWorkout: FriendWorkout?
+
+    /// A full page back means there may be more.
+    private var canLoadMore: Bool { workouts.count >= limit }
+
+    var body: some View {
+        ZStack {
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: MADTheme.Spacing.md) {
+                    FriendWorkoutsSection(
+                        workouts: workouts,
+                        onWorkoutTap: { selectedWorkout = $0 },
+                        isOwnProfile: isOwnProfile,
+                        ownerUserId: user.user_id
+                    )
+                    if canLoadMore {
+                        loadMoreButton
+                    }
+                }
+                .padding(.horizontal, MADTheme.Spacing.screenGutter)
+                .padding(.vertical, MADTheme.Spacing.md)
+                .lockedToScrollWidth()
+            }
+        }
+        .navigationTitle("Workouts")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .onAppear {
+            guard !didSeed else { return }
+            didSeed = true
+            workouts = initialWorkouts
+            limit = initialLimit
+        }
+        .sheet(item: $selectedWorkout) { workout in
+            FriendWorkoutDetailSheet(
+                workout: workout,
+                friendService: friendService,
+                owner: RouteArtAvatar(name: user.displayName, imageURL: user.profile_image_url)
+            )
+        }
+    }
+
+    private var loadMoreButton: some View {
+        Button {
+            loadMore()
+        } label: {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                if isLoadingMore {
+                    ProgressView()
+                        .tint(MADTheme.Colors.madRed)
+                } else {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .accessibilityHidden(true)
+                    Text("Load More Workouts")
+                        .font(MADTheme.Typography.headline)
+                }
+            }
+            .foregroundColor(MADTheme.Colors.madRed)
+            .frame(maxWidth: .infinity)
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .disabled(isLoadingMore)
+    }
+
+    private func loadMore() {
+        guard !isLoadingMore else { return }
+        let newLimit = limit + 10
+        isLoadingMore = true
         Task {
             do {
-                let workouts = try await friendService.fetchRecentWorkouts(for: user.user_id, limit: newLimit)
-
+                let fetched = try await friendService.fetchRecentWorkouts(for: user.user_id, limit: newLimit)
                 await MainActor.run {
                     withAnimation(MADTheme.Animation.standard) {
-                        friendWorkouts = workouts
-                        workoutLimit = newLimit
+                        workouts = fetched
+                        limit = newLimit
                     }
-                    isLoadingMoreWorkouts = false
+                    isLoadingMore = false
                 }
             } catch {
                 await MainActor.run {
-                    print("[UserProfileDetailView] Failed to load more workouts: \(error)")
-                    isLoadingMoreWorkouts = false
+                    print("[FriendAllWorkoutsView] Failed to load more workouts: \(error)")
+                    isLoadingMore = false
                 }
             }
         }
@@ -1168,6 +1322,9 @@ struct FriendWorkoutDetailSheet: View {
     /// The run's GPS trace from the server — the owner's own detail gets this
     /// from HealthKit, which never holds someone else's runs.
     @State private var routeCoordinates: [CLLocationCoordinate2D]?
+    /// The server trimmed this route's start & end for route privacy (hide
+    /// start & end) — drawn fading in and out, no start pin.
+    @State private var routeTrimmed = false
     /// Retained map snapshot so the route map's pinch-zoom can compose its
     /// floating copy on demand (same mechanism as the feed cards).
     @State private var routeSnapshot: RouteMapSnapshot?
@@ -1221,7 +1378,8 @@ struct FriendWorkoutDetailSheet: View {
                         WorkoutRouteMapView(
                             coordinates: routeCoordinates,
                             routeColor: workoutColor,
-                            onSnapshot: { routeSnapshot = $0 }
+                            onSnapshot: { routeSnapshot = $0 },
+                            routeTrimmed: routeTrimmed
                         )
                     } else {
                         RouteArtView(
@@ -1234,7 +1392,8 @@ struct FriendWorkoutDetailSheet: View {
                             // Same time-of-day cast as your own detail sheet —
                             // the forked copy shipped without it and a friend's
                             // dusk run drew the daytime canvas.
-                            paletteDate: BuddyDate.parse(workout.deviceEndDate)
+                            paletteDate: BuddyDate.parse(workout.deviceEndDate),
+                            routeTrimmed: routeTrimmed
                         )
                     }
                 }
@@ -1323,6 +1482,7 @@ struct FriendWorkoutDetailSheet: View {
                 snapshot: snapshot,
                 coordinates: coords,
                 routeColor: workoutColor,
+                routeTrimmed: routeTrimmed,
                 // Derived from the card's own aspect so the lift is a pure
                 // upscale — a fixed size that didn't match would crop the route.
                 size: WorkoutRouteMapView.zoomSize(for: snapshot, targetWidth: 900)
@@ -1339,6 +1499,7 @@ struct FriendWorkoutDetailSheet: View {
             authorAvatar: owner,
             underlay: routeSnapshot,
             paletteDate: BuddyDate.parse(workout.deviceEndDate),
+            routeTrimmed: routeTrimmed,
             size: size
         ) {
             EmptyView()
@@ -1361,11 +1522,12 @@ struct FriendWorkoutDetailSheet: View {
     private func loadRoute() async {
         guard workout.hasRoute == true, routeCoordinates == nil, !isLoadingRoute else { return }
         await MainActor.run { isLoadingRoute = true }
-        let raw = try? await friendService.fetchWorkoutRoute(
+        let detail = try? await friendService.fetchWorkoutRouteDetail(
             for: workout.userId, workoutId: workout.id
         )
         await MainActor.run {
-            routeCoordinates = decodeRouteCoordinates(raw)
+            routeCoordinates = decodeRouteCoordinates(detail?.route)
+            routeTrimmed = detail?.route_trimmed ?? false
             isLoadingRoute = false
         }
     }

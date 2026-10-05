@@ -363,7 +363,7 @@ function addDays(ymd: string, days: number): string {
 const PB_REFERENCE_DAYS = 28;
 
 /** "This split is a believable, complete mile from a workout that counts." */
-function pbSplitFilterSql(workout: string, split: string): string {
+export function pbSplitFilterSql(workout: string, split: string): string {
   return `${countedWorkoutSql(workout)}
 				AND ${realMileSplitSql(`${split}.split_pace`)}
 				AND ${split}.split_distance >= ${DAILY_GOAL_TOLERANCE}`;
@@ -1375,7 +1375,25 @@ async function lastWeekResult(
   weekStart: string,
 ): Promise<WeeklyChallengeResponse["last_week"]> {
   const prevStart = addDays(weekStart, -7);
-  const prevEnd = addDays(prevStart, 6);
+  return servedWeekResult(userId, prevStart, addDays(prevStart, 6));
+}
+
+/**
+ * How the challenge SERVED for `weekStart` went, measured through
+ * `measureThrough` (the week's end for a finished week, the user's today for
+ * the running one). Null when nothing was served that week — this never
+ * serves (and so never stamps) a week itself, because a read about a week is
+ * not the user being shown its challenge.
+ *
+ * Shared by `last_week` here and the Weekly Recap, so the two can never report
+ * the same week differently.
+ */
+export async function servedWeekResult(
+  userId: string,
+  weekStart: string,
+  measureThrough: string,
+): Promise<WeeklyChallengeResponse["last_week"]> {
+  const weekEnd = addDays(weekStart, 6);
 
   const rows = await db.query<{
     challenge_key: string;
@@ -1396,7 +1414,7 @@ async function lastWeekResult(
 		LEFT JOIN user_weekly_challenge_completions c
 			ON c.user_id = uwc.user_id AND c.week_start = uwc.week_start
 		WHERE uwc.user_id = $1 AND uwc.week_start = $2::date`,
-    [userId, prevStart],
+    [userId, weekStart],
   );
 
   const row = rows[0];
@@ -1406,11 +1424,16 @@ async function lastWeekResult(
   // A missed week still gets measured, so the card can say how close it was.
   const value = completed
     ? Number(row.final_value)
-    : await measure(userId, row.metric as WeeklyMetric, prevStart, prevEnd);
+    : await measure(
+        userId,
+        row.metric as WeeklyMetric,
+        weekStart,
+        minDate(weekEnd, measureThrough),
+      );
 
   return {
-    week_start: prevStart,
-    week_end: prevEnd,
+    week_start: weekStart,
+    week_end: weekEnd,
     challenge_key: row.challenge_key,
     title: row.title,
     icon: row.icon,

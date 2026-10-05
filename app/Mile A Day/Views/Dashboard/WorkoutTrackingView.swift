@@ -31,6 +31,11 @@ struct WorkoutTrackingView: View {
     /// arrives non-nil, making the adopted and handed-in paths
     /// indistinguishable from then on.
     var onBuddySessionAdopted: ((String) -> Void)? = nil
+    /// Walk/run already answered by a Start My Mile request (Siri, Shortcuts,
+    /// the Action Button, Control Center). Skips ONLY the activity step of a
+    /// fresh wizard — never touches a recovered workout or a buddy hand-off,
+    /// and indoor/outdoor is still asked (it picks the instrument).
+    var preselectedActivity: HKWorkoutActivityType? = nil
     @Environment(\.dismiss) var dismiss
 
     // Shared singleton — tracking keeps running when this view is dismissed
@@ -92,6 +97,10 @@ struct WorkoutTrackingView: View {
     /// system started deferring updates (frozen activity on the lock screen).
     @State private var lastActivityPushDate: Date = .distantPast
     @State private var lastPushedDistance: Double = -1
+    /// When the 1 Hz tick last wrote the recovery snapshot. Every write
+    /// re-encodes the whole route (up to ~1 MB), so it is throttled — see
+    /// `updateLiveActivity`.
+    @State private var lastStatePersistDate: Date = .distantPast
     /// Live buddy roster, when this workout is part of a Buddy Walk.
     @ObservedObject private var buddyService = BuddySessionService.shared
     /// One-shot guard so the buddy auto-start can't fire twice if the view's
@@ -106,6 +115,12 @@ struct WorkoutTrackingView: View {
     /// mile still counts (Health access is fine) — no scary blocking alert.
     @State private var showSaveFallbackToast = false
     @State private var endWorkoutTimeoutTask: DispatchWorkItem? // Timeout for end workout flow
+    /// Keeps the process alive through the async HealthKit save. Ending the
+    /// workout stops location updates — the only thing that kept the app
+    /// running in the background — so a user who taps End and pockets the
+    /// phone was suspended mid-chain: no save, no cleanup, and the 10s
+    /// timeout couldn't fire either.
+    @State private var finishBackgroundTask: UIBackgroundTaskIdentifier = .invalid
     @State private var trackingMetricsHeight: CGFloat = 0 // Measured height of the scrollable metrics area
     @State private var workoutSession: HKWorkoutSession?
     @State private var workoutBuilder: HKWorkoutBuilder?
@@ -121,6 +136,9 @@ struct WorkoutTrackingView: View {
     /// Cheap downsampled thumb of the newest snap for the tray chip.
     @State private var lastSnapThumb: UIImage?
     @State private var showSnapSavedToast = false
+    /// Whether the snap the toast is about was a FRONT & BACK press, so the
+    /// toast can say so. Set on the way in, read only while it's on screen.
+    @State private var lastSnapWasDual = false
     /// Import a photo taken on THIS walk from the library (time-windowed).
     @State private var showLibraryImport = false
     /// Transient result banner for a library import (message, success?).
@@ -196,6 +214,15 @@ struct WorkoutTrackingView: View {
     /// buddy check in this file reads THIS, never `buddySessionId` raw.
     private var effectiveBuddySessionId: String? {
         buddySessionId ?? adoptedBuddySessionId
+    }
+
+    /// The running workout's own answers to the buddy lobby's questions, for
+    /// a mid-walk join (see `BuddyMidWalkJoinStrip.Answers`).
+    private var midWalkJoinAnswers: BuddyMidWalkJoinStrip.Answers {
+        BuddyMidWalkJoinStrip.Answers(
+            isRunning: selectedActivityType == .running,
+            locationType: selectedLocationType == .indoor ? .indoor : .outdoor
+        )
     }
 
     private var raceActivityKey: String {
@@ -699,7 +726,8 @@ struct WorkoutTrackingView: View {
                 cancelCountdown()
             } label: {
                 Text("Cancel")
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    // A 52pt capsule: grows, but stays inside it.
+                    .madFont(size: 17, weight: .semibold, design: .rounded, maxScale: 1.5)
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
@@ -801,7 +829,7 @@ struct WorkoutTrackingView: View {
                             // mid-workout. Renders nothing when there's nobody
                             // to join and nothing to rejoin, so an ordinary
                             // solo run is untouched.
-                            BuddyMidWalkJoinStrip { sessionId in
+                            BuddyMidWalkJoinStrip(answers: midWalkJoinAnswers) { sessionId in
                                 adoptedBuddySessionId = sessionId
                                 onBuddySessionAdopted?(sessionId)
                                 // The workout is already persisted without a
@@ -861,6 +889,12 @@ struct WorkoutTrackingView: View {
         // fullScreenCover, which sits on top of MainTabView's InAppBanner
         // overlay — a hype toast anywhere else is invisible mid-workout.
         .overlay(alignment: .top) { hypeReceivedToast }
+        // Dynamic Type: the labels, banners, chips and toasts here grow; the
+        // live numbers (distance, ring %, time) stay fixed on purpose — they
+        // are already the largest text on the phone and the metric column is
+        // sized from the screen height. The column scrolls and the controls
+        // are pinned, so the labels can take the card cap.
+        .madTypeCap(.madCardCap)
         .onChange(of: livePresence.sessionHypes.count) { oldCount, newCount in
             guard newCount > oldCount, let latest = livePresence.sessionHypes.last else { return }
             MADHaptics.action()
@@ -871,7 +905,11 @@ struct WorkoutTrackingView: View {
                 withAnimation { hypeToast = nil }
             }
             // Carry the hype onto the Live Activity right away — the 30s
-            // cadence would otherwise sit on the moment.
+            // cadence would otherwise sit on the moment. Only mid-workout:
+            // `updateLiveActivity` creates an activity when it holds none, so
+            // a hype landing on the recap would raise a new one for a walk
+            // that is over — and it would read TRACKING INTERRUPTED 3 min later.
+            guard isTracking, !isStopping else { return }
             lastActivityPushDate = .distantPast
             updateLiveActivity()
         }
@@ -883,10 +921,10 @@ struct WorkoutTrackingView: View {
         if let text = hypeToast {
             HStack(spacing: 8) {
                 Image(systemName: "flame.fill")
-                    .font(.system(size: 15, weight: .bold))
+                    .madFont(size: 15, weight: .bold)
                     .foregroundColor(.orange)
                 Text(text)
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -938,9 +976,13 @@ struct WorkoutTrackingView: View {
                     .strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
             )
             .overlay(alignment: .topTrailing) {
-                Text("\(midRunSnapCount)")
+                // Capped for WIDTH, not for truth — the tray holds as many
+                // as were taken. An 18pt disc fits two digits.
+                Text(midRunSnapCount > 99 ? "99+" : "\(midRunSnapCount)")
                     .font(.system(size: 11, weight: .heavy, design: .rounded))
                     .monospacedDigit()
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
                     .foregroundColor(.white)
                     .frame(width: 18, height: 18)
                     .background(Circle().fill(Color.orange))
@@ -1057,16 +1099,16 @@ struct WorkoutTrackingView: View {
     private var activityCaption: some View {
         HStack(spacing: 5) {
             Image(systemName: selectedActivityType == .running ? "figure.run" : "figure.walk")
-                .font(.system(size: 11, weight: .bold))
+                .madFont(size: 11, weight: .bold)
                 .accessibilityHidden(true)
             Text(selectedActivityType == .running ? "RUN" : "WALK")
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .tracking(1.5)
             Text("·")
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .opacity(0.5)
             Text(selectedLocationType == .indoor ? "INDOOR" : "OUTDOOR")
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .tracking(1.5)
                 .opacity(0.75)
         }
@@ -1096,37 +1138,89 @@ struct WorkoutTrackingView: View {
         .fullScreenCover(isPresented: $showMidRunCamera) {
             // Camera-roll save is handled below, keyed to the stash id, so the
             // review gallery can show "Saved" and never duplicate the shot.
-            MADCameraView(image: $midRunImage, autoSaveToPhotos: false)
+            //
+            // FRONT & BACK is offered HERE too now. It was withheld on the
+            // grounds that this camera exists to catch a moment in one tap
+            // while you're still moving — which is exactly right about the
+            // DEFAULT and wrong about the choice: the mode rail opens on
+            // PHOTO, the shutter behaves as it always did, and the second
+            // frame only happens for someone who asked for it. Mid-walk is
+            // also where the shot most worth having both halves of is (the
+            // view, and your face looking at it), and the composer's camera
+            // is usually reached once the walk is already over.
+            MADCameraView(
+                image: $midRunImage,
+                autoSaveToPhotos: false,
+                allowsDual: true,
+                onDualCapture: { capture in
+                    stashSnap(
+                        capture.primary,
+                        secondary: capture.secondary,
+                        primaryWasFront: capture.primaryWasFront
+                    )
+                }
+            )
         }
         .onChange(of: midRunImage) { _, newImage in
             guard let image = newImage else { return }
             midRunImage = nil
-            // Downscale + JPEG-encode off the main thread — doing it inline
-            // stutters the camera dismissal animation on big sensor images.
-            Task.detached(priority: .utility) {
-                let entry = MidRunPhotoStash.add(image)
-                let count = MidRunPhotoStash.count
-                let thumb = MidRunPhotoStash.latestThumbnail()
-                await MainActor.run {
-                    // Keep the user's own full-res copy in the camera roll no
-                    // matter what (the camera no longer auto-saves this path).
-                    // When it made it into the stash, key the save to that snap
-                    // so the gallery shows "Saved" instead of a duplicate.
-                    if let entry {
-                        PhotoRollSaver.save(image, ledgerKey: entry.id)
-                    } else {
-                        PhotoRollSaver.save(image)
-                    }
-                    guard entry != nil else { return }
-                    midRunSnapCount = count
-                    lastSnapThumb = thumb
-                    MADHaptics.success()
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        showSnapSavedToast = true
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                        withAnimation(.easeOut(duration: 0.25)) { showSnapSavedToast = false }
-                    }
+            stashSnap(image)
+        }
+    }
+
+    /// Put a mid-walk shot in the stash, save the user's own copy, and say so.
+    ///
+    /// ONE path for both shapes of capture. A FRONT & BACK press arrives with
+    /// its second frame and is stored as a pair — one snap, counted once,
+    /// deleted once — so the composer can restore the arrangement later and
+    /// publish the flip. An ordinary press passes nil and nothing about it
+    /// changes.
+    private func stashSnap(
+        _ image: UIImage,
+        secondary: UIImage? = nil,
+        primaryWasFront: Bool = false
+    ) {
+        lastSnapWasDual = secondary != nil
+        // Downscale + JPEG-encode off the main thread — doing it inline
+        // stutters the camera dismissal animation on big sensor images.
+        Task.detached(priority: .utility) {
+            let entry = MidRunPhotoStash.add(
+                image, secondary: secondary, primaryWasFront: primaryWasFront)
+            let count = MidRunPhotoStash.count
+            let thumb = MidRunPhotoStash.latestThumbnail()
+            await MainActor.run {
+                // The camera roll gets ONE picture for one press: the pair
+                // flattened the way the feed will draw it. Saving only the
+                // frame they aimed would quietly drop the other half out of
+                // their own library, and saving both would put two photos in
+                // the roll for a single shutter tap.
+                //
+                // Composed HERE rather than before the detached work, even
+                // though it costs a main-thread render either way:
+                // `ImageRenderer` is main-actor only, and by this point the
+                // camera cover is already on its way out, so the frame it
+                // takes lands in the dismissal rather than in front of it.
+                let rollImage: UIImage = secondary.flatMap {
+                    DualPhotoComposite.render(big: image, small: $0)
+                } ?? image
+                // Keep the user's own full-res copy in the camera roll no
+                // matter what (the camera no longer auto-saves this path).
+                // When it made it into the stash, key the save to that snap
+                // so the gallery shows "Saved" instead of a duplicate.
+                if let entry {
+                    PhotoRollSaver.save(rollImage, ledgerKey: entry.id)
+                } else {
+                    PhotoRollSaver.save(rollImage)
+                }
+                guard entry != nil else { return }
+                midRunSnapCount = count
+                lastSnapThumb = thumb
+                MADHaptics.success()
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    showSnapSavedToast = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                    withAnimation(.easeOut(duration: 0.25)) { showSnapSavedToast = false }
                 }
             }
         }
@@ -1137,12 +1231,20 @@ struct WorkoutTrackingView: View {
         if showSnapSavedToast {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 15, weight: .bold))
+                    .madFont(size: 15, weight: .bold)
                     .foregroundColor(.green)
-                Text(midRunSnapCount >= MidRunPhotoStash.maxPhotos
-                     ? "Saved — that's the max, oldest gets replaced"
+                // Names the pair once, at the moment it happens. A second
+                // frame the user asked for should still be ACKNOWLEDGED —
+                // the shutter fired twice and the tray count went up by one,
+                // and those two facts need reconciling on the spot rather
+                // than in the composer.
+                //
+                // There is no "that's the max" any more: nothing is dropped,
+                // so nothing has to be warned about.
+                Text(lastSnapWasDual
+                     ? "Both sides saved as one photo"
                      : "Saved for your post")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
             }
             .padding(.horizontal, 16)
@@ -1163,10 +1265,10 @@ struct WorkoutTrackingView: View {
         if let toast = importToast {
             HStack(spacing: 8) {
                 Image(systemName: toast.ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    .font(.system(size: 15, weight: .bold))
+                    .madFont(size: 15, weight: .bold)
                     .foregroundColor(toast.ok ? .green : .orange)
                 Text(toast.text)
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
             }
@@ -1192,10 +1294,10 @@ struct WorkoutTrackingView: View {
         if showSaveFallbackToast {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 15, weight: .bold))
+                    .madFont(size: 15, weight: .bold)
                     .foregroundColor(.green)
                 Text("Your mile still counts — it'll sync on your next update.")
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .madFont(size: 14, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
             }
@@ -1293,6 +1395,13 @@ struct WorkoutTrackingView: View {
                     .foregroundColor(.white.opacity(0.7))
             }
         }
+        // Fun: Flamey stands off the ring's lower-right edge. An OVERLAY,
+        // offset past the ring's frame, so the metric column's height-derived
+        // layout never moves; draws nothing on Modern.
+        .overlay(alignment: .bottomTrailing) {
+            TrackerFlameyBuddy(progress: progress, size: min(66, diameter * 0.34))
+                .offset(x: diameter * 0.26, y: 2)
+        }
     }
 
     /// The reason GPS tracking is NOT working right now, when there is one.
@@ -1360,19 +1469,19 @@ struct WorkoutTrackingView: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: issue.icon)
-                        .font(.system(size: 18, weight: .bold))
+                        .madFont(size: 18, weight: .bold)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(issue.title)
-                            .font(.system(size: 14, weight: .heavy, design: .rounded))
+                            .madFont(size: 14, weight: .heavy, design: .rounded)
                         Text(issue.detail)
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .madFont(size: 12, weight: .medium, design: .rounded)
                             .opacity(0.85)
                             .multilineTextAlignment(.leading)
                     }
                     Spacer(minLength: 0)
                     if issue.showsSettings {
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .bold))
+                            .madFont(size: 12, weight: .bold)
                             .opacity(0.7)
                     }
                 }
@@ -1412,9 +1521,9 @@ struct WorkoutTrackingView: View {
             if locationManager.isPaused {
                 HStack(spacing: 5) {
                     Image(systemName: "pause.fill")
-                        .font(.system(size: 9, weight: .bold))
+                        .madFont(size: 9, weight: .bold)
                     Text("PAUSED")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .tracking(1.0)
                 }
                 .foregroundColor(.orange)
@@ -1430,9 +1539,9 @@ struct WorkoutTrackingView: View {
             if locationManager.isAutoPaused, !locationManager.isPaused {
                 HStack(spacing: 5) {
                     Image(systemName: "pause.fill")
-                        .font(.system(size: 9, weight: .bold))
+                        .madFont(size: 9, weight: .bold)
                     Text("AUTO-PAUSED")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .madFont(size: 11, weight: .heavy, design: .rounded)
                         .tracking(1.0)
                 }
                 .foregroundColor(.orange)
@@ -1465,6 +1574,13 @@ struct WorkoutTrackingView: View {
         .animation(.easeInOut(duration: 0.25), value: coach.lastLine)
     }
 
+    /// Muted reads as muted; on a call reads as a call, because the coach is
+    /// silent for two different reasons and only one of them is the user's.
+    private var coachIconName: String {
+        guard coachEnabled else { return "speaker.slash.fill" }
+        return coach.isOnCall ? "phone.fill" : "speaker.wave.2.fill"
+    }
+
     /// The coach's last line, and the only way to shut it up mid-walk.
     ///
     /// The coach speaks on EVERY workout — splits, the interval call, halfway,
@@ -1486,8 +1602,8 @@ struct WorkoutTrackingView: View {
                 // just muted.
                 if !coachEnabled { GhostCoach.shared.silenceCurrentLine() }
             } label: {
-                Image(systemName: coachEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                    .font(.system(size: 11, weight: .bold))
+                Image(systemName: coachIconName)
+                    .madFont(size: 11, weight: .bold, maxScale: 1.3)
                     .foregroundColor(coachEnabled ? .white.opacity(0.7) : .orange)
                     .frame(width: 26, height: 26)
                     .background(
@@ -1503,23 +1619,21 @@ struct WorkoutTrackingView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(line)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .madFont(size: 12, weight: .semibold, design: .rounded)
                     .foregroundColor(.white.opacity(coachEnabled ? 0.75 : 0.5))
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
                     .id(line)
-                // The voice is as good as code can make it; the rest is a
-                // download the app cannot start and Settings cannot deep-link
-                // to. This hint lived only on the settings page — a screen
-                // nobody opens mid-walk — so "it sounds robotic" went
-                // unanswered at the one moment the answer would land: while
-                // the robot is talking.
-                if coachEnabled, GhostCoach.usingBasicVoice {
-                    Text("Basic voice. A natural one is a free download: Settings › Accessibility › Spoken Content › Voices.")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                // A coach that has gone silent mid-walk reads as broken, so
+                // the one time it deliberately does, it says why. (What used
+                // to sit here was "your voice is basic, go download a better
+                // one" — an errand nobody can run mid-stride, for a voice that
+                // is no longer the robotic one.)
+                if coachEnabled, coach.isOnCall {
+                    Text("On a call — buzzing instead of speaking.")
+                        .madFont(size: 10, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.45))
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(2)
+                        .lineLimit(1)
                 }
             }
         }
@@ -1550,7 +1664,7 @@ struct WorkoutTrackingView: View {
             // then the ghost is beside the point.
             if frozen {
                 Image(systemName: ahead ? "trophy.fill" : "flag.checkered")
-                    .font(.system(size: 9, weight: .bold))
+                    .madFont(size: 9, weight: .bold)
             } else {
                 GhostSprite(
                     size: 11,
@@ -1560,7 +1674,7 @@ struct WorkoutTrackingView: View {
                 )
             }
             Text(text)
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .madFont(size: 11, weight: .heavy, design: .rounded)
                 .tracking(0.4)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -1698,17 +1812,23 @@ struct WorkoutTrackingView: View {
     private var goalCompletionOverlay: some View {
         if showCompletion {
             VStack(spacing: 24) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 100))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.green, .green.opacity(0.7)],
-                            startPoint: .top,
-                            endPoint: .bottom
+                // Fun: Flamey cheers IN this overlay (same one-shot, same 3s)
+                // rather than in a second one competing with it.
+                if TrackerFlameyCheer.isAvailable {
+                    TrackerFlameyCheer()
+                } else {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 100))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.green, .green.opacity(0.7)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
                         )
-                    )
-                    .scaleEffect(showCompletion ? 1.0 : 0.5)
-                    .animation(.spring(response: 0.6, dampingFraction: 0.6), value: showCompletion)
+                        .scaleEffect(showCompletion ? 1.0 : 0.5)
+                        .animation(.spring(response: 0.6, dampingFraction: 0.6), value: showCompletion)
+                }
 
                 Text("Goal Complete!")
                     .font(.system(size: 48, weight: .bold, design: .rounded))
@@ -1852,14 +1972,17 @@ struct WorkoutTrackingView: View {
                 goBack(to: {}, from: { buddyFlowEntry = nil })
             },
             onStart: { session in
-                // Cleared here as well as in `clearPreStartSteps`: the guards
-                // in `startBuddyWorkoutIfReady` can decline the hand-off (a
-                // workout is already running), and the lobby must still come
-                // down — it has already latched `hasHandedOff`.
-                buddyFlowEntry = nil
                 adoptedBuddySessionId = session.id
                 onBuddySessionAdopted?(session.id)
-                startBuddyWorkoutIfReady()
+                // A declined hand-off still has to leave this wizard. Every
+                // guard in `startBuddyWorkoutIfReady` means "a workout is
+                // already running", and the lobby has latched `hasHandedOff`
+                // either way, so the questions behind it are answered no
+                // matter which way it went — leaving them mounted dropped the
+                // walker back on "What are you doing?" the moment the lobby
+                // came down, which reads as the app having forgotten the walk
+                // it just started. The success path clears them itself.
+                if !startBuddyWorkoutIfReady() { clearPreStartSteps() }
             }
         )
     }
@@ -1887,6 +2010,7 @@ struct WorkoutTrackingView: View {
             onDistanceAdjusted: { newDistance in
                 recapDistance = newDistance
             },
+            isBuddyWalk: effectiveBuddySessionId != nil,
             onDismiss: { dismiss() }
         )
     }
@@ -1993,6 +2117,8 @@ struct WorkoutTrackingView: View {
             // do a final Live Activity update and state save so the Dynamic Island
             // shows current data while the view is gone.
             if isTracking && !isStopping {
+                // The one save that must not wait behind the 5s throttle.
+                lastStatePersistDate = .distantPast
                 updateLiveActivity()
             }
 
@@ -2041,7 +2167,15 @@ struct WorkoutTrackingView: View {
             // would fail the lock anyway.
             if startBuddyWorkoutIfReady() { return }
 
-            guard let saved = InProgressWorkoutStore.load(), saved.isActive else { return }
+            guard let saved = InProgressWorkoutStore.load(), saved.isActive else {
+                // Opening on the start wizard. If a tracking session is still
+                // running underneath with no workout on disk, nothing on this
+                // screen can stop it — retire it (and its Live Activity and
+                // watchdog) rather than leave a walk only a force-quit ends.
+                WorkoutLocationManager.retireOrphanedSession()
+                applyPreselectedActivity()
+                return
+            }
 
             // Buddy walk: the room rides the persisted workout. Re-adopt it
             // before anything below starts reporting, and ask the server for
@@ -2052,6 +2186,22 @@ struct WorkoutTrackingView: View {
             if effectiveBuddySessionId == nil, let restoredSession = saved.buddySessionId {
                 adoptedBuddySessionId = restoredSession
                 onBuddySessionAdopted?(restoredSession)
+                Task { @MainActor in
+                    await BuddySessionService.shared.refreshMySessions()
+                }
+            } else if let session = effectiveBuddySessionId,
+                      saved.buddySessionId == nil {
+                // ...and the other direction. Arriving here with a session the
+                // persisted workout doesn't carry is the tracker being REOPENED
+                // onto a walk already recording — a buddy push or the pill
+                // tapped mid-walk, which now routes here instead of to a lobby
+                // that could not act on it. The workout was persisted SOLO, so
+                // stamp it, exactly as the mid-walk join strip does: without
+                // this the crew survives only until the next relaunch, which is
+                // the failure the persisted room exists to prevent. Only when
+                // it carries no room — a workout already in one keeps it rather
+                // than being moved by whatever was tapped.
+                InProgressWorkoutStore.setBuddySession(session)
                 Task { @MainActor in
                     await BuddySessionService.shared.refreshMySessions()
                 }
@@ -2210,8 +2360,9 @@ struct WorkoutTrackingView: View {
               buddyService.session?.me(buddyService.currentUserId)?.status != .finished,
               InProgressWorkoutStore.load()?.isActive != true else { return false }
         hasAutoStartedBuddyWorkout = true
-        selectedActivityType =
-            (buddyService.session?.isRunning ?? false) ? .running : .walking
+        // This person's OWN answer from the lobby (a friend can run beside
+        // a walker), falling back to the host's plan when they gave none.
+        selectedActivityType = buddyService.myIsRunning ? .running : .walking
         // NOT hardcoded outdoor any more. This line picks the INSTRUMENT —
         // outdoor measures with GPS, which indoors never returns a fix that
         // clears the 50m accuracy gate — so a buddy walker on a treadmill
@@ -2262,6 +2413,23 @@ struct WorkoutTrackingView: View {
             from()
             to()
         }
+    }
+
+    /// A Start My Mile request's walk/run, applied once to a FRESH wizard.
+    /// `onAppear` re-fires whenever a sheet over this cover dismisses, so it
+    /// only acts while the wizard is still on its first step with nothing
+    /// chosen — Back to the activity step keeps `selectedActivityType`, so it
+    /// can't bounce the user forward again.
+    private func applyPreselectedActivity() {
+        guard let preselectedActivity,
+              effectiveBuddySessionId == nil,
+              !isTracking, !showCountdown,
+              showActivitySelection,
+              selectedActivityType == nil
+        else { return }
+        selectedActivityType = preselectedActivity
+        showActivitySelection = false
+        showLocationTypeSelection = true
     }
 
     private func selectActivity(_ activityType: HKWorkoutActivityType) {
@@ -2355,12 +2523,12 @@ struct WorkoutTrackingView: View {
                 }
 
                 Text("Share that you're out?")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .madFont(size: 30, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
 
                 Text("While you track a walk or run, friends who are also out see \u{201C}you're out right now\u{201D} — and their hypes land on your Live Activity mid-walk. Never your location, only that you're moving. You'll see them too either way.")
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .madFont(size: 15, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.82))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -2374,7 +2542,7 @@ struct WorkoutTrackingView: View {
                     resolvePresenceConsent(share: true)
                 } label: {
                     Text("Share when I'm out")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .madFont(size: 18, weight: .bold, design: .rounded)
                         .foregroundColor(Color(red: 0.5, green: 0.15, blue: 0.2))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
@@ -2389,7 +2557,7 @@ struct WorkoutTrackingView: View {
                     resolvePresenceConsent(share: false)
                 } label: {
                     Text("Not now")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .madFont(size: 16, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.85))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
@@ -2404,12 +2572,15 @@ struct WorkoutTrackingView: View {
                 .buttonStyle(.plain)
 
                 Text("Change any time in notification settings.")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .madFont(size: 12, weight: .medium, design: .rounded)
                     .foregroundColor(.white.opacity(0.55))
             }
             .padding(.horizontal, 32)
             .padding(.bottom, 48)
         }
+        // No scroll view here, and two fixed-height buttons: the copy grows,
+        // but only as far as one screen holds.
+        .madTypeCap(.madFixedChromeCap)
     }
 
     /// The 3-2-1. Retained in `countdownTimer` so Cancel can actually stop it:
@@ -2545,6 +2716,8 @@ struct WorkoutTrackingView: View {
             buddySessionId: effectiveBuddySessionId
         )
         InProgressWorkoutStore.save(initialState)
+        // What Start My Mile pre-answers next time.
+        TrackerLaunchPreference.record(selectedActivityType)
 
         // Start location/pedometer tracking (fresh workout, initialDistance = 0)
         locationManager.startTracking(locationType: selectedLocationType, initialDistance: 0)
@@ -2733,9 +2906,16 @@ struct WorkoutTrackingView: View {
         // Cleaned once here — despiked, smoothed, simplified — because this
         // is the single point every route consumer flows through (HealthKit
         // route → backend sync → feed maps).
+        let persistedState = InProgressWorkoutStore.load()
         let routeLocations = WorkoutRouteCleanup.cleaned(
-            (InProgressWorkoutStore.load()?.routePoints ?? []).map { $0.toCLLocation() }
+            (persistedState?.routePoints ?? []).map { $0.toCLLocation() }
         )
+        // Read the Stealth latch NOW. `markEnded()` below flips the state
+        // inactive, and `load()` deletes an inactive state on its next read —
+        // so reading it later (as the metadata block used to) always came back
+        // nil, and a walk started in Stealth with the toggle turned off
+        // mid-walk lost its stealth stamp.
+        let latchedStealth = persistedState?.stealth == true
 
         // The user has ENDED this workout — record that synchronously, before
         // the async HealthKit save. finishCleanup() clears the store only at
@@ -2749,6 +2929,21 @@ struct WorkoutTrackingView: View {
         timer = nil
         locationManager.stopTracking()
         livePresence.endSession()
+
+        // End the Live Activity NOW, at the user's decision, not at the far
+        // end of the HealthKit chain. Location updates just stopped, so
+        // nothing keeps the process alive any more; a user who taps End and
+        // locks the phone was suspended before `finishCleanup` ran, the
+        // activity was never ended, and three minutes later its staleDate
+        // turned it into TRACKING INTERRUPTED — on a walk they had finished.
+        endLiveActivity()
+
+        // And ask for the time the save chain needs.
+        if finishBackgroundTask == .invalid {
+            finishBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "FinishWorkout") {
+                endFinishBackgroundTask()
+            }
+        }
 
         // Safety timeout: if HealthKit callbacks never fire, force-cleanup after 10s
         let timeout = DispatchWorkItem { [self] in
@@ -2964,7 +3159,7 @@ struct WorkoutTrackingView: View {
         // The sync reads this back off the HKWorkout and keeps the trace on
         // the phone; the route is still written to HealthKit below (the owner
         // keeps their own map in Apple Fitness).
-        if InProgressWorkoutStore.load()?.stealth == true || StealthModeStore.shared.isOn {
+        if latchedStealth || StealthModeStore.shared.isOn {
             metadata[StealthModeStore.metadataKey] = true
         }
         let addMetadataThenSave = {
@@ -3076,6 +3271,8 @@ struct WorkoutTrackingView: View {
         pendingRaceStamp = nil
         GhostCoach.shared.stop()
 
+        endFinishBackgroundTask()
+
         // Show result to user. The mile counts via GPS/pedometer sync whether
         // or not the HealthKit write succeeded, so a failed save is never a lost
         // workout — tailor the messaging to the cause instead of alarming.
@@ -3093,6 +3290,12 @@ struct WorkoutTrackingView: View {
                 dismiss()
             }
         }
+    }
+
+    private func endFinishBackgroundTask() {
+        guard finishBackgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(finishBackgroundTask)
+        finishBackgroundTask = .invalid
     }
 
     // MARK: - Live Activity Management
@@ -3221,8 +3424,11 @@ struct WorkoutTrackingView: View {
         let realTimeElapsed = activeElapsedTime
         let paused = locationManager.isPaused
 
-        // Update Live Activity (if we have one)
-        if workoutActivity == nil {
+        // Update Live Activity (if we have one). Only CREATE one for a
+        // workout that is actually running — this is reached from the hype
+        // handler and the disappear hook too, and an activity raised for a
+        // workout that isn't recording goes stale into TRACKING INTERRUPTED.
+        if workoutActivity == nil, isTracking, InProgressWorkoutStore.load() != nil {
             startLiveActivity()
         }
         if let activity = workoutActivity {
@@ -3298,6 +3504,14 @@ struct WorkoutTrackingView: View {
         }
 
         // Persist state for recovery (only update EXISTING state, never create new).
+        // Throttled: each save re-encodes every route point, and doing it once
+        // a second on the main thread is what made a long walk's tracker stop
+        // answering taps. Distance has its own 2s persist in the location
+        // manager, pauses write through on each edge, and the clock is derived
+        // from `startTime` — so 5s loses nothing a relaunch needs.
+        let now = Date()
+        guard now.timeIntervalSince(lastStatePersistDate) >= 5 else { return }
+        lastStatePersistDate = now
         InProgressWorkoutStore.flushRoutePoints()
         if var existingState = InProgressWorkoutStore.load() {
             existingState.elapsedTime = realTimeElapsed
@@ -3356,6 +3570,10 @@ struct WorkoutTrackingView: View {
         Task {
             let allActivities = Activity<WorkoutActivityAttributes>.activities
             for orphanedActivity in allActivities {
+                // Skip anything already ended (including the one just ended
+                // above) — re-ending it `.immediate` would cut its 5s linger.
+                guard orphanedActivity.activityState == .active
+                        || orphanedActivity.activityState == .stale else { continue }
                 if orphanedActivity.id != endedActivityID {
                     print("🗑️ Cleaning up orphaned Live Activity: \(orphanedActivity.id)")
                     await orphanedActivity.end(nil, dismissalPolicy: .immediate)

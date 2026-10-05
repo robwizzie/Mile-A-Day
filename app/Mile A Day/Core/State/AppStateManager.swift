@@ -14,7 +14,6 @@ class AppStateManager: ObservableObject {
         case authentication
         case usernameSetup
         case personalization
-        case welcome
         case healthAccess
         case main
     }
@@ -112,6 +111,11 @@ class AppStateManager: ObservableObject {
     
     /// Complete username setup and move to the personalization ("about you") step
     func completeUsernameSetup() {
+        // Only a brand-new account sets a username: a "What's New" sheet on
+        // its first dashboard would announce the whole app as an update.
+        // Existing users who update never pass through here, so they still
+        // get it.
+        WhatsNewManager.markSeen()
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 self.currentState = .personalization
@@ -119,20 +123,13 @@ class AppStateManager: ObservableObject {
         }
     }
 
-    /// Complete the optional personalization step and move to the welcome screen.
-    /// This step is optional (data-collection only) so it is intentionally NOT
-    /// part of the `hasCompletedFullSetup` gate — a user who quits here still
-    /// resumes straight to the main app on next launch.
+    /// Complete the optional personalization step and move straight to health
+    /// access. (A "You're all set" screen sat between them once — it repeated
+    /// the welcome tour the user had just finished.) This step is optional
+    /// (data-collection only) so it is intentionally NOT part of the
+    /// `hasCompletedFullSetup` gate — a user who quits here still resumes
+    /// straight to the main app on next launch.
     func completePersonalization() {
-        DispatchQueue.main.async {
-            withAnimation(MADTheme.Animation.standard) {
-                self.currentState = .welcome
-            }
-        }
-    }
-
-    /// Complete welcome screen and move to health access
-    func completeWelcome() {
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 self.currentState = .healthAccess

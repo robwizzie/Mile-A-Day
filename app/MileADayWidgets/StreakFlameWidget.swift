@@ -44,6 +44,16 @@ struct StreakFlameEntry: TimelineEntry {
     /// Today's steps. Refreshed roughly per 1,000 (see `WidgetDataStore`), so
     /// it lags the dashboard's live number by up to a bucket.
     var steps: Int = 0
+    /// What Flamey wears in THIS entry (Fun only): gear from the longest
+    /// streak plus the outfit for the entry's own date — so the baked
+    /// midnight entry puts the next day's holiday outfit on with no reload.
+    var look: FlameyLook = .plain
+    /// What Flamey is FEELING in this entry (Fun only; nil on Modern) —
+    /// resolved by `FlameMoodKind.resolve`, the exact call the dashboard
+    /// hero makes, from the entry's own date. So he sleeps in before 10 AM,
+    /// frets from 6 PM, dozes off in a nightcap after 10 PM, all on the
+    /// pre-baked hourly entries with no reload spent.
+    var mood: FlameMoodKind? = nil
 
     var isAtRisk: Bool { health == .critical }
 
@@ -77,6 +87,11 @@ struct StreakFlameProvider: TimelineProvider {
         var completed: Bool
         let tokensReady: Int
         let isFun: Bool
+        var flameyBadges: Set<String> = []
+        var signupDate: Date? = nil
+        var flameyChoice: FlameyLookChoice = .basic
+        /// The local day a poke woke him on the dashboard.
+        var wokenDay: String = ""
     }
 
     func placeholder(in context: Context) -> StreakFlameEntry {
@@ -93,7 +108,8 @@ struct StreakFlameProvider: TimelineProvider {
             tokensReady: 3,
             isFun: true,
             longestStreak: 436,
-            steps: 6842
+            steps: 6842,
+            mood: .ready
         )
     }
 
@@ -136,7 +152,11 @@ struct StreakFlameProvider: TimelineProvider {
             goal: data.goal,
             completed: data.streakCompleted,
             tokensReady: WidgetDataStore.loadTokensReady(),
-            isFun: WidgetDataStore.loadDashboardStyle() == "fun"
+            isFun: WidgetDataStore.loadDashboardStyle() == "fun",
+            flameyBadges: WidgetDataStore.loadFlameyBadgeIds(),
+            signupDate: WidgetDataStore.loadFlameySignupDate(),
+            flameyChoice: WidgetDataStore.loadFlameyChoice(),
+            wokenDay: WidgetDataStore.loadFlameyWokenDay()
         )
     }
 
@@ -152,6 +172,16 @@ struct StreakFlameProvider: TimelineProvider {
             streak: snapshot.streak
         )
         let burning = !snapshot.completed && snapshot.streak > 0
+        // The hero's own resolution (FlameyMoodCore.swift), fed what the
+        // widget has: the store only holds values the app already trusted,
+        // so completion and streak-zero are taken as fresh.
+        let phase = StreakFlamePhase.forState(isCompleted: snapshot.completed, distanceIsFresh: true,
+                                              streak: snapshot.streak)
+        let mood: FlameMoodKind? = snapshot.isFun
+            ? FlameMoodKind.resolve(phase: phase, progress: snapshot.progress, isAtRisk: isAtRisk,
+                                    hasActiveWorkout: false, streak: snapshot.streak,
+                                    wokenToday: snapshot.wokenDay == FlameMoodKind.dayStamp(date), now: date)
+            : nil
         return StreakFlameEntry(
             date: date,
             streak: snapshot.streak,
@@ -165,7 +195,22 @@ struct StreakFlameProvider: TimelineProvider {
             tokensReady: snapshot.tokensReady,
             isFun: snapshot.isFun,
             longestStreak: snapshot.longestStreak,
-            steps: snapshot.steps
+            steps: snapshot.steps,
+            // Same resolver as the app's hero (FlameyWardrobe.swift, a
+            // byte-identical copy), WITH the mood's dressing — nightcap
+            // asleep, shades once it's done, the party hat on a milestone —
+            // resolved against his outfit exactly as the hero's is. No
+            // outfit on the coal — he isn't lit.
+            look: snapshot.isFun && phase != .coal
+                ? FlameyLook.resolve(owned: FlameyWardrobe.owned(earnedBadgeIds: snapshot.flameyBadges
+                                        .union(FlameyWardrobe.impliedBadgeIds(longestStreak: max(snapshot.longestStreak, snapshot.streak)))),
+                                     choice: snapshot.flameyChoice,
+                                     date: date,
+                                     mood: mood?.props ?? [],
+                                     signupDate: snapshot.signupDate,
+                                     detail: .compact)
+                : .plain,
+            mood: mood
         )
     }
 }
@@ -200,9 +245,40 @@ private struct FlameArt: View {
 
     private var vigor: CGFloat? { entry.vigor.map { CGFloat($0) } }
 
+    /// The scale the figure copy draws at (its `effectiveBodyScale`), so the
+    /// outfit sits on him as he burns down through the day's entries.
+    private var bodyScale: CGFloat {
+        if let vigor = entry.vigor, entry.health != .dead, entry.health != .blazing {
+            return StreakFlameClock.flameScale(vigor: vigor)
+        }
+        return entry.health.bodyScale
+    }
+
+    /// Both widget sizes were laid out around a BARE tip (0.98 + its 0.03
+    /// flicker, body units), which already reaches the canvas's top margin.
+    /// A tall head — the party hat, a crown, the nightcap — is fitted back
+    /// inside that envelope, shrinking him about his feet, rather than
+    /// sliced by the widget's edge. (Legs are the compact stand-fit's job.)
+    /// A ratio of his own geometry, never a predicted canvas height.
+    private var headFit: CGFloat {
+        let reach = 0.98 + FlameyArt.crest(of: entry.look) + entry.look.hoverLift
+        return min(1, (0.98 + 0.03) / reach)
+    }
+
     var body: some View {
-        if entry.isFun {
-            FlameBuddyFigure(health: entry.health, size: size, showsFace: true, vigor: vigor, grounded: true)
+        if entry.isFun, entry.mood == .unlit {
+            // No streak: the hero's own sleeping coal (a shared,
+            // byte-identical copy), framed exactly as `FlameBuddyView` frames
+            // it, warmed by today's partial mile.
+            CoalLumpView(size: size * 0.74, showsFace: true, warmth: min(entry.progress, 1), still: true)
+                .frame(width: size, height: size, alignment: .bottom)
+                .offset(y: -size * 0.01)
+        } else if entry.isFun {
+            // Static, like everything a widget draws. `mood` puts the hero's
+            // face, arms and still props on him (FlameyMoodCore.swift).
+            FlameyDressedFigure(look: entry.look, health: entry.health, size: size, vigor: vigor, scale: bodyScale,
+                                mood: entry.mood)
+                .scaleEffect(headFit, anchor: .bottom)
         } else {
             MADWidgetRing(
                 progress: entry.progress,

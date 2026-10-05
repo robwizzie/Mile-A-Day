@@ -11,7 +11,10 @@ export type BadgeCategory =
   | "competition"
   | "buddy"
   | "ghost"
-  | "weekly_challenge";
+  | "weekly_challenge"
+  // holiday_<key>: walked the day's goal ON a holiday (services/holidays.ts).
+  // Evaluated per DAY (not from aggregates) — see evaluateHolidayBadges.
+  | "holiday";
 export type BadgeRarity = "common" | "rare" | "legendary";
 export type DailyChallengeType =
   | "pace"
@@ -330,6 +333,9 @@ export interface NewWeeklyCompletion {
 
 export interface UserAggregates {
   currentStreak: number;
+  // Best run EVER (the Hall of Streaks' longest era) — what streak medals are
+  // judged on, so a broken streak keeps the medals it reached.
+  longestStreak: number;
   totalMiles: number;
   fastestSplitPaceMinMi: number;
   mostMilesInOneDay: number;

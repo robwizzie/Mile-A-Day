@@ -14,9 +14,13 @@ import {
   getTodayMiles,
   DAILY_GOAL_TOLERANCE,
 } from "../services/workoutService.js";
-import { effectiveStreakSql } from "../services/streakFeatureCore.js";
+import {
+  effectiveStreakSql,
+  fetchTodayCoverage,
+} from "../services/streakFeatureCore.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import { PostgresService } from "../services/DbService.js";
+import { bothUseFun } from "../services/flameyService.js";
 
 const db = PostgresService.getInstance();
 
@@ -48,6 +52,19 @@ async function fetchStreaks(
   }
 }
 
+const FLAMEY_POKE_BODIES = [
+  "He's itching for a mile — want to go?",
+  "He's bouncing on his toes. One mile?",
+  "He wants to stretch his legs. Walk with him?",
+];
+
+/** Varied copy for a Flamey poke. Playful, never a health claim. */
+export function flameyPokeCopy(senderName: string): { title: string; body: string } {
+  const body =
+    FLAMEY_POKE_BODIES[Math.floor(Math.random() * FLAMEY_POKE_BODIES.length)];
+  return { title: `🔥 ${senderName} poked your Flamey`, body };
+}
+
 export async function nudgeFriend(req: AuthenticatedRequest, res: Response) {
   const friendId = req.params.friendId;
   const senderId = req.userId!;
@@ -65,6 +82,16 @@ export async function nudgeFriend(req: AuthenticatedRequest, res: Response) {
       friendship.status !== "accepted"
     ) {
       return res.status(400).json({ error: "You can only nudge friends" });
+    }
+
+    // A Flamey poke is the same nudge — same friendship check above, same
+    // done-today and once-a-day rules below, same push type — dressed in
+    // Flamey's copy. Flamey only exists on the Fun dashboard, so both sides
+    // must draw it; NULL (a build predating the field) counts as not Fun.
+    // Without `source` nothing below changes.
+    const flameyPoke = req.body?.source === "flamey";
+    if (flameyPoke && !(await bothUseFun(senderId, friendId))) {
+      return res.status(403).json({ error: "flamey_unavailable" });
     }
 
     // Check if friend has already completed their mile today — same 0.95
@@ -96,12 +123,23 @@ export async function nudgeFriend(req: AuthenticatedRequest, res: Response) {
       const sender = await getUser({ userId: senderId });
       const senderName = sender?.username || "Someone";
 
-      await sendPush(friendId, {
-        title: "Time to lace up!",
-        body: `${senderName} is nudging you to get your mile in today`,
-        type: "friend_nudge",
-        data: { user_id: senderId },
-      });
+      await sendPush(
+        friendId,
+        flameyPoke
+          ? {
+              ...flameyPokeCopy(senderName),
+              // Same type every shipped build routes; `source` is additive
+              // and string-valued (inbox `data` decodes as [String: String]).
+              type: "friend_nudge",
+              data: { user_id: senderId, source: "flamey" },
+            }
+          : {
+              title: "Time to lace up!",
+              body: `${senderName} is nudging you to get your mile in today`,
+              type: "friend_nudge",
+              data: { user_id: senderId },
+            },
+      );
     }
 
     // Log after the send so a failed push doesn't consume the daily limit
@@ -126,20 +164,27 @@ export async function checkNudgeStatus(
   const senderId = req.userId!;
 
   try {
-    const [nudgedToday, unlimited, friendTodayMiles, streaks] =
+    const [nudgedToday, unlimited, friendTodayMiles, streaks, coverage] =
       await Promise.all([
         hasNudgedFriendToday(senderId, friendId),
         hasUnlimitedActions(senderId),
         getTodayMiles(friendId),
         fetchStreaks([friendId]),
+        fetchTodayCoverage([friendId]),
       ]);
     const canNudge = unlimited || !nudgedToday;
 
     const hasCompletedMile = friendTodayMiles >= DAILY_GOAL_TOLERANCE;
+    const covered = coverage[friendId] ?? null;
 
     res.status(200).json({
       can_nudge: canNudge && !hasCompletedMile,
       has_completed_mile: hasCompletedMile,
+      // A token is already holding their day. Additive and null for almost
+      // everyone; shipped builds ignore it. Without it the row paints a
+      // banked day as "0.00 / 1 mi · 0%" — the app reporting that the rescue
+      // the viewer may have just paid for did nothing.
+      today_covered: covered,
       // Legacy field: derived from can_nudge, so unlimited nudgers read
       // false here and old builds keep their re-nudge ability.
       already_nudged_today: !canNudge,
@@ -181,14 +226,22 @@ export async function checkNudgeStatusBatch(
         unlimited_nudges: boolean;
         today_miles: number;
         current_streak: number;
+        today_covered: {
+          local_date: string;
+          kind: string;
+          source_username: string | null;
+        } | null;
       }
     > = {};
 
     // One DB roundtrip for all streaks rather than N per-friend queries;
-    // the role bypass is per-sender, so look it up once.
-    const [streaks, unlimited] = await Promise.all([
+    // the role bypass is per-sender, so look it up once. Today's coverage is
+    // batched the same way — it resolves each friend's own local day, so it
+    // cannot be folded into the per-friend loop without N more queries.
+    const [streaks, unlimited, coverage] = await Promise.all([
       fetchStreaks(friendIds),
       hasUnlimitedActions(senderId),
+      fetchTodayCoverage(friendIds),
     ]);
 
     await Promise.all(
@@ -209,6 +262,7 @@ export async function checkNudgeStatusBatch(
           unlimited_nudges: unlimited,
           today_miles: Math.round(friendTodayMiles * 100) / 100,
           current_streak: streaks[friendId] ?? 0,
+          today_covered: coverage[friendId] ?? null,
         };
       }),
     );

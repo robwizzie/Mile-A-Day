@@ -9,8 +9,9 @@ enum CompeteAnchor: Hashable {
 ///
 /// The old tab was a filter bar over one flat list, which meant it had nothing
 /// to show until you already had competitions. This is ordered by what a user
-/// needs: what's waiting on you, what you're in, what just wrapped, and then —
-/// always, not just when you're empty — the five modes and the quick starts.
+/// needs: what's waiting on you, what you're in, what just wrapped, and then
+/// how to start something — the full catalogue when you have nothing, one
+/// "Start a competition" button (→ `StartCompetitionSheet`) once you do.
 ///
 /// Still a `List` rather than a `ScrollView`: `.swipeActions` (Delete / Edit /
 /// Leave) and `.refreshable` only exist here, and `ScrollViewReader` drives the
@@ -43,6 +44,10 @@ struct CompeteHomeView: View {
     @State private var pendingLeaveId: String?
     /// An invite push arrived for an invite that is no longer pending.
     @State private var showInviteHandledNote = false
+    /// The collapsed "Start a competition" button's sheet, and what was picked
+    /// in it (acted on after dismissal).
+    @State private var showStartSheet = false
+    @State private var pendingStart: StartCompetitionSheet.Choice?
 
     private var currentUserId: String? {
         UserDefaults.standard.string(forKey: "backendUserId")
@@ -52,15 +57,19 @@ struct CompeteHomeView: View {
     /// per-mode "what should I do right now?" model — the dashboard banner and
     /// the home-screen widget already sort by it, so this can't disagree with
     /// them. Ties break on whichever ends soonest.
+    ///
+    /// The focus key is computed once per competition, not twice per
+    /// comparison — same keys, same comparator, same order.
     private var activeCompetitions: [Competition] {
-        competitionService.competitions
+        let userId = currentUserId
+        return competitionService.competitions
             .filter { $0.status == .active }
+            .map { ($0, TodayFocus.compute(for: $0, currentUserId: userId).level.sortKey) }
             .sorted { lhs, rhs in
-                let l = TodayFocus.compute(for: lhs, currentUserId: currentUserId).level.sortKey
-                let r = TodayFocus.compute(for: rhs, currentUserId: currentUserId).level.sortKey
-                if l != r { return l < r }
-                return (lhs.end_date ?? "9999") < (rhs.end_date ?? "9999")
+                if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }
+                return (lhs.0.end_date ?? "9999") < (rhs.0.end_date ?? "9999")
             }
+            .map(\.0)
     }
 
     /// Lobbies and scheduled starts — real commitments, but nothing to do yet.
@@ -71,7 +80,7 @@ struct CompeteHomeView: View {
 
     /// Wrapped within the last week. A competition you were watching shouldn't
     /// vanish from the tab the moment it ends — the full history lives in
-    /// Record.
+    /// the History segment.
     private var recentlyFinished: [Competition] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
         return competitionService.competitions
@@ -92,6 +101,7 @@ struct CompeteHomeView: View {
     var body: some View {
         ScrollViewReader { proxy in
             List {
+                let active = activeCompetitions
                 if let weekly = weeklyService.current {
                     WeeklyChallengeHeroCard(response: weekly) { onOpenWeekly() }
                         .listRowBackground(Color.clear)
@@ -107,9 +117,9 @@ struct CompeteHomeView: View {
                     invitesSection
                 }
 
-                if !activeCompetitions.isEmpty {
+                if !active.isEmpty {
                     section(title: "Active", icon: "bolt.fill", accent: .green) {
-                        ForEach(activeCompetitions, id: \.competition_id) { competition in
+                        ForEach(active, id: \.competition_id) { competition in
                             competitionRow(competition)
                         }
                     }
@@ -137,6 +147,11 @@ struct CompeteHomeView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            // On the List, not the row: a presentation on a List row can be
+            // dropped when the row is recycled.
+            .sheet(isPresented: $showStartSheet, onDismiss: runPendingStart) {
+                StartCompetitionSheet { pendingStart = $0 }
+            }
             .environment(\.defaultMinListRowHeight, 0)
             .refreshable {
                 await competitionService.refreshAllData()
@@ -267,28 +282,76 @@ struct CompeteHomeView: View {
 
     // MARK: - Start something
 
-    /// Permanently present, not just an empty state. Someone with three live
-    /// competitions is exactly who might start a fourth, and the only place the
-    /// modes were ever explained used to be inside the create form.
+    /// Empty state: the full section — modes, presets, custom — because it is
+    /// what teaches the feature. Once the user has competitions it collapses
+    /// to ONE "Start a competition" button opening `StartCompetitionSheet`,
+    /// which holds every one of those same paths; a tab already carrying live
+    /// boards shouldn't scroll through a catalogue under them.
+    @ViewBuilder
     private var startSection: some View {
+        if hasAnyCompetitions {
+            startButton
+        } else {
+            fullStartSection
+        }
+    }
+
+    private var startButton: some View {
+        Button { showStartSheet = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(MADTheme.Colors.madRed)
+                    .accessibilityHidden(true)
+                Text("Start a competition")
+                    .font(CompeteDesign.name)
+                    .foregroundColor(CompeteDesign.ink)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(CompeteDesign.inkFaint)
+                    .accessibilityHidden(true)
+            }
+            .modifier(StartButtonSurface())
+            .contentShape(RoundedRectangle(cornerRadius: CompeteDesign.radius, style: .continuous))
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 18, leading: 14, bottom: 4, trailing: 14))
+    }
+
+    /// Held until the sheet has finished dismissing: the shell presents the
+    /// explainer / create form as sheets of its own, and those can't come up
+    /// while this one is still on screen.
+    private func runPendingStart() {
+        guard let choice = pendingStart else { return }
+        pendingStart = nil
+        switch choice {
+        case .preset(let preset): onStartPreset(preset)
+        case .mode(let type): onExplainMode(type)
+        case .blank: onCreateBlank()
+        }
+    }
+
+    private var fullStartSection: some View {
         Group {
             header(
-                title: hasAnyCompetitions ? "Start another" : "Start competing",
+                title: "Start competing",
                 icon: "plus.circle.fill",
                 accent: MADTheme.Colors.madRed
             )
 
-            if !hasAnyCompetitions {
-                Text("Pick a mode to see how it works, or start one of these in a couple of taps.")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 4)
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets())
-            }
+            Text("Pick a mode to see how it works, or start one of these in a couple of taps.")
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.6))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 4)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets())
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
@@ -471,5 +534,23 @@ struct CompeteHomeView: View {
                 onError("Couldn't leave this competition. \(error.localizedDescription)")
             }
         }
+    }
+}
+
+/// `CompeteSurface`'s fill + hairline, as a modifier so the whole card stays
+/// the button's tappable label.
+private struct StartButtonSurface: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: CompeteDesign.radius, style: .continuous)
+                    .fill(CompeteDesign.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CompeteDesign.radius, style: .continuous)
+                    .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
+            )
     }
 }

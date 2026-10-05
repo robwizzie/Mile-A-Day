@@ -347,11 +347,16 @@ final class MADNotificationService: NSObject, ObservableObject {
                 let device_token: String
                 let environment: String
                 let client_features: [String]
+                /// Installed widget kinds; nil (omitted) when WidgetKit can't
+                /// say, which the server stores as "unknown" and never pushes.
+                let widget_kinds: [String]?
             }
+            let widgetKinds = await WidgetLiveRefresh.installedKinds()
             let body = try JSONEncoder().encode(RegisterRequest(
                 device_token: token,
                 environment: AppEnvironment.apnsEnvironment,
-                client_features: ClientFeatures.supported
+                client_features: ClientFeatures.supported,
+                widget_kinds: widgetKinds
             ))
             let _: [String: String] = try await APIClient.fancyFetch(
                 endpoint: "/devices/register",

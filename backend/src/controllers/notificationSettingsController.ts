@@ -19,6 +19,22 @@ import {
   isWorkoutVisibility,
   WORKOUT_VISIBILITY_VALUES,
 } from "../services/visibilityService.js";
+import {
+  isRoutePrivacyMeters,
+  ROUTE_PRIVACY_OPTIONS,
+} from "../services/routePrivacy.js";
+
+/**
+ * The Weekly Recap switch under both names: `weekly_recap_enabled` (the
+ * column, what shipped Settings screens already read and write) and
+ * `weekly_recap` (the recap feature's contract name). One column, so the two
+ * can never disagree.
+ */
+function withRecapAlias<T extends { weekly_recap_enabled: boolean }>(
+  prefs: T,
+): T & { weekly_recap: boolean } {
+  return { ...prefs, weekly_recap: prefs.weekly_recap_enabled };
+}
 
 export async function getPreferences(req: AuthenticatedRequest, res: Response) {
   try {
@@ -26,7 +42,10 @@ export async function getPreferences(req: AuthenticatedRequest, res: Response) {
     // Stealth is composed HERE, not in getNotificationPreferences: that
     // function runs per push inside shouldSendNotification and must stay a
     // single row read.
-    res.status(200).json({ ...prefs, ...(await stealthStatus(req.userId!)) });
+    res.status(200).json({
+      ...withRecapAlias(prefs),
+      ...(await stealthStatus(req.userId!)),
+    });
   } catch (error: any) {
     console.error("Error getting notification preferences:", error.message);
     res.status(500).json({ error: "Error getting notification preferences" });
@@ -53,6 +72,18 @@ export async function updatePreferences(
     ) {
       return res.status(400).json({
         error: `workout_visibility must be one of: ${WORKOUT_VISIBILITY_VALUES.join(", ")}`,
+      });
+    }
+    // Hide start & end: one of the offered distances (metres), or null for
+    // the default.
+    const { route_privacy_meters } = req.body;
+    if (
+      route_privacy_meters !== undefined &&
+      route_privacy_meters !== null &&
+      !isRoutePrivacyMeters(route_privacy_meters)
+    ) {
+      return res.status(400).json({
+        error: `route_privacy_meters must be one of: ${ROUTE_PRIVACY_OPTIONS.join(", ")}, or null`,
       });
     }
     if (
@@ -160,10 +191,20 @@ export async function updatePreferences(
       await closeWindow(req.userId!);
     }
 
-    const updated = await updateNotificationPreferences(req.userId!, req.body);
-    res
-      .status(200)
-      .json({ ...updated, ...(await stealthStatus(req.userId!)) });
+    // `weekly_recap` is an alias for the `weekly_recap_enabled` column the
+    // Settings toggle has always written; the explicit column name wins.
+    const body = { ...req.body };
+    if (
+      body.weekly_recap_enabled === undefined &&
+      typeof body.weekly_recap === "boolean"
+    ) {
+      body.weekly_recap_enabled = body.weekly_recap;
+    }
+    const updated = await updateNotificationPreferences(req.userId!, body);
+    res.status(200).json({
+      ...withRecapAlias(updated),
+      ...(await stealthStatus(req.userId!)),
+    });
   } catch (error: any) {
     console.error("Error updating notification preferences:", error.message);
     res.status(500).json({ error: "Error updating notification preferences" });

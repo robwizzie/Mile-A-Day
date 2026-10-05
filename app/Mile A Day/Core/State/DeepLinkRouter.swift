@@ -38,7 +38,43 @@ final class DeepLinkRouter: ObservableObject {
     /// been visited, and consumes this in both `.task` and `.onReceive`.
     @Published var pendingCompetitionId: String?
 
+    /// "Open the workout tracker" — from the Start My Mile App Intent (Siri,
+    /// Shortcuts, the Action Button, the Control Center control) and the
+    /// widgets' `mileaday://workout/start` buttons. Parked for the usual
+    /// reason: on a cold launch the Dashboard that owns the tracker cover
+    /// doesn't exist yet. Consumed by `TrackerLaunchModifier`, which reopens a
+    /// workout already in progress rather than starting a second one.
+    struct TrackerLaunchRequest: Equatable {
+        /// nil = the activity the user last tracked (else walk).
+        let activity: MileActivityOption?
+        let requestedAt: Date
+    }
+
+    @Published var pendingTrackerLaunch: TrackerLaunchRequest?
+
+    /// Something to open ON the Compete tab (not a specific competition) —
+    /// Flamey's Closet's "Where to earn it" for the organiser and weekly
+    /// medals. Parked for the usual reason (`CompetitionsListView` exists only
+    /// once the tab has been visited) and consumed in BOTH `.task` and
+    /// `.onReceive`. Callers also switch to the tab (`MAD_SwitchTab`, 1).
+    enum CompeteAction: Equatable {
+        case createCompetition
+        case weeklyChallenge
+    }
+
+    @Published var pendingCompeteAction: CompeteAction?
+
     private init() {}
+
+    /// Asks the Dashboard to open the tracker, switching to it first.
+    func requestOpenTracker(activity: MileActivityOption? = nil) {
+        pendingTrackerLaunch = TrackerLaunchRequest(activity: activity, requestedAt: Date())
+        NotificationCenter.default.post(
+            name: NSNotification.Name("MAD_SwitchTab"),
+            object: nil,
+            userInfo: ["tab": 0]
+        )
+    }
 
     /// Asks the Compete tab to open one competition. Callers should also
     /// switch to it (`MAD_SwitchTab`, tab 1).

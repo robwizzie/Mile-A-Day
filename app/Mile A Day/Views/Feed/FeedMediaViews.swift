@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 
 // Shared media plumbing for the feed: a cached image view (so signed URLs and
 // scroll-recycling don't re-download), Instagram-style pinch-to-zoom that
@@ -10,10 +11,18 @@ import UIKit
 /// In-memory image cache for feed media. Keyed by the URL *path* — signed
 /// media URLs rotate their query string every few days, and a query-keyed
 /// cache would re-download every photo on rotation.
+///
+/// Everything stored here is ALREADY DECODED (`FeedImageLoader` does it off
+/// the main thread), so the limit is BYTES, not a count: a full feed photo is
+/// ~15MB of bitmap and an avatar thumbnail ~60KB, and a count limit treats
+/// them as the same thing. Full-size images live under the bare path key
+/// (the share studio and zoom read those); downsampled ones add their pixel
+/// size to it.
 enum FeedImageCache {
     private static let cache: NSCache<NSString, UIImage> = {
         let c = NSCache<NSString, UIImage>()
-        c.countLimit = 120
+        c.countLimit = 600
+        c.totalCostLimit = 150 * 1024 * 1024
         return c
     }()
 
@@ -21,13 +30,167 @@ enum FeedImageCache {
         NSString(string: "\(url.host ?? "")\(url.path)")
     }
 
+    static func key(for url: URL, pixelSize: CGSize) -> NSString {
+        NSString(string: "\(url.host ?? "")\(url.path)#\(Int(pixelSize.width))x\(Int(pixelSize.height))")
+    }
+
     static func image(for url: URL) -> UIImage? { cache.object(forKey: key(for: url)) }
-    static func store(_ image: UIImage, for url: URL) { cache.setObject(image, forKey: key(for: url)) }
+    static func store(_ image: UIImage, for url: URL) {
+        cache.setObject(image, forKey: key(for: url), cost: cost(of: image))
+    }
+
+    /// A downsampled copy for `pixelSize`, else the full image if one is
+    /// already decoded (it fills any tile, and is free).
+    static func image(for url: URL, pixelSize: CGSize) -> UIImage? {
+        cache.object(forKey: key(for: url, pixelSize: pixelSize)) ?? image(for: url)
+    }
+    static func store(_ image: UIImage, for url: URL, pixelSize: CGSize) {
+        cache.setObject(image, forKey: key(for: url, pixelSize: pixelSize), cost: cost(of: image))
+    }
+
+    private static func cost(of image: UIImage) -> Int {
+        if let cg = image.cgImage { return cg.bytesPerRow * cg.height }
+        return Int(image.size.width * image.scale * image.size.height * image.scale * 4)
+    }
+}
+
+/// Download + decode for `FeedImageCache`, OFF the main thread.
+/// `UIImage(data:)` decodes lazily — at first DRAW, on the main thread, at full
+/// size — so a 2160px upload decoded mid-scroll was a dropped frame per photo.
+/// Concurrent requests for one file share a single download.
+enum FeedImageLoader {
+    /// Full resolution, pre-decoded. For surfaces that pinch-zoom or export
+    /// the picture (the feed card), which need every pixel the upload has.
+    static func fullImage(for url: URL) async -> UIImage? {
+        if let hit = FeedImageCache.image(for: url) { return hit }
+        guard let data = await Downloads.shared.data(for: url) else { return nil }
+        let image = await Task.detached(priority: .userInitiated) {
+            guard let raw = UIImage(data: data) else { return nil as UIImage? }
+            return raw.preparingForDisplay() ?? raw
+        }.value
+        if let image { FeedImageCache.store(image, for: url) }
+        return image
+    }
+
+    /// Downsampled so it just FILLS `pixelSize` (aspect-fill: the short edge
+    /// covers the frame), decoded off the main thread. Never upscales.
+    static func thumbnail(for url: URL, pixelSize: CGSize) async -> UIImage? {
+        if let hit = FeedImageCache.image(for: url, pixelSize: pixelSize) { return hit }
+        guard let data = await Downloads.shared.data(for: url) else { return nil }
+        let image = await Task.detached(priority: .userInitiated) {
+            downsample(data, toFill: pixelSize)
+        }.value
+        if let image { FeedImageCache.store(image, for: url, pixelSize: pixelSize) }
+        return image
+    }
+
+    private static func downsample(_ data: Data, toFill target: CGSize) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(
+            data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary
+        ) else { return nil }
+        var maxPixel = max(target.width, target.height)
+        if let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           var w = (props[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
+           var h = (props[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue,
+           w > 0, h > 0 {
+            // EXIF orientations 5-8 are rotated a quarter turn.
+            if let o = (props[kCGImagePropertyOrientation] as? NSNumber)?.intValue, o >= 5 { swap(&w, &h) }
+            let scale = max(target.width / w, target.height / h)
+            if scale >= 1 {
+                guard let raw = UIImage(data: data) else { return nil }
+                return raw.preparingForDisplay() ?? raw
+            }
+            maxPixel = (max(w, h) * scale).rounded(.up)
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
+    }
+
+    /// One download per file at a time — a list of rows all showing the same
+    /// avatar asks for it once.
+    private actor Downloads {
+        static let shared = Downloads()
+        private var inFlight: [NSString: Task<Data?, Never>] = [:]
+
+        func data(for url: URL) async -> Data? {
+            let key = FeedImageCache.key(for: url)
+            if let running = inFlight[key] { return await running.value }
+            let task = Task<Data?, Never> {
+                guard let (data, response) = try? await URLSession.shared.data(from: url) else { return nil }
+                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { return nil }
+                return data
+            }
+            inFlight[key] = task
+            let data = await task.value
+            inFlight[key] = nil
+            return data
+        }
+    }
+}
+
+/// A remote picture drawn aspect-fill at a SMALL size (avatars, grid tiles,
+/// highlight covers), through `FeedImageCache` at that size × screen scale —
+/// what `AsyncImage` did at full resolution with no memory cache, so every
+/// row rebuild re-decoded the photo and flashed its placeholder. A cache hit
+/// draws synchronously in the first body (which also keeps it correct inside
+/// an `ImageRenderer`, where nothing asynchronous ever lands).
+/// `pointSize` nil = measure the frame it's given.
+struct CachedThumbnailImage<Placeholder: View, Failure: View>: View {
+    let url: URL?
+    var pointSize: CGSize? = nil
+    @ViewBuilder var placeholder: () -> Placeholder
+    @ViewBuilder var failure: () -> Failure
+
+    @Environment(\.displayScale) private var displayScale
+    @State private var loaded: (key: NSString, image: UIImage)?
+    @State private var failedKey: NSString?
+
+    var body: some View {
+        if let pointSize {
+            content(pointSize)
+        } else {
+            GeometryReader { content($0.size) }
+        }
+    }
+
+    private func content(_ size: CGSize) -> some View {
+        let pixels = CGSize(width: (size.width * displayScale).rounded(.up),
+                            height: (size.height * displayScale).rounded(.up))
+        let key = url.map { FeedImageCache.key(for: $0, pixelSize: pixels) }
+        let image = key.flatMap { k in loaded?.key == k ? loaded?.image : nil }
+            ?? url.flatMap { FeedImageCache.image(for: $0, pixelSize: pixels) }
+        return ZStack {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else if url == nil || (key != nil && failedKey == key) {
+                failure()
+            } else {
+                placeholder()
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .task(id: key) {
+            guard let url, let key, pixels.width > 0, pixels.height > 0, image == nil else { return }
+            if let fetched = await FeedImageLoader.thumbnail(for: url, pixelSize: pixels) {
+                loaded = (key, fetched)
+            } else if !Task.isCancelled {
+                failedKey = key
+            }
+        }
+    }
 }
 
 /// Feed media image backed by `FeedImageCache`. Same visual states as the old
 /// AsyncImage treatment (spinner → fill image → broken-photo placeholder), but
 /// exposes the loaded `UIImage` so the zoom overlay can float a copy of it.
+/// Full resolution on purpose: the same image is what pinch-zoom lifts out of
+/// the card and what the share studio exports.
 struct FeedImageView: View {
     let url: URL?
     @Binding var loadedImage: UIImage?
@@ -61,15 +224,9 @@ struct FeedImageView: View {
         // showing someone else's image while the right one downloads.
         loadedImage = nil
         failed = false
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            guard let image = UIImage(data: data) else {
-                failed = true
-                return
-            }
-            FeedImageCache.store(image, for: url)
+        if let image = await FeedImageLoader.fullImage(for: url) {
             loadedImage = image
-        } catch {
+        } else if !Task.isCancelled {
             failed = true
         }
     }
@@ -429,32 +586,38 @@ struct HypeBurstView: View {
 
     var body: some View {
         ZStack {
-            // Radiating mini claps
-            ForEach(Array(particleAngles.enumerated()), id: \.offset) { index, angle in
-                Image(systemName: "hands.clap.fill")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.orange.opacity(0.9))
-                    .rotationEffect(.degrees(Double(index.isMultiple(of: 2) ? -18 : 14)))
-                    .offset(particleOffset(angle: angle, distance: particlesOut ? 84 : 12))
-                    .opacity(playing && !particlesOut ? 0.9 : 0)
-                    .scaleEffect(particlesOut ? 0.6 : 1)
-            }
+            // A zero-size anchor so the ZStack (and its onChange) always
+            // exists; the claps themselves are only BUILT while playing —
+            // at rest seven shadowed symbols sat at opacity 0 on every card.
+            Color.clear.frame(width: 0, height: 0)
+            if playing {
+                // Radiating mini claps
+                ForEach(Array(particleAngles.enumerated()), id: \.offset) { index, angle in
+                    Image(systemName: "hands.clap.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.orange.opacity(0.9))
+                        .rotationEffect(.degrees(Double(index.isMultiple(of: 2) ? -18 : 14)))
+                        .offset(particleOffset(angle: angle, distance: particlesOut ? 84 : 12))
+                        .opacity(playing && !particlesOut ? 0.9 : 0)
+                        .scaleEffect(particlesOut ? 0.6 : 1)
+                }
 
-            // The hero clap
-            Image(systemName: "hands.clap.fill")
-                .font(.system(size: 88, weight: .bold))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Color(red: 1.0, green: 0.72, blue: 0.25), .orange],
-                        startPoint: .top, endPoint: .bottom
+                // The hero clap
+                Image(systemName: "hands.clap.fill")
+                    .font(.system(size: 88, weight: .bold))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [Color(red: 1.0, green: 0.72, blue: 0.25), .orange],
+                            startPoint: .top, endPoint: .bottom
+                        )
                     )
-                )
-                .shadow(color: .orange.opacity(0.55), radius: 22)
-                .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
-                .scaleEffect(mainScale)
-                .rotationEffect(.degrees(mainRotation))
-                .opacity(playing ? mainOpacity : 0)
-                .offset(y: rise)
+                    .shadow(color: .orange.opacity(0.55), radius: 22)
+                    .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
+                    .scaleEffect(mainScale)
+                    .rotationEffect(.degrees(mainRotation))
+                    .opacity(playing ? mainOpacity : 0)
+                    .offset(y: rise)
+            }
         }
         .allowsHitTesting(false)
         .onChange(of: trigger) { _, _ in play() }
@@ -481,14 +644,20 @@ struct HypeBurstView: View {
             particlesOut = false
         }
 
-        // Pop in with an Instagram-style overshoot spring…
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.55)) {
-            mainScale = 1.12
-            mainRotation = 0
-            mainOpacity = 1
-        }
-        withAnimation(.easeOut(duration: 0.7).delay(0.05)) {
-            particlesOut = true
+        // The claps are inserted by the reset above; animating in the same
+        // update would give the new views only the END values, so the pop
+        // starts on the next turn, once they exist at their start values.
+        DispatchQueue.main.async {
+            guard gen == generation else { return }
+            // Pop in with an Instagram-style overshoot spring…
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.55)) {
+                mainScale = 1.12
+                mainRotation = 0
+                mainOpacity = 1
+            }
+            withAnimation(.easeOut(duration: 0.7).delay(0.05)) {
+                particlesOut = true
+            }
         }
         // …hold a beat, then float up and fade out.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {

@@ -24,6 +24,7 @@ import leaderboardRoutes from "./routes/leaderboardRoutes.js";
 import liveTrackingRoutes from "./routes/liveTrackingRoutes.js";
 import ghostRoutes from "./routes/ghostRoutes.js";
 import telemetryRoutes from "./routes/telemetryRoutes.js";
+import diagnosticsRoutes from "./routes/diagnosticsRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
 import buddyRoutes from "./routes/buddyRoutes.js";
 import injuryPauseRoutes from "./routes/injuryPauseRoutes.js";
@@ -33,7 +34,12 @@ import {
   AuthenticatedRequest,
 } from "./middleware/auth.js";
 import { logError } from "./services/errorLogService.js";
+import {
+  configureTrustProxy,
+  globalUserLimiter,
+} from "./middleware/rateLimit.js";
 import adminRoutes, { adminAuthRouter } from "./routes/adminRoutes.js";
+import displayRoutes from "./routes/displayRoutes.js";
 import { startCompetitionCron } from "./cron/competitionCron.js";
 import { startNotificationCron } from "./cron/notificationCron.js";
 import { startSilentSyncCron } from "./cron/silentSyncCron.js";
@@ -45,6 +51,7 @@ import { startWeeklyChallengeCron } from "./cron/weeklyChallengeCron.js";
 import { startH2hChallengeCron } from "./cron/h2hChallengeCron.js";
 import { startStreakFeaturesCron } from "./cron/streakFeaturesCron.js";
 import { startLastCallCron } from "./cron/lastCallCron.js";
+import { startDiagnosticsCron } from "./cron/diagnosticsCron.js";
 import { healUncomputedStreaks } from "./services/streakFeatureCore.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
@@ -55,7 +62,12 @@ import {
   getMigrationReport,
 } from "./db/runMigrations.js";
 import { backfillFeedRoles } from "./db/backfillFeedRoles.js";
+import { repairSweptMedia } from "./db/repairSweptMedia.js";
 import { backfillLongestStreaks } from "./db/backfillLongestStreaks.js";
+import { backfillHolidayMedals } from "./db/backfillHolidayMedals.js";
+import { repairBadgeEarnedDates } from "./db/repairBadgeEarnedDates.js";
+import { backfillRetroBadges } from "./db/backfillRetroBadges.js";
+import { backfillRoutePrivacyBounds } from "./db/backfillRoutePrivacyBounds.js";
 import {
   getUnifiedFeed,
   getStoriesRail,
@@ -73,6 +85,10 @@ import { webcrypto } from "node:crypto";
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? "3000");
+// Hop count, never `true` (a client-written X-Forwarded-For would pick its own
+// rate-limit bucket). Default 1 = Coolify's reverse proxy; Cloudflare in front
+// of it is resolved via CF-Connecting-IP in middleware/rateLimit.ts.
+configureTrustProxy(app);
 
 app.use(compression());
 // 2mb (default is 100kb): a workout-sync batch can now carry GPS route traces
@@ -324,8 +340,12 @@ app.use("/badges", publicBadgesRouter);
 app.use("/public", publicRoutes);
 // Admin login (Apple-web verify) is public — it's how the dashboard gets a token.
 app.use("/admin/auth", adminAuthRouter);
+// Desk display feed: its own per-device key, never a user JWT (see displayService).
+app.use("/display", displayRoutes);
 
 app.use(authenticateToken);
+// Per-user backstop, far above any real client (see RATE_LIMIT_SPECS.global).
+app.use(globalUserLimiter);
 // Admin dashboard data — authenticated AND role=admin.
 app.use("/admin", requireAdmin, adminRoutes);
 app.use("/users", userRoutes);
@@ -348,6 +368,7 @@ app.use("/streak", injuryPauseRoutes);
 app.use("/live", liveTrackingRoutes);
 app.use("/ghosts", ghostRoutes);
 app.use("/telemetry", telemetryRoutes);
+app.use("/diagnostics", diagnosticsRoutes);
 
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   console.error("Error:", err.message);
@@ -400,10 +421,36 @@ runPendingMigrations()
       // users.longest_streak from workout history; rows it hasn't reached
       // read 0, which every API surface degrades to max(0, current streak).
       void backfillLongestStreaks();
+      // Same contract: retroactive holiday medals for goal days already in
+      // history. Silent (no push), idempotent, done-marker in
+      // maintenance_runs, so every later boot is one SELECT.
+      void backfillHolidayMedals();
+      // Same contract: put every medal the retro sweeps / Recalibrate / a
+      // first-run import dated to the moment they RAN back on the day its
+      // history says it was earned (the app celebrates medals dated today —
+      // a deploy-dated shelf popped one unlock per medal). Earlier-only,
+      // 2-day slack, marker `badge_earned_dates_v1`.
+      void repairBadgeEarnedDates();
+      // Same contract: every medal judged over the WHOLE history once for
+      // everyone (what Recalibrate now does per user). Award-only, silent,
+      // one user at a time, done-marker `badge_retro_v1` in maintenance_runs.
+      void backfillRetroBadges();
+      // Same contract: cache every stored route's hide-start-&-end cut
+      // (workout_routes.privacy_bounds). A row it hasn't reached is trimmed
+      // at read anyway — this only makes that read cheap. Marker
+      // `route_privacy_bounds_v1`.
+      void backfillRoutePrivacyBounds();
       // Same contract again: compute-and-store the streak snapshot for every
       // active user the new columns (0057) haven't been written for. Until a
       // row is reached it reads its old stored value (as before); a few
       // thousand users is seconds. Empty — one SELECT — on every later boot.
+      // Same contract once more: clear the rows still pointing at crew photos
+      // and highlight covers the orphan sweep deleted before it learned to
+      // recognise them. Nothing can restore those files; this stops the UI
+      // drawing a broken frame where a photo was, and re-offers "add your
+      // photo" to the person whose slide was lost. Guarded against an
+      // unmounted volume — see repairSweptMedia.
+      void repairSweptMedia();
       void healUncomputedStreaks()
         .then((n) => {
           if (n > 0) console.log(`[Streaks] boot sweep computed ${n} row(s)`);
@@ -426,6 +473,7 @@ function startCrons() {
   startBuddySessionCron();
   startWeeklyChallengeCron();
   startLastCallCron();
+  startDiagnosticsCron();
   // Idempotently ensure the v2 social/app-function badges exist in the catalog.
   seedExtraBadges();
   // Idempotently ensure the v2 daily challenges (5K/10K/social) exist.

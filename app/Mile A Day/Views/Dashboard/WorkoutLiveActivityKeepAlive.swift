@@ -69,4 +69,22 @@ enum WorkoutLiveActivityKeepAlive {
             await activity.update(content)
         }
     }
+
+    /// End every still-live workout activity. Only for when NO workout is in
+    /// progress (see `WorkoutLocationManager.retireOrphanedSession`): nothing
+    /// else ever ends an activity whose workout is gone, and one left behind
+    /// sits on the lock screen reading TRACKING INTERRUPTED. Already-ended
+    /// activities are skipped so a just-finished walk keeps its short linger.
+    static func endOrphanedActivities() {
+        let live = Activity<WorkoutActivityAttributes>.activities.filter {
+            $0.activityState == .active || $0.activityState == .stale
+        }
+        guard !live.isEmpty else { return }
+        Task {
+            for activity in live {
+                print("[LiveActivity] 🗑️ Ending orphaned workout activity \(activity.id)")
+                await activity.end(nil, dismissalPolicy: .immediate)
+            }
+        }
+    }
 }

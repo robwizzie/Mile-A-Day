@@ -350,6 +350,7 @@ class UserManager: ObservableObject {
         currentUser.profileImageUrl = remote.profile_image_url
         currentUser.profileBannerUrl = remote.profile_banner_url
         currentUser.profileBannerStyle = remote.profile_banner_style
+        FlameyFacts.recordSignup(createdAt: remote.created_at, userId: userId)
         saveUserData()
     }
     #endif
@@ -386,8 +387,10 @@ class UserManager: ObservableObject {
             date: Date()
         )
 
-        // Check for retroactive badges after updating stats
-        checkForRetroactiveBadges()
+        // No medal fetch here any more: this runs on every dashboard
+        // refresh, and each call was a network round trip that republished
+        // the whole user. Medals refresh after uploads, on foreground
+        // (`refreshBadgesIfStale`) and on the Medals/Profile screens.
 
         // CRITICAL FIX: Save data to persist streak update
         // Without this, streak updates are only in memory and revert when app reopens
@@ -665,7 +668,9 @@ class UserManager: ObservableObject {
 
     /// Fetch the user's earned badges from the backend. Server is authoritative.
     /// Safe to call on every workout-upload completion and on Badges view appear.
-    func refreshBadgesFromServer() async {
+    /// `celebrateNew: false` absorbs freshly-earned medals without one unlock
+    /// popup each — for a burst the caller announces itself (Recalibrate).
+    func refreshBadgesFromServer(celebrateNew: Bool = true) async {
         #if !os(watchOS)
         guard let userId = currentUser.backendUserId else { return }
         do {
@@ -678,6 +683,11 @@ class UserManager: ObservableObject {
                 let existingIds = Set(currentUser.badges.map { $0.id })
                 currentUser.badges = fetched
                 saveUserData()
+                // Medals unlock Flamey's wardrobe. Deferred to the END of this
+                // block so it sees `hasCompletedInitialBadgeSync` as the
+                // branches below leave it; runs on every path, celebrateNew or
+                // not — a Recalibrate burst is exactly the batch card's case.
+                defer { FlameyUnlocks.reconcile(allowAnnounce: hasCompletedInitialBadgeSync) }
 
                 // Badges awarded retroactively during initial setup are absorbed
                 // silently — no celebrations. The flag is normally flipped by the
@@ -697,18 +707,50 @@ class UserManager: ObservableObject {
                     return
                 }
 
+                guard celebrateNew else { return }
+
                 // Decide whether a yearly headline celebration is owed BEFORE we
                 // queue any badge celebrations. If yes, suppress the matching
                 // 365/730/etc. badge popups so they don't pile on top.
                 let yearlyOwed = checkAndQueueYearlyCelebration()
                 let suppressedBadgeIDs: Set<String> = yearlyOwed ? suppressedBadgeIDsForYearly() : []
 
-                // Celebrate freshly-earned badges (not previously present).
-                let today = Calendar.current.startOfDay(for: Date())
-                for badge in fetched {
-                    let earnedToday = Calendar.current.startOfDay(for: badge.dateAwarded) == today
-                    if earnedToday && !existingIds.contains(badge.id) && !suppressedBadgeIDs.contains(badge.id) {
+                // Celebrate freshly-arrived badges (not previously present),
+                // split by WHEN they were earned. Something this refresh brought
+                // in that was earned on an earlier day (a server backfill such
+                // as the holiday medals — ten at once for a long-time walker —
+                // or medals earned while the app went unopened) is ONE dated
+                // card, never a popup each claiming to be today's. A big burst
+                // earned today is bunched the same way.
+                let calendar = Calendar.current
+                let today = calendar.startOfDay(for: Date())
+                let fresh = fetched.filter {
+                    !existingIds.contains($0.id) && !suppressedBadgeIDs.contains($0.id)
+                        && !Self.isAnnouncedByStreakMilestone($0)
+                }
+                let earnedToday = fresh.filter { calendar.startOfDay(for: $0.dateAwarded) >= today }
+                let earlier = fresh.filter { calendar.startOfDay(for: $0.dateAwarded) < today }
+
+                if earnedToday.count > Self.individualBadgePopupLimit {
+                    CelebrationManager.shared.addCelebration(.badgeBatch(badges: earnedToday, retroactive: false))
+                } else {
+                    for badge in earnedToday {
                         CelebrationManager.shared.addCelebration(.badgeUnlocked(badge: badge))
+                    }
+                }
+                // Only against a shelf we actually had: with no local list
+                // (a lost persisted blob) EVERY medal diffs as fresh, and that
+                // is a restore, not news.
+                //
+                // ONE medal is a medal, not a batch: the 500-day medal for a
+                // streak reached late last night arrives dated yesterday, and
+                // the "you unlocked medals" batch card read as a pile landing
+                // at once. A single one gets its own popup.
+                if !earlier.isEmpty && !existingIds.isEmpty {
+                    if earlier.count == 1, let only = earlier.first {
+                        CelebrationManager.shared.addCelebration(.badgeUnlocked(badge: only))
+                    } else {
+                        CelebrationManager.shared.addCelebration(.badgeBatch(badges: earlier, retroactive: true))
                     }
                 }
             }
@@ -725,6 +767,18 @@ class UserManager: ObservableObject {
     /// `-1` is the uninitialized sentinel so existing users with mid-year streaks aren't
     /// retroactively flooded with year-1/2/3 animations on first launch with this feature.
     @AppStorage("lastCelebratedYearMilestoneStreak") private var lastCelebratedYearMilestoneStreak: Int = -1
+
+    /// A streak medal whose milestone screen is queued, playing or already
+    /// seen — that screen carries the medal, so a popup would say it twice.
+    static func isAnnouncedByStreakMilestone(_ badge: Badge) -> Bool {
+        guard badge.id.hasPrefix("streak_"),
+              let days = Int(badge.id.dropFirst("streak_".count)) else { return false }
+        return CelebrationManager.shared.isCelebratingStreakMilestone(days: days)
+    }
+
+    /// More medals than this earned TODAY in one refresh become one card
+    /// (`.badgeBatch`) instead of a popup each.
+    static let individualBadgePopupLimit = 3
 
     /// Armed only AFTER the initial historical workout sync completes (via the
     /// MAD_InitialSyncCompleted handler in init). While false, refreshBadgesFromServer
@@ -834,6 +888,24 @@ class UserManager: ObservableObject {
     /// for the same milestone day.
     private func suppressedBadgeIDsForYearly() -> Set<String> {
         ["streak_365", "streak_730"]
+    }
+    #endif
+
+    #if !os(watchOS)
+    private var lastBadgeRefreshAt: Date?
+
+    /// Foreground / goal-time medal refresh, throttled to once a minute.
+    ///
+    /// Medals are awarded by MORE than uploads — hypes, posts, nudges, a buddy
+    /// walk's finish all re-run the evaluator — but the app only re-fetched
+    /// after an upload or on the Medals/Profile screens. A medal awarded any
+    /// other way sat unseen until one of those, often the next day, and then
+    /// arrived dated "yesterday" as a retroactive card. That is the 500-day
+    /// medal report.
+    func refreshBadgesIfStale() async {
+        if let last = lastBadgeRefreshAt, Date().timeIntervalSince(last) < 60 { return }
+        lastBadgeRefreshAt = Date()
+        await refreshBadgesFromServer()
     }
     #endif
 

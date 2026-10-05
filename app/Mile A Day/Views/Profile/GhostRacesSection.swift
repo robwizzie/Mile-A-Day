@@ -48,6 +48,10 @@ struct GhostRacesSection: View {
     @State private var races: [GhostRaceRecord] = []
     @State private var isLoading = true
     @State private var loadFailed = false
+    @State private var showingAll = false
+
+    /// Rows on the Stats tab before "See all".
+    private static let previewCount = 3
 
     private var wins: Int { races.filter(\.won).count }
 
@@ -63,9 +67,27 @@ struct GhostRacesSection: View {
                 emptyState
             } else {
                 VStack(spacing: MADTheme.Spacing.sm) {
-                    ForEach(races.prefix(10)) { race in
-                        row(race)
+                    ForEach(races.prefix(Self.previewCount)) { race in
+                        GhostRaceRow(race: race)
                     }
+                }
+                if races.count > Self.previewCount {
+                    Button {
+                        MADHaptics.tap()
+                        showingAll = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("See all \(races.count) races")
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .bold))
+                                .accessibilityHidden(true)
+                        }
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(MADTheme.Colors.madRed)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -75,6 +97,9 @@ struct GhostRacesSection: View {
         .madLiquidGlass()
         .task {
             await load()
+        }
+        .sheet(isPresented: $showingAll) {
+            GhostRacesListView(races: races)
         }
     }
 
@@ -106,7 +131,28 @@ struct GhostRacesSection: View {
         .padding(.vertical, MADTheme.Spacing.sm)
     }
 
-    private func row(_ race: GhostRaceRecord) -> some View {
+    private func load() async {
+        do {
+            let response: GhostHistoryResponse = try await APIClient.fancyFetch(
+                endpoint: "/ghosts/history",
+                method: .GET,
+                body: nil,
+                responseType: GhostHistoryResponse.self
+            )
+            races = response.races
+            loadFailed = false
+        } catch {
+            loadFailed = true
+        }
+        isLoading = false
+    }
+}
+
+/// One race: result line, date, your time.
+struct GhostRaceRow: View {
+    let race: GhostRaceRecord
+
+    var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
             Image(systemName: race.won ? "trophy.fill" : "flag.checkered")
                 .font(.system(size: 14, weight: .semibold))
@@ -137,20 +183,33 @@ struct GhostRacesSection: View {
                 .fill(Color.white.opacity(0.06))
         )
     }
+}
 
-    private func load() async {
-        do {
-            let response: GhostHistoryResponse = try await APIClient.fancyFetch(
-                endpoint: "/ghosts/history",
-                method: .GET,
-                body: nil,
-                responseType: GhostHistoryResponse.self
-            )
-            races = response.races
-            loadFailed = false
-        } catch {
-            loadFailed = true
+/// Every race, wins and losses, newest first.
+struct GhostRacesListView: View {
+    let races: [GhostRaceRecord]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(spacing: MADTheme.Spacing.sm) {
+                    ForEach(races) { race in
+                        GhostRaceRow(race: race)
+                    }
+                }
+                .padding(MADTheme.Spacing.md)
+                .lockedToScrollWidth()
+            }
+            .scrollContentBackground(.hidden)
+            .background(MADTheme.Colors.appBackgroundGradient.ignoresSafeArea())
+            .navigationTitle("Ghost Races")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
         }
-        isLoading = false
     }
 }

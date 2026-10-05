@@ -59,7 +59,9 @@ struct StreakRiskLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     if context.attributes.funStyle {
                         HStack(spacing: 6) {
-                            FlameBuddyFigure(health: .critical, size: 42)
+                            // HIS Flamey — the user's own colour and outfit, from
+                            // the App Group mirror — hands on his cheeks.
+                            LiveActivityWorriedFlamey(size: 42)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("DAY \(context.attributes.streak)")
                                     .font(.system(size: 12, weight: .heavy, design: .rounded))
@@ -168,7 +170,7 @@ private struct StreakRiskLockScreenView: View {
     var body: some View {
         HStack(spacing: 14) {
             if context.attributes.funStyle {
-                FlameBuddyFigure(health: .critical, size: 62)
+                LiveActivityWorriedFlamey(size: 62)
                     .frame(width: 64, height: 64)
             }
 
@@ -230,7 +232,15 @@ private struct StreakRiskLockScreenView: View {
             }
             .accessibilityLabel("Start Mile")
         }
+        // Fill the WHOLE lock-screen card. The gradient used to be a
+        // background on the content alone, so it only covered the content's
+        // own height; the system's card is taller, and with a `.clear` tint
+        // the rest showed through as dark translucent bands above and below.
+        // The frame stretches the content (and the gradient under it) to the
+        // card's height, and the tint is the card's own colour in case the
+        // system ever draws a sliver the view doesn't reach.
         .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             LinearGradient(
                 colors: [
@@ -242,7 +252,7 @@ private struct StreakRiskLockScreenView: View {
                 endPoint: .bottomTrailing
             )
         )
-        .activityBackgroundTint(Color.clear)
+        .activityBackgroundTint(Color(red: 0.16, green: 0.05, blue: 0.07))
         .activitySystemActionForegroundColor(.white)
         .widgetURL(URL(string: "mileaday://dashboard"))
     }

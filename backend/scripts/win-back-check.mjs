@@ -19,6 +19,7 @@ import {
   lapseContextFor,
   winBackCopy,
   WIN_BACK_DAYS,
+  duelCopy,
 } from "../dist/services/dailyReminderService.js";
 
 const db = PostgresService.getInstance();
@@ -210,6 +211,15 @@ try {
       assert.ok(c.title.length > 0 && c.body.length > 0, `copy for day ${days}`);
     }
   }
+
+  // ── The duel line: decided at the 2dp the user reads, never raw. A few
+  // metres of drift used to push "@x is ahead of you — 0.00 mi to your 0.00".
+  const duel = (my_miles, rival_miles) =>
+    duelCopy({ user_id: "x", rival_username: "mad", my_miles, rival_miles }).title;
+  check("0.000 vs 0.004 is nobody ahead", duel(0, 0.004), "You're up against @mad today 🥊");
+  check("0.501 vs 0.503 is a tie, not a lead", duel(0.501, 0.503), "Dead even with @mad 🥊");
+  check("behind is still behind", duel(0.2, 0.6), "@mad is ahead of you 👀");
+  check("ahead with the rival at zero", duel(0.4, 0), "You're ahead of @mad 🔥");
 } finally {
   await cleanup();
   await db.close?.();

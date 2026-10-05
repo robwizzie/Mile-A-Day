@@ -22,16 +22,16 @@ extension CompetitionDetailView {
                             .font(MADTheme.Typography.callout)
                             .fontWeight(.semibold)
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(CompeteDesign.ink)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, MADTheme.Spacing.md)
+                    .padding(.vertical, 13)
                     .background(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .fill(Color.white.opacity(0.08))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
-                            )
+                        RoundedRectangle(cornerRadius: CompeteDesign.innerRadius, style: .continuous)
+                            .fill(CompeteDesign.surface)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: CompeteDesign.innerRadius, style: .continuous)
+                            .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                     )
                 }
                 .buttonStyle(ScaleButtonStyle())
@@ -81,14 +81,14 @@ extension CompetitionDetailView {
             .tint(.orange)
             .padding(.horizontal, MADTheme.Spacing.xl)
         }
-        .padding(MADTheme.Spacing.lg)
+        .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .stroke(Color.orange.opacity(0.3), lineWidth: 1)
-                )
+            RoundedRectangle(cornerRadius: CompeteDesign.radius, style: .continuous)
+                .fill(CompeteDesign.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: CompeteDesign.radius, style: .continuous)
+                .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
         )
     }
 
@@ -143,7 +143,7 @@ extension CompetitionDetailView {
         .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
+                .fill(CompeteDesign.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                         .stroke(Color.blue.opacity(0.3), lineWidth: 1)
@@ -154,10 +154,11 @@ extension CompetitionDetailView {
     // MARK: - Lobby Participants Section
     var lobbyParticipantsSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Competitors")
-                .font(MADTheme.Typography.title3)
-                .foregroundColor(.white)
-                .padding(.horizontal, MADTheme.Spacing.sm)
+            CompeteHeader(
+                eyebrow: "Competitors",
+                trailingText: "\(competition.acceptedUsersCount) of \(competition.users.count) in"
+            )
+            .padding(.horizontal, 2)
 
             VStack(spacing: MADTheme.Spacing.sm) {
                 ForEach(competition.users) { user in
@@ -174,17 +175,10 @@ extension CompetitionDetailView {
             .padding(MADTheme.Spacing.lg)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.2), Color.clear],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
+                            .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
         }
@@ -226,11 +220,11 @@ extension CompetitionDetailView {
                     Image(systemName: "arrow.right")
                 }
             }
-            .foregroundColor(.white)
-            .padding(MADTheme.Spacing.lg)
+            .foregroundColor(canStart ? .white : CompeteDesign.inkFaint)
+            .padding(16)
             .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(canStart ? MADTheme.Colors.primaryGradient : LinearGradient(colors: [.gray.opacity(0.3)], startPoint: .leading, endPoint: .trailing))
+                RoundedRectangle(cornerRadius: CompeteDesign.radius, style: .continuous)
+                    .fill(canStart ? MADTheme.Colors.madRed : Color.white.opacity(0.06))
             )
         }
         .disabled(!canStart || isStarting)

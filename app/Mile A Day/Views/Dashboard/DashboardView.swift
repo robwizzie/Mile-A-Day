@@ -22,7 +22,10 @@ struct DashboardView: View {
     @EnvironmentObject var competitionService: CompetitionService
     @EnvironmentObject var friendService: FriendService
     @StateObject private var workoutService = WorkoutService()
-    @StateObject private var syncService = WorkoutSyncService.shared
+    // NOT observed: `WorkoutSyncService` publishes progress once per workout
+    // during a history import, and holding it as a @StateObject redrew the
+    // whole dashboard thousands of times. Read it directly where needed.
+    private var syncService: WorkoutSyncService { WorkoutSyncService.shared }
 
     @State private var showConfetti = false
     // The goal sheet moved to the settings page along with everything else
@@ -59,6 +62,20 @@ struct DashboardView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// Controls presentation of the in‑progress workout tracking UI.
     @State private var showWorkoutView = false
+    /// Whether the tracker is ACTUALLY on screen, from the cover content's own
+    /// appear/disappear. `showWorkoutView` only says a presentation was
+    /// requested: when iOS drops one (something else presenting at that
+    /// instant — the usual case is the cold-launch auto-resume after a phone
+    /// died mid-walk), the flag stays `true` with nothing up, and every Resume
+    /// tap after that is a true→true no-op. The button "went nowhere" until
+    /// a relaunch reset the state. See `reconcileDroppedTrackerPresentation`.
+    @State private var trackerOnScreen = false
+    /// Automatic re-presentations spent on a dropped cover, so a screen that
+    /// keeps refusing can't loop. Reset whenever the tracker really appears.
+    @State private var trackerPresentRetries = 0
+    /// Walk/run pre-answered for the tracker's wizard by a Start My Mile
+    /// request (TrackerLaunchModifier). Cleared when the cover dismisses.
+    @State private var trackerPreselectedActivity: HKWorkoutActivityType?
     // Buddy Walks. `activeBuddySessionId` is what turns the SAME tracker into a
     // buddy session — see WorkoutTrackingView.buddySessionId. It is deliberately
     // a plain String? passed to the one existing initializer rather than a
@@ -68,6 +85,11 @@ struct DashboardView: View {
     @State private var buddyFlowEntry: BuddyWalkFlowEntry?
     @State private var activeBuddySessionId: String?
     @State private var buddyRecapSessionId: String?
+    /// When a buddy walk last ended on this phone — the solo photo prompt
+    /// stands down for it (see `soloPhotoPromptAllowed`).
+    @State private var buddyWalkFinishedAt: Date?
+    /// When onAppear last ran the heavy refresh (see its throttle).
+    @State private var lastAppearRefresh: Date?
     /// Why a tapped buddy link couldn't be opened. Its own state, not
     /// `buddyService.errorMessage`: that one is only ever RENDERED inside the
     /// buddy flow, which is not on screen when a push or an inbox row is
@@ -87,20 +109,15 @@ struct DashboardView: View {
     /// (up to thousands of GPS points) — too expensive to do per render,
     /// so views read this flag and it's refreshed on appear / cover dismiss.
     @State private var hasActiveWorkout = false
+    /// An in-progress workout found while the app was launched in the
+    /// BACKGROUND (a silent push, a HealthKit/BGTask wake). Presenting the
+    /// tracker then runs its recovery — GPS, the dead-man notification, a
+    /// fresh Live Activity — for a walk the user isn't on, with no screen to
+    /// see it on: the Live Activity went stale into TRACKING INTERRUPTED and
+    /// "Is your workout still tracking?" fired five minutes later, on a phone
+    /// in a pocket. Held here and presented on the next `.active`.
+    @State private var trackerDeferredForForeground = false
 
-    /// Competition opened directly from a Dashboard rivalry-hint row. Sheet
-    /// presentation, not a tab switch — keeps the user on Dashboard in the
-    /// back stack so dismiss returns them to where they tapped.
-    /// Collapsed by default (like stats/workouts) — the smart header still
-    /// surfaces "N need you today" so nothing urgent hides.
-    @AppStorage("competitionsCollapsed") private var competitionsCollapsed: Bool = true
-
-    // (The old week-view style picker is gone — the chart and trends views
-    // now live in the Workouts hub, and the hero card is always the lead.)
-
-    /// Collapsible section state
-    @AppStorage("statsCollapsed") private var statsCollapsed: Bool = true
-    @AppStorage("workoutsCollapsed") private var workoutsCollapsed: Bool = true
     @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStyle.modern.rawValue
     @State private var showDashboardStyleChooser = false
     @State private var showInsights = false
@@ -145,6 +162,8 @@ struct DashboardView: View {
     /// completion so any historical readers stay consistent.
     @AppStorage("hasSeenInstructions") private var hasSeenInstructions = false
     @State private var showWelcomeTour = false
+    /// Set by AppGuidedTourView when it ends; ticks the checklist's tour item.
+    @AppStorage(AppGuidedTourView.seenKey) private var hasSeenAppGuidedTour = false
 
     /// Getting-started checklist dismissal. The card also auto-hides once all
     /// items are complete, so this only matters for users who close it early.
@@ -153,6 +172,10 @@ struct DashboardView: View {
     /// Starts hidden and only becomes visible after async data (friends,
     /// competitions, badges) has loaded and we confirm items remain incomplete.
     @State private var gettingStartedReady = false
+    /// Latched forever once the checklist has nothing left to say — every
+    /// item done, or an account long past "getting started" — so later
+    /// launches never have to wait on the network to know not to show it.
+    @AppStorage("gettingStartedGraduatedV1") private var gettingStartedGraduated = false
 
     /// Cached "a mid-run photo is waiting but the goal isn't done" flag, so the
     /// nudge renders without touching disk in `body` (MidRunPhotoStash.count
@@ -185,6 +208,20 @@ struct DashboardView: View {
     /// surfaces the matching streak milestone visuals).
     private func replayTodaysCelebration() {
         let streak = userManager.currentUser.streak
+        // A milestone day replays the way it first played: the flame, then
+        // the milestone's own screen.
+        if StreakMilestoneInfo.isCelebrated(streak) {
+            celebrationManager.replaySequence([
+                .goalCompleted(stats: buildGoalCompletionStats()),
+                .streakMilestone(info: StreakMilestoneInfo(
+                    days: streak,
+                    achievedOn: Date(),
+                    totalMiles: userManager.currentUser.totalMiles,
+                    isReplay: false
+                ))
+            ])
+            return
+        }
         if streak > 0 && streak % 365 == 0 {
             let years = streak / 365
             let startDate = Calendar.current.date(byAdding: .day, value: -streak, to: Date())
@@ -269,11 +306,7 @@ struct DashboardView: View {
     /// Today as a `yyyy-MM-dd` string in the device timezone — matches
     /// CelebrationManager's date keying so the session/persistent dedup gates agree.
     private static func celebrationDayStamp(_ date: Date = Date()) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.calendar = Calendar.current
-        formatter.timeZone = TimeZone.current
-        return formatter.string(from: date)
+        DayKeyFormatter.string(from: date)
     }
 
     /// Check if goal is completed and show celebration if appropriate
@@ -336,8 +369,10 @@ struct DashboardView: View {
             return
         }
 
-        // Already shown today → nothing to do.
+        // Already shown today → nothing to do — except make sure the day's
+        // photo prompt wasn't lost along the way.
         guard !celebrationManager.hasShownGoalCelebrationToday else {
+            recoverLostPhotoPrompt()
             return
         }
 
@@ -351,6 +386,9 @@ struct DashboardView: View {
         // Avoid stacking redundant streak fetches when several observers fire at once.
         guard !isPreparingGoalCelebration else { return }
         isPreparingGoalCelebration = true
+        // Nothing else opens the show while the flame's sequence is built —
+        // a medal from the same upload otherwise played first.
+        celebrationManager.holdForGoalSequence()
 
         // Sample the workout count NOW (goal-completion time) as the extra-mile
         // baseline, before the await below — a workout finishing during the fetch
@@ -365,7 +403,10 @@ struct DashboardView: View {
         let goalCompletionWorkoutCount = max(substantiveWorkoutCount, 1)
 
         Task { @MainActor in
-            defer { isPreparingGoalCelebration = false }
+            defer {
+                isPreparingGoalCelebration = false
+                celebrationManager.releaseGoalHold()
+            }
 
             // Pull the freshest streak before building the celebration. On cold launch
             // the cached streak hasn't yet counted today's mile, so without this the
@@ -396,6 +437,11 @@ struct DashboardView: View {
             // streak refresh above already landed, so the current era is
             // today-inclusive. Failure just means no comeback framing today.
             await StreakErasStore.shared.refresh()
+            // The day's medals (a milestone's streak medal above all) on the
+            // shelf BEFORE the sequence is built: the milestone screen shows
+            // its medal, and a medal fetched later arrived as a separate,
+            // possibly next-day, card.
+            await userManager.refreshBadgesIfStale()
 
             var completionStats = buildGoalCompletionStats()
             if let comeback = StreakErasStore.shared.comebackContext(), comeback.day == 1 {
@@ -405,6 +451,16 @@ struct DashboardView: View {
                     "\(comeback.priorLength) days came before. Day 1 of the next run starts now."
             }
             celebrationManager.addCelebration(.goalCompleted(stats: completionStats))
+            // A milestone day gets its own moment straight after the flame.
+            // The flame looks the same every day; the 500th day must not.
+            if StreakMilestoneInfo.isCelebrated(completionStats.currentStreak) {
+                celebrationManager.addCelebration(.streakMilestone(info: StreakMilestoneInfo(
+                    days: completionStats.currentStreak,
+                    achievedOn: Date(),
+                    totalMiles: userManager.currentUser.totalMiles,
+                    isReplay: false
+                )))
+            }
             // Record-crossing and day-3/7 comeback moments, right behind the flame.
             enqueueComebackAndRecordMoments()
             // Right after the fire/streak screen: show where you land on today's
@@ -421,10 +477,71 @@ struct DashboardView: View {
                 // regardless of the auto-share prompt, so the feed countdown /
                 // ring and "Fresh" reward work even when auto-share is off.
                 FreshPostWindowManager.shared.open(workoutId: promptWorkout.id)
-                if autoShareRunsToFeed {
+                if autoShareRunsToFeed, soloPhotoPromptAllowed(for: promptWorkout.id) {
                     celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: promptWorkout.id, workoutType: promptWorkout.type))
                 }
             }
+        }
+    }
+
+    /// Re-offer a photo prompt that was queued but never SEEN.
+    ///
+    /// The flame stamps "shown today" when it's dismissed; the prompt queued
+    /// behind it stamps only when IT is dismissed. Anything that ends the
+    /// session in between — the app killed or jettisoned while the
+    /// leaderboard or a medal was up, say — left the walk with neither its
+    /// prompt nor its route card, and nothing would ever ask again, because
+    /// the goal sequence that queues the prompt runs once a day. This runs on
+    /// the same level-triggered checks as the flame (foreground, fresh
+    /// HealthKit data, the tracker closing) and only when the show is calm,
+    /// so it can never cut into a sequence that's still playing.
+    private func recoverLostPhotoPrompt() {
+        guard autoShareRunsToFeed,
+              !isPreparingGoalCelebration,
+              celebrationManager.isCalm,
+              FreshPostWindowManager.shared.canPostToday else { return }
+        var candidates: [(id: String, type: String)] = []
+        if let goal = goalCompletionPromptWorkout { candidates.append(goal) }
+        // The newest walk only once the extra-mile check has already counted
+        // it — otherwise that check is about to offer it the normal way.
+        if substantiveWorkoutCount <= celebrationManager.lastPostGoalWorkoutCount,
+           let latest = latestFinishedPromptWorkout,
+           !candidates.contains(where: { $0.id == latest.id }) {
+            candidates.append(latest)
+        }
+        for workout in candidates
+        where celebrationManager.needsPhotoPrompt(for: workout.id)
+            && soloPhotoPromptAllowed(for: workout.id) {
+            print("[Dashboard] 📸 Re-offering an unseen photo prompt for \(workout.id)")
+            celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: workout.id, workoutType: workout.type))
+        }
+    }
+
+    /// A buddy walk's photo is asked for ONCE, on the buddy recap — the walk's
+    /// card is shared by the crew. The solo prompt used to follow it anyway
+    /// (it couldn't tell the walk was a buddy walk while HealthKit was still
+    /// catching up), so skipping the crew photo was answered with "add a photo
+    /// of your walk" for the same walk. The time window covers that lag.
+    private func soloPhotoPromptAllowed(for workoutId: String) -> Bool {
+        if RunPostService.buddySessionForWorkout(workoutId) != nil { return false }
+        if let finished = buddyWalkFinishedAt, Date().timeIntervalSince(finished) < 20 * 60 { return false }
+        return true
+    }
+
+    /// The buddy recap is the walk's last step — the crew, then the one photo
+    /// of it — so it waits for the day's celebrations (the flame, a milestone,
+    /// the leaderboard) to finish rather than opening over them and leaving
+    /// them to play, out of order, once it closes.
+    private func presentBuddyRecapWhenCalm(_ sessionId: String) {
+        Task { @MainActor in
+            // Past the 0.5s re-check in onDismiss and the queue's settle.
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            let deadline = Date().addingTimeInterval(15 * 60)
+            while Date() < deadline,
+                  isPreparingGoalCelebration || !celebrationManager.isCalm {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+            }
+            buddyRecapSessionId = sessionId
         }
     }
 
@@ -513,7 +630,7 @@ struct DashboardView: View {
             // Each extra qualifying walk/run reopens a fresh 10-min window (a
             // new uuid resets it), regardless of the auto-share prompt.
             FreshPostWindowManager.shared.open(workoutId: promptWorkout.id)
-            if autoShareRunsToFeed {
+            if autoShareRunsToFeed, soloPhotoPromptAllowed(for: promptWorkout.id) {
                 celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: promptWorkout.id, workoutType: promptWorkout.type))
             }
         }
@@ -545,7 +662,6 @@ struct DashboardView: View {
             MADTabHeader(
                 title: "Mile A Day",
                 subtitle: headerSubtitle,
-                subtitleHighlight: headerSubtitleHighlight,
                 actions: dashboardHeaderActions
             )
 
@@ -591,6 +707,10 @@ struct DashboardView: View {
                     dashboardExperienceSection
                         .frame(maxWidth: .infinity)
                 }
+                // Dynamic Type: the banners and cards here are rows that wrap,
+                // so they grow to the card cap; the heroes and tiles tighten
+                // it further inside their bodies (DashboardModeCards).
+                .madTypeCap(.madCardCap)
                 // A style switch made from the Customize sheet reflows the
                 // whole page under it; keep the row that opened the sheet in
                 // view so closing it lands where the user was.
@@ -664,14 +784,22 @@ struct DashboardView: View {
                 let hasActive = InProgressWorkoutStore.load()?.isActive == true
                 hasActiveWorkout = hasActive
                 showInProgressBanner = hasActive
+                trackerPreselectedActivity = nil
 
                 // Buddy Walk just ended — show the group result. Only when the
                 // workout is genuinely over: dismissing the tracker mid-walk to
                 // check the dashboard must not close out the session.
                 if let buddyId = activeBuddySessionId, !hasActive {
                     activeBuddySessionId = nil
-                    buddyRecapSessionId = buddyId
+                    buddyWalkFinishedAt = Date()
+                    presentBuddyRecapWhenCalm(buddyId)
                 }
+
+                // Celebrations queued while the tracker covered the screen (a
+                // ghost win, a medal) waited; hold them a moment longer so the
+                // day's flame — built just below — goes first.
+                celebrationManager.holdForGoalSequence(seconds: 3)
+                celebrationManager.setObscured("tracker", false)
 
                 // Surface any celebration earned during the workout now that the
                 // dashboard is visible again (checks are deferred while covered):
@@ -680,6 +808,11 @@ struct DashboardView: View {
                     try? await Task.sleep(nanoseconds: 500_000_000)
                     checkAndShowGoalCelebration()
                     checkAndShowPostGoalEncouragement()
+                    // No flame to build (already celebrated today) — let the
+                    // waiting ones go now rather than at the hold's timeout.
+                    if !isPreparingGoalCelebration {
+                        celebrationManager.releaseGoalHold()
+                    }
                 }
                 // A workout just finished/synced — refresh ask-mode pendings.
                 loadPendingNotifications()
@@ -706,8 +839,14 @@ struct DashboardView: View {
                     // the dismiss handler above offer the group recap, and on
                     // the next render the tracker's own buddySessionId arrives
                     // non-nil — one path from then on.
-                    onBuddySessionAdopted: { activeBuddySessionId = $0 }
+                    onBuddySessionAdopted: { activeBuddySessionId = $0 },
+                    preselectedActivity: trackerPreselectedActivity
                 )
+                .onAppear {
+                    trackerOnScreen = true
+                    trackerPresentRetries = 0
+                }
+                .onDisappear { trackerOnScreen = false }
             }
             // Buddy Walks flow: pill → setup steps → lobby (synced countdown)
             // → the normal tracker → recap. All of it lives in one
@@ -723,19 +862,34 @@ struct DashboardView: View {
                     onPendingLink: consumePendingBuddyLink
                 )
             )
+            // Start My Mile (Siri / Shortcuts / Action Button / Control
+            // Center / widget Start buttons) — reopens a workout in progress,
+            // else opens the tracker.
+            .modifier(
+                TrackerLaunchModifier(
+                    router: deepLinkRouter,
+                    showWorkoutView: $showWorkoutView,
+                    preselectedActivity: $trackerPreselectedActivity
+                )
+            )
             .onAppear {
                 // Stealth window log: server wins, once per process (there is
                 // no other launch-time preferences sync).
                 Task { await StealthModeStore.shared.hydrateFromServerIfNeeded() }
-                refreshData()
                 refreshMidRunPhotoWaiting()
-                // Sync widget data immediately
-                syncWidgetData()
-                // Load ask-mode pending notifications (cheap-guarded on settings).
-                loadPendingNotifications()
-
-                // Fetch fastest mile pace from backend database
-                fetchFastestPaceFromBackend()
+                // The heavy half — a HealthKit re-fetch, widget sync, pending
+                // notifications, the pace fetch — at most once a minute. TabView
+                // re-fires onAppear on every switch back to this tab, and doing
+                // all of it each time is a good part of why moving around the
+                // app felt sluggish. Fresh data still arrives on its own
+                // (HealthKit observers, the foreground hook, pull-to-refresh).
+                if lastAppearRefresh.map({ Date().timeIntervalSince($0) > 60 }) ?? true {
+                    lastAppearRefresh = Date()
+                    refreshData()  // includes the backend pace fetch
+                    syncWidgetData()
+                    // Load ask-mode pending notifications (cheap-guarded on settings).
+                    loadPendingNotifications()
+                }
 
                 // The weekly challenge, which the Dashboard shows as a card but
                 // only ever LOADED on pull-to-refresh. Its snapshot is
@@ -757,7 +911,13 @@ struct DashboardView: View {
                 let active = InProgressWorkoutStore.load()?.isActive == true
                 hasActiveWorkout = active
                 if active {
-                    showWorkoutView = true
+                    if UIApplication.shared.applicationState == .background {
+                        trackerDeferredForForeground = true
+                    } else {
+                        showWorkoutView = true
+                    }
+                } else {
+                    WorkoutLocationManager.retireOrphanedSession()
                 }
 
                 // First-run welcome tour: wait a beat for layout to settle, and
@@ -913,7 +1073,21 @@ struct DashboardView: View {
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
+                    // A workout surfaced during a background launch waits for
+                    // the user; with none on disk, retire anything a workout
+                    // left behind (Live Activity, watchdog, a zombie session).
+                    let active = InProgressWorkoutStore.load()?.isActive == true
+                    hasActiveWorkout = active
+                    if active, trackerDeferredForForeground, !showWorkoutView {
+                        showWorkoutView = true
+                    }
+                    trackerDeferredForForeground = false
+                    if !active { WorkoutLocationManager.retireOrphanedSession() }
                     celebrationManager.onAppBecameActive()
+                    // Medals awarded while we were away (a friend's hype, a
+                    // buddy walk's finish, a background sync) — fetched now,
+                    // the day they were earned, not whenever Profile opens.
+                    Task { await userManager.refreshBadgesIfStale() }
                     // Re-check celebrations in case data changed while backgrounded
                     checkAndShowGoalCelebration()
                     // Pick up ask-mode pendings created while backgrounded.
@@ -927,6 +1101,20 @@ struct DashboardView: View {
                 // user leaves the app on an at-risk evening, ends the moment
                 // the mile lands or the risk passes.
                 syncStreakRiskActivity()
+            }
+            // The tracker is a cover over the root celebration overlay: what's
+            // queued while it's up waits for the screen instead of "playing"
+            // behind it. Released in the cover's onDismiss, after the goal
+            // hold is set, so the flame still goes first.
+            .onChange(of: showWorkoutView) { _, showing in
+                if showing {
+                    celebrationManager.setObscured("tracker", true)
+                    // A requested cover that never shows is otherwise
+                    // invisible: check it actually arrived.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        reconcileDroppedTrackerPresentation()
+                    }
+                }
             }
             .onChange(of: celebrationManager.isShowingCelebration) { wasShowing, isShowing in
                 // When a celebration finishes, surface any leftover pendings the
@@ -947,16 +1135,21 @@ struct DashboardView: View {
                     applyHealthDataToUserManager()
                     checkAndShowGoalCelebration()
                     maybeTriggerStreakReveal()
-                    // Defer checklist visibility until data has settled so
-                    // established users never see a single-frame flash.
-                    if !gettingStartedReady && !gettingStartedDismissed {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                gettingStartedReady = true
-                            }
-                        }
-                    }
+                    evaluateGettingStarted()
                 }
+            }
+            // The checklist decides only once EVERYTHING it reads has
+            // answered — see `evaluateGettingStarted`.
+            .onChange(of: friendService.hasLoadedFriendsOnce) { _, _ in evaluateGettingStarted() }
+            .onChange(of: competitionService.hasLoadedOnce) { _, _ in evaluateGettingStarted() }
+            .onChange(of: userManager.currentUser.badges.count) { _, _ in evaluateGettingStarted() }
+            .task {
+                // The Dashboard never loaded friends (only the Friends tab
+                // did), so "Add your first friend" read as undone for
+                // everyone until that tab was visited.
+                guard !gettingStartedDismissed, !gettingStartedGraduated,
+                      !friendService.hasLoadedFriendsOnce else { return }
+                try? await friendService.loadFriends()
             }
             .onChange(of: healthManager.retroactiveStreak) { _, _ in
                 applyHealthDataToUserManager()
@@ -1259,7 +1452,7 @@ struct DashboardView: View {
     }
 
     private func maybePresentMonthlyRecap() {
-        guard !showMonthlyRecap else { return }
+        guard !showMonthlyRecap, !MonthlyRecapManager.alreadySeenPreviousMonth() else { return }
         guard let stats = MonthlyRecapStats.computePreviousMonth(
             healthManager: healthManager,
             goal: userManager.currentUser.goalMiles,
@@ -1370,29 +1563,17 @@ struct DashboardView: View {
 
     // MARK: - Header Actions
 
-    /// Curated header — insights, bell (with unread count badge), + (manual
-    /// workout), gear (goal/settings). Trophy / sparkles / admin / info
-    /// were moved out of the header. Replay is now an inline card in the body
-    /// when applicable; admin/info will get re-surfaced in Profile later.
+    /// Curated header — bell (with unread count badge) and gear, nothing
+    /// else. Manual entry lives under Start Mile ("Log a past workout") and
+    /// Insights in a row beside Customize at the bottom: four icons up top
+    /// made the two that matter harder to find.
     private var dashboardHeaderActions: [MADHeaderAction] {
         [
-            MADHeaderAction(
-                id: "insights",
-                systemImage: "chart.line.uptrend.xyaxis"
-            ) { showInsights = true },
             MADHeaderAction(
                 id: "bell",
                 systemImage: "bell.fill",
                 style: .notification(count: unreadNotificationCount)
             ) { showNotificationInbox = true },
-            // `square.and.pencil` reads as "log/edit an entry" — distinct
-            // from the Compete tab's `+` icon (which means "create a new
-            // competition"). Both being plain `+` was confusing.
-            MADHeaderAction(
-                id: "add-workout",
-                systemImage: "square.and.pencil",
-                style: .cta
-            ) { showManualWorkoutEntry = true },
             MADHeaderAction(
                 id: "settings",
                 systemImage: "gearshape.fill"
@@ -1412,21 +1593,23 @@ struct DashboardView: View {
         } label: {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 16, weight: .bold))
+                    .madFont(size: 16, weight: .bold)
                     .foregroundStyle(
                         LinearGradient(colors: [.yellow, MADTheme.Colors.madRed], startPoint: .top, endPoint: .bottom)
                     )
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Replay today's celebration")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                    Text(StreakMilestoneInfo.isCelebrated(userManager.currentUser.streak)
+                         ? "Replay your \(userManager.currentUser.streak)-day celebration"
+                         : "Replay today's celebration")
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text("Re-watch or share your mile-a-day moment")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .madFont(size: 11, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.white.opacity(0.4))
             }
             .padding(MADTheme.Spacing.md)
@@ -1456,21 +1639,21 @@ struct DashboardView: View {
         } label: {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "camera.badge.clock")
-                    .font(.system(size: 16, weight: .bold))
+                    .madFont(size: 16, weight: .bold)
                     .foregroundStyle(
                         LinearGradient(colors: [.white, MADTheme.Colors.walkBlue], startPoint: .top, endPoint: .bottom)
                     )
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Photo waiting")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text("Finish today's mile to share it")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .madFont(size: 11, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.white.opacity(0.4))
             }
             .padding(MADTheme.Spacing.md)
@@ -1506,7 +1689,20 @@ struct DashboardView: View {
                     try await buddyService.join(sessionId: sessionId)
                 }
                 if buddyService.canReenterLiveSession {
-                    buddyFlowEntry = .lobby
+                    // Same routing question the pill and the lobby
+                    // notification ask: a push or an inbox row tapped DURING a
+                    // walk must land in the tracker that is already recording,
+                    // not on a pre-start lobby that can neither start nor
+                    // cancel it. This is the path a buddy push takes, which is
+                    // the most likely way to arrive here mid-walk.
+                    switch BuddyWalkRouting.openTarget(buddyService) {
+                    case .resumeTracking(let id):
+                        if let id { activeBuddySessionId = id }
+                        buddyFlowEntry = nil
+                        showWorkoutView = true
+                    case .lobby, .setup:
+                        buddyFlowEntry = .lobby
+                    }
                 } else if let session = buddyService.session,
                           session.me(buddyService.currentUserId)?.status == .finished {
                     // The tapped push led to a walk THIS user already finished
@@ -1545,16 +1741,16 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "heart.text.square.fill")
-                    .font(.system(size: 22, weight: .bold))
+                    .madFont(size: 22, weight: .bold)
                     .foregroundStyle(
                         LinearGradient(colors: [.red, .pink], startPoint: .top, endPoint: .bottom)
                     )
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Enable Apple Health")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .madFont(size: 15, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text("Turn it on and runs from your Apple Watch, treadmill, and other apps count automatically.")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                         .lineLimit(3)
                 }
@@ -1566,7 +1762,7 @@ struct DashboardView: View {
                     healthManager.requestAuthorization { _ in }
                 } label: {
                     Text("Continue")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
@@ -1580,7 +1776,7 @@ struct DashboardView: View {
                     }
                 } label: {
                     Text("Open Settings")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .madFont(size: 13, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.75))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -1606,27 +1802,6 @@ struct DashboardView: View {
         )
     }
 
-    // MARK: - Extracted dashboard sections to help Swift type‑check
-
-    @ViewBuilder
-    private var dashboardContent: some View {
-        VStack(spacing: 22) {
-            gettingStartedSection
-            dailyChallengeSection
-            weeklyChallengeSection
-            friendActivitySection
-            activeCompetitionSection
-            badgesSection
-            statsAndHistorySection
-        }
-        // Shared with Workouts and Insights — a card must not change width as
-        // you move between the three screens.
-        .padding(.horizontal, MADTheme.Spacing.screenGutter)
-        .padding(.top, 0)
-        .padding(.bottom, 100) // Extra padding for tab bar
-        .clipped() // Prevent content overflow from causing horizontal jitter
-    }
-
     @ViewBuilder
     private var dashboardExperienceSection: some View {
         VStack(spacing: dashboardStyle == .fun ? 18 : 14) {
@@ -1637,7 +1812,8 @@ struct DashboardView: View {
                     userManager: userManager,
                     friendService: friendService,
                     hasActiveWorkout: hasActiveWorkout,
-                    showWorkoutView: $showWorkoutView
+                    showWorkoutView: $showWorkoutView,
+                    onLogPastWorkout: { showManualWorkoutEntry = true }
                 )
             case .modern:
                 ModernDashboardBody(
@@ -1645,16 +1821,20 @@ struct DashboardView: View {
                     userManager: userManager,
                     friendService: friendService,
                     hasActiveWorkout: hasActiveWorkout,
-                    showWorkoutView: $showWorkoutView
+                    showWorkoutView: $showWorkoutView,
+                    onLogPastWorkout: { showManualWorkoutEntry = true }
                 )
             }
 
             // AFTER the switch, not inside either body: its identity (and the
             // Customize sheet it presents) survives a style change, which is
             // exactly what that sheet does.
-            DashboardCustomizeRow(style: dashboardStyle)
-                .padding(.horizontal, 16)
-                .id("dashboard-customize-row")
+            VStack(spacing: 10) {
+                DashboardInsightsRow(style: dashboardStyle) { showInsights = true }
+                DashboardCustomizeRow(style: dashboardStyle)
+                    .id("dashboard-customize-row")
+            }
+            .padding(.horizontal, 16)
         }
         .padding(.bottom, 100)
     }
@@ -1669,28 +1849,6 @@ struct DashboardView: View {
             Color(red: 0.05, green: 0.05, blue: 0.06)
                 .ignoresSafeArea()
         }
-    }
-
-    // MARK: - Hero
-
-    private var heroSection: some View {
-        DashboardHeroCard(
-            streak: userManager.currentUser.streak,
-            isAtRisk: userManager.currentUser.isStreakAtRisk,
-            user: userManager.currentUser,
-            currentDistance: currentState.distance,
-            goalDistance: currentState.goal,
-            progress: currentState.progress,
-            isGoalCompleted: currentState.isCompleted,
-            hasActiveWorkout: hasActiveWorkout,
-            distanceIsFresh: healthManager.hasFreshTodaysDistance,
-            fastestPace: userManager.currentUser.fastestMilePace,
-            mostMiles: healthManager.cachedCurrentStreakStats.mostMiles > 0
-                ? healthManager.cachedCurrentStreakStats.mostMiles
-                : healthManager.mostMilesInOneDay,
-            healthManager: healthManager,
-            showWorkoutView: $showWorkoutView
-        )
     }
 
     // MARK: - Attention slot
@@ -1779,20 +1937,20 @@ struct DashboardView: View {
                 // iOS 17, where symbols added after SF Symbols 5 render as a
                 // blank box rather than falling back.
                 Image(systemName: "person.crop.circle.badge.plus")
-                    .font(.system(size: 16, weight: .bold))
+                    .madFont(size: 16, weight: .bold)
                     .foregroundColor(MADTheme.Colors.madRed)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text(subtitle)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .madFont(size: 11, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                         .lineLimit(1)
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.white.opacity(0.4))
             }
             .padding(MADTheme.Spacing.md)
@@ -1820,7 +1978,7 @@ struct DashboardView: View {
         } label: {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "trophy.fill")
-                    .font(.system(size: 16, weight: .bold))
+                    .madFont(size: 16, weight: .bold)
                     .foregroundStyle(
                         LinearGradient(colors: [.yellow, MADTheme.Colors.madRed], startPoint: .top, endPoint: .bottom)
                     )
@@ -1828,15 +1986,15 @@ struct DashboardView: View {
                     Text(competitionService.invites.count == 1
                          ? "Competition invite"
                          : "\(competitionService.invites.count) competition invites")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .madFont(size: 13, weight: .bold, design: .rounded)
                         .foregroundColor(.white)
                     Text("A friend wants to race you — tap to respond")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .madFont(size: 11, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.55))
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
+                    .madFont(size: 11, weight: .bold)
                     .foregroundColor(.white.opacity(0.4))
             }
             .padding(MADTheme.Spacing.md)
@@ -1860,19 +2018,35 @@ struct DashboardView: View {
         return f
     }()
 
-    /// "Tuesday, July 21 · Day 412" — makes the screen read as YOUR day,
-    /// not the app's.
+    /// "Tuesday, July 21". The streak used to ride here too ("· Day 412"),
+    /// directly above a hero whose whole job is that number.
     private var headerSubtitle: String {
-        let date = Self.headerDateFormatter.string(from: Date())
-        let streak = userManager.currentUser.streak
-        return streak > 0 ? "\(date) · Day \(streak)" : date
+        Self.headerDateFormatter.string(from: Date())
     }
 
-    private var headerSubtitleHighlight: String? {
-        let streak = userManager.currentUser.streak
-        return streak > 0 ? "Day \(streak)" : nil
-    }
 
+    /// The tracker cover was requested and never came up. Put the flag back to
+    /// the truth (so the next Resume tap is a real false→true transition),
+    /// release the celebration hold the request took (`onDismiss` never runs
+    /// for a cover that never presented, so nothing else would), surface the
+    /// Resume banner, and — for an active workout — try once more on the next
+    /// beat, since whatever was presenting has usually gone by then.
+    private func reconcileDroppedTrackerPresentation() {
+        guard showWorkoutView, !trackerOnScreen else { return }
+        showWorkoutView = false
+        celebrationManager.setObscured("tracker", false)
+        let hasActive = InProgressWorkoutStore.load()?.isActive == true
+        hasActiveWorkout = hasActive
+        showInProgressBanner = hasActive
+        guard hasActive, trackerPresentRetries < 1 else { return }
+        trackerPresentRetries += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            guard !showWorkoutView, !trackerOnScreen,
+                  InProgressWorkoutStore.load()?.isActive == true else { return }
+            showInProgressBanner = false
+            showWorkoutView = true
+        }
+    }
 
     @ViewBuilder
     private var inProgressBannerSection: some View {
@@ -1898,6 +2072,11 @@ struct DashboardView: View {
                         }
                     }
                     InProgressWorkoutStore.clear()
+                    // The store was the only thing cleared here: the tracking
+                    // session kept running (GPS, watchdog, heartbeat), and the
+                    // tracker then opened on the start wizard over it — a
+                    // workout with no Stop button.
+                    WorkoutLocationManager.retireOrphanedSession()
                     showInProgressBanner = false
                 }
             } message: {
@@ -1913,10 +2092,14 @@ struct DashboardView: View {
             GettingStartedChecklistCard.Item(
                 id: "tour",
                 icon: "sparkles",
-                title: "Take the welcome tour",
-                subtitle: "Two minutes — see everything the app can do",
-                isDone: hasSeenWelcomeTour,
-                action: { showWelcomeTour = true }
+                title: "Take the app tour",
+                // The 9-page welcome tour already played in onboarding; this
+                // is the live walk through the real tabs (AppGuidedTourView).
+                subtitle: "A quick walk through each tab, on the real app",
+                isDone: hasSeenAppGuidedTour,
+                action: {
+                    NotificationCenter.default.post(name: NSNotification.Name("MAD_StartGuidedTour"), object: nil)
+                }
             ),
             GettingStartedChecklistCard.Item(
                 id: "first-mile",
@@ -1967,11 +2150,38 @@ struct DashboardView: View {
         ]
     }
 
+    /// Show the checklist ONLY once every source it reads has answered.
+    ///
+    /// It used to show 0.4s after HealthKit loaded, while friends,
+    /// competitions and medals were still on their way — so for an
+    /// established account every network-backed item read as undone, the
+    /// card popped in, and vanished a moment later when the data landed.
+    /// Undecided means hidden; the decision is made once, from real data.
+    private func evaluateGettingStarted() {
+        guard !gettingStartedReady, !gettingStartedDismissed, !gettingStartedGraduated else { return }
+        let user = userManager.currentUser
+        // Long past getting started: never show it, and never wait to decide.
+        if user.streak >= 14 || user.totalMiles >= 30 {
+            gettingStartedGraduated = true
+            return
+        }
+        guard healthManager.hasLoadedInitialData,
+              friendService.hasLoadedFriendsOnce,
+              competitionService.hasLoadedOnce,
+              // Medals: a fetched shelf, or the account is too new to have one.
+              !user.badges.isEmpty || user.totalMiles < 0.95
+        else { return }
+        if !gettingStartedItems.contains(where: { !$0.isDone }) {
+            gettingStartedGraduated = true
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.3)) { gettingStartedReady = true }
+    }
+
     @ViewBuilder
     private var gettingStartedSection: some View {
-        // Hidden until `gettingStartedReady` flips — prevents a single-frame
-        // flash for established users whose async data hasn't arrived yet.
-        if gettingStartedReady, !gettingStartedDismissed {
+        // Hidden until `evaluateGettingStarted` decides from loaded data.
+        if gettingStartedReady, !gettingStartedDismissed, !gettingStartedGraduated {
             let items = gettingStartedItems
             if items.contains(where: { !$0.isDone }) {
                 GettingStartedChecklistCard(items: items) {
@@ -1981,128 +2191,6 @@ struct DashboardView: View {
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
-        }
-    }
-
-    // MARK: - Daily Challenge Section
-
-    private var dailyChallengeSection: some View {
-        NavigationLink {
-            DailyChallengesView(healthManager: healthManager, userManager: userManager)
-        } label: {
-            DailyChallengeCard(healthManager: healthManager, userManager: userManager)
-        }
-        .buttonStyle(PlainButtonStyle())
-    }
-
-    // MARK: - Weekly Challenge Section
-
-    /// The weekly challenge, beside the daily one. Its home is the Compete tab,
-    /// but this is where people actually find it — the dashboard is the screen
-    /// they open, and a feature nobody discovers may as well not exist.
-    @ViewBuilder
-    private var weeklyChallengeSection: some View {
-        if let weekly = weeklyChallengeService.current {
-            NavigationLink {
-                WeeklyChallengeDetailView(
-                    response: weekly,
-                    service: weeklyChallengeService
-                )
-            } label: {
-                WeeklyChallengeHeroCard(response: weekly, compact: true) {}
-                    // The card's own button is inert here; the NavigationLink
-                    // owns the tap.
-                    .allowsHitTesting(false)
-            }
-            .buttonStyle(PlainButtonStyle())
-        }
-    }
-
-    // MARK: - Friend Activity Section
-
-    private var friendActivitySection: some View {
-        FriendActivityStripView(friendService: friendService)
-    }
-
-    // MARK: - Active Competition Section
-    /// Surfaces every active competition the user is in, sorted by "what
-    /// needs your attention right now" — streak-at-risk and tight clash
-    /// races bubble to the top, comfortable leads fall to the bottom. Each
-    /// row is a rich focus card showing today's actionable status so the
-    /// user can decide where to put their next mile without tapping in.
-    ///
-    /// Wrapped in the shared `DashboardCollapsibleSection` so users who
-    /// don't want a tall comp stack on the dashboard can fold it away.
-    /// Collapse state persists via @AppStorage.
-
-    @ViewBuilder
-    private var activeCompetitionSection: some View {
-        let active = competitionService.competitions.filter { $0.status == .active }
-        if !active.isEmpty {
-            let backendUserId = UserDefaults.standard.string(forKey: "backendUserId")
-            // Compute each comp's focus ONCE (the old code recomputed inside
-            // the sort comparator) — it also feeds the smart header.
-            let focused = active.map { ($0, TodayFocus.compute(for: $0, currentUserId: backendUserId)) }
-            let sorted = focused.sorted { a, b in
-                if a.1.level.sortKey != b.1.level.sortKey {
-                    return a.1.level.sortKey < b.1.level.sortKey
-                }
-                // Tie-break: earlier-ending competition first (more time
-                // pressure makes it more relevant today).
-                let endA = a.0.endDateFormatted ?? .distantFuture
-                let endB = b.0.endDateFormatted ?? .distantFuture
-                return endA < endB
-            }
-            // Collapsed by default now, so the header must carry the signal:
-            // how many comps still need miles today.
-            let needsYou = focused.filter { $0.1.level == .urgent || $0.1.level == .behind }.count
-            let hasUrgent = focused.contains { $0.1.level == .urgent }
-
-            DashboardCollapsibleSection(
-                title: sorted.count == 1
-                    ? "Your Competitions"
-                    : "Your Competitions (\(sorted.count))",
-                icon: "trophy.fill",
-                accessoryText: needsYou > 0
-                    ? "\(needsYou) need\(needsYou == 1 ? "s" : "") you today"
-                    : nil,
-                accessoryColor: hasUrgent ? UrgencyLevel.urgent.color : .orange,
-                isCollapsed: $competitionsCollapsed,
-                unified: true
-            ) {
-                VStack(spacing: 0) {
-                    ForEach(Array(sorted.enumerated()), id: \.element.0.competition_id) { index, pair in
-                        ActiveCompetitionBannerCard(competition: pair.0, embedded: true)
-                        if index < sorted.count - 1 {
-                            Rectangle()
-                                .fill(Color.white.opacity(0.06))
-                                .frame(height: 0.5)
-                                .padding(.horizontal, 6)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Badges only — the calendar preview was redundant with the Workouts
-    /// hub (whose card sits right below and owns the full calendar).
-    private var badgesSection: some View {
-        BadgesPreviewCard(
-            userManager: userManager,
-            healthManager: healthManager
-        )
-    }
-
-    private var statsAndHistorySection: some View {
-        VStack(spacing: 12) {
-            DashboardCollapsibleSection(title: "Your Stats", icon: "chart.bar.fill", isCollapsed: $statsCollapsed) {
-                StatsGridView(user: userManager.currentUser, healthManager: healthManager)
-            }
-
-            // Recent Workouts now lives behind a clean preview card that opens
-            // the full Workouts screen (calendar + history + swipeable detail).
-            RecentWorkoutsPreviewCard(healthManager: healthManager, showWorkouts: $showWorkouts)
         }
     }
 }

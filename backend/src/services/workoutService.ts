@@ -4,6 +4,7 @@ import {
   MAX_PLAUSIBLE_MILE_SECONDS,
 } from "./mileTime.js";
 import { PostgresService } from "./DbService.js";
+import { servedRouteFrom } from "./routePrivacy.js";
 import {
   stealthOverlapSql,
   stealthRouteCleanupStatement,
@@ -212,11 +213,14 @@ export async function uploadWorkouts(
   // the trace of a walk recorded in stealth is refused right here, and every
   // route-serving read stays clean without a stealth predicate of its own.
   const routeQuery = `
-        INSERT INTO workout_routes (workout_id, route, point_count, times, started_at, updated_at)
+        INSERT INTO workout_routes (workout_id, route, point_count, times, started_at, updated_at, privacy_bounds)
         -- Explicit casts: in an INSERT … SELECT, an uncast select-list param
         -- resolves to text, which then conflicts with the varchar column the
         -- WHERE below compares $1 against ("inconsistent types deduced").
-        SELECT $1::varchar, $2::jsonb, $3::integer, $4::jsonb, $5::timestamptz, NOW()
+        -- privacy_bounds: the hide-start-&-end cut for every offered setting,
+        -- computed with the route it describes (routePrivacy.ts).
+        SELECT $1::varchar, $2::jsonb, $3::integer, $4::jsonb, $5::timestamptz, NOW(),
+               mad_route_privacy_bounds($2::jsonb, $1::varchar)
         WHERE NOT COALESCE(
           (SELECT w.stealth FROM workouts w WHERE w.workout_id = $1),
           false
@@ -225,6 +229,9 @@ export async function uploadWorkouts(
         DO UPDATE SET
 			route = EXCLUDED.route,
 			point_count = EXCLUDED.point_count,
+			-- Always rewritten WITH the route: a cache describing an older
+			-- polyline would cut the new one at the wrong points.
+			privacy_bounds = EXCLUDED.privacy_bounds,
 			-- Times are only meaningful against the points they were sampled
 			-- with. A re-upload that carries none (an older client's fullSync,
 			-- a route backfill) keeps the stored ones ONLY if it re-sent the
@@ -1369,7 +1376,7 @@ export async function getWorkoutRoute(
     `SELECT wr.route
 		 FROM workouts w
 		 LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
-		 JOIN workout_routes wr ON wr.workout_id = w.workout_id
+		 CROSS JOIN LATERAL ${servedRouteFrom("wr", "w.workout_id", "w.user_id", "$3")}
 		 WHERE w.workout_id = $2
 			 AND w.user_id = $1
 			 AND w.deleted_at IS NULL
@@ -1387,6 +1394,8 @@ export interface WorkoutRouteDetail {
   route_times: number[] | null;
   /** The first fix's instant as epoch seconds; null when unknown. */
   route_started_at: number | null;
+  /** TRUE when trimmed for route privacy (the viewer isn't the owner). */
+  route_trimmed: boolean;
 }
 
 /**
@@ -1403,10 +1412,13 @@ export async function getWorkoutRouteDetail(
 ): Promise<WorkoutRouteDetail | null> {
   const rows = await db.query<WorkoutRouteDetail>(
     `SELECT wr.route, wr.times AS route_times,
-		        EXTRACT(EPOCH FROM wr.started_at)::double precision AS route_started_at
+		        EXTRACT(EPOCH FROM wr.started_at)::double precision AS route_started_at,
+		        wr.trimmed AS route_trimmed
 		 FROM workouts w
 		 LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
-		 JOIN workout_routes wr ON wr.workout_id = w.workout_id
+		 -- Route privacy: a non-owner gets the line with its start & end
+		 -- trimmed (or no row at all), clock re-based in lockstep.
+		 CROSS JOIN LATERAL ${servedRouteFrom("wr", "w.workout_id", "w.user_id", "$3")}
 		 WHERE w.workout_id = $2
 			 AND w.user_id = $1
 			 AND w.deleted_at IS NULL

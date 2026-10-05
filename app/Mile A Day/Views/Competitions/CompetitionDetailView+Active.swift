@@ -156,7 +156,7 @@ extension CompetitionDetailView {
     func apexHeroContent(user: CompetitionUser?, todayDistance: Double, todayKey: String, gradientColors: [Color]) -> some View {
         let totalScore = user?.score ?? 0
         let acceptedUsers = competition.users.filter { $0.invite_status == .accepted }
-        let myRank = acceptedUsers.sorted { ($0.score ?? 0) > ($1.score ?? 0) }.firstIndex(where: { $0.user_id == user?.user_id }).map { $0 + 1 } ?? 0
+        let myRank = competition.rankedStandings.first(where: { $0.user.user_id == user?.user_id })?.place ?? 0
 
         return VStack(spacing: 10) {
             HStack(spacing: 8) {
@@ -255,8 +255,7 @@ extension CompetitionDetailView {
         let totalDistance = user?.score ?? 0
         let progress = min(totalDistance / max(goal, 0.1), 1.0)
         let percent = Int(progress * 100)
-        let acceptedUsers = competition.users.filter { $0.invite_status == .accepted }
-        let myRank = acceptedUsers.sorted { ($0.score ?? 0) > ($1.score ?? 0) }.firstIndex(where: { $0.user_id == user?.user_id }).map { $0 + 1 } ?? 0
+        let myRank = competition.rankedStandings.first(where: { $0.user.user_id == user?.user_id })?.place ?? 0
 
         return VStack(spacing: 10) {
             HStack(spacing: 8) {

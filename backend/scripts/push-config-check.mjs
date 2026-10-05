@@ -167,9 +167,17 @@ for (const type of [
   "streak_assist_offer",
   "streak_assist_request",
   "streak_saved",
+  // "You ran it anyway" — the token came back. Fires at most once per covered
+  // day and is the only thing that ever tells the donor their mile is free
+  // again, so a capped one is simply never said.
+  "streak_token_returned",
+  "streak_assist_returned",
   "challenge_won",
   "crew_photo",
   "buddy_finished",
+  // Your own week, once a week, claimed per user+week — bounded by
+  // construction, and a capped one would land in the NEXT week's digest.
+  "weekly_recap",
 ]) {
   assert.equal(
     isCapExempt(type),

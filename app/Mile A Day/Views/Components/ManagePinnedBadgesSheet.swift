@@ -1,7 +1,10 @@
 import SwiftUI
 
 /// Sheet that lets the user pick up to 3 earned badges to pin to their profile showcase.
-/// Tap to select/deselect; selection order determines pin order (1, 2, 3).
+/// The picks sit in a FIXED strip at the top — the showcase as it will read,
+/// slot 1 → 3 — where tapping one removes it; the grid below picks. Selection
+/// order is pin order. A full showcase dims the rest of the grid, and tapping
+/// a dimmed medal says why (and shakes the strip) rather than doing nothing.
 struct ManagePinnedBadgesSheet: View {
     @ObservedObject var userManager: UserManager
     @Environment(\.dismiss) private var dismiss
@@ -10,6 +13,11 @@ struct ManagePinnedBadgesSheet: View {
     @State private var isSaving = false
     @State private var sortOption: SortOption = .dateNewest
     @State private var saveError: String?
+    /// Bumped when a pick is refused because the showcase is full — drives the
+    /// strip's shake and the hint's flash.
+    @State private var capacityNudges = 0
+    @State private var hintFlash = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     enum SortOption: String, CaseIterable, Hashable {
         case dateNewest = "Newest"
@@ -59,9 +67,10 @@ struct ManagePinnedBadgesSheet: View {
                 MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    headerBanner
-
-                    if !earnedBadges.isEmpty {
+                    if earnedBadges.isEmpty {
+                        headerBanner
+                    } else {
+                        showcaseStrip
                         sortBar
                     }
 
@@ -81,7 +90,7 @@ struct ManagePinnedBadgesSheet: View {
                                         selectionIndex: selectionIndex(for: badge.id),
                                         atCapacity: selected.count >= maxPins && !selected.contains(badge.id)
                                     ) {
-                                        toggle(badge.id)
+                                        pick(badge.id)
                                     }
                                 }
                             }
@@ -141,6 +150,76 @@ struct ManagePinnedBadgesSheet: View {
         }
         .padding(.vertical, MADTheme.Spacing.md)
         .frame(maxWidth: .infinity)
+        .background(Color.white.opacity(0.04))
+    }
+
+    // MARK: - Showcase strip
+
+    /// The selected medals resolved, in slot order.
+    private var selectedBadges: [Badge] {
+        let byId = Dictionary(
+            userManager.currentUser.badges.filter { !$0.isLocked }.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return selected.compactMap { byId[$0] }
+    }
+
+    private var isFull: Bool { selected.count >= maxPins }
+
+    private var stripHint: String {
+        if isFull { return "Showcase full · remove one to swap" }
+        if selected.isEmpty { return "Tap medals below to pin them, in order" }
+        return "Tap a pinned medal to remove it"
+    }
+
+    private var showcaseStrip: some View {
+        let badges = selectedBadges
+        return VStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(MADTheme.Colors.redGradient)
+                    .accessibilityHidden(true)
+                Text("YOUR SHOWCASE")
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .tracking(1.3)
+                    .foregroundColor(.white.opacity(0.7))
+                Spacer()
+                Text("\(selected.count) of \(maxPins)")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(selected.isEmpty ? .white.opacity(0.45) : MADTheme.Colors.madRed)
+            }
+
+            HStack(spacing: 10) {
+                ForEach(0..<maxPins, id: \.self) { slot in
+                    if slot < badges.count {
+                        PinnedStripSlot(badge: badges[slot], slotNumber: slot + 1) {
+                            remove(badges[slot].id)
+                        }
+                        .transition(.scale(scale: 0.85).combined(with: .opacity))
+                        .id(badges[slot].id)
+                    } else {
+                        PinnedStripEmptySlot(slotNumber: slot + 1)
+                    }
+                }
+            }
+            .modifier(ShakeEffect(travel: reduceMotion ? 0 : 7, shakes: CGFloat(capacityNudges)))
+            .animation(.spring(response: 0.35, dampingFraction: 0.82), value: selected)
+
+            HStack(spacing: 5) {
+                Image(systemName: isFull ? "exclamationmark.circle.fill" : "hand.tap.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .accessibilityHidden(true)
+                Text(stripHint)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+            }
+            .foregroundColor(hintFlash ? MADTheme.Colors.madRed : .white.opacity(0.5))
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.top, MADTheme.Spacing.md)
+        .padding(.bottom, 12)
         .background(Color.white.opacity(0.04))
     }
 
@@ -216,11 +295,31 @@ struct ManagePinnedBadgesSheet: View {
         return nil
     }
 
-    private func toggle(_ badgeId: String) {
-        if let idx = selected.firstIndex(of: badgeId) {
-            selected.remove(at: idx)
+    /// A grid tap: unpin if pinned, pin if there's room, otherwise say why.
+    private func pick(_ badgeId: String) {
+        if selected.contains(badgeId) {
+            remove(badgeId)
         } else if selected.count < maxPins {
-            selected.append(badgeId)
+            MADHaptics.tap()
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                selected.append(badgeId)
+            }
+        } else {
+            MADHaptics.warning()
+            withAnimation(.linear(duration: 0.4)) { capacityNudges += 1 }
+            withAnimation(.easeOut(duration: 0.15)) { hintFlash = true }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 900_000_000)
+                withAnimation(.easeOut(duration: 0.4)) { hintFlash = false }
+            }
+        }
+    }
+
+    private func remove(_ badgeId: String) {
+        guard let idx = selected.firstIndex(of: badgeId) else { return }
+        MADHaptics.tap()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+            _ = selected.remove(at: idx)
         }
     }
 
@@ -242,6 +341,127 @@ struct ManagePinnedBadgesSheet: View {
     }
 }
 
+/// One pinned medal in the strip: tap anywhere to take it off.
+private struct PinnedStripSlot: View {
+    let badge: Badge
+    let slotNumber: Int
+    let onRemove: () -> Void
+
+    var body: some View {
+        Button(action: onRemove) {
+            VStack(spacing: 6) {
+                MedalView(badge: badge, size: 50, showShimmer: false)
+                    .frame(width: 62, height: 58)
+                    .overlay(alignment: .topTrailing) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .black))
+                            .foregroundColor(.white)
+                            .frame(width: 20, height: 20)
+                            .background(Circle().fill(Color.black.opacity(0.75)))
+                            .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1))
+                            .offset(x: 4, y: -2)
+                    }
+
+                Text(badge.name)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+                    .frame(height: 28, alignment: .top)
+            }
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+            .padding(.horizontal, 4)
+            .frame(maxWidth: .infinity)
+            .frame(height: PinnedStripMetrics.height)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(badge.rarity.color.opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(badge.rarity.color.opacity(0.45), lineWidth: 1)
+                    )
+            )
+            .overlay(alignment: .topLeading) {
+                PinnedSlotNumber(number: slotNumber, filled: true)
+            }
+        }
+        .buttonStyle(BadgeCardButtonStyle())
+        .accessibilityLabel("Slot \(slotNumber): \(badge.name)")
+        .accessibilityHint("Removes it from your showcase")
+    }
+}
+
+private struct PinnedStripEmptySlot: View {
+    let slotNumber: Int
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Circle()
+                .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                .foregroundColor(.white.opacity(0.22))
+                .frame(width: 50, height: 50)
+                .overlay(
+                    Image(systemName: "plus")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.3))
+                )
+                .frame(width: 62, height: 58)
+            Text("Pick a medal")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.38))
+                .frame(height: 28, alignment: .top)
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+        .frame(maxWidth: .infinity)
+        .frame(height: PinnedStripMetrics.height)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+        )
+        .overlay(alignment: .topLeading) {
+            PinnedSlotNumber(number: slotNumber, filled: false)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Slot \(slotNumber): empty")
+    }
+}
+
+private enum PinnedStripMetrics {
+    static let height: CGFloat = 112
+}
+
+private struct PinnedSlotNumber: View {
+    let number: Int
+    let filled: Bool
+
+    var body: some View {
+        Text("\(number)")
+            .font(.system(size: 10, weight: .black, design: .rounded))
+            .foregroundColor(filled ? .white : .white.opacity(0.35))
+            .frame(width: 18, height: 18)
+            .background(Circle().fill(filled ? MADTheme.Colors.madRed : Color.white.opacity(0.06)))
+            .padding(6)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Horizontal shake; `shakes` steps by one per refused pick.
+private struct ShakeEffect: GeometryEffect {
+    var travel: CGFloat
+    var shakes: CGFloat
+    var animatableData: CGFloat {
+        get { shakes }
+        set { shakes = newValue }
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(CGAffineTransform(translationX: travel * sin(shakes * .pi * 4), y: 0))
+    }
+}
+
 private struct BadgePickerCard: View {
     let badge: Badge
     let selectionIndex: Int?
@@ -252,24 +472,21 @@ private struct BadgePickerCard: View {
 
     var body: some View {
         Button(action: onTap) {
-            VStack(spacing: 10) {
-                ZStack {
-                    MedalView(badge: badge, size: 64, showShimmer: false)
-
-                    if let idx = selectionIndex {
-                        ZStack {
-                            Circle()
-                                .fill(MADTheme.Colors.madRed)
-                                .frame(width: 26, height: 26)
-                                .overlay(Circle().stroke(Color.white, lineWidth: 2))
-                            Text("\(idx)")
-                                .font(.system(size: 13, weight: .bold, design: .rounded))
+            VStack(spacing: 9) {
+                MedalView(badge: badge, size: 64, showShimmer: false)
+                    .frame(width: 90, height: 78)
+                    .overlay(alignment: .topTrailing) {
+                        if isSelected {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .black))
                                 .foregroundColor(.white)
+                                .frame(width: 24, height: 24)
+                                .background(Circle().fill(MADTheme.Colors.madRed))
+                                .overlay(Circle().stroke(Color.white, lineWidth: 2))
+                                .transition(.scale.combined(with: .opacity))
+                                .accessibilityHidden(true)
                         }
-                        .offset(x: 26, y: -26)
                     }
-                }
-                .frame(width: 90, height: 90)
 
                 Text(badge.name)
                     .font(.system(size: 13, weight: .bold, design: .rounded))
@@ -296,13 +513,28 @@ private struct BadgePickerCard: View {
                     .frame(height: 44, alignment: .top)
                     .padding(.horizontal, 2)
 
-                HStack(spacing: 4) {
-                    Image(systemName: "calendar")
-                        .font(.system(size: 9, weight: .semibold))
-                    Text(badge.dateAwarded.formattedShortDate)
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                Group {
+                    if let idx = selectionIndex {
+                        Text("PINNED · SLOT \(idx)")
+                            .font(.system(size: 10, weight: .black, design: .rounded))
+                            .tracking(0.6)
+                            .foregroundColor(MADTheme.Colors.madRed)
+                    } else if atCapacity {
+                        Text("Remove one to swap")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.6))
+                    } else {
+                        HStack(spacing: 4) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 9, weight: .semibold))
+                                .accessibilityHidden(true)
+                            Text(MedalStory.shortDate(badge.dateAwarded))
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        }
+                        .foregroundColor(.white.opacity(0.55))
+                    }
                 }
-                .foregroundColor(.white.opacity(0.55))
+                .frame(height: 14)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, MADTheme.Spacing.md)
@@ -318,10 +550,11 @@ private struct BadgePickerCard: View {
                             )
                     )
             )
-            .opacity(atCapacity ? 0.45 : 1.0)
+            .opacity(atCapacity ? 0.42 : 1.0)
         }
         .buttonStyle(BadgeCardButtonStyle())
-        .disabled(atCapacity)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityHint(isSelected ? "Unpins it" : (atCapacity ? "Showcase full. Remove one to swap." : "Pins it to your showcase"))
     }
 }
 

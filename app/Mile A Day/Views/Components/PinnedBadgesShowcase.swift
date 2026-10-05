@@ -16,6 +16,11 @@ struct PinnedBadgesShowcase: View {
     /// destination indices into the current `pinnedBadges` array. Nil on friend
     /// profiles so visitors can't rearrange.
     let onReorder: ((Int, Int) -> Void)?
+    /// "How earned" summaries by badge id. Nil = resolve them here: your own
+    /// profile (the one with a manage affordance) reads this account's
+    /// `BadgeEarnedDetails`; a friend's has none, so their medals say rarity
+    /// and date — no per-medal fetch.
+    let earnedSummaries: [String: String]?
 
     @State private var draggingSlot: Int? = nil
     @State private var hoveredSlot: Int? = nil
@@ -25,13 +30,15 @@ struct PinnedBadgesShowcase: View {
         onManageTapped: (() -> Void)? = nil,
         onBadgeTapped: ((Badge) -> Void)? = nil,
         ownerDisplayName: String? = nil,
-        onReorder: ((Int, Int) -> Void)? = nil
+        onReorder: ((Int, Int) -> Void)? = nil,
+        earnedSummaries: [String: String]? = nil
     ) {
         self.pinnedBadges = pinnedBadges
         self.onManageTapped = onManageTapped
         self.onBadgeTapped = onBadgeTapped
         self.ownerDisplayName = ownerDisplayName
         self.onReorder = onReorder
+        self.earnedSummaries = earnedSummaries
     }
 
     private static let slotCount = 3
@@ -63,18 +70,37 @@ struct PinnedBadgesShowcase: View {
                 }
             }
 
-            HStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(0..<Self.slotCount, id: \.self) { slot in
-                    if slot < pinnedBadges.count {
-                        filledSlot(at: slot, badge: pinnedBadges[slot])
-                    } else {
-                        PinnedBadgeSlotEmpty(
-                            isInteractive: onManageTapped != nil,
-                            reserveNameSpace: !pinnedBadges.isEmpty
-                        ) {
-                            onManageTapped?()
+            Group {
+                if pinnedBadges.isEmpty {
+                    // Nothing pinned: one quiet row of dashed sockets.
+                    HStack(spacing: MADTheme.Spacing.sm) {
+                        ForEach(0..<Self.slotCount, id: \.self) { _ in
+                            PinnedBadgeSlotEmpty(isInteractive: onManageTapped != nil, compact: true) {
+                                onManageTapped?()
+                            }
                         }
                     }
+                } else {
+                    let summaries = resolvedSummaries
+                    // Your own profile keeps its open sockets (each one is an Add);
+                    // a friend's 1–2 pins sit centred at the same width instead of
+                    // beside sockets they can't fill.
+                    let slots = onManageTapped != nil ? Self.slotCount : pinnedBadges.count
+                    HStack(spacing: MADTheme.Spacing.sm) {
+                        ForEach(0..<slots, id: \.self) { slot in
+                            Group {
+                                if slot < pinnedBadges.count {
+                                    filledSlot(at: slot, badge: pinnedBadges[slot], summaries: summaries)
+                                } else {
+                                    PinnedBadgeSlotEmpty(isInteractive: true, compact: false) {
+                                        onManageTapped?()
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: ShowcaseSlotMetrics.maxWidth)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
             }
             // Smoothly swap badges when the pinned list reorders.
@@ -105,7 +131,7 @@ struct PinnedBadgesShowcase: View {
     /// A single filled slot. Tappable for detail; long-press-and-drag for reorder
     /// when `onReorder` is provided (i.e., on the local user's own profile).
     @ViewBuilder
-    private func filledSlot(at slot: Int, badge: Badge) -> some View {
+    private func filledSlot(at slot: Int, badge: Badge, summaries: [String: String]) -> some View {
         let canReorder = onReorder != nil && pinnedBadges.count > 1
         let isDragging = draggingSlot == slot
         let isDropTarget = canReorder && hoveredSlot == slot && draggingSlot != nil && draggingSlot != slot
@@ -120,7 +146,10 @@ struct PinnedBadgesShowcase: View {
                 Button {
                     onBadgeTapped?(badge)
                 } label: {
-                    PinnedBadgeSlotFilled(badge: badge)
+                    PinnedBadgeSlotFilled(
+                        badge: badge,
+                        story: MedalStory.measuredLine(for: badge, summaries: summaries)
+                    )
                 }
                 .buttonStyle(BadgeCardButtonStyle())
                 .disabled(onBadgeTapped == nil)
@@ -147,6 +176,11 @@ struct PinnedBadgesShowcase: View {
         )
     }
 
+    private var resolvedSummaries: [String: String] {
+        if let earnedSummaries { return earnedSummaries }
+        return onManageTapped != nil ? MedalStory.summaries() : [:]
+    }
+
     private var emptyStateText: String {
         if onManageTapped != nil {
             return "Pin up to 3 of your favorite medals to show off on your profile."
@@ -158,39 +192,85 @@ struct PinnedBadgesShowcase: View {
     }
 }
 
-private struct PinnedBadgeSlotFilled: View {
+/// Shared geometry so a filled slot, its drag skeleton and an open socket are
+/// exactly the same size — the row never reflows while you drag.
+enum ShowcaseSlotMetrics {
+    static let height: CGFloat = 204
+    static let maxWidth: CGFloat = 124
+    static let medalSize: CGFloat = 60
+    /// Height of the hanging medal (ribbon + loop + disc) at `medalSize`.
+    static let medalBox: CGFloat = 104
+}
+
+/// A pinned medal as it hangs on the profile: ribbon and disc on a small
+/// rarity-lit plinth, the name, then its story — "Legendary · Sep 30", plus
+/// the measured line when the medal has one ("You ran a 7:42 mile").
+struct PinnedBadgeSlotFilled: View {
     let badge: Badge
+    var story: String? = nil
 
     var body: some View {
-        VStack(spacing: 8) {
-            MedalView(badge: badge, size: 72)
-                .frame(width: 90, height: 90)
+        VStack(spacing: 6) {
+            HangingMedal(badge: badge, size: ShowcaseSlotMetrics.medalSize, showShimmer: false)
+                .frame(height: ShowcaseSlotMetrics.medalBox, alignment: .bottom)
 
             Text(badge.name)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .font(.system(size: 12, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
-                .frame(height: 28, alignment: .top)
+                .minimumScaleFactor(0.85)
+                .frame(height: 30, alignment: .top)
+
+            Text(MedalStory.rarityAndDate(badge))
+                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                .foregroundColor(badge.rarity.color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+
+            Text(story ?? " ")
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.62))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+                .frame(maxHeight: .infinity, alignment: .top)
         }
+        .padding(.horizontal, 6)
+        .padding(.top, 2)
+        .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
+        .frame(height: ShowcaseSlotMetrics.height)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(
+                    LinearGradient(
+                        colors: [badge.rarity.color.opacity(0.03), badge.rarity.color.opacity(0.16)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(badge.rarity.color.opacity(0.22), lineWidth: 1)
+                )
+        )
+        .accessibilityElement(children: .combine)
     }
 }
 
-/// Placeholder shown in a filled slot while its badge is being dragged. Matches
-/// the empty-slot dimensions exactly so the rest of the row doesn't reflow.
-/// Heavy dashed outline in the badge's rarity color + soft inner glow + a
-/// pulsing scale animation so the "this slot is in motion" signal is loud.
+/// Placeholder shown in a filled slot while its badge is being dragged. Same
+/// frame as a filled slot so the rest of the row doesn't reflow. Dashed
+/// outline in the badge's rarity colour + a pulsing scale so the "this slot
+/// is in motion" signal is loud.
 private struct PinnedBadgeSlotSkeleton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let badge: Badge
     @State private var pulse: Bool = false
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             ZStack {
-                // Soft tinted disc behind the outline so the slot reads as
-                // "occupied but lifted" rather than empty.
                 Circle()
                     .fill(
                         RadialGradient(
@@ -202,25 +282,20 @@ private struct PinnedBadgeSlotSkeleton: View {
                     )
                     .frame(width: 90, height: 90)
 
-                // Dashed outline — animates by pulsing its scale so it's
-                // visibly "alive" even when the user's finger covers part of
-                // the screen.
                 Circle()
                     .strokeBorder(
                         badge.rarity.color.opacity(0.95),
                         style: StrokeStyle(lineWidth: 2, dash: [5, 4])
                     )
-                    .frame(width: 64, height: 64)
+                    .frame(width: 60, height: 60)
                     .scaleEffect(pulse ? 1.08 : 0.96)
                     .opacity(pulse ? 1.0 : 0.7)
 
-                // Arrows-out-of-rectangle reads as "moving" rather than the
-                // badge's normal icon which would look like a static dim copy.
                 Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
                     .font(.system(size: 16, weight: .black))
                     .foregroundColor(badge.rarity.color.opacity(0.85))
             }
-            .frame(width: 90, height: 90)
+            .frame(height: ShowcaseSlotMetrics.medalBox, alignment: .bottom)
             .onAppear {
                 guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
@@ -232,18 +307,22 @@ private struct PinnedBadgeSlotSkeleton: View {
                 .font(.system(size: 10, weight: .black, design: .rounded))
                 .tracking(1.4)
                 .foregroundColor(badge.rarity.color.opacity(0.9))
-                .frame(height: 28, alignment: .top)
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
+        .frame(height: ShowcaseSlotMetrics.height)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(badge.rarity.color.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+        )
     }
 }
 
+/// An open socket. `compact` is the all-empty state (a short row with the
+/// explainer under it); otherwise it matches a filled slot's frame.
 private struct PinnedBadgeSlotEmpty: View {
     let isInteractive: Bool
-    /// Reserve vertical space matching a filled slot's name label so empty + filled
-    /// slots align on the same baseline. Skip the reservation when all slots are
-    /// empty — there's nothing to align with and the spacer makes the row look loose.
-    let reserveNameSpace: Bool
+    let compact: Bool
     let onTap: () -> Void
 
     var body: some View {
@@ -251,34 +330,45 @@ private struct PinnedBadgeSlotEmpty: View {
             VStack(spacing: 8) {
                 ZStack {
                     Circle()
-                        .strokeBorder(
-                            style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
-                        )
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
                         .foregroundColor(.white.opacity(0.25))
-                        .frame(width: 64, height: 64)
+                        .frame(width: 60, height: 60)
 
                     Image(systemName: isInteractive ? "plus" : "pin")
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(.system(size: 20, weight: .semibold))
                         .foregroundColor(.white.opacity(0.35))
                 }
-                .frame(width: 90, height: 90)
+                .frame(height: compact ? 76 : ShowcaseSlotMetrics.medalBox, alignment: .bottom)
 
-                if reserveNameSpace {
-                    Text(" ")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
-                        .frame(height: 28)
+                if !compact {
+                    Text("Add a medal")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.4))
+                    Spacer(minLength: 0)
                 }
             }
             .frame(maxWidth: .infinity)
+            .frame(height: compact ? 84 : ShowcaseSlotMetrics.height)
+            .background {
+                if !compact {
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(Color.white.opacity(0.1), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                }
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!isInteractive)
+        .accessibilityLabel(isInteractive ? "Add a medal to your showcase" : "Empty showcase slot")
     }
 }
 
 // MARK: - Visual helpers (mirrors PremiumBadgeCard styling so the showcase looks consistent)
 
 func iconName(for badge: Badge) -> String {
+    if let holiday = HolidayKey(badgeId: badge.id) {
+        return holiday.medalIcon
+    }
     if badge.id.starts(with: "streak_") || badge.id.starts(with: "consistency_") {
         return "flame.fill"
     } else if badge.id.starts(with: "miles_") {
@@ -350,6 +440,7 @@ private struct ReorderableSlotModifier: ViewModifier {
             content
                 .draggable(beginDrag()) {
                     PinnedBadgeSlotFilled(badge: badge)
+                        .frame(width: ShowcaseSlotMetrics.maxWidth)
                         .scaleEffect(1.05)
                         .shadow(color: .black.opacity(0.4), radius: 10, x: 0, y: 6)
                 }

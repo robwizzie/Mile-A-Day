@@ -137,6 +137,54 @@ export async function uploadPostMedia(
   }
 }
 
+/**
+ * The FRONT & BACK twin of a photo being posted: a second `/uploads/posts/`
+ * path the caller owns, or nothing.
+ *
+ * Its own function because it is the THIRD place these three checks are
+ * written (createPost's `media_url`, the highlight cover, and here), and
+ * because the one that matters is the least obvious: media urls are served to
+ * the whole circle, so without the `<userId>-` filename test anyone could
+ * hang a friend's photo off their own post as the flip side — a story-only
+ * picture that never reached a grid included.
+ *
+ * Returns `null` for absent (the overwhelmingly common case: every single
+ * shot, and every client that predates the feature) and `false` for present
+ * but unusable, so the caller can 400 rather than quietly drop half of what
+ * the user just shot.
+ */
+function normalizeDualMediaUrl(
+  userId: string,
+  raw: unknown,
+): string | null | false {
+  if (raw === undefined || raw === null || raw === "") return null;
+  if (typeof raw !== "string") return false;
+  const bare = stripMediaQuery(raw);
+  if (!bare.startsWith(POSTS_MEDIA_PREFIX) || bare.includes("..")) return false;
+  if (!path.basename(bare).startsWith(`${userId}-`)) return false;
+  if (!fs.existsSync(path.join(process.cwd(), bare.replace(/^\//, "")))) {
+    return false;
+  }
+  return bare;
+}
+
+/**
+ * Which corner the inset was baked into.
+ *
+ * Four values or nothing. Unlike the url beside it this is never worth a 400:
+ * an unrecognised corner is a client bug, and refusing the whole post over it
+ * would lose a photo to protect a tap target. NULL reads as top-trailing
+ * everywhere, which is where every photo posted before the inset could be
+ * moved already sits.
+ */
+function normalizeDualInsetCorner(raw: unknown): string | null {
+  return typeof raw === "string" && DUAL_INSET_CORNERS.includes(raw)
+    ? raw
+    : null;
+}
+
+const DUAL_INSET_CORNERS = ["tr", "tl", "bl", "br"];
+
 export async function createPostController(
   req: AuthenticatedRequest,
   res: Response,
@@ -157,6 +205,8 @@ export async function createPostController(
     posted_live,
     photo_source,
     competition_id,
+    dual_media_url,
+    dual_inset_corner,
   } = req.body ?? {};
 
   try {
@@ -164,8 +214,19 @@ export async function createPostController(
     // flow) — store the bare path, signatures are minted per-response.
     const mediaUrl =
       typeof media_url === "string" ? stripMediaQuery(media_url) : media_url;
+    // A LIVE auto card carries no picture at all: the card is drawn on the
+    // viewer's phone from the workout, its route and the stats snapshot, so
+    // there is nothing to upload, host or sweep. Stored as '' — the column is
+    // NOT NULL, and '' is what every "has a photo?" read already treats as
+    // none (crewPosts, workoutService.has_photo, photoLock, push images).
+    // Viewers whose build predates live cards are served the row in a shape
+    // their existing code draws live (`AUTO_FLAG_SQL`, postSql).
+    const liveAutoCard =
+      is_auto === true && (mediaUrl === undefined || mediaUrl === null || mediaUrl === "");
     // Validate media_url points at our own posts upload dir and exists on disk.
-    if (
+    if (liveAutoCard) {
+      // nothing to validate
+    } else if (
       typeof mediaUrl !== "string" ||
       !mediaUrl.startsWith(POSTS_MEDIA_PREFIX) ||
       mediaUrl.includes("..")
@@ -174,8 +235,8 @@ export async function createPostController(
         .status(400)
         .json({ error: "A valid uploaded media_url is required" });
     }
-    const onDisk = path.join(process.cwd(), mediaUrl.replace(/^\//, ""));
-    if (!fs.existsSync(onDisk)) {
+    const onDisk = liveAutoCard ? "" : path.join(process.cwd(), mediaUrl.replace(/^\//, ""));
+    if (!liveAutoCard && !fs.existsSync(onDisk)) {
       return res
         .status(400)
         .json({ error: "media_url does not reference an uploaded file" });
@@ -183,11 +244,21 @@ export async function createPostController(
     // Ownership: upload filenames are `<userId>-<ts>-<rand>.jpg`, and media
     // urls are visible to the whole circle — without this check anyone could
     // republish a friend's photo (including story-only photos) as their own.
-    if (!path.basename(mediaUrl).startsWith(`${userId}-`)) {
+    if (!liveAutoCard && !path.basename(mediaUrl).startsWith(`${userId}-`)) {
       return res
         .status(403)
         .json({ error: "media_url must reference your own upload" });
     }
+    // FRONT & BACK's second frame. A 400 rather than a silent drop: the user
+    // shot two pictures and half of one arriving is worse than being told.
+    const dualMediaUrl = liveAutoCard ? null : normalizeDualMediaUrl(userId, dual_media_url);
+    if (dualMediaUrl === false) {
+      return res
+        .status(400)
+        .json({ error: "dual_media_url must reference your own upload" });
+    }
+    // Never a 400: an unknown corner costs a tap target, not a photo.
+    const dualInsetCorner = normalizeDualInsetCorner(dual_inset_corner);
 
     const shareToFeed = share_to_feed !== false; // default true
     const shareToStory = share_to_story === true; // default false
@@ -340,7 +411,9 @@ export async function createPostController(
 
     const post = await createPost({
       userId,
-      mediaUrl,
+      mediaUrl: liveAutoCard ? "" : mediaUrl,
+      dualMediaUrl,
+      dualInsetCorner,
       caption: typeof caption === "string" ? caption.trim() || null : null,
       workoutId,
       localDate: goal.localDate,
@@ -1009,7 +1082,8 @@ export async function addCrewPhotoController(
 ) {
   const userId = req.userId!;
   const postId = req.params.postId;
-  const { media_url, photo_source, caption } = req.body ?? {};
+  const { media_url, photo_source, caption, dual_media_url, dual_inset_corner } =
+    req.body ?? {};
   if (
     caption != null &&
     (typeof caption !== "string" || caption.length > MAX_CAPTION)
@@ -1047,6 +1121,13 @@ export async function addCrewPhotoController(
         .status(403)
         .json({ error: "media_url must reference your own upload" });
     }
+    const dualMediaUrl = normalizeDualMediaUrl(userId, dual_media_url);
+    if (dualMediaUrl === false) {
+      return res
+        .status(400)
+        .json({ error: "dual_media_url must reference your own upload" });
+    }
+    const dualInsetCorner = normalizeDualInsetCorner(dual_inset_corner);
 
     // Adding your slide is posting a photo, so it answers to the same window.
     // Which tier applies is the client's declared source, same split as
@@ -1080,6 +1161,8 @@ export async function addCrewPhotoController(
       userId,
       mediaUrl,
       typeof caption === "string" ? caption.trim() || null : null,
+      dualMediaUrl,
+      dualInsetCorner,
     );
     if (!ok) return res.status(404).json({ error: "Post not found" });
     // Fire-and-forget: everyone else on the walk hears about it, and a push

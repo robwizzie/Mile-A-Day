@@ -100,6 +100,7 @@ struct RecordStreakCelebrationView: View {
     @State private var showStars = false
     @State private var showContent = false
     @State private var hasStartedAnimation = false
+    @State private var storyShare: MADStoryContent?
 
     var body: some View {
         ComebackCelebrationScaffold(
@@ -115,10 +116,23 @@ struct RecordStreakCelebrationView: View {
             title: "New Longest Streak!",
             message: "Day \(days) — you've never been here before. Your old record was \(previousBest).",
             buttonTint: Color(red: 0.72, green: 0.48, blue: 0.05),
+            // The Duolingo moment: a new all-time record is the streak card
+            // people most want to post, offered while they're looking at it.
+            onShare: {
+                MADHaptics.action()
+                TelemetryService.record(ShareTelemetry.opened)
+                var content = MADStoryContent(streak: days, date: Date())
+                let total = UserManager.shared.currentUser.totalMiles
+                content.totalMiles = total > 0 ? total : nil
+                storyShare = content
+            },
             scale: $scale, opacity: $opacity,
             showBurst: $showBurst, showStars: $showStars, showContent: $showContent
         ) {
             manager.dismissCurrentCelebration()
+        }
+        .sheet(item: $storyShare) { content in
+            ShareStudioView(content: content, initialTemplate: .flameyStreak)
         }
         .onAppear { startAnimationIfActive() }
         .onChange(of: scenePhase) { _, newPhase in
@@ -151,6 +165,9 @@ private struct ComebackCelebrationScaffold: View {
     let title: String
     let message: String
     let buttonTint: Color
+    /// A secondary "Share your streak" above Continue, when the moment is
+    /// worth posting. nil = no share button.
+    var onShare: (() -> Void)? = nil
 
     @Binding var scale: CGFloat
     @Binding var opacity: Double
@@ -257,6 +274,29 @@ private struct ComebackCelebrationScaffold: View {
                 }
 
                 Spacer()
+
+                if showContent, let onShare {
+                    Button(action: onShare) {
+                        HStack(spacing: MADTheme.Spacing.sm) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 17, weight: .bold))
+                                .accessibilityHidden(true)
+                            Text("Share your streak")
+                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                .strokeBorder(Color.white.opacity(0.7), lineWidth: 1.5)
+                        )
+                        .padding(.horizontal, MADTheme.Spacing.xl)
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.bottom, -MADTheme.Spacing.md)
+                }
 
                 if showContent {
                     Button(action: {

@@ -1,0 +1,1 @@
+ALTER TABLE "post_coauthors" ADD COLUMN "on_profile" boolean;

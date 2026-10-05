@@ -76,6 +76,18 @@ private enum RouteSnapshotCache {
 }
 
 extension RouteMapSnapshot {
+    /// The session cache only, synchronously — what a recycled card uses to
+    /// land its finished frame on the right projection before it is drawn.
+    static func cached(coordinates: [CLLocationCoordinate2D], size: CGSize) -> RouteMapSnapshot? {
+        guard !coordinates.isEmpty, size.width > 1, size.height > 1 else { return nil }
+        return RouteSnapshotCache.snapshot(for: RouteSnapshotCache.key(coordinates: coordinates, size: size))
+    }
+
+    /// A cheap identity for "this route at this size" (the cache's own key).
+    static func signature(coordinates: [CLLocationCoordinate2D], size: CGSize) -> String {
+        RouteSnapshotCache.key(coordinates: coordinates, size: size) as String
+    }
+
     /// One dark, POI-free snapshot covering `coordinates` at `size` — the same
     /// options the live map view uses, shared so `RouteArtView`'s ghost-map
     /// underlay and the baked auto-post image frame routes identically.
@@ -106,6 +118,13 @@ struct CompanionRoute: Identifiable {
     let id: String
     let coordinates: [CLLocationCoordinate2D]
     let color: Color
+    /// Their route clock (`workout_routes.times`), when the server sent one —
+    /// the only thing that can tell a straight mile of road from a drive
+    /// between two halves of a paused walk. See `RouteGaps`.
+    var pointTimes: [Double]? = nil
+    /// The server trimmed this line's start & end for route privacy (it is
+    /// not the viewer's own) — drawn fading in and out, with no start pin.
+    var trimmedForPrivacy: Bool = false
 }
 
 /// Colours for the crew's lines on a combined route map.
@@ -229,6 +248,8 @@ enum RouteDrawTiming {
 struct WorkoutRouteMapView: View {
     let coordinates: [CLLocationCoordinate2D]
     let routeColor: Color
+    /// The author's route clock — see `CompanionRoute.pointTimes`.
+    var pointTimes: [Double]? = nil
     /// Everyone else who was on this walk and shared their route.
     ///
     /// Drawn onto the SAME snapshot, and — the part that matters — folded into
@@ -241,6 +262,13 @@ struct WorkoutRouteMapView: View {
     /// Carries the projection, not just the image: a `UIImage` alone can't say
     /// where a coordinate belongs on it.
     var onSnapshot: ((RouteMapSnapshot) -> Void)? = nil
+    /// The server served this route trimmed for route privacy (hide start &
+    /// end — a friend's walk): the line fades in and out and draws no start
+    /// pin. Defaulted, so an unwired caller draws exactly as before.
+    var routeTrimmed: Bool = false
+    /// The OWNER's own full route: the stretches friends never see, drawn
+    /// dimmed. nil = nothing hidden (or not the owner's view).
+    var privacyHint: RoutePrivacyHint? = nil
 
     @State private var snapshot: RouteMapSnapshot?
     /// 0 → 1 for every line at once. The STAGGER is not in this value — each
@@ -303,6 +331,11 @@ struct WorkoutRouteMapView: View {
         return MKCoordinateRegion(center: center, span: span)
     }
 
+    /// Steps the author's line must not be drawn across — see `RouteGaps`.
+    private var authorBreaks: Set<Int> {
+        RouteGaps.breakIndices(coordinates: coordinates, times: pointTimes)
+    }
+
     /// Framed over EVERY trace on the map. Framing on the author's alone left
     /// a buddy who looped the other way half off the card.
     private var region: MKCoordinateRegion {
@@ -323,6 +356,9 @@ struct WorkoutRouteMapView: View {
         // otherwise pinching a buddy walk's route quietly deletes everyone but
         // the poster from it.
         companionRoutes: [CompanionRoute] = [],
+        pointTimes: [Double]? = nil,
+        routeTrimmed: Bool = false,
+        privacyHint: RoutePrivacyHint? = nil,
         size: CGSize,
         @ViewBuilder overlay: () -> Overlay
     ) -> UIImage? {
@@ -338,7 +374,11 @@ struct WorkoutRouteMapView: View {
                     project: { snapshot.point(for: $0, in: size) },
                     routeColor: companion.color,
                     trimProgress: 1,
-                    showEndMarker: true
+                    showEndMarker: true,
+                    breaks: RouteGaps.breakIndices(
+                        coordinates: companion.coordinates,
+                        times: companion.pointTimes),
+                    fadesEnds: companion.trimmedForPrivacy
                 )
             }
             RouteOverlay(
@@ -347,7 +387,10 @@ struct WorkoutRouteMapView: View {
                 routeColor: routeColor,
                 trimProgress: 1,
                 showStartMarker: true,
-                showEndMarker: true
+                showEndMarker: true,
+                breaks: RouteGaps.breakIndices(coordinates: coordinates, times: pointTimes),
+                fadesEnds: routeTrimmed,
+                privacyKept: privacyHint?.kept
             )
             overlay()
         }
@@ -397,7 +440,11 @@ struct WorkoutRouteMapView: View {
                             trimProgress: trimProgress,
                             cometOpacity: cometVisible ? cometOpacity : 0,
                             showStartMarker: false,
-                            showEndMarker: showEndMarkers
+                            showEndMarker: showEndMarkers,
+                            breaks: RouteGaps.breakIndices(
+                                coordinates: companion.coordinates,
+                                times: companion.pointTimes),
+                            fadesEnds: companion.trimmedForPrivacy
                         )
                         // The stagger, applied where it actually works. Index 0
                         // here is the FIRST COMPANION; the author leaves first
@@ -413,7 +460,10 @@ struct WorkoutRouteMapView: View {
                         trimProgress: trimProgress,
                         cometOpacity: cometVisible ? cometOpacity : 0,
                         showStartMarker: showStartMarkers,
-                        showEndMarker: showEndMarkers
+                        showEndMarker: showEndMarkers,
+                        breaks: authorBreaks,
+                        fadesEnds: routeTrimmed,
+                        privacyKept: privacyHint?.kept
                     )
                     .animation(Self.lineAnimation(index: 0), value: trimProgress)
                 } else {
@@ -524,9 +574,71 @@ struct RouteOverlay: View {
     /// Pre-projected (and possibly LANED — see `RouteLaneOffset`) points. When
     /// set, `coordinates`/`project` are ignored for the line itself.
     var overridePoints: [CGPoint]? = nil
+    /// Steps this line must NOT draw across — a walk paused in one place and
+    /// resumed in another (`RouteGaps`). Index-aligned with the coordinates,
+    /// which is also what `overridePoints` preserves.
+    var breaks: Set<Int> = []
+    /// Hide start & end, as a FRIEND sees it: the server already cut this
+    /// line's ends off, so it FADES in over its first stretch and out over
+    /// its last — the cut reads as deliberate instead of as a walk that began
+    /// mid-street — and draws neither pin, which would mark a start and an
+    /// end that aren't the real ones. The owner's own line never fades.
+    var fadesEnds: Bool = false
+    /// The OWNER's own full line: the points friends are shown (0-based,
+    /// inclusive, index-aligned with `coordinates`). Everything outside is
+    /// drawn dimmed — what "Start & end hidden from friends" refers to.
+    var privacyKept: ClosedRange<Int>? = nil
 
     private var points: [CGPoint] {
         overridePoints ?? coordinates.map(project)
+    }
+
+    /// Share of the drawn length each faded end takes.
+    private static let fadeFraction: CGFloat = 0.1
+    private static let fadeSteps = 8
+    /// How far the owner's hidden stretches are dimmed.
+    private static let hiddenOpacity: Double = 0.3
+
+    /// The opacity bands along the line's length, as `Path.trim` fractions —
+    /// nil when the whole line is drawn at full strength.
+    private func maskBands(_ points: [CGPoint]) -> [(from: CGFloat, to: CGFloat, alpha: Double)]? {
+        if fadesEnds {
+            let f = Self.fadeFraction
+            let n = Self.fadeSteps
+            var bands: [(CGFloat, CGFloat, Double)] = []
+            for k in 0..<n {
+                let a = f * CGFloat(k) / CGFloat(n)
+                let b = f * CGFloat(k + 1) / CGFloat(n)
+                let alpha = (Double(k) + 0.5) / Double(n)
+                bands.append((a, b, alpha))
+                bands.append((1 - b, 1 - a, alpha))
+            }
+            bands.append((f, 1 - f, 1))
+            return bands
+        }
+        if let kept = privacyKept, points.count >= 2 {
+            // Trim fractions are of the DRAWN length: a lifted-pen gap
+            // (`breaks`) contributes nothing, exactly as in RoutePolyline.
+            var cumulative: [CGFloat] = [0]
+            cumulative.reserveCapacity(points.count)
+            for i in 1..<points.count {
+                let step = breaks.contains(i - 1)
+                    ? 0
+                    : hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y)
+                cumulative.append(cumulative[i - 1] + step)
+            }
+            guard let total = cumulative.last, total > 0,
+                  kept.lowerBound < points.count, kept.upperBound < points.count
+            else { return nil }
+            let s = cumulative[kept.lowerBound] / total
+            let e = cumulative[kept.upperBound] / total
+            return [
+                (0, s, Self.hiddenOpacity),
+                (s, e, 1),
+                (e, 1, Self.hiddenOpacity),
+            ]
+        }
+        return nil
     }
 
     /// The bead's length as a fraction of the whole line. Short enough to read
@@ -537,44 +649,22 @@ struct RouteOverlay: View {
         // Projected once, not per-stroke: the glow, the casing, the line, the
         // bead and both markers all read the same array.
         let points = self.points
+        let bands = maskBands(points)
         return ZStack {
             if points.count >= 2 {
-                // Glow
-                RoutePath(points: points)
-                    .trim(from: 0, to: trimProgress)
-                    .stroke(routeColor.opacity(0.3), style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
-                    .blur(radius: 3)
+                // Masked only when there is something to mask: a mask clips
+                // to the view's bounds, and the glow and bead shadow of an
+                // ordinary line must keep drawing exactly as before.
+                if let bands {
+                    lineStrokes(points)
+                        .mask { RouteBandMask(points: points, breaks: breaks, bands: bands) }
+                } else {
+                    lineStrokes(points)
+                }
 
-                // Dark casing under the colour. Eight lines on one map cross
-                // each other constantly, and where two bright strokes overlap
-                // with nothing between them the eye reads a single line that
-                // changes colour. A hairline of map-dark on either side is what
-                // keeps them legible as separate people — the same trick every
-                // transit map uses, and it costs one stroke.
-                RoutePath(points: points)
-                    .trim(from: 0, to: trimProgress)
-                    .stroke(Color.black.opacity(0.45), style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
-
-                // Main line
-                RoutePath(points: points)
-                    .trim(from: 0, to: trimProgress)
-                    .stroke(routeColor, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
-
-                // The bead riding the tip while the line draws.
-                //
-                // Positioned by trimming the path itself — both ends of the
-                // window animate, so it slides along the route for free. The
-                // alternative (a cumulative arc-length table sampled per frame)
-                // is a second answer to a question `Path.trim` has already
-                // answered, and one that could disagree with the line under it.
-                RoutePath(points: points)
-                    .trim(from: max(0, trimProgress - Self.cometLength), to: trimProgress)
-                    .stroke(Color.white, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
-                    .shadow(color: routeColor, radius: 6)
-                    .opacity(cometOpacity)
-
-                // Start marker
-                if showStartMarker, let start = points.first {
+                // Start marker — never on a privacy-trimmed line: it would
+                // pin a start that isn't the real one.
+                if showStartMarker, !fadesEnds, let start = points.first {
                     Circle()
                         .fill(.green)
                         .frame(width: 10, height: 10)
@@ -585,8 +675,8 @@ struct RouteOverlay: View {
 
                 // End marker — this walker's own colour, so a crew card says
                 // where each person stopped without any of them wearing the
-                // same dot.
-                if showEndMarker, let end = points.last {
+                // same dot. Same exception as the start pin.
+                if showEndMarker, !fadesEnds, let end = points.last {
                     Circle()
                         .fill(routeColor)
                         .frame(width: 10, height: 10)
@@ -598,15 +688,80 @@ struct RouteOverlay: View {
             }
         }
     }
+
+    /// Glow, casing, line and the drawing bead — everything the privacy mask
+    /// applies to (the pins sit outside it).
+    @ViewBuilder
+    private func lineStrokes(_ points: [CGPoint]) -> some View {
+        ZStack {
+                // Glow
+                RoutePath(points: points, breaks: breaks)
+                    .trim(from: 0, to: trimProgress)
+                    .stroke(routeColor.opacity(0.3), style: StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
+                    .blur(radius: 3)
+
+                // Dark casing under the colour. Eight lines on one map cross
+                // each other constantly, and where two bright strokes overlap
+                // with nothing between them the eye reads a single line that
+                // changes colour. A hairline of map-dark on either side is what
+                // keeps them legible as separate people — the same trick every
+                // transit map uses, and it costs one stroke.
+                RoutePath(points: points, breaks: breaks)
+                    .trim(from: 0, to: trimProgress)
+                    .stroke(Color.black.opacity(0.45), style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
+
+                // Main line
+                RoutePath(points: points, breaks: breaks)
+                    .trim(from: 0, to: trimProgress)
+                    .stroke(routeColor, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+
+                // The bead riding the tip while the line draws.
+                //
+                // Positioned by trimming the path itself — both ends of the
+                // window animate, so it slides along the route for free. The
+                // alternative (a cumulative arc-length table sampled per frame)
+                // is a second answer to a question `Path.trim` has already
+                // answered, and one that could disagree with the line under it.
+                RoutePath(points: points, breaks: breaks)
+                    .trim(from: max(0, trimProgress - Self.cometLength), to: trimProgress)
+                    .stroke(Color.white, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                    .shadow(color: routeColor, radius: 6)
+                    .opacity(cometOpacity)
+        }
+    }
+}
+
+/// The privacy mask under a route's strokes: the same path, stroked wide
+/// enough to cover the glow, in bands of opacity along its length. STATIC —
+/// it never reads `trimProgress` — so the draw-on animates beneath it and
+/// each band reveals at its own alpha as the tip passes. Butt caps so
+/// neighbouring bands don't overlap and double their alpha.
+private struct RouteBandMask: View {
+    let points: [CGPoint]
+    let breaks: Set<Int>
+    let bands: [(from: CGFloat, to: CGFloat, alpha: Double)]
+
+    var body: some View {
+        ZStack {
+            ForEach(Array(bands.enumerated()), id: \.offset) { _, band in
+                RoutePath(points: points, breaks: breaks)
+                    .trim(from: band.from, to: band.to)
+                    .stroke(Color.black, style: StrokeStyle(lineWidth: 26, lineCap: .butt, lineJoin: .round))
+                    .opacity(band.alpha)
+            }
+        }
+    }
 }
 
 // MARK: - Route Path Shape
 
 struct RoutePath: Shape {
     let points: [CGPoint]
+    /// See `RoutePolyline.path(through:breakingAfter:)`.
+    var breaks: Set<Int> = []
 
     func path(in rect: CGRect) -> Path {
         // Drawn identically to the baked auto-post image (RunPostService).
-        Path(RoutePolyline.path(through: points))
+        Path(RoutePolyline.path(through: points, breakingAfter: breaks))
     }
 }

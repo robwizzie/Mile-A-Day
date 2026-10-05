@@ -127,9 +127,9 @@ struct ProfileBannerView: View {
     }
 }
 
-/// The round glass buttons that ride the banner (QR, edit, settings). Same
-/// 38pt circle as `MADTabHeader`'s standard style, on a darker fill so they
-/// hold up over a photo.
+/// The round glass buttons that ride the banner (share, edit). Same 38pt
+/// circle as `MADTabHeader`'s standard style, on a darker fill so they hold
+/// up over a photo.
 struct ProfileBannerButton: View {
     let systemImage: String
     let accessibilityLabel: String
@@ -137,19 +137,44 @@ struct ProfileBannerButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(width: 38, height: 38)
-                .background(
-                    Circle()
-                        .fill(Color.black.opacity(0.35))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-                )
-                .contentShape(Circle())
+            ProfileBannerGlyph(systemImage: systemImage)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// A banner button that opens a menu instead of acting — the same circle, so
+/// the Share menu sits beside Edit as one set.
+struct ProfileBannerMenu<Content: View>: View {
+    let systemImage: String
+    let accessibilityLabel: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        Menu(content: content) {
+            ProfileBannerGlyph(systemImage: systemImage)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// The glyph-in-a-glass-circle both banner controls draw.
+private struct ProfileBannerGlyph: View {
+    let systemImage: String
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundColor(.white)
+            .frame(width: 38, height: 38)
+            .background(
+                Circle()
+                    .fill(Color.black.opacity(0.35))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+            )
+            .contentShape(Circle())
     }
 }
 
@@ -173,6 +198,11 @@ struct ProfileWordmark: View {
 struct GoalRingAvatar<Avatar: View>: View {
     let progress: Double?
     let isComplete: Bool
+    /// A streak token is carrying today. The ring fills in SavedDayStyle's
+    /// blue rather than reading as an unfinished orange arc — the day IS
+    /// safe, and the one thing this ring must never do is contradict the
+    /// streak number sitting under it.
+    var savedToday: Bool = false
     /// Avatar diameter; the ring sits outside it.
     let size: CGFloat
     var ringWidth: CGFloat = 5
@@ -183,7 +213,9 @@ struct GoalRingAvatar<Avatar: View>: View {
         size + 2 * gap + 2 * ringWidth
     }
 
-    private var clamped: Double { isComplete ? 1 : max(0, min(1, progress ?? 0)) }
+    private var clamped: Double {
+        (isComplete || savedToday) ? 1 : max(0, min(1, progress ?? 0))
+    }
 
     var body: some View {
         let diameter = Self.ringDiameter(size: size, ringWidth: ringWidth, gap: gap)
@@ -200,16 +232,7 @@ struct GoalRingAvatar<Avatar: View>: View {
                 .inset(by: ringWidth / 2)
                 .trim(from: 0, to: clamped)
                 .stroke(
-                    isComplete
-                        ? AnyShapeStyle(Color.green)
-                        : AnyShapeStyle(
-                            AngularGradient(
-                                colors: [Color.orange.opacity(0.55), .orange, Color.orange.opacity(0.85)],
-                                center: .center,
-                                startAngle: .degrees(0),
-                                endAngle: .degrees(360)
-                            )
-                        ),
+                    ringStyle,
                     style: StrokeStyle(lineWidth: ringWidth, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
@@ -220,6 +243,22 @@ struct GoalRingAvatar<Avatar: View>: View {
         }
         .frame(width: diameter, height: diameter)
     }
+
+    /// Done → green. Saved → the token blue. Otherwise the in-progress
+    /// orange sweep. Saved is checked FIRST only when the day isn't actually
+    /// complete: a covered day the user then ran is a green day.
+    private var ringStyle: AnyShapeStyle {
+        if isComplete { return AnyShapeStyle(Color.green) }
+        if savedToday { return AnyShapeStyle(SavedDayStyle.tint) }
+        return AnyShapeStyle(
+            AngularGradient(
+                colors: [Color.orange.opacity(0.55), .orange, Color.orange.opacity(0.85)],
+                center: .center,
+                startAngle: .degrees(0),
+                endAngle: .degrees(360)
+            )
+        )
+    }
 }
 
 /// "88% TO GOAL" / "GOAL DONE" — the chip tucked under the ring. Nothing when
@@ -227,10 +266,16 @@ struct GoalRingAvatar<Avatar: View>: View {
 struct GoalRingLabel: View {
     let progress: Double?
     let isComplete: Bool
+    /// The day a token is carrying. Its chip REPLACES the percentage rather
+    /// than sitting beside it: "0% TO GOAL" over a streak that just went up
+    /// is the contradiction this whole state exists to remove.
+    var savedToday: CoveredDate? = nil
 
     var body: some View {
         if isComplete {
             chip("GOAL DONE", icon: "checkmark", color: .green)
+        } else if let savedToday {
+            SavedDayStyle.todayChip(for: savedToday)
         } else if let progress {
             let percent = Int((max(0, min(1, progress)) * 100).rounded(.down))
             chip("\(percent)% TO GOAL", icon: nil, color: .orange)
@@ -331,7 +376,7 @@ struct NextMilestoneChip: View {
 
 // MARK: - Hero layout
 
-/// Banner + top bar + milestone, with the avatar (in its goal ring) hanging
+/// Banner + top bar, with the avatar (in its goal ring) hanging
 /// off the banner's bottom edge. The space the hanging ring needs is RESERVED
 /// with padding rather than drawn with an offset, so whatever the caller puts
 /// underneath lays out against the real bounds.
@@ -339,12 +384,15 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
     let bannerURL: String?
     let bannerStyle: ProfileBannerStyle
     var bannerLocalImage: UIImage? = nil
-    /// nil = unknown (a profile whose stats aren't loaded or shared) → no chip.
+    /// Retained for API compatibility; the banner no longer draws a chip.
     let totalMiles: Double?
-    /// Mile-medal rungs from the badge catalog (see `MileMilestones`).
+    /// Retained for API compatibility (see `MileMilestones`).
     var milestoneThresholds: [Double] = []
     let goalProgress: Double?
     let goalComplete: Bool
+    /// A streak token is carrying today — the ring and its chip say so
+    /// instead of drawing an untouched day beside a streak that just grew.
+    var goalSavedToday: CoveredDate? = nil
     /// Extra banner height above the top bar — the status bar when the banner
     /// runs under it (own profile). Zero when a navigation bar sits above.
     var topInset: CGFloat = 0
@@ -369,19 +417,22 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
                 .padding(.horizontal, gutter)
                 .padding(.top, topInset + 10)
         }
-        .overlay(alignment: .bottomTrailing) {
-            if let totalMiles {
-                NextMilestoneChip(totalMiles: totalMiles, thresholds: milestoneThresholds)
-                    .padding(.trailing, gutter)
-                    .padding(.bottom, 14)
-            }
-        }
+        // No milestone chip on the banner any more: lifetime miles already
+        // reads on the Miles tile and on the Total Miles screen, and a third
+        // copy in the banner was clutter. `totalMiles`/`milestoneThresholds`
+        // stay in the API so callers keep compiling; `NextMilestoneChip`
+        // stays available for any surface that wants the rung on its own.
         .padding(.bottom, hang + labelReserve)
         .overlay(alignment: .bottomLeading) {
             Button {
                 onTapAvatar?()
             } label: {
-                GoalRingAvatar(progress: goalProgress, isComplete: goalComplete, size: avatarSize) {
+                GoalRingAvatar(
+                    progress: goalProgress,
+                    isComplete: goalComplete,
+                    savedToday: goalSavedToday != nil,
+                    size: avatarSize
+                ) {
                     avatar()
                 }
                 .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
@@ -390,8 +441,12 @@ struct ProfileHero<Avatar: View, TopBar: View>: View {
             .accessibilityLabel("Profile photo")
             .allowsHitTesting(onTapAvatar != nil)
             .overlay(alignment: .bottom) {
-                GoalRingLabel(progress: goalProgress, isComplete: goalComplete)
-                    .offset(y: 8)
+                GoalRingLabel(
+                    progress: goalProgress,
+                    isComplete: goalComplete,
+                    savedToday: goalSavedToday
+                )
+                .offset(y: 8)
             }
             .padding(.leading, gutter)
             .padding(.bottom, labelReserve)
@@ -467,6 +522,13 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
     /// Today's mile is in: the streak tile turns green (the dashboard's
     /// done-colour) instead of the brand red it wears while the day is open.
     var streakDoneToday: Bool = false
+    /// A token is carrying today. The tile wears SavedDayStyle's blue and a
+    /// shield — never green, which would claim miles that weren't run, and
+    /// never the open-day red, which would contradict the number above it.
+    var streakSavedToday: CoveredDate? = nil
+    /// When set, the Miles tile is a button (own profile → Total Miles
+    /// detail). Nil keeps it a plain tile, as on a friend's profile.
+    var onTapMiles: (() -> Void)? = nil
     @ViewBuilder var friendsDestination: () -> FriendsDestination
 
     var body: some View {
@@ -474,10 +536,20 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
             tile(
                 label: "STREAK",
                 value: "\(streak)",
-                accent: streakDoneToday ? .green : MADTheme.Colors.madRed,
-                trailingIcon: streakDoneToday ? "checkmark.circle.fill" : nil
+                accent: streakAccent,
+                trailingIcon: streakIcon
             )
-            tile(label: DistanceUnits.current.plural.uppercased(), value: milesText, accent: nil)
+            if let onTapMiles {
+                Button {
+                    MADHaptics.tap()
+                    onTapMiles()
+                } label: {
+                    tile(label: DistanceUnits.current.plural.uppercased(), value: milesText, accent: nil, chevron: true)
+                }
+                .buttonStyle(.plain)
+            } else {
+                tile(label: DistanceUnits.current.plural.uppercased(), value: milesText, accent: nil)
+            }
             NavigationLink(destination: friendsDestination()) {
                 tile(
                     label: friendCount == 1 ? "FRIEND" : "FRIENDS",
@@ -489,6 +561,20 @@ struct ProfileStatTiles<FriendsDestination: View>: View {
             .buttonStyle(.plain)
         }
         .animation(.easeInOut(duration: 0.2), value: friendCount)
+    }
+
+    /// Done outranks saved: a covered day the owner then ran is a green day,
+    /// and the server has already handed the token back by the time we draw.
+    private var streakAccent: Color {
+        if streakDoneToday { return .green }
+        if streakSavedToday != nil { return SavedDayStyle.tint }
+        return MADTheme.Colors.madRed
+    }
+
+    private var streakIcon: String? {
+        if streakDoneToday { return "checkmark.circle.fill" }
+        if let saved = streakSavedToday { return SavedDayStyle.icon(for: saved.kind) }
+        return nil
     }
 
     private func tile(

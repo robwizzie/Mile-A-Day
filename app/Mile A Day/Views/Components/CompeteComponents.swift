@@ -51,133 +51,108 @@ struct ActiveCompetitionRow: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 11) {
                 topRow
                 focusLine
                 if let hint = competition.rivalryHint {
                     rivalryRow(hint)
                 }
             }
-            .padding(MADTheme.Spacing.md)
+            .padding(14)
             .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [gradientColors[0].opacity(0.10), Color.clear],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [gradientColors[0].opacity(0.35), Color.white.opacity(0.06)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
-                    )
+                RoundedRectangle(cornerRadius: CompeteDesign.radius, style: .continuous)
+                    .fill(CompeteDesign.surface)
             )
+            .overlay(
+                RoundedRectangle(cornerRadius: CompeteDesign.radius, style: .continuous)
+                    .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
+            )
+            // The competition's colour as a rail, not as a wash over the whole
+            // card. A diagonal tinted gradient behind the text was the single
+            // thing that dated this row most: it greyed the copy sitting on it
+            // and made twelve cards in a list read as twelve different
+            // materials.
+            .overlay(alignment: .leading) {
+                Capsule()
+                    .fill(accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 14)
+                    .accessibilityHidden(true)
+            }
         }
         .buttonStyle(ScaleButtonStyle())
     }
 
+    private var accent: Color { CompeteDesign.accent(competition.type) }
+
     private var topRow: some View {
-        HStack(spacing: 12) {
-            Image(systemName: competition.type.icon)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(
-                    LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .bottom)
-                )
-                .frame(width: 38, height: 38)
-                .background(
-                    Circle()
-                        .fill(gradientColors[0].opacity(0.14))
-                        .overlay(Circle().strokeBorder(gradientColors[0].opacity(0.45), lineWidth: 1))
-                )
-
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(competition.competition_name)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
+                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    .foregroundColor(CompeteDesign.ink)
                     .lineLimit(1)
+                    .truncationMode(.tail)
 
-                HStack(spacing: 6) {
-                    Text(competition.type.displayName)
+                HStack(spacing: 5) {
+                    Text(competition.type.displayName.uppercased())
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .tracking(0.9)
+                        .foregroundColor(accent)
                     if let standing = standingText {
-                        Text("·")
+                        Text("·").foregroundColor(CompeteDesign.inkGhost)
                         Text(standing)
-                            .foregroundColor(.white.opacity(0.8))
+                            .font(CompeteDesign.caption)
+                            .foregroundColor(CompeteDesign.inkMuted)
                     }
                 }
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
                 .lineLimit(1)
             }
-
-            Spacer(minLength: 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             if let timeLeft = CompeteFormat.timeLeft(for: competition) {
                 Text(timeLeft)
                     .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.white.opacity(0.08)))
+                    .foregroundColor(CompeteDesign.inkFaint)
+                    .monospacedDigit()
                     // Data-driven text in a fixed row: let the NAME truncate
                     // first, never this.
                     .fixedSize()
             }
         }
+        .padding(.leading, 10)
     }
 
-    /// The pill sits above its detail rather than beside it: both are
-    /// data-driven strings, and side by side they compete for one row and
-    /// truncate each other.
+    /// What to do about it today — the reason this row leads with focus rather
+    /// than with the competition's name.
     private var focusLine: some View {
         VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Image(systemName: focus.pillIcon)
-                    .font(.system(size: 11, weight: .bold))
-
-                Text(focus.pill)
-                    .font(.system(size: 11, weight: .black, design: .rounded))
-                    .tracking(0.8)
-
-                Spacer(minLength: 0)
-            }
-            .foregroundColor(focus.level.color)
+            Text(focus.pill)
+                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .tracking(0.9)
+                .foregroundColor(focus.level.color)
+                .lineLimit(1)
 
             Text(focus.detail)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.6))
+                .font(CompeteDesign.detail)
+                .foregroundColor(CompeteDesign.inkMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 10)
         .accessibilityElement(children: .combine)
     }
 
     private func rivalryRow(_ hint: RivalryHint) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: "figure.run")
-                .font(.system(size: 10, weight: .bold))
             Text("\(hint.gapText) \(hint.actionSuffix)")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(MADTheme.Colors.madRed)
                 .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-        .foregroundColor(MADTheme.Colors.madRed)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
-                .fill(MADTheme.Colors.madRed.opacity(0.12))
-        )
+        .padding(.leading, 10)
     }
 }
 
@@ -269,7 +244,7 @@ struct ModeGalleryCard: View {
             .padding(MADTheme.Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                    .fill(.ultraThinMaterial)
+                    .fill(CompeteDesign.surface)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
                             .fill(
@@ -335,7 +310,7 @@ struct PresetCard: View {
                     .fill(Color.white.opacity(0.05))
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                            .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                     )
             )
         }
@@ -356,55 +331,70 @@ struct FinishedCompetitionRow: View {
         competition.type.gradient.map { Color(hex: $0) }
     }
 
-    private var placement: Int? {
+    /// Where this finished — the TEAM's place on a team competition, since
+    /// that is what the competition was scored on and what the end screen
+    /// prints. `standing(for:)` is the one place that decision is made.
+    private var standing: (place: Int, of: Int, isTeam: Bool)? {
         guard let uid = UserDefaults.standard.string(forKey: "backendUserId") else { return nil }
-        if let winner = competition.winner { return winner == uid ? 1 : nil }
-        let ranked = competition.users
-            .filter { $0.invite_status == .accepted }
-            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
-        return ranked.firstIndex(where: { $0.user_id == uid }).map { $0 + 1 }
+        return competition.standing(for: uid)
     }
 
+    private var placement: Int? { standing?.place }
+
+    /// "Team 2 won" / "Won" / "2nd of 3 teams" / "4th of 6".
+    ///
+    /// It used to key "Won" off the stored `winner` matching you, which on a
+    /// team competition is only ever the winning team's biggest contributor —
+    /// so three of the four people who won it were shown "Finished" — and then
+    /// fall back to an INDIVIDUAL place counted against the number of people,
+    /// which is not the board this competition was decided on.
     private var resultText: String {
-        guard let placement else { return "Finished" }
-        let field = competition.users.filter { $0.invite_status == .accepted }.count
-        return placement == 1 ? "Won" : "\(ActiveCompetitionRow.ordinal(placement)) of \(field)"
+        guard let standing else { return "Finished" }
+        if standing.place == 1 {
+            guard standing.isTeam,
+                  let uid = UserDefaults.standard.string(forKey: "backendUserId"),
+                  let myTeam = competition.team(for: uid) else { return "Won" }
+            return "\(myTeam.name) won"
+        }
+        let field = standing.isTeam
+            ? "\(standing.of) team\(standing.of == 1 ? "" : "s")"
+            : "\(standing.of)"
+        return "\(ActiveCompetitionRow.ordinal(standing.place)) of \(field)"
     }
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(gradientColors[0].opacity(0.14))
-                        .frame(width: compact ? 40 : 44, height: compact ? 40 : 44)
-                    Image(systemName: competition.isWinner ? "crown.fill" : competition.type.icon)
-                        .font(.system(size: compact ? 15 : 16, weight: .bold))
-                        .foregroundStyle(
-                            competition.isWinner
-                                ? LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
-                                : LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .bottom)
-                        )
+            HStack(spacing: 11) {
+                // The PLACE, not the mode's icon. A finished competition is
+                // remembered by how it went; the icon told you which game it
+                // was, which is the one thing the name beside it already says.
+                if let placement {
+                    CompeteRankBadge(place: placement, size: 30)
+                } else {
+                    Image(systemName: "flag.checkered")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(CompeteDesign.inkFaint)
+                        .frame(width: 30, height: 30)
+                        .accessibilityHidden(true)
                 }
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(competition.competition_name)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
+                        .font(CompeteDesign.nameSmall)
+                        .foregroundColor(CompeteDesign.ink)
                         .lineLimit(1)
+                        .truncationMode(.tail)
 
                     HStack(spacing: 5) {
                         Text(resultText)
-                            .foregroundColor(competition.isWinner ? .yellow : .white.opacity(0.55))
-                        Text("·")
-                            .foregroundColor(.white.opacity(0.3))
+                            .foregroundColor(competition.isWinner ? (CompeteDesign.medal(1) ?? .yellow) : CompeteDesign.inkMuted)
+                        Text("·").foregroundColor(CompeteDesign.inkGhost)
                         Text(competition.type.displayName)
-                            .foregroundColor(.white.opacity(0.45))
+                            .foregroundColor(CompeteDesign.inkFaint)
                         if let end = competition.end_date {
-                            Text("·")
-                                .foregroundColor(.white.opacity(0.3))
+                            Text("·").foregroundColor(CompeteDesign.inkGhost)
                             Text(CompeteFormat.shortDate(end))
-                                .foregroundColor(.white.opacity(0.45))
+                                .foregroundColor(CompeteDesign.inkFaint)
                         }
                     }
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
@@ -414,19 +404,19 @@ struct FinishedCompetitionRow: View {
                 Spacer(minLength: 0)
             }
             .frame(width: compact ? 240 : nil, alignment: .leading)
-            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.horizontal, 13)
             .padding(.vertical, 12)
             .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                    .fill(Color.white.opacity(0.05))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                            .strokeBorder(
-                                competition.isWinner
-                                    ? Color.yellow.opacity(0.28)
-                                    : Color.white.opacity(0.08),
-                                lineWidth: 1
-                            )
+                RoundedRectangle(cornerRadius: CompeteDesign.radius, style: .continuous)
+                    .fill(CompeteDesign.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CompeteDesign.radius, style: .continuous)
+                    .strokeBorder(
+                        competition.isWinner
+                            ? (CompeteDesign.medal(1) ?? .yellow).opacity(0.4)
+                            : CompeteDesign.hairline,
+                        lineWidth: 1
                     )
             )
         }
@@ -490,7 +480,7 @@ struct RecordHeroCard: View {
         .padding(.horizontal, MADTheme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.extraLarge, style: .continuous)
-                .fill(.ultraThinMaterial)
+                .fill(CompeteDesign.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.extraLarge, style: .continuous)
                         .fill(
@@ -634,10 +624,10 @@ struct RivalRow: View {
         .padding(.vertical, 10)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+                .fill(CompeteDesign.surface)
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
+                        .strokeBorder(CompeteDesign.hairline, lineWidth: 1)
                 )
         )
     }
@@ -646,7 +636,8 @@ struct RivalRow: View {
 // MARK: - Section header
 
 /// Shared section label for the Compete/Record scroll views, with an optional
-/// trailing action.
+/// trailing action. Same eyebrow as `CompeteHeader` so a section on the Compete
+/// home and a section inside a competition read as the same rank of heading.
 struct CompeteSectionHeader: View {
     let title: String
     var systemImage: String? = nil
@@ -656,16 +647,11 @@ struct CompeteSectionHeader: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            if let systemImage {
-                Image(systemName: systemImage)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(accent)
-            }
-
             Text(title.uppercased())
-                .font(.system(size: 11, weight: .black, design: .rounded))
-                .tracking(1.4)
-                .foregroundColor(.white.opacity(0.85))
+                .font(CompeteDesign.eyebrow)
+                .tracking(CompeteDesign.eyebrowTracking)
+                .foregroundColor(CompeteDesign.inkFaint)
+                .lineLimit(1)
 
             Spacer(minLength: 4)
 
@@ -675,6 +661,7 @@ struct CompeteSectionHeader: View {
                         Text(actionTitle)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 9, weight: .bold))
+                            .accessibilityHidden(true)
                     }
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundColor(MADTheme.Colors.madRed)

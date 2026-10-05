@@ -20,6 +20,10 @@ struct WorkoutDetailView: View {
     @State private var isLoadingSplits = false
     @State private var showEditSheet = false
     @State private var routeCoordinates: [CLLocationCoordinate2D]?
+    /// Seconds since the first fix, one per coordinate — what tells a
+    /// straight mile of road from the drive between two halves of a paused
+    /// walk (`RouteGaps`).
+    @State private var routeTimes: [Double]?
     /// Retained map snapshot so the route map's pinch-zoom can compose its
     /// floating copy on demand (same mechanism as the feed cards).
     @State private var routeSnapshot: RouteMapSnapshot?
@@ -38,6 +42,11 @@ struct WorkoutDetailView: View {
     /// The route card's laid-out size, captured so the art zoom composite can
     /// match its aspect exactly (the map path derives it from the snapshot).
     @State private var routeArtSize: CGSize = .zero
+    /// Hide start & end, as it applies to THIS walk: what friends are served
+    /// of the route (the server's cut, mirrored by `RoutePrivacyTrim`). nil
+    /// until computed, and whenever friends get no route anyway (stealth,
+    /// route maps off) — then there is nothing to explain.
+    @State private var privacyOutcome: RoutePrivacyTrim.Outcome?
     /// The share studio, opened from the toolbar. A past walk was the one
     /// place in the app you could look straight at a run and have no way to
     /// share it.
@@ -127,6 +136,7 @@ struct WorkoutDetailView: View {
                 snapshot: snapshot,
                 coordinates: coords,
                 routeColor: workoutColor,
+                privacyHint: routePrivacyHint,
                 // Derived from the card's own aspect so the lift is a pure
                 // upscale — a fixed size that didn't match would crop the route.
                 size: WorkoutRouteMapView.zoomSize(for: snapshot, targetWidth: 900)
@@ -143,8 +153,38 @@ struct WorkoutDetailView: View {
             authorAvatar: ownerAvatar,
             underlay: routeSnapshot,
             paletteDate: workout.endDate,
+            privacyHint: routePrivacyHint,
             size: size
         ) {
+            EmptyView()
+        }
+    }
+
+    /// The stretches friends never see, for the map to dim. Only a REAL trim
+    /// gets one — a walk too short to show friends any of it says so in the
+    /// caption instead of dimming the whole line.
+    private var routePrivacyHint: RoutePrivacyHint? {
+        if case .trimmed(let kept) = privacyOutcome { return RoutePrivacyHint(kept: kept) }
+        return nil
+    }
+
+    /// One quiet line under the owner's map: what friends see of it. Says
+    /// "friends" deliberately — it describes what the app shows them, and
+    /// claims nothing about anyone else.
+    @ViewBuilder
+    private var routePrivacyCaption: some View {
+        switch privacyOutcome {
+        case .trimmed:
+            Label("Start & end hidden from friends", systemImage: "eye.slash")
+                .madFont(size: 12, weight: .semibold, design: .rounded)
+                .foregroundColor(.secondary)
+        case .hidden:
+            Label("Too short to hide the start & end — friends see it without a map",
+                  systemImage: "eye.slash")
+                .madFont(size: 12, weight: .semibold, design: .rounded)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        case .full, .none:
             EmptyView()
         }
     }
@@ -786,7 +826,13 @@ struct WorkoutDetailView: View {
             routeColor: MADTheme.workoutColor(
                 workoutTypeString == "Walk" ? "walking" : "running"
             ),
-            avatar: ownerAvatar
+            avatar: ownerAvatar,
+            // The figure the post cards and Well Earned print (HealthKit's
+            // own, else the tracker's estimate) — offered by the stat toggle.
+            calories: RunPostService.workoutCalories(workout),
+            // Seeds the share studio's hide-start-&-end cut so the picture
+            // is cut where friends' copy is.
+            workoutId: workoutId
         )
     }
 
@@ -961,17 +1007,21 @@ struct WorkoutDetailView: View {
                         WorkoutRouteMapView(
                             coordinates: routeCoordinates,
                             routeColor: workoutColor,
-                            onSnapshot: { routeSnapshot = $0 }
+                            pointTimes: routeTimes,
+                            onSnapshot: { routeSnapshot = $0 },
+                            privacyHint: routePrivacyHint
                         )
                     } else {
                         RouteArtView(
                             coordinates: routeCoordinates,
                             routeColor: workoutColor,
+                            pointTimes: routeTimes,
                             authorAvatar: ownerAvatar,
                             // Same region + size as the map face's snapshot, so
                             // ONE cached value serves both faces' zooms.
                             onSnapshot: { routeSnapshot = $0 },
-                            paletteDate: workout.endDate
+                            paletteDate: workout.endDate,
+                            privacyHint: routePrivacyHint
                         )
                     }
                 }
@@ -991,6 +1041,8 @@ struct WorkoutDetailView: View {
                 // Pinch to zoom the route, same as the feed cards. The floating
                 // copy is composed on demand — nothing heavy is baked up front.
                 .instagramZoomable(imageProvider: { routeZoomComposite() })
+
+                routePrivacyCaption
 
                 // Route recognition: the habit made visible, ranked when the
                 // local index can time the repeats. A first time needs no
@@ -1012,6 +1064,12 @@ struct WorkoutDetailView: View {
             }
             // `routeCoordinates` is the if-let-shadowed non-optional here.
             .task(id: routeCoordinates.count) {
+                // Hide start & end: friends' copy of this route, computed the
+                // way the server cuts it — only worth saying when friends get
+                // a route at all.
+                privacyOutcome = (isStealthWorkout || !NotificationPreferences.load().shareRouteMaps)
+                    ? nil
+                    : RoutePrivacyTrim.outcome(coordinates: routeCoordinates, workoutId: workoutId)
                 // A stealth walk isn't in the server library, so "your Nth
                 // time" would be off by one — say nothing.
                 guard routeCoordinates.count >= 2, routeStats == nil, !isStealthWorkout else { return }
@@ -1058,7 +1116,10 @@ struct WorkoutDetailView: View {
                 },
                 // The tracker's receipt-floored figure — what every other
                 // surface shows for this workout.
-                officialDistanceMiles: distanceMiles
+                officialDistanceMiles: distanceMiles,
+                // The walk's own clock: real-time replay, and the one thing
+                // that can spot a pause spent travelling (`RouteGaps`).
+                pointTimes: routeTimes
             )
         }
     }
@@ -1204,6 +1265,9 @@ struct WorkoutDetailView: View {
         isLoadingRoute = true
         let locations = await healthManager.fetchAllRouteLocations(for: workout)
         routeCoordinates = locations.isEmpty ? nil : locations.map { $0.coordinate }
+        routeTimes = locations.first.map { first in
+            locations.map { $0.timestamp.timeIntervalSince(first.timestamp) }
+        }
         isLoadingRoute = false
     }
 

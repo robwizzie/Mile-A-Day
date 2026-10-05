@@ -709,6 +709,8 @@ struct NotificationSettingsView: View {
         else { return }
         // Free hydration point for the Stealth window log (server wins).
         StealthModeStore.shared.apply(settings)
+        // …and for hide-start-&-end's local mirror (share cards, own maps).
+        RoutePrivacySync.adopt(settings)
         let visibility = settings.workout_visibility.flatMap(WorkoutVisibility.init(rawValue:))
         let taggedOnProfile = settings.tagged_posts_on_profile
         await MainActor.run {

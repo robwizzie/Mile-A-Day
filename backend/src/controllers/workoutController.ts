@@ -1,3 +1,4 @@
+import { refreshFriendsLeaderboardWidgets } from "../services/widgetRefreshService.js";
 import { Request, Response } from "express";
 import { AuthenticatedRequest } from "../middleware/auth.js";
 import { PostgresService } from "../services/DbService.js";
@@ -42,10 +43,16 @@ import {
   checkCompetitionMilestones,
   checkLeadChanges,
 } from "../services/notificationService.js";
-import { evaluateWorkoutRewards } from "../services/badgeService.js";
+import {
+  evaluateWorkoutRewards,
+  recalibrateBadges,
+} from "../services/badgeService.js";
 import { notifyGhostsBeaten } from "../services/ghostService.js";
 import {
+  BADGE_PUSH_BURST_LIMIT,
+  deliverBadgeAwards,
   fireBadgeEarnedPush,
+  fireBadgeSummaryPush,
   fanOutFriendBadgePush,
   fanOutFriendChallengePush,
   fanOutFriendPersonalBestPush,
@@ -57,6 +64,7 @@ import {
 } from "../services/leaderboardService.js";
 import {
   reconcileStreakFeaturesOnUpload,
+  refundEarnedCoverage,
   getStreakFeaturesPayload,
 } from "../services/streakFeatureService.js";
 import { reconcileBuddySessions } from "../services/buddySessionService.js";
@@ -133,6 +141,15 @@ export async function uploadWorkouts(req: Request, res: Response) {
       console.error("Error reconciling streak features:", err.message),
     );
 
+    // ...and hand a token BACK when this upload turns a covered day into a
+    // day the user actually ran. A token buys a day you missed; the moment
+    // the miles land the rescue was not needed, so keeping it charged would
+    // leave a blue "saved" marker on a day they walked and a streak reading
+    // non-natural with no hole in it. Same fire-and-forget gating.
+    refundEarnedCoverage(userId).catch((err) =>
+      console.error("Error refunding streak coverage:", err.message),
+    );
+
     // Buddy sessions: stamp the AUTHORITATIVE result now that the real workout
     // has landed. The live distance a session showed was accumulated from
     // 5-second reports and is display-only; this replaces it with the synced
@@ -150,6 +167,12 @@ export async function uploadWorkouts(req: Request, res: Response) {
       notifyH2hLeadChanges(userId).catch((err) =>
         console.error("Error notifying H2H lead change:", err.message),
       );
+      // Today's miles moved, so every friend's Daily Leaderboard widget did
+      // too. Only friends with that widget on a device that can take the
+      // silent push are woken, each at most once per coalescing window
+      // (widgetRefreshService). Same gate as the duel: a history backfill
+      // doesn't change today.
+      void refreshFriendsLeaderboardWidgets(userId);
     }
 
     try {
@@ -189,8 +212,13 @@ export async function uploadWorkouts(req: Request, res: Response) {
         // Same 0.95 tolerance as streak counting — a GPS 0.98-mile day that
         // extends the streak must also fire the mile-completed notification.
         if (todayMiles >= DAILY_GOAL_TOLERANCE) {
+          // The walks this upload carried: the one that completed the day is
+          // among them, and its own pre-goal announcement — queued by an
+          // earlier sync, when the day was still short — is superseded by the
+          // mile. A walk from some OTHER upload keeps its announcement.
           const milestoneFired = await notifyFriendsOfMileCompletion(
             userId,
+            [...recentWorkoutIds],
           ).catch((err) => {
             console.error("Error notifying friends:", err.message);
             return false;
@@ -254,18 +282,33 @@ export async function uploadWorkouts(req: Request, res: Response) {
     // with no single triggering workout fall back to "did this batch include any
     // workout from the last 24h". Friend fan-outs are additionally gated by
     // isFullSync so the setup backfill never notifies others.
-    for (const badge of rewards.newlyEarnedBadges) {
-      const fromRecentWorkout = badge.triggeringWorkoutId
+    //
+    // More than BADGE_PUSH_BURST_LIMIT at once (a first upload after the
+    // all-history medal rules shipped can cross a whole ladder of streak
+    // medals) is ONE summary push and no friend fan-out: a burst is news to
+    // its owner, not a dozen banners, and not an event for their friends.
+    const pushable = rewards.newlyEarnedBadges.filter((badge) =>
+      badge.triggeringWorkoutId
         ? recentWorkoutIds.has(badge.triggeringWorkoutId)
-        : hasRecentWorkout;
-      if (!fromRecentWorkout) continue;
-      fireBadgeEarnedPush(userId, badge).catch((err) =>
-        console.error("Error firing badge_earned push:", err.message),
+        : hasRecentWorkout,
+    );
+    if (pushable.length > BADGE_PUSH_BURST_LIMIT) {
+      fireBadgeSummaryPush(userId, pushable, "upload").catch((err) =>
+        console.error("Error firing badge summary push:", err.message),
       );
-      if (!isFullSync && badge.rarity !== "common") {
-        fanOutFriendBadgePush(userId, badge).catch((err) =>
-          console.error("Error fanning out friend_badge_earned:", err.message),
+    } else {
+      for (const badge of pushable) {
+        fireBadgeEarnedPush(userId, badge).catch((err) =>
+          console.error("Error firing badge_earned push:", err.message),
         );
+        if (!isFullSync && badge.rarity !== "common") {
+          fanOutFriendBadgePush(userId, badge).catch((err) =>
+            console.error(
+              "Error fanning out friend_badge_earned:",
+              err.message,
+            ),
+          );
+        }
       }
     }
     if (!isFullSync) {
@@ -540,7 +583,28 @@ export async function recalibrateStreak(req: Request, res: Response) {
 
     const streak = await refreshCurrentStreak(userId);
 
-    return res.status(200).json({ streak });
+    // Recalibrate MEDALS too, after the streak (a repaired history is exactly
+    // when a missing medal turns up). Award-only — see recalibrateBadges. A
+    // medal failure must never fail the streak fix the user asked for, so it
+    // degrades to "no new medals".
+    let newBadges: Awaited<ReturnType<typeof recalibrateBadges>> = [];
+    try {
+      newBadges = await recalibrateBadges(userId, "recalibrate");
+    } catch (err: any) {
+      console.error("Error recalibrating medals:", err?.message ?? err);
+    }
+    if (newBadges.length > 0) {
+      // One banner per medal up to BADGE_PUSH_BURST_LIMIT, one summary above
+      // it; never the friend fan-out (these are old achievements, not news).
+      deliverBadgeAwards(userId, newBadges, "recalibrate").catch((err) =>
+        console.error("Error delivering recalibrated medals:", err?.message),
+      );
+    }
+
+    // `new_badges` is additive: shipped builds decode `{ streak }` and ignore it.
+    return res
+      .status(200)
+      .json({ streak, new_badges: newBadges.map((b) => b.badgeId) });
   } catch (error: any) {
     console.error("Error recalibrating streak:", error.message);
     res
@@ -709,6 +773,8 @@ export async function getWorkoutRouteController(
       route: detail?.route ?? null,
       route_times: detail?.route_times ?? null,
       route_started_at: detail?.route_started_at ?? null,
+      // Additive: the line was trimmed for route privacy (hide start & end).
+      route_trimmed: detail?.route_trimmed ?? false,
     });
   } catch (error: any) {
     console.error("Error getting workout route:", error.message);
@@ -885,6 +951,12 @@ export async function updateWorkout(req: Request, res: Response) {
       console.error("Error refreshing current_streak:", err.message);
     }
 
+    // An edit that carries a covered day over the mile earns the token back,
+    // exactly as a fresh upload would.
+    refundEarnedCoverage(userId).catch((err: any) =>
+      console.error("Error refunding streak coverage:", err.message),
+    );
+
     try {
       await checkRaceCompletions(userId);
     } catch (raceError: any) {
@@ -936,6 +1008,12 @@ export async function setDuplicateDecisionController(
     } catch (err: any) {
       console.error("Error refreshing current_streak:", err.message);
     }
+
+    // Counting a previously-excluded workout can also earn back a token that
+    // had covered that day.
+    refundEarnedCoverage(req.params.userId).catch((err: any) =>
+      console.error("Error refunding streak coverage:", err.message),
+    );
     // The day's totals just moved. The client refreshes its own stats — this
     // returns the affected date so it knows which day to re-pull.
     res.json({ ok: true, local_date: result.localDate });

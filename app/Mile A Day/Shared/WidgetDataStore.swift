@@ -1,5 +1,6 @@
 import Foundation
 import WidgetKit
+import AppIntents
 
 struct WidgetDataStore {
     private static let suiteName = "group.mileaday.shared"
@@ -31,18 +32,26 @@ struct WidgetDataStore {
         let safeGoal = goal > 0 ? goal : 1.0
         let stamp = dayStamp()
 
+        // The server's DAILY_GOAL_TOLERANCE, restated because this file is
+        // compiled into the widget extension, which can't see
+        // ProgressCalculator. A raw `>=` drew "streak at risk" on the home
+        // screen for a 0.97 mi day the app and the server both count as done.
+        let isCompleted = todayMiles >= safeGoal * 0.95
+
         // Skip no-op writes: every save triggers widget timeline reloads, and
         // iOS rations those per day — burning the budget on unchanged values
-        // means real updates later in the day get silently dropped.
+        // means real updates later in the day get silently dropped. The
+        // completed flag is part of the comparison so a stored day whose miles
+        // didn't move still picks up a change in how it is judged.
         if defaults.double(forKey: milesKey) == todayMiles,
            defaults.double(forKey: goalKey) == safeGoal,
+           defaults.bool(forKey: "streak_completed_today") == isCompleted,
            defaults.string(forKey: dataDayKey) == stamp {
             return
         }
 
         // Calculate progress and cap at 100%
         let progress = min(todayMiles / safeGoal, 1.0)
-        let isCompleted = todayMiles >= safeGoal
 
         // Save all values with proper synchronization
         defaults.set(todayMiles, forKey: milesKey)
@@ -84,6 +93,16 @@ struct WidgetDataStore {
         let progress = defaults.double(forKey: "current_progress")
 
         return (miles, goal, streakCompleted, progress)
+    }
+
+    /// True only when today's progress snapshot was written TODAY. `load()`
+    /// answers a stale (or never-written) day with zeros, which is right for a
+    /// ring but wrong for a sentence: "you're at 0.00 today" is a claim, and
+    /// the "How far today?" intent must say "open the app to refresh" instead
+    /// of making it.
+    static func hasProgressForToday() -> Bool {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return false }
+        return defaults.string(forKey: dataDayKey) == dayStamp()
     }
 
     // MARK: - Streak helpers
@@ -229,6 +248,91 @@ struct WidgetDataStore {
         return defaults.string(forKey: dashboardStyleKey) ?? "modern"
     }
 
+    // MARK: - Flamey's wardrobe facts (streak flame widget, Fun style)
+
+    private static let flameyBadgesKey = "flamey_badge_ids"
+    private static let flameySignupKey = "flamey_signup_epoch"
+
+    /// The durable facts the flame widget resolves Flamey's look from
+    /// (`FlameyLook.resolve`, per timeline entry, so a holiday outfit goes on
+    /// at midnight with no reload). The longest streak rides `longest_streak`.
+    /// Only the catalog's badge ids are stored. The caller decides `reload`
+    /// — it's true only when what he'd wear today or tomorrow changed, so
+    /// badge churn that changes nothing on him costs no reload budget.
+    static func save(flameyBadgeIds: [String], signupDate: Date?, reload: Bool) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        let sorted = flameyBadgeIds.sorted()
+        let epoch = signupDate?.timeIntervalSince1970 ?? 0
+        let unchanged = (defaults.stringArray(forKey: flameyBadgesKey) ?? []) == sorted
+            && defaults.double(forKey: flameySignupKey) == epoch
+        if !unchanged {
+            defaults.set(sorted, forKey: flameyBadgesKey)
+            defaults.set(epoch, forKey: flameySignupKey)
+        }
+        guard reload else { return }
+        DispatchQueue.main.async {
+            WidgetCenter.shared.reloadTimelines(ofKind: "StreakFlameWidget")
+        }
+    }
+
+    static func loadFlameyBadgeIds() -> Set<String> {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return [] }
+        return Set(defaults.stringArray(forKey: flameyBadgesKey) ?? [])
+    }
+
+    static func loadFlameySignupDate() -> Date? {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return nil }
+        let epoch = defaults.double(forKey: flameySignupKey)
+        return epoch > 0 ? Date(timeIntervalSince1970: epoch) : nil
+    }
+
+    private static let flameyChoiceKey = "flamey_look_choice"
+
+    /// The Closet choice, as its wire JSON. Written without a reload — the
+    /// badge save beside it reloads when the resolved look actually moved.
+    static func save(flameyChoice: FlameyLookChoice) {
+        guard let defaults = UserDefaults(suiteName: suiteName),
+              let data = try? JSONEncoder().encode(flameyChoice) else { return }
+        if defaults.data(forKey: flameyChoiceKey) == data { return }
+        defaults.set(data, forKey: flameyChoiceKey)
+    }
+
+    static func loadFlameyChoice() -> FlameyLookChoice {
+        guard let defaults = UserDefaults(suiteName: suiteName),
+              let data = defaults.data(forKey: flameyChoiceKey),
+              let choice = try? JSONDecoder().decode(FlameyLookChoice.self, from: data) else { return .basic }
+        return choice
+    }
+
+    /// Everything he owns, from the mirrored medals plus the streak colours
+    /// the mirrored longest streak implies.
+    static func loadFlameyOwnedItems() -> Set<FlameyItem> {
+        FlameyWardrobe.owned(earnedBadgeIds: loadFlameyBadgeIds()
+            .union(FlameyWardrobe.impliedBadgeIds(longestStreak: loadLongestStreak())))
+    }
+
+    private static let flameyWokenDayKey = "flamey_woken_day"
+
+    /// The local day a poke woke the dashboard's sleeping Flamey
+    /// (`flameyWokenDayV1`, `FlameMoodKind.dayStamp`). The widget resolves
+    /// his mood per entry from it, so the home screen wakes when the hero
+    /// does and sleeps in again tomorrow with no write at all. Written at
+    /// most once a day (a wake), and it reloads the flame widget only when
+    /// it actually changes — that reload IS the point: he's awake now.
+    static func save(flameyWokenDay: String) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        if defaults.string(forKey: flameyWokenDayKey) == flameyWokenDay { return }
+        defaults.set(flameyWokenDay, forKey: flameyWokenDayKey)
+        DispatchQueue.main.async {
+            WidgetCenter.shared.reloadTimelines(ofKind: "StreakFlameWidget")
+        }
+    }
+
+    static func loadFlameyWokenDay() -> String {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return "" }
+        return defaults.string(forKey: flameyWokenDayKey) ?? ""
+    }
+
     // MARK: - Streak tokens (streak widget accessory)
 
     private static let tokensReadyKey = "tokens_ready"
@@ -335,6 +439,8 @@ struct WidgetDataStore {
         var standings: [StandingRow] = []
     }
 
+    /// Returns whether anything was written (and the widget reloaded).
+    @discardableResult
     static func save(
         competitionId: String,
         competitionName: String,
@@ -343,8 +449,8 @@ struct WidgetDataStore {
         rankText: String,
         urgency: String,
         standings: [StandingRow] = []
-    ) {
-        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+    ) -> Bool {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return false }
         let stamp = dayStamp()
         let standingsData = (try? JSONEncoder().encode(standings)) ?? Data()
         if defaults.string(forKey: compIdKey) == competitionId,
@@ -354,7 +460,7 @@ struct WidgetDataStore {
            defaults.string(forKey: compRankKey) == rankText,
            defaults.data(forKey: compStandingsKey) == standingsData,
            defaults.string(forKey: compStampKey) == stamp {
-            return
+            return false
         }
         defaults.set(competitionId, forKey: compIdKey)
         defaults.set(competitionName, forKey: compNameKey)
@@ -367,11 +473,13 @@ struct WidgetDataStore {
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "CompetitionWidget")
         }
+        return true
     }
 
-    static func clearCompetitionSummary() {
+    @discardableResult
+    static func clearCompetitionSummary() -> Bool {
         guard let defaults = UserDefaults(suiteName: suiteName),
-              defaults.string(forKey: compNameKey) != nil else { return }
+              defaults.string(forKey: compNameKey) != nil else { return false }
         defaults.removeObject(forKey: compIdKey)
         defaults.removeObject(forKey: compNameKey)
         defaults.removeObject(forKey: compPillKey)
@@ -383,6 +491,7 @@ struct WidgetDataStore {
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "CompetitionWidget")
         }
+        return true
     }
 
     static func loadCompetitionSummary() -> CompetitionSummary? {
@@ -423,19 +532,22 @@ struct WidgetDataStore {
     }
 
     /// Saves today's friends leaderboard for the Daily Leaderboard widget.
-    static func save(leaderboardRows: [LeaderboardRow]) {
+    /// Returns whether anything was written (and the widget reloaded).
+    @discardableResult
+    static func save(leaderboardRows: [LeaderboardRow]) -> Bool {
         guard let defaults = UserDefaults(suiteName: suiteName),
-              let data = try? JSONEncoder().encode(leaderboardRows) else { return }
+              let data = try? JSONEncoder().encode(leaderboardRows) else { return false }
         let stamp = dayStamp()
         if defaults.data(forKey: leaderboardRowsKey) == data,
            defaults.string(forKey: leaderboardStampKey) == stamp {
-            return
+            return false
         }
         defaults.set(data, forKey: leaderboardRowsKey)
         defaults.set(stamp, forKey: leaderboardStampKey)
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "DailyLeaderboardWidget")
         }
+        return true
     }
 
     static func loadLeaderboard() -> LeaderboardSnapshot? {
@@ -449,5 +561,100 @@ struct WidgetDataStore {
             rows: rows,
             isStale: defaults.string(forKey: leaderboardStampKey) != dayStamp()
         )
+    }
+}
+
+// MARK: - Start My Mile (shared by the app AND the widget extension)
+//
+// This lives in this file on purpose: it is the one source file that is
+// already a member of BOTH the app and the widget extension, and a control
+// that opens the app (the Control Center "Start My Mile" button) needs its
+// intent compiled into both — the extension to declare it, the app to run it
+// (`openAppWhenRun` intents perform in the APP's process). A new file would
+// join the app target only; extension membership is a pbxproj edit. Keep this
+// block dependency-free (Foundation + AppIntents): the extension can't see
+// anything else in the app.
+
+/// Walk or run, as Siri, Shortcuts and the Action Button name it.
+enum MileActivityOption: String, AppEnum {
+    case walk
+    case run
+
+    static var typeDisplayRepresentation: TypeDisplayRepresentation {
+        TypeDisplayRepresentation(name: "Activity")
+    }
+
+    static var caseDisplayRepresentations: [MileActivityOption: DisplayRepresentation] {
+        [
+            .walk: DisplayRepresentation(title: "Walk"),
+            .run: DisplayRepresentation(title: "Run")
+        ]
+    }
+}
+
+/// The hand-off from the intent to the app's own routing. The intent can't
+/// reach `DeepLinkRouter` (the extension compiles this file too), so the app
+/// installs `handler` at launch; a request that arrives before that is parked
+/// and delivered on install.
+@MainActor
+enum StartMileLaunch {
+    struct Request {
+        let activity: MileActivityOption?
+    }
+
+    private static var parked: Request?
+
+    static var handler: ((Request) -> Void)? {
+        didSet {
+            guard let handler, let request = parked else { return }
+            parked = nil
+            handler(request)
+        }
+    }
+
+    static func request(activity: MileActivityOption?) {
+        let request = Request(activity: activity)
+        if let handler {
+            handler(request)
+        } else {
+            parked = request
+        }
+    }
+}
+
+/// "Start my mile": opens the app on the workout tracker. It never starts a
+/// second workout — the app reopens one already in progress instead (see
+/// `DeepLinkRouter.requestOpenTracker`).
+struct StartMileIntent: AppIntent {
+    static var title: LocalizedStringResource { "Start My Mile" }
+
+    static var description: IntentDescription {
+        IntentDescription(
+            "Opens Mile A Day to the workout tracker. If a workout is already in progress, it reopens that workout instead of starting another."
+        )
+    }
+
+    static var openAppWhenRun: Bool { true }
+
+    @Parameter(
+        title: "Activity",
+        description: "Walk or run. Leave empty to use the one you last tracked."
+    )
+    var activity: MileActivityOption?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Start my mile as a \(\.$activity)")
+    }
+
+    init() {}
+
+    init(activity: MileActivityOption?) {
+        self.activity = activity
+    }
+
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        StartMileLaunch.request(activity: activity)
+        return .result()
     }
 }

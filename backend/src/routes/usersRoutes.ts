@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { uploadLimiter } from "../middleware/rateLimit.js";
 import multer from "multer";
 import {
   deleteUser,
@@ -12,6 +13,11 @@ import {
   updateUserOnboarding,
   uploadProfileImage,
   uploadProfileBanner,
+  getFlameyClosetController,
+  putFlameyLook,
+  putFlameyName,
+  getFlameyOutfits,
+  putFlameyOutfits,
 } from "../controllers/usersController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
 import {
@@ -64,6 +70,16 @@ router.patch(
   updateUserUsername,
 );
 router.patch("/:userId/bio", requireSelfAccess("userId"), updateUserBio);
+// Flamey's Closet (self only): the chosen mascot look + server-side ownership.
+router.get(
+  "/:userId/flamey-closet",
+  requireSelfAccess("userId"),
+  getFlameyClosetController,
+);
+router.put("/:userId/flamey-look", requireSelfAccess("userId"), putFlameyLook);
+router.put("/:userId/flamey-name", requireSelfAccess("userId"), putFlameyName);
+router.get("/:userId/flamey-outfits", requireSelfAccess("userId"), getFlameyOutfits);
+router.put("/:userId/flamey-outfits", requireSelfAccess("userId"), putFlameyOutfits);
 router.patch(
   "/:userId/onboarding",
   requireSelfAccess("userId"),
@@ -77,6 +93,7 @@ router.patch(
 router.post(
   "/:userId/profile-image/upload",
   requireSelfAccess("userId"),
+  uploadLimiter,
   upload.single("image"),
   uploadProfileImage,
 );
@@ -86,6 +103,7 @@ router.post(
 router.post(
   "/:userId/banner/upload",
   requireSelfAccess("userId"),
+  uploadLimiter,
   upload.single("image"),
   uploadProfileBanner,
 );

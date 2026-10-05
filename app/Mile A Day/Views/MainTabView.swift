@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import HealthKit
 import UserNotifications
 
@@ -45,7 +46,10 @@ struct MainTabView: View {
     // singleton, so we surface a live, tappable banner above the tab bar on
     // every tab (except Dashboard, which has its own inline banner) so users
     // never lose where their walk/run is.
-    @StateObject private var trackingManager = WorkoutLocationManager.shared
+    /// Mirrors `WorkoutLocationManager.isTracking` — the ONE thing the root
+    /// needs from it. Observing the manager itself redrew the whole app (every
+    /// tab, every sheet binding) on each GPS and pedometer update of a walk.
+    @State private var isTracking = WorkoutLocationManager.shared.isTracking
     @State private var activeWorkoutForBanner: InProgressWorkoutState?
     @State private var showGuidedTour = false
 
@@ -63,6 +67,10 @@ struct MainTabView: View {
     /// here rather than inside a tab so it works from wherever the user is and
     /// survives a cold launch (the link may arrive before any tab is mounted).
     @StateObject private var postDeepLink = PostDeepLink.shared
+    /// "Your week" — opened by the `weekly_recap` push (warm and cold), the
+    /// inbox row and the dashboard's week card. Presented HERE, at root, so a
+    /// request from any tab (or before the Dashboard exists) still lands.
+    @StateObject private var weeklyRecapLink = WeeklyRecapLink.shared
     /// One-shot: stamped by the sheet's own Save (never on display), so a
     /// crash mid-sheet re-asks instead of silently applying nothing.
     @State private var showPrivacyOnboarding =
@@ -143,7 +151,9 @@ struct MainTabView: View {
             // of sitting on top of the notification banner.
             ServiceOutageBanner()
         }
-        .onChange(of: trackingManager.isTracking) { _, tracking in
+        .onReceive(WorkoutLocationManager.shared.$isTracking.removeDuplicates()) { tracking in
+            guard tracking != isTracking else { return }
+            isTracking = tracking
             activeWorkoutForBanner = tracking ? InProgressWorkoutStore.load() : nil
         }
         .onAppear {
@@ -160,9 +170,12 @@ struct MainTabView: View {
             if DeepLinkRouter.shared.pendingProfileUsername != nil {
                 selectedTab = 3
             }
-            await competitionService.refreshAllData()
-            await friendService.refreshAllData()
-            await refreshUnreadCount()
+            // Independent loads, in parallel: run back to back they put the
+            // last one's data on screen a full round trip per call late.
+            async let competitions: Void = competitionService.refreshAllData()
+            async let friends: Void = friendService.refreshAllData()
+            async let unread: Void = refreshUnreadCount()
+            _ = await (competitions, friends, unread)
             // Sync explicitly, not just via onChange: if the badge is stale
             // from a previous session and the user has since resolved every
             // request elsewhere, the count stays 0 the whole launch, onChange
@@ -171,6 +184,9 @@ struct MainTabView: View {
             // Existing users already past a streak milestone get asked on this
             // first calm pass — the retroactive path.
             scheduleReviewEvaluation()
+            // Restore Flamey's look from the server (a reinstall / new phone),
+            // or push a change this phone made offline. Fun-only, token-gated.
+            await FlameyClosetSync.syncOnForeground()
         }
         .onReceive(NotificationCenter.default.publisher(for: .didReceivePushNotification)) { notification in
             guard let type = notification.userInfo?["type"] as? String else { return }
@@ -193,6 +209,13 @@ struct MainTabView: View {
                 Task { await refreshUnreadCount() }
                 return
             }
+            // A medal or a challenge opens THAT medal / challenge (yours, or
+            // a friend's on its own screen) — not the tab it lives on.
+            if let destination = NotificationDestination.from(type: type, data: data) {
+                NotificationDestinationLink.shared.open(destination)
+                Task { await refreshUnreadCount() }
+                return
+            }
             // A Head-to-Head lead change: the duel card is on the Dashboard,
             // so go straight there. Opening the inbox on top of it (what
             // `lead_change` otherwise does, since it's a competition type)
@@ -208,6 +231,12 @@ struct MainTabView: View {
                let compId = data["competition_id"], !compId.isEmpty {
                 DeepLinkRouter.shared.requestOpenCompetition(id: compId)
                 selectedTab = 1
+                Task { await refreshUnreadCount() }
+                return
+            }
+            // The Saturday "your week" recap opens the week it names.
+            if type == "weekly_recap" {
+                weeklyRecapLink.open(weekStart: data["week_start"])
                 Task { await refreshUnreadCount() }
                 return
             }
@@ -351,6 +380,7 @@ struct MainTabView: View {
                     // resolved on another device while this one was backgrounded.
                     await notificationService.setAppBadge(friendService.friendRequests.count)
                     await syncLeaderboardWidget()
+                    await FlameyClosetSync.syncOnForeground()
                 }
                 // Refresh health data and re-evaluate the daily reminder
                 // so "Mile still waiting" is cancelled if the user completed their mile
@@ -380,7 +410,7 @@ struct MainTabView: View {
             // over it. (safeAreaInset on a TabView renders on top of the bar, so
             // it covered the tab buttons.) Padded up by ~one tab-bar height; the
             // home indicator is handled by the safe area.
-            if trackingManager.isTracking, selectedTab != 0, let state = activeWorkoutForBanner {
+            if isTracking, selectedTab != 0, let state = activeWorkoutForBanner {
                 InProgressWorkoutBanner(state: state) {
                     // Reuse the Dashboard's resume path so starting/goal
                     // distance are computed correctly.
@@ -431,6 +461,9 @@ struct MainTabView: View {
                 selectedTab = 0
             }
         }
+        // Medal / challenge notifications open their own screen, from any
+        // tab and from a cold launch.
+        .notificationDestinationHost()
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MAD_StartGuidedTour"))) { _ in
             withAnimation(.easeIn(duration: 0.25)) {
                 showGuidedTour = true
@@ -481,6 +514,9 @@ struct MainTabView: View {
         ) {
             DonateMileSheet()
         }
+        .sheet(item: $weeklyRecapLink.pending) { request in
+            WeeklyRecapView(weekStart: request.weekStart)
+        }
         .sheet(
             isPresented: Binding(
                 get: { postDeepLink.pendingPostId != nil },
@@ -495,7 +531,11 @@ struct MainTabView: View {
         .onChange(of: userManager.currentUser.streak) { _, _ in
             scheduleReviewEvaluation()
         }
-        .animation(.easeInOut(duration: 0.25), value: trackingManager.isTracking)
+        // Flamey's Closet — one presentation for every door into it (hero,
+        // profile, Settings, a friend's wardrobe, the unlock card, the deep
+        // link), here at root for the same reason as the sheets above.
+        .flameyClosetHost()
+        .animation(.easeInOut(duration: 0.25), value: isTracking)
     }
 
     // MARK: - Configuration
@@ -549,6 +589,14 @@ struct MainTabView: View {
         ) {
             notificationService.pendingNotificationType = nil
             postDeepLink.open(postId)
+            Task { await refreshUnreadCount() }
+            return
+        }
+        if let destination = NotificationDestination.from(
+            type: type, data: notificationService.pendingNotificationData
+        ) {
+            notificationService.pendingNotificationType = nil
+            NotificationDestinationLink.shared.open(destination)
             Task { await refreshUnreadCount() }
             return
         }
@@ -627,6 +675,12 @@ struct MainTabView: View {
                 // — with no inbox sheet covering it.
                 selectedTab = 0
                 notificationService.pendingNotificationType = nil
+            case "weekly_recap":
+                // Mirrors the live handler: the week it names, over whatever
+                // tab this launch lands on. The payload survives a cold launch.
+                let week = notificationService.pendingNotificationData["week_start"]
+                notificationService.pendingNotificationType = nil
+                weeklyRecapLink.open(weekStart: week)
             default:
                 notificationService.pendingNotificationType = nil
             }
@@ -687,6 +741,12 @@ struct MainTabView: View {
         // Backfill the flame widget's style for users who chose it before the
         // widget existed (the setter mirrors it going forward).
         WidgetDataStore.save(dashboardStyle: DashboardStylePreference.current.rawValue)
+        // Flamey's wardrobe facts (reloads the flame widget only when what he
+        // wears changes), the signup date behind his anniversary, and the
+        // once-per-launch style report.
+        FlameyFacts.mirrorToWidget()
+        Task { await FlameyFacts.ensureSignupDate() }
+        DashboardStyleReporter.report()
         // Those saves are no-ops when nothing changed, so they can't fix a
         // widget that's rendering an old timeline over correct stored values.
         // Throttled to 15 minutes, so repeated foregrounding stays cheap.
@@ -694,92 +754,24 @@ struct MainTabView: View {
     }
 
     /// Mirror the most urgent active competition into the App Group for the
-    /// Competition widget — same focus/sort logic as the dashboard cards.
+    /// Competition widget. The builder is shared with the silent-push refresh
+    /// (`WidgetLiveRefresh`), which runs without this view.
     private func syncCompetitionWidget(_ competitions: [Competition]) {
-        let active = competitions.filter { $0.status == .active }
-        guard !active.isEmpty else {
-            WidgetDataStore.clearCompetitionSummary()
-            return
-        }
-
-        let userId = UserDefaults.standard.string(forKey: "backendUserId")
-        guard let top = active.min(by: { a, b in
-            TodayFocus.compute(for: a, currentUserId: userId).level.sortKey
-                < TodayFocus.compute(for: b, currentUserId: userId).level.sortKey
-        }) else { return }
-
-        let focus = TodayFocus.compute(for: top, currentUserId: userId)
-
-        let ranked = top.users
-            .filter { $0.invite_status == .accepted }
-            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
-        // On a team competition the TEAM is the competitor, so the widget
-        // ranks teams and names mine — a member's own rank among people is a
-        // fact about a leaderboard the competition isn't scored on.
-        let myTeam: CompetitionTeam? = userId.flatMap { top.hasTeams ? top.team(for: $0) : nil }
-        let rankedTeams = top.rankedTeams
-        var rankText = ""
-        if let myTeam, let index = rankedTeams.firstIndex(where: { $0.id == myTeam.id }) {
-            rankText = "\(myTeam.teamLabel) · \(ActiveCompetitionRow.ordinal(index + 1)) of \(rankedTeams.count)"
-        } else if let uid = userId, let index = ranked.firstIndex(where: { $0.user_id == uid }) {
-            rankText = "\(ActiveCompetitionRow.ordinal(index + 1)) of \(ranked.count)"
-        }
-
-        let urgency: String
-        switch focus.level {
-        case .urgent: urgency = "urgent"
-        case .behind: urgency = "behind"
-        case .neutral: urgency = "neutral"
-        case .winning: urgency = "winning"
-        }
-
-        // Top players (me always included) as a mini-leaderboard for the
-        // widget. Same summary the post sticker draws (`stickerSummary`), so
-        // the place a photo claims and the place the widget shows can't drift
-        // apart — they were separate arithmetic that happened to agree.
-        let standings: [WidgetDataStore.StandingRow] = top.standingsPodium(for: userId)
-            .map { WidgetDataStore.StandingRow(name: $0.name, valueText: $0.score, isMe: $0.isMe) }
-
-        WidgetDataStore.save(
-            competitionId: top.competition_id,
-            competitionName: top.competition_name,
-            pill: focus.pill,
-            detail: focus.detail,
-            rankText: rankText,
-            urgency: urgency,
-            standings: standings
-        )
+        WidgetLiveRefresh.saveCompetitionSnapshot(competitions)
     }
 
     /// Mirror today's friends leaderboard into the App Group for the Daily
-    /// Leaderboard widget — the same standings the post-mile celebration
-    /// shows. Failed fetches keep the last good snapshot.
+    /// Leaderboard widget. Failed fetches keep the last good snapshot.
     private func syncLeaderboardWidget() async {
-        let myId = UserDefaults.standard.string(forKey: "backendUserId")
-        guard myId != nil else { return }
+        guard UserDefaults.standard.string(forKey: "backendUserId") != nil else { return }
         guard let items = try? await friendService.fetchFriendsActivityToday() else { return }
-
-        var rows: [WidgetDataStore.LeaderboardRow] = items
-            .filter { $0.user_id != myId }
-            .map {
-                WidgetDataStore.LeaderboardRow(
-                    name: $0.displayName,
-                    miles: $0.today_miles,
-                    isMe: false,
-                    completed: $0.completed_today
-                )
-            }
         let user = userManager.currentUser
-        rows.append(WidgetDataStore.LeaderboardRow(
-            name: user.username ?? user.name,
-            miles: healthManager.todaysDistance,
-            isMe: true,
-            completed: ProgressCalculator.isGoalCompleted(
-                current: healthManager.todaysDistance, goal: user.goalMiles
-            )
-        ))
-        rows.sort { $0.miles > $1.miles }
-        WidgetDataStore.save(leaderboardRows: rows)
+        WidgetLiveRefresh.saveLeaderboardSnapshot(
+            friends: items,
+            myName: user.username ?? user.name,
+            myMiles: healthManager.todaysDistance,
+            myGoal: user.goalMiles
+        )
     }
 }
 

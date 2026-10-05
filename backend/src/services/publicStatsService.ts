@@ -57,8 +57,9 @@ export async function getPublicStats(): Promise<PublicStats> {
          WHERE local_date = ${TODAY_ET_DATE_SQL}
            AND deleted_at IS NULL AND exclusion_reason IS NULL)::float AS miles_today,
       (SELECT COUNT(*) FROM hype_log)::int AS total_hypes,
-      ((SELECT COUNT(*) FROM nudge_log)
-        + (SELECT COUNT(*) FROM friend_nudge_log))::int AS total_nudges,
+      -- Lifetime counter — the nudge logs are pruned after 7 days, so
+      -- counting them published a rolling week as "Nudges delivered".
+      (SELECT COALESCE(SUM(nudges_sent_total), 0) FROM users)::int AS total_nudges,
       -- Distinct runners who logged a counting mile in the last 7 ET days.
       (SELECT COUNT(DISTINCT user_id) FROM workouts
          WHERE local_date >= ${TODAY_ET_DATE_SQL} - 6

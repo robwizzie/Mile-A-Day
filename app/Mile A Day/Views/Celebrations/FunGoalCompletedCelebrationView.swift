@@ -80,7 +80,10 @@ struct FunGoalCompletedCelebrationView: View {
     }
 
     private var reigniteStage: some View {
-        ReignitingFlameView(showsFace: true, size: 210, progress: ignitionProgress, intensity: 1.35, origin: flameOrigin)
+        // Wearing HIS look — the flame that catches is the Flamey from the
+        // dashboard, not a generic mascot.
+        ReignitingFlameView(showsFace: true, size: 210, progress: ignitionProgress, intensity: 1.35, origin: flameOrigin,
+                            look: FlameyFacts.look())
             .frame(width: 330, height: 276)
     }
 
@@ -342,7 +345,7 @@ struct FunGoalCompletedCelebrationView: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "square.and.arrow.up")
-                    Text("Share Achievement")
+                    Text(stats.shareTitle)
                 }
                 .font(.system(size: 17, weight: .heavy, design: .rounded))
                 .foregroundColor(.white)
@@ -355,7 +358,7 @@ struct FunGoalCompletedCelebrationView: View {
             }
             .buttonStyle(.plain)
             .sheet(item: $storyShare) { content in
-                ShareStudioView(content: content)
+                ShareStudioView(content: content, initialTemplate: stats.shareTemplate)
             }
 
             Button {

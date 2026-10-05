@@ -172,11 +172,13 @@ struct WizardPrimaryButton: View {
                     ProgressView().tint(WizardPalette.onAccent)
                 } else if let icon {
                     Image(systemName: icon)
-                        .font(.system(size: 16, weight: .semibold))
+                        .madFont(size: 16, weight: .semibold, maxScale: 1.4)
                 }
                 Text(title)
             }
-            .font(MADTheme.Typography.bodyBold)
+            // MADTheme.Typography.bodyBold, scaled — inside a 52pt capsule, so
+            // it grows only so far.
+            .madFont(size: 17, weight: .semibold, design: .rounded, maxScale: 1.4)
             .frame(maxWidth: .infinity)
             .frame(height: 52)
             .background(Capsule().fill(WizardPalette.accent))
@@ -232,7 +234,7 @@ struct WizardHeader: View {
             .frame(height: 62)
 
             Text(title)
-                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .madFont(size: 30, weight: .bold, design: .rounded)
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
@@ -323,13 +325,13 @@ struct WizardOptionCard<Leading: View, Accessory: View>: View {
                         // title a few percent smaller reads fine, a title
                         // reading "Just Track…" does not.
                         Text(title)
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .madFont(size: 28, weight: .bold, design: .rounded)
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
                             .allowsTightening(true)
                         if let badge {
                             Text(badge)
-                                .font(.system(size: 9, weight: .black, design: .rounded))
+                                .madFont(size: 9, weight: .black, design: .rounded, maxScale: 1.5)
                                 .tracking(0.8)
                                 .foregroundColor(.black.opacity(0.8))
                                 .lineLimit(1)

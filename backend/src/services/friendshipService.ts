@@ -70,7 +70,8 @@ export async function getFriendship(
  * open of the Friends tab.
  */
 const FRIEND_SAFE_USER_COLUMNS = `u.user_id, u.username, u.first_name, u.last_name, u.bio,
-			u.profile_image_url, (${effectiveStreakSql("u")})::int AS current_streak, '' AS email`;
+			u.profile_image_url, (${effectiveStreakSql("u")})::int AS current_streak, '' AS email,
+			u.dashboard_style`; // additive: fun|modern|null — the app draws a friend's Flamey poke only on Fun
 
 export async function getFriends(user: string): Promise<User[]> {
   const friends = await db.query(

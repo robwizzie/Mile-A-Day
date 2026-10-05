@@ -287,7 +287,8 @@ struct PostHighlightItem: Codable, Identifiable {
            let crew = post.acceptedCoauthors.first(where: { $0.user_id == userId }) {
             return crew.mediaURL
         }
-        return post.storyPhotoURL ?? post.mediaURL
+        // `photoURL`: an auto card has no picture — its face is drawn live.
+        return post.storyPhotoURL ?? post.photoURL
     }
 
     /// The words that belong under this face — the same rule the feed card

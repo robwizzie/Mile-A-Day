@@ -81,6 +81,16 @@ async function seed() {
        ON CONFLICT (user_id) DO NOTHING`,
       [id, `sub-${id}`, `${id}@example.com`, id, id],
     );
+    // Hide start & end OFF: these seeds are short routes that pin route
+    // GATES byte-for-byte, and the trim would serve them to friends as no
+    // route at all. share_route_maps stays NULL — read exactly like a missing
+    // row (COALESCE(..., true)). The trim is pinned by route-privacy-check.
+    await db.query(
+      `INSERT INTO notification_settings (user_id, share_route_maps, route_privacy_meters)
+       VALUES ($1, NULL, 0)
+       ON CONFLICT (user_id) DO UPDATE SET route_privacy_meters = 0`,
+      [id],
+    );
   }
   // Everyone is an accepted friend of everyone — the point of this check is
   // the buddy-post rules, so nothing must fail for an unrelated circle reason.
@@ -373,6 +383,25 @@ async function main() {
       ? "drawn"
       : "none",
     "drawn",
+  );
+
+  // ── 5b. A credit row that lost its session still resolves through the
+  // POST's. "3 of you" already read p.buddy_session_id; the routes read only
+  // the credit row's, so such a card counted everyone and drew one line.
+  await db.query(
+    `UPDATE post_coauthors SET buddy_session_id = NULL WHERE post_id = $1 AND user_id = $2`,
+    [postId, PAL],
+  );
+  check(
+    "a crew route resolves through the post's session",
+    Array.isArray((await crewEntry(OUT, postId, PAL))?.route)
+      ? (await crewEntry(OUT, postId, PAL)).route.length
+      : null,
+    3,
+  );
+  await db.query(
+    `UPDATE post_coauthors SET buddy_session_id = $3 WHERE post_id = $1 AND user_id = $2`,
+    [postId, PAL, sessionId],
   );
 
   // ── 6. "No map on this one" covers the whole card, not just the poster ──

@@ -82,7 +82,7 @@ struct RecoveryModeView: View {
 
     private func pausedSection(status: InjuryPauseStatus, active: InjuryPauseStatus.Active) -> some View {
         VStack(spacing: 18) {
-            InjuredFlameBuddyView(size: 150)
+            InjuredFlameBuddyView(size: 150, look: FlameyFacts.look())
                 .padding(.top, 8)
 
             VStack(spacing: 6) {
@@ -138,7 +138,7 @@ struct RecoveryModeView: View {
 
     private func startSection(_ status: InjuryPauseStatus) -> some View {
         VStack(spacing: 18) {
-            InjuredFlameBuddyView(size: 130).padding(.top, 4)
+            InjuredFlameBuddyView(size: 130, look: FlameyFacts.look()).padding(.top, 4)
 
             Text("Hurt yourself?")
                 .font(.system(size: 20, weight: .bold, design: .rounded))

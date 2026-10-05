@@ -20,6 +20,7 @@ export async function registerDevice(req: AuthenticatedRequest, res: Response) {
       req.body.device_token,
       req.body.environment,
       req.body.client_features,
+      req.body.widget_kinds,
     );
 
     // Buddy enrollment rides the registration every build already makes,

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth.js';
 import { getCatalog, getUserBadges, markBadgesViewed, setPinnedBadges, BadgePinError } from '../services/badgeService.js';
 import { areFriends } from '../services/friendshipService.js';
+import { earnedDetailsFor } from '../services/badgeEarnedDetail.js';
 import hasRequiredKeys from '../utils/hasRequiredKeys.js';
 
 export async function getPublicCatalog(_req: Request, res: Response) {
@@ -33,7 +34,21 @@ export async function getBadgesForUser(req: AuthenticatedRequest, res: Response)
 		}
 
 		const badges = await getUserBadges(targetUserId);
-		return res.status(200).json({ userId: targetUserId, badges });
+		// Additive `earned_detail` per badge: HOW it was earned ("You ran a 7:42
+		// mile"), derived at read in a bounded handful of queries for the whole
+		// list. Never fails the read — a broken detail degrades to null.
+		const details = await earnedDetailsFor(
+			targetUserId,
+			badges,
+			requesterId === targetUserId ? 'self' : 'friend'
+		).catch((err: any) => {
+			console.error('[badges] earned_detail failed:', err?.message ?? err);
+			return new Map();
+		});
+		return res.status(200).json({
+			userId: targetUserId,
+			badges: badges.map(b => ({ ...b, earned_detail: details.get(b.badgeId) ?? null }))
+		});
 	} catch (err: any) {
 		console.error('Error getting user badges:', err.message);
 		return res.status(500).json({ error: 'Error getting user badges: ' + err.message });

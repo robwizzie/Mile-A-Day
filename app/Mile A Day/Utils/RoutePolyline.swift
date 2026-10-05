@@ -13,11 +13,23 @@ import CoreGraphics
 /// took. Round joins/caps in the stroke style soften the vertices without
 /// ever moving the line off the streets; don't reintroduce a curve here.
 enum RoutePolyline {
-    static func path(through points: [CGPoint]) -> CGPath {
+    /// - Parameter breakingAfter: indices after which the points are NOT
+    ///   joined by walked ground (`RouteGaps`) — the path lifts the pen and
+    ///   starts a new subpath there instead of drawing a line nobody walked.
+    ///   `Path.trim` measures the TOTAL length of all subpaths, and a gap
+    ///   contributes none, so the draw animation and the bead cross it as a
+    ///   jump-cut with no other change. Empty for every ordinary route.
+    static func path(through points: [CGPoint], breakingAfter breaks: Set<Int> = []) -> CGPath {
         let path = CGMutablePath()
         guard let first = points.first else { return path }
         path.move(to: first)
-        for p in points.dropFirst() { path.addLine(to: p) }
+        for (index, p) in points.enumerated().dropFirst() {
+            if breaks.contains(index - 1) {
+                path.move(to: p)
+            } else {
+                path.addLine(to: p)
+            }
+        }
         return path
     }
 }
