@@ -41,6 +41,10 @@ const MAX_FRIENDS_RUNNING = 3;
 const MAX_FRIENDS_FINISHED = 3;
 const MAX_AT_RISK_NAMES = 3;
 const AT_RISK_MIN_STREAK = 3; // same floor as the admin "at risk" panel
+const HEATMAP_DAYS = 64;       // one per pixel column of the panel
+const MESSAGE_TTL_HOURS = 24;
+const MAX_MESSAGES = 3;
+export const MESSAGE_MAX_CHARS = 48;
 
 export function hashDisplayKey(key: string): string {
   return crypto.createHash("sha256").update(key, "utf8").digest("hex");
@@ -122,6 +126,74 @@ export async function resolveDisplayKey(key: string): Promise<string | null> {
       .catch(() => undefined);
   }
   return rows[0].user_id;
+}
+
+// ─── Desk-to-desk messages (admin writes, the recipient's display reads) ───
+
+/** Emoji the panel can draw as an icon, mapped to a token it understands. */
+const EMOJI_TOKENS: [RegExp, string][] = [
+  [/\u{1F525}/gu, "\u0001"],                                               // fire
+  [/(\u2764|\u2665|\u{1F496}|\u{1F497}|\u{1F493}|\u{1F495}|\u{1F9E1})\uFE0F?/gu, "\u0002"], // heart
+  [/\u{1F44F}[\u{1F3FB}-\u{1F3FF}]?/gu, "\u0003"],                        // clap
+  [/\u{1F3C3}[\u{1F3FB}-\u{1F3FF}]?(\u200D[\u2640\u2642]\uFE0F?)?/gu, "\u0004"], // runner
+];
+const TOKEN_NAMES = ["", "[FIRE]", "[HEART]", "[CLAP]", "[RUN]"];
+
+/**
+ * Turn what an admin typed into something the panel can draw: upper case,
+ * the panel font's characters only, four emoji as icon tokens, single
+ * spaces, at most MESSAGE_MAX_CHARS. Returns null if nothing is left.
+ */
+export function sanitizeDisplayText(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  let t = raw.normalize("NFC");
+  for (const [re, tok] of EMOJI_TOKENS) t = t.replace(re, ` ${tok} `);
+  t = t.toUpperCase().replace(/[^A-Z0-9 .,!?'\-+#:/%&\u0001-\u0004]/g, "");
+  t = t.replace(/\s+/g, " ").trim().slice(0, MESSAGE_MAX_CHARS).trim();
+  if (!t.replace(/[\u0001-\u0004 ]/g, "").length && !/[\u0001-\u0004]/.test(t)) return null;
+  return t.replace(/[\u0001-\u0004]/g, (c) => TOKEN_NAMES[c.charCodeAt(0)]);
+}
+
+export interface DisplayMessageRow {
+  id: string;
+  to_username: string | null;
+  from_username: string | null;
+  body: string;
+  created_at: string;
+  expires_at: string;
+}
+
+export async function createDisplayMessage(
+  toUserId: string,
+  fromUserId: string | null,
+  body: string,
+): Promise<DisplayMessageRow> {
+  const rows = await db.query<DisplayMessageRow>(
+    `WITH ins AS (
+       INSERT INTO display_messages (to_user_id, from_user_id, body, expires_at)
+       VALUES ($1, $2, $3, NOW() + INTERVAL '${MESSAGE_TTL_HOURS} hours')
+       RETURNING id, to_user_id, from_user_id, body, created_at, expires_at
+     )
+     SELECT ins.id, tu.username AS to_username, fu.username AS from_username, ins.body,
+            ins.created_at::text, ins.expires_at::text
+       FROM ins
+       JOIN users tu ON tu.user_id = ins.to_user_id
+       LEFT JOIN users fu ON fu.user_id = ins.from_user_id`,
+    [toUserId, fromUserId, body],
+  );
+  return rows[0];
+}
+
+export async function listDisplayMessages(): Promise<DisplayMessageRow[]> {
+  return db.query<DisplayMessageRow>(
+    `SELECT m.id, tu.username AS to_username, fu.username AS from_username, m.body,
+            m.created_at::text, m.expires_at::text
+       FROM display_messages m
+       JOIN users tu ON tu.user_id = m.to_user_id
+       LEFT JOIN users fu ON fu.user_id = m.from_user_id
+      ORDER BY m.created_at DESC
+      LIMIT 30`,
+  );
 }
 
 // ─── Community block (aggregates only, cached) ─────────────────────────────
@@ -217,7 +289,12 @@ export interface DisplayFeed {
     live_miles: number | null;   // their own live session distance while running_now
     longest_run: number | null;  // their longest single run, all time
     fastest_mile_month: number | null; // their fastest full-mile split this local month, seconds
+    /** Their own last 64 local days, oldest first: miles that day, or -1 for
+     *  a day with no mile that a streak token covered. */
+    days: number[];
   };
+  /** Unexpired desk messages sent TO the owner (newest first). */
+  messages: { id: string; from: string; text: string; age_s: number }[];
   friends_running: { name: string; miles: number }[];
   /** The owner's friends whose streak is at risk today (their own local day,
    *  the admin panel's rule). Friends already see each other's daily miles in
@@ -229,7 +306,7 @@ export interface DisplayFeed {
 }
 
 export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
-  const [community, meRows, todayMiles, coverage, friends, alerts, finished, atRisk] = await Promise.all([
+  const [community, meRows, todayMiles, coverage, friends, alerts, finished, atRisk, days, messages] = await Promise.all([
     getCommunity(),
     db.query<{
       username: string | null;
@@ -373,6 +450,38 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
         ORDER BY c.current_streak DESC`,
       [userId],
     ),
+    // The owner's own last 64 local days (the streak heatmap).
+    db.query<{ miles: number; covered: boolean }>(
+      `WITH tz AS (
+         SELECT COALESCE((SELECT timezone_offset FROM workouts
+                           WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1), 0) AS off
+       ), today AS (
+         SELECT ((NOW() AT TIME ZONE 'UTC') + (tz.off || ' minutes')::interval)::date AS d FROM tz
+       ), days AS (
+         SELECT generate_series(today.d - ${HEATMAP_DAYS - 1}, today.d, INTERVAL '1 day')::date AS day
+           FROM today
+       )
+       SELECT COALESCE((SELECT SUM(w.distance) FROM workouts w
+                         WHERE w.user_id = $1 AND w.local_date = days.day
+                           AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL), 0)::float AS miles,
+              EXISTS (SELECT 1 FROM streak_coverage sc
+                       WHERE sc.user_id = $1 AND sc.local_date = days.day) AS covered
+         FROM days
+        ORDER BY days.day`,
+      [userId],
+    ),
+    // Desk messages to the owner. Sender shown by username only.
+    db.query<{ id: string; from: string | null; text: string; age_s: number }>(
+      `SELECT encode(sha256(m.id::text::bytea), 'hex') AS id,
+              fu.username AS "from", m.body AS text,
+              EXTRACT(EPOCH FROM (NOW() - m.created_at))::int AS age_s
+         FROM display_messages m
+         LEFT JOIN users fu ON fu.user_id = m.from_user_id
+        WHERE m.to_user_id = $1 AND m.expires_at > NOW()
+        ORDER BY m.created_at DESC
+        LIMIT ${MAX_MESSAGES}`,
+      [userId],
+    ),
   ]);
 
   const me = meRows[0];
@@ -394,7 +503,17 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
       live_miles: me?.live_miles == null ? null : Math.round(Number(me.live_miles) * 100) / 100,
       longest_run: me?.longest_run == null ? null : Math.round(Number(me.longest_run) * 100) / 100,
       fastest_mile_month: me?.fastest_mile_month == null ? null : Math.round(Number(me.fastest_mile_month)),
+      days: days.map((d) => {
+        const mi = Number(d.miles) || 0;
+        return mi < DAILY_GOAL_TOLERANCE && d.covered ? -1 : Math.round(mi * 10) / 10;
+      }),
     },
+    messages: messages.map((m) => ({
+      id: m.id.slice(0, 16),
+      from: m.from ?? "MILE A DAY",
+      text: m.text,
+      age_s: Math.max(0, Number(m.age_s) || 0),
+    })),
     friends_running: friends.map((f) => ({ name: f.name, miles: Number(f.miles) || 0 })),
     friends_at_risk: {
       count: atRisk.length,

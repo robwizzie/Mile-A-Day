@@ -49,6 +49,8 @@ function check(label, actual, expected) {
 
 async function cleanup() {
   await db.query(`DELETE FROM display_keys WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM display_messages WHERE to_user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM streak_coverage WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM in_app_notifications WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM live_tracking_sessions WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM notification_settings WHERE user_id = ANY($1::text[])`, [ALL]);
@@ -127,6 +129,12 @@ async function seed() {
      VALUES ($1, 1, 480, 1.0, 480), ($1, 2, 6, 0.02, 300), ($1, 3, 200, 1.0, 200)`,
     [P + "w1"],
   );
+  // A streak token covered the owner's day 3 days ago (heatmap shows -1).
+  await db.query(
+    `INSERT INTO streak_coverage (user_id, local_date, kind)
+     VALUES ($1, ((NOW() AT TIME ZONE 'UTC') - INTERVAL '3 days')::date, 'freeze')`,
+    [OWNER],
+  );
   // ...and 1.5 miles on this date last year (the "1 year ago today" moment).
   await db.query(
     `INSERT INTO workouts (workout_id, user_id, distance, local_date, date, timezone_offset,
@@ -143,6 +151,7 @@ function server() {
   app.use("/display", displayRoutes);
   // Stand-in for authenticateToken: the header says who the caller is.
   app.use((req, _res, next) => { req.userId = req.headers["x-test-user"]; next(); });
+  app.use(express.json());
   app.use("/admin", requireAdmin, adminRoutes);
   return new Promise((resolve) => {
     const s = app.listen(0, () => resolve(s));
@@ -175,14 +184,14 @@ async function main() {
   const body = await res.json();
 
   // ── exact whitelist ──
-  check("top-level fields", Object.keys(body).sort(), ["alerts", "community", "friends_at_risk", "friends_finished", "friends_running", "me", "v"]);
+  check("top-level fields", Object.keys(body).sort(), ["alerts", "community", "friends_at_risk", "friends_finished", "friends_running", "me", "messages", "v"]);
   check("community fields", Object.keys(body.community).sort(), [
     "active_7d", "badges_today", "hypes_today", "longest_streak", "miles_today",
     "miles_yesterday_same_time", "new_friends_today", "nudges_today", "out_running_now",
     "photos_shared", "tokens_spent_today", "total_hypes", "total_miles", "total_users"]);
   check("community values are all numbers", Object.values(body.community).every((v) => typeof v === "number"), true);
   check("me fields", Object.keys(body.me).sort(), [
-    "fastest_mile_month", "live_miles", "local_date", "local_time", "longest_run", "mile_done", "miles_today",
+    "days", "fastest_mile_month", "live_miles", "local_date", "local_time", "longest_run", "mile_done", "miles_today",
     "minutes_to_midnight", "running_now", "streak", "username", "year_ago_miles"]);
   const text = JSON.stringify(body);
   check("no emails anywhere", text.includes("@"), false);
@@ -209,6 +218,11 @@ async function main() {
   check("not running → no live miles", body.me.live_miles, null);
   check("my longest run", body.me.longest_run, 1.5);
   check("my fastest mile this month (full splits only)", body.me.fastest_mile_month, 480);
+  check("heatmap: 64 days", body.me.days.length, 64);
+  check("heatmap: today is last", body.me.days[63], 1);
+  check("heatmap: token-covered day", body.me.days[60], -1);
+  check("heatmap: plain numbers only", body.me.days.every((d) => typeof d === "number"), true);
+  check("no messages yet", body.messages, []);
   // ── friends at risk: my friends only, streak >= 3, nothing logged today, not blocked ──
   check("friends at risk", body.friends_at_risk, { count: 2, top: [{ name: "runner", streak: 40 }, { name: "nudger", streak: 9 }] });
 
@@ -242,6 +256,32 @@ async function main() {
   const nudgerFeed = await feed({ authorization: `Display ${made.key}` });
   check("their key shows THEIR data", (await nudgerFeed.json()).me.username, "nudger");
   check("unknown username → 404", (await admin("display-keys?username=nobody-here", "POST")).status, 404);
+
+  // ── desk messages ──
+  const sendMsg = (body, user = ADMIN) => fetch(`${base}/admin/display-messages`, {
+    method: "POST",
+    headers: { "x-test-user": user, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  check("non-admin cannot send a desk message", (await sendMsg({ username: "owner", text: "hi" }, OWNER)).status, 403);
+  check("non-admin cannot list desk messages", (await admin("display-messages", "GET", OWNER)).status, 403);
+  check("empty message → 400", (await sendMsg({ username: "owner", text: "<<>> \u{1F600}" })).status, 400);
+  check("unknown recipient → 404", (await sendMsg({ username: "nobody-here", text: "hi" })).status, 404);
+  const sent = await sendMsg({ username: "owner", text: "nice mile \u{1F525} <script>alert(1)</script> \u2764\uFE0F" });
+  check("admin can send a desk message", sent.status, 201);
+  check("message is cleaned for the panel", (await sent.json()).message.body, "NICE MILE [FIRE] SCRIPTALERT1/SCRIPT [HEART]");
+  await sendMsg({ username: "other", text: "not for you" });
+  await db.query(
+    `INSERT INTO display_messages (to_user_id, body, expires_at) VALUES ($1, 'OLD', NOW() - INTERVAL '1 minute')`,
+    [OWNER],
+  );
+  const withMsg = await (await feed({ authorization: `Display ${key}` })).json();
+  check("my desk gets only my unexpired message", withMsg.messages.map((m) => [m.from, m.text]),
+    [["admin", "NICE MILE [FIRE] SCRIPTALERT1/SCRIPT [HEART]"]]);
+  check("message fields", Object.keys(withMsg.messages[0] ?? {}).sort(), ["age_s", "from", "id", "text"]);
+  check("message ids are opaque", withMsg.messages.every((m) => /^[0-9a-f]{16}$/.test(m.id)), true);
+  const msgList = await (await admin("display-messages")).json();
+  check("admin can list desk messages", msgList.messages.length >= 2, true);
 
   // ── revoke ──
   const id = list.keys.find((k) => k.username === "owner").id;

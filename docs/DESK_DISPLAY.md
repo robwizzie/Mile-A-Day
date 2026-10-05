@@ -28,10 +28,11 @@ public `/public/stats` numbers.
 |---|---|
 | `v` | `1` |
 | `community` | numbers only: `total_users`, `total_miles`, `miles_today`, `active_7d`, `longest_streak`, `total_hypes`, `photos_shared`, `out_running_now`, `tokens_spent_today`, `badges_today`, `new_friends_today`, `hypes_today`, `nudges_today`, `miles_yesterday_same_time` |
-| `me` | the key owner only: `username`, `mile_done`, `miles_today`, `streak`, `running_now`, `local_time` (`HH:MM:SS`), `minutes_to_midnight`, `year_ago_miles` (their own miles on this date last year, or null), `local_date` (for seasonal looks), `live_miles` (their own live distance while running, else null), `longest_run`, `fastest_mile_month` (seconds, full-mile splits only) |
+| `me` | the key owner only: `username`, `mile_done`, `miles_today`, `streak`, `running_now`, `local_time` (`HH:MM:SS`), `minutes_to_midnight`, `year_ago_miles` (their own miles on this date last year, or null), `local_date` (for seasonal looks), `live_miles` (their own live distance while running, else null), `longest_run`, `fastest_mile_month` (seconds, full-mile splits only), `days` (their own last 64 local days of miles, -1 = streak-token day; the heatmap) |
 | `friends_running` | ≤ 3 × `{name, miles}`: accepted friends who are live right now, share live presence, and are not blocked in either direction |
 | `friends_at_risk` | `{count, top}`: how many of the owner's friends (streak ≥ 3, not blocked either way, not paused) have nothing logged on their own local day yet; `top` = up to 3 `{name, streak}`, longest first. Friends already see each other's daily miles in the app. |
 | `friends_finished` | ≤ 3 × `{id, name, miles}` — same friends rules as above, for sessions that ended in the last 30 min; `id` is an opaque hash |
+| `messages` | ≤ 3 × `{id, from, text, age_s}`: unexpired desk messages sent TO the owner from Admin → Displays (sender username only, text cleaned to the panel's characters, 24 h expiry) |
 | `alerts` | ≤ 5 × `{id, kind, from, at}`: the owner's own `nudge`/`hype` notifications from the last 24 h. `from` is the sender's username, `id` is an opaque hash. Blocked senders are excluded. |
 
 It never returns emails, real names, user ids, Apple ids, notification
@@ -56,5 +57,7 @@ real HTTP.
 - **Revocation:** a revoked key, or the key of a deleted user (the rows
   cascade), gets the same generic 401 as a wrong key.
 - **Key management:** create, list and revoke all require `role = admin`.
+- **Desk messages:** only admins can send or list them (`POST/GET /admin/display-messages`); a message is readable only through the recipient's own display key and expires after 24 h. Text is reduced to upper-case letters, digits, a little punctuation and four emoji tokens before it is stored.
 - **Read-only:** the display never marks notifications read and never writes
   user data. The only write is a throttled `last_used_at` stamp on the key.
+  (Desk messages are written by admins in Admin → Displays, never by a display.)

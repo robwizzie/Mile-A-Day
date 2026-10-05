@@ -18,10 +18,13 @@ export async function getData<T>(path: string): Promise<T> {
 }
 
 /** POST an admin action; surfaces the backend's error message on failure. */
-export async function postData<T>(path: string): Promise<T> {
+export async function postData<T>(path: string, json?: unknown): Promise<T> {
   const res = await fetch(`/admin/api/data/${path}`, {
     method: "POST",
     cache: "no-store",
+    ...(json === undefined
+      ? {}
+      : { headers: { "content-type": "application/json" }, body: JSON.stringify(json) }),
   });
   if (res.status === 401 || res.status === 403) {
     await fetch("/admin/api/logout", { method: "POST" });

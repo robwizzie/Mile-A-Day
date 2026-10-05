@@ -20,6 +20,18 @@ function isOnline(k: { last_used_at: string | null; revoked_at: string | null },
   return !k.revoked_at && !!k.last_used_at && now - new Date(k.last_used_at).getTime() < OFFLINE_AFTER_MS;
 }
 
+type DisplayMessage = {
+  id: string;
+  to_username: string | null;
+  from_username: string | null;
+  body: string;
+  created_at: string;
+  expires_at: string;
+};
+
+const MESSAGE_MAX = 48;
+const EMOJI = ["🔥", "❤️", "👏", "🏃"];
+
 type DisplayKey = {
   id: string;
   username: string | null;
@@ -39,9 +51,19 @@ export function DisplaysTab() {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  const [messages, setMessages] = useState<DisplayMessage[] | null>(null);
+  const [msgTo, setMsgTo] = useState("");
+  const [msgText, setMsgText] = useState("");
+  const [msgBusy, setMsgBusy] = useState(false);
+  const [msgNote, setMsgNote] = useState<string | null>(null);
+
   const load = useCallback(async () => {
-    const res = await getData<{ keys: DisplayKey[] }>("display-keys");
+    const [res, msgs] = await Promise.all([
+      getData<{ keys: DisplayKey[] }>("display-keys"),
+      getData<{ messages: DisplayMessage[] }>("display-messages"),
+    ]);
     setKeys(res.keys);
+    setMessages(msgs.messages);
   }, []);
 
   const [now, setNow] = useState(() => Date.now());
@@ -57,6 +79,29 @@ export function DisplaysTab() {
   }, [load]);
 
   const offline = (keys ?? []).filter((k) => !k.revoked_at && !isOnline(k, now));
+  // People with a live desk display (one entry each).
+  const recipients = Array.from(
+    new Set((keys ?? []).filter((k) => !k.revoked_at && k.username).map((k) => k.username as string)),
+  );
+
+  async function sendMessage() {
+    setError(null);
+    setMsgNote(null);
+    setMsgBusy(true);
+    try {
+      const res = await postData<{ message: DisplayMessage }>("display-messages", {
+        username: msgTo || recipients[0],
+        text: msgText,
+      });
+      setMsgNote(`Sent to ${res.message.to_username}'s desk: "${res.message.body}"`);
+      setMsgText("");
+      await load();
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    } finally {
+      setMsgBusy(false);
+    }
+  }
 
   // The plaintext key is shown once; drop it from the page after 2 minutes.
   useEffect(() => {
@@ -103,6 +148,75 @@ export function DisplaysTab() {
           (unplugged, or lost Wi-Fi).
         </div>
       )}
+      <section className={`${CARD} p-5`}>
+        <h2 className="text-lg font-bold">Send to a desk</h2>
+        <p className="mt-1 text-sm text-white/50">
+          Scrolls across their display with a little mascot wave. Letters, numbers and
+          🔥 ❤️ 👏 🏃 only; it disappears after 24 hours.
+        </p>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <select
+            value={msgTo || recipients[0] || ""}
+            onChange={(e) => setMsgTo(e.target.value)}
+            className="rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none"
+          >
+            {recipients.length === 0 && <option value="">No displays yet</option>}
+            {recipients.map((u) => (
+              <option key={u} value={u}>
+                {u}&apos;s desk
+              </option>
+            ))}
+          </select>
+          <input
+            value={msgText}
+            maxLength={MESSAGE_MAX}
+            onChange={(e) => setMsgText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && msgText.trim() && recipients.length && !msgBusy) sendMessage();
+            }}
+            placeholder="NICE MILE 🔥"
+            className="min-w-[14rem] flex-1 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm uppercase outline-none focus:border-white/30"
+          />
+          {EMOJI.map((e) => (
+            <button
+              key={e}
+              onClick={() => setMsgText((t) => (t + " " + e).slice(0, MESSAGE_MAX))}
+              className="rounded-lg border border-white/10 px-2 py-1.5 text-sm"
+              title="Add to message"
+            >
+              {e}
+            </button>
+          ))}
+          <button
+            onClick={sendMessage}
+            disabled={msgBusy || !msgText.trim() || recipients.length === 0}
+            className="rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-40"
+            style={{ background: MAD_RED }}
+          >
+            Send
+          </button>
+        </div>
+        <p className="mt-2 text-xs text-white/40">{msgText.length}/{MESSAGE_MAX}</p>
+        {msgNote && <p className="mt-2 text-sm text-emerald-300">{msgNote}</p>}
+        {messages && messages.length > 0 && (
+          <ul className="mt-4 space-y-1.5 text-sm">
+            {messages.slice(0, 8).map((m) => {
+              const live = new Date(m.expires_at).getTime() > now;
+              return (
+                <li key={m.id} className={`flex flex-wrap gap-x-3 ${live ? "" : "opacity-40"}`}>
+                  <span className="text-white/50">{fmtDateTime(m.created_at)}</span>
+                  <span>
+                    {m.from_username ?? "admin"} → {m.to_username}
+                  </span>
+                  <span className="font-mono">{m.body}</span>
+                  {!live && <span className="text-xs">expired</span>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
       <section className={`${CARD} p-5`}>
         <h2 className="text-lg font-bold">New desk display key</h2>
         <p className="mt-1 text-sm text-white/50">

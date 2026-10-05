@@ -3342,6 +3342,40 @@ export const displayKeys = pgTable(
   ],
 );
 
+/// Short desk-to-desk messages: an admin types one in Admin -> Displays and it
+/// scrolls across that user's desk display. Only the recipient's own display
+/// key ever reads it, and it expires after a day.
+export const displayMessages = pgTable(
+  "display_messages",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    toUserId: text("to_user_id").notNull(),
+    fromUserId: text("from_user_id"),
+    body: varchar({ length: 80 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    index("idx_display_messages_to").using(
+      "btree",
+      table.toUserId.asc().nullsLast(),
+      table.createdAt.desc().nullsFirst(),
+    ),
+    foreignKey({
+      columns: [table.toUserId],
+      foreignColumns: [users.userId],
+      name: "display_messages_to_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.fromUserId],
+      foreignColumns: [users.userId],
+      name: "display_messages_from_user_id_fkey",
+    }).onDelete("set null"),
+  ],
+);
+
 /**
  * A user's shoes, for per-pair mileage. PRIVATE to the owner: nothing here is
  * read by a feed, profile, friend or post query, and every route is

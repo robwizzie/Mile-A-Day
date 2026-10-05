@@ -33,8 +33,9 @@ export async function GET(
   });
 }
 
-// Action proxy for the few admin POST endpoints (e.g. posts/:id/restore).
-// Same cookie auth as GET; no request body is forwarded (none is needed).
+// Action proxy for the admin POST endpoints (e.g. posts/:id/restore). Same
+// cookie auth as GET. A small JSON body is forwarded when one is sent (desk
+// messages); anything else goes through without a body, as before.
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ path: string[] }> },
@@ -46,9 +47,17 @@ export async function POST(
 
   const { path } = await params;
   const search = new URL(req.url).search;
+  const isJson = (req.headers.get("content-type") ?? "").includes("application/json");
+  const payload = isJson ? await req.text() : "";
+  if (payload.length > 4096) {
+    return Response.json({ error: "Body too large" }, { status: 413 });
+  }
   const res = await fetch(`${API_URL}/admin/${path.join("/")}${search}`, {
     method: "POST",
-    headers: { authorization: `Bearer ${token}` },
+    headers: payload
+      ? { authorization: `Bearer ${token}`, "content-type": "application/json" }
+      : { authorization: `Bearer ${token}` },
+    body: payload || undefined,
     cache: "no-store",
   });
 
