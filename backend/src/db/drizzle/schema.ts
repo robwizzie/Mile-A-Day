@@ -3311,3 +3311,33 @@ export const flameyOutfits = pgTable(
     }).onDelete("cascade"),
   ],
 );
+
+// Desk display keys (the LED "Mile A Day counter"). A key lets ONE device read
+// GET /display/feed as ONE user: community aggregates + that user's own mile,
+// streak and nudges/hypes. Only the SHA-256 of the key is stored; the key
+// itself is shown once at creation. Created/revoked by admins only.
+export const displayKeys = pgTable(
+  "display_keys",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    keyHash: varchar("key_hash", { length: 64 }).notNull(),
+    keyPrefix: varchar("key_prefix", { length: 16 }).notNull(),
+    label: text().default("").notNull(),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "string" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    unique("display_keys_key_hash_key").on(table.keyHash),
+    index("idx_display_keys_user").using("btree", table.userId.asc().nullsLast()),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "display_keys_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);

@@ -284,6 +284,15 @@ export const RATE_LIMIT_SPECS = {
     key: "user",
     message: "You're commenting a lot right now. Take a breather and try again in a bit.",
   },
+  display: {
+    // Desk displays poll every ~30 s; several on one home network fit easily.
+    // Keyed by IP and applied BEFORE the key lookup, so it also caps guessing.
+    name: "DISPLAY",
+    windowMs: 15 * MIN,
+    max: 240,
+    key: "ip",
+    message: "Too many requests. Please try again in a moment.",
+  },
   // Post/comment reports: each one lands in the moderation queue.
   report: {
     name: "REPORT",
@@ -313,3 +322,4 @@ export const postCreateLimiter = makeLimiter(RATE_LIMIT_SPECS.post);
 export const commentLimiter = makeLimiter(RATE_LIMIT_SPECS.comment);
 export const reportLimiter = makeLimiter(RATE_LIMIT_SPECS.report);
 export const globalUserLimiter = makeLimiter(RATE_LIMIT_SPECS.global);
+export const displayLimiter = makeLimiter(RATE_LIMIT_SPECS.display);

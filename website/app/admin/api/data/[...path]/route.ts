@@ -27,6 +27,8 @@ export async function GET(
     status: res.status,
     headers: {
       "content-type": res.headers.get("content-type") ?? "application/json",
+      // Admin data (and a freshly made display key) must never be cached.
+      "cache-control": "no-store",
     },
   });
 }
@@ -55,6 +57,8 @@ export async function POST(
     status: res.status,
     headers: {
       "content-type": res.headers.get("content-type") ?? "application/json",
+      // Admin data (and a freshly made display key) must never be cached.
+      "cache-control": "no-store",
     },
   });
 }

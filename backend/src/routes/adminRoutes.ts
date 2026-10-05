@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { signInLimiter } from "../middleware/rateLimit.js";
 import {
+  adminCreateDisplayKey,
+  adminListDisplayKeys,
+  adminRevokeDisplayKey,
+} from "../controllers/displayController.js";
+import {
   verifyAppleWeb,
   overview,
   milesByDay,
@@ -48,6 +53,11 @@ adminAuthRouter.post("/apple", signInLimiter, verifyAppleWeb);
 // Protected: mounted AFTER authenticateToken + requireAdmin in server.ts.
 const adminRouter = Router();
 adminRouter.get("/overview", overview);
+
+// Desk display keys (the LED counter). Plaintext key returned once on create.
+adminRouter.get("/display-keys", adminListDisplayKeys);
+adminRouter.post("/display-keys", adminCreateDisplayKey);
+adminRouter.post("/display-keys/:id/revoke", adminRevokeDisplayKey);
 adminRouter.get("/miles-by-day", milesByDay);
 adminRouter.get("/engagement", engagement);
 adminRouter.get("/signups-by-day", signupsByDay);
