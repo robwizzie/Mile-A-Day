@@ -2,6 +2,7 @@ import AVFoundation
 import AudioToolbox
 import CallKit
 import Foundation
+import StoreKit
 
 /// The voice in your ear during a workout.
 ///
@@ -78,7 +79,14 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate,
     /// app that routes through CallKit (WhatsApp, Messenger, Signal); an app
     /// that doesn't is invisible to it, and the coach will talk over that one
     /// exactly as it does today.
-    private let callObserver = CXCallObserver()
+    ///
+    /// NIL until `CallKitRegionGate` says CallKit may be used here, and it
+    /// stays nil on the China App Store: China's MIIT requires CallKit to be
+    /// INACTIVE in every app on that storefront, and App Review rejects a
+    /// build (Guideline 5, 1.2.07) that would create one there. Without it
+    /// the coach simply talks over calls, as it did before this existed.
+    private var callObserver: CXCallObserver?
+    private var isResolvingCallGate = false
 
     /// How much a line is worth interrupting for.
     ///
@@ -152,18 +160,45 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate,
     private override init() {
         super.init()
         synthesizer.delegate = self
-        // The delegate only reports CHANGES, so a coach started during a call
-        // would never hear about it — seed from the current list.
-        callObserver.setDelegate(self, queue: .main)
-        let up = callIsUp
-        DispatchQueue.main.async { self.isOnCall = up }
+        refreshCallObserving()
+    }
+
+    /// Creates the call observer only once the storefront is KNOWN and isn't
+    /// China, and tears it down if a later check says otherwise (the App
+    /// Store account can change country mid-process). Re-run at every
+    /// workout start, so an answer that wasn't ready at launch is picked up
+    /// before the coach first speaks.
+    private func refreshCallObserving() {
+        DispatchQueue.main.async {
+            guard !self.isResolvingCallGate else { return }
+            self.isResolvingCallGate = true
+            Task {
+                let allowed = await CallKitRegionGate.isAllowed()
+                DispatchQueue.main.async {
+                    self.isResolvingCallGate = false
+                    if allowed {
+                        guard self.callObserver == nil else { return }
+                        let observer = CXCallObserver()
+                        observer.setDelegate(self, queue: .main)
+                        self.callObserver = observer
+                    } else {
+                        self.callObserver?.setDelegate(nil, queue: nil)
+                        self.callObserver = nil
+                    }
+                    // The delegate only reports CHANGES, so a coach started
+                    // during a call would never hear about it — seed from the
+                    // current list.
+                    self.isOnCall = self.callIsUp
+                }
+            }
+        }
     }
 
     /// A call is "up" from the first ring, not from the moment it connects:
     /// talking over someone's ringtone while they decide whether to answer is
     /// the same intrusion, a second earlier.
     private var callIsUp: Bool {
-        callObserver.calls.contains { !$0.hasEnded }
+        callObserver?.calls.contains { !$0.hasEnded } ?? false
     }
 
     func callObserver(_ observer: CXCallObserver, callChanged call: CXCall) {
@@ -183,6 +218,7 @@ final class GhostCoach: NSObject, ObservableObject, AVSpeechSynthesizerDelegate,
         ghostSeconds: Double?,
         targetDistance: Double = 1.0
     ) {
+        refreshCallObserving()
         guard Self.isEnabled else { return }
         self.ghostName = ghostName
         self.targetDistance = max(targetDistance, 0.1)
@@ -1035,5 +1071,31 @@ private extension String {
     var capitalizedFirst: String {
         guard let first else { return self }
         return String(first).uppercased() + dropFirst()
+    }
+}
+
+/// Whether CallKit may be ACTIVE for this install.
+///
+/// China's MIIT requires CallKit to be deactivated in every app on the China
+/// App Store, and App Review rejected 1.2.07 for creating a `CXCallObserver`
+/// while China was a listed territory. The rule is about the STOREFRONT the
+/// app was obtained from, so that is what is asked — not the device region or
+/// language, which a traveller or an expat can set to anything.
+///
+/// Fails CLOSED: an unknown storefront (not signed in to the App Store, the
+/// Simulator, StoreKit not answering) reads as "not allowed". The cost of
+/// being wrong that way is the coach talking over a call — the behaviour
+/// before call detection existed — while being wrong the other way is the
+/// legal problem. Nothing else in the app touches CallKit; keep it that way
+/// or route the new use through here.
+enum CallKitRegionGate {
+    /// ISO 3166-1 alpha-3, which is what `Storefront.countryCode` reports.
+    static let blockedStorefronts: Set<String> = ["CHN"]
+
+    static func isAllowed() async -> Bool {
+        guard let code = await Storefront.current?.countryCode, !code.isEmpty else {
+            return false
+        }
+        return !blockedStorefronts.contains(code.uppercased())
     }
 }
