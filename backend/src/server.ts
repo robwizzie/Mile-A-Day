@@ -38,6 +38,7 @@ import {
   globalUserLimiter,
 } from "./middleware/rateLimit.js";
 import adminRoutes, { adminAuthRouter } from "./routes/adminRoutes.js";
+import displayRoutes from "./routes/displayRoutes.js";
 import { startCompetitionCron } from "./cron/competitionCron.js";
 import { startNotificationCron } from "./cron/notificationCron.js";
 import { startSilentSyncCron } from "./cron/silentSyncCron.js";
@@ -337,6 +338,8 @@ app.use("/badges", publicBadgesRouter);
 app.use("/public", publicRoutes);
 // Admin login (Apple-web verify) is public — it's how the dashboard gets a token.
 app.use("/admin/auth", adminAuthRouter);
+// Desk display feed: its own per-device key, never a user JWT (see displayService).
+app.use("/display", displayRoutes);
 
 app.use(authenticateToken);
 // Per-user backstop, far above any real client (see RATE_LIMIT_SPECS.global).

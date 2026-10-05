@@ -143,6 +143,11 @@ jobs:
       # blocked you.
       - name: Blocked accounts check
         run: node scripts/blocks-check.mjs
+      # Desk display feed: only a live display key opens it, the response is
+      # an exact whitelist, friends/alerts obey presence + blocks, and key
+      # management is admin-only and never returns the stored hash.
+      - name: Desk display check
+        run: node scripts/display-check.mjs
       # The walk's lifecycle end to end. A scheduled walk was cancelled by the
       # 3h lobby sweep before anyone arrived, local_date was stamped in New
       # York for everyone, a finisher's synced workout only linked if the
