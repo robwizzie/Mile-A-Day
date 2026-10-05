@@ -164,26 +164,43 @@ struct BuddyRecapView: View {
         }
     }
 
-    /// "Add your photo" — the ordinary composer, pointed at the walk's
-    /// existing card instead of at a new post of its own.
+    /// "Add your photo" — the SAME photo prompt as the solo finale and the
+    /// "Post this walk" step (`PhotoPromptView`), pointed at the walk's
+    /// existing card: its composer adds this user's slide to that post
+    /// instead of making a second one.
     private func crewPhotoComposer(_ target: CrewPhotoTarget) -> some View {
-        PostComposerView(
+        let session = recap?.session
+        return PhotoPromptView(
+            workoutId: session.flatMap { session in
+                RunPostService.buddyWorkoutId(
+                    reconciled: session.me(buddy.currentUserId)?.workoutId,
+                    startedAt: session.startedAtDate,
+                    endedAt: session.endedAtDate
+                )
+            },
+            workoutType: (session?.isRunning ?? false) ? "running" : "walking",
             stats: crewPhotoStats(),
-            // The user just tapped a camera button; open the shutter, same as
-            // the post-run prompt does one tap earlier in its own flow.
-            autoOpenCamera: true,
-            buddyCrewNames: target.authorName.map { [$0] } ?? [],
-            crewPhotoPostId: target.postId
-        ) { outcome in
-            crewPhotoTarget = nil
-            guard case .published = outcome else { return }
-            // Same 0.35s deferral the wizard documents: dismissing a cover and
-            // mutating state that re-renders behind it in one transaction is
-            // the race SwiftUI resolves by dropping one of them.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                Task { await load(showSpinner: false) }
+            joiningPostId: target.postId,
+            joiningAuthorName: target.authorName,
+            skipTitle: "Not now",
+            // The recap only offers this while the day's window is open.
+            resolvesWithoutPostingWindow: false,
+            onFinish: { outcome in
+                guard case .published = outcome else {
+                    crewPhotoTarget = nil
+                    return
+                }
+                // Same 0.35s deferral the wizard documents: the prompt's own
+                // composer is closing in this transaction, and dismissing this
+                // cover in the same one is the race SwiftUI resolves by
+                // dropping one of them.
+                MidRunPhotoStash.clear()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    crewPhotoTarget = nil
+                    Task { await load(showSpinner: false) }
+                }
             }
-        }
+        )
     }
 
     /// Stats for the crew-photo composer's sticker.
@@ -425,8 +442,9 @@ struct BuddyRecapView: View {
         .frame(height: 6)
     }
 
-    /// The post flow's front door — opens the crew-and-routes wizard
-    /// (BuddyPostWizardView), which owns the composer hand-off. Gated on the
+    /// The post flow's front door — opens the shared photo prompt in crew
+    /// mode (BuddyPostWizardView → PhotoPromptView), which owns the composer
+    /// hand-off. Gated on the
     /// DAY tier, not the ten-minute camera countdown (ios.md: only an
     /// affordance that literally opens the shutter takes `isCameraOpen`) — a
     /// buddy recap is exactly the screen someone opens once they're home, and
@@ -472,7 +490,7 @@ struct BuddyRecapView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(session.isRunning ? "Post this run" : "Post this walk")
                             .font(MADTheme.Typography.bodyBold)
-                        Text("Everyone's on it — see the crew and routes first")
+                        Text("Add a photo — it joins everyone's routes in one post")
                             .font(MADTheme.Typography.caption)
                             .opacity(0.85)
                     }

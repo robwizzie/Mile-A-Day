@@ -1,18 +1,20 @@
 import SwiftUI
 import CoreLocation
 
-/// Step 1 of posting a buddy walk — the crew and their routes.
+/// Posting a buddy walk — the SAME photo prompt as the solo finale
+/// (`PhotoPromptView`), in crew mode.
 ///
-/// The recap used to jump straight into the composer from a bare share
-/// button, which meant WHO was being credited was invisible until the post
-/// existed. This makes the flow an explicit wizard: settle WHO here (everyone
-/// who finished, shown by name — the server still re-validates each id), see
-/// WHERE each of them went (their route, once their workout has synced and
-/// their "Share route maps" consent allows the server to hand it over), then
-/// move on to the photo and share steps the composer already owns.
+/// This used to be its own crew-and-routes screen ("Step 1 of 3 · the
+/// crew") with a look nothing like the solo prompt, so a buddy walk never got
+/// the redesign. Now the prompt's preview card IS the crew card — everyone's
+/// routes on one map, coloured and keyed exactly as the published card draws
+/// them — the line under it says who's credited, and Take a photo / Choose
+/// from this walk open the composer with the crew attached. "Not now" goes
+/// back to the recap, whose Done is the walk's real skip.
 ///
-/// Routes come from the SERVER for every row, the poster's own included —
-/// one code path, and the friend/consent/block gating stays server truth
+/// Routes come from the SERVER for every row except the poster's own (read
+/// from HealthKit, since the server's copy lands a minute or two after the
+/// walk) — the friend/consent/block gating stays server truth
 /// (`GET /workouts/:userId/workout/:id/route` answers `route: null` rather
 /// than erroring when the owner doesn't share).
 struct BuddyPostWizardView: View {
@@ -40,295 +42,83 @@ struct BuddyPostWizardView: View {
     }
 
     @State private var routes: [String: RouteState] = [:]
-    @State private var showComposer = false
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-                        header
-                        combinedRouteCard
-                        crewSection
-                        if !stillOut.isEmpty { stillOutNote }
-                        continueButton
-                        Color.clear.frame(height: MADTheme.Spacing.lg)
-                    }
-                    .padding(MADTheme.Spacing.md)
-                }
-                // The composer is a cover on the ScrollView node — the
-                // NavigationStack stays free in case this wizard ever needs
-                // a gate of its own (two covers on one node drop one).
-                .fullScreenCover(isPresented: $showComposer) {
-                    PostComposerView(
-                        stats: composerStats(),
-                        buddyCoauthorIds: coauthorIds(),
-                        buddySessionId: session.id,
-                        buddyCrewNames: coauthorNames()
-                    ) { outcome in
-                        showComposer = false
-                        // Published → the wizard's job is done; fall back to
-                        // the recap. Cancelled → stay here, nothing is lost.
-                        //
-                        // Deferred a beat, NOT called inline: closing the
-                        // composer and dismissing the wizard that presents it
-                        // are two presentation changes in one transaction, and
-                        // SwiftUI drops one of those (the same race the
-                        // history screen's `startWalk` and the composer's
-                        // stacked covers document). The one it dropped was
-                        // this dismiss — so a published post left the crew
-                        // screen sitting there afterwards, which reads as the
-                        // wizard asking to be filled in a second time.
-                        guard case .published = outcome else { return }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                            // Tell the recap BEFORE dismissing: it re-reads and
-                            // has its confirmation ready by the time it's the
-                            // screen on top.
-                            onPosted()
-                            dismiss()
-                        }
+        PhotoPromptView(
+            workoutId: myWorkoutId,
+            workoutType: session.isRunning ? "running" : "walking",
+            stats: composerStats(),
+            crew: PhotoPromptView.Crew(
+                sessionId: session.id,
+                coauthorIds: coauthorIds(),
+                coauthorNames: coauthorNames(),
+                walkCard: combinedRouteCard,
+                note: crewNote
+            ),
+            skipTitle: "Not now",
+            // The recap already checked the day's posting window before
+            // offering this step.
+            resolvesWithoutPostingWindow: false,
+            onFinish: { outcome in
+                switch outcome {
+                case .skipped:
+                    dismiss()
+                case .published:
+                    // The walk's snaps were offered here; once one is on the
+                    // walk's post they're spent, as on the solo prompt.
+                    MidRunPhotoStash.clear()
+                    // Deferred a beat, NOT inline: the composer closing and
+                    // this screen dismissing are two presentation changes in
+                    // one transaction, and SwiftUI drops one of them — the
+                    // one it dropped was this dismiss, which left the screen
+                    // sitting there after a published post.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        // Tell the recap BEFORE dismissing: it re-reads and
+                        // has its confirmation ready by the time it's on top.
+                        onPosted()
+                        dismiss()
                     }
                 }
             }
-            .navigationTitle(session.isRunning ? "Post Your Run" : "Post Your Walk")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .foregroundColor(MADTheme.Colors.madWhite.opacity(0.7))
-                }
-            }
-        }
+        )
         .task { await loadRoutes() }
     }
 
-    // MARK: - Sections
+    // MARK: - Preview card
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("STEP 1 OF 3 · THE CREW")
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
-                .tracking(1.2)
-                .foregroundStyle(session.accentColor)
-            Text("One post, everyone on it")
-                .font(MADTheme.Typography.title2)
-                .foregroundStyle(MADTheme.Colors.madWhite)
-            Text(
-                "Everyone below is credited on one card — your routes drawn "
-                    + "together, and each of them can add their own photo to it."
-            )
-            .font(MADTheme.Typography.subheadline)
-            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.65))
-            .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    /// The routes, on ONE map, coloured and keyed exactly as the published
-    /// card will draw them.
-    ///
-    /// This screen used to stack a separate 150pt map per person and then
-    /// publish a post carrying only the poster's — so the wizard's own preview
-    /// was the clearest possible statement of a promise the post didn't keep.
-    /// Showing the real thing here is half the fix; the other half is that the
-    /// post now actually renders it.
-    @ViewBuilder
-    private var combinedRouteCard: some View {
+    /// Everyone's routes on ONE card, coloured and keyed exactly as the
+    /// published card will draw them. nil until at least one line has
+    /// loaded — the prompt shows the stats card meanwhile.
+    private var combinedRouteCard: AnyView? {
         let drawn = drawnRoutes
-        if !drawn.isEmpty {
-            let avatars = crewRouteAvatars
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                RouteArtView(
-                    coordinates: drawn.first?.coordinates ?? [],
-                    routeColor: drawn.first?.color ?? session.accentColor,
-                    companionRoutes: Array(drawn.dropFirst()),
-                    authorAvatar: drawn.first.flatMap { avatars[$0.id] },
-                    companionAvatars: avatars
-                )
-                .frame(height: 220)
-                .clipShape(RoundedRectangle(
-                    cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-                .overlay(
-                    RoundedRectangle(
-                        cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
-                        .strokeBorder(MADTheme.Colors.madWhite.opacity(0.1), lineWidth: 1)
-                )
-
-                FlowLayout(spacing: 10) {
-                    ForEach(drawn) { route in
-                        HStack(spacing: 5) {
-                            Capsule().fill(route.color).frame(width: 14, height: 4)
-                            Text(routeNames[route.id] ?? "a friend")
-                                .font(MADTheme.Typography.caption)
-                                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.75))
-                                .lineLimit(1)
-                        }
-                    }
-                }
-
-                if drawn.count < crew.count {
-                    // Said once, for the group, without naming anyone: an
-                    // indoor walk and a privacy choice must read the same.
-                    Text("Routes appear for everyone who has one to share.")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.45))
-                }
-            }
-        }
-    }
-
-    private var crewSection: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
-            ForEach(crew) { participant in
-                crewCard(participant)
-            }
-        }
-    }
-
-    /// One participant: who they are, what they covered, where they went.
-    private func crewCard(_ participant: BuddyParticipant) -> some View {
-        let isYou = participant.userId == buddy.currentUserId
-
-        return VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            HStack(spacing: MADTheme.Spacing.md) {
-                AvatarView(
-                    name: participant.displayName,
-                    imageURL: participant.profileImageUrl,
-                    size: 44
-                )
-                .overlay(
-                    Circle().strokeBorder(
-                        isYou ? session.accentColor : .clear, lineWidth: 2)
-                )
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(isYou ? "You" : participant.displayName)
-                        .font(MADTheme.Typography.bodyBold)
-                        .foregroundStyle(MADTheme.Colors.madWhite)
-                        .lineLimit(1)
-                    Text("\(participant.bestDistance.milesText) mi")
-                        .font(MADTheme.Typography.subheadline)
-                        .monospacedDigit()
-                        .foregroundStyle(session.accentColor)
-                }
-
-                Spacer(minLength: MADTheme.Spacing.sm)
-
-                // Everyone on this list is credited, including someone still
-                // walking — the glyph says which of those two they are without
-                // implying the still-out one is any less on the post.
-                Image(
-                    systemName: participant.status == .active
-                        ? "figure.walk.motion" : "checkmark.circle.fill"
-                )
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(session.accentColor.opacity(0.9))
-                .accessibilityLabel(
-                    participant.status == .active
-                        ? "Still out — included on the post"
-                        : "Included on the post"
-                )
-            }
-
-            // The per-person 150pt map that used to live here is gone: the
-            // card above draws every route on ONE map, which is what the post
-            // does. A stack of separate maps described a post that has never
-            // existed. What's left per row is the state of THEIR route, in a
-            // line — still honest about what's missing, without repeating the
-            // picture.
-            routeFootnoteRow(for: participant)
-        }
-        .padding(MADTheme.Spacing.md)
-        .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.large)
-    }
-
-    /// One line about this person's trace: the colour it's drawn in, or why
-    /// there isn't one.
-    @ViewBuilder
-    private func routeFootnoteRow(for participant: BuddyParticipant) -> some View {
-        switch routes[participant.userId] ?? .pending {
-        case .loaded:
-            if let color = drawnRoutes.first(where: { $0.id == participant.userId })?.color {
-                HStack(spacing: 6) {
-                    Capsule().fill(color).frame(width: 14, height: 4)
-                    Text("Route on the map")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.55))
-                }
-                .padding(.vertical, MADTheme.Spacing.xs)
-            }
-        case .loading:
-            routeFootnote(icon: "arrow.triangle.2.circlepath", text: "Loading their route…")
-        case .pending:
-            routeFootnote(
-                icon: "arrow.triangle.2.circlepath",
-                text: "Route appears once their workout finishes syncing."
+        guard let first = drawn.first else { return nil }
+        let avatars = crewRouteAvatars
+        return AnyView(
+            RouteArtView(
+                coordinates: first.coordinates,
+                routeColor: first.color,
+                companionRoutes: Array(drawn.dropFirst()),
+                authorAvatar: avatars[first.id],
+                companionAvatars: avatars,
+                showsMileMarkers: false
             )
-        case .unavailable:
-            // Indoor walk, or maps not shared — one quiet message for both,
-            // so the row never outs a privacy setting.
-            routeFootnote(icon: "map", text: "No route map for this one.")
-        }
-    }
-
-    private func routeFootnote(icon: String, text: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-            Text(text)
-                .font(MADTheme.Typography.caption)
-        }
-        .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.45))
-        .padding(.vertical, MADTheme.Spacing.xs)
-    }
-
-    /// Buddies still mid-walk can't be credited yet — a post made now simply
-    /// won't carry them (coauthors are settled at create time, server-side).
-    /// Say so instead of silently dropping them from the crew list.
-    private var stillOutNote: some View {
-        HStack(spacing: MADTheme.Spacing.sm) {
-            Image(systemName: "figure.walk.motion")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
-            Text(stillOutText)
-                .font(MADTheme.Typography.caption)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.55))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
-                .fill(MADTheme.Colors.madWhite.opacity(0.05))
         )
     }
 
-    private var continueButton: some View {
-        VStack(spacing: 6) {
-            Button {
-                MADHaptics.action()
-                showComposer = true
-            } label: {
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    Image(systemName: "camera.fill")
-                    Text("Continue — add your photo")
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .bold))
-                }
-                .font(MADTheme.Typography.bodyBold)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, MADTheme.Spacing.md)
-                .background(Capsule().fill(session.accentColor))
-                .foregroundStyle(MADTheme.Colors.madWhite)
-            }
-            .buttonStyle(.plain)
-
-            Text("Step 2 · photo — Step 3 · caption & share")
-                .font(MADTheme.Typography.caption)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.45))
+    /// Who's credited on the post, and anyone still out — the crew list this
+    /// screen used to draw as cards, said in one line under the preview.
+    private var crewNote: String? {
+        let others = crewExcludingMe.map(\.displayName)
+        guard !others.isEmpty else { return nil }
+        let names: String
+        switch others.count {
+        case 1: names = others[0]
+        case 2: names = "\(others[0]) and \(others[1])"
+        default: names = "\(others[0]), \(others[1]) and \(others.count - 2) more"
         }
-        .padding(.top, MADTheme.Spacing.sm)
+        var line = "With \(names) — everyone's on this one post."
+        if !stillOut.isEmpty { line += " \(stillOutText)" }
+        return line
     }
 
     // MARK: - Crew
@@ -379,16 +169,6 @@ struct BuddyPostWizardView: View {
         return out
     }
 
-    /// user id → the name to print beside their line.
-    private var routeNames: [String: String] {
-        var out: [String: String] = [:]
-        for participant in crew {
-            out[participant.userId] =
-                participant.userId == buddy.currentUserId ? "You" : participant.displayName
-        }
-        return out
-    }
-
     /// The crew in the exact order `coauthorIds()` sends them, which is the
     /// order the server writes `post_coauthors` rows and therefore the order
     /// the card assigns colours in.
@@ -428,8 +208,7 @@ struct BuddyPostWizardView: View {
             ? names.joined(separator: " and ")
             : "\(names.count) buddies"
         let verb = names.count == 1 ? "is" : "are"
-        return "\(list) \(verb) still out — still on the post, but the distance "
-            + "shown is where they'd got to when you finished."
+        return "\(list) \(verb) still out, so their distance is where they'd got to."
     }
 
     // MARK: - Composer hand-off
