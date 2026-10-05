@@ -54,6 +54,7 @@ async function cleanup() {
   await db.query(`DELETE FROM notification_settings WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM user_blocks WHERE blocker_id = ANY($1::text[]) OR blocked_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM friendships WHERE user_id = ANY($1::text[]) OR friend_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM workout_splits WHERE workout_id LIKE $1`, [P + "%"]);
   await db.query(`DELETE FROM workouts WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM users WHERE user_id = ANY($1::text[])`, [ALL]);
 }
@@ -121,6 +122,11 @@ async function seed() {
              'running', NOW() - INTERVAL '1 minute', 100, 600)`,
     [P + "w1", OWNER],
   );
+  await db.query(
+    `INSERT INTO workout_splits (workout_id, split_number, split_duration, split_distance, split_pace)
+     VALUES ($1, 1, 480, 1.0, 480), ($1, 2, 6, 0.02, 300), ($1, 3, 200, 1.0, 200)`,
+    [P + "w1"],
+  );
   // ...and 1.5 miles on this date last year (the "1 year ago today" moment).
   await db.query(
     `INSERT INTO workouts (workout_id, user_id, distance, local_date, date, timezone_offset,
@@ -176,8 +182,8 @@ async function main() {
     "photos_shared", "tokens_spent_today", "total_hypes", "total_miles", "total_users"]);
   check("community values are all numbers", Object.values(body.community).every((v) => typeof v === "number"), true);
   check("me fields", Object.keys(body.me).sort(), [
-    "local_time", "mile_done", "miles_today", "minutes_to_midnight", "running_now", "streak", "username",
-    "year_ago_miles"]);
+    "fastest_mile_month", "live_miles", "local_date", "local_time", "longest_run", "mile_done", "miles_today",
+    "minutes_to_midnight", "running_now", "streak", "username", "year_ago_miles"]);
   const text = JSON.stringify(body);
   check("no emails anywhere", text.includes("@"), false);
   check("no real names anywhere", /Secret|Surname/.test(text), false);
@@ -199,6 +205,10 @@ async function main() {
   check("finished item fields", Object.keys(body.friends_finished[0] ?? {}).sort(), ["id", "miles", "name"]);
   check("finished ids are opaque", body.friends_finished.every((f) => /^[0-9a-f]{16}$/.test(f.id)), true);
   check("my miles a year ago", body.me.year_ago_miles, 1.5);
+  check("local date shape", /^\d{4}-\d{2}-\d{2}$/.test(body.me.local_date), true);
+  check("not running → no live miles", body.me.live_miles, null);
+  check("my longest run", body.me.longest_run, 1.5);
+  check("my fastest mile this month (full splits only)", body.me.fastest_mile_month, 480);
   // ── friends at risk: my friends only, streak >= 3, nothing logged today, not blocked ──
   check("friends at risk", body.friends_at_risk, { count: 2, top: [{ name: "runner", streak: 40 }, { name: "nudger", streak: 9 }] });
 
@@ -206,6 +216,16 @@ async function main() {
   check("alerts", body.alerts.map((a) => [a.kind, a.from]), [["hype", "nudger"], ["nudge", "nudger"]]);
   check("alert fields", Object.keys(body.alerts[0] ?? {}).sort(), ["at", "from", "id", "kind"]);
   check("alert ids are opaque", body.alerts.every((a) => /^[0-9a-f]{16}$/.test(a.id)), true);
+
+  // ── my own live run ──
+  await db.query(
+    `INSERT INTO live_tracking_sessions (user_id, workout_type, distance_miles, last_seen_at)
+     VALUES ($1, 'running', 0.73, NOW() - INTERVAL '5 seconds')`,
+    [OWNER],
+  );
+  const live = await (await feed({ authorization: `Display ${key}` })).json();
+  check("running now → live miles", [live.me.running_now, live.me.live_miles], [true, 0.73]);
+  check("I'm not in my own friends running list", live.friends_running.some((f) => f.name === "owner"), false);
 
   // ── admin endpoints ──
   const admin = (path, method = "GET", user = ADMIN) =>
