@@ -41,6 +41,11 @@ final class DailyStepsSyncService {
                 return
             }
             Task { [weak self] in
+                // Step deliveries are the app's most frequent background wake.
+                // If an earlier wake found HealthKit locked (a Watch walk
+                // synced to a pocketed phone), this one finishes the widget's
+                // today-refresh instead of leaving it stale until launch.
+                await MADBackgroundService.shared.runPendingTodayRefreshIfPossible()
                 await self?.syncNow(force: false)
                 completionHandler()
             }

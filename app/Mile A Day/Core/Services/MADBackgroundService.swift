@@ -35,9 +35,22 @@ final class MADBackgroundService: NSObject, ObservableObject {
     
     /// A background pass that ran while HealthKit's store was locked, so it
     /// could not read today's miles and deliberately wrote nothing. The next
-    /// unlock re-runs it (`protectedDataDidBecomeAvailable`) — otherwise the
-    /// widget keeps whatever it last knew until the app is opened.
-    private var todayRefreshPendingUnlock = false
+    /// unlock re-runs it — otherwise the widget keeps whatever it last knew
+    /// until the app is opened.
+    ///
+    /// PERSISTED, and re-checked on every wake (`runPendingTodayRefreshIfPossible`),
+    /// because `protectedDataDidBecomeAvailable` alone almost never fires: the
+    /// common case is a Watch walk syncing to a phone in a pocket — the
+    /// observer wakes us LOCKED, the read fails, and iOS suspends the process
+    /// seconds later. A suspended app is not told about the unlock, so the
+    /// widget read "not done" all day for a mile already walked. The step
+    /// observer wakes us constantly once the phone is in use, and any of those
+    /// wakes can finish the job; an in-memory flag also died with the process.
+    private static let todayRefreshPendingKey = "MAD_TodayRefreshPendingUnlock"
+    private var todayRefreshPendingUnlock: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.todayRefreshPendingKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.todayRefreshPendingKey) }
+    }
 
     private override init() {
         super.init()
@@ -54,11 +67,20 @@ final class MADBackgroundService: NSObject, ObservableObject {
     }
 
     @objc private func protectedDataDidBecomeAvailable() {
-        guard todayRefreshPendingUnlock else { return }
-        todayRefreshPendingUnlock = false
         Task { @MainActor in
-            await self.performBackgroundSync(reason: .protectedDataAvailable)
+            await self.runPendingTodayRefreshIfPossible()
         }
+    }
+
+    /// Finish a today-refresh an earlier LOCKED wake had to abandon, if this
+    /// wake can read HealthKit. Cheap when nothing is pending; call it from
+    /// any background wake (the step observer does).
+    @MainActor
+    func runPendingTodayRefreshIfPossible() async {
+        guard todayRefreshPendingUnlock,
+              UIApplication.shared.isProtectedDataAvailable else { return }
+        todayRefreshPendingUnlock = false
+        await performBackgroundSync(reason: .protectedDataAvailable)
     }
     
     // MARK: - Public API
@@ -173,6 +195,11 @@ final class MADBackgroundService: NSObject, ObservableObject {
     
     @MainActor
     private func performBackgroundWork() async {
+        // An in-app walk whose HealthKit save failed or timed out is staged on
+        // disk; land it before reading today's miles, or the read below (and
+        // the widget it feeds) reports a day without it. No-ops while locked.
+        await PendingWorkoutSaver.shared.retryIfNeeded()
+
         // Today's miles FIRST, and wait for HealthKit's actual answer.
         //
         // This used to read `healthManager.todaysDistance` as soon as
@@ -191,6 +218,7 @@ final class MADBackgroundService: NSObject, ObservableObject {
         let success = await fetchLatestWorkoutData()
 
         if todayAnswered {
+            todayRefreshPendingUnlock = false
             // Check if user completed their mile goal
             checkForMileCompletion()
             updateTodayWidget()
