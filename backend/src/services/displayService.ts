@@ -8,6 +8,7 @@ import { effectiveStreakSql, fetchTodayCoverage } from "./streakFeatureCore.js";
 import { localNowSql } from "./dailyResetTime.js";
 import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
 import { ownedFlameyItems, servedFlameyLook } from "./flameyService.js";
+import { postCommentMatchSql } from "./posts/postSql.js";
 
 const db = PostgresService.getInstance();
 
@@ -48,6 +49,10 @@ const MAX_MESSAGES = 3;
 export const MESSAGE_MAX_CHARS = 48;
 const MEDAL_WINDOW_HOURS = 48;
 const MAX_MEDALS = 3;
+// Comments on posts the owner is tagged in (a friend's collab or buddy-walk
+// post): the last day's, newest first.
+const COMMENT_WINDOW_HOURS = 24;
+const MAX_COMMENTS = 3;
 /** Flamey's Closet slots the desk can draw (the rest stay off the wire). */
 const DESK_FLAMEY_SLOTS = ["color", "head", "eyes", "costume"] as const;
 // App Store reviews (founder mode): Apple's public customer-reviews feed.
@@ -370,6 +375,11 @@ export interface DisplayFeed {
     /** Medals they earned in the last 48 h (newest first). */
     medals: { id: string; name: string; age_s: number }[];
   };
+  /** New comments (last 24 h, newest first) on posts the owner is tagged in:
+   *  someone else's post where they are an accepted coauthor. Commenter by
+   *  username only; text cleaned to the panel's characters. The owner can
+   *  read every one of these on the post itself. */
+  comments: { id: string; from: string; text: string; age_s: number }[];
   /** Founder mode: newest App Store reviews, only on admins' desks. */
   reviews: DeskReview[];
   /** Unexpired desk messages sent TO the owner (newest first). */
@@ -386,7 +396,7 @@ export interface DisplayFeed {
 
 export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
   const [community, meRows, todayMiles, coverage, friends, alerts, finished, atRisk, days, messages,
-         closetRows, owned, medals, roleRows] = await Promise.all([
+         closetRows, owned, medals, roleRows, comments] = await Promise.all([
     getCommunity(),
     db.query<{
       username: string | null;
@@ -576,6 +586,41 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
       [userId],
     ),
     db.query<{ role: string | null }>(`SELECT role FROM users WHERE user_id = $1`, [userId]),
+    // Comments on posts the owner is tagged in. Same thread rule as the app
+    // (postCommentMatchSql: the post, its workout, every leg of a buddy
+    // walk); never their own comments; blocks either way hide a comment,
+    // exactly as in the thread.
+    db.query<{ id: string; from: string | null; text: string; age_s: number }>(
+      `WITH tagged AS (
+         SELECT p.post_id, p.workout_id, p.buddy_session_id
+           FROM posts p
+          WHERE p.deleted_at IS NULL AND p.user_id <> $1
+            AND ((p.coauthor_user_id = $1 AND p.coauthor_status = 'accepted')
+                 OR EXISTS (SELECT 1 FROM post_coauthors pca
+                             WHERE pca.post_id = p.post_id AND pca.user_id = $1
+                               AND pca.status = 'accepted'))
+       ), hits AS (
+         SELECT DISTINCT ON (c.comment_id) c.comment_id, c.user_id, c.content, c.created_at
+           FROM tagged t
+           JOIN post_comments c ON ${postCommentMatchSql("c", "t")}
+          WHERE c.deleted_at IS NULL
+            AND c.user_id <> $1
+            AND c.created_at > NOW() - INTERVAL '${COMMENT_WINDOW_HOURS} hours'
+            AND NOT EXISTS (
+              SELECT 1 FROM user_blocks b
+               WHERE (b.blocker_id = $1 AND b.blocked_id = c.user_id)
+                  OR (b.blocker_id = c.user_id AND b.blocked_id = $1))
+          ORDER BY c.comment_id
+       )
+       SELECT encode(sha256(('comment:' || h.comment_id::text)::bytea), 'hex') AS id,
+              u.username AS "from", h.content AS text,
+              EXTRACT(EPOCH FROM (NOW() - h.created_at))::int AS age_s
+         FROM hits h
+         JOIN users u ON u.user_id = h.user_id
+        ORDER BY h.created_at DESC
+        LIMIT ${MAX_COMMENTS}`,
+      [userId],
+    ),
   ]);
   const isAdmin = roleRows[0]?.role === "admin";
   const reviews = isAdmin ? await latestReviews() : [];
@@ -617,6 +662,12 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
       }),
     },
     reviews,
+    comments: comments.map((c) => ({
+      id: c.id.slice(0, 16),
+      from: c.from ?? "FRIEND",
+      text: sanitizeDisplayText(c.text) ?? "",
+      age_s: Math.max(0, Number(c.age_s) || 0),
+    })).filter((c) => c.text),
     messages: messages.map((m) => ({
       id: m.id.slice(0, 16),
       from: m.from ?? "MILE A DAY",
