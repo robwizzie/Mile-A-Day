@@ -266,11 +266,11 @@ def clock(app, b, now, t):
     fill(b, 0, 17, 64, 18, MAROON)
     streak = int(app.value(11))
     if app.mile_done():
-        w = 7 + text_width("MILE DONE")
+        w = 7 + text_width("MILE DONE")       # rows 19-25, a blank row, then 27-31
         x = (64 - w) // 2
-        draw_icon(b, x, 20, "check")
-        draw_text(b, x + 7, 20, "MILE DONE", WHITE)
-        draw_box(b, 0, 64, 27, "%d DAY STREAK" % streak, GREEN, F3)
+        draw_icon(b, x, 19, "check", GREEN)
+        draw_text(b, x + 7, 19, "MILE DONE", GREEN)
+        draw_box(b, 0, 64, 27, "%d DAY STREAK" % streak, WHITE, F3)
         return
     if s is None:
         return

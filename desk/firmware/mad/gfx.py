@@ -35,7 +35,7 @@ WATER, WATER_LIGHT = 25, 26
 palette[WATER] = 0x082050
 palette[WATER_LIGHT] = 0x285890
 GREEN = 27                       # "mile done" check
-palette[GREEN] = 0x0C5A14
+palette[GREEN] = 0x00A000       # pure green: stays green (not grey) when dimmed at night
 LOG = 28                         # campfire logs
 palette[LOG] = 0x3C1806
 # Streak heatmap: light for a mile, deeper red the further you went
