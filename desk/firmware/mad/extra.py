@@ -4,7 +4,7 @@
 # reviews. Split out of fx.py to keep memory free.
 import math
 import random
-from mad.gfx import (glyph, BLACK, MAROON_DIM, MAROON, RED, WHITE, FAR, SPARK, GREEN,
+from mad.gfx import (fit, miles_text, glyph, BLACK, MAROON_DIM, MAROON, RED, WHITE, FAR, SPARK, GREEN,
                      FL_YELLOW, FL_GOLD, FL_ORANGE, FL_DEEP, HEAT_L, HEAT_D, F5, F3, FB,
                      text_width, draw_text, draw_box, blit, fill, draw_icon, icon_width,
                      ease, ease_out)
@@ -252,6 +252,39 @@ def comment(app, b, ev, t, now, dt):
     typed(b, x0, 64, 4, who, t - 0.2, RED, F3, 0.04)
     typed(b, x0, 64, 10, "COMMENTED", t - 0.2 - 0.04 * len(who), WHITE, F3, 0.04)
     fill(b, x0 + 3, 16, 61, 17, MAROON_DIM)
+
+
+# ---------------- a friend got their mile in ----------------
+def _clock(secs):
+    h, m, s = secs // 3600, secs // 60 % 60, secs % 60
+    return "%d:%02d:%02d" % (h, m, s) if h else "%d:%02d" % (m, s)
+
+
+def friendmile(app, b, ev, t, now, dt):
+    """<NAME> / MILE IN! next to the cheering mascot, then their day's
+    numbers one at a time (miles, time, best pace), confetti in green and gold."""
+    name, miles, secs, pace = ev[1], ev[2], ev[3], ev[4]
+    x0 = mascot_at_left(app, b, now, t)
+    fit(b, x0, 64, 1, name, WHITE, F5, t)
+    typed(b, x0, 64, 9, "MILE IN!", t - 0.5, GREEN)
+    stats = [(miles_text(miles, 41), "MILES")]
+    if secs > 0:
+        stats.append((_clock(secs), "TIME"))
+    if pace:
+        stats.append((_clock(int(pace)), "BEST PACE"))
+    if t > 1.3:
+        k = int((t - 1.3) // 2.2) % len(stats)
+        u = (t - 1.3) % 2.2
+        value, label = stats[k]
+        y = 18 + (0 if u > 0.25 else int((1 - u / 0.25) * 4))   # each slides up into place
+        fit(b, x0, 64, y, value, WHITE if u > 0.25 else FAR, F5, t)
+        fit(b, x0, 64, 26, label, RED, F3, t)
+    if 0.5 < t < 0.6 and not app.popped:
+        app.popped = True
+        burst(app, 11, 12, 18, 14, (GREEN, FL_GOLD, WHITE))
+    if random.random() < 0.08:
+        burst(app, random.uniform(24, 62), random.uniform(0, 6), 3, 6, (GREEN, FL_GOLD, WHITE))
+    particles(app, b, dt, gravity=6)
 
 
 # ---------------- holiday morning greeting ----------------

@@ -3,7 +3,7 @@ import { PostgresService } from "./DbService.js";
 import { getPublicStats } from "./publicStatsService.js";
 import { START_OF_TODAY_ET_SQL, TODAY_ET_DATE_SQL } from "./dailyResetTime.js";
 import { LIVE_PRESENCE_WINDOW_SECONDS } from "./liveTrackingService.js";
-import { DAILY_GOAL_TOLERANCE, getTodayMiles } from "./workoutService.js";
+import { DAILY_GOAL_TOLERANCE, getTodayMiles, getTodayStats } from "./workoutService.js";
 import { effectiveStreakSql, fetchTodayCoverage } from "./streakFeatureCore.js";
 import { localNowSql } from "./dailyResetTime.js";
 import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
@@ -46,6 +46,10 @@ const AT_RISK_MIN_STREAK = 3; // same floor as the admin "at risk" panel
 const HEATMAP_DAYS = 64;       // one per pixel column of the panel
 const MESSAGE_TTL_HOURS = 24;
 const MAX_MESSAGES = 3;
+// "<friend> got their mile in!": the same announcements the owner's phone
+// gets (so audience and block rules already applied), from the last hour.
+const FRIEND_MILE_WINDOW_MINUTES = 60;
+const MAX_FRIEND_MILES = 3;
 export const MESSAGE_MAX_CHARS = 48;
 const MEDAL_WINDOW_HOURS = 48;
 const MAX_MEDALS = 3;
@@ -357,6 +361,13 @@ async function boxActivity(boxId: string, userId: string): Promise<DeskActivity[
          LEFT JOIN users tu ON tu.user_id = m.to_user_id
         WHERE (m.to_user_id = $1 OR m.from_user_id = $1) AND m.created_at > NOW() - ${days}
        UNION ALL
+       SELECT n.created_at, 'friend_mile', '@' || su.username || ' got their mile in · ' || n.body
+         FROM in_app_notifications n
+         JOIN users su ON su.user_id = (n.data->>'user_id')
+        WHERE n.user_id = $1 AND n.type = 'friend_activity' AND n.data->>'kind' = 'mile_completed'
+          AND n.created_at > NOW() - ${days}
+          AND ${blocked("su.user_id")}
+       UNION ALL
        SELECT ub.earned_at, 'medal', 'New medal: ' || b.name
          FROM user_badges ub JOIN badges b ON b.badge_id = ub.badge_id
         WHERE ub.user_id = $1 AND ub.earned_at > NOW() - ${days}
@@ -600,6 +611,9 @@ export interface DisplayFeed {
    *  username only; text cleaned to the panel's characters. The owner can
    *  read every one of these on the post itself. */
   comments: { id: string; from: string; text: string; age_s: number }[];
+  /** Friends who got their mile in (the owner's own "got their mile in!"
+   *  notifications, last hour): their day so far. */
+  friends_miles: { id: string; name: string; miles: number; seconds: number; best_pace: number | null; age_s: number }[];
   /** This box's remote settings (style / mascot ids, rev bumps per change). */
   desk: DeskSettings | null;
   /** Remote taps for this box from the last 3 min: opaque id + "show". */
@@ -620,7 +634,7 @@ export interface DisplayFeed {
 
 export async function getDisplayFeed(userId: string, keyId?: string): Promise<DisplayFeed> {
   const [community, meRows, todayMiles, coverage, friends, alerts, finished, atRisk, days, messages,
-         closetRows, owned, medals, roleRows, comments, desk, commands] = await Promise.all([
+         closetRows, owned, medals, roleRows, comments, desk, commands, friendMiles] = await Promise.all([
     getCommunity(),
     db.query<{
       username: string | null;
@@ -858,7 +872,30 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
           [keyId],
         )
       : Promise.resolve([] as { id: string; kind: string }[]),
+    // The owner's own "<friend> got their mile in!" announcements.
+    db.query<{ id: string; sender: string; name: string; age_s: number }>(
+      `SELECT encode(sha256(('mile:' || n.id::text)::bytea), 'hex') AS id,
+              n.data->>'user_id' AS sender, su.username AS name,
+              EXTRACT(EPOCH FROM (NOW() - n.created_at))::int AS age_s
+         FROM in_app_notifications n
+         JOIN users su ON su.user_id = (n.data->>'user_id')
+        WHERE n.user_id = $1
+          AND n.type = 'friend_activity'
+          AND n.data->>'kind' = 'mile_completed'
+          AND n.created_at > NOW() - INTERVAL '${FRIEND_MILE_WINDOW_MINUTES} minutes'
+          AND (n.data->>'user_id') IS DISTINCT FROM $1
+          AND su.username IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM user_blocks b
+             WHERE (b.blocker_id = $1 AND b.blocked_id = su.user_id)
+                OR (b.blocker_id = su.user_id AND b.blocked_id = $1))
+        ORDER BY n.created_at DESC
+        LIMIT ${MAX_FRIEND_MILES}`,
+      [userId],
+    ),
   ]);
+  // Their day so far, the same numbers the notification shows.
+  const friendStats = await Promise.all(friendMiles.map((f) => getTodayStats(f.sender).catch(() => null)));
   const isAdmin = roleRows[0]?.role === "admin";
   const reviews = isAdmin ? await latestReviews() : [];
   const look = servedFlameyLook(closetRows[0]?.flamey_look, owned);
@@ -899,6 +936,14 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
       }),
     },
     reviews,
+    friends_miles: friendMiles.map((f, i) => ({
+      id: f.id.slice(0, 16),
+      name: f.name,
+      miles: Math.round((friendStats[i]?.miles ?? 0) * 100) / 100,
+      seconds: Math.round(friendStats[i]?.durationSeconds ?? 0),
+      best_pace: friendStats[i]?.bestSplitPaceSecMi == null ? null : Math.round(friendStats[i]!.bestSplitPaceSecMi!),
+      age_s: Math.max(0, Number(f.age_s) || 0),
+    })),
     desk,
     commands: commands.map((c) => ({ id: c.id.slice(0, 16), kind: c.kind })),
     comments: comments.map((c) => ({

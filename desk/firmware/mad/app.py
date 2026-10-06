@@ -9,7 +9,7 @@ from mad.gfx import (BLACK, MAROON_DIM, MAROON, RED, WHITE, FL_YELLOW, GREEN,
                      text_width, draw_text, ink, draw_box, draw_centered, blit,
                      fill, draw_icon, icon_width, commas, short, num, ease,
                      ease_out, art_bitmap, set_dim, upper_name)
-LAZY = ("message", "holiday", "countdown", "medal", "review", "comment")   # scenes in extra.py
+LAZY = ("message", "holiday", "countdown", "medal", "review", "comment", "friendmile")   # scenes in extra.py
 MODES = (2, 4, 5, 6, 7)       # styles drawn by mad/modes.py
 
 STYLES = ("CLASSIC", "SPOTLIGHT", "ARCADE", "BIG", "CAMPFIRE", "RACE", "CLOCK")
@@ -209,6 +209,8 @@ class App:
         self.seen_medals = None
         self.seen_reviews = None
         self.seen_comments = None
+        self.seen_miles = None
+        self.cheered = {}                # friend name -> when their run was celebrated
         self.desk_rev = 0                # last phone-remote change applied (nvm)
         self.seen_cmds = None
         self.ny_countdown = False
@@ -275,6 +277,7 @@ class App:
             self._messages(data.get("messages") or ())
             self._reviews(data.get("reviews") or ())
             self._comments(data.get("comments") or ())
+            self._friend_miles(data.get("friends_miles") or (), now)
             self._desk(data.get("desk"), now)
             self._commands(data.get("commands") or (), now)
             names = tuple(upper_name(f.get("name")) for f in self.friends)
@@ -359,6 +362,26 @@ class App:
                 if self.mode in ("dash", "show"):
                     self.start_show(now)
         self.seen_cmds = (ids + [i for i in self.seen_cmds if i not in ids])[:10]
+
+    def _friend_miles(self, miles, now):
+        """'<friend> got their mile in!' (the same announcement as the phone):
+        a celebration with their day's numbers. Skipped if their run's finish
+        was just celebrated (same run, a few minutes apart)."""
+        ids = [m.get("id") for m in miles]
+        first = self.seen_miles is None
+        seen = self.seen_miles or []
+        for m in reversed(miles):                      # oldest first
+            if m.get("id") in seen or (first and (m.get("age_s") or 0) > 900):
+                continue
+            name = upper_name(m.get("name"))
+            if now - self.cheered.get(name, -1e9) < 2400:
+                continue
+            self.cheered[name] = now
+            self.push(("friendmile", name, float(m.get("miles") or 0), int(m.get("seconds") or 0),
+                       m.get("best_pace")))
+        self.seen_miles = (ids + [i for i in seen if i not in ids])[:10]
+        for n in [n for n, t in self.cheered.items() if now - t > 3600]:
+            self.cheered.pop(n)
 
     def _comments(self, comments):
         """New comments on posts the owner is tagged in: each plays once. At
@@ -461,6 +484,7 @@ class App:
             seen = self.seen_running.get(name)
             if f.get("id") not in self.seen_finished and seen is not None and now - seen < 3 * 3600:
                 self.push(("finished", name, float(f.get("miles") or 0)))
+                self.cheered[name] = now
                 self.seen_running.pop(name, None)
         self.seen_finished = (ids + [i for i in self.seen_finished if i not in ids])[:12]
         for name in [n for n, t in self.seen_running.items() if now - t > 3 * 3600]:
@@ -628,7 +652,7 @@ class App:
                    ("streak", (streak // 50 + 1) * 50), ("atrisk", 3, (("MEGSMILES", 213), ("DAVE", 513), ("JWIS35", 88))), ("morning",),
                    ("yearago", 1.32, streak), ("pr", "LONGEST RUN", "5.2 MI", "NEW PR!"),
                    ("pr", "FASTEST MILE", "7:42", "OCT PR!"), ("newyear", 2027), ("countdown", 15.0, 2027), ("message", "DAVE", "NICE MILE [FIRE]"),
-                   ("medal", "MONTH STRONG"), ("comment", "DAVE", "NICE RUN [FIRE]"), ("review", 5, "LOVE THIS APP [FIRE]"),
+                   ("medal", "MONTH STRONG"), ("friendmile", "LAQUETA", 4.68, 6184, 1264), ("comment", "DAVE", "NICE RUN [FIRE]"), ("review", 5, "LOVE THIS APP [FIRE]"),
                    ("holiday", "THANKSGIVING"), ("recap",))
 
     def demo(self, now):

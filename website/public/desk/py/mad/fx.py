@@ -660,12 +660,13 @@ def newyear(app, b, ev, t, now, dt):
 
 
 # Loaded from mad/extra.py only when one plays (keeps boot memory down).
-LAZY = ("message", "holiday", "countdown", "medal", "review", "comment")
+LAZY = ("message", "holiday", "countdown", "medal", "review", "comment", "friendmile")
 
 SCENES = {
     "message": (None, 20.0),
     "medal": (None, 8.0),
     "comment": (None, 20.0),
+    "friendmile": (None, 9.0),
     "review": (None, 9.0),
     "holiday": (None, 7.5),
     "countdown": (None, 44.0),
