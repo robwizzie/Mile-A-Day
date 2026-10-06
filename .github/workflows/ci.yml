@@ -154,6 +154,10 @@ jobs:
       # management is admin-only and never returns the stored hash.
       - name: Desk display check
         run: node scripts/display-check.mjs
+      # The phone remote's live preview runs a copy of the desk's own code;
+      # it must match desk/firmware/mad (desk/sync-preview.sh).
+      - name: Desk preview code in sync
+        run: node scripts/desk-preview-check.mjs
       # The walk's lifecycle end to end. A scheduled walk was cancelled by the
       # 3h lobby sweep before anyone arrived, local_date was stamped in New
       # York for everyone, a finisher's synced workout only linked if the
