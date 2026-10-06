@@ -9,7 +9,7 @@ import {
   adminDeskBoxes,
   adminDeskBox,
   adminDeskBoxSettings,
-  adminDeskBoxShow,
+  adminDeskBoxTap,
   adminDeskBoxMessage,
 } from "../controllers/displayController.js";
 import {
@@ -73,7 +73,8 @@ adminRouter.post("/display-messages", adminSendDisplayMessage);
 adminRouter.get("/desk/boxes", adminDeskBoxes);
 adminRouter.get("/desk/box/:id", adminDeskBox);
 adminRouter.post("/desk/box/:id/settings", adminDeskBoxSettings);
-adminRouter.post("/desk/box/:id/show", adminDeskBoxShow);
+adminRouter.post("/desk/box/:id/show", adminDeskBoxTap("show"));
+adminRouter.post("/desk/box/:id/wake", adminDeskBoxTap("wake"));
 adminRouter.post("/desk/box/:id/message", adminDeskBoxMessage);
 adminRouter.get("/miles-by-day", milesByDay);
 adminRouter.get("/engagement", engagement);

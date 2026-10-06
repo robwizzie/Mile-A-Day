@@ -206,7 +206,7 @@ def main():
     style, mascot = load_choice()
     STAGE[0] = "APP"
     app = App(bmp, style, mascot, BUFS[1:])
-    app.night_hours = night_hours()
+    app.night_hours = app.night_default = night_hours()
     app.celebrated = load_celebrated()
     app.desk_rev = load_desk_rev()
     app.season_mode = (os.getenv("MAD_SEASON") or "AUTO").strip().upper()
@@ -316,6 +316,7 @@ def main():
         if net["key"]:
             target = feed_url
             headers["Authorization"] = "Display " + net["key"]
+            headers["X-Desk-State"] = app.state()     # what's on screen, for the phone remote
         r = net["requests"].get(target, headers=headers, timeout=15)
         try:
             if r.status_code in (401, 403) and net["key"]:

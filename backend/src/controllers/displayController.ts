@@ -5,7 +5,10 @@ import {
   DESK_STYLES,
   getDeskBox,
   listDeskBoxes,
-  queueBoxShow,
+  DESK_TAPS,
+  parseBoxState,
+  queueBoxTap,
+  recordBoxState,
   sendBoxMessage,
   setBoxSettings,
   createDisplayKey,
@@ -50,6 +53,10 @@ export async function requireDisplayKey(req: Request, res: Response, next: NextF
 export async function displayFeed(req: Request, res: Response) {
   const userId = (req as Request & { displayUserId?: string }).displayUserId!;
   const keyId = (req as Request & { displayKeyId?: string }).displayKeyId;
+  // The box says what's on its screen (style, mascot, awake, sleep hours) so
+  // the phone remote can show it as it is. Strictly parsed; best effort.
+  const state = parseBoxState(req.headers["x-desk-state"]);
+  if (state && keyId) recordBoxState(keyId, state).catch(() => undefined);
   try {
     res.json(await getDisplayFeed(userId, keyId));
   } catch (e: any) {
@@ -173,26 +180,45 @@ function deskIndex(v: unknown, max: number): number | null | undefined {
   return Number.isInteger(v) && (v as number) >= 0 && (v as number) < max ? (v as number) : undefined;
 }
 
-/** POST /admin/desk/box/:id/settings  JSON { style?: 0-6, mascot?: 0-1 } */
+function minutes(v: unknown): number | undefined {
+  return Number.isInteger(v) && (v as number) >= 0 && (v as number) < 1440 ? (v as number) : undefined;
+}
+
+/** POST /admin/desk/box/:id/settings
+ *  JSON { style?: 0-6, mascot?: 0-1, sleep?: {start, end} (minutes) | "never" | "default" } */
 export async function adminDeskBoxSettings(req: Request, res: Response) {
   noStore(res);
   const style = deskIndex(req.body?.style, DESK_STYLES.length);
   const mascot = deskIndex(req.body?.mascot, DESK_MASCOTS.length);
-  if (style === undefined || mascot === undefined || (style === null && mascot === null)) {
-    return res.status(400).json({ error: "style (0-6) and/or mascot (0-1) required" });
+  const raw = req.body?.sleep;
+  let sleep: [number, number] | "never" | "default" | undefined;
+  if (raw === "never" || raw === "default") sleep = raw;
+  else if (raw && typeof raw === "object") {
+    const a = minutes(raw.start), b = minutes(raw.end);
+    if (a === undefined || b === undefined || a === b) {
+      return res.status(400).json({ error: "sleep needs start and end (different minutes, 0-1439)" });
+    }
+    sleep = [a, b];
+  } else if (raw !== undefined) {
+    return res.status(400).json({ error: "sleep must be {start, end}, \"never\" or \"default\"" });
   }
-  const settings = await setBoxSettings(String(req.params.id ?? ""), style, mascot);
+  if (style === undefined || mascot === undefined || (style === null && mascot === null && sleep === undefined)) {
+    return res.status(400).json({ error: "style (0-6), mascot (0-1) and/or sleep required" });
+  }
+  const settings = await setBoxSettings(String(req.params.id ?? ""), { style, mascot, sleep });
   if (!settings) return res.status(404).json({ error: "No such desk" });
   res.json({ settings });
 }
 
-/** POST /admin/desk/box/:id/show — run that box's stat show (real data). */
-export async function adminDeskBoxShow(req: Request, res: Response) {
-  noStore(res);
-  const ok = await queueBoxShow(String(req.params.id ?? ""));
-  if (ok === null) return res.status(404).json({ error: "No such desk" });
-  if (!ok) return res.status(429).json({ error: "Slow down a little" });
-  res.status(201).json({ ok: true });
+/** POST /admin/desk/box/:id/show | /wake — stat show (real data) or wake for 30 min. */
+export function adminDeskBoxTap(kind: (typeof DESK_TAPS)[number]) {
+  return async (req: Request, res: Response) => {
+    noStore(res);
+    const ok = await queueBoxTap(String(req.params.id ?? ""), kind);
+    if (ok === null) return res.status(404).json({ error: "No such desk" });
+    if (!ok) return res.status(429).json({ error: "Slow down a little" });
+    res.status(201).json({ ok: true });
+  };
 }
 
 /** POST /admin/desk/box/:id/message  JSON { to: <box id>, text } */
