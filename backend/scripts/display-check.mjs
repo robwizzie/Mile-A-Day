@@ -50,6 +50,8 @@ function check(label, actual, expected) {
 
 async function cleanup() {
   await db.query(`DELETE FROM display_keys WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM desk_settings WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM desk_commands WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM post_comments WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM post_coauthors WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM posts WHERE user_id = ANY($1::text[])`, [ALL]);
@@ -242,7 +244,7 @@ async function main() {
   const body = await res.json();
 
   // ── exact whitelist ──
-  check("top-level fields", Object.keys(body).sort(), ["alerts", "comments", "community", "friends_at_risk", "friends_finished", "friends_running", "me", "messages", "reviews", "v"]);
+  check("top-level fields", Object.keys(body).sort(), ["alerts", "commands", "comments", "community", "desk", "friends_at_risk", "friends_finished", "friends_running", "me", "messages", "reviews", "v"]);
   check("community fields", Object.keys(body.community).sort(), [
     "active_7d", "badges_today", "hypes_today", "longest_streak", "miles_today",
     "miles_yesterday_same_time", "new_friends_today", "nudges_today", "out_running_now",
@@ -372,6 +374,41 @@ async function main() {
   check("message ids are opaque", withMsg.messages.every((m) => /^[0-9a-f]{16}$/.test(m.id)), true);
   const msgList = await (await admin("display-messages")).json();
   check("admin can list desk messages", msgList.messages.length >= 2, true);
+
+  // ── the desk remote: my own desk only ──
+  check("no remote settings yet", withMsg.desk, null);
+  check("no remote taps yet", withMsg.commands, []);
+  const post = (path, body, user = ADMIN) => fetch(`${base}/admin/${path}`, {
+    method: "POST",
+    headers: { "x-test-user": user, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  check("non-admin cannot use the remote", (await admin("desk", "GET", OWNER)).status, 403);
+  check("non-admin cannot set a style", (await post("desk/settings", { style: 1 }, OWNER)).status, 403);
+  check("bad style → 400", (await post("desk/settings", { style: 9 })).status, 400);
+  check("nothing to set → 400", (await post("desk/settings", {})).status, 400);
+  check("style string → 400", (await post("desk/settings", { style: "2" })).status, 400);
+  check("set style", (await (await post("desk/settings", { style: 2, mascot: 0 })).json()).settings, { style: 2, mascot: 0, rev: 1 });
+  check("set mascot keeps style", (await (await post("desk/settings", { mascot: 1 })).json()).settings, { style: 2, mascot: 1, rev: 2 });
+  check("unknown scene → 400", (await post("desk/play", { kind: "rm -rf" })).status, 400);
+  check("play a nudge", (await post("desk/play", { kind: "nudge" })).status, 201);
+  const adminFeed2 = await (await feed({ authorization: `Display ${adminKey}` })).json();
+  check("my board gets my settings", adminFeed2.desk, { style: 2, mascot: 1, rev: 2 });
+  check("my board gets my tap", adminFeed2.commands.map((c) => c.kind), ["nudge"]);
+  check("tap ids are opaque", adminFeed2.commands.every((c) => /^[0-9a-f]{16}$/.test(c.id)), true);
+  const ownerFeed3 = await (await feed({ authorization: `Display ${key}` })).json();
+  check("someone else's board gets none of it", [ownerFeed3.desk, ownerFeed3.commands], [null, []]);
+  const remote = await (await admin("desk")).json();
+  check("remote: me", remote.username, "admin");
+  check("remote: my settings", remote.settings, { style: 2, mascot: 1, rev: 2 });
+  check("remote: my board", remote.boards.map((b) => [b.label, b.online]), [["founder desk", true]]);
+  check("remote: who I can message (desk owners, not me)", remote.recipients, ["nudger", "owner"]);
+  check("remote: my sent messages", remote.messages.filter((m) => m.direction === "out").map((m) => [m.who, m.text]),
+    [["other", "NOT FOR YOU"], ["owner", "NICE MILE [FIRE] SCRIPTALERT1/SCRIPT [HEART]"]]);
+  check("remote: live data is my own feed", remote.live.me.username, "admin");
+  check("remote: no key hashes", JSON.stringify(remote).includes(stored[0].key_hash), false);
+  for (let i = 0; i < 29; i++) await post("desk/play", { kind: "hype" });
+  check("taps are rate-limited", (await post("desk/play", { kind: "hype" })).status, 429);
 
   // ── revoke ──
   const id = list.keys.find((k) => k.username === "owner").id;

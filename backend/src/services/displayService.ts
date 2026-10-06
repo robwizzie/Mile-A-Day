@@ -210,6 +210,113 @@ export async function listDisplayMessages(): Promise<DisplayMessageRow[]> {
   );
 }
 
+// ─── The desk remote (Admin -> My desk, on a phone) ────────────────────────
+// The owner picks their board's style and mascot, and taps "play on my desk"
+// for any scene. Both reach the board through its own feed (it polls every
+// ~15 s); the board itself still never writes anything.
+
+/** Board style / mascot ids, in the board's own order (mad/app.py). */
+export const DESK_STYLES = ["CLASSIC", "SPOTLIGHT", "ARCADE", "BIG", "CAMPFIRE", "RACE", "CLOCK"] as const;
+export const DESK_MASCOTS = ["RUNNER", "FLAMEY"] as const;
+/** Scenes the remote can play on a desk (the board maps each to a sample). */
+export const DESK_PLAYS = [
+  "demo", "show", "nudge", "hype", "friend", "finished", "atrisk", "mile", "streak",
+  "milestone", "user", "pr", "morning", "yearago", "recap", "newyear", "medal",
+  "review", "comment", "message", "holiday",
+] as const;
+const COMMAND_WINDOW_SECONDS = 180;   // a board plays a tap from the last 3 min
+const MAX_COMMANDS_PER_10_MIN = 30;
+const DESK_HISTORY_DAYS = 14;
+
+export interface DeskSettings { style: number | null; mascot: number | null; rev: number }
+
+export async function getDeskSettings(userId: string): Promise<DeskSettings | null> {
+  const rows = await db.query<DeskSettings>(
+    `SELECT style, mascot, rev FROM desk_settings WHERE user_id = $1`, [userId]);
+  return rows[0] ?? null;
+}
+
+/** Set the style and/or mascot (null leaves it as is). Bumps `rev`. */
+export async function setDeskSettings(
+  userId: string, style: number | null, mascot: number | null,
+): Promise<DeskSettings> {
+  const rows = await db.query<DeskSettings>(
+    `INSERT INTO desk_settings (user_id, style, mascot, rev, updated_at)
+     VALUES ($1, $2, $3, 1, NOW())
+     ON CONFLICT (user_id) DO UPDATE
+       SET style = COALESCE($2, desk_settings.style),
+           mascot = COALESCE($3, desk_settings.mascot),
+           rev = desk_settings.rev + 1,
+           updated_at = NOW()
+     RETURNING style, mascot, rev`,
+    [userId, style, mascot],
+  );
+  return rows[0];
+}
+
+/** Queue "play <kind> on my desk". Returns false when rate-limited. */
+export async function queueDeskCommand(userId: string, kind: string): Promise<boolean> {
+  const recent = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM desk_commands
+      WHERE user_id = $1 AND created_at > NOW() - INTERVAL '10 minutes'`, [userId]);
+  if ((recent[0]?.n ?? 0) >= MAX_COMMANDS_PER_10_MIN) return false;
+  await db.query(`DELETE FROM desk_commands WHERE user_id = $1 AND created_at < NOW() - INTERVAL '1 day'`, [userId]);
+  await db.query(`INSERT INTO desk_commands (user_id, kind) VALUES ($1, $2)`, [userId, kind]);
+  return true;
+}
+
+export interface DeskMessage { id: string; direction: "in" | "out"; who: string; text: string; at: string }
+
+/** Everything the phone remote shows: the owner's own settings, boards,
+ *  message history (to and from them), who they can message, and the same
+ *  live data their board gets. Owner-scoped: nothing about anyone else that
+ *  their own board doesn't already show. */
+export async function getDeskRemote(userId: string) {
+  const [me, settings, boards, messages, recipients, feed] = await Promise.all([
+    db.query<{ username: string | null }>(`SELECT username FROM users WHERE user_id = $1`, [userId]),
+    getDeskSettings(userId),
+    db.query<{ label: string; last_used_at: string | null }>(
+      `SELECT label, last_used_at::text FROM display_keys
+        WHERE user_id = $1 AND revoked_at IS NULL ORDER BY created_at`, [userId]),
+    db.query<DeskMessage>(
+      `SELECT encode(sha256(m.id::text::bytea), 'hex') AS id,
+              CASE WHEN m.to_user_id = $1 THEN 'in' ELSE 'out' END AS direction,
+              CASE WHEN m.to_user_id = $1 THEN COALESCE(fu.username, 'MILE A DAY')
+                   ELSE tu.username END AS who,
+              m.body AS text, m.created_at::text AS at
+         FROM display_messages m
+         JOIN users tu ON tu.user_id = m.to_user_id
+         LEFT JOIN users fu ON fu.user_id = m.from_user_id
+        WHERE (m.to_user_id = $1 OR m.from_user_id = $1)
+          AND m.created_at > NOW() - INTERVAL '${DESK_HISTORY_DAYS} days'
+        ORDER BY m.created_at DESC
+        LIMIT 50`, [userId]),
+    // People with a desk of their own (an active key), other than me.
+    db.query<{ username: string }>(
+      `SELECT DISTINCT u.username FROM display_keys k JOIN users u ON u.user_id = k.user_id
+        WHERE k.revoked_at IS NULL AND k.user_id <> $1 AND u.username IS NOT NULL
+        ORDER BY u.username`, [userId]),
+    getDisplayFeed(userId),
+  ]);
+  const now = Date.now();
+  return {
+    username: me[0]?.username ?? null,
+    styles: DESK_STYLES,
+    mascots: DESK_MASCOTS,
+    plays: DESK_PLAYS,
+    settings: settings ?? { style: null, mascot: null, rev: 0 },
+    boards: boards.map((b) => ({
+      label: b.label,
+      last_seen: b.last_used_at,
+      // last_used_at is stamped at most every 2 min; 10 min of silence = offline.
+      online: b.last_used_at != null && now - Date.parse(b.last_used_at) < 10 * 60 * 1000,
+    })),
+    messages: messages.map((m) => ({ ...m, id: m.id.slice(0, 16) })),
+    recipients: recipients.map((r) => r.username),
+    live: feed,
+  };
+}
+
 // ─── App Store reviews (founder mode, admins' desks only) ──────────────────
 
 export interface DeskReview { id: string; stars: number; title: string }
@@ -380,6 +487,10 @@ export interface DisplayFeed {
    *  username only; text cleaned to the panel's characters. The owner can
    *  read every one of these on the post itself. */
   comments: { id: string; from: string; text: string; age_s: number }[];
+  /** The owner's remote settings (style / mascot ids, rev bumps per change). */
+  desk: DeskSettings | null;
+  /** "Play on my desk" taps from the last 3 min: opaque id + scene name. */
+  commands: { id: string; kind: string }[];
   /** Founder mode: newest App Store reviews, only on admins' desks. */
   reviews: DeskReview[];
   /** Unexpired desk messages sent TO the owner (newest first). */
@@ -396,7 +507,7 @@ export interface DisplayFeed {
 
 export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
   const [community, meRows, todayMiles, coverage, friends, alerts, finished, atRisk, days, messages,
-         closetRows, owned, medals, roleRows, comments] = await Promise.all([
+         closetRows, owned, medals, roleRows, comments, desk, commands] = await Promise.all([
     getCommunity(),
     db.query<{
       username: string | null;
@@ -621,6 +732,15 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
         LIMIT ${MAX_COMMENTS}`,
       [userId],
     ),
+    getDeskSettings(userId),
+    db.query<{ id: string; kind: string }>(
+      `SELECT encode(sha256(('cmd:' || id::text)::bytea), 'hex') AS id, kind
+         FROM desk_commands
+        WHERE user_id = $1 AND created_at > NOW() - INTERVAL '${COMMAND_WINDOW_SECONDS} seconds'
+        ORDER BY created_at DESC
+        LIMIT 5`,
+      [userId],
+    ),
   ]);
   const isAdmin = roleRows[0]?.role === "admin";
   const reviews = isAdmin ? await latestReviews() : [];
@@ -662,6 +782,8 @@ export async function getDisplayFeed(userId: string): Promise<DisplayFeed> {
       }),
     },
     reviews,
+    desk,
+    commands: commands.map((c) => ({ id: c.id.slice(0, 16), kind: c.kind })),
     comments: comments.map((c) => ({
       id: c.id.slice(0, 16),
       from: c.from ?? "FRIEND",

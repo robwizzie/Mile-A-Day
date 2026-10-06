@@ -6,6 +6,9 @@ import {
   adminRevokeDisplayKey,
   adminListDisplayMessages,
   adminSendDisplayMessage,
+  adminDeskRemote,
+  adminDeskSettings,
+  adminDeskPlay,
 } from "../controllers/displayController.js";
 import {
   verifyAppleWeb,
@@ -64,6 +67,10 @@ adminRouter.post("/display-keys", adminCreateDisplayKey);
 adminRouter.post("/display-keys/:id/revoke", adminRevokeDisplayKey);
 adminRouter.get("/display-messages", adminListDisplayMessages);
 adminRouter.post("/display-messages", adminSendDisplayMessage);
+// The desk remote: the signed-in admin's own board(s).
+adminRouter.get("/desk", adminDeskRemote);
+adminRouter.post("/desk/settings", adminDeskSettings);
+adminRouter.post("/desk/play", adminDeskPlay);
 adminRouter.get("/miles-by-day", milesByDay);
 adminRouter.get("/engagement", engagement);
 adminRouter.get("/signups-by-day", signupsByDay);
