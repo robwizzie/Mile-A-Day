@@ -50,6 +50,9 @@ function check(label, actual, expected) {
 
 async function cleanup() {
   await db.query(`DELETE FROM display_keys WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM post_comments WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM post_coauthors WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM posts WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM display_messages WHERE to_user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM streak_coverage WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM user_badges WHERE user_id = ANY($1::text[])`, [ALL]);
@@ -157,6 +160,33 @@ async function seed() {
     `UPDATE users SET flamey_look = $2::jsonb WHERE user_id = $1`,
     [OWNER, JSON.stringify({ color: "sapphire", head: "ball_cap", eyes: "aviators", back: "red_cape" })],
   );
+  // Posts the owner is tagged in: RUNNER's collab (scalar coauthor) and
+  // DONE's buddy post (post_coauthors). Plus NUDGER's post without a tag,
+  // and a deleted collab.
+  const post = async (author) => (await db.query(
+    `INSERT INTO posts (user_id, media_url, local_date)
+     VALUES ($1, 'https://example.com/p.jpg', (NOW() AT TIME ZONE 'UTC')::date)
+     RETURNING post_id`, [author])).at(0).post_id;
+  const collab = await post(RUNNER);
+  await db.query(`UPDATE posts SET coauthor_user_id = $2, coauthor_status = 'accepted' WHERE post_id = $1`, [collab, OWNER]);
+  const buddy = await post(DONE);
+  await db.query(`INSERT INTO post_coauthors (post_id, user_id, status) VALUES ($1, $2, 'accepted')`, [buddy, OWNER]);
+  const untagged = await post(NUDGER);
+  const gone = await post(RUNNER);
+  await db.query(`UPDATE posts SET coauthor_user_id = $2, coauthor_status = 'accepted', deleted_at = NOW() WHERE post_id = $1`, [gone, OWNER]);
+  const comment = (postId, who, content, agoMin, deleted = false) => db.query(
+    `INSERT INTO post_comments (post_id, user_id, content, created_at, deleted_at)
+     VALUES ($1, $2, $3, NOW() - ($4 || ' minutes')::interval, CASE WHEN $5 THEN NOW() END)`,
+    [postId, who, content, String(agoMin), deleted],
+  );
+  await comment(collab, NUDGER, "Nice run \u{1F525} @owner", 5);      // shown
+  await comment(buddy, OTHER, "Great walk!", 3);                        // shown
+  await comment(collab, OWNER, "thanks", 2);                            // my own: no
+  await comment(collab, BLOCKED, "blocked words", 1);                   // blocked: no
+  await comment(collab, STRANGER, "old news", 60 * 30);                 // > 24 h: no
+  await comment(collab, NUDGER, "deleted words", 1, true);              // deleted: no
+  await comment(untagged, OTHER, "not my post", 1);                     // not tagged: no
+  await comment(gone, OTHER, "deleted post", 1);                        // post deleted: no
   // A streak token covered the owner's day 3 days ago (heatmap shows -1).
   await db.query(
     `INSERT INTO streak_coverage (user_id, local_date, kind)
@@ -212,7 +242,7 @@ async function main() {
   const body = await res.json();
 
   // ── exact whitelist ──
-  check("top-level fields", Object.keys(body).sort(), ["alerts", "community", "friends_at_risk", "friends_finished", "friends_running", "me", "messages", "reviews", "v"]);
+  check("top-level fields", Object.keys(body).sort(), ["alerts", "comments", "community", "friends_at_risk", "friends_finished", "friends_running", "me", "messages", "reviews", "v"]);
   check("community fields", Object.keys(body.community).sort(), [
     "active_7d", "badges_today", "hypes_today", "longest_streak", "miles_today",
     "miles_yesterday_same_time", "new_friends_today", "nudges_today", "out_running_now",
@@ -257,6 +287,11 @@ async function main() {
   check("heatmap: token-covered day", body.me.days[60], -1);
   check("heatmap: plain numbers only", body.me.days.every((d) => typeof d === "number"), true);
   check("no messages yet", body.messages, []);
+  // ── comments on posts I'm tagged in: newest first, nobody's own/blocked/old/deleted ──
+  check("tagged-post comments", body.comments.map((c) => [c.from, c.text]),
+        [["other", "GREAT WALK!"], ["nudger", "NICE RUN [FIRE] OWNER"]]);
+  check("comment fields", Object.keys(body.comments[0] ?? {}).sort(), ["age_s", "from", "id", "text"]);
+  check("comment ids are opaque", body.comments.every((c) => /^[0-9a-f]{16}$/.test(c.id)), true);
   // ── friends at risk: my friends only, streak >= 3, nothing logged today, not blocked ──
   check("friends at risk", body.friends_at_risk, { count: 2, top: [{ name: "runner", streak: 40 }, { name: "nudger", streak: 9 }] });
 
