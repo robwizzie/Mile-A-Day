@@ -53,7 +53,7 @@ if RUN:
     displayio.release_displays()
     gc.collect()
     MATRIX = rgbmatrix.RGBMatrix(
-        width=64, height=32, bit_depth=4,
+        width=64, height=32, bit_depth=6,      # 6: fine enough steps to dim way down at night
         rgb_pins=[board.MTX_R1, board.MTX_G1, board.MTX_B1,
                   board.MTX_R2, board.MTX_G2, board.MTX_B2],
         addr_pins=[board.MTX_ADDRA, board.MTX_ADDRB, board.MTX_ADDRC,
@@ -237,8 +237,10 @@ def main():
         pass
 
     def status(color):
+        """The board's own little LED: green = fetched, red = trouble. Barely
+        on at night."""
         if pixel:
-            pixel[0] = color
+            pixel[0] = tuple(c // 15 for c in color) if app.night else color
 
     btn_up = Button(board.BUTTON_UP, Pull, DigitalInOut)
     btn_down = Button(board.BUTTON_DOWN, Pull, DigitalInOut)

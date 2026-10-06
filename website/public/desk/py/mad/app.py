@@ -21,7 +21,7 @@ DASH_SECONDS = 25        # Classic: still dashboard time between stat shows
 T_TRANS = 1.7            # mascot wipe between screens
 T_COUNT = 1.0            # number count-up
 EVENT_GAP = 4.0          # dashboard time between two alerts
-NIGHT_DIM = 0.35
+NIGHT_DIM = 0.1          # sleep: everything just barely lit
 
 # One vocabulary everywhere: an icon + a short label.
 # (feed key, icon, short label). "me" = this board's owner.
