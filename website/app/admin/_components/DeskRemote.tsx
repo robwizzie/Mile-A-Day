@@ -15,7 +15,9 @@ import { MAD_RED, MAD_SUCCESS } from "./theme";
  * only ever come from real activity. The chosen box is remembered per phone.
  */
 
-type Box = { id: string; label: string; username: string | null; last_seen: string | null; online: boolean };
+type BoxState = { style: number; mascot: number; awake: boolean; sleep_start: number | null; sleep_end: number | null };
+type Box = { id: string; label: string; username: string | null; last_seen: string | null; online: boolean;
+             state: BoxState | null };
 
 type Feed = {
   community: Record<string, number>;
@@ -37,7 +39,8 @@ type BoxDetail = {
   box: Box;
   styles: string[];
   mascots: string[];
-  settings: { style: number | null; mascot: number | null; rev: number };
+  settings: { style: number | null; mascot: number | null; rev: number;
+              sleep_start: number | null; sleep_end: number | null; never_sleep: boolean };
   messages: { id: string; direction: "in" | "out"; who: string; text: string; at: string }[];
   recipients: Box[];
   activity: { at: string; kind: string; text: string }[];
@@ -74,6 +77,16 @@ function ago(iso: string | null): string {
   return `${Math.floor(s / 86400)} d ago`;
 }
 
+const toHHMM = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+const fromHHMM = (v: string) => {
+  const [h, m] = v.split(":").map(Number);
+  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+};
+function niceTime(m: number) {
+  const h = Math.floor(m / 60), mm = m % 60;
+  return `${((h + 11) % 12) + 1}:${String(mm).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
+
 function boxName(b: Box) {
   return b.label || (b.username ? `@${b.username}'s desk` : "Desk");
 }
@@ -92,6 +105,7 @@ type Preview = {
   start(feed: string, style: number, mascot: number): void;
   feed(feed: string, now: number): void;
   choose(style: number, mascot: number, now: number): void;
+  sleep(awake: number, start: number, end: number, now: number): void;
   frame(now: number): Uint8Array;
 };
 
@@ -120,7 +134,12 @@ function loadEngine(): Promise<Preview> {
   return enginePromise;
 }
 
-function LivePreview({ feed, style, mascot }: { feed: Feed; style: number; mascot: number }) {
+/** `sleep`: the box's hours ([-1,-1] = never sleeps) and whether it's awake;
+ *  `forceAwake` while previewing a new look (show it as it looks by day). */
+function LivePreview({ feed, style, mascot, sleep, forceAwake }: {
+  feed: Feed; style: number; mascot: number;
+  sleep: { awake: boolean; start: number; end: number }; forceAwake: boolean;
+}) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const engine = useRef<Preview | null>(null);
   const started = useRef(false);
@@ -140,6 +159,7 @@ function LivePreview({ feed, style, mascot }: { feed: Feed; style: number; masco
         engine.current = eng;
         t0.current = performance.now();
         eng.start(feedJson, style, mascot);
+        eng.sleep(forceAwake || sleep.awake ? 1 : 0, sleep.start, sleep.end, now());
         started.current = true;
         setState("ok");
         const ctx = canvas.current?.getContext("2d");
@@ -176,6 +196,12 @@ function LivePreview({ feed, style, mascot }: { feed: Feed; style: number; masco
   useEffect(() => {
     if (started.current && engine.current) engine.current.choose(style, mascot, now());
   }, [style, mascot]);
+
+  const awakeNow = forceAwake || sleep.awake;
+  useEffect(() => {
+    if (started.current && engine.current) engine.current.sleep(awakeNow ? 1 : 0, sleep.start, sleep.end, now());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [awakeNow, sleep.start, sleep.end]);
 
   return (
     <div className="relative overflow-hidden rounded-xl bg-black p-2">
@@ -268,8 +294,16 @@ export function DeskRemote() {
   // What the box is set to (null = whatever its own buttons picked).
   const setStyle = data?.settings.style ?? null;
   const setMascot = data?.settings.mascot ?? null;
-  const shown = view ?? { style: setStyle ?? 0, mascot: setMascot ?? 1 };
-  const dirty = !!view && (view.style !== setStyle || view.mascot !== setMascot);
+  const st = data?.box.state ?? null;      // what's on the box's screen right now
+  const onDesk = st ? { style: st.style, mascot: st.mascot } : { style: setStyle ?? 0, mascot: setMascot ?? 1 };
+  const shown = view ?? onDesk;
+  // Sleep: the hours the box reports using, else the remote's, else 10pm–7am.
+  const sset = data?.settings;
+  const hours = st ? { start: st.sleep_start ?? -1, end: st.sleep_end ?? -1 }
+    : sset?.never_sleep ? { start: -1, end: -1 }
+    : { start: sset?.sleep_start ?? 22 * 60, end: sset?.sleep_end ?? 7 * 60 };
+  const awake = st ? st.awake : true;
+  const dirty = !!view && (view.style !== onDesk.style || view.mascot !== onDesk.mascot);
 
   async function apply() {
     if (!data || !view) return;
@@ -285,6 +319,34 @@ export function DeskRemote() {
       say((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function saveSleep(sleep: { start: number; end: number } | "never" | "default") {
+    if (!data) return;
+    setBusy(true);
+    try {
+      const r = await postData<{ settings: BoxDetail["settings"] }>(`desk/box/${data.box.id}/settings`, { sleep });
+      setData((d) => (d ? { ...d, settings: r.settings } : d));
+      say(sleep === "never" ? "It will stay awake all night"
+        : sleep === "default" ? "Back to the box's own sleep hours"
+        : `Sleeps ${niceTime(sleep.start)} – wakes ${niceTime(sleep.end)}`);
+      load();
+    } catch (e) {
+      say((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function wakeUp() {
+    if (!data) return;
+    try {
+      await postData(`desk/box/${data.box.id}/wake`, {});
+      say("Waking up — bright for 30 minutes (in about 15 seconds)");
+      load();
+    } catch (e) {
+      say((e as Error).message);
     }
   }
 
@@ -350,7 +412,9 @@ export function DeskRemote() {
           </div>
           {data && (
             <p className="text-xs text-white/45">
-              Shows @{owner}&apos;s data · {data.box.online ? "online now" : `offline · last seen ${ago(data.box.last_seen)}`}
+              Shows @{owner}&apos;s data · {data.box.online
+                ? (st ? (st.awake ? "awake" : `asleep${hours.end >= 0 ? ` · wakes ${niceTime(hours.end)}` : ""}`) : "online now")
+                : `offline · last seen ${ago(data.box.last_seen)}`}
             </p>
           )}
         </header>
@@ -362,11 +426,16 @@ export function DeskRemote() {
             {/* ── the real screen ── */}
             <Section title={dirty ? "Preview" : "On the desk"}
                      right={<span className="text-[11px] text-white/40">real data, live</span>}>
-              <LivePreview key={data.box.id} feed={live} style={shown.style} mascot={shown.mascot} />
-              {setStyle == null && !view && (
+              <LivePreview key={data.box.id} feed={live} style={shown.style} mascot={shown.mascot}
+                           sleep={{ awake, start: hours.start, end: hours.end }} forceAwake={dirty} />
+              {!st && (
                 <p className="mt-2 text-xs text-white/45">
-                  The desk shows whatever its buttons picked. Choose a style below to set it from here.
+                  {data.box.online ? "This box hasn't reported its screen yet (it needs the latest firmware)."
+                    : "This box is offline, so this is its last known setting."}
                 </p>
+              )}
+              {dirty && !awake && (
+                <p className="mt-2 text-xs text-white/45">Previewing how it looks awake.</p>
               )}
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {data.mascots.map((m, i) => (
@@ -386,7 +455,7 @@ export function DeskRemote() {
                           style={{ background: shown.style === i ? "rgba(217,64,89,0.25)" : "rgba(255,255,255,0.05)",
                                    boxShadow: shown.style === i ? `inset 0 0 0 1.5px ${MAD_RED}` : undefined }}>
                     <div className="text-sm font-extrabold">
-                      {cap(s)} {setStyle === i && <span className="text-[10px] text-white/50">· on desk</span>}
+                      {cap(s)} {onDesk.style === i && <span className="text-[10px] text-white/50">· on desk</span>}
                     </div>
                     <div className="text-[11px] leading-tight text-white/45">{STYLE_INFO[s]}</div>
                   </button>
@@ -407,6 +476,18 @@ export function DeskRemote() {
                 ▶ Run the stat show now
               </button>
             </Section>
+
+            {/* ── sleep ── */}
+            <SleepSection
+              key={`sleep-${data.box.id}`}
+              settings={data.settings}
+              hours={hours}
+              awake={awake}
+              reported={!!st}
+              busy={busy}
+              onSave={saveSleep}
+              onWake={wakeUp}
+            />
 
             {/* ── messages ── */}
             <Section title="Messages">
@@ -532,5 +613,74 @@ function List({ title, rows, empty }: { title: string; rows: string[][]; empty: 
         </ul>
       )}
     </div>
+  );
+}
+
+function SleepSection({ settings, hours, awake, reported, busy, onSave, onWake }: {
+  settings: BoxDetail["settings"];
+  hours: { start: number; end: number };
+  awake: boolean;
+  reported: boolean;
+  busy: boolean;
+  onSave: (s: { start: number; end: number } | "never" | "default") => void;
+  onWake: () => void;
+}) {
+  const never = hours.start < 0;
+  const [start, setStart] = useState(toHHMM(never ? 22 * 60 : hours.start));
+  const [end, setEnd] = useState(toHHMM(never ? 7 * 60 : hours.end));
+  const a = fromHHMM(start), b = fromHHMM(end);
+  const changed = never || a !== hours.start || b !== hours.end;
+  return (
+    <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="text-sm font-extrabold uppercase tracking-wider text-white/60">Sleep</h2>
+        <span className="text-[11px] text-white/40">
+          {reported ? (awake ? "awake now" : "asleep now") : "dims and shows a clock"}
+        </span>
+      </div>
+      <button
+        onClick={onWake}
+        className="mb-3 w-full rounded-xl py-2.5 text-sm font-extrabold"
+        style={{ background: !awake ? MAD_RED : "rgba(255,255,255,0.08)" }}
+      >
+        ☀️ Wake it up now (30 min)
+      </button>
+      <label className="flex items-center justify-between rounded-xl bg-white/[0.05] px-3 py-2.5">
+        <span className="text-sm font-bold">Never sleep (always bright)</span>
+        <input
+          type="checkbox"
+          checked={never}
+          disabled={busy}
+          onChange={(e) => onSave(e.target.checked ? "never" : { start: a ?? 1320, end: b ?? 420 })}
+          className="h-5 w-5 accent-[#d94059]"
+        />
+      </label>
+      {!never && (
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <label className="rounded-xl bg-white/[0.05] px-3 py-2">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Goes to sleep</div>
+            <input type="time" value={start} onChange={(e) => setStart(e.target.value)}
+                   className="w-full bg-transparent text-base font-extrabold outline-none" />
+          </label>
+          <label className="rounded-xl bg-white/[0.05] px-3 py-2">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Wakes up</div>
+            <input type="time" value={end} onChange={(e) => setEnd(e.target.value)}
+                   className="w-full bg-transparent text-base font-extrabold outline-none" />
+          </label>
+        </div>
+      )}
+      {!never && changed && a != null && b != null && a !== b && (
+        <button disabled={busy} onClick={() => onSave({ start: a, end: b })}
+                className="mt-2 w-full rounded-xl py-2.5 text-sm font-extrabold" style={{ background: MAD_RED }}>
+          Save sleep hours
+        </button>
+      )}
+      {(settings.never_sleep || settings.sleep_start != null) && (
+        <button disabled={busy} onClick={() => onSave("default")} className="mt-2 w-full text-xs font-bold text-white/45">
+          Use the box&apos;s own sleep hours instead
+        </button>
+      )}
+      <p className="mt-2 text-[11px] text-white/35">Times are the box owner&apos;s local time. A button press on the box also wakes it for 2 minutes.</p>
+    </section>
   );
 }

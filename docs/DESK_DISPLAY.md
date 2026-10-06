@@ -33,8 +33,8 @@ public `/public/stats` numbers.
 | `friends_at_risk` | `{count, top}`: how many of the owner's friends (streak ≥ 3, not blocked either way, not paused) have nothing logged on their own local day yet; `top` = up to 3 `{name, streak}`, longest first. Friends already see each other's daily miles in the app. |
 | `friends_finished` | ≤ 3 × `{id, name, miles}` — same friends rules as above, for sessions that ended in the last 30 min; `id` is an opaque hash |
 | `comments` | ≤ 3 × `{id, from, text, age_s}`: comments from the last 24 h on posts the owner is tagged in (someone else's collab or buddy-walk post where the owner is an accepted coauthor). Commenter by username only, text cleaned to the panel's characters; never the owner's own comments; blocks either way hide a comment, as in the thread. `id` is an opaque hash. |
-| `desk` | `{style, mascot, rev}` set for THIS box from the phone remote, or null; the box applies each `rev` once |
-| `commands` | ≤ 5 × `{id, kind}`: remote taps for this box from the last 3 min; `kind` is always `show` (run the stat show) |
+| `desk` | `{style, mascot, rev, sleep_start, sleep_end, never_sleep}` set for THIS box from the phone remote, or null. Style/mascot apply once per `rev`; sleep hours (minutes, owner's local time; null = the box's own `MAD_NIGHT`) apply as they are |
+| `commands` | ≤ 5 × `{id, kind}`: remote taps for this box from the last 3 min; `kind` is `show` (run the stat show) or `wake` (bright for 30 min) |
 | `friends_miles` | ≤ 3 × `{id, name, miles, seconds, best_pace, age_s}`: friends who "got their mile in" in the last hour — the owner's own announcements (so the friend's audience settings already applied, blocks excluded) — with that friend's day so far (the same numbers the notification shows) |
 | `messages` | ≤ 3 × `{id, from, text, age_s}`: unexpired desk messages sent TO the owner from Admin → Displays (sender username only, text cleaned to the panel's characters, 24 h expiry) |
 | `reviews` | founder mode, admin owners only (everyone else gets `[]`): ≤ 3 × `{id, stars, title}` from Apple's public App Store reviews feed for the app, newest first. `id` is an opaque hash, `title` is cleaned to the panel's characters; reviewer names and review text are never passed on. Fetched server-side at most every 15 min. |
@@ -64,6 +64,8 @@ real HTTP.
 - **Key management:** create, list and revoke all require `role = admin`.
 - **Desk messages:** only admins can send or list them (`POST/GET /admin/display-messages`); a message is readable only through the recipient's own display key and expires after 24 h. Text is reduced to upper-case letters, digits, a little punctuation and four emoji tokens before it is stored.
 - **Closet, medals, reviews:** the closet look is filtered to items the owner actually owns (same rule as the app), medals are the owner's own, and the App Store reviews (already public) only go to desks whose owner has `role = admin`.
+- **Box state:** the only thing a box sends is that one `X-Desk-State` line
+  about its own screen; it's stored on its key row and shown in the remote.
 - **Read-only:** the display never marks notifications read and never writes
   user data. The only write is a throttled `last_used_at` stamp on the key.
   (Desk messages are written by admins in Admin → Displays, never by a display.)
@@ -78,6 +80,10 @@ box: Rob's, Dave's…; the choice is remembered on that phone), then:
   real feed, so the preview is exactly what the desk shows: real numbers,
   Flamey's closet look, the season. Pick a style or mascot to preview it, then
   "Show on desk".
+- **Sleep**: wake it now (30 min), set its sleep and wake times, or keep it
+  awake all night. The box reports what's on its screen with each poll
+  (`X-Desk-State: style,mascot,awake,sleep_start,sleep_end`, strictly parsed,
+  stored on its key), so the preview follows its buttons and its sleep.
 - **Stat show** on demand (real numbers). Nothing else can be triggered:
   nudges, hypes, runs, medals and messages only come from real activity.
 - **Messages** from this box's owner to another box, and the last two weeks

@@ -3331,6 +3331,11 @@ export const displayKeys = pgTable(
       .notNull(),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "string" }),
     revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+    // What the box reports with each poll (X-Desk-State): the style and
+    // mascot on its screen, awake or asleep, its sleep hours. Lets the phone
+    // remote show the box as it really is, buttons and all.
+    state: jsonb(),
+    stateAt: timestamp("state_at", { withTimezone: true, mode: "string" }),
   },
   (table) => [
     unique("display_keys_key_hash_key").on(table.keyHash),
@@ -3450,6 +3455,11 @@ export const deskBoxSettings = pgTable(
     style: smallint(),
     mascot: smallint(),
     rev: integer().default(0).notNull(),
+    // Sleep hours from the remote (minutes after midnight, the box owner's
+    // local time); null = the box's own settings.toml. never_sleep wins.
+    sleepStart: smallint("sleep_start"),
+    sleepEnd: smallint("sleep_end"),
+    neverSleep: boolean("never_sleep").default(false).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),

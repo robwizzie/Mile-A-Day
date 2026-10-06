@@ -212,6 +212,7 @@ class App:
         self.seen_miles = None
         self.cheered = {}                # friend name -> when their run was celebrated
         self.desk_rev = 0                # last phone-remote change applied (nvm)
+        self.night_default = (22 * 60, 7 * 60)   # settings.toml MAD_NIGHT (main.py sets it)
         self.seen_cmds = None
         self.ny_countdown = False
         self.season_mode = "AUTO"        # AUTO / OFF / HALLOWEEN / SANTA (settings.toml)
@@ -329,10 +330,22 @@ class App:
         self.seen_medals = (ids + [i for i in seen if i not in ids])[:10]
 
     def _desk(self, d, now):
-        """The phone remote picked a style / mascot: apply each change once,
-        so the buttons still work in between."""
+        """The phone remote: sleep hours apply as they are (null = this box's
+        own settings.toml); a style / mascot change applies once (by rev), so
+        the buttons still work in between."""
         if not isinstance(d, dict):
             return
+        if d.get("never_sleep"):
+            hours = None
+        else:
+            a, b = d.get("sleep_start"), d.get("sleep_end")
+            if isinstance(a, int) and isinstance(b, int) and 0 <= a < 1440 and 0 <= b < 1440:
+                hours = (a, b)
+            else:
+                hours = self.night_default
+        if hours != self.night_hours:
+            self.night_hours = hours
+            self._update_night(now)
         rev = d.get("rev")
         if not isinstance(rev, int) or rev == self.desk_rev:
             return
@@ -350,17 +363,22 @@ class App:
             self.toast = (MASCOTS[self.mascot], now + 1.6)
 
     def _commands(self, cmds, now):
-        """Taps from the phone remote: only "run the stat show now" (real
-        numbers). Nothing else can be triggered: alerts only come from real
-        activity."""
+        """Taps from the phone remote: "run the stat show now" (real numbers)
+        and "wake up" (30 min). Nothing else can be triggered: alerts only
+        come from real activity."""
         ids = [c.get("id") for c in cmds]
         if self.seen_cmds is None:            # first feed: those are old taps
             self.seen_cmds = ids
             return
         for c in reversed(cmds):
-            if c.get("id") not in self.seen_cmds and c.get("kind") == "show":
+            if c.get("id") in self.seen_cmds:
+                continue
+            if c.get("kind") == "show":
                 if self.mode in ("dash", "show"):
                     self.start_show(now)
+            elif c.get("kind") == "wake":            # bright for half an hour
+                self.wake_until = now + 1800
+                self._update_night(now)
         self.seen_cmds = (ids + [i for i in self.seen_cmds if i not in ids])[:10]
 
     def _friend_miles(self, miles, now):
@@ -532,6 +550,12 @@ class App:
         if not self.clock:
             return None
         return (self.clock[0] + (now - self.clock[1])) % 86400
+
+    def state(self):
+        """What this box tells the server with each poll (X-Desk-State), so the
+        phone remote shows it as it really is: style, mascot, awake, sleep hours."""
+        a, b = self.night_hours if self.night_hours else (-1, -1)
+        return "%d,%d,%d,%d,%d" % (self.style, self.mascot, 0 if self.night else 1, a, b)
 
     def is_night(self, now):
         s = self.local_seconds(now)

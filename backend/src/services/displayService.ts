@@ -236,7 +236,52 @@ const DESK_HISTORY_DAYS = 14;
 const ACTIVITY_DAYS = 7;
 const ONLINE_MS = 10 * 60 * 1000;     // last_used_at is stamped at most every 2 min
 
-export interface DeskSettings { style: number | null; mascot: number | null; rev: number }
+export interface DeskSettings {
+  style: number | null;
+  mascot: number | null;
+  rev: number;
+  /** Sleep hours, minutes after midnight in the owner's local time; null =
+   *  the box's own settings.toml. never_sleep keeps it bright all night. */
+  sleep_start: number | null;
+  sleep_end: number | null;
+  never_sleep: boolean;
+}
+
+/** What a box last reported about itself (X-Desk-State on its feed poll). */
+export interface DeskBoxState {
+  style: number;
+  mascot: number;
+  awake: boolean;
+  sleep_start: number | null;   // the hours it's actually using; null = never sleeps
+  sleep_end: number | null;
+}
+
+/** "style,mascot,awake,sleep_start,sleep_end" (-1 = never sleeps). Strict:
+ *  anything else is ignored. */
+export function parseBoxState(header: unknown): DeskBoxState | null {
+  if (typeof header !== "string") return null;
+  const m = /^(\d),(\d),([01]),(-1|\d{1,4}),(-1|\d{1,4})$/.exec(header.trim());
+  if (!m) return null;
+  const [style, mascot, awake, a, b] = m.slice(1).map(Number);
+  if (style >= DESK_STYLES.length || mascot >= DESK_MASCOTS.length) return null;
+  const ok = (v: number) => v === -1 || (v >= 0 && v < 1440);
+  if (!ok(a) || !ok(b)) return null;
+  return {
+    style, mascot, awake: awake === 1,
+    sleep_start: a === -1 || b === -1 ? null : a,
+    sleep_end: a === -1 || b === -1 ? null : b,
+  };
+}
+
+/** Store a box's reported state: only when it changed (or every 2 min). */
+export async function recordBoxState(keyId: string, state: DeskBoxState): Promise<void> {
+  await db.query(
+    `UPDATE display_keys SET state = $2::jsonb, state_at = NOW()
+      WHERE id = $1 AND (state IS DISTINCT FROM $2::jsonb OR state_at IS NULL
+                         OR state_at < NOW() - INTERVAL '2 minutes')`,
+    [keyId, JSON.stringify(state)],
+  );
+}
 
 export interface DeskBox {
   id: string;
@@ -244,22 +289,32 @@ export interface DeskBox {
   username: string | null;
   last_seen: string | null;
   online: boolean;
+  /** What's on its screen right now (null if it hasn't said lately). */
+  state: DeskBoxState | null;
 }
 
-function boxRow(r: { id: string; label: string; username: string | null; last_used_at: string | null }): DeskBox {
+type BoxDbRow = { id: string; label: string; username: string | null; last_used_at: string | null;
+                  state: DeskBoxState | null; state_at: string | null };
+
+function boxRow(r: BoxDbRow): DeskBox {
+  const fresh = (t: string | null) => t != null && Date.now() - Date.parse(t) < ONLINE_MS;
   return {
     id: r.id,
     label: r.label,
     username: r.username,
     last_seen: r.last_used_at,
-    online: r.last_used_at != null && Date.now() - Date.parse(r.last_used_at) < ONLINE_MS,
+    online: fresh(r.last_used_at),
+    state: fresh(r.state_at) && r.state
+      ? { style: r.state.style, mascot: r.state.mascot, awake: r.state.awake,
+          sleep_start: r.state.sleep_start, sleep_end: r.state.sleep_end }
+      : null,
   };
 }
 
 /** Every active box (key), oldest first. Never the hash. */
 export async function listDeskBoxes(): Promise<DeskBox[]> {
-  const rows = await db.query<{ id: string; label: string; username: string | null; last_used_at: string | null }>(
-    `SELECT k.id, k.label, u.username, k.last_used_at::text
+  const rows = await db.query<BoxDbRow>(
+    `SELECT k.id, k.label, u.username, k.last_used_at::text, k.state, k.state_at::text
        FROM display_keys k JOIN users u ON u.user_id = k.user_id
       WHERE k.revoked_at IS NULL
       ORDER BY k.created_at`,
@@ -269,8 +324,8 @@ export async function listDeskBoxes(): Promise<DeskBox[]> {
 
 async function boxOwner(boxId: string): Promise<{ userId: string; box: DeskBox } | null> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(boxId)) return null;
-  const rows = await db.query<{ id: string; user_id: string; label: string; username: string | null; last_used_at: string | null }>(
-    `SELECT k.id, k.user_id, k.label, u.username, k.last_used_at::text
+  const rows = await db.query<BoxDbRow & { user_id: string }>(
+    `SELECT k.id, k.user_id, k.label, u.username, k.last_used_at::text, k.state, k.state_at::text
        FROM display_keys k JOIN users u ON u.user_id = k.user_id
       WHERE k.id = $1 AND k.revoked_at IS NULL`, [boxId]);
   return rows[0] ? { userId: rows[0].user_id, box: boxRow(rows[0]) } : null;
@@ -278,41 +333,67 @@ async function boxOwner(boxId: string): Promise<{ userId: string; box: DeskBox }
 
 export async function getBoxSettings(keyId: string): Promise<DeskSettings | null> {
   const rows = await db.query<DeskSettings>(
-    `SELECT style, mascot, rev FROM desk_box_settings WHERE key_id = $1`, [keyId]);
+    `SELECT style, mascot, rev, sleep_start, sleep_end, never_sleep
+       FROM desk_box_settings WHERE key_id = $1`, [keyId]);
   return rows[0] ?? null;
 }
 
-/** Set a box's style and/or mascot (null leaves it). Bumps `rev`, logs it.
- *  Returns null for an unknown/revoked box. */
-export async function setBoxSettings(
-  boxId: string, style: number | null, mascot: number | null,
-): Promise<DeskSettings | null> {
+export interface BoxSettingsChange {
+  style: number | null;          // null = leave as is
+  mascot: number | null;
+  /** Sleep: a [start, end] pair (minutes), "never", "default", or undefined. */
+  sleep?: [number, number] | "never" | "default";
+}
+
+const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+
+/** Change a box's style / mascot (bumps `rev`: the box applies it once) and/or
+ *  its sleep hours (applied continuously). Logs it. Null = unknown box. */
+export async function setBoxSettings(boxId: string, change: BoxSettingsChange): Promise<DeskSettings | null> {
   const owner = await boxOwner(boxId);
   if (!owner) return null;
+  const look = change.style != null || change.mascot != null;
+  const sl = change.sleep;
+  const setSleep = sl !== undefined;
+  const start = Array.isArray(sl) ? sl[0] : null;
+  const end = Array.isArray(sl) ? sl[1] : null;
+  const never = sl === "never";
   const rows = await db.query<DeskSettings>(
-    `INSERT INTO desk_box_settings (key_id, style, mascot, rev, updated_at)
-     VALUES ($1, $2, $3, 1, NOW())
+    `INSERT INTO desk_box_settings (key_id, style, mascot, rev, sleep_start, sleep_end, never_sleep, updated_at)
+     VALUES ($1, $2, $3, CASE WHEN $4 THEN 1 ELSE 0 END, $6, $7, COALESCE($8, FALSE), NOW())
      ON CONFLICT (key_id) DO UPDATE
        SET style = COALESCE($2, desk_box_settings.style),
            mascot = COALESCE($3, desk_box_settings.mascot),
-           rev = desk_box_settings.rev + 1,
+           rev = desk_box_settings.rev + CASE WHEN $4 THEN 1 ELSE 0 END,
+           sleep_start = CASE WHEN $5 THEN $6 ELSE desk_box_settings.sleep_start END,
+           sleep_end = CASE WHEN $5 THEN $7 ELSE desk_box_settings.sleep_end END,
+           never_sleep = CASE WHEN $5 THEN $8 ELSE desk_box_settings.never_sleep END,
            updated_at = NOW()
-     RETURNING style, mascot, rev`,
-    [boxId, style, mascot],
+     RETURNING style, mascot, rev, sleep_start, sleep_end, never_sleep`,
+    [boxId, change.style, change.mascot, look, setSleep, start, end, setSleep ? never : null],
   );
-  const s = rows[0];
-  const detail = [s.style != null ? DESK_STYLES[s.style] : null, s.mascot != null ? DESK_MASCOTS[s.mascot] : null]
-    .filter(Boolean).join(" / ");
+  const st = rows[0];
+  const parts: string[] = [];
+  if (look) {
+    parts.push([st.style != null ? DESK_STYLES[st.style] : null, st.mascot != null ? DESK_MASCOTS[st.mascot] : null]
+      .filter(Boolean).join(" / "));
+  }
+  if (setSleep) {
+    parts.push(never ? "never sleeps" : start != null && end != null
+      ? `sleeps ${hhmm(start)}–${hhmm(end)}` : "sleep hours back to the box's own");
+  }
   await db.query(
     `INSERT INTO desk_commands (user_id, key_id, kind, detail) VALUES ($1, $2, 'set', $3)`,
-    [owner.userId, boxId, detail],
+    [owner.userId, boxId, parts.join(", ").slice(0, 60)],
   );
-  return s;
+  return st;
 }
 
-/** "Run the stat show now" on a box (real numbers only). False = rate-limited,
- *  null = unknown box. */
-export async function queueBoxShow(boxId: string): Promise<boolean | null> {
+/** Remote taps a box acts on: "show" (run the stat show, real numbers) and
+ *  "wake" (bright for 30 minutes). False = rate-limited, null = unknown box. */
+export const DESK_TAPS = ["show", "wake"] as const;
+
+export async function queueBoxTap(boxId: string, kind: (typeof DESK_TAPS)[number]): Promise<boolean | null> {
   const owner = await boxOwner(boxId);
   if (!owner) return null;
   const recent = await db.query<{ n: number }>(
@@ -320,7 +401,7 @@ export async function queueBoxShow(boxId: string): Promise<boolean | null> {
       WHERE key_id = $1 AND created_at > NOW() - INTERVAL '10 minutes'`, [boxId]);
   if ((recent[0]?.n ?? 0) >= MAX_COMMANDS_PER_10_MIN) return false;
   await db.query(`DELETE FROM desk_commands WHERE key_id = $1 AND created_at < NOW() - INTERVAL '30 days'`, [boxId]);
-  await db.query(`INSERT INTO desk_commands (user_id, key_id, kind) VALUES ($1, $2, 'show')`, [owner.userId, boxId]);
+  await db.query(`INSERT INTO desk_commands (user_id, key_id, kind) VALUES ($1, $2, $3)`, [owner.userId, boxId, kind]);
   return true;
 }
 
@@ -391,6 +472,7 @@ async function boxActivity(boxId: string, userId: string): Promise<DeskActivity[
        UNION ALL
        SELECT c.created_at, 'remote',
               CASE c.kind WHEN 'set' THEN 'Changed from the remote: ' || COALESCE(c.detail, '')
+                          WHEN 'wake' THEN 'Woken up from the remote'
                           ELSE 'Stat show started from the remote' END
          FROM desk_commands c
         WHERE c.key_id = $2 AND c.created_at > NOW() - ${days}
@@ -431,7 +513,7 @@ export async function getDeskBox(boxId: string) {
     box: owner.box,
     styles: DESK_STYLES,
     mascots: DESK_MASCOTS,
-    settings: settings ?? { style: null, mascot: null, rev: 0 },
+    settings: settings ?? { style: null, mascot: null, rev: 0, sleep_start: null, sleep_end: null, never_sleep: false },
     messages: messages.map((m) => ({ ...m, id: m.id.slice(0, 16) })),
     // Message another box (not one owned by this box's owner).
     recipients: others.filter((b) => b.id !== boxId && b.username && b.username !== owner.box.username),
@@ -616,7 +698,7 @@ export interface DisplayFeed {
   friends_miles: { id: string; name: string; miles: number; seconds: number; best_pace: number | null; age_s: number }[];
   /** This box's remote settings (style / mascot ids, rev bumps per change). */
   desk: DeskSettings | null;
-  /** Remote taps for this box from the last 3 min: opaque id + "show". */
+  /** Remote taps for this box from the last 3 min: opaque id + "show" / "wake". */
   commands: { id: string; kind: string }[];
   /** Founder mode: newest App Store reviews, only on admins' desks. */
   reviews: DeskReview[];
@@ -860,12 +942,12 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
       [userId],
     ),
     keyId ? getBoxSettings(keyId) : Promise.resolve(null),
-    // Remote taps for THIS box (only "show": nothing else can be triggered).
+    // Remote taps for THIS box ("show" / "wake": nothing else can be triggered).
     keyId
       ? db.query<{ id: string; kind: string }>(
           `SELECT encode(sha256(('cmd:' || id::text)::bytea), 'hex') AS id, kind
              FROM desk_commands
-            WHERE key_id = $1 AND kind = 'show'
+            WHERE key_id = $1 AND kind IN ('show', 'wake')
               AND created_at > NOW() - INTERVAL '${COMMAND_WINDOW_SECONDS} seconds'
             ORDER BY created_at DESC
             LIMIT 5`,
