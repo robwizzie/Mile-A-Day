@@ -6,26 +6,29 @@ import SwiftUI
 @Observable
 final class WorkoutShoeChoice {
     let workoutId: String
+    /// Which default the workout takes — nil when it isn't on foot.
+    let activity: ShoeActivity?
     private(set) var shoeId: String?
     private(set) var loaded = false
     private(set) var isSaving = false
     private(set) var error: String?
 
-    init(workoutId: String) {
+    init(workoutId: String, activity: ShoeActivity?) {
         self.workoutId = workoutId
+        self.activity = activity
     }
 
     /// The server's answer, which for a workout that hasn't synced yet is the
-    /// default it WILL be stamped with — so the recap shows the right pair
-    /// before HealthKit has handed the walk to the sync.
+    /// default it WILL be stamped with for its activity — so the recap shows
+    /// the right pair (or none) before HealthKit has handed it to the sync.
     func load() async {
         do {
-            let assignment = try await ShoeService.assignment(forWorkout: workoutId)
+            let assignment = try await ShoeService.assignment(forWorkout: workoutId, activity: activity)
             shoeId = assignment.shoe_id
         } catch {
             print("[WorkoutShoeChoice] load failed: \(error)")
-            // Offline: the default is still the best guess for a new walk.
-            if !loaded { shoeId = ShoeStore.shared.defaultShoe?.shoe_id }
+            // Offline: the activity's default is still the best guess.
+            if !loaded { shoeId = activity.flatMap { ShoeStore.shared.defaultShoe(for: $0)?.shoe_id } }
         }
         loaded = true
     }
@@ -97,6 +100,7 @@ private struct ShoeMenuItems: View {
 /// The "Shoes" card on a workout's detail sheet.
 struct WorkoutShoeCard: View {
     let workoutId: String
+    let activity: ShoeActivity?
     /// Mirrors `WorkoutDetailView.isActive`: the swipe pager builds every
     /// page up front, so only the page on screen loads.
     var isActive: Bool = true
@@ -105,10 +109,11 @@ struct WorkoutShoeCard: View {
     @State private var choice: WorkoutShoeChoice
     @State private var showAdd = false
 
-    init(workoutId: String, isActive: Bool = true) {
+    init(workoutId: String, activity: ShoeActivity?, isActive: Bool = true) {
         self.workoutId = workoutId
+        self.activity = activity
         self.isActive = isActive
-        _choice = State(initialValue: WorkoutShoeChoice(workoutId: workoutId))
+        _choice = State(initialValue: WorkoutShoeChoice(workoutId: workoutId, activity: activity))
     }
 
     var body: some View {
@@ -209,13 +214,15 @@ struct WorkoutShoeCard: View {
 /// decide that.
 struct RecapShoePicker: View {
     let workoutId: String
+    let activity: ShoeActivity
 
     @State private var store = ShoeStore.shared
     @State private var choice: WorkoutShoeChoice
 
-    init(workoutId: String) {
+    init(workoutId: String, activity: ShoeActivity) {
         self.workoutId = workoutId
-        _choice = State(initialValue: WorkoutShoeChoice(workoutId: workoutId))
+        self.activity = activity
+        _choice = State(initialValue: WorkoutShoeChoice(workoutId: workoutId, activity: activity))
     }
 
     var body: some View {

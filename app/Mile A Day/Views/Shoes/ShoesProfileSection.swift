@@ -73,7 +73,7 @@ struct ShoesProfileSection: View {
             Text(store.loadFailed
                  ? "Couldn't load your shoes."
                  : store.shoes.isEmpty
-                    ? "Paste a link to your shoes and every walk and run adds to their mileage. Only you can see them."
+                    ? "Add your shoes and every walk and run in them adds to their mileage. Only you can see them."
                     : "Every pair is retired. Add your new ones.")
                 .font(MADTheme.Typography.caption)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))

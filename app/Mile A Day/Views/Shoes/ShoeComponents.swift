@@ -144,8 +144,8 @@ struct ShoeRow: View {
                         .font(.system(size: 16, weight: .semibold, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)
-                    if shoe.is_default {
-                        ShoeDefaultChip()
+                    if !shoe.defaultActivities.isEmpty {
+                        ShoeDefaultChip(activities: shoe.defaultActivities)
                     }
                 }
                 if let detail = shoe.detailLine {
@@ -182,10 +182,19 @@ struct ShoeRow: View {
     }
 }
 
-/// The small "DEFAULT" tag beside the pair new workouts get.
+/// The small tag beside a pair new workouts get: "DEFAULT" when it's the
+/// default for walks AND runs, else which one it's the default for.
 struct ShoeDefaultChip: View {
+    let activities: Set<ShoeActivity>
+
+    private var label: String {
+        if activities == Set(ShoeActivity.allCases) { return "DEFAULT" }
+        if activities.contains(.running) { return "RUNS" }
+        return "WALKS"
+    }
+
     var body: some View {
-        Text("DEFAULT")
+        Text(label)
             .font(.system(size: 9, weight: .heavy, design: .rounded))
             .tracking(0.6)
             .foregroundColor(MADTheme.Colors.success)
@@ -194,5 +203,154 @@ struct ShoeDefaultChip: View {
             .background(Capsule().fill(MADTheme.Colors.success.opacity(0.15)))
             .lineLimit(1)
             .fixedSize()
+    }
+}
+
+// MARK: - Defaults
+
+/// "Walks: None ⌄ / Runs: Vomero 18 ⌄" — the pair each kind of workout gets
+/// automatically, including none at all (running shoes stay off walks).
+struct ShoeDefaultsCard: View {
+    @State private var store = ShoeStore.shared
+    @State private var savingActivity: ShoeActivity?
+    @State private var cleanup: ShoeDefaultCleanup?
+    @State private var errorText: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            ProfileCardLabel(text: "DEFAULT SHOES")
+                .padding(.horizontal, 4)
+            VStack(spacing: 0) {
+                ForEach(Array(ShoeActivity.allCases.enumerated()), id: \.element) { index, activity in
+                    if index > 0 {
+                        Divider().overlay(Color.white.opacity(0.08))
+                    }
+                    row(activity)
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.vertical, MADTheme.Spacing.xs)
+            .madLiquidGlass()
+            Text("New workouts get these automatically. You can change the shoes on any workout from its details.")
+                .font(MADTheme.Typography.caption)
+                .foregroundColor(.white.opacity(0.45))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 4)
+        }
+        .shoeDefaultCleanupPrompt($cleanup, onError: { errorText = $0 })
+        .alert(
+            "Couldn't update your shoes",
+            isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })
+        ) {
+            Button("OK", role: .cancel) { errorText = nil }
+        } message: {
+            Text(errorText ?? "")
+        }
+    }
+
+    private func row(_ activity: ShoeActivity) -> some View {
+        let current = store.defaultShoe(for: activity)
+        return Menu {
+            ForEach(store.active) { shoe in
+                Button {
+                    choose(shoe.shoe_id, for: activity)
+                } label: {
+                    if shoe.shoe_id == current?.shoe_id {
+                        Label(shoe.name, systemImage: "checkmark")
+                    } else {
+                        Text(shoe.name)
+                    }
+                }
+            }
+            Divider()
+            Button {
+                choose(nil, for: activity)
+            } label: {
+                if current == nil {
+                    Label("None", systemImage: "checkmark")
+                } else {
+                    Text("None")
+                }
+            }
+        } label: {
+            HStack(spacing: MADTheme.Spacing.md) {
+                Image(systemName: activity.symbol)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(MADTheme.workoutColor(activity.rawValue))
+                    .frame(width: 28)
+                    .accessibilityHidden(true)
+                Text(activity.title)
+                    .font(.system(size: 16, weight: .medium, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .fixedSize()
+                Spacer(minLength: 8)
+                if savingActivity == activity {
+                    ProgressView()
+                } else {
+                    // The pair's name is DATA: it truncates, never pushes.
+                    Text(current?.name ?? "None")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundColor(current == nil ? .white.opacity(0.5) : .white)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.5))
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(savingActivity != nil)
+        .accessibilityLabel("Default shoes for \(activity.noun): \(current?.name ?? "none")")
+    }
+
+    private func choose(_ shoeId: String?, for activity: ShoeActivity) {
+        guard shoeId != store.defaultShoe(for: activity)?.shoe_id else { return }
+        savingActivity = activity
+        Task { @MainActor in
+            do {
+                cleanup = try await store.setDefault(shoeId, for: activity)
+            } catch {
+                errorText = error.localizedDescription
+            }
+            savingActivity = nil
+        }
+    }
+}
+
+// MARK: - Cleanup prompt
+
+extension View {
+    /// After a pair stops being an activity's default: "Take Vomero off
+    /// past walks?" for the walks the SYNC gave it. Never touches workouts
+    /// the user picked it for themselves.
+    func shoeDefaultCleanupPrompt(
+        _ cleanup: Binding<ShoeDefaultCleanup?>,
+        onError: @escaping (String) -> Void
+    ) -> some View {
+        alert(
+            cleanup.wrappedValue.map { "Take \($0.shoeName) off past \($0.activity.noun)?" } ?? "",
+            isPresented: Binding(
+                get: { cleanup.wrappedValue != nil },
+                set: { if !$0 { cleanup.wrappedValue = nil } }
+            ),
+            presenting: cleanup.wrappedValue
+        ) { item in
+            Button("Take Off \(item.activity.count(item.count))", role: .destructive) {
+                Task { @MainActor in
+                    do {
+                        try await ShoeStore.shared.clearAutoAssigned(item)
+                    } catch {
+                        onError(error.localizedDescription)
+                    }
+                }
+            }
+            Button("Keep", role: .cancel) {}
+        } message: { item in
+            Text("It was added to \(item.activity.count(item.count)) automatically while it was your default for \(item.activity.noun). Workouts you chose it for yourself stay as they are.")
+        }
     }
 }

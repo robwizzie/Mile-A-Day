@@ -30,6 +30,8 @@ struct ProfileView: View {
     /// PROFILE (a way to add you), which is a different thing.
     @State private var showingShareStudio = false
     @State private var showingRouteHeatmap = false
+    /// The full workout history, opened from the Activity tab's Workouts card.
+    @State private var showingWorkoutHistory = false
     /// Daily goal editor, reachable from the Activity tab's goal row — the
     /// same sheet Settings opens, so there is one place the number is set.
     /// Sender tapped in "Recent hypes" — opens their profile.
@@ -167,6 +169,10 @@ struct ProfileView: View {
         .navigationDestination(isPresented: $showingShareProfile) {
             ShareProfileView()
         }
+        // The same history screen the Dashboard's Recent Workouts card pushes.
+        .navigationDestination(isPresented: $showingWorkoutHistory) {
+            WorkoutsView(healthManager: healthManager)
+        }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .totalMiles:
@@ -285,7 +291,8 @@ struct ProfileView: View {
     /// friend profile's Activity tab role.
     @ViewBuilder
     private var ownActivityTabContent: some View {
-        // Ordered by how close to NOW each block is: the week, then walks
+        // Ordered by how close to NOW each block is: the week, then the
+        // workouts behind it (the doorway to the full history), then walks
         // with people, then streak history, then what friends said about it.
         // Today's goal and challenge are the Dashboard's — the avatar's goal
         // ring already carries the day here. Every card wears the same flat
@@ -304,6 +311,9 @@ struct ProfileView: View {
                     coveredDays: tokensState.payload?.frozen_dates,
                     isSelf: true
                 )
+            }
+            OwnRecentWorkoutsCard(healthManager: healthManager) {
+                showingWorkoutHistory = true
             }
             // Walks you've taken WITH people. On the Activity tab rather than
             // Stats because it's a record of what happened, not a performance

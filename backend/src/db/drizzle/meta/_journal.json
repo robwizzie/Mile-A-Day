@@ -645,6 +645,13 @@
       "when": 1791253377537,
       "tag": "0091_desk_sleep",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1791258648298,
+      "tag": "0092_shoe_defaults",
+      "breakpoints": true
     }
   ]
 }

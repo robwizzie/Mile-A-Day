@@ -3,16 +3,21 @@ import fs from "fs";
 import path from "path";
 import sharp from "sharp";
 import {
+  clearAutoAssigned,
   countShoes,
   createShoe,
   deleteShoe,
   getShoe,
   getWorkoutShoe,
+  isShoeActivity,
   listShoes,
   listShoeWorkouts,
   MAX_SHOES_PER_USER,
+  setActivityDefault,
   setShoeImage,
   setWorkoutShoe,
+  SHOE_ACTIVITIES,
+  ShoeActivity,
   shoeExists,
   ShoeInput,
   updateShoe,
@@ -83,6 +88,19 @@ function optionalBool(value: unknown, field: string): boolean | undefined {
   return value;
 }
 
+function optionalActivities(
+  value: unknown,
+  field: string,
+): ShoeActivity[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every(isShoeActivity)) {
+    throw new InvalidInput(
+      `${field} must be a list of ${SHOE_ACTIVITIES.join(" / ")}`,
+    );
+  }
+  return [...new Set(value as ShoeActivity[])];
+}
+
 /** Parses the writable fields of a shoe body; `undefined` = leave alone. */
 function parseShoeBody(body: any): ShoeInput {
   const b = body ?? {};
@@ -104,6 +122,8 @@ function parseShoeBody(body: any): ShoeInput {
 
   const isDefault = optionalBool(b.is_default, "is_default");
   if (isDefault !== undefined) input.is_default = isDefault;
+  const defaultFor = optionalActivities(b.default_for, "default_for");
+  if (defaultFor !== undefined) input.default_for = defaultFor;
   const retired = optionalBool(b.retired, "retired");
   if (retired !== undefined) input.retired = retired;
 
@@ -232,8 +252,15 @@ export async function getWorkoutShoeController(req: Request, res: Response) {
   };
   if (!validWorkoutId(workoutId))
     return res.status(400).json({ error: "Invalid workout id" });
+  // Which default to predict for a workout that hasn't synced yet. Optional:
+  // builds before per-activity defaults don't send it.
+  const activity = isShoeActivity(req.query.activity)
+    ? req.query.activity
+    : undefined;
   try {
-    return res.status(200).json(await getWorkoutShoe(userId, workoutId));
+    return res
+      .status(200)
+      .json(await getWorkoutShoe(userId, workoutId, activity));
   } catch (err) {
     return handle(res, "reading workout shoe", err);
   }
@@ -262,5 +289,67 @@ export async function putWorkoutShoeController(req: Request, res: Response) {
     return res.status(200).json(await getWorkoutShoe(userId, workoutId));
   } catch (err) {
     return handle(res, "setting workout shoe", err);
+  }
+}
+
+/**
+ * `PUT /users/:userId/shoe-defaults/:activity` with `{ shoe_id: "<uuid>" }`
+ * makes that pair the default for walks or runs; `{ shoe_id: null }` leaves
+ * the activity with no default. Answers the refreshed list plus `previous`:
+ * the pair that lost the activity and how many of its workouts it was given
+ * automatically (null when nothing was replaced).
+ */
+export async function putShoeDefaultController(req: Request, res: Response) {
+  const { userId, activity } = req.params as {
+    userId: string;
+    activity: string;
+  };
+  if (!isShoeActivity(activity)) {
+    return res
+      .status(400)
+      .json({ error: `activity must be ${SHOE_ACTIVITIES.join(" or ")}` });
+  }
+  const shoeId = req.body?.shoe_id;
+  if (
+    shoeId !== null &&
+    (typeof shoeId !== "string" || !UUID_RE.test(shoeId))
+  ) {
+    return res.status(400).json({ error: "shoe_id must be a shoe id or null" });
+  }
+  try {
+    if (shoeId !== null && !(await shoeExists(userId, shoeId))) {
+      return res.status(404).json({ error: "Shoe not found" });
+    }
+    const previous = await setActivityDefault(userId, activity, shoeId);
+    const shoes = await listShoes(userId);
+    return res.status(200).json({ shoes, previous });
+  } catch (err) {
+    return handle(res, "setting default shoe", err);
+  }
+}
+
+/**
+ * `POST /users/:userId/shoes/:shoeId/clear-auto` with `{ activity }`: takes
+ * the pair off the workouts of that activity the sync gave it, leaving each
+ * an explicit "no shoe". Workouts the user picked it for are untouched.
+ */
+export async function clearAutoAssignedController(req: Request, res: Response) {
+  const { userId, shoeId } = req.params as { userId: string; shoeId: string };
+  if (!UUID_RE.test(shoeId))
+    return res.status(404).json({ error: "Shoe not found" });
+  const activity = req.body?.activity;
+  if (!isShoeActivity(activity)) {
+    return res
+      .status(400)
+      .json({ error: `activity must be ${SHOE_ACTIVITIES.join(" or ")}` });
+  }
+  try {
+    if (!(await shoeExists(userId, shoeId))) {
+      return res.status(404).json({ error: "Shoe not found" });
+    }
+    const cleared = await clearAutoAssigned(userId, shoeId, activity);
+    return res.status(200).json({ cleared, shoes: await listShoes(userId) });
+  } catch (err) {
+    return handle(res, "clearing automatic shoe assignments", err);
   }
 }

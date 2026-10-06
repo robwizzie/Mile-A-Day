@@ -160,7 +160,10 @@ struct WorkoutRecapView: View {
                     statsGrid
 
                     if let workoutId {
-                        RecapShoePicker(workoutId: workoutId)
+                        RecapShoePicker(
+                            workoutId: workoutId,
+                            activity: activityName == "Run" ? .running : .walking
+                        )
                     }
 
                     if isIndoor, let workoutId {

@@ -3329,7 +3329,10 @@ export const displayKeys = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
-    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "string" }),
+    lastUsedAt: timestamp("last_used_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
     revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
     // What the box reports with each poll (X-Desk-State): the style and
     // mascot on its screen, awake or asleep, its sleep hours. Lets the phone
@@ -3339,7 +3342,10 @@ export const displayKeys = pgTable(
   },
   (table) => [
     unique("display_keys_key_hash_key").on(table.keyHash),
-    index("idx_display_keys_user").using("btree", table.userId.asc().nullsLast()),
+    index("idx_display_keys_user").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+    ),
     foreignKey({
       columns: [table.userId],
       foreignColumns: [users.userId],
@@ -3494,9 +3500,9 @@ export const shoes = pgTable(
     startingMiles: doublePrecision("starting_miles").default(0).notNull(),
     // Optional "replace at" mileage; NULL = no target.
     replaceAtMiles: doublePrecision("replace_at_miles"),
-    // At most one per user (partial unique index below). `default_since` is
-    // when it BECAME the default: the sync only stamps workouts that ended
-    // after it, so choosing a default never rewrites history.
+    // LEGACY (0087): one default for every activity. Superseded by
+    // `shoe_defaults` (0088), which backfilled from these; neither column is
+    // read or written any more. Left in place rather than dropped.
     isDefault: boolean("is_default").default(false).notNull(),
     defaultSince: timestamp("default_since", {
       withTimezone: true,
@@ -3520,9 +3526,49 @@ export const shoes = pgTable(
       foreignColumns: [users.userId],
       name: "shoes_user_id_fkey",
     }).onDelete("cascade"),
+    check("shoes_name_check", sql`char_length(name) BETWEEN 1 AND 120`),
+  ],
+);
+
+/**
+ * The pair new workouts get, per ACTIVITY ('walking' | 'running') — the
+ * same pair need not go on both (running shoes stay off walks). No row = no
+ * default for that activity: the sync stamps nothing.
+ *
+ * `since` is when that pair became the default FOR THAT ACTIVITY: the sync
+ * only stamps workouts that ended after it, so choosing a default never
+ * rewrites history. Changing the walking default leaves the running row's
+ * `since` alone.
+ */
+export const shoeDefaults = pgTable(
+  "shoe_defaults",
+  {
+    userId: text("user_id").notNull(),
+    activity: text().notNull(),
+    shoeId: uuid("shoe_id").notNull(),
+    since: timestamp({ withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.activity],
+      name: "shoe_defaults_pkey",
+    }),
+    index("idx_shoe_defaults_shoe").on(table.shoeId),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "shoe_defaults_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.shoeId],
+      foreignColumns: [shoes.shoeId],
+      name: "shoe_defaults_shoe_id_fkey",
+    }).onDelete("cascade"),
     check(
-      "shoes_name_check",
-      sql`char_length(name) BETWEEN 1 AND 120`,
+      "shoe_defaults_activity_check",
+      sql`activity IN ('walking', 'running')`,
     ),
   ],
 );

@@ -19,7 +19,8 @@ struct ShoeFormView: View {
     @State private var startingText: String
     /// In the DISPLAY unit; nil = no target.
     @State private var replaceAt: Double?
-    @State private var makeDefault = false
+    /// The activities a NEW pair becomes the default for.
+    @State private var defaultFor: Set<ShoeActivity> = []
     @State private var photo: UIImage?
     @State private var showLibrary = false
     @State private var isSaving = false
@@ -38,6 +39,17 @@ struct ShoeFormView: View {
 
     private var trimmedModel: String {
         model.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Says which pair each activity gets today, so ticking a box reads as
+    /// replacing it.
+    private var defaultsFooter: String {
+        let replacing = ShoeActivity.allCases.compactMap { activity -> String? in
+            guard defaultFor.contains(activity), let current = store.defaultShoe(for: activity) else { return nil }
+            return "\(current.name) for \(activity.noun)"
+        }
+        let base = "Workouts you do from now on get their default pair automatically. You can change the shoes on any workout from its details."
+        return replacing.isEmpty ? base : "Replaces \(replacing.joined(separator: " and ")). " + base
     }
 
     private var hasPhoto: Bool {
@@ -82,10 +94,19 @@ struct ShoeFormView: View {
 
                 if editing == nil {
                     Section {
-                        Toggle("Default for new walks & runs", isOn: $makeDefault)
+                        ForEach(ShoeActivity.allCases) { activity in
+                            Toggle("Default for \(activity.noun)", isOn: Binding(
+                                get: { defaultFor.contains(activity) },
+                                set: { on in
+                                    if on { defaultFor.insert(activity) } else { defaultFor.remove(activity) }
+                                }
+                            ))
                             .tint(MADTheme.Colors.success)
+                        }
+                    } header: {
+                        Text("Default")
                     } footer: {
-                        Text("Walks and runs you do from now on are given your default pair automatically. You can change the shoes on any workout from its details.")
+                        Text(defaultsFooter)
                     }
                 }
 
@@ -117,14 +138,15 @@ struct ShoeFormView: View {
                 }
             }
             .sheet(isPresented: $showLibrary) {
-                ImagePicker(selectedImage: $photo)
+                ImagePicker(selectedImage: $photo, confirmation: .squareCrop)
             }
         }
         .task {
             guard editing == nil else { return }
             await store.refreshIfStale()
-            // The first pair is the default unless one is already set.
-            makeDefault = store.defaultShoe == nil
+            // A first pair is the default for both. After that nothing is
+            // ticked: "none for walks" may be a choice, not a gap to fill.
+            if store.shoes.isEmpty { defaultFor = Set(ShoeActivity.allCases) }
         }
     }
 
@@ -162,7 +184,7 @@ struct ShoeFormView: View {
                     draft.colorway = colorValue
                     draft.startingMiles = starting
                     draft.replaceAtMiles = target
-                    draft.isDefault = makeDefault
+                    draft.defaultFor = defaultFor
                     saved = try await store.add(draft, image: picked).shoe
                 }
                 isSaving = false

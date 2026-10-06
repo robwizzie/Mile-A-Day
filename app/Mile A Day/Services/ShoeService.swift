@@ -1,8 +1,60 @@
 import Foundation
+import HealthKit
 import Observation
 import UIKit
 
 // MARK: - Models
+
+/// A default pair is chosen PER ACTIVITY, so running shoes can stay off
+/// walks. Every on-foot workout files under one of the two — mirrors the
+/// server's `shoeActivitySql`, which decides what the sync stamps.
+enum ShoeActivity: String, CaseIterable, Identifiable, Hashable {
+    case walking, running
+
+    var id: String { rawValue }
+
+    /// "Walks" / "Runs".
+    var title: String {
+        switch self {
+        case .walking: return "Walks"
+        case .running: return "Runs"
+        }
+    }
+
+    /// "walks" / "runs", for the middle of a sentence.
+    var noun: String { title.lowercased() }
+
+    /// "3 walks" / "1 run".
+    func count(_ n: Int) -> String {
+        let one = self == .walking ? "walk" : "run"
+        return n == 1 ? "1 \(one)" : "\(n) \(noun)"
+    }
+
+    var symbol: String {
+        switch self {
+        case .walking: return "figure.walk"
+        case .running: return "figure.run"
+        }
+    }
+
+    /// 13:30/mi — the walk/run divide `ActivityCardView` draws `other` with.
+    private static let walkRunPaceSeconds: TimeInterval = 810
+
+    /// Which default a workout takes: runs → running; walks and hikes →
+    /// walking; `.other` (Fitbit-via-Google-Health walks) by pace. nil for
+    /// anything not on foot, which the sync never gives a pair.
+    static func of(_ workout: HKWorkout) -> ShoeActivity? {
+        switch workout.workoutActivityType {
+        case .running: return .running
+        case .walking, .hiking: return .walking
+        case .cycling: return nil
+        default:
+            let miles = workout.madDistanceMiles
+            guard miles > 0, workout.duration > 0 else { return .walking }
+            return workout.duration / miles < walkRunPaceSeconds ? .running : .walking
+        }
+    }
+}
 
 /// One pair of the user's shoes. PRIVATE: every endpoint behind this is
 /// self-only on the server and nothing about a shoe is ever put on a post,
@@ -18,7 +70,11 @@ struct Shoe: Codable, Identifiable, Hashable {
     let image_url: String?
     let starting_miles: Double
     let replace_at_miles: Double?
+    /// Default for either activity (what builds before the split read).
     let is_default: Bool
+    /// The activities this pair is the default for. nil on a server that
+    /// predates the split, where one default meant every activity.
+    let default_for: [String]?
     /// Timestamps stay strings (fractional-second `timestamptz` breaks
     /// `.iso8601` — see `BuddyDate`); only presence is read here.
     let retired_at: String?
@@ -32,6 +88,16 @@ struct Shoe: Codable, Identifiable, Hashable {
 
     var id: String { shoe_id }
     var isRetired: Bool { retired_at != nil }
+
+    var defaultActivities: Set<ShoeActivity> {
+        guard let default_for else { return is_default ? Set(ShoeActivity.allCases) : [] }
+        return Set(default_for.compactMap(ShoeActivity.init(rawValue:)))
+    }
+
+    func isDefault(for activity: ShoeActivity) -> Bool {
+        defaultActivities.contains(activity)
+    }
+
     var imageURL: URL? { ProfileImageService.fullImageURL(for: image_url) }
 
     /// "Nike · Volt Tint/Sapphire", whichever halves exist.
@@ -77,7 +143,20 @@ struct ShoeDraft {
     /// Miles, never display units.
     var startingMiles: Double = 0
     var replaceAtMiles: Double?
-    var isDefault: Bool = false
+    var defaultFor: Set<ShoeActivity> = []
+}
+
+/// A pair just taken off an activity's default, with how many of that
+/// activity's workouts the sync gave it — the app offers to take it off
+/// those, since "not for walks" usually means it's carrying walks it was
+/// never worn on.
+struct ShoeDefaultCleanup: Identifiable, Hashable {
+    let shoeId: String
+    let shoeName: String
+    let activity: ShoeActivity
+    let count: Int
+
+    var id: String { "\(shoeId)#\(activity.rawValue)" }
 }
 
 // MARK: - API
@@ -91,6 +170,18 @@ enum ShoeService {
     }
 
     private struct ShoeList: Decodable { let shoes: [Shoe] }
+    struct ReplacedDefault: Decodable {
+        let shoe_id: String
+        let auto_assigned: Int
+    }
+    private struct DefaultChange: Decodable {
+        let shoes: [Shoe]
+        let previous: ReplacedDefault?
+    }
+    private struct ClearedAuto: Decodable {
+        let cleared: Int
+        let shoes: [Shoe]
+    }
     private struct WorkoutList: Decodable { let workouts: [ShoeWorkout] }
     private struct OK: Decodable { let success: Bool? }
 
@@ -114,7 +205,7 @@ enum ShoeService {
         var body: [String: Any] = [
             "name": draft.name,
             "starting_miles": draft.startingMiles,
-            "is_default": draft.isDefault,
+            "default_for": ShoeActivity.allCases.filter(draft.defaultFor.contains).map(\.rawValue),
         ]
         if !draft.brand.isEmpty { body["brand"] = draft.brand }
         if !draft.colorway.isEmpty { body["colorway"] = draft.colorway }
@@ -155,12 +246,41 @@ enum ShoeService {
         ).workouts
     }
 
-    static func assignment(forWorkout workoutId: String) async throws -> WorkoutShoeAssignment {
+    /// `activity` picks which default to predict for a workout the server
+    /// hasn't seen yet (the recap opens before the sync).
+    static func assignment(forWorkout workoutId: String, activity: ShoeActivity?) async throws -> WorkoutShoeAssignment {
         let uid = try userId()
+        let query = activity.map { "?activity=\($0.rawValue)" } ?? ""
         return try await APIClient.fancyFetch(
-            endpoint: "/users/\(uid)/workout-shoes/\(workoutId)",
+            endpoint: "/users/\(uid)/workout-shoes/\(workoutId)\(query)",
             responseType: WorkoutShoeAssignment.self
         )
+    }
+
+    /// Makes `shoeId` the default for `activity`; nil = no default for it.
+    static func setDefault(_ shoeId: String?, for activity: ShoeActivity) async throws -> (shoes: [Shoe], previous: ReplacedDefault?) {
+        let uid = try userId()
+        let body: [String: Any] = ["shoe_id": shoeId ?? NSNull()]
+        let result = try await APIClient.fancyFetch(
+            endpoint: "/users/\(uid)/shoe-defaults/\(activity.rawValue)",
+            method: .PUT,
+            body: try json(body),
+            responseType: DefaultChange.self
+        )
+        return (result.shoes, result.previous)
+    }
+
+    /// Takes the pair off the `activity` workouts the sync gave it. The
+    /// user's own picks are left alone.
+    static func clearAutoAssigned(_ shoeId: String, activity: ShoeActivity) async throws -> (cleared: Int, shoes: [Shoe]) {
+        let uid = try userId()
+        let result = try await APIClient.fancyFetch(
+            endpoint: "/users/\(uid)/shoes/\(shoeId)/clear-auto",
+            method: .POST,
+            body: try json(["activity": activity.rawValue]),
+            responseType: ClearedAuto.self
+        )
+        return (result.cleared, result.shoes)
     }
 
     /// `shoeId` nil records an explicit "no shoes" for that workout, which
@@ -250,7 +370,10 @@ final class ShoeStore {
     /// Pairs still in rotation — the ones a workout can be given.
     var active: [Shoe] { shoes.filter { !$0.isRetired } }
     var retired: [Shoe] { shoes.filter(\.isRetired) }
-    var defaultShoe: Shoe? { shoes.first { $0.is_default && !$0.isRetired } }
+    /// The pair new `activity` workouts get; nil = none.
+    func defaultShoe(for activity: ShoeActivity) -> Shoe? {
+        shoes.first { $0.isDefault(for: activity) && !$0.isRetired }
+    }
 
     func shoe(id: String?) -> Shoe? {
         guard let id else { return nil }
@@ -305,6 +428,36 @@ final class ShoeStore {
     func update(_ shoeId: String, fields: [String: Any]) async throws {
         _ = try await ShoeService.update(shoeId, fields: fields)
         await refresh()
+    }
+
+    /// Sets the default for one activity. Returns the pair that lost it when
+    /// the sync had given that pair some of the activity's workouts, so the
+    /// caller can offer to take it off them.
+    @discardableResult
+    func setDefault(_ shoeId: String?, for activity: ShoeActivity) async throws -> ShoeDefaultCleanup? {
+        let previousName = shoes.first { $0.isDefault(for: activity) }?.name
+        let result = try await ShoeService.setDefault(shoeId, for: activity)
+        adopt(result.shoes)
+        guard let previous = result.previous, previous.auto_assigned > 0 else { return nil }
+        return ShoeDefaultCleanup(
+            shoeId: previous.shoe_id,
+            shoeName: shoe(id: previous.shoe_id)?.name ?? previousName ?? "That pair",
+            activity: activity,
+            count: previous.auto_assigned
+        )
+    }
+
+    func clearAutoAssigned(_ cleanup: ShoeDefaultCleanup) async throws {
+        let result = try await ShoeService.clearAutoAssigned(cleanup.shoeId, activity: cleanup.activity)
+        adopt(result.shoes)
+    }
+
+    /// A full list the server just answered with — no second round trip.
+    private func adopt(_ list: [Shoe]) {
+        shoes = list
+        loadFailed = false
+        hasLoaded = true
+        loadedAt = Date()
     }
 
     func replaceImage(_ image: UIImage, shoeId: String) async throws {

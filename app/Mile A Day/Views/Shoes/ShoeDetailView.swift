@@ -17,6 +17,10 @@ struct ShoeDetailView: View {
     @State private var confirmDelete = false
     @State private var isWorking = false
     @State private var actionError: String?
+    @State private var cleanup: ShoeDefaultCleanup?
+    /// A toggle's new position while its save is in flight, so it doesn't
+    /// snap back until the server answers.
+    @State private var pendingDefault: [ShoeActivity: Bool] = [:]
 
     private var shoe: Shoe? { store.shoe(id: shoeId) }
 
@@ -66,6 +70,7 @@ struct ShoeDetailView: View {
         } message: {
             Text(actionError ?? "")
         }
+        .shoeDefaultCleanupPrompt($cleanup, onError: { actionError = $0 })
         .task { await store.refreshIfStale() }
         // Re-read the list whenever the count behind the mileage moves.
         .task(id: shoe?.workout_count) { await loadWorkouts() }
@@ -89,8 +94,8 @@ struct ShoeDetailView: View {
                         .foregroundColor(.white.opacity(0.6))
                         .multilineTextAlignment(.center)
                 }
-                if shoe.is_default {
-                    ShoeDefaultChip()
+                if !shoe.defaultActivities.isEmpty {
+                    ShoeDefaultChip(activities: shoe.defaultActivities)
                 } else if shoe.isRetired {
                     Text("RETIRED")
                         .font(.system(size: 9, weight: .heavy, design: .rounded))
@@ -176,30 +181,11 @@ struct ShoeDetailView: View {
 
     private func actionsCard(_ shoe: Shoe) -> some View {
         VStack(spacing: 0) {
-            if shoe.is_default {
-                actionRow(
-                    icon: "checkmark.circle.fill",
-                    title: "Default shoes",
-                    subtitle: "New walks and runs get this pair",
-                    tint: MADTheme.Colors.success
-                )
-                .opacity(0.9)
-            } else if !shoe.isRetired {
-                Button {
-                    update(["is_default": true])
-                } label: {
-                    actionRow(
-                        icon: "star.circle.fill",
-                        title: "Make Default",
-                        subtitle: "Give new walks and runs this pair",
-                        tint: MADTheme.Colors.success
-                    )
+            if !shoe.isRetired {
+                ForEach(ShoeActivity.allCases) { activity in
+                    defaultToggleRow(shoe, activity: activity)
+                    divider
                 }
-                .buttonStyle(.plain)
-            }
-
-            if shoe.is_default || !shoe.isRetired {
-                divider
             }
 
             Button {
@@ -234,6 +220,40 @@ struct ShoeDetailView: View {
         .padding(.vertical, MADTheme.Spacing.xs)
         .madLiquidGlass()
         .disabled(isWorking)
+    }
+
+    /// "Default for walks" — on: new walks get this pair; off: they get
+    /// none (or whichever pair the subtitle names).
+    private func defaultToggleRow(_ shoe: Shoe, activity: ShoeActivity) -> some View {
+        let isOn = pendingDefault[activity] ?? shoe.isDefault(for: activity)
+        let other = store.defaultShoe(for: activity)
+        let subtitle = isOn
+            ? "New \(activity.noun) get this pair"
+            : other.map { "Now: \($0.name)" } ?? "Now: no shoes"
+        return HStack(spacing: MADTheme.Spacing.md) {
+            Image(systemName: activity.symbol)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(MADTheme.workoutColor(activity.rawValue))
+                .frame(width: 28)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Default for \(activity.noun)")
+                    .font(.system(size: 16, weight: .medium, design: .rounded))
+                    .foregroundColor(.white)
+                Text(subtitle)
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.5))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            Toggle("Default for \(activity.noun)", isOn: Binding(
+                get: { isOn },
+                set: { setDefault($0, activity: activity) }
+            ))
+            .labelsHidden()
+            .tint(MADTheme.Colors.success)
+        }
+        .padding(.vertical, 10)
     }
 
     private var divider: some View {
@@ -275,7 +295,7 @@ struct ShoeDetailView: View {
             } else if workouts.isEmpty {
                 Text(shoe.isRetired
                      ? "No workouts were logged in this pair."
-                     : "None yet. Walks and runs get your default pair automatically, or choose this pair from any workout's details.")
+                     : "None yet. Make it a default above, or choose this pair from any workout's details.")
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(.white.opacity(0.55))
             } else {
@@ -327,6 +347,22 @@ struct ShoeDetailView: View {
             } catch {
                 actionError = error.localizedDescription
             }
+            isWorking = false
+        }
+    }
+
+    /// On: this pair becomes the activity's default (replacing any other).
+    /// Off: the activity gets no default — the pair isn't swapped for another.
+    private func setDefault(_ on: Bool, activity: ShoeActivity) {
+        isWorking = true
+        pendingDefault[activity] = on
+        Task { @MainActor in
+            do {
+                cleanup = try await store.setDefault(on ? shoeId : nil, for: activity)
+            } catch {
+                actionError = error.localizedDescription
+            }
+            pendingDefault[activity] = nil
             isWorking = false
         }
     }

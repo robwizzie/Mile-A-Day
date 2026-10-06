@@ -22,6 +22,9 @@ struct ImagePicker: UIViewControllerRepresentable {
         case circleCrop
         /// Preview at the shape the banner is actually stored in.
         case banner
+        /// Square move-and-scale, for a shoe photo: every tile it fills is
+        /// square, so the framing chosen here is the one that shows.
+        case squareCrop
     }
 
     @Binding var selectedImage: UIImage?
@@ -139,6 +142,24 @@ struct ImagePicker: UIViewControllerRepresentable {
                         onCancel: cancel
                     )
                 )
+            case .squareCrop:
+                host = UIHostingController(
+                    rootView: ProfileImageCropper(
+                        image: image,
+                        aspect: 1,
+                        isCircular: false,
+                        // The server's largest shoe image (900px, fit inside),
+                        // so its resize is a no-op and this framing survives.
+                        outputSize: CGSize(width: 900, height: 900),
+                        maxCropWidth: nil,
+                        hint: "Drag to move, pinch to zoom. Zoom out to fit the whole shoe.",
+                        // A wide or tall shot has to FIT the square, not lose
+                        // its toe or heel to it.
+                        allowsZoomOut: true,
+                        onCrop: use,
+                        onCancel: cancel
+                    )
+                )
             }
             host.modalPresentationStyle = .fullScreen
             picker.present(host, animated: true)
@@ -236,6 +257,12 @@ struct ProfileImageCropper: View {
     var maxCropWidth: CGFloat? = 300
     /// One line under the window, when the shape needs explaining.
     var hint: String? = nil
+    /// Lets the photo shrink INSIDE the window — down to half the size that
+    /// fits it whole — padded with the colour of the photo's own edge, so a
+    /// product shot on white pads with white. Off for the avatar and banner,
+    /// which must always be filled; with it off nothing here behaves any
+    /// differently from before.
+    var allowsZoomOut: Bool = false
     let onCrop: (UIImage) -> Void
     let onCancel: () -> Void
 
@@ -247,6 +274,8 @@ struct ProfileImageCropper: View {
     /// toolbar button, outside the GeometryReader, and the whole display→pixel
     /// conversion is expressed in this window's points.
     @State private var measuredWindow: CGSize = .zero
+    /// What fills the window around a zoomed-out photo (`allowsZoomOut`).
+    @State private var padColor: UIColor = .white
 
     var body: some View {
         NavigationView {
@@ -255,6 +284,18 @@ struct ProfileImageCropper: View {
 
                 GeometryReader { geometry in
                     ZStack {
+                        // What a zoomed-out photo is padded with, drawn where
+                        // the output will have it.
+                        if allowsZoomOut {
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                                .fill(Color(uiColor: padColor))
+                                .frame(
+                                    width: cropWindow(in: geometry).width,
+                                    height: cropWindow(in: geometry).height
+                                )
+                                .allowsHitTesting(false)
+                        }
+
                         // Draggable/zoomable image
                         Image(uiImage: image)
                             .resizable()
@@ -264,30 +305,10 @@ struct ProfileImageCropper: View {
                                 height: imageDisplaySize(in: geometry).height * scale
                             )
                             .offset(offset)
-                            .gesture(
-                                SimultaneousGesture(
-                                    MagnificationGesture()
-                                        .onChanged { value in
-                                            let newScale = lastScale * value
-                                            scale = max(1.0, min(newScale, 5.0))
-                                        }
-                                        .onEnded { _ in
-                                            lastScale = scale
-                                            clampOffset(in: geometry)
-                                        },
-                                    DragGesture()
-                                        .onChanged { value in
-                                            offset = CGSize(
-                                                width: lastOffset.width + value.translation.width,
-                                                height: lastOffset.height + value.translation.height
-                                            )
-                                        }
-                                        .onEnded { _ in
-                                            clampOffset(in: geometry)
-                                            lastOffset = offset
-                                        }
-                                )
-                            )
+                            // On the photo itself — unless it can be smaller
+                            // than the window, when a pinch on the padding has
+                            // to reach it too (the container's copy below).
+                            .gesture(moveAndScale(in: geometry), including: allowsZoomOut ? .subviews : .all)
 
                         // Dark overlay with the crop window cut out of it
                         CropOverlay(
@@ -310,10 +331,24 @@ struct ProfileImageCropper: View {
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .allowsHitTesting(false)
                         }
+
+                        if allowsZoomOut {
+                            VStack {
+                                Spacer()
+                                fitToggle(in: geometry)
+                                    .padding(.bottom, hint == nil ? MADTheme.Spacing.xl : 84)
+                            }
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                        }
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height)
+                    .contentShape(Rectangle())
+                    .gesture(moveAndScale(in: geometry), including: allowsZoomOut ? .all : .subviews)
                     .clipped()
-                    .onAppear { measuredWindow = cropWindow(in: geometry) }
+                    .onAppear {
+                        measuredWindow = cropWindow(in: geometry)
+                        if allowsZoomOut { padColor = ImageEdgeColor.average(of: image) }
+                    }
                     .onChange(of: geometry.size) { _, _ in
                         measuredWindow = cropWindow(in: geometry)
                     }
@@ -363,8 +398,11 @@ struct ProfileImageCropper: View {
     private func clampOffset(in geometry: GeometryProxy) {
         let window = cropWindow(in: geometry)
         let imgSize = imageDisplaySize(in: geometry)
-        let maxX = max(0, (imgSize.width * scale - window.width) / 2)
-        let maxY = max(0, (imgSize.height * scale - window.height) / 2)
+        // Larger than the window: its edges can't come inside it. Smaller
+        // (only possible with `allowsZoomOut`): it can't leave it. One rule —
+        // and identical to the old `max(0, …)` whenever the photo covers.
+        let maxX = abs(imgSize.width * scale - window.width) / 2
+        let maxY = abs(imgSize.height * scale - window.height) / 2
 
         withAnimation(.easeOut(duration: 0.2)) {
             offset.width = min(maxX, max(-maxX, offset.width))
@@ -374,6 +412,10 @@ struct ProfileImageCropper: View {
     }
 
     private func cropAndReturn() {
+        if allowsZoomOut {
+            onCrop(renderPadded())
+            return
+        }
         let window = measuredWindow
         // The source is normalised FIRST: `cgImage.cropping` works in raw
         // pixels and ignores `imageOrientation`, so a photo shot in portrait
@@ -441,6 +483,157 @@ struct ProfileImageCropper: View {
         return UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
             image.draw(in: CGRect(origin: .zero, size: image.size))
         }
+    }
+
+    // MARK: Zoom-out (`allowsZoomOut`)
+
+    private func moveAndScale(in geometry: GeometryProxy) -> some Gesture {
+        SimultaneousGesture(
+            MagnificationGesture()
+                .onChanged { value in
+                    let newScale = lastScale * value
+                    scale = max(minScale(in: geometry), min(newScale, 5.0))
+                }
+                .onEnded { _ in
+                    lastScale = scale
+                    clampOffset(in: geometry)
+                },
+            DragGesture()
+                .onChanged { value in
+                    offset = CGSize(
+                        width: lastOffset.width + value.translation.width,
+                        height: lastOffset.height + value.translation.height
+                    )
+                }
+                .onEnded { _ in
+                    clampOffset(in: geometry)
+                    lastOffset = offset
+                }
+        )
+    }
+
+    /// The zoom (relative to the cover fit) at which the whole photo fits.
+    private func fitScale(in geometry: GeometryProxy) -> CGFloat {
+        let window = cropWindow(in: geometry)
+        guard image.size.width > 0, image.size.height > 0 else { return 1 }
+        let cover = max(window.width / image.size.width, window.height / image.size.height)
+        let fit = min(window.width / image.size.width, window.height / image.size.height)
+        return fit / cover
+    }
+
+    /// 1 (cover) unless zooming out is allowed, then half the whole-photo fit.
+    private func minScale(in geometry: GeometryProxy) -> CGFloat {
+        allowsZoomOut ? fitScale(in: geometry) * 0.5 : 1.0
+    }
+
+    private func isFitted(in geometry: GeometryProxy) -> Bool {
+        abs(scale - fitScale(in: geometry)) < 0.01 && abs(offset.width) < 1 && abs(offset.height) < 1
+    }
+
+    /// One tap between "the whole photo, centred" and "fill the window".
+    private func fitToggle(in geometry: GeometryProxy) -> some View {
+        let fitted = isFitted(in: geometry)
+        return Button {
+            withAnimation(.easeOut(duration: 0.25)) {
+                scale = fitted ? 1 : fitScale(in: geometry)
+                offset = .zero
+            }
+            lastScale = scale
+            lastOffset = .zero
+        } label: {
+            Label(
+                fitted ? "Fill the square" : "Fit whole photo",
+                systemImage: fitted
+                    ? "arrow.up.left.and.arrow.down.right"
+                    : "arrow.down.right.and.arrow.up.left"
+            )
+            .font(.system(size: 14, weight: .semibold, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(Capsule().fill(Color.white.opacity(0.18)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The window, drawn at `outputSize`: the pad colour, then the photo
+    /// exactly where it sits on screen — so a photo smaller than the window
+    /// comes out padded, and one larger comes out cropped, by the same maths.
+    private func renderPadded() -> UIImage {
+        let window = measuredWindow
+        let source = normalizedImage()
+        guard window.width > 0, window.height > 0,
+              source.size.width > 0, source.size.height > 0 else { return image }
+
+        let cover = max(window.width / source.size.width, window.height / source.size.height)
+        let displayWidth = source.size.width * cover * scale
+        let displayHeight = source.size.height * cover * scale
+        // Output pixels per window point (the window has the output's aspect).
+        let k = outputSize.width / window.width
+        let photoRect = CGRect(
+            x: (window.width / 2 + offset.width - displayWidth / 2) * k,
+            y: (window.height / 2 + offset.height - displayHeight / 2) * k,
+            width: displayWidth * k,
+            height: displayHeight * k
+        )
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: outputSize, format: format).image { context in
+            padColor.setFill()
+            context.fill(CGRect(origin: .zero, size: outputSize))
+            source.draw(in: photoRect)
+        }
+    }
+}
+
+/// The average colour of a photo's outer ring — the natural padding for it.
+/// Transparent pixels count as white, because a transparent PNG is shown
+/// (and stored by the server) flattened onto white.
+enum ImageEdgeColor {
+    static func average(of image: UIImage) -> UIColor {
+        guard let cgImage = image.cgImage else { return .white }
+        let side = 24
+        let ring = 2
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        let totals: (r: Int, g: Int, b: Int, n: Int)? = pixels.withUnsafeMutableBytes { buffer in
+            guard let base = buffer.baseAddress,
+                  let context = CGContext(
+                      data: base,
+                      width: side,
+                      height: side,
+                      bitsPerComponent: 8,
+                      bytesPerRow: side * 4,
+                      space: CGColorSpaceCreateDeviceRGB(),
+                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                  )
+            else { return nil }
+            context.interpolationQuality = .medium
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: side, height: side))
+
+            var r = 0, g = 0, b = 0, n = 0
+            for y in 0..<side {
+                for x in 0..<side where x < ring || y < ring || x >= side - ring || y >= side - ring {
+                    let i = (y * side + x) * 4
+                    // Premultiplied, so "over white" is colour + (1 - alpha).
+                    let clear = 255 - Int(buffer[i + 3])
+                    r += Int(buffer[i]) + clear
+                    g += Int(buffer[i + 1]) + clear
+                    b += Int(buffer[i + 2]) + clear
+                    n += 1
+                }
+            }
+            return (r: r, g: g, b: b, n: n)
+        }
+        guard let totals, totals.n > 0 else { return .white }
+        let scale = CGFloat(totals.n * 255)
+        return UIColor(
+            red: min(1, CGFloat(totals.r) / scale),
+            green: min(1, CGFloat(totals.g) / scale),
+            blue: min(1, CGFloat(totals.b) / scale),
+            alpha: 1
+        )
     }
 }
 

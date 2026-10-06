@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Every pair the user tracks: in rotation first (default on top), retired
-/// below. Pushed from Settings and from the profile's Shoes card.
+/// Every pair the user tracks: which pair walks and runs each get by default,
+/// then the pairs in rotation (defaults on top), retired below. Pushed from
+/// Settings and from the profile's Shoes card.
 struct ShoesListView: View {
     @State private var store = ShoeStore.shared
     @State private var showAdd = false
@@ -16,6 +17,9 @@ struct ShoesListView: View {
                 } else if store.shoes.isEmpty {
                     emptyState
                 } else {
+                    if !store.active.isEmpty {
+                        ShoeDefaultsCard()
+                    }
                     section("IN ROTATION", shoes: store.active)
                     if !store.retired.isEmpty {
                         section("RETIRED", shoes: store.retired)
@@ -88,7 +92,7 @@ struct ShoesListView: View {
                 .foregroundColor(.white)
             Text(store.loadFailed
                  ? "Couldn't load your shoes. Pull down to try again."
-                 : "Paste a link to your pair and every walk and run adds to its mileage — so you know when it's time for a new one.")
+                 : "Add your pair and every walk and run in it adds to its mileage — so you know when it's time for a new one.")
                 .font(MADTheme.Typography.subheadline)
                 .foregroundColor(.white.opacity(0.6))
                 .multilineTextAlignment(.center)

@@ -254,7 +254,11 @@ struct WorkoutDetailView: View {
                         statsSection
 
                         // Which pair it was done in (private to the owner).
-                        WorkoutShoeCard(workoutId: workoutId, isActive: isActive)
+                        WorkoutShoeCard(
+                            workoutId: workoutId,
+                            activity: ShoeActivity.of(workout),
+                            isActive: isActive
+                        )
 
                         // The race, if this workout was one. Every completed
                         // race appears here, won or lost — this is the only

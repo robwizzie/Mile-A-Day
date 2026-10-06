@@ -16,6 +16,11 @@
  *      workout id can't block your stamp
  *   6. PRIVACY: nothing outside the shoe service (and account deletion)
  *      reads the shoe tables, so no feed/profile/friend surface can.
+ *   7. defaults are PER ACTIVITY: runs take the running default, walks and
+ *      hikes the walking one, `other` by pace; "none" for walks stamps
+ *      nothing; changing one activity never moves the other's line; and
+ *      taking a pair off walks can clear the walks the SYNC gave it while
+ *      leaving the user's own picks alone.
  *
  * Usage (same env as ci-smoke):
  *   DATABASE_URL=... node scripts/shoes-check.mjs
@@ -30,6 +35,8 @@ import {
   getWorkoutShoe,
   listShoes,
   listShoeWorkouts,
+  clearAutoAssigned,
+  setActivityDefault,
   setWorkoutShoe,
   updateShoe,
 } from "../dist/services/shoeService.js";
@@ -79,6 +86,7 @@ async function shoeOf(user, workoutId) {
 }
 
 async function cleanup() {
+  await db.query(`DELETE FROM shoe_defaults WHERE user_id = ANY($1)`, [ALL]);
   await db.query(`DELETE FROM workout_shoes WHERE user_id = ANY($1)`, [ALL]);
   await db.query(`DELETE FROM shoes WHERE user_id = ANY($1)`, [ALL]);
   await db.query(`DELETE FROM workouts WHERE user_id = ANY($1)`, [ALL]);
@@ -111,7 +119,7 @@ async function main() {
     is_default: true,
   });
   await db.query(
-    `UPDATE shoes SET default_since = now() - interval '3 hours' WHERE shoe_id = $1`,
+    `UPDATE shoe_defaults SET since = now() - interval '3 hours' WHERE shoe_id = $1`,
     [pegasus.shoe_id],
   );
 
@@ -260,7 +268,7 @@ async function main() {
   );
   const vomero = await createShoe(ALICE, { name: "Vomero", is_default: true });
   await db.query(
-    `UPDATE shoes SET default_since = now() - interval '10 hours' WHERE shoe_id = $1`,
+    `UPDATE shoe_defaults SET since = now() - interval '10 hours' WHERE shoe_id = $1`,
     [vomero.shoe_id],
   );
   await uploadWorkouts(ALICE, [workout("shoe-w-new", 1)]);
@@ -287,6 +295,182 @@ async function main() {
     true,
   );
 
+  // ── 7. Per-activity defaults ────────────────────────────────────────────
+  const byId = async (id) =>
+    (await listShoes(ALICE)).find((s) => s.shoe_id === id);
+  check(
+    "legacy is_default: true is the default for both",
+    (await byId(vomero.shoe_id)).default_for,
+    ["walking", "running"],
+  );
+  const walkers = await createShoe(ALICE, {
+    name: "Walkers",
+    default_for: ["walking"],
+  });
+  check(
+    "create with default_for takes only that activity",
+    (await byId(walkers.shoe_id)).default_for,
+    ["walking"],
+  );
+  check(
+    "…and the pair it replaced keeps the other",
+    [
+      (await byId(vomero.shoe_id)).default_for,
+      (await byId(vomero.shoe_id)).is_default,
+    ],
+    [["running"], true],
+  );
+
+  const runningSince = async () =>
+    (
+      await db.query(
+        `SELECT since FROM shoe_defaults WHERE user_id = $1 AND activity = 'running'`,
+        [ALICE],
+      )
+    )[0].since.getTime();
+  const runLineBefore = await runningSince();
+  const cleared = await setActivityDefault(ALICE, "walking", null);
+  check(
+    "walks → none reports the pair that lost them",
+    cleared?.shoe_id,
+    walkers.shoe_id,
+  );
+  check(
+    "changing walks leaves the running line where it was",
+    await runningSince(),
+    runLineBefore,
+  );
+
+  await uploadWorkouts(ALICE, [
+    workout("shoe-a-run", 1),
+    workout("shoe-a-walk", 1, { workoutType: "walking" }),
+    workout("shoe-a-hike", 1, { workoutType: "hiking" }),
+    // 20:00/mi → a walk; 10:00/mi → a run (13:30/mi is the line).
+    workout("shoe-a-other-slow", 1, {
+      workoutType: "other",
+      distance: 1,
+      totalDuration: 1200,
+    }),
+    workout("shoe-a-other-fast", 1, {
+      workoutType: "other",
+      distance: 2,
+      totalDuration: 1200,
+    }),
+  ]);
+  check(
+    "run takes the running default",
+    await shoeOf(ALICE, "shoe-a-run"),
+    { shoe_id: vomero.shoe_id, assigned_by: "default" },
+  );
+  check(
+    "walk with no walking default stamps nothing",
+    await shoeOf(ALICE, "shoe-a-walk"),
+    "none",
+  );
+  check(
+    "hike files under walking",
+    await shoeOf(ALICE, "shoe-a-hike"),
+    "none",
+  );
+  check(
+    "slow 'other' files under walking",
+    await shoeOf(ALICE, "shoe-a-other-slow"),
+    "none",
+  );
+  check(
+    "fast 'other' files under running",
+    (await shoeOf(ALICE, "shoe-a-other-fast")).shoe_id,
+    vomero.shoe_id,
+  );
+
+  check(
+    "unsynced run predicts the running default",
+    await getWorkoutShoe(ALICE, "shoe-a-unsynced", "running"),
+    { shoe_id: vomero.shoe_id, source: "predicted" },
+  );
+  check(
+    "unsynced walk predicts none",
+    await getWorkoutShoe(ALICE, "shoe-a-unsynced", "walking"),
+    { shoe_id: null, source: null },
+  );
+  check(
+    "no activity (older build) never guesses between two",
+    await getWorkoutShoe(ALICE, "shoe-a-unsynced"),
+    { shoe_id: null, source: null },
+  );
+
+  // The pair was on walks too (the backfilled shared default), then the
+  // user says it isn't a walking shoe.
+  check(
+    "setting a default where there was none reports nothing replaced",
+    await setActivityDefault(ALICE, "walking", vomero.shoe_id),
+    null,
+  );
+  await db.query(
+    `UPDATE shoe_defaults SET since = now() - interval '10 hours'
+     WHERE user_id = $1 AND activity = 'walking'`,
+    [ALICE],
+  );
+  await setWorkoutShoe(ALICE, "shoe-b-walk-picked", vomero.shoe_id);
+  await uploadWorkouts(ALICE, [
+    workout("shoe-b-walk", 1, { workoutType: "walking" }),
+    workout("shoe-b-walk-picked", 1, { workoutType: "walking" }),
+  ]);
+  check(
+    "walk stamped while it was the walking default",
+    (await shoeOf(ALICE, "shoe-b-walk")).shoe_id,
+    vomero.shoe_id,
+  );
+  check(
+    "taking walks off it counts only the walks the SYNC gave it",
+    await setActivityDefault(ALICE, "walking", null),
+    { shoe_id: vomero.shoe_id, auto_assigned: 1 },
+  );
+  check(
+    "clear-auto clears exactly those",
+    await clearAutoAssigned(ALICE, vomero.shoe_id, "walking"),
+    1,
+  );
+  check(
+    "…leaving an explicit none",
+    await shoeOf(ALICE, "shoe-b-walk"),
+    { shoe_id: null, assigned_by: "user" },
+  );
+  check(
+    "…never the user's own pick",
+    await shoeOf(ALICE, "shoe-b-walk-picked"),
+    { shoe_id: vomero.shoe_id, assigned_by: "user" },
+  );
+  check(
+    "…nor its runs",
+    await shoeOf(ALICE, "shoe-a-run"),
+    { shoe_id: vomero.shoe_id, assigned_by: "default" },
+  );
+  await uploadWorkouts(ALICE, [
+    workout("shoe-b-walk", 1, { workoutType: "walking" }),
+  ]);
+  check(
+    "a re-sync doesn't put it back",
+    (await shoeOf(ALICE, "shoe-b-walk")).shoe_id,
+    null,
+  );
+
+  await updateShoe(ALICE, walkers.shoe_id, { is_default: false });
+  check(
+    "legacy is_default: false takes it off every activity",
+    (await byId(walkers.shoe_id)).default_for,
+    [],
+  );
+  await updateShoe(ALICE, walkers.shoe_id, { default_for: ["running"] });
+  check(
+    "PATCH default_for moves the running default",
+    [
+      (await byId(walkers.shoe_id)).default_for,
+      (await byId(vomero.shoe_id)).default_for,
+    ],
+    [["running"], []],
+  );
+
   // PRIVACY: the shoe tables are read by the shoe service and written by
   // account deletion — nothing else. A feed/profile/friend query that joined
   // them would be a leak this check exists to stop at review time.
@@ -310,7 +494,7 @@ async function main() {
         const src = fs.readFileSync(full, "utf8");
         if (
           !allowed.has(rel) &&
-          /\b(workout_shoes|FROM\s+shoes|JOIN\s+shoes)\b/i.test(src)
+          /\b(workout_shoes|shoe_defaults|FROM\s+shoes|JOIN\s+shoes)\b/i.test(src)
         ) {
           offenders.push(rel);
         }

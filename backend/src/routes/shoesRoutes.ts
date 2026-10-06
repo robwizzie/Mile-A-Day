@@ -1,11 +1,13 @@
 import { Router } from "express";
 import multer from "multer";
 import {
+  clearAutoAssignedController,
   createShoeController,
   deleteShoeController,
   getShoesController,
   getShoeWorkoutsController,
   getWorkoutShoeController,
+  putShoeDefaultController,
   putWorkoutShoeController,
   updateShoeController,
   uploadShoeImageController,
@@ -41,6 +43,12 @@ router.post(
   uploadShoeImageController,
 );
 router.get("/:userId/shoes/:shoeId/workouts", self, getShoeWorkoutsController);
+router.post(
+  "/:userId/shoes/:shoeId/clear-auto",
+  self,
+  clearAutoAssignedController,
+);
+router.put("/:userId/shoe-defaults/:activity", self, putShoeDefaultController);
 router.get("/:userId/workout-shoes/:workoutId", self, getWorkoutShoeController);
 router.put("/:userId/workout-shoes/:workoutId", self, putWorkoutShoeController);
 
