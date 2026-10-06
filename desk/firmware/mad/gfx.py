@@ -66,17 +66,25 @@ def set_theme(overrides):
     set_dim(_DIM[0])
 
 
+NIGHT_FLOOR = 0x08    # the panel's first lit step (bit depth 6: red/blue get 5 bits)
+
+
 def set_dim(f):
-    """Scale every colour (night mode). Lit channels never round to black:
-    the panel has 16 levels per channel, so keep at least the first one."""
+    """Scale every colour (night mode). A colour's main channels never round
+    to black (they keep the panel's first step); its faint ones drop out
+    instead of being lifted, so a dim colour keeps its hue (no grey wash)."""
     _DIM[0] = f
     for i, c in enumerate(_BASE):
+        rgb = ((c >> 16) & 255, (c >> 8) & 255, c & 255)
+        top = max(rgb)
         out = 0
-        for sh in (16, 8, 0):
-            v = (c >> sh) & 255
-            if v:
-                v = max(0x10, int(v * f))
-            out |= v << sh
+        for v in rgb:
+            d = int(v * f)
+            if f < 1:                     # snap to whole panel steps (same for all
+                d = (d + 4) // 8 * 8      # three, so yellow stays yellow, not green)
+            if v and d < NIGHT_FLOOR:
+                d = NIGHT_FLOOR if v * 2 >= top else 0
+            out = (out << 8) | d
         palette[i] = out
 
 # ---------- fonts ----------
