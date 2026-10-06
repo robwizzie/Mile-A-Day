@@ -127,6 +127,18 @@ async function seed() {
   await note(OWNER, "friend_nudge", NUDGER, 60 * 30);   // older than 24h
   await note(OWNER, "comment", NUDGER, 1);              // not a nudge/hype
   await note(OTHER, "friend_nudge", NUDGER, 1);         // someone else's inbox
+  // "<friend> got their mile in!" announcements in the owner's inbox.
+  const mileNote = (uid, sender, ago) => db.query(
+    `INSERT INTO in_app_notifications (user_id, title, body, type, data, created_at)
+     VALUES ($1, 'x got their mile in!', '1.10 mi · 10:00', 'friend_activity',
+             jsonb_build_object('user_id', $2::text, 'kind', 'mile_completed'),
+             NOW() - ($3 || ' minutes')::interval)`,
+    [uid, sender, String(ago)],
+  );
+  await mileNote(OWNER, DONE, 4);                       // shown
+  await mileNote(OWNER, BLOCKED, 3);                    // blocked: no
+  await mileNote(OWNER, RUNNER, 90);                    // older than an hour: no
+  await mileNote(OTHER, DONE, 2);                       // someone else's inbox
   // Owner did 1.02 miles today in their own timezone.
   await db.query(
     `INSERT INTO workouts (workout_id, user_id, distance, local_date, date, timezone_offset,
@@ -244,7 +256,7 @@ async function main() {
   const body = await res.json();
 
   // ── exact whitelist ──
-  check("top-level fields", Object.keys(body).sort(), ["alerts", "commands", "comments", "community", "desk", "friends_at_risk", "friends_finished", "friends_running", "me", "messages", "reviews", "v"]);
+  check("top-level fields", Object.keys(body).sort(), ["alerts", "commands", "comments", "community", "desk", "friends_at_risk", "friends_finished", "friends_miles", "friends_running", "me", "messages", "reviews", "v"]);
   check("community fields", Object.keys(body.community).sort(), [
     "active_7d", "badges_today", "hypes_today", "longest_streak", "miles_today",
     "miles_yesterday_same_time", "new_friends_today", "nudges_today", "out_running_now",
@@ -289,6 +301,11 @@ async function main() {
   check("heatmap: token-covered day", body.me.days[60], -1);
   check("heatmap: plain numbers only", body.me.days.every((d) => typeof d === "number"), true);
   check("no messages yet", body.messages, []);
+  // ── friends who got their mile in: my own announcements, last hour, not blocked ──
+  check("friends' miles", body.friends_miles.map((f) => [f.name, f.miles, f.seconds, f.best_pace]),
+        [["done", 1.1, 600, 545]]);
+  check("friend mile fields", Object.keys(body.friends_miles[0] ?? {}).sort(), ["age_s", "best_pace", "id", "miles", "name", "seconds"]);
+  check("friend mile ids are opaque", body.friends_miles.every((f) => /^[0-9a-f]{16}$/.test(f.id)), true);
   // ── comments on posts I'm tagged in: newest first, nobody's own/blocked/old/deleted ──
   check("tagged-post comments", body.comments.map((c) => [c.from, c.text]),
         [["other", "GREAT WALK!"], ["nudger", "NICE RUN [FIRE] OWNER"]]);
@@ -421,7 +438,7 @@ async function main() {
   check("box detail: live is the owner's own feed", detail.live.me.username, "owner");
   const kinds = new Set(detail.activity.map((x) => x.kind));
   check("activity: nudges, hypes, messages, medals, runs, friend runs, remote", 
-        ["nudge", "hype", "message_in", "medal", "run", "friend_run", "remote"].every((k) => kinds.has(k)), true);
+        ["nudge", "hype", "message_in", "medal", "run", "friend_run", "friend_mile", "remote"].every((k) => kinds.has(k)), true);
   check("activity: no blocked sender", detail.activity.some((x) => x.text.includes("blocked")), false);
   check("activity: remote changes logged", detail.activity.filter((x) => x.kind === "remote").map((x) => x.text).sort(),
         ["Changed from the remote: ARCADE / FLAMEY", "Changed from the remote: ARCADE / RUNNER", "Stat show started from the remote"]);
