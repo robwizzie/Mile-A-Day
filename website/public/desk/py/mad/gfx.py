@@ -185,8 +185,8 @@ def fit(bmp, x0, x1, y, text, color, font=F5, t=None, small=True):
 def miles_text(v, room, font=F5, lead=0):
     """The most precise distance that fits `room` px (plus `lead` px for an
     icon): 1.23 MI, 1.2 MI, 1.2, then whole miles."""
-    for fmt in ("%.2f MI", "%.1f MI", "%.1f", "%d"):
-        txt = fmt % v
+    for fmt, q in (("%.2f MI", 100), ("%.1f MI", 10), ("%.1f", 10), ("%d", 1)):
+        txt = fmt % (int(v * q + 1e-6) / q)      # cut, never round up to a mile not yet run
         if lead + text_width(txt, font) <= room:
             return txt
     return "%d" % v

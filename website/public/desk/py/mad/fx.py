@@ -221,7 +221,10 @@ def friend(app, b, ev, t, now, dt):
     name, miles = ev[1], ev[2]
     walk = len(ev) > 3 and ev[3]
     typed(b, 0, 64, 1, name, t, WHITE, name_font(name, 62))
-    typed(b, 0, 64, 9, "IS WALKING" if walk else "IS RUNNING", t - 0.06 * len(name) - 0.1, RED, F3)
+    if app.popped and int(t / 1.5) % 2:              # they've hit their mile
+        draw_box(b, 0, 64, 9, "MILE DONE!", GREEN, F3)
+    else:
+        typed(b, 0, 64, 9, "IS WALKING" if walk else "IS RUNNING", t - 0.06 * len(name) - 0.1, RED, F3)
     d = t * (12 if walk else 30)         # a walk: the track rolls by slower
     fill(b, 0, 30, 64, 31, MAROON)
     for x in range(64):
@@ -238,9 +241,18 @@ def friend(app, b, ev, t, now, dt):
     blit(b, f, x, y, skip=BLACK)
     if t > 1.2:
         v = miles * ease_out((t - 1.2) / 1.0)
-        fit(b, 28, 64, 17, miles_text(v, 36), WHITE, t=t)
+        done = v >= 1.0                              # a full mile, no early check
+        if done and not app.popped:                  # counting past 1.00: confetti!
+            app.popped = True
+            burst(app, 46, 20, 22, 15, (GREEN, FL_GOLD, WHITE))
+        txt = miles_text(v, 36, F5, 7 if done else 0)
+        if done:
+            fit_icon(b, 28, 64, 17, "check", txt, WHITE, t=t, icon_color=GREEN)
+        else:
+            fit(b, 28, 64, 17, txt, WHITE, t=t)
         fill(b, 33, 27, 59, 29, MAROON_DIM)          # progress toward their mile
-        fill(b, 33, 27, 33 + int(26 * min(1.0, v)), 29, GREEN if v >= 0.95 else RED)
+        fill(b, 33, 27, 33 + int(26 * min(1.0, v)), 29, GREEN if done else RED)
+    particles(app, b, dt, gravity=8)
 
 
 # ---------------- reminder: today's mile isn't done yet ----------------
@@ -357,7 +369,7 @@ def finished(app, b, ev, t, now, dt):
         burst(app, random.uniform(4, 60), -1, 2, 5)
     particles(app, b, dt, gravity=8)
     typed(b, 0, 64, 3 if name_font(name, 62) is F5 else 4, name, t - 2.0, WHITE, name_font(name, 62))
-    done = miles >= 0.95
+    done = miles >= 1.0                  # DONE! only for a full mile
     if t > 2.0 + 0.06 * len(name):
         word = "DONE!" if done else "FINISHED"
         w = (7 if done else 0) + text_width(word)
@@ -369,7 +381,7 @@ def finished(app, b, ev, t, now, dt):
     if t > 3.4:
         v = miles * ease_out((t - 3.4) / 0.8)
         walk = len(ev) > 3 and ev[3]
-        fit(b, 0, 64, 21, "%.1f MI %s" % (v, "WALK" if walk else "RUN"), WHITE, t=t)
+        fit(b, 0, 64, 21, "%.1f MI %s" % (int(v * 10) / 10, "WALK" if walk else "RUN"), WHITE, t=t)
 
 
 # ---------------- evening: friends whose streak is at risk ----------------
