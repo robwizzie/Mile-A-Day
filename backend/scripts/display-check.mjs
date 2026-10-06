@@ -375,7 +375,7 @@ async function main() {
   const msgList = await (await admin("display-messages")).json();
   check("admin can list desk messages", msgList.messages.length >= 2, true);
 
-  // ── the desk remote: my own desk only ──
+  // ── the desk remote: per box ──
   check("no remote settings yet", withMsg.desk, null);
   check("no remote taps yet", withMsg.commands, []);
   const post = (path, body, user = ADMIN) => fetch(`${base}/admin/${path}`, {
@@ -383,32 +383,52 @@ async function main() {
     headers: { "x-test-user": user, "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-  check("non-admin cannot use the remote", (await admin("desk", "GET", OWNER)).status, 403);
-  check("non-admin cannot set a style", (await post("desk/settings", { style: 1 }, OWNER)).status, 403);
-  check("bad style → 400", (await post("desk/settings", { style: 9 })).status, 400);
-  check("nothing to set → 400", (await post("desk/settings", {})).status, 400);
-  check("style string → 400", (await post("desk/settings", { style: "2" })).status, 400);
-  check("set style", (await (await post("desk/settings", { style: 2, mascot: 0 })).json()).settings, { style: 2, mascot: 0, rev: 1 });
-  check("set mascot keeps style", (await (await post("desk/settings", { mascot: 1 })).json()).settings, { style: 2, mascot: 1, rev: 2 });
-  check("unknown scene → 400", (await post("desk/play", { kind: "rm -rf" })).status, 400);
-  check("play a nudge", (await post("desk/play", { kind: "nudge" })).status, 201);
-  const adminFeed2 = await (await feed({ authorization: `Display ${adminKey}` })).json();
-  check("my board gets my settings", adminFeed2.desk, { style: 2, mascot: 1, rev: 2 });
-  check("my board gets my tap", adminFeed2.commands.map((c) => c.kind), ["nudge"]);
-  check("tap ids are opaque", adminFeed2.commands.every((c) => /^[0-9a-f]{16}$/.test(c.id)), true);
-  const ownerFeed3 = await (await feed({ authorization: `Display ${key}` })).json();
-  check("someone else's board gets none of it", [ownerFeed3.desk, ownerFeed3.commands], [null, []]);
-  const remote = await (await admin("desk")).json();
-  check("remote: me", remote.username, "admin");
-  check("remote: my settings", remote.settings, { style: 2, mascot: 1, rev: 2 });
-  check("remote: my board", remote.boards.map((b) => [b.label, b.online]), [["founder desk", true]]);
-  check("remote: who I can message (desk owners, not me)", remote.recipients, ["nudger", "owner"]);
-  check("remote: my sent messages", remote.messages.filter((m) => m.direction === "out").map((m) => [m.who, m.text]),
-    [["other", "NOT FOR YOU"], ["owner", "NICE MILE [FIRE] SCRIPTALERT1/SCRIPT [HEART]"]]);
-  check("remote: live data is my own feed", remote.live.me.username, "admin");
-  check("remote: no key hashes", JSON.stringify(remote).includes(stored[0].key_hash), false);
-  for (let i = 0; i < 29; i++) await post("desk/play", { kind: "hype" });
-  check("taps are rate-limited", (await post("desk/play", { kind: "hype" })).status, 429);
+  check("non-admin cannot list boxes", (await admin("desk/boxes", "GET", OWNER)).status, 403);
+  const boxes = (await (await admin("desk/boxes")).json()).boxes;
+  check("box fields", Object.keys(boxes[0] ?? {}).sort(), ["id", "label", "last_seen", "online", "username"]);
+  check("boxes: every active key", boxes.map((b) => b.username).sort(), ["admin", "nudger", "owner"]);
+  check("no key hashes in the box list", JSON.stringify(boxes).includes(stored[0].key_hash), false);
+  const ownerBox = boxes.find((b) => b.username === "owner").id;
+  const adminBox = boxes.find((b) => b.username === "admin").id;
+  check("non-admin cannot read a box", (await admin(`desk/box/${ownerBox}`, "GET", OWNER)).status, 403);
+  check("non-admin cannot set a style", (await post(`desk/box/${ownerBox}/settings`, { style: 1 }, OWNER)).status, 403);
+  check("unknown box → 404", (await admin("desk/box/00000000-0000-0000-0000-000000000000")).status, 404);
+  check("garbage box id → 404", (await admin("desk/box/x';drop")).status, 404);
+  check("bad style → 400", (await post(`desk/box/${ownerBox}/settings`, { style: 9 })).status, 400);
+  check("nothing to set → 400", (await post(`desk/box/${ownerBox}/settings`, {})).status, 400);
+  check("style string → 400", (await post(`desk/box/${ownerBox}/settings`, { style: "2" })).status, 400);
+  check("set owner's box", (await (await post(`desk/box/${ownerBox}/settings`, { style: 2, mascot: 0 })).json()).settings,
+        { style: 2, mascot: 0, rev: 1 });
+  check("set mascot keeps style", (await (await post(`desk/box/${ownerBox}/settings`, { mascot: 1 })).json()).settings,
+        { style: 2, mascot: 1, rev: 2 });
+  check("stat show on owner's box", (await post(`desk/box/${ownerBox}/show`, {})).status, 201);
+  check("old play endpoint is gone", (await post("desk/play", { kind: "nudge" })).status, 404);
+  const ownerFeedBox = await (await feed({ authorization: `Display ${key}` })).json();
+  check("that box gets its settings", ownerFeedBox.desk, { style: 2, mascot: 1, rev: 2 });
+  check("that box gets the stat show tap", ownerFeedBox.commands.map((c) => c.kind), ["show"]);
+  check("tap ids are opaque", ownerFeedBox.commands.every((c) => /^[0-9a-f]{16}$/.test(c.id)), true);
+  const adminFeed3 = await (await feed({ authorization: `Display ${adminKey}` })).json();
+  check("another box gets none of it", [adminFeed3.desk, adminFeed3.commands], [null, []]);
+  const sentBox = await post(`desk/box/${adminBox}/message`, { to: ownerBox, text: "go run \u{1F3C3}" });
+  check("box-to-box message", sentBox.status, 201);
+  check("message to unknown box → 404", (await post(`desk/box/${adminBox}/message`, { to: "nope", text: "hi" })).status, 404);
+  const detail = await (await admin(`desk/box/${ownerBox}`)).json();
+  check("box detail: the box", [detail.box.username, detail.box.online], ["owner", true]);
+  check("box detail: settings", detail.settings, { style: 2, mascot: 1, rev: 2 });
+  check("box detail: recipients are other people's boxes", detail.recipients.map((b) => b.username).sort(), ["admin", "nudger"]);
+  check("box detail: messages in", detail.messages.filter((m) => m.direction === "in" && m.who === "admin").map((m) => [m.who, m.text]),
+        [["admin", "GO RUN [RUN]"], ["admin", "NICE MILE [FIRE] SCRIPTALERT1/SCRIPT [HEART]"]]);
+  check("box detail: live is the owner's own feed", detail.live.me.username, "owner");
+  const kinds = new Set(detail.activity.map((x) => x.kind));
+  check("activity: nudges, hypes, messages, medals, runs, friend runs, remote", 
+        ["nudge", "hype", "message_in", "medal", "run", "friend_run", "remote"].every((k) => kinds.has(k)), true);
+  check("activity: no blocked sender", detail.activity.some((x) => x.text.includes("blocked")), false);
+  check("activity: remote changes logged", detail.activity.filter((x) => x.kind === "remote").map((x) => x.text).sort(),
+        ["Changed from the remote: ARCADE / FLAMEY", "Changed from the remote: ARCADE / RUNNER", "Stat show started from the remote"]);
+  check("activity: no emails or real names", /@example\.com|Secret|Surname/.test(JSON.stringify(detail.activity)), false);
+  check("box detail: no key hashes", JSON.stringify(detail).includes(stored[0].key_hash), false);
+  for (let i = 0; i < 30; i++) await post(`desk/box/${ownerBox}/show`, {});
+  check("taps are rate-limited", (await post(`desk/box/${ownerBox}/show`, {})).status, 429);
 
   // ── revoke ──
   const id = list.keys.find((k) => k.username === "owner").id;

@@ -2,18 +2,19 @@ import type { Request, Response, NextFunction } from "express";
 import { PostgresService } from "../services/DbService.js";
 import {
   DESK_MASCOTS,
-  DESK_PLAYS,
   DESK_STYLES,
-  getDeskRemote,
-  queueDeskCommand,
-  setDeskSettings,
+  getDeskBox,
+  listDeskBoxes,
+  queueBoxShow,
+  sendBoxMessage,
+  setBoxSettings,
   createDisplayKey,
   createDisplayMessage,
   getDisplayFeed,
   listDisplayKeys,
   listDisplayMessages,
   sanitizeDisplayText,
-  resolveDisplayKey,
+  resolveDisplayKeyRow,
   revokeDisplayKey,
 } from "../services/displayService.js";
 import { logError } from "../services/errorLogService.js";
@@ -35,19 +36,22 @@ export async function requireDisplayKey(req: Request, res: Response, next: NextF
   noStore(res);
   const header = req.headers.authorization ?? "";
   const match = /^Display\s+(\S+)$/.exec(header);
-  const userId = match ? await resolveDisplayKey(match[1]).catch(() => null) : null;
+  const row = match ? await resolveDisplayKeyRow(match[1]).catch(() => null) : null;
+  const userId = row?.userId;
   if (!userId) {
     // One generic answer for missing, malformed, unknown and revoked keys.
     return res.status(401).json({ error: "Invalid display key" });
   }
-  (req as Request & { displayUserId?: string }).displayUserId = userId;
+  (req as Request & { displayUserId?: string; displayKeyId?: string }).displayUserId = userId;
+  (req as Request & { displayKeyId?: string }).displayKeyId = row!.keyId;
   next();
 }
 
 export async function displayFeed(req: Request, res: Response) {
   const userId = (req as Request & { displayUserId?: string }).displayUserId!;
+  const keyId = (req as Request & { displayKeyId?: string }).displayKeyId;
   try {
-    res.json(await getDisplayFeed(userId));
+    res.json(await getDisplayFeed(userId, keyId));
   } catch (e: any) {
     logError("api", "display feed failed", {
       userId,
@@ -143,16 +147,23 @@ export async function adminSendDisplayMessage(req: Request, res: Response) {
 }
 
 
-// ─── The desk remote (Admin -> My desk). Always the signed-in admin's OWN desk.
+// ─── The desk remote (Admin -> Desks). Admin only; any active box.
 
-/** GET /admin/desk */
-export async function adminDeskRemote(req: Request, res: Response) {
+/** GET /admin/desk/boxes */
+export async function adminDeskBoxes(_req: Request, res: Response) {
   noStore(res);
-  const userId = (req as any).userId as string;
+  res.json({ boxes: await listDeskBoxes() });
+}
+
+/** GET /admin/desk/box/:id */
+export async function adminDeskBox(req: Request, res: Response) {
+  noStore(res);
   try {
-    res.json(await getDeskRemote(userId));
+    const box = await getDeskBox(String(req.params.id ?? ""));
+    if (!box) return res.status(404).json({ error: "No such desk" });
+    res.json(box);
   } catch (err) {
-    console.error("desk remote failed:", (err as Error)?.message);
+    console.error("desk box failed:", (err as Error)?.message);
     res.status(500).json({ error: "Desk unavailable" });
   }
 }
@@ -162,25 +173,35 @@ function deskIndex(v: unknown, max: number): number | null | undefined {
   return Number.isInteger(v) && (v as number) >= 0 && (v as number) < max ? (v as number) : undefined;
 }
 
-/** POST /admin/desk/settings  JSON { style?: 0-6, mascot?: 0-1 } */
-export async function adminDeskSettings(req: Request, res: Response) {
+/** POST /admin/desk/box/:id/settings  JSON { style?: 0-6, mascot?: 0-1 } */
+export async function adminDeskBoxSettings(req: Request, res: Response) {
   noStore(res);
   const style = deskIndex(req.body?.style, DESK_STYLES.length);
   const mascot = deskIndex(req.body?.mascot, DESK_MASCOTS.length);
   if (style === undefined || mascot === undefined || (style === null && mascot === null)) {
     return res.status(400).json({ error: "style (0-6) and/or mascot (0-1) required" });
   }
-  res.json({ settings: await setDeskSettings((req as any).userId as string, style, mascot) });
+  const settings = await setBoxSettings(String(req.params.id ?? ""), style, mascot);
+  if (!settings) return res.status(404).json({ error: "No such desk" });
+  res.json({ settings });
 }
 
-/** POST /admin/desk/play  JSON { kind } — play that scene on my desk. */
-export async function adminDeskPlay(req: Request, res: Response) {
+/** POST /admin/desk/box/:id/show — run that box's stat show (real data). */
+export async function adminDeskBoxShow(req: Request, res: Response) {
   noStore(res);
-  const kind = typeof req.body?.kind === "string" ? req.body.kind : "";
-  if (!(DESK_PLAYS as readonly string[]).includes(kind)) {
-    return res.status(400).json({ error: "Unknown scene" });
-  }
-  const ok = await queueDeskCommand((req as any).userId as string, kind);
+  const ok = await queueBoxShow(String(req.params.id ?? ""));
+  if (ok === null) return res.status(404).json({ error: "No such desk" });
   if (!ok) return res.status(429).json({ error: "Slow down a little" });
   res.status(201).json({ ok: true });
+}
+
+/** POST /admin/desk/box/:id/message  JSON { to: <box id>, text } */
+export async function adminDeskBoxMessage(req: Request, res: Response) {
+  noStore(res);
+  const text = sanitizeDisplayText(req.body?.text);
+  const to = typeof req.body?.to === "string" ? req.body.to : "";
+  if (!text) return res.status(400).json({ error: "Message is empty after cleanup (letters, numbers and a few emoji only)" });
+  const message = await sendBoxMessage(String(req.params.id ?? ""), to, text);
+  if (!message) return res.status(404).json({ error: "No such desk" });
+  res.status(201).json({ message });
 }

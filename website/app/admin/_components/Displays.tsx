@@ -145,7 +145,7 @@ export function DisplaysTab() {
         href="/admin/desk"
         className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.04] p-4 text-sm font-bold"
       >
-        <span>📱 My Desk remote — styles, scenes, messages and live data for your own board</span>
+        <span>📱 Desk remote — each desk's real screen, style, messages, live data and activity</span>
         <span style={{ color: MAD_RED }}>Open →</span>
       </a>
       {offline.length > 0 && (

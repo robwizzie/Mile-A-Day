@@ -3407,7 +3407,11 @@ export const deskCommands = pgTable(
   {
     id: uuid().defaultRandom().primaryKey().notNull(),
     userId: text("user_id").notNull(),
+    // Which box (display key) it was for; the remote works per box.
+    keyId: uuid("key_id"),
     kind: varchar({ length: 24 }).notNull(),
+    // What changed, for the box's activity log ("ARCADE / FLAMEY").
+    detail: varchar({ length: 60 }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
@@ -3418,10 +3422,43 @@ export const deskCommands = pgTable(
       table.userId.asc().nullsLast(),
       table.createdAt.desc().nullsFirst(),
     ),
+    index("idx_desk_commands_key").using(
+      "btree",
+      table.keyId.asc().nullsLast(),
+      table.createdAt.desc().nullsFirst(),
+    ),
     foreignKey({
       columns: [table.userId],
       foreignColumns: [users.userId],
       name: "desk_commands_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.keyId],
+      foreignColumns: [displayKeys.id],
+      name: "desk_commands_key_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
+// The phone remote's choice of style / mascot for ONE box (display key):
+// Rob's and Dave's desks are set separately. `rev` goes up on every change
+// so the box applies each change once and its buttons still work.
+export const deskBoxSettings = pgTable(
+  "desk_box_settings",
+  {
+    keyId: uuid("key_id").primaryKey().notNull(),
+    style: smallint(),
+    mascot: smallint(),
+    rev: integer().default(0).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.keyId],
+      foreignColumns: [displayKeys.id],
+      name: "desk_box_settings_key_id_fkey",
     }).onDelete("cascade"),
   ],
 );
