@@ -19,6 +19,7 @@ import {
   uniqueIndex,
   bigserial,
   primaryKey,
+  smallint,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -3373,6 +3374,55 @@ export const displayMessages = pgTable(
       foreignColumns: [users.userId],
       name: "display_messages_from_user_id_fkey",
     }).onDelete("set null"),
+  ],
+);
+
+// The desk remote (Admin -> My desk on a phone): which style and mascot the
+// owner's board(s) should show. `rev` goes up on every change so a board
+// applies a change once and its own button presses aren't overridden.
+export const deskSettings = pgTable(
+  "desk_settings",
+  {
+    userId: text("user_id").primaryKey().notNull(),
+    style: smallint(),
+    mascot: smallint(),
+    rev: integer().default(0).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "desk_settings_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
+// "Play this on my desk" taps from the remote. A board plays each id once;
+// rows older than a few minutes are ignored (and cleaned up on write).
+export const deskCommands = pgTable(
+  "desk_commands",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    kind: varchar({ length: 24 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_desk_commands_user").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.createdAt.desc().nullsFirst(),
+    ),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "desk_commands_user_id_fkey",
+    }).onDelete("cascade"),
   ],
 );
 

@@ -33,6 +33,8 @@ public `/public/stats` numbers.
 | `friends_at_risk` | `{count, top}`: how many of the owner's friends (streak ≥ 3, not blocked either way, not paused) have nothing logged on their own local day yet; `top` = up to 3 `{name, streak}`, longest first. Friends already see each other's daily miles in the app. |
 | `friends_finished` | ≤ 3 × `{id, name, miles}` — same friends rules as above, for sessions that ended in the last 30 min; `id` is an opaque hash |
 | `comments` | ≤ 3 × `{id, from, text, age_s}`: comments from the last 24 h on posts the owner is tagged in (someone else's collab or buddy-walk post where the owner is an accepted coauthor). Commenter by username only, text cleaned to the panel's characters; never the owner's own comments; blocks either way hide a comment, as in the thread. `id` is an opaque hash. |
+| `desk` | `{style, mascot, rev}` set from the owner's phone remote (Admin → My desk), or null; the board applies each `rev` once |
+| `commands` | ≤ 5 × `{id, kind}`: "play on my desk" taps from the owner's remote in the last 3 min (`kind` is one of a fixed list of scenes) |
 | `messages` | ≤ 3 × `{id, from, text, age_s}`: unexpired desk messages sent TO the owner from Admin → Displays (sender username only, text cleaned to the panel's characters, 24 h expiry) |
 | `reviews` | founder mode, admin owners only (everyone else gets `[]`): ≤ 3 × `{id, stars, title}` from Apple's public App Store reviews feed for the app, newest first. `id` is an opaque hash, `title` is cleaned to the panel's characters; reviewer names and review text are never passed on. Fetched server-side at most every 15 min. |
 | `alerts` | ≤ 5 × `{id, kind, from, at}`: the owner's own `nudge`/`hype` notifications from the last 24 h. `from` is the sender's username, `id` is an opaque hash. Blocked senders are excluded. |
@@ -64,3 +66,20 @@ real HTTP.
 - **Read-only:** the display never marks notifications read and never writes
   user data. The only write is a throttled `last_used_at` stamp on the key.
   (Desk messages are written by admins in Admin → Displays, never by a display.)
+
+## The phone remote (mileaday.run/admin/desk)
+
+A phone-first page for your own board: pick the style and Flamey/runner
+(with animated previews), play any scene on the desk, send a desk message to
+another desk owner and read the last two weeks of messages to and from you,
+and see the live data your board shows (friends running / finished / at
+risk, your mile, community numbers). Same Sign in with Apple as the admin
+dashboard; Safari → Share → Add to Home Screen opens it like an app.
+
+- `GET /admin/desk`, `POST /admin/desk/settings` `{style?, mascot?}`,
+  `POST /admin/desk/play` `{kind}` — admin only, and always the signed-in
+  admin's OWN desk (no user id is ever taken from the request).
+- Taps are rate-limited (30 per 10 min) and expire after 3 minutes.
+- The board polls every ~15 s, so changes land within about 15 s. Its
+  buttons still work; a remote change applies once (by `rev`).
+- Preview GIFs are rendered by the desk simulator into `website/public/desk`.

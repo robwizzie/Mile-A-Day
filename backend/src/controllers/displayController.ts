@@ -1,6 +1,12 @@
 import type { Request, Response, NextFunction } from "express";
 import { PostgresService } from "../services/DbService.js";
 import {
+  DESK_MASCOTS,
+  DESK_PLAYS,
+  DESK_STYLES,
+  getDeskRemote,
+  queueDeskCommand,
+  setDeskSettings,
   createDisplayKey,
   createDisplayMessage,
   getDisplayFeed,
@@ -134,4 +140,47 @@ export async function adminSendDisplayMessage(req: Request, res: Response) {
     console.error("display message failed:", (err as Error)?.message);
     res.status(500).json({ error: "Could not send message" });
   }
+}
+
+
+// ─── The desk remote (Admin -> My desk). Always the signed-in admin's OWN desk.
+
+/** GET /admin/desk */
+export async function adminDeskRemote(req: Request, res: Response) {
+  noStore(res);
+  const userId = (req as any).userId as string;
+  try {
+    res.json(await getDeskRemote(userId));
+  } catch (err) {
+    console.error("desk remote failed:", (err as Error)?.message);
+    res.status(500).json({ error: "Desk unavailable" });
+  }
+}
+
+function deskIndex(v: unknown, max: number): number | null | undefined {
+  if (v === undefined || v === null) return null;          // leave as is
+  return Number.isInteger(v) && (v as number) >= 0 && (v as number) < max ? (v as number) : undefined;
+}
+
+/** POST /admin/desk/settings  JSON { style?: 0-6, mascot?: 0-1 } */
+export async function adminDeskSettings(req: Request, res: Response) {
+  noStore(res);
+  const style = deskIndex(req.body?.style, DESK_STYLES.length);
+  const mascot = deskIndex(req.body?.mascot, DESK_MASCOTS.length);
+  if (style === undefined || mascot === undefined || (style === null && mascot === null)) {
+    return res.status(400).json({ error: "style (0-6) and/or mascot (0-1) required" });
+  }
+  res.json({ settings: await setDeskSettings((req as any).userId as string, style, mascot) });
+}
+
+/** POST /admin/desk/play  JSON { kind } — play that scene on my desk. */
+export async function adminDeskPlay(req: Request, res: Response) {
+  noStore(res);
+  const kind = typeof req.body?.kind === "string" ? req.body.kind : "";
+  if (!(DESK_PLAYS as readonly string[]).includes(kind)) {
+    return res.status(400).json({ error: "Unknown scene" });
+  }
+  const ok = await queueDeskCommand((req as any).userId as string, kind);
+  if (!ok) return res.status(429).json({ error: "Slow down a little" });
+  res.status(201).json({ ok: true });
 }
