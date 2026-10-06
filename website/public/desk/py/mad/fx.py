@@ -216,29 +216,43 @@ def hype(app, b, ev, t, now, dt):
     three_lines(b, 23, t - 0.5, name, "HYPED", "YOU!", WHITE, FL_GOLD, FL_GOLD)
 
 
-# ---------------- a friend is out running ----------------
+# ---------------- a friend is out running (or walking) ----------------
 def friend(app, b, ev, t, now, dt):
     name, miles = ev[1], ev[2]
+    walk = len(ev) > 3 and ev[3]
     typed(b, 0, 64, 1, name, t, WHITE, name_font(name, 62))
-    typed(b, 0, 64, 9, "IS RUNNING", t - 0.06 * len(name) - 0.1, RED, F3)
-    d = t * 30
+    if app.popped and int(t / 1.5) % 2:              # they've hit their mile
+        draw_box(b, 0, 64, 9, "MILE DONE!", GREEN, F3)
+    else:
+        typed(b, 0, 64, 9, "IS WALKING" if walk else "IS RUNNING", t - 0.06 * len(name) - 0.1, RED, F3)
+    d = t * (12 if walk else 30)         # a walk: the track rolls by slower
     fill(b, 0, 30, 64, 31, MAROON)
     for x in range(64):
         if int(x + d) % 8 < 3:
             b[x, 31] = MAROON_DIM
-    f = app.mascot_frame(now)
+    f = app.mascot_frame(now * 0.5 if walk else now)
     x = int(-18 + 24 * ease_out(t / 1.0))
     y = 31 - f.height                    # feet on the track, head clear of the text
     if app.mascot:
-        y -= int(round(abs(math.sin(t * math.pi * 2.4))))
-    for k, (dy, ln) in enumerate(((19, 6), (22, 9), (25, 5))):   # speed lines
-        fill(b, x - ln - 1 + (k % 2), dy, x - 1 + (k % 2), dy + 1, MAROON_DIM)
+        y -= int(round(abs(math.sin(t * math.pi * (1.2 if walk else 2.4)))))
+    if not walk:
+        for k, (dy, ln) in enumerate(((19, 6), (22, 9), (25, 5))):   # speed lines
+            fill(b, x - ln - 1 + (k % 2), dy, x - 1 + (k % 2), dy + 1, MAROON_DIM)
     blit(b, f, x, y, skip=BLACK)
     if t > 1.2:
         v = miles * ease_out((t - 1.2) / 1.0)
-        fit(b, 28, 64, 17, miles_text(v, 36), WHITE, t=t)
+        done = v >= 1.0                              # a full mile, no early check
+        if done and not app.popped:                  # counting past 1.00: confetti!
+            app.popped = True
+            burst(app, 46, 20, 22, 15, (GREEN, FL_GOLD, WHITE))
+        txt = miles_text(v, 36, F5, 7 if done else 0)
+        if done:
+            fit_icon(b, 28, 64, 17, "check", txt, WHITE, t=t, icon_color=GREEN)
+        else:
+            fit(b, 28, 64, 17, txt, WHITE, t=t)
         fill(b, 33, 27, 59, 29, MAROON_DIM)          # progress toward their mile
-        fill(b, 33, 27, 33 + int(26 * min(1.0, v)), 29, GREEN if v >= 0.95 else RED)
+        fill(b, 33, 27, 33 + int(26 * min(1.0, v)), 29, GREEN if done else RED)
+    particles(app, b, dt, gravity=8)
 
 
 # ---------------- reminder: today's mile isn't done yet ----------------
@@ -355,7 +369,7 @@ def finished(app, b, ev, t, now, dt):
         burst(app, random.uniform(4, 60), -1, 2, 5)
     particles(app, b, dt, gravity=8)
     typed(b, 0, 64, 3 if name_font(name, 62) is F5 else 4, name, t - 2.0, WHITE, name_font(name, 62))
-    done = miles >= 0.95
+    done = miles >= 1.0                  # DONE! only for a full mile
     if t > 2.0 + 0.06 * len(name):
         word = "DONE!" if done else "FINISHED"
         w = (7 if done else 0) + text_width(word)
@@ -366,7 +380,8 @@ def finished(app, b, ev, t, now, dt):
               t - 2.1 - 0.06 * len(name), GREEN if done else WHITE)
     if t > 3.4:
         v = miles * ease_out((t - 3.4) / 0.8)
-        draw_box(b, 0, 64, 21, "%.1f MI" % v, WHITE)
+        walk = len(ev) > 3 and ev[3]
+        fit(b, 0, 64, 21, "%.1f MI %s" % (int(v * 10) / 10, "WALK" if walk else "RUN"), WHITE, t=t)
 
 
 # ---------------- evening: friends whose streak is at risk ----------------
@@ -466,7 +481,7 @@ def yearago(app, b, ev, t, now, dt):
     if t < 1.2:
         return
     then = streak_now - 365
-    top = ("DAY %d" % then) if then > 0 else "YOU RAN"
+    top = ("DAY %d" % then) if then > 0 else "YOU DID"
     ic = "streak" if then > 0 else "today"
     w = 7 + text_width(top)
     x = (64 - w) // 2

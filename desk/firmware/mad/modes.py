@@ -126,7 +126,8 @@ def arcade(app, b, now, t):
 
 
 HUD_SHORT = {"MILE TODAY?": "RUN!", "DAYS DONE": "DAYS", "TOTAL MI": "MI", "MI TODAY": "TODAY",
-             "ACTIVE/WK": "ACTIVE", "OUT NOW": "OUT"}
+             "ACTIVE/WK": "ACTIVE", "OUT NOW": "OUT",
+             "RUNS TODAY": "RUNS", "RUNS ALL TIME": "RUNS"}
 
 
 def app_icon(i):
@@ -265,11 +266,11 @@ def clock(app, b, now, t):
     fill(b, 0, 17, 64, 18, MAROON)
     streak = int(app.value(11))
     if app.mile_done():
-        w = 7 + text_width("MILE DONE")
+        w = 7 + text_width("MILE DONE")       # rows 19-25, a blank row, then 27-31
         x = (64 - w) // 2
-        draw_icon(b, x, 20, "check")
-        draw_text(b, x + 7, 20, "MILE DONE", WHITE)
-        draw_box(b, 0, 64, 27, "%d DAY STREAK" % streak, GREEN, F3)
+        draw_icon(b, x, 19, "check", GREEN)
+        draw_text(b, x + 7, 19, "MILE DONE", GREEN)
+        draw_box(b, 0, 64, 27, "%d DAY STREAK" % streak, WHITE, F3)
         return
     if s is None:
         return
@@ -290,31 +291,88 @@ def live(app, b, now, t):
     dt = min(0.1, max(0.0, now - getattr(app, "_lv_last", now)))
     app._lv_last = now
     target = float(me.get("live_miles") or 0)
+    # The live distance crossing one full mile (seen in the feed, not at boot)
+    # earns a party, started when the shown number actually reaches 1.00.
+    last = getattr(app, "_lv_target", None)
+    if last is not None and last < 1.0 <= target:
+        app._lv_due = True
+    app._lv_target = target
     app.live_shown += (target - app.live_shown) * min(1.0, dt * 1.5)
     if abs(target - app.live_shown) < 0.005:
         app.live_shown = target
+    v = app.live_shown
+    done = v >= 1.0                       # a full mile: no early check mark
+    if done and getattr(app, "_lv_due", False):
+        app._lv_due = False
+        app._lv_party = now
+        app.particles = []
+        confetti(app, 46, 20, 26, 16)
+    p = now - getattr(app, "_lv_party", -1e9)
+    party = 0 <= p < PARTY
+    splash = party and p < SPLASH          # first: a big "1 MILE!" moment
     name = upper_name(me.get("username"))
-    fit(b, 0, 64, 1, name, WHITE, t=t)
-    draw_box(b, 0, 64, 9, "IS RUNNING", RED, F3)
-    d = t * 30
+    walk = me.get("live_kind") == "walk"
+    if splash:
+        pop = 1 if p < 0.25 else 0                      # it lands with a bounce
+        draw_box(b, 24, 64, 3 + pop, "1", FL_GOLD, FB)
+        draw_box(b, 24, 64, 16, "MILE!", GREEN if int(p * 6) % 2 else FL_GOLD)
+    else:
+        fit(b, 0, 64, 1, name, WHITE, t=t)
+    if splash:
+        pass
+    elif party or (done and int(t / 3) % 2):          # after the party, it alternates
+        draw_box(b, 0, 64, 9, "MILE DONE!", (FL_GOLD if int(p * 5) % 2 else GREEN) if party else GREEN, F3)
+    else:
+        draw_box(b, 0, 64, 9, "IS WALKING" if walk else "IS RUNNING", RED, F3)
+    d = t * (12 if walk else 30)          # a walk: the track rolls by slower
     fill(b, 0, 30, 64, 31, MAROON)
     for x in range(64):
         if int(x + d) % 8 < 3:
             b[x, 31] = MAROON_DIM
-    f = app.mascot_frame(now)
+    if party:
+        if int(p / 0.4) != int((p - dt) / 0.4) and p < PARTY - 1.2:   # fireworks
+            confetti(app, random.uniform(28, 60), random.uniform(2, 14), 12, 12)
+        particles(app, b, dt, gravity=8)
+    f = app.mascot_frame(now * 0.5 if walk else now)
     x = 6
     y = 31 - f.height                    # feet on the track, head clear of the text
-    if app.mascot:
-        y -= int(round(abs(math.sin(t * math.pi * 2.4))))
-    for k, (dy, ln) in enumerate(((19, 6), (22, 9), (25, 5))):   # speed lines
-        fill(b, x - ln - 1 + (k % 2), dy, x - 1 + (k % 2), dy + 1, MAROON_DIM)
+    if party:                            # happy hops
+        y -= int(round(2 * abs(math.sin(p * math.pi * 3))))
+    elif app.mascot:
+        y -= int(round(abs(math.sin(t * math.pi * (1.2 if walk else 2.4)))))
+    if not walk and not party:
+        for k, (dy, ln) in enumerate(((19, 6), (22, 9), (25, 5))):   # speed lines
+            fill(b, x - ln - 1 + (k % 2), dy, x - 1 + (k % 2), dy + 1, MAROON_DIM)
     blit(b, f, x, y, skip=BLACK)
-    v = app.live_shown
-    done = v >= 0.95
+    if splash:
+        return
     txt = miles_text(v, 36, F5, 7 if done else 0)
+    col = (FL_GOLD if party and p < SPLASH + 1.0 else WHITE)
     if done:
-        fit_icon(b, 28, 64, 17, "check", txt, WHITE, t=t)
+        fit_icon(b, 28, 64, 17, "check", txt, col, t=t, icon_color=GREEN)
     else:
         fit(b, 28, 64, 17, txt, WHITE, t=t)
     fill(b, 33, 27, 59, 29, MAROON_DIM)              # progress toward the mile
     fill(b, 33, 27, 33 + int(26 * min(1.0, v)), 29, GREEN if done else RED)
+    if party:                                        # a shine sweeps the full bar
+        sx = 33 + int(p * 30) % 34
+        if sx < 59:
+            fill(b, sx, 27, min(59, sx + 2), 29, SPARK)
+        if p < 0.6 and int(p * 10) % 2 == 0:         # a quick gold frame flash
+            fill(b, 0, 0, 64, 1, FL_GOLD)
+            fill(b, 0, 31, 64, 32, FL_GOLD)
+            fill(b, 0, 0, 1, 32, FL_GOLD)
+            fill(b, 63, 0, 64, 32, FL_GOLD)
+
+
+PARTY = 6.0                               # seconds of celebration at the mile
+SPLASH = 1.8                              # ...the first of them a big "1 MILE!"
+
+
+def confetti(app, x, y, n, speed):
+    """A pop of green / gold / white / red confetti from (x, y)."""
+    for _ in range(n):
+        a = random.uniform(0, 6.283)
+        s = random.uniform(0.4, 1.0) * speed
+        app.particles.append([x, y, math.cos(a) * s, math.sin(a) * s * 0.8 - 3,
+                              random.uniform(0.7, 1.3), 1, random.choice((GREEN, FL_GOLD, WHITE, RED))])

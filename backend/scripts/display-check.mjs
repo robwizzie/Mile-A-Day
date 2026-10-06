@@ -109,7 +109,7 @@ async function seed() {
   for (const [id, ago] of [[DONE, 5], [OLDDONE, 120], [HIDDONE, 5], [STRDONE, 5]]) {
     await db.query(
       `INSERT INTO live_tracking_sessions (user_id, workout_type, distance_miles, last_seen_at, ended_at)
-       VALUES ($1, 'running', 1.23, NOW() - ($2 || ' minutes')::interval, NOW() - ($2 || ' minutes')::interval)`,
+       VALUES ($1, 'walking', 1.23, NOW() - ($2 || ' minutes')::interval, NOW() - ($2 || ' minutes')::interval)`,
       [id, String(ago)],
     );
   }
@@ -260,10 +260,11 @@ async function main() {
   check("community fields", Object.keys(body.community).sort(), [
     "active_7d", "badges_today", "hypes_today", "longest_streak", "miles_today",
     "miles_yesterday_same_time", "new_friends_today", "nudges_today", "out_running_now",
-    "photos_shared", "tokens_spent_today", "total_hypes", "total_miles", "total_users"]);
+    "photos_shared", "run_miles_today", "run_miles_total", "tokens_spent_today", "total_hypes", "total_miles",
+    "total_users", "walk_miles_today", "walk_miles_total"]);
   check("community values are all numbers", Object.values(body.community).every((v) => typeof v === "number"), true);
   check("me fields", Object.keys(body.me).sort(), [
-    "days", "fastest_mile_month", "flamey", "live_miles", "local_date", "local_time", "longest_run", "medals",
+    "days", "fastest_mile_month", "flamey", "live_kind", "live_miles", "local_date", "local_time", "longest_run", "medals",
     "mile_done", "miles_today", "minutes_to_midnight", "running_now", "streak", "username", "year_ago_miles"]);
   const text = JSON.stringify(body);
   check("no emails anywhere", text.includes("@"), false);
@@ -278,12 +279,15 @@ async function main() {
   check("local_time shape", /^\d{2}:\d{2}:\d{2}$/.test(body.me.local_time), true);
 
   // ── friends running: only the one who shares, is fresh, not blocked ──
-  check("friends running", body.friends_running, [{ name: "runner", miles: 0.8 }]);
-  check("friend item fields", Object.keys(body.friends_running[0] ?? {}).sort(), ["miles", "name"]);
+  check("friends running", body.friends_running, [{ name: "runner", miles: 0.8, kind: "run" }]);
+  check("friend item fields", Object.keys(body.friends_running[0] ?? {}).sort(), ["kind", "miles", "name"]);
 
   // ── friends finished: only the friend who shares and finished recently ──
-  check("friends finished", body.friends_finished.map((f) => [f.name, f.miles]), [["done", 1.2]]);
-  check("finished item fields", Object.keys(body.friends_finished[0] ?? {}).sort(), ["id", "miles", "name"]);
+  check("friends finished (a walk)", body.friends_finished.map((f) => [f.name, f.miles, f.kind]), [["done", 1.2, "walk"]]);
+  check("finished item fields", Object.keys(body.friends_finished[0] ?? {}).sort(), ["id", "kind", "miles", "name"]);
+  check("runs vs walks are miles", ["run_miles_today", "walk_miles_today", "run_miles_total", "walk_miles_total"]
+    .every((k) => typeof body.community[k] === "number" && body.community[k] >= 0), true);
+  check("all-time runs include ours", body.community.run_miles_total >= 2.1, true);
   check("finished ids are opaque", body.friends_finished.every((f) => /^[0-9a-f]{16}$/.test(f.id)), true);
   check("my miles a year ago", body.me.year_ago_miles, 1.5);
   check("local date shape", /^\d{4}-\d{2}-\d{2}$/.test(body.me.local_date), true);
@@ -304,7 +308,8 @@ async function main() {
   // ── friends who got their mile in: my own announcements, last hour, not blocked ──
   check("friends' miles", body.friends_miles.map((f) => [f.name, f.miles, f.seconds, f.best_pace]),
         [["done", 1.1, 600, 545]]);
-  check("friend mile fields", Object.keys(body.friends_miles[0] ?? {}).sort(), ["age_s", "best_pace", "id", "miles", "name", "seconds"]);
+  check("friend mile is a run (their latest workout)", body.friends_miles[0]?.kind, "run");
+  check("friend mile fields", Object.keys(body.friends_miles[0] ?? {}).sort(), ["age_s", "best_pace", "id", "kind", "miles", "name", "seconds"]);
   check("friend mile ids are opaque", body.friends_miles.every((f) => /^[0-9a-f]{16}$/.test(f.id)), true);
   // ── comments on posts I'm tagged in: newest first, nobody's own/blocked/old/deleted ──
   check("tagged-post comments", body.comments.map((c) => [c.from, c.text]),
@@ -326,7 +331,7 @@ async function main() {
     [OWNER],
   );
   const live = await (await feed({ authorization: `Display ${key}` })).json();
-  check("running now → live miles", [live.me.running_now, live.me.live_miles], [true, 0.73]);
+  check("running now → live miles", [live.me.running_now, live.me.live_miles, live.me.live_kind], [true, 0.73, "run"]);
   check("I'm not in my own friends running list", live.friends_running.some((f) => f.name === "owner"), false);
 
   // ── admin endpoints ──

@@ -35,7 +35,7 @@ WATER, WATER_LIGHT = 25, 26
 palette[WATER] = 0x082050
 palette[WATER_LIGHT] = 0x285890
 GREEN = 27                       # "mile done" check
-palette[GREEN] = 0x0C5A14
+palette[GREEN] = 0x00A000       # pure green: stays green (not grey) when dimmed at night
 LOG = 28                         # campfire logs
 palette[LOG] = 0x3C1806
 # Streak heatmap: light for a mile, deeper red the further you went
@@ -185,8 +185,8 @@ def fit(bmp, x0, x1, y, text, color, font=F5, t=None, small=True):
 def miles_text(v, room, font=F5, lead=0):
     """The most precise distance that fits `room` px (plus `lead` px for an
     icon): 1.23 MI, 1.2 MI, 1.2, then whole miles."""
-    for fmt in ("%.2f MI", "%.1f MI", "%.1f", "%d"):
-        txt = fmt % v
+    for fmt, q in (("%.2f MI", 100), ("%.1f MI", 10), ("%.1f", 10), ("%d", 1)):
+        txt = fmt % (int(v * q + 1e-6) / q)      # cut, never round up to a mile not yet run
         if lead + text_width(txt, font) <= room:
             return txt
     return "%d" % v
