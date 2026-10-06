@@ -69,6 +69,11 @@ def set_theme(overrides):
 NIGHT_FLOOR = 0x08    # the panel's first lit step (bit depth 6: red/blue get 5 bits)
 
 
+# Green LEDs look far brighter than red or blue at the same level, so at
+# night the green gets its own deep shade (green only, 2 of 64 steps).
+NIGHT_COLOR = {GREEN: 0x000800}
+
+
 def set_dim(f):
     """Scale every colour (night mode). A colour's main channels never round
     to black (they keep the panel's first step); its faint ones drop out
@@ -85,7 +90,7 @@ def set_dim(f):
             if v and d < NIGHT_FLOOR:
                 d = NIGHT_FLOOR if v * 2 >= top else 0
             out = (out << 8) | d
-        palette[i] = out
+        palette[i] = NIGHT_COLOR.get(i, out) if f < 1 else out
 
 # ---------- fonts ----------
 # Fonts packed for memory: (characters, rows per glyph, data) where each glyph
