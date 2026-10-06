@@ -40,17 +40,19 @@ STATS = (
     ("me", "streak", "MY STREAK"),                 # 11
     ("goal", "miles", "MILE GOAL"),                # 12 next community mile goal
     ("days", "streak", "LAST 64 DAYS"),            # 13 my streak heatmap
+    ("run_miles_total", "running", "RUN VS WALK"),  # 14 runs vs walks (feed only)
 )
 ME = 11
 GOAL = 12
 HEAT = 13
+RUNWALK = 14
 HOLIDAYS = ("VALENTINE", "STPATRICK", "JULY4", "THANKSGIVING", "ANNIV")
 # Flamey's flame burning down when the mile still isn't done in the evening.
 # (7..12 are the same tones in a Flamey's Closet colour.)
 DIM_NERVOUS = {16: 17, 23: 17, 17: 18, 7: 8, 11: 8, 8: 9}
 DIM_PANIC = {16: 18, 23: 18, 17: 18, 18: 19, 19: 24, 7: 9, 11: 9, 8: 9, 9: 10, 10: 12}
 # Rotation order (feed-only stats drop out without a key; today's 0s skip).
-ORDER = (1, ME, HEAT, 2, GOAL, 7, 3, 4, 8, 9, 10, 5, 6)
+ORDER = (1, ME, HEAT, 2, GOAL, RUNWALK, 7, 3, 4, 8, 9, 10, 5, 6)
 
 
 def next_day(date):
@@ -284,7 +286,7 @@ class App:
             names = tuple(upper_name(f.get("name")) for f in self.friends)
             for f, name in zip(self.friends, names):
                 if name not in self.running_names:
-                    self.push(("friend", name, float(f.get("miles") or 0)))
+                    self.push(("friend", name, float(f.get("miles") or 0), f.get("kind") == "walk"))
                 self.seen_running[name] = now
             self.running_names = names
             self._finished(data.get("friends_finished") or (), now)
@@ -396,7 +398,7 @@ class App:
                 continue
             self.cheered[name] = now
             self.push(("friendmile", name, float(m.get("miles") or 0), int(m.get("seconds") or 0),
-                       m.get("best_pace")))
+                       m.get("best_pace"), m.get("kind") == "walk"))
         self.seen_miles = (ids + [i for i in seen if i not in ids])[:10]
         for n in [n for n, t in self.cheered.items() if now - t > 3600]:
             self.cheered.pop(n)
@@ -454,11 +456,13 @@ class App:
         self._medals(me.get("medals") or ())
         if me.get("running_now"):
             self.live_last = float(me.get("live_miles") or 0)
+            self.live_walk = me.get("live_kind") == "walk"
         if first or not prev:
             return
         if prev.get("running_now") and not me.get("running_now"):
             # run over: celebrate it (the MILE DONE party follows once it syncs)
-            self.push(("finished", upper_name(me.get("username")), self.live_last))
+            self.push(("finished", upper_name(me.get("username")), self.live_last,
+                       getattr(self, "live_walk", False)))
         a, b = prev.get("longest_run"), me.get("longest_run")
         if a is not None and b is not None and b >= a + 0.05:
             self.push(("pr", "LONGEST RUN", "%.1f MI" % b, "NEW PR!"))
@@ -501,7 +505,7 @@ class App:
             name = upper_name(f.get("name"))
             seen = self.seen_running.get(name)
             if f.get("id") not in self.seen_finished and seen is not None and now - seen < 3 * 3600:
-                self.push(("finished", name, float(f.get("miles") or 0)))
+                self.push(("finished", name, float(f.get("miles") or 0), f.get("kind") == "walk"))
                 self.cheered[name] = now
                 self.seen_running.pop(name, None)
         self.seen_finished = (ids + [i for i in self.seen_finished if i not in ids])[:12]
@@ -533,6 +537,9 @@ class App:
         if i == HEAT:
             days = (self.me or {}).get("days") or ()
             return sum(1 for d in days if d == -1 or d >= 0.95)
+        if i == RUNWALK:
+            r, w = self.runs_walks(self.runs_walks_today())
+            return 100 * r / (r + w) if r + w else 0
         return num(self.stats, STATS[i][0]) if self.stats else 0
 
     def goal(self):
@@ -541,6 +548,16 @@ class App:
         step = goal_step(total)
         target = (int(total) // step + 1) * step
         return target, (total - (target - step)) / step
+
+    def runs_walks_today(self):
+        """Today if anyone has logged miles yet, otherwise all time."""
+        return num(self.stats, "run_miles_today") + num(self.stats, "walk_miles_today") > 0
+
+    def runs_walks(self, today):
+        """(run miles, walk miles), today or all time."""
+        s = self.stats or {}
+        k = "today" if today else "total"
+        return num(s, "run_miles_" + k), num(s, "walk_miles_" + k)
 
     def mile_done(self):
         return bool(self.me and self.me.get("mile_done"))
@@ -839,6 +856,8 @@ class App:
         if i == HEAT:
             n = len((self.me or {}).get("days") or ())
             return "%d/%d" % (int(self.value(i) * frac + 0.5), n)
+        if i == RUNWALK:
+            return "%d%%" % int(self.value(i) * frac + 0.5)
         v = self.value(i) * frac
         if i == 1 and v < 100 and v != int(v):
             return "%.1f" % v
@@ -854,6 +873,8 @@ class App:
             return short(self.value(GOAL)) + " TO GO", RED
         if i == HEAT:
             return "DAYS DONE", RED
+        if i == RUNWALK:
+            return ("RUNS TODAY" if self.runs_walks_today() else "RUNS ALL TIME"), RED
         return STATS[i][2], RED
 
     def draw_stat_line(self, b, i, y, frac=1.0, x0=0, x1=64):
@@ -890,6 +911,10 @@ class App:
         if i == HEAT:
             from mad import heat
             heat.heat_card(self, b, frac, now)
+            return
+        if i == RUNWALK:
+            from mad import cards
+            cards.runwalk_card(self, b, frac)
             return
         _, ic, label = STATS[i]
         t = self.stat_text(i, frac)

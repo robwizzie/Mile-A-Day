@@ -19,6 +19,10 @@ type BoxState = { style: number; mascot: number; awake: boolean; sleep_start: nu
 type Box = { id: string; label: string; username: string | null; last_seen: string | null; online: boolean;
              state: BoxState | null };
 
+type Kind = "run" | "walk";
+const kindLabel = (k?: Kind | null, done = false) =>
+  k === "walk" ? (done ? "🚶 walk" : "🚶 walking") : (done ? "🏃 run" : "🏃 running");
+
 type Feed = {
   community: Record<string, number>;
   me: {
@@ -28,10 +32,11 @@ type Feed = {
     streak: number;
     running_now: boolean;
     live_miles: number | null;
+    live_kind?: Kind | null;
     local_time: string;
   };
-  friends_running: { name: string; miles: number }[];
-  friends_finished: { id: string; name: string; miles: number }[];
+  friends_running: { name: string; miles: number; kind?: Kind }[];
+  friends_finished: { id: string; name: string; miles: number; kind?: Kind }[];
   friends_at_risk: { count: number; top: { name: string; streak: number }[] };
 };
 
@@ -537,7 +542,8 @@ export function DeskRemote() {
             <Section title="Live now" right={<span className="text-[11px] text-white/40">every 15 s</span>}>
               <div className="grid grid-cols-3 gap-2 text-center">
                 <Stat label={`@${owner}'s mile`}
-                      value={live.me.mile_done ? "Done ✓" : live.me.running_now ? `${(live.me.live_miles ?? 0).toFixed(2)} mi` : "Not yet"}
+                      value={live.me.mile_done ? "Done ✓" : live.me.running_now
+                        ? `${(live.me.live_miles ?? 0).toFixed(2)} mi ${live.me.live_kind === "walk" ? "🚶" : "🏃"}` : "Not yet"}
                       color={live.me.mile_done ? MAD_SUCCESS : undefined} />
                 <Stat label="Streak" value={`🔥 ${live.me.streak.toLocaleString()}`} />
                 <Stat label="Out now" value={(live.community.out_running_now ?? 0).toLocaleString()} />
@@ -545,10 +551,11 @@ export function DeskRemote() {
                 <Stat label="Users" value={(live.community.total_users ?? 0).toLocaleString()} />
                 <Stat label="Hypes today" value={(live.community.hypes_today ?? 0).toLocaleString()} />
               </div>
-              <List title="Friends running" empty="No friends out right now"
-                    rows={live.friends_running.map((f) => [`@${f.name}`, `${f.miles.toFixed(1)} mi`])} />
+              <RunsVsWalks c={live.community} />
+              <List title="Friends out now" empty="No friends out right now"
+                    rows={live.friends_running.map((f) => [`@${f.name}`, `${kindLabel(f.kind)} · ${f.miles.toFixed(1)} mi`])} />
               <List title="Just finished" empty="Nobody in the last 30 min"
-                    rows={live.friends_finished.map((f) => [`@${f.name}`, `${f.miles.toFixed(1)} mi`])} />
+                    rows={live.friends_finished.map((f) => [`@${f.name}`, `${f.miles.toFixed(1)} mi ${kindLabel(f.kind, true)}`])} />
               <List title={`Streaks at risk (${live.friends_at_risk.count})`} empty="Everyone's safe today"
                     rows={live.friends_at_risk.top.map((f) => [`@${f.name}`, `🔥 ${f.streak}`])} />
             </Section>
@@ -592,6 +599,42 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
     <div className="rounded-xl bg-white/[0.05] px-2 py-2.5">
       <div className="truncate text-base font-extrabold" style={color ? { color } : undefined}>{value}</div>
       <div className="truncate text-[10px] font-bold uppercase tracking-wider text-white/40">{label}</div>
+    </div>
+  );
+}
+
+/** Runs vs walks, today and all time: the same two charts as the box's card. */
+function RunsVsWalks({ c }: { c: Record<string, number> }) {
+  if (c.run_miles_total == null) return null;            // an older server
+  const charts: [string, number, number][] = [
+    ["Today", c.run_miles_today ?? 0, c.walk_miles_today ?? 0],
+    ["All time", c.run_miles_total ?? 0, c.walk_miles_total ?? 0],
+  ];
+  const fmt = (v: number) => (v >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(1));
+  return (
+    <div className="mt-4">
+      <h3 className="mb-1.5 text-xs font-extrabold text-white/70">Runs vs walks (miles)</h3>
+      <div className="grid grid-cols-2 gap-3">
+        {charts.map(([title, run, walk]) => {
+          const top = Math.max(run, walk) || 1;
+          return (
+            <div key={title} className="rounded-xl bg-white/[0.04] p-2.5">
+              <div className="mb-1.5 text-[11px] font-bold text-white/50">{title}</div>
+              {([["Run", run, MAD_RED], ["Walk", walk, "#3B82F6"]] as const).map(([label, v, color]) => (
+                <div key={label} className="mb-1 last:mb-0">
+                  <div className="flex justify-between text-[11px]">
+                    <span className="font-semibold" style={{ color }}>{label}</span>
+                    <span className="tabular-nums text-white/70">{fmt(v)}</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-white/[0.06]">
+                    <div className="h-1.5 rounded-full" style={{ width: `${(100 * v) / top}%`, background: color }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

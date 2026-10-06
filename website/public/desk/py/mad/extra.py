@@ -264,10 +264,11 @@ def friendmile(app, b, ev, t, now, dt):
     """<NAME> / MILE IN! next to the cheering mascot, then their day's
     numbers one at a time (miles, time, best pace), confetti in green and gold."""
     name, miles, secs, pace = ev[1], ev[2], ev[3], ev[4]
+    walk = len(ev) > 5 and ev[5]
     x0 = mascot_at_left(app, b, now, t)
     fit(b, x0, 64, 1, name, WHITE, F5, t)
     typed(b, x0, 64, 9, "MILE IN!", t - 0.5, GREEN)
-    stats = [(miles_text(miles, 41), "MILES")]
+    stats = [(miles_text(miles, 41), "MI WALKED" if walk else "MI RUN")]
     if secs > 0:
         stats.append((_clock(secs), "TIME"))
     if pace:
@@ -276,7 +277,7 @@ def friendmile(app, b, ev, t, now, dt):
         k = int((t - 1.3) // 2.2) % len(stats)
         u = (t - 1.3) % 2.2
         value, label = stats[k]
-        y = 18 + (0 if u > 0.25 else int((1 - u / 0.25) * 4))   # each slides up into place
+        y = 18 if u > 0.25 else 19          # each eases up into place (clear of its label)
         fit(b, x0, 64, y, value, WHITE if u > 0.25 else FAR, F5, t)
         fit(b, x0, 64, 26, label, RED, F3, t)
     if 0.5 < t < 0.6 and not app.popped:

@@ -454,13 +454,15 @@ async function boxActivity(boxId: string, userId: string): Promise<DeskActivity[
         WHERE ub.user_id = $1 AND ub.earned_at > NOW() - ${days}
        UNION ALL
        SELECT w.device_end_date, 'run',
-              'You logged ' || to_char(w.distance, 'FM990.00') || ' mi'
+              'You logged a ' || to_char(w.distance, 'FM990.00') || ' mi '
+                || CASE WHEN w.workout_type = 'walking' THEN 'walk' ELSE 'run' END
          FROM workouts w
         WHERE w.user_id = $1 AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
           AND w.device_end_date > NOW() - ${days}
        UNION ALL
        SELECT s.ended_at, 'friend_run',
-              '@' || u.username || ' finished ' || to_char(s.distance_miles, 'FM990.00') || ' mi'
+              '@' || u.username || ' finished a ' || to_char(s.distance_miles, 'FM990.00') || ' mi '
+                || CASE WHEN s.workout_type = 'walking' THEN 'walk' ELSE 'run' END
          FROM friendships f
          JOIN live_tracking_sessions s ON s.user_id = f.friend_id AND s.ended_at IS NOT NULL
           AND s.ended_at > NOW() - ${days}
@@ -604,6 +606,11 @@ export interface DisplayCommunity {
   hypes_today: number;
   nudges_today: number;
   miles_yesterday_same_time: number;
+  /** Runs vs walks: today's miles and all-time miles of each. */
+  run_miles_today: number;
+  walk_miles_today: number;
+  run_miles_total: number;
+  walk_miles_total: number;
 }
 
 let communityCache: { data: DisplayCommunity; at: number } | null = null;
@@ -640,7 +647,16 @@ async function getCommunity(): Promise<DisplayCommunity> {
       (SELECT COALESCE(SUM(distance), 0) FROM workouts
         WHERE local_date = ${TODAY_ET_DATE_SQL} - 1
           AND device_end_date <= NOW() - INTERVAL '1 day'
-          AND deleted_at IS NULL AND exclusion_reason IS NULL)::float AS miles_yesterday_same_time
+          AND deleted_at IS NULL AND exclusion_reason IS NULL)::float AS miles_yesterday_same_time,
+      -- Runs vs walks, today and all time.
+      (SELECT COALESCE(SUM(distance) FILTER (WHERE workout_type = 'running' AND local_date = ${TODAY_ET_DATE_SQL}), 0)
+         FROM workouts WHERE deleted_at IS NULL AND exclusion_reason IS NULL)::float AS run_miles_today,
+      (SELECT COALESCE(SUM(distance) FILTER (WHERE workout_type = 'walking' AND local_date = ${TODAY_ET_DATE_SQL}), 0)
+         FROM workouts WHERE deleted_at IS NULL AND exclusion_reason IS NULL)::float AS walk_miles_today,
+      (SELECT COALESCE(SUM(distance) FILTER (WHERE workout_type = 'running'), 0)
+         FROM workouts WHERE deleted_at IS NULL AND exclusion_reason IS NULL)::float AS run_miles_total,
+      (SELECT COALESCE(SUM(distance) FILTER (WHERE workout_type = 'walking'), 0)
+         FROM workouts WHERE deleted_at IS NULL AND exclusion_reason IS NULL)::float AS walk_miles_total
   `);
   const data: DisplayCommunity = {
     total_users: pub.total_users,
@@ -657,6 +673,10 @@ async function getCommunity(): Promise<DisplayCommunity> {
     hypes_today: row?.hypes_today ?? 0,
     nudges_today: row?.nudges_today ?? 0,
     miles_yesterday_same_time: Math.round((row?.miles_yesterday_same_time ?? 0) * 10) / 10,
+    run_miles_today: Math.round((row?.run_miles_today ?? 0) * 10) / 10,
+    walk_miles_today: Math.round((row?.walk_miles_today ?? 0) * 10) / 10,
+    run_miles_total: Math.round(row?.run_miles_total ?? 0),
+    walk_miles_total: Math.round(row?.walk_miles_total ?? 0),
   };
   communityCache = { data, at: Date.now() };
   return data;
@@ -678,6 +698,7 @@ export interface DisplayFeed {
     year_ago_miles: number | null; // their own miles on this date last year
     local_date: string;          // "YYYY-MM-DD" in the owner's timezone (seasonal looks)
     live_miles: number | null;   // their own live session distance while running_now
+    live_kind: "run" | "walk" | null; // what that live session is
     longest_run: number | null;  // their longest single run, all time
     fastest_mile_month: number | null; // their fastest full-mile split this local month, seconds
     /** Their own last 64 local days, oldest first: miles that day, or -1 for
@@ -695,7 +716,7 @@ export interface DisplayFeed {
   comments: { id: string; from: string; text: string; age_s: number }[];
   /** Friends who got their mile in (the owner's own "got their mile in!"
    *  notifications, last hour): their day so far. */
-  friends_miles: { id: string; name: string; miles: number; seconds: number; best_pace: number | null; age_s: number }[];
+  friends_miles: { id: string; name: string; kind: "run" | "walk"; miles: number; seconds: number; best_pace: number | null; age_s: number }[];
   /** This box's remote settings (style / mascot ids, rev bumps per change). */
   desk: DeskSettings | null;
   /** Remote taps for this box from the last 3 min: opaque id + "show" / "wake". */
@@ -704,13 +725,13 @@ export interface DisplayFeed {
   reviews: DeskReview[];
   /** Unexpired desk messages sent TO the owner (newest first). */
   messages: { id: string; from: string; text: string; age_s: number }[];
-  friends_running: { name: string; miles: number }[];
+  friends_running: { name: string; miles: number; kind: "run" | "walk" }[];
   /** The owner's friends whose streak is at risk today (their own local day,
    *  the admin panel's rule). Friends already see each other's daily miles in
    *  the app; blocks in either direction are excluded. */
   friends_at_risk: { count: number; top: { name: string; streak: number }[] };
   /** Friends whose tracked session ended in the last 30 min (same rules). */
-  friends_finished: { id: string; name: string; miles: number }[];
+  friends_finished: { id: string; name: string; miles: number; kind: "run" | "walk" }[];
   alerts: { id: string; kind: "nudge" | "hype"; from: string; at: string }[];
 }
 
@@ -727,6 +748,7 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
       year_ago_miles: number | null;
       local_date: string;
       live_miles: number | null;
+      live_kind: "run" | "walk" | null;
       longest_run: number | null;
       fastest_mile_month: number | null;
     }>(
@@ -751,6 +773,10 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
               (SELECT s.distance_miles::float FROM live_tracking_sessions s
                 WHERE s.user_id = u.user_id AND s.ended_at IS NULL
                   AND s.last_seen_at > NOW() - INTERVAL '${LIVE_PRESENCE_WINDOW_SECONDS} seconds') AS live_miles,
+              (SELECT CASE WHEN s.workout_type = 'walking' THEN 'walk' ELSE 'run' END FROM live_tracking_sessions s
+                WHERE s.user_id = u.user_id AND s.ended_at IS NULL
+                  AND s.last_seen_at > NOW() - INTERVAL '${LIVE_PRESENCE_WINDOW_SECONDS} seconds'
+                ORDER BY s.last_seen_at DESC LIMIT 1) AS live_kind,
               (SELECT MAX(w.distance)::float FROM workouts w
                 WHERE w.user_id = u.user_id AND w.workout_type = 'running'
                   AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL) AS longest_run,
@@ -767,8 +793,9 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
     ),
     getTodayMiles(userId),
     fetchTodayCoverage([userId]),
-    db.query<{ name: string; miles: number }>(
-      `SELECT u.username AS name, ROUND(s.distance_miles::numeric, 1)::float AS miles
+    db.query<{ name: string; miles: number; kind: "run" | "walk" }>(
+      `SELECT u.username AS name, ROUND(s.distance_miles::numeric, 1)::float AS miles,
+              CASE WHEN s.workout_type = 'walking' THEN 'walk' ELSE 'run' END AS kind
          FROM friendships f
          JOIN live_tracking_sessions s
            ON s.user_id = f.friend_id
@@ -811,9 +838,10 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
     ),
     // Friends who just FINISHED a tracked session: identical friendship,
     // presence opt-out and block rules to friends_running above.
-    db.query<{ id: string; name: string; miles: number }>(
+    db.query<{ id: string; name: string; miles: number; kind: "run" | "walk" }>(
       `SELECT encode(sha256((s.session_id::text || s.ended_at::text)::bytea), 'hex') AS id,
-              u.username AS name, ROUND(s.distance_miles::numeric, 1)::float AS miles
+              u.username AS name, ROUND(s.distance_miles::numeric, 1)::float AS miles,
+              CASE WHEN s.workout_type = 'walking' THEN 'walk' ELSE 'run' END AS kind
          FROM friendships f
          JOIN live_tracking_sessions s
            ON s.user_id = f.friend_id
@@ -955,9 +983,15 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
         )
       : Promise.resolve([] as { id: string; kind: string }[]),
     // The owner's own "<friend> got their mile in!" announcements.
-    db.query<{ id: string; sender: string; name: string; age_s: number }>(
+    db.query<{ id: string; sender: string; name: string; age_s: number; kind: "run" | "walk" }>(
       `SELECT encode(sha256(('mile:' || n.id::text)::bytea), 'hex') AS id,
               n.data->>'user_id' AS sender, su.username AS name,
+              -- what got them there: their latest run or walk
+              COALESCE((SELECT CASE WHEN w.workout_type = 'walking' THEN 'walk' ELSE 'run' END
+                          FROM workouts w
+                         WHERE w.user_id = su.user_id AND w.deleted_at IS NULL
+                           AND w.workout_type IN ('running', 'walking')
+                         ORDER BY w.device_end_date DESC LIMIT 1), 'run') AS kind,
               EXTRACT(EPOCH FROM (NOW() - n.created_at))::int AS age_s
          FROM in_app_notifications n
          JOIN users su ON su.user_id = (n.data->>'user_id')
@@ -1004,6 +1038,7 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
       year_ago_miles: me?.year_ago_miles == null ? null : Math.round(Number(me.year_ago_miles) * 100) / 100,
       local_date: me?.local_date ?? "1970-01-01",
       live_miles: me?.live_miles == null ? null : Math.round(Number(me.live_miles) * 100) / 100,
+      live_kind: me?.live_kind ?? null,
       longest_run: me?.longest_run == null ? null : Math.round(Number(me.longest_run) * 100) / 100,
       fastest_mile_month: me?.fastest_mile_month == null ? null : Math.round(Number(me.fastest_mile_month)),
       flamey,
@@ -1021,6 +1056,7 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
     friends_miles: friendMiles.map((f, i) => ({
       id: f.id.slice(0, 16),
       name: f.name,
+      kind: f.kind,
       miles: Math.round((friendStats[i]?.miles ?? 0) * 100) / 100,
       seconds: Math.round(friendStats[i]?.durationSeconds ?? 0),
       best_pace: friendStats[i]?.bestSplitPaceSecMi == null ? null : Math.round(friendStats[i]!.bestSplitPaceSecMi!),
@@ -1040,12 +1076,12 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
       text: m.text,
       age_s: Math.max(0, Number(m.age_s) || 0),
     })),
-    friends_running: friends.map((f) => ({ name: f.name, miles: Number(f.miles) || 0 })),
+    friends_running: friends.map((f) => ({ name: f.name, miles: Number(f.miles) || 0, kind: f.kind })),
     friends_at_risk: {
       count: atRisk.length,
       top: atRisk.slice(0, MAX_AT_RISK_NAMES).map((r) => ({ name: r.name, streak: Number(r.streak) || 0 })),
     },
-    friends_finished: finished.map((f) => ({ id: f.id.slice(0, 16), name: f.name, miles: Number(f.miles) || 0 })),
+    friends_finished: finished.map((f) => ({ id: f.id.slice(0, 16), name: f.name, miles: Number(f.miles) || 0, kind: f.kind })),
     alerts: alerts.map((a) => ({ id: a.id.slice(0, 16), kind: a.kind, from: a.from, at: a.at })),
   };
 }

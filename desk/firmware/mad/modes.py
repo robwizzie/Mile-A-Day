@@ -126,7 +126,8 @@ def arcade(app, b, now, t):
 
 
 HUD_SHORT = {"MILE TODAY?": "RUN!", "DAYS DONE": "DAYS", "TOTAL MI": "MI", "MI TODAY": "TODAY",
-             "ACTIVE/WK": "ACTIVE", "OUT NOW": "OUT"}
+             "ACTIVE/WK": "ACTIVE", "OUT NOW": "OUT",
+             "RUNS TODAY": "RUNS", "RUNS ALL TIME": "RUNS"}
 
 
 def app_icon(i):
@@ -294,20 +295,22 @@ def live(app, b, now, t):
     if abs(target - app.live_shown) < 0.005:
         app.live_shown = target
     name = upper_name(me.get("username"))
+    walk = me.get("live_kind") == "walk"
     fit(b, 0, 64, 1, name, WHITE, t=t)
-    draw_box(b, 0, 64, 9, "IS RUNNING", RED, F3)
-    d = t * 30
+    draw_box(b, 0, 64, 9, "IS WALKING" if walk else "IS RUNNING", RED, F3)
+    d = t * (12 if walk else 30)          # a walk: the track rolls by slower
     fill(b, 0, 30, 64, 31, MAROON)
     for x in range(64):
         if int(x + d) % 8 < 3:
             b[x, 31] = MAROON_DIM
-    f = app.mascot_frame(now)
+    f = app.mascot_frame(now * 0.5 if walk else now)
     x = 6
     y = 31 - f.height                    # feet on the track, head clear of the text
     if app.mascot:
-        y -= int(round(abs(math.sin(t * math.pi * 2.4))))
-    for k, (dy, ln) in enumerate(((19, 6), (22, 9), (25, 5))):   # speed lines
-        fill(b, x - ln - 1 + (k % 2), dy, x - 1 + (k % 2), dy + 1, MAROON_DIM)
+        y -= int(round(abs(math.sin(t * math.pi * (1.2 if walk else 2.4)))))
+    if not walk:
+        for k, (dy, ln) in enumerate(((19, 6), (22, 9), (25, 5))):   # speed lines
+            fill(b, x - ln - 1 + (k % 2), dy, x - 1 + (k % 2), dy + 1, MAROON_DIM)
     blit(b, f, x, y, skip=BLACK)
     v = app.live_shown
     done = v >= 0.95
