@@ -3501,7 +3501,7 @@ export const shoes = pgTable(
     // Optional "replace at" mileage; NULL = no target.
     replaceAtMiles: doublePrecision("replace_at_miles"),
     // LEGACY (0087): one default for every activity. Superseded by
-    // `shoe_defaults` (0088), which backfilled from these; neither column is
+    // `shoe_defaults` (0092), which backfilled from these; neither column is
     // read or written any more. Left in place rather than dropped.
     isDefault: boolean("is_default").default(false).notNull(),
     defaultSince: timestamp("default_since", {
