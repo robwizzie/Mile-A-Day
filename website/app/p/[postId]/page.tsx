@@ -37,15 +37,20 @@ export async function generateMetadata({
   const post = await getPost(postId);
 
   if (!post) {
-    return { title: "Mile A Day" };
+    return { title: { absolute: "Mile A Day" }, robots: { index: false } };
   }
 
   const title = `${authorName(post)} on Mile A Day`;
   const description = `${authorName(post)} shared a post on Mile A Day. Open it in the app to see it.`;
 
   return {
-    title,
+    title: { absolute: title },
     description,
+    // A post is friends-only; this page is a signpost to the app, not
+    // content. Keep it out of search results (unfurlers ignore this, so
+    // link previews are unaffected) while still letting crawlers follow
+    // through to the author's public profile.
+    robots: { index: false, follow: true },
     openGraph: { title, description, type: "article", siteName: "Mile A Day" },
     // The co-located opengraph-image is 1200x630 and Next emits it for Twitter
     // too. `summary` rendered that as a small square thumbnail with most of the

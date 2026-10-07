@@ -7,7 +7,7 @@ import { DeskRemote } from "../_components/DeskRemote";
 // sign-in as the admin dashboard (Sign in with Apple, admin accounts only);
 // "Add to Home Screen" on an iPhone opens it full-screen like an app.
 export const metadata: Metadata = {
-  title: "Desks — Mile A Day",
+  title: "Desks",
   robots: { index: false, follow: false },
   appleWebApp: { capable: true, title: "Desks", statusBarStyle: "black-translucent" },
 };
