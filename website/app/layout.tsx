@@ -18,7 +18,8 @@ const bebasNeue = Bebas_Neue({
 })
 
 const DESCRIPTION =
-  'Mile A Day is the free iPhone & Apple Watch app that turns one mile a day into an unbreakable habit. Track your streak, compete with friends, earn medals, and go the extra mile.'
+  // ≤160 characters, so search results show all of it.
+  'The free iPhone & Apple Watch app that turns one mile a day into an unbreakable habit. Build your streak, compete with friends, and earn medals.'
 const SOCIAL_DESCRIPTION =
   'Build an unbreakable habit. Track your streak, compete with friends, and Go the Extra Mile.'
 
@@ -60,6 +61,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
+    site: '@mileadayapp',
+    creator: '@mileadayapp',
     title: 'Mile A Day - Walk or Run a Mile Every Single Day',
     description: SOCIAL_DESCRIPTION,
   },
@@ -74,6 +77,8 @@ export const metadata: Metadata = {
       'max-video-preview': -1,
     },
   },
+  appleWebApp: { title: 'Mile A Day', statusBarStyle: 'black-translucent' },
+  formatDetection: { telephone: false, email: false, address: false },
   icons: {
     icon: '/images/mad-circle-icon.png',
     apple: '/images/mad-circle-icon.png',

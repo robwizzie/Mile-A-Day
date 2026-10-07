@@ -1,89 +1,129 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { ImageResponse } from "next/og";
+import {
+  BRAND,
+  Glow,
+  Lockup,
+  OG_SIZE,
+  StoreLine,
+  dashboardDataURI,
+  iconDataURI,
+  ogFonts,
+} from "./_og/shared";
 
-// Branded social-share card for mileaday.run, generated at build time. Used
-// for both OpenGraph and Twitter (Next reuses opengraph-image when there's no
-// twitter-image). /p/<id> has its own; /u/<username> inherits this one.
-export const alt = "Mile A Day — Walk or run a mile every single day";
-export const size = { width: 1200, height: 630 };
+// The site's link preview (iMessage, Slack, X, LinkedIn…), generated at build
+// time and reused for Twitter. It mirrors the hero: the same headline in the
+// same type, beside the real dashboard. /u/<username> and /p/<id> have their
+// own cards.
+export const alt =
+  "Mile A Day — One mile. Every day. Free on iPhone and Apple Watch.";
+export const size = OG_SIZE;
 export const contentType = "image/png";
 
 export default async function OpengraphImage() {
-  const icon = await readFile(
-    join(process.cwd(), "public/images/mad-circle-icon.png"),
-  );
-  const iconSrc = `data:image/png;base64,${icon.toString("base64")}`;
+  const [fonts, icon, dashboard] = await Promise.all([
+    ogFonts(),
+    iconDataURI(),
+    dashboardDataURI(),
+  ]);
 
   return new ImageResponse(
     <div
       style={{
-        height: "100%",
         width: "100%",
+        height: "100%",
         display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
-        backgroundColor: "#0a0a0a",
-        backgroundImage:
-          "radial-gradient(circle at 78% 22%, rgba(199,37,84,0.28) 0%, rgba(10,10,10,0) 55%)",
-        padding: "90px",
+        position: "relative",
+        overflow: "hidden",
+        backgroundColor: BRAND.ground,
+        fontFamily: "DM Sans",
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "18px",
-          fontSize: 30,
-          fontWeight: 700,
-          letterSpacing: "4px",
-          color: "#c72554",
-        }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={iconSrc} width={64} height={64} alt="" />
-        MILE A DAY
-      </div>
+      <Glow top={-260} left={620} size={820} alpha={0.34} />
+      <Glow top={380} left={-240} size={560} alpha={0.16} />
 
+      {/* Copy */}
       <div
         style={{
           display: "flex",
           flexDirection: "column",
-          marginTop: "36px",
-          fontSize: 122,
-          fontWeight: 800,
-          lineHeight: 1,
-          letterSpacing: "-3px",
+          justifyContent: "space-between",
+          padding: "60px 0 62px 72px",
+          width: 760,
         }}
       >
-        <div style={{ display: "flex", color: "#f5f5f5" }}>ONE MILE.</div>
-        <div style={{ display: "flex", color: "#c72554" }}>EVERY DAY.</div>
+        <Lockup icon={icon} />
+
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              fontFamily: "Bebas Neue",
+              fontSize: 140,
+              lineHeight: 0.88,
+              letterSpacing: -1,
+            }}
+          >
+            <div style={{ display: "flex", color: BRAND.ink }}>ONE MILE.</div>
+            <div
+              style={{
+                display: "flex",
+                backgroundImage: `linear-gradient(90deg, ${BRAND.red} 0%, ${BRAND.pink} 100%)`,
+                backgroundClip: "text",
+                color: "transparent",
+              }}
+            >
+              EVERY DAY.
+            </div>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              marginTop: 22,
+              fontSize: 32,
+              fontWeight: 500,
+              lineHeight: 1.3,
+              color: BRAND.muted,
+              maxWidth: 600,
+            }}
+          >
+            Walk it or run it. Just get it done.
+          </div>
+        </div>
+
+        <StoreLine />
       </div>
 
+      {/* The real app, tilted like the hero's floating phone. */}
       <div
         style={{
+          position: "absolute",
+          top: 70,
+          left: 818,
           display: "flex",
-          marginTop: "48px",
-          fontSize: 40,
-          color: "#a0a0a0",
+          padding: 10,
+          borderRadius: 54,
+          backgroundColor: "#1c1c1e",
+          border: "2px solid rgba(255,255,255,0.12)",
+          boxShadow:
+            "0 40px 90px rgba(0,0,0,0.65), 0 0 120px rgba(199,37,84,0.25)",
+          transform: "rotate(6deg)",
         }}
       >
-        Track your streak. Compete with friends.
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          marginTop: "20px",
-          fontSize: 28,
-          fontWeight: 600,
-          letterSpacing: "1px",
-          color: "#f5f5f5",
-        }}
-      >
-        Free on iOS &amp; Apple Watch
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={dashboard}
+          width={320}
+          height={590}
+          alt=""
+          style={{
+            borderRadius: 44,
+            objectFit: "cover",
+            objectPosition: "top",
+          }}
+        />
       </div>
     </div>,
-    { ...size },
+    { ...size, fonts },
   );
 }

@@ -4,7 +4,22 @@ import { LegalPage, Section } from '@/components/legal-page';
 export const metadata: Metadata = {
 	title: 'Privacy Policy',
 	description: 'How Mile A Day collects, uses, and protects your data.',
-	alternates: { canonical: '/privacy' }
+	alternates: { canonical: '/privacy' },
+	// A page's openGraph/twitter REPLACE the root ones, so restate what a share
+	// needs; the card image comes from this segment's opengraph-image.
+	openGraph: {
+		title: 'Privacy Policy | Mile A Day',
+		description: 'How Mile A Day collects, uses, and protects your data.',
+		url: '/privacy',
+		type: 'website',
+		siteName: 'Mile A Day'
+	},
+	twitter: {
+		card: 'summary_large_image',
+		site: '@mileadayapp',
+		title: 'Privacy Policy | Mile A Day',
+		description: 'How Mile A Day collects, uses, and protects your data.'
+	}
 };
 
 export default function PrivacyPage() {
