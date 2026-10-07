@@ -4,7 +4,7 @@ import { AdminLogin } from "./login";
 import { AdminDashboard } from "./dashboard";
 
 export const metadata: Metadata = {
-  title: "Admin — Mile A Day",
+  title: "Admin",
   robots: { index: false, follow: false },
 };
 

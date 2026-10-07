@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Navbar } from "@/components/navbar";
 import { HeroSection } from "@/components/hero-section";
 import { MarqueeSection } from "@/components/marquee-section";
@@ -15,6 +16,68 @@ import { CtaSection } from "@/components/cta-section";
 import { Footer } from "@/components/footer";
 import { ScrollReveal } from "@/components/scroll-reveal";
 
+
+const SITE_URL = "https://mileaday.run";
+const APP_STORE_URL = "https://apps.apple.com/us/app/mile-a-day/id6746970905";
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+  // Smart App Banner: iOS Safari offers "Get"/"Open" for the app up top.
+  itunes: { appId: "6746970905" },
+};
+
+// schema.org data so search engines know mileaday.run is the home of a free
+// iPhone + Apple Watch app (and who makes it). Facts only — nothing here may
+// claim a rating or review count the App Store doesn't publish for us.
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": `${SITE_URL}/#organization`,
+      name: "Mile A Day",
+      url: SITE_URL,
+      logo: `${SITE_URL}/images/mad-circle-icon.png`,
+      founder: [
+        { "@type": "Person", name: "Rob Wiscount" },
+        { "@type": "Person", name: "David Simmerman" },
+      ],
+      sameAs: [
+        APP_STORE_URL,
+        "https://www.instagram.com/mileadayapp",
+        "https://www.tiktok.com/@mileadayapp",
+        "https://x.com/mileadayapp",
+      ],
+    },
+    {
+      "@type": "WebSite",
+      "@id": `${SITE_URL}/#website`,
+      url: SITE_URL,
+      name: "Mile A Day",
+      inLanguage: "en-US",
+      publisher: { "@id": `${SITE_URL}/#organization` },
+    },
+    {
+      "@type": "MobileApplication",
+      "@id": `${SITE_URL}/#app`,
+      name: "Mile A Day",
+      operatingSystem: "iOS, watchOS",
+      applicationCategory: "HealthApplication",
+      description:
+        "Walk or run a mile every day, build streaks, earn medals, and compete with friends. Free on iPhone and Apple Watch.",
+      url: SITE_URL,
+      image: `${SITE_URL}/images/mad-circle-icon.png`,
+      downloadUrl: APP_STORE_URL,
+      installUrl: APP_STORE_URL,
+      publisher: { "@id": `${SITE_URL}/#organization` },
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    },
+  ],
+};
+
+// Escape "<" so no string in the data can close the script tag early.
+const structuredDataJson = JSON.stringify(structuredData).replace(/</g, "\\u003c");
+
 // Section order tells the story top to bottom: hook (hero) → live proof the
 // community is real (stats band) → what the app does (features) → the new
 // social experience (feed, then friends/nudges) → the competitive layer
@@ -23,6 +86,10 @@ import { ScrollReveal } from "@/components/scroll-reveal";
 export default function Home() {
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a]">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: structuredDataJson }}
+      />
       <ScrollReveal />
       <Navbar />
       <HeroSection />
