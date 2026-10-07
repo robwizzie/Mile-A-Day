@@ -4,42 +4,16 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Flame, Apple } from "lucide-react";
 import { Footer } from "@/components/footer";
+import {
+  displayName,
+  getPublicProfile,
+  profileAvatarURL,
+  profileInitials,
+} from "./publicProfile";
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "https://mad.mindgoblin.tech";
 const APP_STORE_URL = "https://apps.apple.com/us/app/mile-a-day/id6746970905";
 
-type PublicProfile = {
-  user_id: string;
-  username: string | null;
-  first_name: string | null;
-  last_name: string | null;
-  bio: string | null;
-  profile_image_url: string | null;
-  current_streak: number;
-};
-
-function displayName(profile: PublicProfile): string {
-  if (profile.first_name && profile.last_name)
-    return `${profile.first_name} ${profile.last_name}`;
-  if (profile.first_name) return profile.first_name;
-  return profile.username ?? "A runner";
-}
-
-async function getProfile(username: string): Promise<PublicProfile | null> {
-  try {
-    const res = await fetch(
-      `${API_URL}/public/users/${encodeURIComponent(username)}`,
-      {
-        next: { revalidate: 300 },
-      },
-    );
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
+const getProfile = getPublicProfile;
 
 export async function generateMetadata({
   params,
@@ -74,7 +48,9 @@ export async function generateMetadata({
       type: "profile",
       siteName: "Mile A Day",
     },
-    twitter: { card: "summary", title, description },
+    // The co-located opengraph-image is a 1200x630 card; `summary` would crop
+    // it to a small square.
+    twitter: { card: "summary_large_image", site: "@mileadayapp", title, description },
     // Smart App Banner: iOS Safari shows an "Open in app" banner, which is
     // the fallback path when the universal link opens in the browser.
     // app-argument hands this exact profile to the app, so the banner's
@@ -99,15 +75,8 @@ export default async function ProfilePage({
   }
 
   const name = displayName(profile);
-  const imageSrc = profile.profile_image_url
-    ? `${API_URL}${profile.profile_image_url}`
-    : null;
-  const initials = name
-    .split(" ")
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
+  const imageSrc = profileAvatarURL(profile);
+  const initials = profileInitials(profile);
 
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a]">

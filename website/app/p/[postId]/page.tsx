@@ -55,7 +55,7 @@ export async function generateMetadata({
     // The co-located opengraph-image is 1200x630 and Next emits it for Twitter
     // too. `summary` rendered that as a small square thumbnail with most of the
     // card cropped away — the one shape it is not.
-    twitter: { card: "summary_large_image", title, description },
+    twitter: { card: "summary_large_image", site: "@mileadayapp", title, description },
     // Smart App Banner: iOS Safari offers "Open in app", which is the fallback
     // when the universal link opens in the browser instead. app-argument
     // hands this exact post to the app, so the banner's OPEN lands on the

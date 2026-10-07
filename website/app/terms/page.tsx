@@ -4,7 +4,22 @@ import { LegalPage, Section } from '@/components/legal-page';
 export const metadata: Metadata = {
 	title: 'Terms of Use',
 	description: 'The terms and conditions for using the Mile A Day app.',
-	alternates: { canonical: '/terms' }
+	alternates: { canonical: '/terms' },
+	// A page's openGraph/twitter REPLACE the root ones, so restate what a share
+	// needs; the card image comes from this segment's opengraph-image.
+	openGraph: {
+		title: 'Terms of Use | Mile A Day',
+		description: 'The terms and conditions for using the Mile A Day app.',
+		url: '/terms',
+		type: 'website',
+		siteName: 'Mile A Day'
+	},
+	twitter: {
+		card: 'summary_large_image',
+		site: '@mileadayapp',
+		title: 'Terms of Use | Mile A Day',
+		description: 'The terms and conditions for using the Mile A Day app.'
+	}
 };
 
 export default function TermsPage() {

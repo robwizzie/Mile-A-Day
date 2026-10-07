@@ -22,6 +22,17 @@ const APP_STORE_URL = "https://apps.apple.com/us/app/mile-a-day/id6746970905";
 
 export const metadata: Metadata = {
   alternates: { canonical: "/" },
+  // Restated in full: a page's openGraph replaces the root one rather than
+  // merging, and og:url is the piece only the home page should carry.
+  openGraph: {
+    title: "Mile A Day - Walk or Run a Mile Every Single Day",
+    description:
+      "Build an unbreakable habit. Track your streak, compete with friends, and Go the Extra Mile.",
+    url: "/",
+    type: "website",
+    siteName: "Mile A Day",
+    locale: "en_US",
+  },
   // Smart App Banner: iOS Safari offers "Get"/"Open" for the app up top.
   itunes: { appId: "6746970905" },
 };
@@ -67,6 +78,18 @@ const structuredData = {
         "Walk or run a mile every day, build streaks, earn medals, and compete with friends. Free on iPhone and Apple Watch.",
       url: SITE_URL,
       image: `${SITE_URL}/images/mad-circle-icon.png`,
+      screenshot: `${SITE_URL}/images/app-dashboard.png`,
+      inLanguage: "en-US",
+      isAccessibleForFree: true,
+      featureList: [
+        "Daily mile streak tracking",
+        "Apple Health and Apple Watch sync",
+        "In-app GPS walk and run tracking",
+        "Friends feed, hypes and nudges",
+        "Competitions and head-to-head challenges",
+        "Medals and milestones",
+        "Walk together with friends in real time",
+      ],
       downloadUrl: APP_STORE_URL,
       installUrl: APP_STORE_URL,
       publisher: { "@id": `${SITE_URL}/#organization` },
