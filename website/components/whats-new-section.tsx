@@ -3,52 +3,44 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { RELEASES, CURRENT_RELEASE, releaseAnchor } from "@/lib/releases";
-import {
-  ClosetMockup,
-  RouteCardMockup,
-  WeeklyRecapMockup,
-} from "@/components/feature-mockups";
+import Image from "next/image";
 
 // The current release, shown off. Copy comes from lib/releases.ts (the site's
 // copy of the app's WhatsNewCatalog) — ship a release by adding it there, and
 // this section and /updates both move to it.
 
-// The three headliners get a drawn screen each; every other feature of the
-// release is listed under them. Titles must match lib/releases.ts.
-const SHOWCASE = [
+// Headliners shown on a real App screenshot. A feature appears here only once
+// its `screenshot` is set (a full-screen iPhone capture in
+// public/images/whats-new/); until then it stays in the list below, so the
+// section never shows a drawing in place of the app. `title` must match the
+// feature's title in lib/releases.ts.
+const SHOWCASE: { title: string; caption: string; blurb: string; screenshot: string | null }[] = [
   {
     title: "Flamey's Closet",
     caption: "Flamey's Closet",
-    blurb:
-      "Every medal unlocks something for Flamey to wear. Name him, dress him, save the outfits you love.",
-    Mockup: ClosetMockup,
+    blurb: "Every medal unlocks something for Flamey to wear. Name him, dress him, save the outfits you love.",
+    screenshot: null,
   },
   {
     title: "Your Flamey, on your walks",
     caption: "Your walks, drawn",
-    blurb:
-      "Route Art on the feed, Flamey running beside you, and a Flyover of the whole walk — with your start and finish kept private.",
-    Mockup: RouteCardMockup,
+    blurb: "Route Art on the feed, Flamey running beside you, and a Flyover of the whole walk.",
+    screenshot: null,
   },
   {
     title: "Weekly Recap",
     caption: "Weekly Recap",
-    blurb:
-      "Every Saturday evening: your miles, your best day, and how your friends did.",
-    Mockup: WeeklyRecapMockup,
+    blurb: "Every Saturday evening: your miles, your best day, and how your friends did.",
+    screenshot: null,
   },
 ];
-
-const SHOWN = new Set([
-  "Flamey's Closet",
-  "Your Flamey, on your walks",
-  "Weekly Recap",
-]);
 
 export function WhatsNewSection() {
   const release = CURRENT_RELEASE;
   const previous = RELEASES[1];
-  const rest = release.features.filter((f) => !SHOWN.has(f.title));
+  const shots = SHOWCASE.filter((s) => s.screenshot);
+  const shown = new Set(shots.map((s) => s.title));
+  const rest = release.features.filter((f) => !shown.has(f.title));
 
   return (
     <section
@@ -75,32 +67,30 @@ export function WhatsNewSection() {
           </p>
         </div>
 
-        {/* Subgrid rows: the three screens share one height and the captions
-            start on one line, whatever each caption's length. */}
-        <div className="grid gap-x-6 gap-y-10 md:grid-cols-3 md:grid-rows-[1fr_auto] md:gap-y-0">
-          {SHOWCASE.map(({ caption, blurb, Mockup }, i) => (
-            <div
-              key={caption}
-              className={`reveal-scale reveal-delay-${i + 1} flex flex-col md:row-span-2 md:grid md:grid-rows-subgrid`}
-            >
-              <div className="glass-card flex-1 rounded-[30px] p-2.5">
-                <Mockup />
+        {shots.length > 0 && (
+          <div className="mb-14 grid gap-x-8 gap-y-12 sm:grid-cols-2 md:grid-cols-3">
+            {shots.map((shot, i) => (
+              <div key={shot.title} className={`reveal-scale reveal-delay-${i + 1} flex flex-col items-center text-center`}>
+                <div className="phone-mockup w-full max-w-[280px] overflow-hidden p-2.5">
+                  <Image
+                    src={shot.screenshot!}
+                    alt={`${shot.caption} in the Mile A Day app`}
+                    width={1290}
+                    height={2796}
+                    sizes="280px"
+                    className="w-full rounded-[30px]"
+                  />
+                </div>
+                <h3 className="font-heading mt-6 text-[24px] uppercase tracking-[1px] text-[#f5f5f5]">{shot.caption}</h3>
+                <p className="mt-1.5 max-w-xs text-sm leading-relaxed text-[#a0a0a0]">{shot.blurb}</p>
               </div>
-              <div>
-                <h3 className="font-heading mt-5 text-[24px] uppercase tracking-[1px] text-[#f5f5f5]">
-                  {caption}
-                </h3>
-                <p className="mt-1.5 text-sm leading-relaxed text-[#a0a0a0]">
-                  {blurb}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
-        <div className="reveal reveal-delay-2 glass-card mt-14 rounded-2xl p-6 sm:p-8">
+        <div className="reveal reveal-delay-2 glass-card rounded-2xl p-6 sm:p-8">
           <h3 className="mb-6 text-xs font-semibold uppercase tracking-widest text-[#707070]">
-            Also in {release.version}
+            {shots.length > 0 ? `Also in ${release.version}` : `Everything in ${release.version}`}
           </h3>
           <div className="grid gap-x-8 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
             {rest.map((item) => (
