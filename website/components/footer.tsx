@@ -1,4 +1,8 @@
 import Image from "next/image"
+import Link from "next/link"
+import { Mail } from "lucide-react"
+import { CURRENT_RELEASE } from "@/lib/releases"
+import { SUPPORT_EMAIL, SUPPORT_MAILTO } from "@/lib/site"
 
 export function Footer() {
   return (
@@ -17,15 +21,21 @@ export function Footer() {
             <span className="font-heading text-[22px] tracking-[1px] text-[#f5f5f5]">MILE A DAY</span>
           </div>
 
-          <div className="flex items-center gap-6">
-            <a href="#features" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
+          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3">
+            <a href="/#features" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
               Features
             </a>
-            <a href="#competitions" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
+            <a href="/#competitions" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
               Competitions
             </a>
-            <a href="#story" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
+            <Link href="/updates" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
+              What&apos;s New
+            </Link>
+            <a href="/#story" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
               Our Story
+            </a>
+            <a href="/#support" className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]">
+              Help
             </a>
             <a
               href="https://apps.apple.com/us/app/mile-a-day/id6746970905"
@@ -77,11 +87,31 @@ export function Footer() {
           </div>
         </div>
 
+        <div className="mt-10 flex flex-col items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] px-6 py-5 text-center sm:flex-row sm:justify-between sm:text-left">
+          <p className="text-sm text-[#a0a0a0]">
+            <span className="font-semibold text-[#f5f5f5]">Need help?</span> Questions, bugs, or feedback — we read every
+            email.
+          </p>
+          <a
+            href={SUPPORT_MAILTO}
+            className="inline-flex items-center gap-2 text-sm font-semibold text-[#ff4d7d] transition-colors hover:text-[#ff7a9c]"
+          >
+            <Mail className="h-4 w-4" />
+            {SUPPORT_EMAIL}
+          </a>
+        </div>
+
         <div className="mt-8 flex flex-col items-center gap-4 border-t border-[#333333]/30 pt-8 md:flex-row md:justify-between">
           <p className="text-xs text-[#a0a0a0]/50">
             &copy; {new Date().getFullYear()} Mile A Day. Built by Rob Wiscount & David Simmerman.
           </p>
           <div className="flex items-center gap-4">
+            <Link
+              href="/updates"
+              className="text-xs text-[#a0a0a0]/40 transition-colors hover:text-[#a0a0a0]"
+            >
+              iOS {CURRENT_RELEASE.version}
+            </Link>
             <a href="/privacy" className="text-xs text-[#a0a0a0]/40 transition-colors hover:text-[#a0a0a0]">
               Privacy Policy
             </a>

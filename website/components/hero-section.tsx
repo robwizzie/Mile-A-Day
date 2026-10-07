@@ -1,5 +1,7 @@
 import Image from "next/image"
+import { ArrowRight } from "lucide-react"
 import { LiveUserCount } from "./live-user-count"
+import { CURRENT_RELEASE } from "@/lib/releases"
 
 export function HeroSection() {
   return (
@@ -10,15 +12,23 @@ export function HeroSection() {
       <div className="relative mx-auto flex max-w-6xl flex-col items-center gap-16 lg:flex-row lg:items-center lg:gap-20">
         {/* Left: copy */}
         <div className="flex flex-1 flex-col items-center text-center lg:items-start lg:text-left">
-          <div className="animate-fade-in-up glass-card-highlight mb-6 inline-flex items-center gap-2 rounded-full px-4 py-2">
+          <a
+            href="#whats-new"
+            className="animate-fade-in-up glass-card-highlight group mb-6 inline-flex items-center gap-2 rounded-full px-4 py-2"
+          >
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#c72554] opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-[#c72554]" />
             </span>
             <span className="text-xs font-medium tracking-wide text-[#c72554]">
-              Available on iOS & Apple Watch
+              iOS &amp; Apple Watch
             </span>
-          </div>
+            <span className="h-3 w-px bg-[#c72554]/30" />
+            <span className="text-xs font-semibold tracking-wide text-[#f5f5f5]">
+              New in {CURRENT_RELEASE.version}
+            </span>
+            <ArrowRight className="h-3.5 w-3.5 text-[#f5f5f5]/70 transition-transform group-hover:translate-x-0.5" />
+          </a>
 
           <h1 className="animate-fade-in-up animate-delay-100 font-heading text-[clamp(60px,11vw,150px)] leading-[0.9] tracking-[-2px]">
             <span className="text-[#f5f5f5]">ONE MILE.</span>

@@ -1,206 +1,156 @@
 "use client";
 
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
+import { RELEASES, CURRENT_RELEASE, releaseAnchor } from "@/lib/releases";
 import {
-  Shield,
-  Flame,
-  LayoutGrid,
-  Timer,
-  MessageCircle,
-  Images,
-  Camera,
-  Footprints,
-  Flag,
-  BarChart3,
-  ThumbsUp,
-  Activity,
-  Award,
-  Swords,
-  CalendarRange,
-  Map,
-} from "lucide-react";
+  ClosetMockup,
+  RouteCardMockup,
+  WeeklyRecapMockup,
+} from "@/components/feature-mockups";
 
-// Bump on every App Store release, alongside the app's What's New entry in
-// app/Mile A Day/Views/Components/WhatsNewView.swift. The previous release's
-// headliners drop into PREVIOUS below rather than disappearing.
-const VERSION = "1.2.03";
+// The current release, shown off. Copy comes from lib/releases.ts (the site's
+// copy of the app's WhatsNewCatalog) — ship a release by adding it there, and
+// this section and /updates both move to it.
 
-// Headliners for this release. Copy tracks what the app actually does —
-// Streak Tokens are StreakSave/DoubleDown/StreakAssist, the flame lifecycle is
-// StreakFlamePhase (coal -> burning -> blazing), and the two dashboard styles
-// are DashboardStyle.modern / .fun.
-const FEATURES = [
+// The three headliners get a drawn screen each; every other feature of the
+// release is listed under them. Titles must match lib/releases.ts.
+const SHOWCASE = [
   {
-    icon: Shield,
-    color: "#FFD966",
-    title: "Streak Tokens",
-    desc: "Earn Double Down, Streak Save, and Streak Assist by running — then spend them to protect your streak, or rescue a friend's.",
+    title: "Flamey's Closet",
+    caption: "Flamey's Closet",
+    blurb:
+      "Every medal unlocks something for Flamey to wear. Name him, dress him, save the outfits you love.",
+    Mockup: ClosetMockup,
   },
   {
-    icon: Flame,
-    color: "#FF9F0A",
-    title: "A Flame That Burns Down",
-    desc: "A coal at midnight, shrinking as your day runs out, and a full blaze the second you bank your mile — on your dashboard and your Home Screen.",
+    title: "Your Flamey, on your walks",
+    caption: "Your walks, drawn",
+    blurb:
+      "Route Art on the feed, Flamey running beside you, and a Flyover of the whole walk — with your start and finish kept private.",
+    Mockup: RouteCardMockup,
   },
   {
-    icon: LayoutGrid,
-    color: "#c72554",
-    title: "Your Dashboard, Your Way",
-    desc: "One card for your mile, streak, and tokens. Pick Modern for a calm, focused layout or Fun for the animated flame buddy.",
-  },
-  {
-    icon: Timer,
-    color: "#5AC8FA",
-    title: "Lock Screen Countdown",
-    desc: "Streak on the line in the evening? A live countdown to midnight lands on your Lock Screen and Dynamic Island, with one-tap Start Mile.",
-  },
-  {
-    icon: MessageCircle,
-    color: "#BF5AF2",
-    title: "Comments & Collabs",
-    desc: "Comment, reply, and @mention friends — and share a run together as a co-post that lands on both your profiles.",
-  },
-  {
-    icon: Images,
-    color: "#ff4d7d",
-    title: "Stories & A Faster Feed",
-    desc: "Swipe between friends' stories, spot fresh miles at a glance, and come back to a feed that has already refreshed.",
-  },
-];
-
-// Second tier: real shipped features, just not the headline. Rendered as a
-// compact strip so the section stays scannable instead of becoming 12 cards.
-const ALSO_NEW = [
-  { icon: Footprints, label: "Walks that agree between friends" },
-  { icon: Camera, label: "Pinch-to-zoom camera + 0.5x lens" },
-  { icon: Activity, label: "Treadmill + Apple Health auto-import" },
-  { icon: Flag, label: "Road to your next streak club" },
-  { icon: BarChart3, label: "Your month, wrapped" },
-  { icon: ThumbsUp, label: "Unlimited hypes" },
-];
-
-// Previous release. Kept visible — these are still new to anyone discovering
-// the app now — but demoted to a slim list so the current release leads.
-const PREVIOUS = [
-  {
-    icon: Timer,
-    color: "#c72554",
-    title: "Race PRs",
-    desc: "Automatic records for every standard distance",
-  },
-  {
-    icon: Award,
-    color: "#FF9900",
-    title: "3D Medals",
-    desc: "Tiltable medals and a shelf of social awards",
-  },
-  {
-    icon: Swords,
-    color: "#D94059",
-    title: "Head-to-Head",
-    desc: "Call out a friend, settle it by sundown",
-  },
-  {
-    icon: LayoutGrid,
-    color: "#33B34D",
-    title: "Widgets",
-    desc: "Streak, today's progress, friends leaderboard",
-  },
-  {
-    icon: CalendarRange,
-    color: "#5AC8FA",
     title: "Weekly Recap",
-    desc: "Your week in miles, wrapped",
-  },
-  {
-    icon: Map,
-    color: "#ff4d7d",
-    title: "Heatmap & Memories",
-    desc: "Every route you've run on one glowing map",
+    caption: "Weekly Recap",
+    blurb:
+      "Every Saturday evening: your miles, your best day, and how your friends did.",
+    Mockup: WeeklyRecapMockup,
   },
 ];
+
+const SHOWN = new Set([
+  "Flamey's Closet",
+  "Your Flamey, on your walks",
+  "Weekly Recap",
+]);
 
 export function WhatsNewSection() {
+  const release = CURRENT_RELEASE;
+  const previous = RELEASES[1];
+  const rest = release.features.filter((f) => !SHOWN.has(f.title));
+
   return (
-    <section className="section-lazy relative px-6 py-24">
+    <section
+      id="whats-new"
+      className="section-lazy relative scroll-mt-20 px-6 py-24"
+    >
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-[520px]"
+        style={{
+          background:
+            "radial-gradient(ellipse 700px 380px at 50% 0%, rgba(255,138,61,0.07), transparent 70%)",
+        }}
+      />
       <div className="relative mx-auto max-w-6xl">
         <div className="mx-auto mb-14 max-w-2xl text-center">
-          <span className="reveal mb-4 inline-block text-sm font-semibold uppercase tracking-widest text-[#c72554]">
-            Just shipped
+          <span className="reveal mb-4 inline-flex items-center gap-2 rounded-full border border-[#c72554]/30 bg-[#c72554]/10 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-widest text-[#ff4d7d]">
+            Just shipped · {release.date}
           </span>
           <h2 className="reveal reveal-delay-1 font-heading text-[clamp(40px,6vw,72px)] leading-none tracking-[-1px] text-[#f5f5f5]">
-            NEW IN <span className="text-[#c72554]">{VERSION}</span>
+            NEW IN <span className="text-[#c72554]">{release.version}</span>
           </h2>
           <p className="reveal reveal-delay-2 mt-4 text-base leading-relaxed text-[#a0a0a0]">
-            The biggest update yet — a dashboard that reacts to your day, tokens
-            that protect your streak, and a feed worth coming back to.
+            {release.summary}
           </p>
         </div>
 
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {FEATURES.map((feature, i) => (
+        {/* Subgrid rows: the three screens share one height and the captions
+            start on one line, whatever each caption's length. */}
+        <div className="grid gap-x-6 gap-y-10 md:grid-cols-3 md:grid-rows-[1fr_auto] md:gap-y-0">
+          {SHOWCASE.map(({ caption, blurb, Mockup }, i) => (
             <div
-              key={feature.title}
-              className={`reveal-scale reveal-delay-${(i % 3) + 1} glass-card type-card group relative overflow-hidden rounded-2xl p-6`}
-              style={{ "--accent": feature.color } as React.CSSProperties}
+              key={caption}
+              className={`reveal-scale reveal-delay-${i + 1} flex flex-col md:row-span-2 md:grid md:grid-rows-subgrid`}
             >
-              <div
-                className="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full opacity-[0.07] blur-2xl transition-opacity duration-300 group-hover:opacity-20"
-                style={{ background: feature.color }}
-              />
-              <div
-                className="relative mb-4 flex h-12 w-12 items-center justify-center rounded-xl"
-                style={{
-                  background: `linear-gradient(135deg, ${feature.color}20, ${feature.color}08)`,
-                }}
-              >
-                <feature.icon
-                  className="h-6 w-6"
-                  style={{ color: feature.color }}
-                />
+              <div className="glass-card flex-1 rounded-[30px] p-2.5">
+                <Mockup />
               </div>
-              <h3 className="font-heading relative mb-2 text-[22px] uppercase tracking-[1px] text-[#f5f5f5]">
-                {feature.title}
-              </h3>
-              <p className="relative text-sm leading-relaxed text-[#a0a0a0]">
-                {feature.desc}
-              </p>
+              <div>
+                <h3 className="font-heading mt-5 text-[24px] uppercase tracking-[1px] text-[#f5f5f5]">
+                  {caption}
+                </h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-[#a0a0a0]">
+                  {blurb}
+                </p>
+              </div>
             </div>
           ))}
         </div>
 
-        <div className="reveal reveal-delay-2 mt-6 flex flex-wrap justify-center gap-2.5">
-          {ALSO_NEW.map((item) => (
-            <span
-              key={item.label}
-              className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-4 py-2 text-sm text-[#a0a0a0]"
-            >
-              <item.icon className="h-4 w-4 shrink-0 text-[#c72554]" />
-              {item.label}
-            </span>
-          ))}
-        </div>
-
-        <div className="reveal reveal-delay-3 glass-card mt-14 rounded-2xl p-6 sm:p-8">
+        <div className="reveal reveal-delay-2 glass-card mt-14 rounded-2xl p-6 sm:p-8">
           <h3 className="mb-6 text-xs font-semibold uppercase tracking-widest text-[#707070]">
-            Still new to you
+            Also in {release.version}
           </h3>
-          <div className="grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-            {PREVIOUS.map((item) => (
-              <div key={item.title} className="flex items-start gap-3">
-                <item.icon
-                  className="mt-0.5 h-5 w-5 shrink-0"
-                  style={{ color: item.color }}
-                />
-                <div>
+          <div className="grid gap-x-8 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
+            {rest.map((item) => (
+              <div key={item.title} className="flex items-start gap-3.5">
+                <div
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                  style={{ background: `${item.color}1f` }}
+                >
+                  <item.icon
+                    className="h-5 w-5"
+                    style={{ color: item.color }}
+                  />
+                </div>
+                <div className="min-w-0">
                   <p className="text-[15px] font-semibold text-[#f5f5f5]">
                     {item.title}
                   </p>
-                  <p className="text-sm leading-relaxed text-[#a0a0a0]">
+                  <p className="mt-0.5 text-sm leading-relaxed text-[#a0a0a0]">
                     {item.desc}
                   </p>
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+
+        <div className="reveal reveal-delay-3 mt-6 flex flex-col items-center justify-between gap-4 rounded-2xl border border-white/[0.06] px-6 py-5 sm:flex-row">
+          <p className="text-center text-sm text-[#a0a0a0] sm:text-left">
+            <span className="font-semibold text-[#f5f5f5]">
+              Previously, in {previous.version}:
+            </span>{" "}
+            {previous.features
+              .slice(0, 5)
+              .map((f) => f.title)
+              .join(" · ")}{" "}
+            and more.
+          </p>
+          <div className="flex shrink-0 items-center gap-5">
+            <Link
+              href={`/updates#${releaseAnchor(previous.version)}`}
+              className="text-sm font-semibold text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]"
+            >
+              {previous.version} notes
+            </Link>
+            <Link
+              href="/updates"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#ff4d7d] transition-colors hover:text-[#ff7a9c]"
+            >
+              Every update <ArrowRight className="h-4 w-4" />
+            </Link>
           </div>
         </div>
       </div>
