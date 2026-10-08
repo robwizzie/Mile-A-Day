@@ -12,13 +12,12 @@ import { CompetitionsSection } from "@/components/competitions-section";
 import { SocialSection } from "@/components/social-section";
 import { HowItWorksSection } from "@/components/how-it-works-section";
 import { StorySection } from "@/components/story-section";
+import { SupportSection } from "@/components/support-section";
 import { CtaSection } from "@/components/cta-section";
 import { Footer } from "@/components/footer";
 import { ScrollReveal } from "@/components/scroll-reveal";
-
-
-const SITE_URL = "https://mileaday.run";
-const APP_STORE_URL = "https://apps.apple.com/us/app/mile-a-day/id6746970905";
+import { CURRENT_RELEASE } from "@/lib/releases";
+import { APP_STORE_URL, SITE_URL, SUPPORT_EMAIL } from "@/lib/site";
 
 export const metadata: Metadata = {
   alternates: { canonical: "/" },
@@ -49,6 +48,12 @@ const structuredData = {
       name: "Mile A Day",
       url: SITE_URL,
       logo: `${SITE_URL}/images/mad-circle-icon.png`,
+      email: SUPPORT_EMAIL,
+      contactPoint: {
+        "@type": "ContactPoint",
+        contactType: "customer support",
+        email: SUPPORT_EMAIL,
+      },
       founder: [
         { "@type": "Person", name: "Rob Wiscount" },
         { "@type": "Person", name: "David Simmerman" },
@@ -89,9 +94,13 @@ const structuredData = {
         "Competitions and head-to-head challenges",
         "Medals and milestones",
         "Walk together with friends in real time",
+        "Route Art and route Flyovers",
+        "Flamey, a mascot you dress with the medals you earn",
+        "Weekly recap",
       ],
       downloadUrl: APP_STORE_URL,
       installUrl: APP_STORE_URL,
+      softwareVersion: CURRENT_RELEASE.version,
       publisher: { "@id": `${SITE_URL}/#organization` },
       offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
     },
@@ -102,10 +111,11 @@ const structuredData = {
 const structuredDataJson = JSON.stringify(structuredData).replace(/</g, "\\u003c");
 
 // Section order tells the story top to bottom: hook (hero) → live proof the
-// community is real (stats band) → what the app does (features) → the new
-// social experience (feed, then friends/nudges) → the competitive layer
-// (competitions, medals) → what just shipped (2.0) → why one mile works
-// (habit) → how to start → who built it → download.
+// community is real (stats band) → what the app does (features) → what just
+// shipped (current release, full history at /updates) → the social
+// experience (feed, then friends/nudges) → the competitive layer
+// (competitions, medals) → why one mile works (habit) → how to start → who
+// built it → help & support → download.
 export default function Home() {
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a]">
@@ -119,14 +129,15 @@ export default function Home() {
       <MarqueeSection />
       <LiveStatsBand />
       <FeaturesSection />
+      <WhatsNewSection />
       <FeedSection />
       <SocialSection />
       <CompetitionsSection />
       <BadgeShowcaseSection />
-      <WhatsNewSection />
       <HabitSection />
       <HowItWorksSection />
       <StorySection />
+      <SupportSection />
       <CtaSection />
       <Footer />
     </main>
