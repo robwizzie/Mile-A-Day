@@ -125,9 +125,9 @@ enum PostDestination: String, CaseIterable, Identifiable {
 
     var footnote: String {
         switch self {
-        case .story: return "Disappears in 24 hours — friends who've done their mile can watch."
-        case .feed: return "Stays on your profile and in friends' feeds."
-        case .both: return "Posts to your story and your permanent feed."
+        case .story: return "Your friends can watch it for 24 hours — once they've done their own mile today."
+        case .feed: return "Stays on your profile and in your friends' feeds. Today's photo unlocks for each friend once they've done their mile."
+        case .both: return "Your story for 24 hours, plus your profile and your friends' feeds. Friends see the photo once they've done their mile."
         }
     }
 
