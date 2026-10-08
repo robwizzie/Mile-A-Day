@@ -53,7 +53,8 @@ struct BuddyPostWizardView: View {
                 coauthorIds: coauthorIds(),
                 coauthorNames: coauthorNames(),
                 walkCard: combinedRouteCard,
-                note: crewNote
+                note: crewNote,
+                faces: crewFaces
             ),
             skipTitle: "Not now",
             // The recap already checked the day's posting window before
@@ -167,6 +168,19 @@ struct BuddyPostWizardView: View {
             )
         }
         return out
+    }
+
+    /// The preview card's header faces: the poster, then the crew in the
+    /// order they're credited.
+    private var crewFaces: [RouteArtAvatar] {
+        let me = session.participants.first { $0.userId == buddy.currentUserId }
+        let poster = RouteArtAvatar(
+            name: me?.displayName ?? UserManager.shared.currentUser.name,
+            imageURL: me?.profileImageUrl ?? UserManager.shared.currentUser.profileImageUrl
+        )
+        return [poster] + crewExcludingMe.map {
+            RouteArtAvatar(name: $0.displayName, imageURL: $0.profileImageUrl)
+        }
     }
 
     /// The crew in the exact order `coauthorIds()` sends them, which is the

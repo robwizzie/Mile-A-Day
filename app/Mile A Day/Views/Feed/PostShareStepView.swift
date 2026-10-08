@@ -353,10 +353,18 @@ struct PostShareStepView: View {
             Image(systemName: "person.2.fill")
                 .font(.system(size: 14, weight: .bold))
                 .foregroundColor(MADTheme.Colors.madRed)
-            Text(buddyCrewLine)
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(buddyCrewLine)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                // Who it reaches: a crew post goes to every walker's friends,
+                // which is the part people didn't expect either way.
+                Text("Reaches your friends and the crew's friends.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer(minLength: 0)
         }
         .padding(MADTheme.Spacing.md)
