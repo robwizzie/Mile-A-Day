@@ -592,14 +592,14 @@ struct MADCameraView: View {
             // own copy, independent of what happens to the post. The mid-run
             // path opts out (autoSaveToPhotos == false) so it can save keyed to
             // the snap's stash id and avoid a duplicate on re-save.
-            if autoSaveToPhotos {
-                PhotoRollSaver.save(captured)
-            }
             guard isDualActive, dualMode else {
+                if autoSaveToPhotos { PhotoRollSaver.save(captured) }
                 image = captured
                 dismiss()
                 return
             }
+            // A FRONT & BACK press saves nothing yet: the roll gets ONE
+            // picture once both frames are in (see `captureSecondFrame`).
             beginSecondFrame(after: captured)
         }
     }
@@ -680,6 +680,7 @@ struct MADCameraView: View {
                 // what happened, because a FRONT & BACK that quietly becomes
                 // a single is otherwise just a mystery.
                 firstFrame = nil
+                if autoSaveToPhotos { PhotoRollSaver.save(first) }
                 image = first
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     showCaptureFailed = true
@@ -687,8 +688,14 @@ struct MADCameraView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { dismiss() }
                 return
             }
+            // ONE picture for one press, both frames in it, and the pair
+            // remembered under that photo — so picking it from the library
+            // later restores a real front-and-back post. Two separate saves
+            // here left people with two loose photos and no way to post
+            // them together once they'd left the composer.
             if autoSaveToPhotos {
-                PhotoRollSaver.save(second)
+                DualPairStore.saveToCameraRoll(
+                    primary: first, secondary: second, primaryWasFront: firstWasFront)
             }
             firstFrame = nil
             onDualCapture?(
