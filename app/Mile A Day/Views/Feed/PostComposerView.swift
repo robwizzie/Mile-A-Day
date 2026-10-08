@@ -1250,6 +1250,16 @@ struct PostComposerView: View {
                                         // SHOT, not by when it's posted.
                                         vm.photoSource = .library
                                         vm.errorMessage = nil
+                                    case .acceptedPair(let primary, let secondary, let primaryWasFront):
+                                        // A FRONT & BACK from the library —
+                                        // restored as the pair it was taken
+                                        // as, so it posts swappable.
+                                        vm.clearDual()
+                                        vm.pickedImage = primary
+                                        vm.dualSecondary = secondary
+                                        vm.dualPrimaryWasFront = primaryWasFront
+                                        vm.photoSource = .library
+                                        vm.errorMessage = nil
                                     case .failed:
                                         vm.errorMessage = "Couldn't load that photo. Try another one."
                                     case .cancelled:
