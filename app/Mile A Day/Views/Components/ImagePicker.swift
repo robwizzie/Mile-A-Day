@@ -212,6 +212,28 @@ enum PhotoRollSaver {
         }
     }
 
+    /// As `save`, but reports the new photo's PhotoKit identifier (nil when it
+    /// didn't land) — what `DualPairStore` keys a FRONT & BACK pair under, so
+    /// picking that photo later can restore both frames.
+    static func saveReturningIdentifier(_ image: UIImage, completion: @escaping (String?) -> Void) {
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            var identifier: String?
+            PHPhotoLibrary.shared().performChanges {
+                identifier = PHAssetChangeRequest.creationRequestForAsset(from: image)
+                    .placeholderForCreatedAsset?.localIdentifier
+            } completionHandler: { ok, error in
+                if let error {
+                    print("[PhotoRollSaver] Save failed: \(error.localizedDescription)")
+                }
+                DispatchQueue.main.async { completion(ok && error == nil ? identifier : nil) }
+            }
+        }
+    }
+
     /// As `save`, but records `ledgerKey` in `SavedPhotoLibraryLedger` on a
     /// confirmed save so a review gallery can show "Saved" and refuse a
     /// duplicate. `ledgerKey` is a `MidRunPhotoStash.Entry.id`.

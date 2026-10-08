@@ -825,6 +825,9 @@ struct PhotoPromptView: View {
             // Deferred to the import cover's onDismiss (composer is a second
             // cover — presenting it now would race this one's dismissal).
             pendingUse = ComposerLaunch(image: image)
+        case .acceptedPair(let primary, let secondary, let primaryWasFront):
+            pendingUse = ComposerLaunch(
+                image: primary, secondary: secondary, primaryWasFront: primaryWasFront)
         case .failed:
             importError = "Couldn't load that photo. Try another one."
         case .cancelled:
@@ -852,10 +855,10 @@ private struct ComposerLaunch: Identifiable {
     let secondary: UIImage?
     let primaryWasFront: Bool
 
-    init(image: UIImage?) {
+    init(image: UIImage?, secondary: UIImage? = nil, primaryWasFront: Bool = false) {
         self.image = image
-        self.secondary = nil
-        self.primaryWasFront = false
+        self.secondary = secondary
+        self.primaryWasFront = primaryWasFront
     }
 
     /// Reads the ORIGINAL off disk, not the entry's display copy: `entries()`

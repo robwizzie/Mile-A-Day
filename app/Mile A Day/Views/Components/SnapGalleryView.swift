@@ -163,10 +163,7 @@ struct SnapGalleryView: View {
                 let full = MidRunPhotoStash.fullImage(for: current)
                 let primary = full?.primary ?? current.image
                 let second = full?.secondary ?? current.secondary
-                let toSave = second.flatMap {
-                    DualPhotoComposite.render(big: primary, small: $0)
-                } ?? primary
-                PhotoRollSaver.save(toSave, ledgerKey: current.id) { ok in
+                let onSaved: (Bool) -> Void = { ok in
                     guard ok else { return }
                     MADHaptics.success()
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
@@ -175,6 +172,16 @@ struct SnapGalleryView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
                         withAnimation(.easeOut(duration: 0.25)) { showSavedToast = false }
                     }
+                }
+                if let second {
+                    // Remembered as a pair, so the saved photo can be posted
+                    // later as front-and-back (`DualPairStore`).
+                    DualPairStore.saveToCameraRoll(
+                        primary: primary, secondary: second,
+                        primaryWasFront: current.primaryWasFront,
+                        ledgerKey: current.id, completion: onSaved)
+                } else {
+                    PhotoRollSaver.save(primary, ledgerKey: current.id, completion: onSaved)
                 }
             }
             .disabled(saved)

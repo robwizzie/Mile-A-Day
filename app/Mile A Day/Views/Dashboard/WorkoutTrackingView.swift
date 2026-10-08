@@ -1059,23 +1059,34 @@ struct WorkoutTrackingView: View {
     private func handleImportResult(_ result: WorkoutPhotoImportResult) {
         switch result {
         case .accepted(let image):
-            Task.detached(priority: .utility) {
-                guard let entry = MidRunPhotoStash.add(image) else { return }
-                let count = MidRunPhotoStash.count
-                let thumb = MidRunPhotoStash.latestThumbnail()
-                await MainActor.run {
-                    // Imported straight from the photo library — it already
-                    // lives there, so mark it saved and never offer to re-save.
-                    SavedPhotoLibraryLedger.shared.markSaved(entry.id)
-                    midRunSnapCount = count
-                    lastSnapThumb = thumb
-                    showImportToast("Added to your \(activityNoun)", ok: true)
-                }
-            }
+            stashImported(image)
+        case .acceptedPair(let primary, let secondary, let primaryWasFront):
+            // Kept as a pair, exactly like a FRONT & BACK taken here.
+            stashImported(primary, secondary: secondary, primaryWasFront: primaryWasFront)
         case .failed:
             showImportToast("Couldn't load that photo", ok: false)
         case .cancelled:
             break
+        }
+    }
+
+    private func stashImported(
+        _ image: UIImage, secondary: UIImage? = nil, primaryWasFront: Bool = false
+    ) {
+        Task.detached(priority: .utility) {
+            guard let entry = MidRunPhotoStash.add(
+                image, secondary: secondary, primaryWasFront: primaryWasFront
+            ) else { return }
+            let count = MidRunPhotoStash.count
+            let thumb = MidRunPhotoStash.latestThumbnail()
+            await MainActor.run {
+                // Imported straight from the photo library — it already
+                // lives there, so mark it saved and never offer to re-save.
+                SavedPhotoLibraryLedger.shared.markSaved(entry.id)
+                midRunSnapCount = count
+                lastSnapThumb = thumb
+                showImportToast("Added to your \(activityNoun)", ok: true)
+            }
         }
     }
 
@@ -1200,17 +1211,20 @@ struct WorkoutTrackingView: View {
                 // `ImageRenderer` is main-actor only, and by this point the
                 // camera cover is already on its way out, so the frame it
                 // takes lands in the dismissal rather than in front of it.
-                let rollImage: UIImage = secondary.flatMap {
-                    DualPhotoComposite.render(big: image, small: $0)
-                } ?? image
                 // Keep the user's own full-res copy in the camera roll no
                 // matter what (the camera no longer auto-saves this path).
                 // When it made it into the stash, key the save to that snap
-                // so the gallery shows "Saved" instead of a duplicate.
-                if let entry {
-                    PhotoRollSaver.save(rollImage, ledgerKey: entry.id)
+                // so the gallery shows "Saved" instead of a duplicate. A pair
+                // is also remembered under the saved photo (`DualPairStore`),
+                // so it posts as front-and-back even after the stash is gone.
+                if let secondary {
+                    DualPairStore.saveToCameraRoll(
+                        primary: image, secondary: secondary,
+                        primaryWasFront: primaryWasFront, ledgerKey: entry?.id)
+                } else if let entry {
+                    PhotoRollSaver.save(image, ledgerKey: entry.id)
                 } else {
-                    PhotoRollSaver.save(rollImage)
+                    PhotoRollSaver.save(image)
                 }
                 guard entry != nil else { return }
                 midRunSnapCount = count
