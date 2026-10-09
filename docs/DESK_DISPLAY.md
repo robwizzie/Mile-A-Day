@@ -72,8 +72,11 @@ real HTTP.
 
 ## The phone remote (mileaday.run/admin/desk)
 
-A phone-first page for every desk box. Pick a box (each display key is one
-box: Rob's, Dave's…; the choice is remembered on that phone), then:
+A phone-first page for your own desk box. Each admin signs in with their own
+account and sees and controls only the boxes whose display key belongs to
+them (Rob's box for Rob, Dave's for Dave); anyone else's box answers 404 on
+every endpoint. Messages can still go to any other box (by name only). If you
+own more than one box, pick one (remembered on that phone), then:
 
 - **The real screen.** The page runs the box's own code (`desk/firmware/mad`,
   copied to `website/public/desk/py`) in MicroPython WebAssembly on the box's

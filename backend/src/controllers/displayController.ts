@@ -5,6 +5,7 @@ import {
   DESK_STYLES,
   getDeskBox,
   listDeskBoxes,
+  boxBelongsTo,
   DESK_TAPS,
   parseBoxState,
   queueBoxTap,
@@ -157,16 +158,29 @@ export async function adminSendDisplayMessage(req: Request, res: Response) {
 // ─── The desk remote (Admin -> Desks). Admin only; any active box.
 
 /** GET /admin/desk/boxes */
-export async function adminDeskBoxes(_req: Request, res: Response) {
+const viewer = (req: Request) => ((req as any).userId as string | undefined);
+
+/** The desk remote acts only on the signed-in admin's own boxes: anyone
+ *  else's box answers 404, exactly like a box that doesn't exist. */
+async function ownBox(req: Request, res: Response): Promise<string | null> {
+  const id = String(req.params.id ?? "");
+  if (await boxBelongsTo(id, viewer(req))) return id;
+  res.status(404).json({ error: "No such desk" });
+  return null;
+}
+
+export async function adminDeskBoxes(req: Request, res: Response) {
   noStore(res);
-  res.json({ boxes: await listDeskBoxes() });
+  res.json({ boxes: await listDeskBoxes(viewer(req) ?? "") });
 }
 
 /** GET /admin/desk/box/:id */
 export async function adminDeskBox(req: Request, res: Response) {
   noStore(res);
   try {
-    const box = await getDeskBox(String(req.params.id ?? ""));
+    const id = await ownBox(req, res);
+    if (!id) return;
+    const box = await getDeskBox(id);
     if (!box) return res.status(404).json({ error: "No such desk" });
     res.json(box);
   } catch (err) {
@@ -188,6 +202,8 @@ function minutes(v: unknown): number | undefined {
  *  JSON { style?: 0-6, mascot?: 0-1, sleep?: {start, end} (minutes) | "never" | "default" } */
 export async function adminDeskBoxSettings(req: Request, res: Response) {
   noStore(res);
+  const id = await ownBox(req, res);
+  if (!id) return;
   const style = deskIndex(req.body?.style, DESK_STYLES.length);
   const mascot = deskIndex(req.body?.mascot, DESK_MASCOTS.length);
   const raw = req.body?.sleep;
@@ -205,7 +221,7 @@ export async function adminDeskBoxSettings(req: Request, res: Response) {
   if (style === undefined || mascot === undefined || (style === null && mascot === null && sleep === undefined)) {
     return res.status(400).json({ error: "style (0-6), mascot (0-1) and/or sleep required" });
   }
-  const settings = await setBoxSettings(String(req.params.id ?? ""), { style, mascot, sleep });
+  const settings = await setBoxSettings(id, { style, mascot, sleep });
   if (!settings) return res.status(404).json({ error: "No such desk" });
   res.json({ settings });
 }
@@ -214,7 +230,9 @@ export async function adminDeskBoxSettings(req: Request, res: Response) {
 export function adminDeskBoxTap(kind: (typeof DESK_TAPS)[number]) {
   return async (req: Request, res: Response) => {
     noStore(res);
-    const ok = await queueBoxTap(String(req.params.id ?? ""), kind);
+    const id = await ownBox(req, res);
+    if (!id) return;
+    const ok = await queueBoxTap(id, kind);
     if (ok === null) return res.status(404).json({ error: "No such desk" });
     if (!ok) return res.status(429).json({ error: "Slow down a little" });
     res.status(201).json({ ok: true });
@@ -227,7 +245,9 @@ export async function adminDeskBoxMessage(req: Request, res: Response) {
   const text = sanitizeDisplayText(req.body?.text);
   const to = typeof req.body?.to === "string" ? req.body.to : "";
   if (!text) return res.status(400).json({ error: "Message is empty after cleanup (letters, numbers and a few emoji only)" });
-  const message = await sendBoxMessage(String(req.params.id ?? ""), to, text);
+  const id = await ownBox(req, res);
+  if (!id) return;
+  const message = await sendBoxMessage(id, to, text);
   if (!message) return res.status(404).json({ error: "No such desk" });
   res.status(201).json({ message });
 }

@@ -312,14 +312,24 @@ function boxRow(r: BoxDbRow): DeskBox {
 }
 
 /** Every active box (key), oldest first. Never the hash. */
-export async function listDeskBoxes(): Promise<DeskBox[]> {
+/** Active boxes: every one, or (with ownerId) only that person's own. */
+export async function listDeskBoxes(ownerId?: string): Promise<DeskBox[]> {
   const rows = await db.query<BoxDbRow>(
     `SELECT k.id, k.label, u.username, k.last_used_at::text, k.state, k.state_at::text
        FROM display_keys k JOIN users u ON u.user_id = k.user_id
-      WHERE k.revoked_at IS NULL
+      WHERE k.revoked_at IS NULL AND ($1::text IS NULL OR k.user_id = $1)
       ORDER BY k.created_at`,
+    [ownerId ?? null],
   );
   return rows.map(boxRow);
+}
+
+/** Is this an active box whose display key belongs to this user? The desk
+ *  remote only ever acts on the signed-in person's own boxes. */
+export async function boxBelongsTo(boxId: string, userId: string | undefined): Promise<boolean> {
+  if (!userId) return false;
+  const owner = await boxOwner(boxId);
+  return owner !== null && owner.userId === userId;
 }
 
 async function boxOwner(boxId: string): Promise<{ userId: string; box: DeskBox } | null> {
@@ -517,8 +527,11 @@ export async function getDeskBox(boxId: string) {
     mascots: DESK_MASCOTS,
     settings: settings ?? { style: null, mascot: null, rev: 0, sleep_start: null, sleep_end: null, never_sleep: false },
     messages: messages.map((m) => ({ ...m, id: m.id.slice(0, 16) })),
-    // Message another box (not one owned by this box's owner).
-    recipients: others.filter((b) => b.id !== boxId && b.username && b.username !== owner.box.username),
+    // Message another box (not one owned by this box's owner). Name only:
+    // nothing about another person's box beyond who it belongs to.
+    recipients: others
+      .filter((b) => b.id !== boxId && b.username && b.username !== owner.box.username)
+      .map((b) => ({ id: b.id, label: b.label, username: b.username })),
     activity,
     // The same data the box itself gets: the page draws its real screen.
     live: feed,

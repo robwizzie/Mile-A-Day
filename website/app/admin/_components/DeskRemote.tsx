@@ -5,7 +5,7 @@ import { getData, postData } from "./lib";
 import { MAD_RED, MAD_SUCCESS } from "./theme";
 
 /**
- * The desk remote (/admin/desk), phone-first. Pick a box (Rob's, Dave's…),
+ * The desk remote (/admin/desk), phone-first. Your own box(es) only,
  * then: see its REAL screen (the box's own code, running here in MicroPython
  * WebAssembly on the box's real feed, so the numbers, Flamey's closet look and
  * the season are exactly what's on the desk), set its style and mascot, start
@@ -47,7 +47,7 @@ type BoxDetail = {
   settings: { style: number | null; mascot: number | null; rev: number;
               sleep_start: number | null; sleep_end: number | null; never_sleep: boolean };
   messages: { id: string; direction: "in" | "out"; who: string; text: string; at: string }[];
-  recipients: Box[];
+  recipients: Recipient[];
   activity: { at: string; kind: string; text: string }[];
   live: Feed;
 };
@@ -92,7 +92,9 @@ function niceTime(m: number) {
   return `${((h + 11) % 12) + 1}:${String(mm).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 
-function boxName(b: Box) {
+type Recipient = Pick<Box, "id" | "label" | "username">;
+
+function boxName(b: Recipient) {
   return b.label || (b.username ? `@${b.username}'s desk` : "Desk");
 }
 
@@ -386,7 +388,7 @@ export function DeskRemote() {
     return <main className="min-h-screen bg-black p-6 text-white/70">Couldn&apos;t load the desks: {error}</main>;
   }
   if (boxes && boxes.length === 0) {
-    return <main className="min-h-screen bg-black p-6 text-white/70">No desks yet — create a key in Admin → Displays.</main>;
+    return <main className="min-h-screen bg-black p-6 text-white/70">No desk is linked to your account yet. Make a display key for your own username in Admin → Displays.</main>;
   }
 
   const live = data?.live;
