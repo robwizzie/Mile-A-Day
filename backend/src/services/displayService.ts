@@ -106,25 +106,42 @@ export async function createDisplayKey(
   return { key, row };
 }
 
-export async function listDisplayKeys(): Promise<DisplayKeyRow[]> {
+/** Display keys: every one, or (with ownerId) only that person's own. */
+export async function listDisplayKeys(ownerId?: string): Promise<DisplayKeyRow[]> {
   // Never selects key_hash.
   return db.query<DisplayKeyRow>(
     `SELECT k.id, u.username, k.label, k.key_prefix, k.created_at::text,
             k.last_used_at::text, k.revoked_at::text
        FROM display_keys k JOIN users u ON u.user_id = k.user_id
+      WHERE ($1::text IS NULL OR k.user_id = $1)
       ORDER BY k.revoked_at IS NOT NULL, k.created_at DESC
       LIMIT 200`,
+    [ownerId ?? null],
   );
 }
 
-export async function revokeDisplayKey(id: string): Promise<boolean> {
+/** Revoke a live key; with ownerId, only if it is that person's own. */
+export async function revokeDisplayKey(id: string, ownerId?: string): Promise<boolean> {
   const rows = await db.query(
     `UPDATE display_keys SET revoked_at = NOW()
-      WHERE id = $1 AND revoked_at IS NULL
+      WHERE id = $1 AND revoked_at IS NULL AND ($2::text IS NULL OR user_id = $2)
       RETURNING id`,
-    [id],
+    [id, ownerId ?? null],
   );
   return rows.length > 0;
+}
+
+/** Usernames of the people who have a desk (an active key), other than me:
+ *  who I can send a desk message to. Names only. */
+export async function deskOwnersExcept(userId: string): Promise<string[]> {
+  const rows = await db.query<{ username: string }>(
+    `SELECT DISTINCT u.username
+       FROM display_keys k JOIN users u ON u.user_id = k.user_id
+      WHERE k.revoked_at IS NULL AND k.user_id <> $1 AND u.username IS NOT NULL
+      ORDER BY u.username`,
+    [userId],
+  );
+  return rows.map((r) => r.username);
 }
 
 /** userId for a live (unrevoked) key whose owner still exists, else null. */
@@ -207,15 +224,18 @@ export async function createDisplayMessage(
   return rows[0];
 }
 
-export async function listDisplayMessages(): Promise<DisplayMessageRow[]> {
+/** Recent desk messages: every one, or (with userId) only those to or from that person. */
+export async function listDisplayMessages(userId?: string): Promise<DisplayMessageRow[]> {
   return db.query<DisplayMessageRow>(
     `SELECT m.id, tu.username AS to_username, fu.username AS from_username, m.body,
             m.created_at::text, m.expires_at::text
        FROM display_messages m
        JOIN users tu ON tu.user_id = m.to_user_id
        LEFT JOIN users fu ON fu.user_id = m.from_user_id
+      WHERE ($1::text IS NULL OR m.to_user_id = $1 OR m.from_user_id = $1)
       ORDER BY m.created_at DESC
       LIMIT 30`,
+    [userId ?? null],
   );
 }
 

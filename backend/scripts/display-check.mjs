@@ -339,16 +339,24 @@ async function main() {
     fetch(`${base}/admin/${path}`, { method, headers: { "x-test-user": user } });
   check("non-admin cannot list keys", (await admin("display-keys", "GET", OWNER)).status, 403);
   check("non-admin cannot create keys", (await admin("display-keys?username=owner", "POST", OWNER)).status, 403);
+  // Admin -> Displays is split by owner: you make, list and revoke only your own keys.
+  check("can't make a key for someone else", (await admin("display-keys?username=nudger", "POST")).status, 403);
+  check("…or for a made-up name", (await admin("display-keys?username=nobody-here", "POST")).status, 403);
+  const created = await admin("display-keys?label=founder%20desk", "POST");
+  check("an admin makes a key for their own account", created.status, 201);
+  const mine = await created.json();
+  check("…and it shows THEIR data", (await (await feed({ authorization: `Display ${mine.key}` })).json()).me.username, "admin");
+  const self = await admin("display-keys?username=ADMIN&label=spare", "POST");
+  check("naming yourself is fine", self.status, 201);
+  check("…and you can revoke your own", (await admin(`display-keys/${(await self.json()).display_key.id}/revoke`, "POST")).status, 200);
   const list = await (await admin("display-keys")).json();
   check("admin list has no hash", JSON.stringify(list).includes(stored[0].key_hash), false);
   check("admin list fields", Object.keys(list.keys[0]).sort(),
     ["created_at", "id", "key_prefix", "label", "last_used_at", "revoked_at", "username"]);
-  const created = await admin("display-keys?username=nudger&label=Dave%27s%20desk", "POST");
-  check("admin can create for a user", created.status, 201);
-  const made = await created.json();
+  check("the key list holds only my own keys", [...new Set(list.keys.map((k) => k.username))], ["admin"]);
+  const made = await createDisplayKey(NUDGER, "Dave's desk", NUDGER);
   const nudgerFeed = await feed({ authorization: `Display ${made.key}` });
   check("their key shows THEIR data", (await nudgerFeed.json()).me.username, "nudger");
-  check("unknown username → 404", (await admin("display-keys?username=nobody-here", "POST")).status, 404);
 
   // ── App Store reviews: founders' (admins') desks only ──
   setReviewSourceForTests(async () => ({
@@ -362,7 +370,7 @@ async function main() {
       ],
     },
   }));
-  const adminKey = (await createDisplayKey(ADMIN, "founder desk", ADMIN)).key;
+  const adminKey = mine.key;
   const adminFeed = await (await feed({ authorization: `Display ${adminKey}` })).json();
   check("admin desk gets reviews", adminFeed.reviews.map((r) => [r.stars, r.title]),
     [[5, "LOVE IT! 3 [FIRE]"], [4, "GREAT APP"]]);
@@ -396,6 +404,8 @@ async function main() {
   check("message ids are opaque", withMsg.messages.every((m) => /^[0-9a-f]{16}$/.test(m.id)), true);
   const msgList = await (await admin("display-messages")).json();
   check("admin can list desk messages", msgList.messages.length >= 2, true);
+  check("…only ones to or from me", msgList.messages.every((m) => m.from_username === "admin" || m.to_username === "admin"), true);
+  check("message recipients: other desk owners, by name", msgList.recipients.includes("owner") && !msgList.recipients.includes("admin"), true);
 
   // ── the desk remote: per box ──
   check("no remote settings yet", withMsg.desk, null);
@@ -489,10 +499,12 @@ async function main() {
   check("taps are rate-limited", (await post(`desk/box/${ownerBox}/show`, {}, OWNER)).status, 429);
 
   // ── revoke ──
-  const id = list.keys.find((k) => k.username === "owner").id;
-  check("revoke", (await admin(`display-keys/${id}/revoke`, "POST")).status, 200);
+  const id = (await (await admin("display-keys", "GET", OWNER)).json()).keys.find((k) => k.username === "owner").id;
+  check("can't revoke someone else's key", (await admin(`display-keys/${id}/revoke`, "POST")).status, 404);
+  check("still working after that", (await feed({ authorization: `Display ${key}` })).status, 200);
+  check("revoke my own", (await admin(`display-keys/${id}/revoke`, "POST", OWNER)).status, 200);
   check("revoked key → 401", (await feed({ authorization: `Display ${key}` })).status, 401);
-  check("revoking twice → 404", (await admin(`display-keys/${id}/revoke`, "POST")).status, 404);
+  check("revoking twice → 404", (await admin(`display-keys/${id}/revoke`, "POST", OWNER)).status, 404);
 
   // ── deleting the user kills the key ──
   await db.query(`DELETE FROM users WHERE user_id = $1`, [NUDGER]);

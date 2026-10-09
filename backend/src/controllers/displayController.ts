@@ -5,6 +5,7 @@ import {
   DESK_STYLES,
   getDeskBox,
   listDeskBoxes,
+  deskOwnersExcept,
   boxBelongsTo,
   DESK_TAPS,
   parseBoxState,
@@ -74,9 +75,11 @@ export async function displayFeed(req: Request, res: Response) {
 const db = PostgresService.getInstance();
 
 /** GET /admin/display-keys — prefix/label/owner/dates only, never the hash. */
-export async function adminListDisplayKeys(_req: Request, res: Response) {
+// Admin -> Displays is split by owner too: each admin lists, makes and
+// revokes only their own desk keys, and sees only their own desk messages.
+export async function adminListDisplayKeys(req: Request, res: Response) {
   noStore(res);
-  res.json({ keys: await listDisplayKeys() });
+  res.json({ keys: await listDisplayKeys((req as any).userId ?? "") });
 }
 
 /**
@@ -87,19 +90,20 @@ export async function adminListDisplayKeys(_req: Request, res: Response) {
  */
 export async function adminCreateDisplayKey(req: Request, res: Response) {
   noStore(res);
+  const me = ((req as any).userId as string | undefined) ?? "";
   const username = typeof req.query.username === "string" ? req.query.username.trim() : "";
   const label = typeof req.query.label === "string" ? req.query.label.trim() : "";
-  if (!username) return res.status(400).json({ error: "username required" });
+  if (!me) return res.status(401).json({ error: "Authentication required" });
   try {
-    const users = await db.query<{ user_id: string }>(
-      `SELECT user_id FROM users WHERE LOWER(username) = LOWER($1) LIMIT 2`,
-      [username],
-    );
-    if (users.length !== 1) {
-      return res.status(404).json({ error: "No single user with that username" });
+    // Always for the signed-in admin's own account; naming anyone else is refused.
+    if (username) {
+      const mine = await db.query<{ ok: boolean }>(
+        `SELECT LOWER(username) = LOWER($2) AS ok FROM users WHERE user_id = $1`, [me, username]);
+      if (!mine[0]?.ok) {
+        return res.status(403).json({ error: "You can only make a key for your own account" });
+      }
     }
-    const createdBy = ((req as any).userId as string) ?? null;
-    const { key, row } = await createDisplayKey(users[0].user_id, label || "Desk display", createdBy);
+    const { key, row } = await createDisplayKey(me, label || "Desk display", me);
     res.status(201).json({ key, display_key: row });
   } catch (err) {
     // Handled here so the global error logger never records this URL
@@ -116,7 +120,7 @@ export async function adminRevokeDisplayKey(req: Request, res: Response) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
     return res.status(400).json({ error: "Bad id" });
   }
-  const ok = await revokeDisplayKey(id);
+  const ok = await revokeDisplayKey(id, (req as any).userId ?? "");
   if (!ok) return res.status(404).json({ error: "No active key with that id" });
   res.json({ ok: true });
 }
@@ -124,9 +128,11 @@ export async function adminRevokeDisplayKey(req: Request, res: Response) {
 
 // ─── Desk-to-desk messages (admin only) ─────────────────────────────────────
 
-export async function adminListDisplayMessages(_req: Request, res: Response) {
+export async function adminListDisplayMessages(req: Request, res: Response) {
   noStore(res);
-  res.json({ messages: await listDisplayMessages() });
+  const me = ((req as any).userId as string | undefined) ?? "";
+  const [messages, recipients] = await Promise.all([listDisplayMessages(me), deskOwnersExcept(me)]);
+  res.json({ messages, recipients });
 }
 
 /** POST /admin/display-messages  JSON { username, text }.

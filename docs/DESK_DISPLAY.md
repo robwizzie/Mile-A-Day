@@ -14,7 +14,10 @@ public `/public/stats` numbers.
 ## Setup
 
 1. Deploy (merging to `main` runs migration `0086_display_keys`).
-2. Admin dashboard → **Displays** → username + label → **Create key**.
+2. Signed in with **your own** account: Admin dashboard → **Displays** → label →
+   **Create key**. Keys are always for the signed-in admin's own account (naming
+   anyone else is refused), and each admin lists and revokes only their own keys
+   and sees only the desk messages to or from them.
    The key is shown once (it hides after 2 minutes). Copy it.
 3. On the board's `CIRCUITPY` drive, in `settings.toml`:
    `MAD_DISPLAY_KEY = "madk_..."`. The board restarts and switches to the feed.
