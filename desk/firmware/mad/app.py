@@ -1014,6 +1014,8 @@ class App:
 
     def quiet(self, now):
         """Is this a moment where a 1-2 s network pause won't show?"""
+        if self.mode == "dash" and self.view() == 2:
+            return getattr(self, "arcade_rest", False)   # arcade: only during a breather
         if self.mode in ("dash", "boot"):
             return True
         if self.mode == "show":
