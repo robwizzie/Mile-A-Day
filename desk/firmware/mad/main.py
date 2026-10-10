@@ -11,7 +11,6 @@
 #   UP   press -> next style: CLASSIC, SPOTLIGHT, ARCADE, BIG, CAMPFIRE,
 #               RACE, CLOCK (Race and Clock need a display key)
 #   DOWN press -> switch mascot: RUNNER <-> FLAMEY
-#   UP   hold  -> demo: play every alert once
 #   DOWN hold  -> play the stat show now
 #   (at night the first press just wakes the screen up for 2 minutes)
 # Seasonal looks switch by date on their own: jack-o'-lantern Flamey and a
@@ -387,8 +386,6 @@ def main():
                 app.next_style(now)
             elif down == "tap":
                 app.next_mascot(now)
-            elif up == "hold":
-                app.demo(now)
             elif down == "hold":
                 app.start_show(now)
             if up == "tap" or down == "tap":

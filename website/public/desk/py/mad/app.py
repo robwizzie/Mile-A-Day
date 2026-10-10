@@ -683,25 +683,6 @@ class App:
         self.mascot = (self.mascot + 1) % len(MASCOTS)
         self.toast = (MASCOTS[self.mascot], now + 1.6)
 
-    def samples(self):
-        """Every alert, with sample names (the UP-hold demo on the box)."""
-        n = self.target_users
-        streak = self.value(ME) or 41
-        return (("user", max(0, n - 1), n), ("nudge", "DAVE"), ("hype", "DAVE"),
-                   ("friend", "DAVE", 0.8), ("reminder",), ("mile", streak),
-                   ("milestone", "users", (n // 50 + 1) * 50), ("finished", "DAVE", 1.3),
-                   ("streak", (streak // 50 + 1) * 50), ("atrisk", 3, (("MEGSMILES", 213), ("DAVE", 513), ("JWIS35", 88))), ("morning",),
-                   ("yearago", 1.32, streak), ("pr", "LONGEST RUN", "5.2 MI", "NEW PR!"),
-                   ("pr", "FASTEST MILE", "7:42", "OCT PR!"), ("newyear", 2027), ("countdown", 15.0, 2027), ("message", "DAVE", "NICE MILE [FIRE]"),
-                   ("medal", "MONTH STRONG"), ("friendmile", "LAQUETA", 4.68, 6184, 1264), ("comment", "DAVE", "NICE RUN [FIRE]"), ("review", 5, "LOVE THIS APP [FIRE]"),
-                   ("holiday", "THANKSGIVING"), ("recap",))
-
-    def demo(self, now):
-        """UP hold: play every alert once, with sample names."""
-        for ev in self.samples():
-            self.queue.append(ev)
-        self.next_event_at = 0
-
     def _restart_dash(self, now):
         if self.mode in ("dash", "show"):
             self.mode, self.mode_start = "dash", now
