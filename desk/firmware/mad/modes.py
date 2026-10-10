@@ -14,45 +14,34 @@ HURDLE = ("#####", "#...#", "#...#", "#...#")
 DROP = ("..#..", ".###.", "#####", ".###.")
 # The game runs on its own clock, one fixed step per frame (the board paces
 # arcade frames to ARCADE_FPS), so it moves the same distance every frame
-# and never jumps or stutters, however long a frame took. Every four coins
-# the mascot eases to a stop for a short breather and eases off again: the
-# board's network fetch (which holds the panel for a second or two) waits
-# for that still moment, so it's never seen mid-run.
+# and never jumps or stutters, however long a frame took. The mascot never
+# stops: every six coins the game cuts to a full-screen stat card (like the
+# BIG view) for a few seconds, then picks up exactly where it left off. The
+# board's network fetch, which holds the panel for a second or two, waits
+# for that card: it's a still picture, so the pause is never seen.
 ARCADE_FPS = 24           # = ARCADE_SPEED: exactly 1 px of scroll per frame
-REST_AT0 = 192            # first stop: 1 s after the first coin
-REST_EVERY = 4 * ARCADE_GAP
-EASE_S = 1.5              # slowing down / speeding up
-REST_S = 2.5
-EASE_PX = ARCADE_SPEED * EASE_S / 2
-
-
-CYCLE_S = 2 * EASE_S + REST_S + (REST_EVERY - 2 * EASE_PX) / ARCADE_SPEED   # 20 s
-WRAP_LAPS = 175           # 175 laps of 384 px: stars, dashes and hurdles all line up again
+REST_AT0 = 192            # first card: 1 s after the first coin
+REST_EVERY = 6 * ARCADE_GAP
+REST_S = 3.0              # how long a card stays up (longer if a fetch runs long)
+CYCLE_S = REST_S + REST_EVERY / ARCADE_SPEED                  # 27 s
+WRAP_LAPS = 175           # 175 laps of 576 px: stars, dashes and hurdles all line up again
 WRAP_FRAMES = int(WRAP_LAPS * CYCLE_S * ARCADE_FPS)
-WRAP_AT = int((REST_AT0 - EASE_PX) / ARCADE_SPEED * ARCADE_FPS) + WRAP_FRAMES
+WRAP_AT = int(REST_AT0 / ARCADE_SPEED * ARCADE_FPS) + WRAP_FRAMES
 
 
 def arcade_distance(v):
-    """World distance at game time v, and whether the mascot is stopped."""
+    """World distance at game time v, and whether the stat card is up."""
     s = ARCADE_SPEED
-    t0 = (REST_AT0 - EASE_PX) / s
+    t0 = REST_AT0 / s
     if v < t0:
         return v * s, False
-    run = (REST_EVERY - 2 * EASE_PX) / s
-    per = EASE_S + REST_S + EASE_S + run
     w = v - t0
-    k = int(w // per)
-    u = w - k * per
-    base = REST_AT0 - EASE_PX + k * REST_EVERY
-    if u < EASE_S:                                  # easing to a stop
-        return base + s * (u - u * u / (2 * EASE_S)), False
-    u -= EASE_S
+    k = int(w // CYCLE_S)
+    u = w - k * CYCLE_S
+    base = REST_AT0 + k * REST_EVERY
     if u < REST_S:
-        return base + EASE_PX, True
-    u -= REST_S
-    if u < EASE_S:                                  # easing off again
-        return base + EASE_PX + s * u * u / (2 * EASE_S), False
-    return base + 2 * EASE_PX + s * (u - EASE_S), False
+        return base, True
+    return base + s * (u - REST_S), False
 
 
 HUD_LABEL = {3: "ACTIVE/WK", 4: "STREAK", 8: "TOKENS", 9: "BADGES", 10: "FRIENDS"}
@@ -89,10 +78,19 @@ def arcade(app, b, now, t):
             app._arc_laps += WRAP_LAPS
     app._arc_now = now
     d, rest = arcade_distance(app._arc_f / ARCADE_FPS)
-    if rest and not getattr(app, "arcade_rest", False):
-        import gc
-        gc.collect()                              # tidy memory while it's still
+    starting = rest and not getattr(app, "arcade_rest", False)
     app.arcade_rest = rest
+    if rest:                                      # the stat card (a still picture)
+        if starting or getattr(app, "_arc_card", None) is None:
+            t0 = 70 + ARCADE_GAP / 2 + 64 - 14
+            coins = int((d - t0) // ARCADE_GAP) + 1 + 6 * app._arc_laps
+            order = (0,) + app.order
+            app._arc_card = order[coins % len(order)]
+            import gc
+            gc.collect()                          # tidy memory while it's still
+        app.card(b, app._arc_card, 1.0, now)
+        return
+    app._arc_card = None
     mt = d / ARCADE_SPEED                         # legs, hops, coin spin follow the ground
     fill(b, 0, 0, 64, 32, BLACK)
     mx = 6
@@ -112,7 +110,7 @@ def arcade(app, b, now, t):
     jump, jp = 0.0, 0.0
     t0 = 70 + ARCADE_GAP / 2 + 64 - (mx + 8)         # distance at the first coin grab
     coins = int((d - t0) // ARCADE_GAP) + 1 if d >= t0 else 0
-    hud = coins + 4 * app._arc_laps                  # (the score bar keeps counting)
+    hud = coins + 6 * app._arc_laps                  # (the score bar keeps counting)
     base = int((d - 70) // ARCADE_GAP)
     for k in range(base - 1, base + 3):
         if k < 0:

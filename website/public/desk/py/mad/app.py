@@ -1072,8 +1072,10 @@ class App:
             self.tick_dash(now)
         if self.look and self.mode not in ("boot", "intro"):
             from mad import decor                         # seasonal scenery
-            decor.backdrop(self, self.fb, now,
-                           self.view() if self.mode in ("dash", "show") else -1)
+            v = self.view() if self.mode in ("dash", "show") else -1
+            if v == 2 and getattr(self, "arcade_rest", False):
+                v = 3                                     # arcade's stat card: dress it like BIG
+            decor.backdrop(self, self.fb, now, v)
         if self.toast:
             text, until = self.toast
             if now > until:
