@@ -5,7 +5,7 @@ import { getData, postData } from "./lib";
 import { MAD_RED, MAD_SUCCESS } from "./theme";
 
 /**
- * The desk remote (/admin/desk), phone-first. Pick a box (Rob's, Dave's…),
+ * The desk remote (/admin/desk), phone-first. Your own box(es) only,
  * then: see its REAL screen (the box's own code, running here in MicroPython
  * WebAssembly on the box's real feed, so the numbers, Flamey's closet look and
  * the season are exactly what's on the desk), set its style and mascot, start
@@ -18,6 +18,17 @@ import { MAD_RED, MAD_SUCCESS } from "./theme";
 type BoxState = { style: number; mascot: number; awake: boolean; sleep_start: number | null; sleep_end: number | null };
 type Box = { id: string; label: string; username: string | null; last_seen: string | null; online: boolean;
              state: BoxState | null };
+
+/** Names for the test animations (the box's own list, testscenes.py). */
+const TEST_LABEL: Record<string, string> = {
+  user: "New user", milestone: "User milestone", nudge: "Nudge", hype: "Hype",
+  friend: "Friend running", friend_walk: "Friend walking", finished: "Friend finished",
+  friendmile: "Mile in!", atrisk: "Streaks at risk", reminder: "Mile reminder",
+  morning: "Good morning", mile: "Mile done", streak: "Streak milestone",
+  yearago: "1 year ago", pr: "New PR", message: "Message", comment: "Comment",
+  medal: "New medal", review: "App review", recap: "9pm recap", holiday: "Holiday",
+  newyear: "New Year", countdown: "New Year countdown",
+};
 
 type Kind = "run" | "walk";
 const kindLabel = (k?: Kind | null, done = false) =>
@@ -43,11 +54,12 @@ type Feed = {
 type BoxDetail = {
   box: Box;
   styles: string[];
+  tests?: string[];
   mascots: string[];
   settings: { style: number | null; mascot: number | null; rev: number;
               sleep_start: number | null; sleep_end: number | null; never_sleep: boolean };
   messages: { id: string; direction: "in" | "out"; who: string; text: string; at: string }[];
-  recipients: Box[];
+  recipients: Recipient[];
   activity: { at: string; kind: string; text: string }[];
   live: Feed;
 };
@@ -92,7 +104,9 @@ function niceTime(m: number) {
   return `${((h + 11) % 12) + 1}:${String(mm).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 
-function boxName(b: Box) {
+type Recipient = Pick<Box, "id" | "label" | "username">;
+
+function boxName(b: Recipient) {
   return b.label || (b.username ? `@${b.username}'s desk` : "Desk");
 }
 
@@ -111,6 +125,7 @@ type Preview = {
   feed(feed: string, now: number): void;
   choose(style: number, mascot: number, now: number): void;
   sleep(awake: number, start: number, end: number, now: number): void;
+  test(scene: string, now: number): void;
   frame(now: number): Uint8Array;
 };
 
@@ -125,7 +140,7 @@ function loadEngine(): Promise<Preview> {
     const { loadMicroPython } = await importer("/desk/mp/micropython.mjs");
     const mp = await loadMicroPython({ heapsize: 6 * 1024 * 1024 });
     const files = ["displayio.py", "bitmaptools.py", "deskpreview.py",
-      ...["__init__", "gfx", "art", "app", "cards", "heat", "fx", "modes", "extra", "decor", "season", "closet"]
+      ...["__init__", "gfx", "art", "app", "cards", "heat", "fx", "modes", "extra", "decor", "season", "closet", "testscenes"]
         .map((m) => `mad/${m}.py`)];
     mp.FS.mkdir("/mad");
     await Promise.all(files.map(async (f) => {
@@ -141,9 +156,10 @@ function loadEngine(): Promise<Preview> {
 
 /** `sleep`: the box's hours ([-1,-1] = never sleeps) and whether it's awake;
  *  `forceAwake` while previewing a new look (show it as it looks by day). */
-function LivePreview({ feed, style, mascot, sleep, forceAwake }: {
+function LivePreview({ feed, style, mascot, sleep, forceAwake, test }: {
   feed: Feed; style: number; mascot: number;
   sleep: { awake: boolean; start: number; end: number }; forceAwake: boolean;
+  test?: { scene: string; n: number } | null;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const engine = useRef<Preview | null>(null);
@@ -171,7 +187,7 @@ function LivePreview({ feed, style, mascot, sleep, forceAwake }: {
         const img = ctx?.createImageData(64, 32);
         const draw = (ts: number) => {
           raf = requestAnimationFrame(draw);
-          if (!ctx || !img || ts - last < 66) return;     // ~15 fps, like the box
+          if (!ctx || !img || ts - last < 40) return;     // ~24 fps, like the box
           last = ts;
           const rgb = eng.frame(now());
           for (let i = 0, j = 0; i < 2048; i++, j += 3) {
@@ -201,6 +217,11 @@ function LivePreview({ feed, style, mascot, sleep, forceAwake }: {
   useEffect(() => {
     if (started.current && engine.current) engine.current.choose(style, mascot, now());
   }, [style, mascot]);
+
+  useEffect(() => {
+    if (test && started.current && engine.current) engine.current.test(test.scene, now());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [test?.n]);
 
   const awakeNow = forceAwake || sleep.awake;
   useEffect(() => {
@@ -247,6 +268,7 @@ export function DeskRemote() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [testReq, setTestReq] = useState<{ scene: string; n: number } | null>(null);
   const [view, setView] = useState<{ style: number; mascot: number } | null>(null);   // previewing
   const [to, setTo] = useState("");
   const [text, setText] = useState("");
@@ -355,6 +377,17 @@ export function DeskRemote() {
     }
   }
 
+  async function testOnBox() {
+    if (!data || !testReq) return;
+    try {
+      await postData(`desk/box/${data.box.id}/test`, { scene: testReq.scene });
+      say(`Plays on your desk in about 15 seconds: ${TEST_LABEL[testReq.scene] ?? testReq.scene}`);
+      load();
+    } catch (e) {
+      say((e as Error).message);
+    }
+  }
+
   async function statShow() {
     if (!data) return;
     try {
@@ -386,7 +419,7 @@ export function DeskRemote() {
     return <main className="min-h-screen bg-black p-6 text-white/70">Couldn&apos;t load the desks: {error}</main>;
   }
   if (boxes && boxes.length === 0) {
-    return <main className="min-h-screen bg-black p-6 text-white/70">No desks yet — create a key in Admin → Displays.</main>;
+    return <main className="min-h-screen bg-black p-6 text-white/70">No desk is linked to your account yet. Make a display key for your own username in Admin → Displays.</main>;
   }
 
   const live = data?.live;
@@ -432,7 +465,8 @@ export function DeskRemote() {
             <Section title={dirty ? "Preview" : "On the desk"}
                      right={<span className="text-[11px] text-white/40">real data, live</span>}>
               <LivePreview key={data.box.id} feed={live} style={shown.style} mascot={shown.mascot}
-                           sleep={{ awake, start: hours.start, end: hours.end }} forceAwake={dirty} />
+                           sleep={{ awake, start: hours.start, end: hours.end }} forceAwake={dirty}
+                           test={testReq} />
               {!st && (
                 <p className="mt-2 text-xs text-white/45">
                   {data.box.online ? "This box hasn't reported its screen yet (it needs the latest firmware)."
@@ -479,6 +513,31 @@ export function DeskRemote() {
               )}
               <button onClick={statShow} className="mt-3 w-full rounded-xl bg-white/[0.08] py-2.5 text-sm font-extrabold">
                 ▶ Run the stat show now
+              </button>
+            </Section>
+
+            {/* ── test animations ── */}
+            <Section title="Test animations"
+                     right={<span className="text-[11px] text-white/40">plays in the preview above</span>}>
+              <p className="mb-2 text-xs text-white/45">
+                Tap one to watch it above. To see it on your desk too, tap Play on my box. It shows
+                TEST where a name would be, so it can&apos;t be mistaken for a real nudge or hype.
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(data.tests ?? []).map((sc) => (
+                  <button key={sc}
+                          onClick={() => setTestReq((r) => ({ scene: sc, n: (r?.n ?? 0) + 1 }))}
+                          className="rounded-lg px-2.5 py-2 text-left text-[13px] font-bold"
+                          style={{ background: testReq?.scene === sc ? "rgba(217,64,89,0.25)" : "rgba(255,255,255,0.05)",
+                                   boxShadow: testReq?.scene === sc ? `inset 0 0 0 1.5px ${MAD_RED}` : undefined }}>
+                    {TEST_LABEL[sc] ?? sc}
+                  </button>
+                ))}
+              </div>
+              <button disabled={!testReq} onClick={testOnBox}
+                      className="mt-3 w-full rounded-xl py-2.5 text-sm font-extrabold disabled:opacity-40"
+                      style={{ background: MAD_RED }}>
+                {testReq ? `▶ Play “${TEST_LABEL[testReq.scene] ?? testReq.scene}” on my box` : "Pick one to play it on your box"}
               </button>
             </Section>
 

@@ -365,9 +365,9 @@ class App:
             self.toast = (MASCOTS[self.mascot], now + 1.6)
 
     def _commands(self, cmds, now):
-        """Taps from the phone remote: "run the stat show now" (real numbers)
-        and "wake up" (30 min). Nothing else can be triggered: alerts only
-        come from real activity."""
+        """Taps from the phone remote: "run the stat show now" (real numbers),
+        "wake up" (30 min), and "test" (play one animation, marked TEST,
+        for the owner to check it). Real alerts only come from real activity."""
         ids = [c.get("id") for c in cmds]
         if self.seen_cmds is None:            # first feed: those are old taps
             self.seen_cmds = ids
@@ -381,6 +381,15 @@ class App:
             elif c.get("kind") == "wake":            # bright for half an hour
                 self.wake_until = now + 1800
                 self._update_night(now)
+            elif c.get("kind") == "test":
+                from mad import testscenes
+                ev = testscenes.sample(self, str(c.get("scene") or ""))
+                unload("testscenes")
+                if ev:
+                    self.wake_until = max(self.wake_until, now + 120)   # visible even at night
+                    self._update_night(now)
+                    self.push(ev)
+                    self.next_event_at = min(self.next_event_at, now)
         self.seen_cmds = (ids + [i for i in self.seen_cmds if i not in ids])[:10]
 
     def _friend_miles(self, miles, now):
@@ -682,25 +691,6 @@ class App:
     def next_mascot(self, now):
         self.mascot = (self.mascot + 1) % len(MASCOTS)
         self.toast = (MASCOTS[self.mascot], now + 1.6)
-
-    def samples(self):
-        """Every alert, with sample names (the UP-hold demo on the box)."""
-        n = self.target_users
-        streak = self.value(ME) or 41
-        return (("user", max(0, n - 1), n), ("nudge", "DAVE"), ("hype", "DAVE"),
-                   ("friend", "DAVE", 0.8), ("reminder",), ("mile", streak),
-                   ("milestone", "users", (n // 50 + 1) * 50), ("finished", "DAVE", 1.3),
-                   ("streak", (streak // 50 + 1) * 50), ("atrisk", 3, (("MEGSMILES", 213), ("DAVE", 513), ("JWIS35", 88))), ("morning",),
-                   ("yearago", 1.32, streak), ("pr", "LONGEST RUN", "5.2 MI", "NEW PR!"),
-                   ("pr", "FASTEST MILE", "7:42", "OCT PR!"), ("newyear", 2027), ("countdown", 15.0, 2027), ("message", "DAVE", "NICE MILE [FIRE]"),
-                   ("medal", "MONTH STRONG"), ("friendmile", "LAQUETA", 4.68, 6184, 1264), ("comment", "DAVE", "NICE RUN [FIRE]"), ("review", 5, "LOVE THIS APP [FIRE]"),
-                   ("holiday", "THANKSGIVING"), ("recap",))
-
-    def demo(self, now):
-        """UP hold: play every alert once, with sample names."""
-        for ev in self.samples():
-            self.queue.append(ev)
-        self.next_event_at = 0
 
     def _restart_dash(self, now):
         if self.mode in ("dash", "show"):
@@ -1014,6 +1004,8 @@ class App:
 
     def quiet(self, now):
         """Is this a moment where a 1-2 s network pause won't show?"""
+        if self.mode == "dash" and self.view() == 2:
+            return getattr(self, "arcade_rest", False)   # arcade: only during a breather
         if self.mode in ("dash", "boot"):
             return True
         if self.mode == "show":
@@ -1080,8 +1072,10 @@ class App:
             self.tick_dash(now)
         if self.look and self.mode not in ("boot", "intro"):
             from mad import decor                         # seasonal scenery
-            decor.backdrop(self, self.fb, now,
-                           self.view() if self.mode in ("dash", "show") else -1)
+            v = self.view() if self.mode in ("dash", "show") else -1
+            if v == 2 and getattr(self, "arcade_rest", False):
+                v = 3                                     # arcade's stat card: dress it like BIG
+            decor.backdrop(self, self.fb, now, v)
         if self.toast:
             text, until = self.toast
             if now > until:

@@ -12,6 +12,38 @@ ARCADE_GAP = 96           # pixels between obstacles (a coin sits halfway)
 # Obstacles: the runner clears hurdles, Flamey hops over water drops.
 HURDLE = ("#####", "#...#", "#...#", "#...#")
 DROP = ("..#..", ".###.", "#####", ".###.")
+# The game runs on its own clock, one fixed step per frame (the board paces
+# arcade frames to ARCADE_FPS), so it moves the same distance every frame
+# and never jumps or stutters, however long a frame took. The mascot never
+# stops: every six coins the game cuts to a full-screen stat card (like the
+# BIG view) for a few seconds, then picks up exactly where it left off. The
+# board's network fetch, which holds the panel for a second or two, waits
+# for that card: it's a still picture, so the pause is never seen.
+ARCADE_FPS = 24           # = ARCADE_SPEED: exactly 1 px of scroll per frame
+REST_AT0 = 192            # first card: 1 s after the first coin
+REST_EVERY = 6 * ARCADE_GAP
+REST_S = 3.0              # how long a card stays up (longer if a fetch runs long)
+CYCLE_S = REST_S + REST_EVERY / ARCADE_SPEED                  # 27 s
+WRAP_LAPS = 175           # 175 laps of 576 px: stars, dashes and hurdles all line up again
+WRAP_FRAMES = int(WRAP_LAPS * CYCLE_S * ARCADE_FPS)
+WRAP_AT = int(REST_AT0 / ARCADE_SPEED * ARCADE_FPS) + WRAP_FRAMES
+
+
+def arcade_distance(v):
+    """World distance at game time v, and whether the stat card is up."""
+    s = ARCADE_SPEED
+    t0 = REST_AT0 / s
+    if v < t0:
+        return v * s, False
+    w = v - t0
+    k = int(w // CYCLE_S)
+    u = w - k * CYCLE_S
+    base = REST_AT0 + k * REST_EVERY
+    if u < REST_S:
+        return base, True
+    return base + s * (u - REST_S), False
+
+
 HUD_LABEL = {3: "ACTIVE/WK", 4: "STREAK", 8: "TOKENS", 9: "BADGES", 10: "FRIENDS"}
 
 
@@ -31,7 +63,35 @@ def arcade(app, b, now, t):
     """An endless-runner game: the mascot runs (or Flamey hops) along a
     scrolling track, jumps hurdles (Flamey: water drops) and grabs a coin
     between each one. Every coin puts the next stat on the score bar."""
-    d = t * ARCADE_SPEED
+    # One fixed step per frame. Keeps going across alerts (an alert just
+    # pauses the game); starts over only after a long time away.
+    # (Whole frames, kept small: every ~55 min the count steps back by a
+    # whole number of laps, which moves nothing on screen, so the numbers
+    # never grow big enough to lose precision.)
+    last = getattr(app, "_arc_now", None)
+    if last is None or now - last > 60:
+        app._arc_f, app._arc_laps = 0, 0
+    else:
+        app._arc_f += 1
+        if app._arc_f >= WRAP_AT:
+            app._arc_f -= WRAP_FRAMES
+            app._arc_laps += WRAP_LAPS
+    app._arc_now = now
+    d, rest = arcade_distance(app._arc_f / ARCADE_FPS)
+    starting = rest and not getattr(app, "arcade_rest", False)
+    app.arcade_rest = rest
+    if rest:                                      # the stat card (a still picture)
+        if starting or getattr(app, "_arc_card", None) is None:
+            t0 = 70 + ARCADE_GAP / 2 + 64 - 14
+            coins = int((d - t0) // ARCADE_GAP) + 1 + 6 * app._arc_laps
+            order = (0,) + app.order
+            app._arc_card = order[coins % len(order)]
+            import gc
+            gc.collect()                          # tidy memory while it's still
+        app.card(b, app._arc_card, 1.0, now)
+        return
+    app._arc_card = None
+    mt = d / ARCADE_SPEED                         # legs, hops, coin spin follow the ground
     fill(b, 0, 0, 64, 32, BLACK)
     mx = 6
     for k in range(7):                               # stars (slow parallax)
@@ -50,6 +110,7 @@ def arcade(app, b, now, t):
     jump, jp = 0.0, 0.0
     t0 = 70 + ARCADE_GAP / 2 + 64 - (mx + 8)         # distance at the first coin grab
     coins = int((d - t0) // ARCADE_GAP) + 1 if d >= t0 else 0
+    hud = coins + 6 * app._arc_laps                  # (the score bar keeps counting)
     base = int((d - 70) // ARCADE_GAP)
     for k in range(base - 1, base + 3):
         if k < 0:
@@ -71,25 +132,25 @@ def arcade(app, b, now, t):
             if h > jump:
                 jump, jp = h, p
         cx = ox + ARCADE_GAP / 2                     # the coin after it
-        if mx + 8 < cx < 64 and dec and dec.arcade_coin(app, b, int(cx), now):
+        if mx + 8 < cx < 64 and dec and dec.arcade_coin(app, b, int(cx), mt):
             pass
         elif mx + 8 < cx < 64:
             cxi = int(cx)
-            w = (2, 1, 0, 1)[int(now * 6) % 4]       # spinning coin
+            w = (2, 1, 0, 1)[int(mt * 6) % 4]        # spinning coin
             for yy in range(5):
                 for xx in range(-w, w + 1):
                     if 0 <= cxi + xx < 64:
                         edge = abs(xx) == w or yy in (0, 4)
                         b[cxi + xx, 16 + yy] = FL_GOLD if edge else FL_YELLOW
-    f = app.mascot_frame(now)                        # runner: real jump poses
+    f = app.mascot_frame(mt)                         # runner: real jump poses
     if app.mascot == 0 and jump > 0.6:
         f = app.run_jump[1 if jump > 4.2 else (0 if jp > 2 else 2)]
     y = int(round(30 - f.height - jump))
     if app.mascot == 1 and jump == 0:                # Flamey hops as he goes
-        y -= int(round(abs(math.sin(t * math.pi * 2.2)) * 2))
-    app.draw_mascot(b, f, mx + (0 if app.mascot == 0 else 3), y, now)
+        y -= int(round(abs(math.sin(mt * math.pi * 2.2)) * 2))
+    app.draw_mascot(b, f, mx + (0 if app.mascot == 0 else 3), y, mt)
     if dec:
-        dec.arcade_turkey(app, b, now, t)
+        dec.arcade_turkey(app, b, mt, mt)
     last = 70 + (coins - 1) * ARCADE_GAP + ARCADE_GAP / 2 - d + 64 if coins else -99
     since = (mx + 8 - last) / ARCADE_SPEED
     if coins and since < 0.35:                       # coin grabbed: sparkle
@@ -99,7 +160,7 @@ def arcade(app, b, now, t):
             if 0 <= px < 64 and 8 < py < 32:
                 b[px, py] = SPARK
     order = (0,) + app.order                         # score bar: one stat per coin
-    i = order[coins % len(order)]
+    i = order[hud % len(order)]
     frac = ease_out(since / 0.8) if coins and since < 0.8 else 1.0
     ic = app_icon(i)
     label, col = app.stat_label(i)
@@ -121,7 +182,7 @@ def arcade(app, b, now, t):
             draw_text(b, 63 - (hi - lo) - lo, 1, lab, col, F3)
             break
     else:
-        fit(b, x, 63, 1, label, col, F3, now)
+        fit(b, x, 63, 1, label, col, F3, mt)
     fill(b, 0, 8, 64, 9, MAROON_DIM)
 
 

@@ -11,6 +11,7 @@ import {
   adminDeskBoxSettings,
   adminDeskBoxTap,
   adminDeskBoxMessage,
+  adminDeskBoxTest,
 } from "../controllers/displayController.js";
 import {
   verifyAppleWeb,
@@ -69,13 +70,14 @@ adminRouter.post("/display-keys", adminCreateDisplayKey);
 adminRouter.post("/display-keys/:id/revoke", adminRevokeDisplayKey);
 adminRouter.get("/display-messages", adminListDisplayMessages);
 adminRouter.post("/display-messages", adminSendDisplayMessage);
-// The desk remote: every box (display key), one at a time.
+// The desk remote: the signed-in admin's own boxes only (anyone else's → 404).
 adminRouter.get("/desk/boxes", adminDeskBoxes);
 adminRouter.get("/desk/box/:id", adminDeskBox);
 adminRouter.post("/desk/box/:id/settings", adminDeskBoxSettings);
 adminRouter.post("/desk/box/:id/show", adminDeskBoxTap("show"));
 adminRouter.post("/desk/box/:id/wake", adminDeskBoxTap("wake"));
 adminRouter.post("/desk/box/:id/message", adminDeskBoxMessage);
+adminRouter.post("/desk/box/:id/test", adminDeskBoxTest);
 adminRouter.get("/miles-by-day", milesByDay);
 adminRouter.get("/engagement", engagement);
 adminRouter.get("/signups-by-day", signupsByDay);

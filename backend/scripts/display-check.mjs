@@ -19,7 +19,7 @@ import { PostgresService } from "../dist/services/DbService.js";
 import displayRoutes from "../dist/routes/displayRoutes.js";
 import adminRoutes from "../dist/routes/adminRoutes.js";
 import { requireAdmin } from "../dist/middleware/auth.js";
-import { createDisplayKey, hashDisplayKey, setReviewSourceForTests } from "../dist/services/displayService.js";
+import { createDisplayKey, hashDisplayKey, listDeskBoxes, setReviewSourceForTests } from "../dist/services/displayService.js";
 
 const db = PostgresService.getInstance();
 const P = "display-check-";
@@ -339,16 +339,24 @@ async function main() {
     fetch(`${base}/admin/${path}`, { method, headers: { "x-test-user": user } });
   check("non-admin cannot list keys", (await admin("display-keys", "GET", OWNER)).status, 403);
   check("non-admin cannot create keys", (await admin("display-keys?username=owner", "POST", OWNER)).status, 403);
+  // Admin -> Displays is split by owner: you make, list and revoke only your own keys.
+  check("can't make a key for someone else", (await admin("display-keys?username=nudger", "POST")).status, 403);
+  check("…or for a made-up name", (await admin("display-keys?username=nobody-here", "POST")).status, 403);
+  const created = await admin("display-keys?label=founder%20desk", "POST");
+  check("an admin makes a key for their own account", created.status, 201);
+  const mine = await created.json();
+  check("…and it shows THEIR data", (await (await feed({ authorization: `Display ${mine.key}` })).json()).me.username, "admin");
+  const self = await admin("display-keys?username=ADMIN&label=spare", "POST");
+  check("naming yourself is fine", self.status, 201);
+  check("…and you can revoke your own", (await admin(`display-keys/${(await self.json()).display_key.id}/revoke`, "POST")).status, 200);
   const list = await (await admin("display-keys")).json();
   check("admin list has no hash", JSON.stringify(list).includes(stored[0].key_hash), false);
   check("admin list fields", Object.keys(list.keys[0]).sort(),
     ["created_at", "id", "key_prefix", "label", "last_used_at", "revoked_at", "username"]);
-  const created = await admin("display-keys?username=nudger&label=Dave%27s%20desk", "POST");
-  check("admin can create for a user", created.status, 201);
-  const made = await created.json();
+  check("the key list holds only my own keys", [...new Set(list.keys.map((k) => k.username))], ["admin"]);
+  const made = await createDisplayKey(NUDGER, "Dave's desk", NUDGER);
   const nudgerFeed = await feed({ authorization: `Display ${made.key}` });
   check("their key shows THEIR data", (await nudgerFeed.json()).me.username, "nudger");
-  check("unknown username → 404", (await admin("display-keys?username=nobody-here", "POST")).status, 404);
 
   // ── App Store reviews: founders' (admins') desks only ──
   setReviewSourceForTests(async () => ({
@@ -362,7 +370,7 @@ async function main() {
       ],
     },
   }));
-  const adminKey = (await createDisplayKey(ADMIN, "founder desk", ADMIN)).key;
+  const adminKey = mine.key;
   const adminFeed = await (await feed({ authorization: `Display ${adminKey}` })).json();
   check("admin desk gets reviews", adminFeed.reviews.map((r) => [r.stars, r.title]),
     [[5, "LOVE IT! 3 [FIRE]"], [4, "GREAT APP"]]);
@@ -396,6 +404,8 @@ async function main() {
   check("message ids are opaque", withMsg.messages.every((m) => /^[0-9a-f]{16}$/.test(m.id)), true);
   const msgList = await (await admin("display-messages")).json();
   check("admin can list desk messages", msgList.messages.length >= 2, true);
+  check("…only ones to or from me", msgList.messages.every((m) => m.from_username === "admin" || m.to_username === "admin"), true);
+  check("message recipients: other desk owners, by name", msgList.recipients.includes("owner") && !msgList.recipients.includes("admin"), true);
 
   // ── the desk remote: per box ──
   check("no remote settings yet", withMsg.desk, null);
@@ -406,58 +416,79 @@ async function main() {
     body: JSON.stringify(body),
   });
   check("non-admin cannot list boxes", (await admin("desk/boxes", "GET", OWNER)).status, 403);
-  const boxes = (await (await admin("desk/boxes")).json()).boxes;
-  check("box fields", Object.keys(boxes[0] ?? {}).sort(), ["id", "label", "last_seen", "online", "state", "username"]);
-  check("boxes: every active key", boxes.map((b) => b.username).sort(), ["admin", "nudger", "owner"]);
-  check("no key hashes in the box list", JSON.stringify(boxes).includes(stored[0].key_hash), false);
-  const ownerBox = boxes.find((b) => b.username === "owner").id;
-  const adminBox = boxes.find((b) => b.username === "admin").id;
+  const allBoxes = (await listDeskBoxes()).map((b) => [b.username, b.id]);
+  const ownerBox = allBoxes.find(([u]) => u === "owner")[1];
+  const adminBox = allBoxes.find(([u]) => u === "admin")[1];
   check("non-admin cannot read a box", (await admin(`desk/box/${ownerBox}`, "GET", OWNER)).status, 403);
   check("non-admin cannot set a style", (await post(`desk/box/${ownerBox}/settings`, { style: 1 }, OWNER)).status, 403);
+  // Two founders, each signed in with their own account: each sees and
+  // controls only their own box.
+  await db.query(`UPDATE users SET role = 'admin' WHERE user_id = $1`, [OWNER]);
+  const boxes = (await (await admin("desk/boxes")).json()).boxes;
+  check("box fields", Object.keys(boxes[0] ?? {}).sort(), ["id", "label", "last_seen", "online", "state", "username"]);
+  check("an admin lists only their own box", boxes.map((b) => b.username), ["admin"]);
+  check("the other admin lists only theirs", (await (await admin("desk/boxes", "GET", OWNER)).json()).boxes.map((b) => b.username), ["owner"]);
+  check("no key hashes in the box list", JSON.stringify(boxes).includes(stored[0].key_hash), false);
+  check("can't read someone else's box", (await admin(`desk/box/${ownerBox}`)).status, 404);
+  check("can't change someone else's box", (await post(`desk/box/${ownerBox}/settings`, { style: 1 })).status, 404);
+  check("can't send junk to someone else's box either", (await post(`desk/box/${ownerBox}/settings`, { style: 99 })).status, 404);
+  check("can't show on someone else's box", (await post(`desk/box/${ownerBox}/show`, {})).status, 404);
+  check("can't wake someone else's box", (await post(`desk/box/${ownerBox}/wake`, {})).status, 404);
+  check("can't message as someone else's box", (await post(`desk/box/${ownerBox}/message`, { to: adminBox, text: "hi" })).status, 404);
+  check("…and the owner can't touch the admin's", (await post(`desk/box/${adminBox}/settings`, { style: 1 }, OWNER)).status, 404);
   check("unknown box → 404", (await admin("desk/box/00000000-0000-0000-0000-000000000000")).status, 404);
   check("garbage box id → 404", (await admin("desk/box/x';drop")).status, 404);
-  check("bad style → 400", (await post(`desk/box/${ownerBox}/settings`, { style: 9 })).status, 400);
-  check("nothing to set → 400", (await post(`desk/box/${ownerBox}/settings`, {})).status, 400);
-  check("style string → 400", (await post(`desk/box/${ownerBox}/settings`, { style: "2" })).status, 400);
-  check("set owner's box", (await (await post(`desk/box/${ownerBox}/settings`, { style: 2, mascot: 0 })).json()).settings,
+  check("bad style → 400", (await post(`desk/box/${ownerBox}/settings`, { style: 9 }, OWNER)).status, 400);
+  check("nothing to set → 400", (await post(`desk/box/${ownerBox}/settings`, {}, OWNER)).status, 400);
+  check("style string → 400", (await post(`desk/box/${ownerBox}/settings`, { style: "2" }, OWNER)).status, 400);
+  check("set owner's box", (await (await post(`desk/box/${ownerBox}/settings`, { style: 2, mascot: 0 }, OWNER)).json()).settings,
         { style: 2, mascot: 0, rev: 1, sleep_start: null, sleep_end: null, never_sleep: false });
-  check("set mascot keeps style", (await (await post(`desk/box/${ownerBox}/settings`, { mascot: 1 })).json()).settings,
+  check("set mascot keeps style", (await (await post(`desk/box/${ownerBox}/settings`, { mascot: 1 }, OWNER)).json()).settings,
         { style: 2, mascot: 1, rev: 2, sleep_start: null, sleep_end: null, never_sleep: false });
-  check("bad sleep → 400", (await post(`desk/box/${ownerBox}/settings`, { sleep: { start: 1500, end: 420 } })).status, 400);
-  check("same start/end → 400", (await post(`desk/box/${ownerBox}/settings`, { sleep: { start: 60, end: 60 } })).status, 400);
-  check("sleep string → 400", (await post(`desk/box/${ownerBox}/settings`, { sleep: "nap" })).status, 400);
-  check("set sleep hours (no rev bump)", (await (await post(`desk/box/${ownerBox}/settings`, { sleep: { start: 1350, end: 390 } })).json()).settings,
+  check("bad sleep → 400", (await post(`desk/box/${ownerBox}/settings`, { sleep: { start: 1500, end: 420 } }, OWNER)).status, 400);
+  check("same start/end → 400", (await post(`desk/box/${ownerBox}/settings`, { sleep: { start: 60, end: 60 } }, OWNER)).status, 400);
+  check("sleep string → 400", (await post(`desk/box/${ownerBox}/settings`, { sleep: "nap" }, OWNER)).status, 400);
+  check("set sleep hours (no rev bump)", (await (await post(`desk/box/${ownerBox}/settings`, { sleep: { start: 1350, end: 390 } }, OWNER)).json()).settings,
         { style: 2, mascot: 1, rev: 2, sleep_start: 1350, sleep_end: 390, never_sleep: false });
-  check("never sleep", (await (await post(`desk/box/${ownerBox}/settings`, { sleep: "never" })).json()).settings.never_sleep, true);
-  check("back to the box's own hours", (await (await post(`desk/box/${ownerBox}/settings`, { sleep: "default" })).json()).settings,
+  check("never sleep", (await (await post(`desk/box/${ownerBox}/settings`, { sleep: "never" }, OWNER)).json()).settings.never_sleep, true);
+  check("back to the box's own hours", (await (await post(`desk/box/${ownerBox}/settings`, { sleep: "default" }, OWNER)).json()).settings,
         { style: 2, mascot: 1, rev: 2, sleep_start: null, sleep_end: null, never_sleep: false });
-  await post(`desk/box/${ownerBox}/settings`, { sleep: { start: 1350, end: 390 } });
-  check("stat show on owner's box", (await post(`desk/box/${ownerBox}/show`, {})).status, 201);
-  check("wake owner's box", (await post(`desk/box/${ownerBox}/wake`, {})).status, 201);
-  check("unknown tap → 404", (await post(`desk/box/${ownerBox}/party`, {})).status, 404);
+  await post(`desk/box/${ownerBox}/settings`, { sleep: { start: 1350, end: 390 } }, OWNER);
+  check("stat show on owner's box", (await post(`desk/box/${ownerBox}/show`, {}, OWNER)).status, 201);
+  check("wake owner's box", (await post(`desk/box/${ownerBox}/wake`, {}, OWNER)).status, 201);
+  check("unknown tap → 404", (await post(`desk/box/${ownerBox}/party`, {}, OWNER)).status, 404);
+  // Test animations: the owner plays one on their own box (it shows TEST, never a name).
+  check("test an animation", (await post(`desk/box/${ownerBox}/test`, { scene: "nudge" }, OWNER)).status, 201);
+  check("unknown animation → 400", (await post(`desk/box/${ownerBox}/test`, { scene: "party" }, OWNER)).status, 400);
+  check("animation must be a name → 400", (await post(`desk/box/${ownerBox}/test`, { scene: ["nudge"] }, OWNER)).status, 400);
+  check("can't test on someone else's box", (await post(`desk/box/${ownerBox}/test`, { scene: "nudge" })).status, 404);
   // The box reports its screen with each poll; junk is ignored.
   await feed({ authorization: `Display ${key}`, "x-desk-state": "2,1,0,1350,390" });
   await feed({ authorization: `Display ${adminKey}`, "x-desk-state": "9,9,9,'; drop" });
   const reported = (await (await admin("desk/boxes")).json()).boxes;
-  check("box state reported", reported.find((b) => b.username === "owner").state,
+  check("box state reported", (await (await admin("desk/boxes", "GET", OWNER)).json()).boxes[0].state,
         { style: 2, mascot: 1, awake: false, sleep_start: 1350, sleep_end: 390 });
   check("junk state ignored", reported.find((b) => b.username === "admin").state, null);
   check("old play endpoint is gone", (await post("desk/play", { kind: "nudge" })).status, 404);
   const ownerFeedBox = await (await feed({ authorization: `Display ${key}` })).json();
   check("that box gets its settings", ownerFeedBox.desk,
         { style: 2, mascot: 1, rev: 2, sleep_start: 1350, sleep_end: 390, never_sleep: false });
-  check("that box gets the taps", ownerFeedBox.commands.map((c) => c.kind).sort(), ["show", "wake"]);
+  check("that box gets the taps", ownerFeedBox.commands.map((c) => c.kind).sort(), ["show", "test", "wake"]);
+  check("a test carries its scene only", ownerFeedBox.commands.filter((c) => c.kind === "test"),
+        [{ id: ownerFeedBox.commands.find((c) => c.kind === "test").id, kind: "test", scene: "nudge" }]);
   check("tap ids are opaque", ownerFeedBox.commands.every((c) => /^[0-9a-f]{16}$/.test(c.id)), true);
   const adminFeed3 = await (await feed({ authorization: `Display ${adminKey}` })).json();
   check("another box gets none of it", [adminFeed3.desk, adminFeed3.commands], [null, []]);
   const sentBox = await post(`desk/box/${adminBox}/message`, { to: ownerBox, text: "go run \u{1F3C3}" });
   check("box-to-box message", sentBox.status, 201);
   check("message to unknown box → 404", (await post(`desk/box/${adminBox}/message`, { to: "nope", text: "hi" })).status, 404);
-  const detail = await (await admin(`desk/box/${ownerBox}`)).json();
+  const detail = await (await admin(`desk/box/${ownerBox}`, "GET", OWNER)).json();
   check("box detail: the box", [detail.box.username, detail.box.online], ["owner", true]);
+  check("box detail: the test animations", detail.tests.includes("nudge") && detail.tests.includes("friend_walk"), true);
   check("box detail: settings", detail.settings, { style: 2, mascot: 1, rev: 2, sleep_start: 1350, sleep_end: 390, never_sleep: false });
   check("box detail: state", detail.box.state.awake, false);
   check("box detail: recipients are other people's boxes", detail.recipients.map((b) => b.username).sort(), ["admin", "nudger"]);
+  check("recipients carry a name only", Object.keys(detail.recipients[0] ?? {}).sort(), ["id", "label", "username"]);
   check("box detail: messages in", detail.messages.filter((m) => m.direction === "in" && m.who === "admin").map((m) => [m.who, m.text]),
         [["admin", "GO RUN [RUN]"], ["admin", "NICE MILE [FIRE] SCRIPTALERT1/SCRIPT [HEART]"]]);
   check("box detail: live is the owner's own feed", detail.live.me.username, "owner");
@@ -469,17 +500,19 @@ async function main() {
         ["Changed from the remote: ARCADE / FLAMEY", "Changed from the remote: ARCADE / RUNNER",
          "Changed from the remote: never sleeps", "Changed from the remote: sleep hours back to the box's own",
          "Changed from the remote: sleeps 22:30–06:30", "Changed from the remote: sleeps 22:30–06:30",
-         "Stat show started from the remote", "Woken up from the remote"]);
+         "Stat show started from the remote", "Test animation: nudge", "Woken up from the remote"]);
   check("activity: no emails or real names", /@example\.com|Secret|Surname/.test(JSON.stringify(detail.activity)), false);
   check("box detail: no key hashes", JSON.stringify(detail).includes(stored[0].key_hash), false);
-  for (let i = 0; i < 30; i++) await post(`desk/box/${ownerBox}/show`, {});
-  check("taps are rate-limited", (await post(`desk/box/${ownerBox}/show`, {})).status, 429);
+  for (let i = 0; i < 30; i++) await post(`desk/box/${ownerBox}/show`, {}, OWNER);
+  check("taps are rate-limited", (await post(`desk/box/${ownerBox}/show`, {}, OWNER)).status, 429);
 
   // ── revoke ──
-  const id = list.keys.find((k) => k.username === "owner").id;
-  check("revoke", (await admin(`display-keys/${id}/revoke`, "POST")).status, 200);
+  const id = (await (await admin("display-keys", "GET", OWNER)).json()).keys.find((k) => k.username === "owner").id;
+  check("can't revoke someone else's key", (await admin(`display-keys/${id}/revoke`, "POST")).status, 404);
+  check("still working after that", (await feed({ authorization: `Display ${key}` })).status, 200);
+  check("revoke my own", (await admin(`display-keys/${id}/revoke`, "POST", OWNER)).status, 200);
   check("revoked key → 401", (await feed({ authorization: `Display ${key}` })).status, 401);
-  check("revoking twice → 404", (await admin(`display-keys/${id}/revoke`, "POST")).status, 404);
+  check("revoking twice → 404", (await admin(`display-keys/${id}/revoke`, "POST", OWNER)).status, 404);
 
   // ── deleting the user kills the key ──
   await db.query(`DELETE FROM users WHERE user_id = $1`, [NUDGER]);

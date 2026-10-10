@@ -5,6 +5,10 @@ import {
   DESK_STYLES,
   getDeskBox,
   listDeskBoxes,
+  queueBoxTest,
+  DESK_TEST_SCENES,
+  deskOwnersExcept,
+  boxBelongsTo,
   DESK_TAPS,
   parseBoxState,
   queueBoxTap,
@@ -73,9 +77,11 @@ export async function displayFeed(req: Request, res: Response) {
 const db = PostgresService.getInstance();
 
 /** GET /admin/display-keys — prefix/label/owner/dates only, never the hash. */
-export async function adminListDisplayKeys(_req: Request, res: Response) {
+// Admin -> Displays is split by owner too: each admin lists, makes and
+// revokes only their own desk keys, and sees only their own desk messages.
+export async function adminListDisplayKeys(req: Request, res: Response) {
   noStore(res);
-  res.json({ keys: await listDisplayKeys() });
+  res.json({ keys: await listDisplayKeys((req as any).userId ?? "") });
 }
 
 /**
@@ -86,19 +92,20 @@ export async function adminListDisplayKeys(_req: Request, res: Response) {
  */
 export async function adminCreateDisplayKey(req: Request, res: Response) {
   noStore(res);
+  const me = ((req as any).userId as string | undefined) ?? "";
   const username = typeof req.query.username === "string" ? req.query.username.trim() : "";
   const label = typeof req.query.label === "string" ? req.query.label.trim() : "";
-  if (!username) return res.status(400).json({ error: "username required" });
+  if (!me) return res.status(401).json({ error: "Authentication required" });
   try {
-    const users = await db.query<{ user_id: string }>(
-      `SELECT user_id FROM users WHERE LOWER(username) = LOWER($1) LIMIT 2`,
-      [username],
-    );
-    if (users.length !== 1) {
-      return res.status(404).json({ error: "No single user with that username" });
+    // Always for the signed-in admin's own account; naming anyone else is refused.
+    if (username) {
+      const mine = await db.query<{ ok: boolean }>(
+        `SELECT LOWER(username) = LOWER($2) AS ok FROM users WHERE user_id = $1`, [me, username]);
+      if (!mine[0]?.ok) {
+        return res.status(403).json({ error: "You can only make a key for your own account" });
+      }
     }
-    const createdBy = ((req as any).userId as string) ?? null;
-    const { key, row } = await createDisplayKey(users[0].user_id, label || "Desk display", createdBy);
+    const { key, row } = await createDisplayKey(me, label || "Desk display", me);
     res.status(201).json({ key, display_key: row });
   } catch (err) {
     // Handled here so the global error logger never records this URL
@@ -115,7 +122,7 @@ export async function adminRevokeDisplayKey(req: Request, res: Response) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
     return res.status(400).json({ error: "Bad id" });
   }
-  const ok = await revokeDisplayKey(id);
+  const ok = await revokeDisplayKey(id, (req as any).userId ?? "");
   if (!ok) return res.status(404).json({ error: "No active key with that id" });
   res.json({ ok: true });
 }
@@ -123,9 +130,11 @@ export async function adminRevokeDisplayKey(req: Request, res: Response) {
 
 // ─── Desk-to-desk messages (admin only) ─────────────────────────────────────
 
-export async function adminListDisplayMessages(_req: Request, res: Response) {
+export async function adminListDisplayMessages(req: Request, res: Response) {
   noStore(res);
-  res.json({ messages: await listDisplayMessages() });
+  const me = ((req as any).userId as string | undefined) ?? "";
+  const [messages, recipients] = await Promise.all([listDisplayMessages(me), deskOwnersExcept(me)]);
+  res.json({ messages, recipients });
 }
 
 /** POST /admin/display-messages  JSON { username, text }.
@@ -157,16 +166,29 @@ export async function adminSendDisplayMessage(req: Request, res: Response) {
 // ─── The desk remote (Admin -> Desks). Admin only; any active box.
 
 /** GET /admin/desk/boxes */
-export async function adminDeskBoxes(_req: Request, res: Response) {
+const viewer = (req: Request) => ((req as any).userId as string | undefined);
+
+/** The desk remote acts only on the signed-in admin's own boxes: anyone
+ *  else's box answers 404, exactly like a box that doesn't exist. */
+async function ownBox(req: Request, res: Response): Promise<string | null> {
+  const id = String(req.params.id ?? "");
+  if (await boxBelongsTo(id, viewer(req))) return id;
+  res.status(404).json({ error: "No such desk" });
+  return null;
+}
+
+export async function adminDeskBoxes(req: Request, res: Response) {
   noStore(res);
-  res.json({ boxes: await listDeskBoxes() });
+  res.json({ boxes: await listDeskBoxes(viewer(req) ?? "") });
 }
 
 /** GET /admin/desk/box/:id */
 export async function adminDeskBox(req: Request, res: Response) {
   noStore(res);
   try {
-    const box = await getDeskBox(String(req.params.id ?? ""));
+    const id = await ownBox(req, res);
+    if (!id) return;
+    const box = await getDeskBox(id);
     if (!box) return res.status(404).json({ error: "No such desk" });
     res.json(box);
   } catch (err) {
@@ -188,6 +210,8 @@ function minutes(v: unknown): number | undefined {
  *  JSON { style?: 0-6, mascot?: 0-1, sleep?: {start, end} (minutes) | "never" | "default" } */
 export async function adminDeskBoxSettings(req: Request, res: Response) {
   noStore(res);
+  const id = await ownBox(req, res);
+  if (!id) return;
   const style = deskIndex(req.body?.style, DESK_STYLES.length);
   const mascot = deskIndex(req.body?.mascot, DESK_MASCOTS.length);
   const raw = req.body?.sleep;
@@ -205,7 +229,7 @@ export async function adminDeskBoxSettings(req: Request, res: Response) {
   if (style === undefined || mascot === undefined || (style === null && mascot === null && sleep === undefined)) {
     return res.status(400).json({ error: "style (0-6), mascot (0-1) and/or sleep required" });
   }
-  const settings = await setBoxSettings(String(req.params.id ?? ""), { style, mascot, sleep });
+  const settings = await setBoxSettings(id, { style, mascot, sleep });
   if (!settings) return res.status(404).json({ error: "No such desk" });
   res.json({ settings });
 }
@@ -214,11 +238,28 @@ export async function adminDeskBoxSettings(req: Request, res: Response) {
 export function adminDeskBoxTap(kind: (typeof DESK_TAPS)[number]) {
   return async (req: Request, res: Response) => {
     noStore(res);
-    const ok = await queueBoxTap(String(req.params.id ?? ""), kind);
+    const id = await ownBox(req, res);
+    if (!id) return;
+    const ok = await queueBoxTap(id, kind);
     if (ok === null) return res.status(404).json({ error: "No such desk" });
     if (!ok) return res.status(429).json({ error: "Slow down a little" });
     res.status(201).json({ ok: true });
   };
+}
+
+/** POST /admin/desk/box/:id/test  JSON { scene } — play one animation on MY box, marked TEST. */
+export async function adminDeskBoxTest(req: Request, res: Response) {
+  noStore(res);
+  const id = await ownBox(req, res);
+  if (!id) return;
+  const scene = req.body?.scene;
+  if (typeof scene !== "string" || !(DESK_TEST_SCENES as readonly string[]).includes(scene)) {
+    return res.status(400).json({ error: "Unknown animation" });
+  }
+  const ok = await queueBoxTest(id, scene as (typeof DESK_TEST_SCENES)[number]);
+  if (ok === null) return res.status(404).json({ error: "No such desk" });
+  if (!ok) return res.status(429).json({ error: "Slow down a little" });
+  res.status(201).json({ ok: true });
 }
 
 /** POST /admin/desk/box/:id/message  JSON { to: <box id>, text } */
@@ -227,7 +268,9 @@ export async function adminDeskBoxMessage(req: Request, res: Response) {
   const text = sanitizeDisplayText(req.body?.text);
   const to = typeof req.body?.to === "string" ? req.body.to : "";
   if (!text) return res.status(400).json({ error: "Message is empty after cleanup (letters, numbers and a few emoji only)" });
-  const message = await sendBoxMessage(String(req.params.id ?? ""), to, text);
+  const id = await ownBox(req, res);
+  if (!id) return;
+  const message = await sendBoxMessage(id, to, text);
   if (!message) return res.status(404).json({ error: "No such desk" });
   res.status(201).json({ message });
 }

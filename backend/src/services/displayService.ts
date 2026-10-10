@@ -106,25 +106,42 @@ export async function createDisplayKey(
   return { key, row };
 }
 
-export async function listDisplayKeys(): Promise<DisplayKeyRow[]> {
+/** Display keys: every one, or (with ownerId) only that person's own. */
+export async function listDisplayKeys(ownerId?: string): Promise<DisplayKeyRow[]> {
   // Never selects key_hash.
   return db.query<DisplayKeyRow>(
     `SELECT k.id, u.username, k.label, k.key_prefix, k.created_at::text,
             k.last_used_at::text, k.revoked_at::text
        FROM display_keys k JOIN users u ON u.user_id = k.user_id
+      WHERE ($1::text IS NULL OR k.user_id = $1)
       ORDER BY k.revoked_at IS NOT NULL, k.created_at DESC
       LIMIT 200`,
+    [ownerId ?? null],
   );
 }
 
-export async function revokeDisplayKey(id: string): Promise<boolean> {
+/** Revoke a live key; with ownerId, only if it is that person's own. */
+export async function revokeDisplayKey(id: string, ownerId?: string): Promise<boolean> {
   const rows = await db.query(
     `UPDATE display_keys SET revoked_at = NOW()
-      WHERE id = $1 AND revoked_at IS NULL
+      WHERE id = $1 AND revoked_at IS NULL AND ($2::text IS NULL OR user_id = $2)
       RETURNING id`,
-    [id],
+    [id, ownerId ?? null],
   );
   return rows.length > 0;
+}
+
+/** Usernames of the people who have a desk (an active key), other than me:
+ *  who I can send a desk message to. Names only. */
+export async function deskOwnersExcept(userId: string): Promise<string[]> {
+  const rows = await db.query<{ username: string }>(
+    `SELECT DISTINCT u.username
+       FROM display_keys k JOIN users u ON u.user_id = k.user_id
+      WHERE k.revoked_at IS NULL AND k.user_id <> $1 AND u.username IS NOT NULL
+      ORDER BY u.username`,
+    [userId],
+  );
+  return rows.map((r) => r.username);
 }
 
 /** userId for a live (unrevoked) key whose owner still exists, else null. */
@@ -207,15 +224,18 @@ export async function createDisplayMessage(
   return rows[0];
 }
 
-export async function listDisplayMessages(): Promise<DisplayMessageRow[]> {
+/** Recent desk messages: every one, or (with userId) only those to or from that person. */
+export async function listDisplayMessages(userId?: string): Promise<DisplayMessageRow[]> {
   return db.query<DisplayMessageRow>(
     `SELECT m.id, tu.username AS to_username, fu.username AS from_username, m.body,
             m.created_at::text, m.expires_at::text
        FROM display_messages m
        JOIN users tu ON tu.user_id = m.to_user_id
        LEFT JOIN users fu ON fu.user_id = m.from_user_id
+      WHERE ($1::text IS NULL OR m.to_user_id = $1 OR m.from_user_id = $1)
       ORDER BY m.created_at DESC
       LIMIT 30`,
+    [userId ?? null],
   );
 }
 
@@ -312,14 +332,24 @@ function boxRow(r: BoxDbRow): DeskBox {
 }
 
 /** Every active box (key), oldest first. Never the hash. */
-export async function listDeskBoxes(): Promise<DeskBox[]> {
+/** Active boxes: every one, or (with ownerId) only that person's own. */
+export async function listDeskBoxes(ownerId?: string): Promise<DeskBox[]> {
   const rows = await db.query<BoxDbRow>(
     `SELECT k.id, k.label, u.username, k.last_used_at::text, k.state, k.state_at::text
        FROM display_keys k JOIN users u ON u.user_id = k.user_id
-      WHERE k.revoked_at IS NULL
+      WHERE k.revoked_at IS NULL AND ($1::text IS NULL OR k.user_id = $1)
       ORDER BY k.created_at`,
+    [ownerId ?? null],
   );
   return rows.map(boxRow);
+}
+
+/** Is this an active box whose display key belongs to this user? The desk
+ *  remote only ever acts on the signed-in person's own boxes. */
+export async function boxBelongsTo(boxId: string, userId: string | undefined): Promise<boolean> {
+  if (!userId) return false;
+  const owner = await boxOwner(boxId);
+  return owner !== null && owner.userId === userId;
 }
 
 async function boxOwner(boxId: string): Promise<{ userId: string; box: DeskBox } | null> {
@@ -392,6 +422,28 @@ export async function setBoxSettings(boxId: string, change: BoxSettingsChange): 
 /** Remote taps a box acts on: "show" (run the stat show, real numbers) and
  *  "wake" (bright for 30 minutes). False = rate-limited, null = unknown box. */
 export const DESK_TAPS = ["show", "wake"] as const;
+
+/** Animations the owner can test on their own box (desk/firmware/mad/testscenes.py).
+ *  The box plays the real scene with TEST in place of any name. */
+export const DESK_TEST_SCENES = [
+  "user", "milestone", "nudge", "hype", "friend", "friend_walk", "finished",
+  "friendmile", "atrisk", "reminder", "morning", "mile", "streak", "yearago",
+  "pr", "message", "comment", "medal", "review", "recap", "holiday",
+  "newyear", "countdown",
+] as const;
+
+/** Queue one test animation for a box. Same rate limit as the other taps. */
+export async function queueBoxTest(boxId: string, scene: (typeof DESK_TEST_SCENES)[number]): Promise<boolean | null> {
+  const owner = await boxOwner(boxId);
+  if (!owner) return null;
+  const recent = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM desk_commands
+      WHERE key_id = $1 AND created_at > NOW() - INTERVAL '10 minutes'`, [boxId]);
+  if ((recent[0]?.n ?? 0) >= MAX_COMMANDS_PER_10_MIN) return false;
+  await db.query(`INSERT INTO desk_commands (user_id, key_id, kind, detail) VALUES ($1, $2, 'test', $3)`,
+    [owner.userId, boxId, scene]);
+  return true;
+}
 
 export async function queueBoxTap(boxId: string, kind: (typeof DESK_TAPS)[number]): Promise<boolean | null> {
   const owner = await boxOwner(boxId);
@@ -475,6 +527,7 @@ async function boxActivity(boxId: string, userId: string): Promise<DeskActivity[
        SELECT c.created_at, 'remote',
               CASE c.kind WHEN 'set' THEN 'Changed from the remote: ' || COALESCE(c.detail, '')
                           WHEN 'wake' THEN 'Woken up from the remote'
+                          WHEN 'test' THEN 'Test animation: ' || COALESCE(c.detail, '')
                           ELSE 'Stat show started from the remote' END
          FROM desk_commands c
         WHERE c.key_id = $2 AND c.created_at > NOW() - ${days}
@@ -515,10 +568,14 @@ export async function getDeskBox(boxId: string) {
     box: owner.box,
     styles: DESK_STYLES,
     mascots: DESK_MASCOTS,
+    tests: DESK_TEST_SCENES,
     settings: settings ?? { style: null, mascot: null, rev: 0, sleep_start: null, sleep_end: null, never_sleep: false },
     messages: messages.map((m) => ({ ...m, id: m.id.slice(0, 16) })),
-    // Message another box (not one owned by this box's owner).
-    recipients: others.filter((b) => b.id !== boxId && b.username && b.username !== owner.box.username),
+    // Message another box (not one owned by this box's owner). Name only:
+    // nothing about another person's box beyond who it belongs to.
+    recipients: others
+      .filter((b) => b.id !== boxId && b.username && b.username !== owner.box.username)
+      .map((b) => ({ id: b.id, label: b.label, username: b.username })),
     activity,
     // The same data the box itself gets: the page draws its real screen.
     live: feed,
@@ -720,7 +777,7 @@ export interface DisplayFeed {
   /** This box's remote settings (style / mascot ids, rev bumps per change). */
   desk: DeskSettings | null;
   /** Remote taps for this box from the last 3 min: opaque id + "show" / "wake". */
-  commands: { id: string; kind: string }[];
+  commands: { id: string; kind: string; scene?: string }[];
   /** Founder mode: newest App Store reviews, only on admins' desks. */
   reviews: DeskReview[];
   /** Unexpired desk messages sent TO the owner (newest first). */
@@ -972,16 +1029,16 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
     keyId ? getBoxSettings(keyId) : Promise.resolve(null),
     // Remote taps for THIS box ("show" / "wake": nothing else can be triggered).
     keyId
-      ? db.query<{ id: string; kind: string }>(
-          `SELECT encode(sha256(('cmd:' || id::text)::bytea), 'hex') AS id, kind
+      ? db.query<{ id: string; kind: string; detail: string | null }>(
+          `SELECT encode(sha256(('cmd:' || id::text)::bytea), 'hex') AS id, kind, detail
              FROM desk_commands
-            WHERE key_id = $1 AND kind IN ('show', 'wake')
+            WHERE key_id = $1 AND kind IN ('show', 'wake', 'test')
               AND created_at > NOW() - INTERVAL '${COMMAND_WINDOW_SECONDS} seconds'
             ORDER BY created_at DESC
             LIMIT 5`,
           [keyId],
         )
-      : Promise.resolve([] as { id: string; kind: string }[]),
+      : Promise.resolve([] as { id: string; kind: string; detail: string | null }[]),
     // The owner's own "<friend> got their mile in!" announcements.
     db.query<{ id: string; sender: string; name: string; age_s: number; kind: "run" | "walk" }>(
       `SELECT encode(sha256(('mile:' || n.id::text)::bytea), 'hex') AS id,
@@ -1063,7 +1120,9 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
       age_s: Math.max(0, Number(f.age_s) || 0),
     })),
     desk,
-    commands: commands.map((c) => ({ id: c.id.slice(0, 16), kind: c.kind })),
+    commands: commands.map((c) => c.kind === "test"
+      ? { id: c.id.slice(0, 16), kind: c.kind, scene: c.detail ?? "" }
+      : { id: c.id.slice(0, 16), kind: c.kind }),
     comments: comments.map((c) => ({
       id: c.id.slice(0, 16),
       from: c.from ?? "FRIEND",
