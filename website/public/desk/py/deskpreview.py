@@ -52,6 +52,19 @@ def sleep(awake, start, end, now):
     APP._update_night(now)
 
 
+def test(scene, now):
+    """Play one test animation here (the same scene the box would play)."""
+    from mad import testscenes
+    ev = testscenes.sample(APP, scene)
+    if ev:
+        APP.queue = [ev]
+        APP.toast = None
+        APP.mode, APP.mode_start = "dash", now
+        APP.next_event_at = now
+        APP.wake_until = max(APP.wake_until, now + 120)
+        APP._update_night(now)
+
+
 def frame(now):
     APP.tick(now)
     pal = gfx.palette

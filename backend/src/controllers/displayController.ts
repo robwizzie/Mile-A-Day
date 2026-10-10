@@ -5,6 +5,8 @@ import {
   DESK_STYLES,
   getDeskBox,
   listDeskBoxes,
+  queueBoxTest,
+  DESK_TEST_SCENES,
   deskOwnersExcept,
   boxBelongsTo,
   DESK_TAPS,
@@ -243,6 +245,21 @@ export function adminDeskBoxTap(kind: (typeof DESK_TAPS)[number]) {
     if (!ok) return res.status(429).json({ error: "Slow down a little" });
     res.status(201).json({ ok: true });
   };
+}
+
+/** POST /admin/desk/box/:id/test  JSON { scene } — play one animation on MY box, marked TEST. */
+export async function adminDeskBoxTest(req: Request, res: Response) {
+  noStore(res);
+  const id = await ownBox(req, res);
+  if (!id) return;
+  const scene = req.body?.scene;
+  if (typeof scene !== "string" || !(DESK_TEST_SCENES as readonly string[]).includes(scene)) {
+    return res.status(400).json({ error: "Unknown animation" });
+  }
+  const ok = await queueBoxTest(id, scene as (typeof DESK_TEST_SCENES)[number]);
+  if (ok === null) return res.status(404).json({ error: "No such desk" });
+  if (!ok) return res.status(429).json({ error: "Slow down a little" });
+  res.status(201).json({ ok: true });
 }
 
 /** POST /admin/desk/box/:id/message  JSON { to: <box id>, text } */

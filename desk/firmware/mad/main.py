@@ -44,6 +44,9 @@ import framebufferio
 import rgbmatrix
 import gc
 
+TICKS_MASK = (1 << 29) - 1      # supervisor.ticks_ms wraps at 2**29
+TICKS_HALF = 1 << 28
+
 # The matrix needs one big contiguous buffer: grab it before anything else
 # fragments memory (this was the MemoryError on boot).
 MATRIX = None
@@ -339,6 +342,8 @@ def main():
     if not have_wifi:
         app.set_offline("SET UP WI-FI")
 
+    import supervisor
+    frame_due = supervisor.ticks_ms()
     while True:
         now = time.monotonic()
         # only fetch when the screen is still, so animations never stutter
@@ -393,7 +398,19 @@ def main():
 
         app.tick(time.monotonic())
         display.refresh()
-        time.sleep(0.01)
+        # Arcade advances one fixed step per frame, so its frames are paced
+        # to an even ARCADE_FPS (ticks_ms: exact milliseconds, however long
+        # the board has been on). Everything else just takes a short nap.
+        if app.mode == "dash" and app.view() == 2:
+            frame_due = (frame_due + 1000 // 24) & TICKS_MASK
+            wait = (frame_due - supervisor.ticks_ms()) & TICKS_MASK
+            if wait > TICKS_HALF:              # running late: don't try to catch up
+                frame_due = supervisor.ticks_ms()
+            else:
+                time.sleep(wait / 1000)
+        else:
+            frame_due = supervisor.ticks_ms()
+            time.sleep(0.01)
 
 
 def crash_screen(err):

@@ -365,9 +365,9 @@ class App:
             self.toast = (MASCOTS[self.mascot], now + 1.6)
 
     def _commands(self, cmds, now):
-        """Taps from the phone remote: "run the stat show now" (real numbers)
-        and "wake up" (30 min). Nothing else can be triggered: alerts only
-        come from real activity."""
+        """Taps from the phone remote: "run the stat show now" (real numbers),
+        "wake up" (30 min), and "test" (play one animation, marked TEST,
+        for the owner to check it). Real alerts only come from real activity."""
         ids = [c.get("id") for c in cmds]
         if self.seen_cmds is None:            # first feed: those are old taps
             self.seen_cmds = ids
@@ -381,6 +381,15 @@ class App:
             elif c.get("kind") == "wake":            # bright for half an hour
                 self.wake_until = now + 1800
                 self._update_night(now)
+            elif c.get("kind") == "test":
+                from mad import testscenes
+                ev = testscenes.sample(self, str(c.get("scene") or ""))
+                unload("testscenes")
+                if ev:
+                    self.wake_until = max(self.wake_until, now + 120)   # visible even at night
+                    self._update_night(now)
+                    self.push(ev)
+                    self.next_event_at = min(self.next_event_at, now)
         self.seen_cmds = (ids + [i for i in self.seen_cmds if i not in ids])[:10]
 
     def _friend_miles(self, miles, now):

@@ -11,6 +11,7 @@ import {
   adminDeskBoxSettings,
   adminDeskBoxTap,
   adminDeskBoxMessage,
+  adminDeskBoxTest,
 } from "../controllers/displayController.js";
 import {
   verifyAppleWeb,
@@ -76,6 +77,7 @@ adminRouter.post("/desk/box/:id/settings", adminDeskBoxSettings);
 adminRouter.post("/desk/box/:id/show", adminDeskBoxTap("show"));
 adminRouter.post("/desk/box/:id/wake", adminDeskBoxTap("wake"));
 adminRouter.post("/desk/box/:id/message", adminDeskBoxMessage);
+adminRouter.post("/desk/box/:id/test", adminDeskBoxTest);
 adminRouter.get("/miles-by-day", milesByDay);
 adminRouter.get("/engagement", engagement);
 adminRouter.get("/signups-by-day", signupsByDay);

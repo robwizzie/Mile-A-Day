@@ -457,6 +457,11 @@ async function main() {
   check("stat show on owner's box", (await post(`desk/box/${ownerBox}/show`, {}, OWNER)).status, 201);
   check("wake owner's box", (await post(`desk/box/${ownerBox}/wake`, {}, OWNER)).status, 201);
   check("unknown tap → 404", (await post(`desk/box/${ownerBox}/party`, {}, OWNER)).status, 404);
+  // Test animations: the owner plays one on their own box (it shows TEST, never a name).
+  check("test an animation", (await post(`desk/box/${ownerBox}/test`, { scene: "nudge" }, OWNER)).status, 201);
+  check("unknown animation → 400", (await post(`desk/box/${ownerBox}/test`, { scene: "party" }, OWNER)).status, 400);
+  check("animation must be a name → 400", (await post(`desk/box/${ownerBox}/test`, { scene: ["nudge"] }, OWNER)).status, 400);
+  check("can't test on someone else's box", (await post(`desk/box/${ownerBox}/test`, { scene: "nudge" })).status, 404);
   // The box reports its screen with each poll; junk is ignored.
   await feed({ authorization: `Display ${key}`, "x-desk-state": "2,1,0,1350,390" });
   await feed({ authorization: `Display ${adminKey}`, "x-desk-state": "9,9,9,'; drop" });
@@ -468,7 +473,9 @@ async function main() {
   const ownerFeedBox = await (await feed({ authorization: `Display ${key}` })).json();
   check("that box gets its settings", ownerFeedBox.desk,
         { style: 2, mascot: 1, rev: 2, sleep_start: 1350, sleep_end: 390, never_sleep: false });
-  check("that box gets the taps", ownerFeedBox.commands.map((c) => c.kind).sort(), ["show", "wake"]);
+  check("that box gets the taps", ownerFeedBox.commands.map((c) => c.kind).sort(), ["show", "test", "wake"]);
+  check("a test carries its scene only", ownerFeedBox.commands.filter((c) => c.kind === "test"),
+        [{ id: ownerFeedBox.commands.find((c) => c.kind === "test").id, kind: "test", scene: "nudge" }]);
   check("tap ids are opaque", ownerFeedBox.commands.every((c) => /^[0-9a-f]{16}$/.test(c.id)), true);
   const adminFeed3 = await (await feed({ authorization: `Display ${adminKey}` })).json();
   check("another box gets none of it", [adminFeed3.desk, adminFeed3.commands], [null, []]);
@@ -477,6 +484,7 @@ async function main() {
   check("message to unknown box → 404", (await post(`desk/box/${adminBox}/message`, { to: "nope", text: "hi" })).status, 404);
   const detail = await (await admin(`desk/box/${ownerBox}`, "GET", OWNER)).json();
   check("box detail: the box", [detail.box.username, detail.box.online], ["owner", true]);
+  check("box detail: the test animations", detail.tests.includes("nudge") && detail.tests.includes("friend_walk"), true);
   check("box detail: settings", detail.settings, { style: 2, mascot: 1, rev: 2, sleep_start: 1350, sleep_end: 390, never_sleep: false });
   check("box detail: state", detail.box.state.awake, false);
   check("box detail: recipients are other people's boxes", detail.recipients.map((b) => b.username).sort(), ["admin", "nudger"]);
@@ -492,7 +500,7 @@ async function main() {
         ["Changed from the remote: ARCADE / FLAMEY", "Changed from the remote: ARCADE / RUNNER",
          "Changed from the remote: never sleeps", "Changed from the remote: sleep hours back to the box's own",
          "Changed from the remote: sleeps 22:30–06:30", "Changed from the remote: sleeps 22:30–06:30",
-         "Stat show started from the remote", "Woken up from the remote"]);
+         "Stat show started from the remote", "Test animation: nudge", "Woken up from the remote"]);
   check("activity: no emails or real names", /@example\.com|Secret|Surname/.test(JSON.stringify(detail.activity)), false);
   check("box detail: no key hashes", JSON.stringify(detail).includes(stored[0].key_hash), false);
   for (let i = 0; i < 30; i++) await post(`desk/box/${ownerBox}/show`, {}, OWNER);
