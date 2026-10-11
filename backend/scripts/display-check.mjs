@@ -563,6 +563,9 @@ async function main() {
          "Changed from the remote: never sleeps", "Changed from the remote: sleep hours back to the box's own",
          "Changed from the remote: sleeps 22:30–06:30", "Changed from the remote: sleeps 22:30–06:30",
          "Stat show started from the remote", "Test animation: nudge", "Woken up from the remote"]);
+  const joins = detail.activity.filter((x) => x.kind === "new_user");
+  check("activity: an admin's box logs signups", joins.length > 0, true);
+  check("activity: signups are a number, never who", joins.every((x) => /^New user #[\d,]+ joined Mile A Day( 🎉)?$/.test(x.text)), true);
   check("activity: no emails or real names", /@example\.com|Secret|Surname/.test(JSON.stringify(detail.activity)), false);
   check("box detail: no key hashes", JSON.stringify(detail).includes(stored[0].key_hash), false);
 
