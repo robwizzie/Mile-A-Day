@@ -158,12 +158,10 @@ struct RecoveryModeView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("When did it happen?")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
-                Picker("When did it happen?", selection: $backdateDays) {
-                    ForEach(0...status.max_backdate_days, id: \.self) { day in
-                        Text(day == 0 ? "Today" : "\(day)d ago").tag(day)
-                    }
-                }
-                .pickerStyle(.segmented)
+                dayStrip(maxDaysAgo: status.max_backdate_days)
+                Text(backdateCaption)
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(.secondary)
             }
 
             Button {
@@ -181,6 +179,79 @@ struct RecoveryModeView: View {
             Text("You can end it once the \(status.min_days) days are up.")
                 .font(.system(size: 11.5, design: .rounded))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// The days you can start the pause on, as tiles: weekday over date.
+    ///
+    /// Not a segmented control: today plus the server's backdate limit is
+    /// eight choices, and eight segments across a phone leave ~40pt each, so
+    /// every label ("Today", "3d ago") truncated. A tile only has to hold
+    /// "TODAY"/"THU" over a number. Should the limit grow past what fits,
+    /// the same tiles scroll instead of shrinking.
+    private func dayStrip(maxDaysAgo: Int) -> some View {
+        let days = Array(0...max(0, maxDaysAgo))
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 4) {
+                ForEach(days, id: \.self) { dayTile(daysAgo: $0) }
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
+                    ForEach(days, id: \.self) { dayTile(daysAgo: $0).frame(width: 44) }
+                }
+            }
+        }
+    }
+
+    private func dayTile(daysAgo: Int) -> some View {
+        let date = InjuryPauseDate.date(daysAgo: daysAgo)
+        let selected = backdateDays == daysAgo
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return Button {
+            MADHaptics.tap()
+            backdateDays = daysAgo
+        } label: {
+            VStack(spacing: 1) {
+                Group {
+                    if daysAgo == 0 {
+                        Text("Today")
+                    } else {
+                        Text(date.formatted(.dateTime.weekday(.abbreviated)))
+                    }
+                }
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .textCase(.uppercase)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .foregroundStyle(selected ? Color.white.opacity(0.85) : Color.secondary)
+                Text(date.formatted(.dateTime.day()))
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .foregroundStyle(selected ? Color.white : Color.primary)
+            }
+            .frame(minWidth: 38, maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .background(shape.fill(selected ? MADTheme.Colors.madRed : Color(.secondarySystemBackground)))
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("\(date.formatted(.dateTime.weekday(.wide).month(.wide).day())), \(Self.agoText(daysAgo))"))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// "Thu, Oct 8 · 3 days ago" under the tiles, so the choice is spelled out.
+    private var backdateCaption: String {
+        let date = InjuryPauseDate.date(daysAgo: backdateDays)
+        return "\(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())) · \(Self.agoText(backdateDays))"
+    }
+
+    private static func agoText(_ days: Int) -> String {
+        switch days {
+        case 0: return String(localized: "today")
+        case 1: return String(localized: "yesterday")
+        default: return String(localized: "\(days) days ago")
         }
     }
 
@@ -314,6 +385,12 @@ struct RecoveryModeView: View {
 /// `local_date` under. Never UTC: an evening injury would land on the wrong day
 /// and either miss the backdate window or skip a day the user actually ran.
 enum InjuryPauseDate {
+    /// The day `daysAgo` local days back — the same day the tile shows and
+    /// `localDateString` sends.
+    static func date(daysAgo: Int) -> Date {
+        Calendar.current.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
+    }
+
     static func localDateString(daysAgo: Int) -> String? {
         guard let date = Calendar.current.date(byAdding: .day, value: -daysAgo, to: Date()) else {
             return nil
