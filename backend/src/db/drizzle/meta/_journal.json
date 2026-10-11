@@ -652,6 +652,20 @@
       "when": 1791258648298,
       "tag": "0092_shoe_defaults",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1791681629380,
+      "tag": "0093_desk_doodles",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1791683338889,
+      "tag": "0094_desk_interest",
+      "breakpoints": true
     }
   ]
 }

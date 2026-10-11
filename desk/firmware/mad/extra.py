@@ -6,6 +6,7 @@ import math
 import random
 from mad.gfx import (fit, miles_text, glyph, BLACK, MAROON_DIM, MAROON, RED, WHITE, FAR, SPARK, GREEN,
                      FL_YELLOW, FL_GOLD, FL_ORANGE, FL_DEEP, HEAT_L, HEAT_D, F5, F3, FB,
+                     WATER_LIGHT, PURPLE, crown,
                      text_width, draw_text, draw_box, blit, fill, draw_icon, icon_width,
                      ease, ease_out)
 from mad.fx import typed, particles, burst, mascot_at_left
@@ -23,6 +24,14 @@ def length(ev):
     if kind == "review":
         w = rich_width(ev[2])
         return 7.5 if w <= 62 else max(7.5, 1.8 + 2 * (64 + w) / SCROLL + 0.4)
+    if kind == "doodle":
+        return DOODLE_END
+    if kind == "lead":
+        return 7.0
+    if kind == "replay":
+        return 8.5
+    if kind == "dizzy":
+        return 5.0
     return 7.5
 
 
@@ -455,3 +464,128 @@ def review(app, b, ev, t, now, dt):
             draw_rich(b, (64 - w) // 2, 22, title)
         else:
             draw_rich(b, int(64 - ((t - 1.6) * SCROLL) % (64 + w)), 22, title)
+
+
+# ---------------- a doodle from the other desk ----------------
+# The picture arrives run-length coded: a colour digit, then one length char
+# (1..64). It dissolves in like a postcard turning over, holds, dissolves out.
+RUN = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_"
+INK = (BLACK, WHITE, RED, FL_GOLD, FL_ORANGE, GREEN, WATER_LIGHT, PURPLE)
+D_IN, D_SHOW, D_OUT = 1.8, 3.2, 12.0       # title until 1.8 s, picture by 3.2 s
+DOODLE_END = 13.6
+
+
+def decode(code, bmp):
+    """Paint a coded doodle into a 64x32 bitmap. Anything malformed stops it."""
+    i = 0
+    for k in range(0, len(code) - 1, 2):
+        c = "01234567".find(code[k])
+        n = RUN.find(code[k + 1]) + 1
+        if c < 0 or n < 1:
+            break
+        col = INK[c]
+        for _ in range(n):
+            if i >= 2048:
+                return
+            bmp[i & 63, i >> 6] = col
+            i += 1
+    while i < 2048:
+        bmp[i & 63, i >> 6] = BLACK
+        i += 1
+
+
+def _dissolve(b, src, upto):
+    """Copy the first `upto` pixels of a fixed scatter order (an odd multiple
+    mod 2048 visits every pixel once)."""
+    for j in range(upto):
+        i = (j * 1021) & 2047
+        x, y = i & 63, i >> 6
+        b[x, y] = src[x, y]
+
+
+def doodle(app, b, ev, t, now, dt):
+    """DOODLE / FROM DAVE, then the picture dissolves in, holds, and goes."""
+    if not getattr(app, "popped", False):
+        decode(ev[2], app.card_a)
+        app.popped = True
+    if t >= D_OUT:                                  # dissolve out to black
+        fill(b, 0, 0, 64, 32, BLACK)
+        k = int(2048 * (1 - min(1.0, (t - D_OUT) / (DOODLE_END - D_OUT - 0.2))))
+        _dissolve(b, app.card_a, max(0, k))
+        return
+    if t >= D_SHOW:
+        blit(b, app.card_a, 0, 0)
+        return
+    # the title: a little postcard with a stamp
+    fill(b, 6, 2, 58, 30, MAROON_DIM)
+    fill(b, 7, 3, 57, 29, BLACK)
+    fill(b, 50, 5, 55, 11, RED)
+    fill(b, 51, 6, 54, 10, FL_GOLD)
+    typed(b, 7, 49, 8, "DOODLE", t - 0.1, WHITE, F5)
+    typed(b, 7, 57, 18, "FROM " + ev[1], t - 0.5, RED, F3, 0.04)
+    if t > D_IN:
+        _dissolve(b, app.card_a, int(2048 * ease((t - D_IN) / (D_SHOW - D_IN))))
+
+
+# ---------------- the lead changed hands (Versus) ----------------
+def lead(app, b, ev, t, now, dt):
+    """A crown drops onto the mascot: DAVE / TAKES THE / LEAD! and the score."""
+    name, a, c = ev[1], ev[2], ev[3]
+    f = app.mascot_frame(now, big=True)
+    y = (32 - f.height) // 2 + 2
+    if app.mascot and t > 0.9:
+        y -= int(round(abs(math.sin(t * math.pi * 1.4)) * 2))
+    x = (22 - f.width) // 2
+    app.draw_mascot(b, f, x, y, now)
+    land = y - 4 + (1 if app.mascot == 0 else 2)
+    fall = ease_out(min(1.0, t / 0.8))
+    cy = int(round(-5 + (land + 5) * fall))
+    crown(b, x + (f.width - 7) // 2, cy)
+    if 0.8 < t < 0.9 or (t > 1.0 and random.random() < 0.18):
+        burst(app, random.uniform(26, 62), random.uniform(2, 10), 6, 9)
+    particles(app, b, dt, gravity=8)
+    x0 = 23
+    fit(b, x0, 64, 2, name, WHITE, F5, max(0.0, t - 0.6))
+    typed(b, x0, 64, 11, "TAKES THE", t - 0.8, RED, F3, 0.04)
+    typed(b, x0, 64, 18, "LEAD!", t - 1.2, FL_GOLD, F5)
+    if t > 2.0:
+        fmt = "%.2f" if text_width("%.2f TO %.2f" % (a, c), F3) <= 40 else "%.1f"
+        draw_box(b, x0, 64, 27, (fmt + " TO " + fmt) % (int(a * 100) / 100, int(c * 100) / 100), FAR, F3)
+
+
+# ---------------- my run, replayed mile by mile ----------------
+def replay(app, b, ev, t, now, dt):
+    """The run just synced: its miles draw in one by one (taller = faster),
+    the fastest glows gold, then a little confetti."""
+    from mad import boards
+    boards.splits_card(app, b, min(1.0, t / 3.2), now, ev[1] if len(ev) > 1 else None)
+    if t >= 3.2 and not app.popped:
+        app.popped = True
+        burst(app, 32, 10, 18, 12)
+    particles(app, b, dt, gravity=10)
+
+
+# ---------------- shaken: the mascot gets dizzy (cute) ----------------
+def _star(b, x, y, col):
+    for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
+        if 0 <= x + dx < 64 and 0 <= y + dy < 32:
+            b[x + dx, y + dy] = col
+
+
+def dizzy(app, b, ev, t, now, dt):
+    """Picked up and shaken: the mascot sways and settles, three little stars
+    circle its head. WHOA! / SO DIZZY."""
+    f = app.mascot_frame(now, big=True)
+    calm = max(0.0, 1.0 - t / 3.8)
+    sway = int(round(3 * calm * math.sin(t * 7)))
+    x = (22 - f.width) // 2 + sway
+    y = (32 - f.height) // 2 + 2
+    app.draw_mascot(b, f, x, y, now)
+    cx, cy = x + f.width // 2, max(2, y - 1)
+    for k in range(3):
+        a = now * 4 + k * 2.094
+        sx = cx + int(round(8 * math.cos(a)))
+        sy = cy + int(round(2 * math.sin(a)))
+        _star(b, sx, sy, (FL_YELLOW, WHITE, FL_GOLD)[k])
+    typed(b, 23, 64, 7, "WHOA!", t - 0.3, FL_GOLD, F5)
+    typed(b, 23, 64, 18, "SO DIZZY", t - 0.9, RED, F3, 0.05)

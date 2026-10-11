@@ -5,7 +5,10 @@
 SCENES = ("user", "milestone", "nudge", "hype", "friend", "friend_walk", "finished",
           "friendmile", "atrisk", "reminder", "morning", "mile", "streak", "yearago",
           "pr", "message", "comment", "medal", "review", "recap", "holiday",
-          "newyear", "countdown")
+          "newyear", "countdown", "lead", "doodle", "record", "replay", "dizzy")
+# The test doodle: a heart with a few stars (run-length coded like the feed's).
+HEART = ("0_0_0_0O2207220l2603260h2L0f2L0S300A2N0Q32092N0R300A2N0A300Q2P08320P25112H09300R23112H0d23102I0d2N0d"
+         "2N0N400F2L0N420E2L0O400G2J0G700Q2H0G720P2H0H700R2F0m2D0o2B0r270d600F250d620F230H500M600b520z500_0_0_0A")
 
 
 def sample(app, scene):
@@ -38,4 +41,10 @@ def sample(app, scene):
         "holiday": ("holiday", "THANKSGIVING"),
         "newyear": ("newyear", year + 1),
         "countdown": ("countdown", 12.0, year + 1),
+        "lead": ("lead", who, 2.0, 1.5),
+        "doodle": ("doodle", who, HEART),
+        "replay": ("replay",) if (app.me or {}).get("last_run") else
+                  ("replay", {"miles": 3.1, "seconds": 1580, "kind": "run", "splits": [512, 498, 487]}),
+        "dizzy": ("dizzy",),
+        "record": ("pr", "SIGNUPS", "%d TODAY" % max(1, int((app.growth or {}).get("today") or 0)), "TEST"),
     }.get(scene)

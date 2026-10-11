@@ -13,6 +13,10 @@
 #   DOWN press -> switch mascot: RUNNER <-> FLAMEY
 #   DOWN hold  -> play the stat show now
 #   (at night the first press just wakes the screen up for 2 minutes)
+# The box itself (its built-in motion sensor):
+#   tap        -> wakes it at night (by day the mascot gives a little hop)
+#   double tap -> next style
+#   shake      -> the mascot gets dizzy (stars and all)
 # Seasonal looks switch by date on their own: jack-o'-lantern Flamey and a
 # pumpkin-head runner Oct 25-31, Santa hats Dec 1-26, fireworks at New Year.
 #   (with matching scenery on every screen: snow, sleigh, bats, candy corn...)
@@ -344,6 +348,15 @@ def main():
 
     import supervisor
     frame_due = supervisor.ticks_ms()
+    try:
+        from mad.motion import Motion
+        motion = Motion()
+        if not motion.ok:
+            motion = None
+    except Exception as e:
+        print("motion:", e)
+        motion = None
+    dizzy_at = -1e9
     while True:
         now = time.monotonic()
         # only fetch when the screen is still, so animations never stutter
@@ -384,6 +397,19 @@ def main():
             save_choice(app.style, app.mascot)      # (writes the nvm tag too)
             save_celebrated(app.celebrated)
             save_desk_rev(app.desk_rev)
+        mv = motion.poll(now) if motion else None
+        if mv:
+            if app.wake(now):
+                mv = None                       # night: it only wakes it
+            elif mv == "shake" and now - dizzy_at > 20 and app.mode in ("dash", "show"):
+                dizzy_at = now
+                app.push(("dizzy",))
+                app.next_event_at = min(app.next_event_at, now)
+            elif mv == "double" and app.mode in ("dash", "show"):
+                app.next_style(now)
+                save_choice(app.style, app.mascot)
+            elif mv == "tap":
+                app.poke_at = now
         if (up or down) and app.wake(now):
             up = down = None                   # night: the press only wakes it
         if app.mode in ("dash", "show") and (up or down):

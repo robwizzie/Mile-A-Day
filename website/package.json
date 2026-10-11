@@ -11,6 +11,7 @@
     "@vercel/analytics": "1.6.1",
     "d3-force": "^3.0.0",
     "d3-geo": "^3.1.1",
+    "gifenc": "^1.0.3",
     "lucide-react": "^0.564.0",
     "next": "16.1.6",
     "react": "19.2.4",

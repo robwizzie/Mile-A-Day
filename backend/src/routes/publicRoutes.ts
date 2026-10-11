@@ -7,7 +7,10 @@ import {
   getPublicStatsController,
   getPublicPostController,
   joinAndroidWaitlistController,
+  getPublicDeskController,
+  deskInterestController,
 } from "../controllers/publicController.js";
+import { deskInterestLimiter, publicDeskLimiter } from "../middleware/rateLimit.js";
 
 const router = Router();
 
@@ -37,6 +40,10 @@ router.get("/stats", getPublicStatsController);
 router.get("/posts/:postId", getPublicPostController);
 // Android launch waitlist signups from the site footer form.
 router.post("/android-waitlist", joinAndroidWaitlistController);
+// The website's live desk twin (community aggregates only) and its
+// "I'd buy one" form.
+router.get("/desk", publicDeskLimiter, getPublicDeskController);
+router.post("/desk-interest", deskInterestLimiter, deskInterestController);
 
 // Unknown /public/* paths should 404 here, not fall through to the auth
 // middleware (which confusingly answers "access token required").

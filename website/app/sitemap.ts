@@ -15,8 +15,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
     },
     {
+      url: `${BASE_URL}/desk`,
+      lastModified: "2026-10-10",
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
       url: `${BASE_URL}/privacy`,
-      lastModified: "2026-05-16",
+      lastModified: "2026-10-10",
       changeFrequency: "yearly",
       priority: 0.3,
     },

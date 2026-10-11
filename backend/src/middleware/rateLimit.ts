@@ -293,6 +293,22 @@ export const RATE_LIMIT_SPECS = {
     key: "ip",
     message: "Too many requests. Please try again in a moment.",
   },
+  // The website's desk twin polls /public/desk every ~20 s per open tab.
+  publicDesk: {
+    name: "PUBLIC_DESK",
+    windowMs: 15 * MIN,
+    max: 300,
+    key: "ip",
+    message: "Too many requests. Please try again in a moment.",
+  },
+  // "I'd buy a desk box" signups: a person sends one, maybe fixes a typo.
+  deskInterest: {
+    name: "DESK_INTEREST",
+    windowMs: 60 * MIN,
+    max: 8,
+    key: "ip",
+    message: "Thanks! We already have your signup. Try again later if you need to change it.",
+  },
   // Post/comment reports: each one lands in the moderation queue.
   report: {
     name: "REPORT",
@@ -323,3 +339,5 @@ export const commentLimiter = makeLimiter(RATE_LIMIT_SPECS.comment);
 export const reportLimiter = makeLimiter(RATE_LIMIT_SPECS.report);
 export const globalUserLimiter = makeLimiter(RATE_LIMIT_SPECS.global);
 export const displayLimiter = makeLimiter(RATE_LIMIT_SPECS.display);
+export const publicDeskLimiter = makeLimiter(RATE_LIMIT_SPECS.publicDesk);
+export const deskInterestLimiter = makeLimiter(RATE_LIMIT_SPECS.deskInterest);

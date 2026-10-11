@@ -9,12 +9,20 @@ from mad.gfx import (BLACK, MAROON_DIM, MAROON, RED, WHITE, FL_YELLOW, GREEN,
                      text_width, draw_text, ink, draw_box, draw_centered, blit,
                      fill, draw_icon, icon_width, commas, short, num, ease,
                      ease_out, art_bitmap, set_dim, upper_name)
-LAZY = ("message", "holiday", "countdown", "medal", "review", "comment", "friendmile")   # scenes in extra.py
-MODES = (2, 4, 5, 6, 7)       # styles drawn by mad/modes.py
+LAZY = ("message", "holiday", "countdown", "medal", "review", "comment", "friendmile",
+        "doodle", "lead", "replay", "dizzy")     # scenes in extra.py
+MODES = (2, 4, 5, 6, 7, 8, 9, 11)     # styles drawn by mad/modes.py (9: mad/boards.py)
 
-STYLES = ("CLASSIC", "SPOTLIGHT", "ARCADE", "BIG", "CAMPFIRE", "RACE", "CLOCK")
+STYLES = ("CLASSIC", "SPOTLIGHT", "ARCADE", "BIG", "CAMPFIRE", "RACE", "CLOCK", "VERSUS",
+          "GROWTH", "ODOMETER", "SHOWCASE")
 CLOCK = 6
-LIVE = 7                 # not a choice: shown while the owner is out running
+VERSUS = 7               # head to head with the other desk (a friend's real numbers)
+GROWTH = 8               # founder mode: signups (admins' desks only)
+ODOMETER = 9             # community total miles on rolling wheels
+SHOWCASE = 10            # cycles every style it can show, with a stat show between
+LIVE = 11                # not a choice: shown while the owner is out running
+SHOWCASE_S = 40.0        # Showcase: seconds per style
+SHOWCASE_SHOW = 180.0    # ...and a stat show about every 3 minutes
 MASCOTS = ("RUNNER", "FLAMEY")
 BOOT_MIN = 3.0           # keep the logo up at least this long
 DASH_SECONDS = 25        # Classic: still dashboard time between stat shows
@@ -41,18 +49,32 @@ STATS = (
     ("goal", "miles", "MILE GOAL"),                # 12 next community mile goal
     ("days", "streak", "LAST 64 DAYS"),            # 13 my streak heatmap
     ("run_miles_total", "running", "RUN VS WALK"),  # 14 runs vs walks (feed only)
+    ("leaders", "streak", "FRIEND RANK"),          # 15 friends' streak leaderboard
+    ("hours", "running", "BUSIEST HOUR"),          # 16 today's runs by hour (feed only)
+    ("last_run", "running", "MY LAST RUN"),        # 17 my last run, mile by mile
+    ("records", "miles", "MY RECORDS"),            # 18 my personal records
 )
 ME = 11
 GOAL = 12
 HEAT = 13
 RUNWALK = 14
+LEADERS = 15
+HOURS = 16
+SPLITS = 17
+RECORDS = 18
+BOARDS = (LEADERS, HOURS, SPLITS, RECORDS)     # drawn by mad/boards.py
 HOLIDAYS = ("VALENTINE", "STPATRICK", "JULY4", "THANKSGIVING", "ANNIV")
 # Flamey's flame burning down when the mile still isn't done in the evening.
 # (7..12 are the same tones in a Flamey's Closet colour.)
 DIM_NERVOUS = {16: 17, 23: 17, 17: 18, 7: 8, 11: 8, 8: 9}
 DIM_PANIC = {16: 18, 23: 18, 17: 18, 18: 19, 19: 24, 7: 9, 11: 9, 8: 9, 9: 10, 10: 12}
 # Rotation order (feed-only stats drop out without a key; today's 0s skip).
-ORDER = (1, ME, HEAT, 2, GOAL, RUNWALK, 7, 3, 4, 8, 9, 10, 5, 6)
+ORDER = (1, ME, SPLITS, HEAT, LEADERS, RECORDS, 2, GOAL, HOURS, RUNWALK, 7, 3, 4, 8, 9, 10, 5, 6)
+
+
+def _boards():
+    from mad import boards
+    return boards
 
 
 def next_day(date):
@@ -231,6 +253,18 @@ class App:
         self.last_m = None
         self.last_remind = None
         self.sched_at = 0.0
+        self.rival = None                # head to head: the other desk owner (feed)
+        self.growth = None               # founder mode signups (feed, admins only)
+        self.lead = None                 # who leads today: "me" / "rival" / None
+        self.vs_prev = None              # (my miles, their miles) at the last feed
+        self.seen_doodles = None
+        self.record_day = None           # signup record already celebrated (date)
+        self.hours = None                # today's community runs by hour (feed)
+        self.leaders = None              # friends' streak leaderboard (feed)
+        self.seen_run = None             # last run already replayed (id)
+        self.sc_k = 0                    # Showcase: which style, since when
+        self.sc_at = None
+        self.sc_show = None
 
     # ================= data in =================
     def set_data(self, data, live, now):
@@ -245,6 +279,13 @@ class App:
         self.me = data.get("me") if feed else None
         self.friends = (data.get("friends_running") or ())[:3] if feed else ()
         self.at_risk = (data.get("friends_at_risk") or {}) if feed else {}
+        r, g = (data.get("rival"), data.get("growth")) if feed else (None, None)
+        self.rival = r if isinstance(r, dict) else None
+        prev_growth, self.growth = self.growth, (g if isinstance(g, dict) else None)
+        h = data.get("hours")
+        self.hours = h if isinstance(h, list) and len(h) == 24 else None
+        ld = data.get("leaders") if feed else None
+        self.leaders = ld if isinstance(ld, list) else None
         if self.me:
             try:
                 h, m, s = (int(x) for x in self.me.get("local_time", "").split(":"))
@@ -283,6 +324,13 @@ class App:
             self._friend_miles(data.get("friends_miles") or (), now)
             self._desk(data.get("desk"), now)
             self._commands(data.get("commands") or (), now)
+            self._doodles(data.get("doodles") or ())
+            if live and not first:
+                self._lead()
+                self._record(prev_growth)
+            else:
+                self._lead(quiet=True)
+            self._replay(live and not first)
             names = tuple(upper_name(f.get("name")) for f in self.friends)
             for f, name in zip(self.friends, names):
                 if name not in self.running_names:
@@ -299,6 +347,18 @@ class App:
                 o.append(i)
             elif i == HEAT:
                 if self.me and len(self.me.get("days") or ()) >= 7:
+                    o.append(i)
+            elif i == LEADERS:
+                if self.me and len(self.leaders or ()) >= 2:
+                    o.append(i)
+            elif i == HOURS:
+                if self.hours and sum(int(x or 0) for x in self.hours) > 0:
+                    o.append(i)
+            elif i == SPLITS:
+                if self.me and isinstance(self.me.get("last_run"), dict):
+                    o.append(i)
+            elif i == RECORDS:
+                if self.me and _boards().records(self):
                     o.append(i)
             elif i >= 7:
                 if feed and num(stats, STATS[i][0]) > 0:
@@ -318,6 +378,98 @@ class App:
                 continue
             self.push(("message", upper_name(m.get("from")), str(m.get("text") or "")[:64]))
         self.seen_msgs = (ids + [i for i in seen if i not in ids])[:10]
+
+    def _doodles(self, doodles):
+        """A doodle from the other desk: each fades in once. At boot, only
+        ones from the last half hour."""
+        ids = [d.get("id") for d in doodles]
+        first = self.seen_doodles is None
+        seen = self.seen_doodles or []
+        for d in reversed(doodles):
+            px = d.get("px")
+            if (d.get("id") in seen or (first and (d.get("age_s") or 0) > 1800)
+                    or not isinstance(px, str) or len(px) > 4096):
+                continue
+            self.push(("doodle", upper_name(d.get("from")), px))
+        self.seen_doodles = (ids + [i for i in seen if i not in ids])[:10]
+
+    def _replay(self, news):
+        """My run just synced: replay it mile by mile (once per run)."""
+        r = (self.me or {}).get("last_run")
+        rid = r.get("id") if isinstance(r, dict) else None
+        if news and rid and rid != self.seen_run and self.seen_run is not None \
+                and len(r.get("splits") or ()) >= 1 and (r.get("age_s") or 0) < 3600:
+            self.push(("replay",))
+        if rid or self.seen_run is None:
+            self.seen_run = rid or ""
+
+    def leader(self):
+        """Who's ahead today: "me", "rival", or None for a tie / no rival."""
+        r = self.rival
+        if not (r and self.me):
+            return None
+        a, b = float(self.me.get("miles_today") or 0), float(r.get("miles_today") or 0)
+        if abs(a - b) < 0.005:
+            return None
+        return "me" if a > b else "rival"
+
+    def _lead(self, quiet=False):
+        """The lead changed hands: only when the new leader just ran (so a
+        midnight reset or a deleted run never throws a party)."""
+        ld = self.leader()
+        a = float((self.me or {}).get("miles_today") or 0)
+        b = float((self.rival or {}).get("miles_today") or 0)
+        prev, self.vs_prev = self.vs_prev, (a, b) if self.rival else None
+        old, self.lead = self.lead, ld
+        if quiet or not ld or ld == old or not prev:
+            return
+        ran = a > prev[0] + 0.005 if ld == "me" else b > prev[1] + 0.005
+        if ran:
+            name = (self.me.get("username") if ld == "me" else self.rival.get("name"))
+            self.push(("lead", upper_name(name, 16), max(a, b), min(a, b)))
+
+    def _record(self, prev):
+        """Founder mode: today's signups just passed the best day of the last 30."""
+        g = self.growth
+        if not g or not prev:
+            return
+        try:
+            n, best, was = int(g.get("today") or 0), int(g.get("best_30") or 0), int(prev.get("today") or 0)
+        except (ValueError, TypeError):
+            return
+        day = (g.get("dows") or "") + str(self.date)
+        if best > 0 and n > best >= was and self.record_day != day:
+            self.record_day = day
+            self.push(("pr", "SIGNUPS", "%d TODAY" % n, "RECORD!"))
+
+    def wipe(self, now, change):
+        """The mascot wipes the screen over to what `change()` makes it."""
+        blit(self.card_b, self.fb, 0, 0)
+        change()
+        if self.view() not in MODES:
+            unload("modes")
+        self.mode, self.mode_start = "wipe", now
+
+    def tick_wipe(self, now):
+        u = (now - self.mode_start) / T_TRANS
+        if u < 1:
+            self.render_dash_still(self.dash, now)
+            self.transition(self.dash, self.card_b, u, now)
+            return
+        self.mode, self.mode_start = "dash", now
+
+    def can_show(self, st):
+        """Race and Clock need my own numbers, Versus a rival, Growth the
+        founder numbers; without them the box shows Classic."""
+        if st in (5, 6):
+            return bool(self.me)
+        if st == VERSUS:
+            return bool(self.rival and self.me)
+        if st == GROWTH:
+            return bool(self.growth)
+        if st == SHOWCASE:
+            return True
+        return True
 
     def _medals(self, medals):
         """Medals the owner just earned: each celebrates once. At boot, only
@@ -356,7 +508,7 @@ class App:
         st, ma = d.get("style"), d.get("mascot")
         if isinstance(ma, int) and 0 <= ma < len(MASCOTS):
             self.mascot = ma
-        if isinstance(st, int) and 0 <= st < len(STYLES) and (st not in (5, 6) or self.me):
+        if isinstance(st, int) and 0 <= st < len(STYLES):
             if st != self.style:
                 self.style = st
                 self._restart_dash(now)
@@ -549,6 +701,15 @@ class App:
         if i == RUNWALK:
             r, w = self.runs_walks(self.runs_walks_today())
             return 100 * r / (r + w) if r + w else 0
+        if i == LEADERS:
+            return _boards().my_rank(self)
+        if i == HOURS:
+            return sum(int(x or 0) for x in (self.hours or ()))
+        if i == SPLITS:
+            r = (self.me or {}).get("last_run")
+            return float(r.get("miles") or 0) if isinstance(r, dict) else 0
+        if i == RECORDS:
+            return len(_boards().records(self))
         return num(self.stats, STATS[i][0]) if self.stats else 0
 
     def goal(self):
@@ -614,7 +775,31 @@ class App:
             return LIVE
         if self.night:
             return CLOCK
-        return self.style
+        st = self.showcase_style() if self.style == SHOWCASE else self.style
+        return st if self.can_show(st) else 0
+
+    def showcase_style(self):
+        """Showcase: the style it's on now (every one this box can show)."""
+        pick = [s for s in range(SHOWCASE) if s != CLOCK and self.can_show(s)]
+        return pick[self.sc_k % len(pick)] if pick else 0
+
+    def _showcase(self, now):
+        """Once a second: Showcase moves to the next style every SHOWCASE_S
+        (the mascot wipes it in) and runs the stat show every few minutes."""
+        if self.style != SHOWCASE or self.night:
+            self.sc_at = None
+            return
+        if self.sc_at is None:
+            self.sc_at = self.sc_show = now
+            return
+        if self.mode != "dash":                # (a stat show or an alert: after it)
+            return
+        if now - self.sc_show >= SHOWCASE_SHOW and self.stats:
+            self.sc_show = self.sc_at = now
+            self.start_show(now)
+        elif now - self.sc_at >= SHOWCASE_S:
+            self.sc_at = now
+            self.wipe(now, lambda: setattr(self, "sc_k", self.sc_k + 1))
 
     def _schedule(self, now):
         """Once a second: night mode, the 9pm recap, mile reminders."""
@@ -622,6 +807,7 @@ class App:
             return
         self.sched_at = now + 1.0
         self._update_night(now)
+        self._showcase(now)
         s = self.local_seconds(now)
         if s is None or not self.me or not self.live:
             return
@@ -680,7 +866,7 @@ class App:
     def next_style(self, now):
         for _ in STYLES:
             self.style = (self.style + 1) % len(STYLES)
-            if self.style not in (5, 6) or self.me:    # Race/Clock need the feed
+            if self.can_show(self.style):     # Race/Clock/Versus/Growth need the feed
                 break
         if self.style not in MODES:
             unload("modes")                   # Classic/Spotlight/Big don't need it
@@ -777,11 +963,16 @@ class App:
             return
         f = self.mascot_frame(now)
         if self.mascot == 0:
-            self.draw_mascot(b, f, 0, 0, now)
+            poke = now - getattr(self, "poke_at", -1e9)     # tapped: a little jump
+            self.draw_mascot(b, f, 0, -int(round(abs(math.sin(poke / 0.6 * math.pi)) * 2))
+                             if 0 <= poke < 1.2 else 0, now)
         else:
             # every 9 s he does a happy little double hop (not when he's nervous)
             p = now % 9.0
             calm = self.mood(now) not in ("nervous", "panic")
+            poke = now - getattr(self, "poke_at", -1e9)
+            if 0 <= poke < 1.2:                # tapped: a happy hop right now
+                p, calm = poke, True
             hop = int(round(abs(math.sin(p / 0.6 * math.pi)) * 2)) if p < 1.2 and calm else 0
             self.draw_mascot(b, f, (19 - f.width) // 2, -hop, now)
 
@@ -848,6 +1039,8 @@ class App:
             return "%d/%d" % (int(self.value(i) * frac + 0.5), n)
         if i == RUNWALK:
             return "%d%%" % int(self.value(i) * frac + 0.5)
+        if i in BOARDS:
+            return self._board_hud(i)[0]
         v = self.value(i) * frac
         if i == 1 and v < 100 and v != int(v):
             return "%.1f" % v
@@ -865,7 +1058,26 @@ class App:
             return "DAYS DONE", RED
         if i == RUNWALK:
             return ("RUNS TODAY" if self.runs_walks_today() else "RUNS ALL TIME"), RED
+        if i in BOARDS:
+            return self._board_hud(i)[1], RED
         return STATS[i][2], RED
+
+    def _board_hud(self, i):
+        """(number, label) for the score boards in one-line places (HUD)."""
+        bd = _boards()
+        if i == LEADERS:
+            return "#%d" % bd.my_rank(self), "FRIEND RANK"
+        if i == HOURS:
+            mood, ap = bd._peak_text(self)
+            return (ap or "-"), "BUSIEST HOUR"
+        if i == SPLITS:
+            r = bd.last_run(self) or {}
+            sp = [x for x in (r.get("splits") or ()) if isinstance(x, int) and x > 0]
+            if sp:
+                return bd._clock(min(sp)), "BEST MILE"
+            return "%.1f" % (int(float(r.get("miles") or 0) * 10) / 10), "MY LAST RUN"
+        rows = bd.records(self)
+        return (rows[0][1], rows[0][0]) if rows else ("-", "MY RECORDS")
 
     def draw_stat_line(self, b, i, y, frac=1.0, x0=0, x1=64):
         """icon + number on one row (F5), short label centred under it (F3)."""
@@ -876,6 +1088,10 @@ class App:
         if i == HEAT:
             from mad import heat
             heat.heat_line(self, b, y, frac, x0, x1)
+            return
+        if i in BOARDS:
+            bd = _boards()
+            (bd.leaders_line, bd.hours_line, bd.splits_line, bd.records_line)[i - LEADERS](self, b, y, frac, x0, x1)
             return
         ic = STATS[i][1]
         label, col = self.stat_label(i, x1 - x0)
@@ -905,6 +1121,10 @@ class App:
         if i == RUNWALK:
             from mad import cards
             cards.runwalk_card(self, b, frac)
+            return
+        if i in BOARDS:
+            bd = _boards()
+            (bd.leaders_card, bd.hours_card, bd.splits_card, bd.records_card)[i - LEADERS](self, b, frac, now)
             return
         _, ic, label = STATS[i]
         t = self.stat_text(i, frac)
@@ -979,11 +1199,16 @@ class App:
             _modes().campfire(self, fb, now, t)
         elif style == 5:
             _modes().race(self, fb, now, t)
+        elif style == LIVE:
+            _modes().live(self, fb, now, t)
+        elif style == VERSUS:
+            _modes().versus(self, fb, now, t)
+        elif style == GROWTH:
+            _modes().growth(self, fb, now, t)
+        elif style == ODOMETER:
+            _boards().odometer(self, fb, now, t)
         else:
-            if style == LIVE:
-                _modes().live(self, fb, now, t)
-            else:
-                _modes().clock(self, fb, now, t)
+            _modes().clock(self, fb, now, t)
 
     def big(self, fb, now, t):
         """BIG: one stat at a time, the user count between each."""
@@ -1054,7 +1279,7 @@ class App:
     # ================= frame =================
     def tick(self, now):
         self._schedule(now)
-        if self.mode in ("dash", "show", "intro"):
+        if self.mode in ("dash", "show", "intro", "wipe"):
             self.users_counter(now)
         if (self.queue and self.mode in ("dash", "show") and now >= self.next_event_at
                 and not self.toast):
@@ -1068,11 +1293,13 @@ class App:
             self.tick_boot(now)
         elif self.mode == "show":
             self.tick_show(now)
+        elif self.mode == "wipe":
+            self.tick_wipe(now)
         else:
             self.tick_dash(now)
         if self.look and self.mode not in ("boot", "intro"):
             from mad import decor                         # seasonal scenery
-            v = self.view() if self.mode in ("dash", "show") else -1
+            v = self.view() if self.mode in ("dash", "show", "wipe") else -1
             if v == 2 and getattr(self, "arcade_rest", False):
                 v = 3                                     # arcade's stat card: dress it like BIG
             decor.backdrop(self, self.fb, now, v)
