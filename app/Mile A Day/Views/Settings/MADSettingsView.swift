@@ -42,7 +42,9 @@ struct MADSettingsView: View {
     @State private var showingDeleteAccountConfirmation = false
     @State private var isDeletingAccount = false
     @State private var deleteAccountErrorMessage: String?
-    @State private var isRecalibratingStreak = false
+    /// Recalibrate's live state. The service owns it, so leaving this page
+    /// and coming back mid-run still shows it running.
+    @ObservedObject private var syncService = WorkoutSyncService.shared
     @State private var recalibrateResultMessage: String?
     @State private var isBackfillingRoutes = false
     @State private var routeBackfillProgress: String?
@@ -456,14 +458,12 @@ struct MADSettingsView: View {
                     MADSettingsRow(
                         icon: "arrow.triangle.2.circlepath",
                         title: "Recalibrate Streak",
-                        subtitle: isRecalibratingStreak
-                            ? "Re-syncing your workouts…"
-                            : "Fix a streak that looks too low",
+                        subtitle: recalibrateSubtitle,
                         iconColor: .green
                     )
                 }
                 .buttonStyle(.plain)
-                .disabled(isRecalibratingStreak)
+                .disabled(syncService.isRecalibrating)
 
                 divider
 
@@ -483,6 +483,22 @@ struct MADSettingsView: View {
                 .buttonStyle(.plain)
                 .disabled(isBackfillingRoutes)
             }
+        }
+    }
+
+    /// The Recalibrate row's subtitle, counting along while it runs (the
+    /// banner at the bottom says the same thing everywhere else).
+    private var recalibrateSubtitle: String {
+        guard let progress = syncService.recalibration, progress.isRunning else {
+            return "Fix a streak that looks too low"
+        }
+        switch progress.stage {
+        case .uploading where progress.total > 0:
+            return "Re-checked \(progress.checked) of \(progress.total) workouts…"
+        case .recomputing:
+            return "Recounting your streak…"
+        default:
+            return "Re-syncing your workouts…"
         }
     }
 
@@ -680,9 +696,7 @@ struct MADSettingsView: View {
     /// truth, so this only ever fills server gaps — it can't shorten a
     /// legitimately broken streak.
     private func recalibrateStreak() async {
-        guard !isRecalibratingStreak else { return }
-        isRecalibratingStreak = true
-        defer { isRecalibratingStreak = false }
+        guard !syncService.isRecalibrating else { return }
 
         do {
             let outcome = try await WorkoutSyncService.shared.recalibrateStreak(
@@ -699,6 +713,8 @@ struct MADSettingsView: View {
                 message += " " + medals
             }
             recalibrateResultMessage = message
+        } catch SyncError.alreadyRunning {
+            return
         } catch {
             recalibrateResultMessage =
                 "We couldn't finish recalibrating right now. Please check your connection and try again."

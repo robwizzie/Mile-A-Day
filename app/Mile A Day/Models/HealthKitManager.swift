@@ -966,6 +966,19 @@ class HealthKitManager: ObservableObject {
                 // Only NOW is an empty list meaningful — before the first success
                 // the UI must show "loading", not "no recent workouts".
                 self.hasLoadedRecentWorkoutsOnce = true
+                #if !os(watchOS)
+                // Fold anything new into the all-history cache too. With an
+                // index on disk, nothing else ever adds to `cachedWorkouts`
+                // after launch (`fetchWorkoutsSmartly` returns early), so the
+                // Workouts calendar — which reads only that cache — showed
+                // today's walk as missing until the app was next relaunched.
+                // An EMPTY cache is skipped: the full-history fetch fills it,
+                // and seeding it with 30 days would make that fetch think it
+                // already had everything.
+                if !self.cachedWorkouts.isEmpty {
+                    self.updateCachedWorkoutData(with: workouts)
+                }
+                #endif
             }
         }
 
