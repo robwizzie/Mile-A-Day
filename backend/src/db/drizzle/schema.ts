@@ -3672,3 +3672,38 @@ export const deskInterest = pgTable(
   },
   (table) => [unique("desk_interest_email_unique").on(table.email)],
 );
+
+// Web push for the desk remote (the admin PWA on a founder's phone). One row
+// per browser subscription, always the subscriber's own; `kinds` = which
+// desk notifications that phone wants.
+export const deskPushSubscriptions = pgTable(
+  "desk_push_subscriptions",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    endpoint: varchar({ length: 1024 }).notNull(),
+    p256dh: varchar({ length: 128 }).notNull(),
+    auth: varchar({ length: 64 }).notNull(),
+    kinds: text().array().notNull(),
+    failures: integer().default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    lastOkAt: timestamp("last_ok_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    unique("desk_push_subscriptions_endpoint_unique").on(table.endpoint),
+    index("idx_desk_push_user").using("btree", table.userId.asc().nullsLast()),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "desk_push_subscriptions_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
+// What the desk push job last saw (user count, newest review, who led...),
+// so each event is sent once.
+export const deskPushState = pgTable("desk_push_state", {
+  key: varchar({ length: 128 }).primaryKey().notNull(),
+  value: text().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+});

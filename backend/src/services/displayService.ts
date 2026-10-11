@@ -10,6 +10,7 @@ import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
 import { ownedFlameyItems, servedFlameyLook } from "./flameyService.js";
 import { postCommentMatchSql } from "./posts/postSql.js";
 import { VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL } from "./visibilityService.js";
+import { prettyTokens, pushTo } from "./deskPushService.js";
 
 const db = PostgresService.getInstance();
 
@@ -233,7 +234,13 @@ export async function createDisplayMessage(
        LEFT JOIN users fu ON fu.user_id = ins.from_user_id`,
     [toUserId, fromUserId, body],
   );
-  return rows[0];
+  const m = rows[0];
+  if (m && toUserId !== fromUserId) {                // a push to the recipient's own phone
+    pushTo([toUserId], "message", {
+      title: `Desk message from @${m.from_username ?? "Mile A Day"}`, body: prettyTokens(m.body), tag: "desk-message",
+    }).catch((e) => console.error("desk push (message):", e));
+  }
+  return m;
 }
 
 /** Recent desk messages: every one, or (with userId) only those to or from that person. */
@@ -517,6 +524,12 @@ export async function sendBoxDoodle(fromBoxId: string, toBoxId: string, px: stri
        FROM ins JOIN users u ON u.user_id = ins.to_user_id`,
     [to.userId, from.userId, px],
   );
+  if (rows[0] && to.userId !== from.userId) {
+    const fromName = from.box.username ?? "a friend";
+    pushTo([to.userId], "doodle", {
+      title: `New doodle from @${fromName} 🎨`, body: "It's on your desk now. Tap to see it.", tag: "doodle",
+    }).catch((e) => console.error("desk push (doodle):", e));
+  }
   return rows[0];
 }
 
@@ -535,7 +548,7 @@ export interface DisplayRival {
 /** Head-to-head: the other desk owner, only when you're accepted friends and
  *  they let friends see their runs (blocks either way and 'private' fail it).
  *  Their own numbers as the app already shows them to a friend. */
-async function getRival(userId: string): Promise<DisplayRival | null> {
+export async function getRival(userId: string): Promise<DisplayRival | null> {
   const who = await db.query<{ user_id: string; name: string }>(
     `SELECT u.user_id, u.username AS name
        FROM display_keys k
@@ -695,7 +708,7 @@ export async function getGrowth(): Promise<DisplayGrowth> {
   return value;
 }
 
-export interface DeskActivity { at: string; kind: string; text: string }
+export interface DeskActivity { at: string; kind: string; text: string; px?: string }
 
 /** What happened on a box lately, newest first: real events only (from the
  *  same sources its feed uses), plus changes made from the remote. */
@@ -754,15 +767,7 @@ async function boxActivity(boxId: string, userId: string): Promise<DeskActivity[
         WHERE f.user_id = $1 AND f.status = 'accepted' AND u.username IS NOT NULL
           AND COALESCE(ns.share_live_presence, TRUE) = TRUE
           AND ${blocked("f.friend_id")}
-       UNION ALL
-       SELECT d.created_at, CASE WHEN d.to_user_id = $1 THEN 'doodle_in' ELSE 'doodle_out' END,
-              CASE WHEN d.to_user_id = $1 THEN 'Doodle from @' || COALESCE(fu.username, 'a friend')
-                   ELSE 'Doodle to @' || COALESCE(tu.username, '?') END
-         FROM desk_doodles d
-         LEFT JOIN users fu ON fu.user_id = d.from_user_id
-         LEFT JOIN users tu ON tu.user_id = d.to_user_id
-        WHERE (d.to_user_id = $1 OR d.from_user_id = $1) AND d.created_at > NOW() - ${days}
-          AND ${blocked("CASE WHEN d.to_user_id = $1 THEN d.from_user_id ELSE d.to_user_id END")}
+
        UNION ALL
        SELECT c.created_at, 'remote',
               CASE c.kind WHEN 'set' THEN 'Changed from the remote: ' || COALESCE(c.detail, '')
@@ -776,7 +781,26 @@ async function boxActivity(boxId: string, userId: string): Promise<DeskActivity[
      LIMIT 60`,
     [userId, boxId],
   );
-  return rows;
+  // Doodles the owner sent or got, with their pixels so the remote can show
+  // them (the owner drew or received every one of these).
+  const doodles = await db.query<DeskActivity>(
+    `SELECT to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at,
+            CASE WHEN d.to_user_id = $1 THEN 'doodle_in' ELSE 'doodle_out' END AS kind,
+            CASE WHEN d.to_user_id = $1 THEN 'Doodle from @' || COALESCE(fu.username, 'a friend')
+                 ELSE 'Doodle to @' || COALESCE(tu.username, '?') END AS text,
+            d.pixels AS px
+       FROM desk_doodles d
+       LEFT JOIN users fu ON fu.user_id = d.from_user_id
+       LEFT JOIN users tu ON tu.user_id = d.to_user_id
+      WHERE (d.to_user_id = $1 OR d.from_user_id = $1) AND d.created_at > NOW() - ${days}
+        AND ${blocked("CASE WHEN d.to_user_id = $1 THEN d.from_user_id ELSE d.to_user_id END")}
+      ORDER BY d.created_at DESC
+      LIMIT 20`,
+    [userId],
+  );
+  return [...rows, ...doodles]
+    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+    .slice(0, 60);
 }
 
 /** Everything the remote shows for one box. Null for an unknown box. */
@@ -873,7 +897,7 @@ export function setReviewSourceForTests(src: ReviewSource) {
   reviewsCache = null;
 }
 
-async function latestReviews(): Promise<DeskReview[]> {
+export async function latestReviews(): Promise<DeskReview[]> {
   if (reviewsCache && Date.now() - reviewsCache.at < REVIEWS_TTL_MS) return reviewsCache.data;
   try {
     const data = parseAppReviews(await reviewSource());

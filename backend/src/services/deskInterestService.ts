@@ -1,5 +1,6 @@
 import { PostgresService } from "./DbService.js";
 import { normalizeWaitlistEmail } from "./waitlistService.js";
+import { pushToAdmins } from "./deskPushService.js";
 
 const db = PostgresService.getInstance();
 
@@ -22,12 +23,21 @@ export function cleanInterestPrice(raw: unknown): string | null {
 /** Save (or refresh) one signup. Same result whether the email is new or
  *  not, so the endpoint can't be used to test addresses. */
 export async function addDeskInterest(name: string, email: string, price: string | null): Promise<void> {
-  await db.query(
+  const rows = await db.query<{ inserted: boolean }>(
     `INSERT INTO desk_interest (name, email, price) VALUES ($1, $2, $3)
      ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name,
-       price = COALESCE(EXCLUDED.price, desk_interest.price), updated_at = NOW()`,
+       price = COALESCE(EXCLUDED.price, desk_interest.price), updated_at = NOW()
+     RETURNING (xmax = 0) AS inserted`,
     [name, email, price],
   );
+  if (rows[0]?.inserted) {                      // the founders hear about new ones
+    const [{ n }] = await db.query<{ n: number }>(`SELECT COUNT(*)::int AS n FROM desk_interest`);
+    pushToAdmins("interest", {
+      title: "Someone wants a desk box! 📦",
+      body: `${name}${price ? ` would pay $${price}` : ""} · ${n} on the list`,
+      tag: "interest",
+    }).catch((e) => console.error("desk push (interest):", e));
+  }
 }
 
 export interface DeskInterestRow { name: string; email: string; price: string | null; created_at: string }

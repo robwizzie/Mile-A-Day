@@ -14,6 +14,11 @@ import {
   adminDeskBoxTest,
   adminDeskBoxDoodle,
   adminDeskInterest,
+  adminDeskPush,
+  adminDeskPushSubscribe,
+  adminDeskPushKinds,
+  adminDeskPushUnsubscribe,
+  adminDeskPushTest,
 } from "../controllers/displayController.js";
 import {
   verifyAppleWeb,
@@ -82,6 +87,11 @@ adminRouter.post("/desk/box/:id/message", adminDeskBoxMessage);
 adminRouter.post("/desk/box/:id/test", adminDeskBoxTest);
 adminRouter.post("/desk/box/:id/doodle", adminDeskBoxDoodle);
 adminRouter.get("/desk/interest", adminDeskInterest);
+adminRouter.get("/desk/push", adminDeskPush);
+adminRouter.post("/desk/push/subscribe", adminDeskPushSubscribe);
+adminRouter.post("/desk/push/kinds", adminDeskPushKinds);
+adminRouter.post("/desk/push/unsubscribe", adminDeskPushUnsubscribe);
+adminRouter.post("/desk/push/test", adminDeskPushTest);
 adminRouter.get("/miles-by-day", milesByDay);
 adminRouter.get("/engagement", engagement);
 adminRouter.get("/signups-by-day", signupsByDay);

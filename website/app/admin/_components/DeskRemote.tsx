@@ -5,6 +5,7 @@ import { getData, postData } from "./lib";
 import { MAD_RED, MAD_SUCCESS } from "./theme";
 import { loadDeskEngine, type DeskEngine } from "@/lib/desk-engine";
 import { ShareClip } from "@/components/desk/share-clip";
+import { PushSettings } from "@/components/desk/push-settings";
 
 /**
  * The desk remote (/admin/desk), phone-first. Your own box(es) only,
@@ -66,7 +67,7 @@ type BoxDetail = {
               sleep_start: number | null; sleep_end: number | null; never_sleep: boolean };
   messages: { id: string; direction: "in" | "out"; who: string; text: string; at: string }[];
   recipients: Recipient[];
-  activity: { at: string; kind: string; text: string }[];
+  activity: { at: string; kind: string; text: string; px?: string }[];
   live: Feed;
 };
 
@@ -814,12 +815,25 @@ export function DeskRemote() {
                   {data.activity.map((a, i) => (
                     <li key={i} className="flex gap-3 border-b border-white/[0.06] py-2 last:border-0">
                       <span className="w-6 shrink-0 text-center">{ACTIVITY_ICON[a.kind] ?? "•"}</span>
-                      <span className="min-w-0 flex-1 text-sm">{pretty(a.text)}</span>
+                      <span className="min-w-0 flex-1 text-sm">
+                        {pretty(a.text)}
+                        {a.px && /^[0-7]{2048}$/.test(a.px) && (
+                          <button onClick={() => { setDoodleReq((r) => ({ code: doodleCode(a.px!), n: (r?.n ?? 0) + 1 }));
+                                                   say("Playing it in the preview at the top"); }}
+                                  className="mt-1.5 block" aria-label="Play this doodle in the preview">
+                            <DoodleThumb px={a.px} />
+                          </button>
+                        )}
+                      </span>
                       <span className="shrink-0 text-[11px] text-white/40">{ago(a.at)}</span>
                     </li>
                   ))}
                 </ul>
               )}
+            </Section>
+
+            <Section title="Notifications" right={<span className="text-[11px] text-white/40">this phone</span>}>
+              <PushSettings say={say} />
             </Section>
 
             <InterestList />
@@ -839,6 +853,26 @@ export function DeskRemote() {
       )}
     </main>
   );
+}
+
+/** A doodle as it looks on the panel (its 8 colours), small. */
+function DoodleThumb({ px }: { px: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const ctx = ref.current?.getContext("2d");
+    if (!ctx) return;
+    const img = ctx.createImageData(DW, DH);
+    for (let i = 0; i < DW * DH; i++) {
+      const c = INKS[Number(px[i]) || 0];
+      img.data[i * 4] = parseInt(c.slice(1, 3), 16);
+      img.data[i * 4 + 1] = parseInt(c.slice(3, 5), 16);
+      img.data[i * 4 + 2] = parseInt(c.slice(5, 7), 16);
+      img.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }, [px]);
+  return <canvas ref={ref} width={DW} height={DH} className="w-40 rounded-md"
+                 style={{ imageRendering: "pixelated", aspectRatio: "2 / 1", boxShadow: "0 0 0 1px rgba(255,255,255,0.12)" }} />;
 }
 
 /** "I'd buy one" signups from mileaday.run/desk (both founders see them). */

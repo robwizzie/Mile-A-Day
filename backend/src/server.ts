@@ -50,6 +50,7 @@ import { startBuddySessionCron } from "./cron/buddySessionCron.js";
 import { startWeeklyChallengeCron } from "./cron/weeklyChallengeCron.js";
 import { startH2hChallengeCron } from "./cron/h2hChallengeCron.js";
 import { startStreakFeaturesCron } from "./cron/streakFeaturesCron.js";
+import { startDeskPushCron } from "./cron/deskPushCron.js";
 import { startLastCallCron } from "./cron/lastCallCron.js";
 import { startDiagnosticsCron } from "./cron/diagnosticsCron.js";
 import { healUncomputedStreaks } from "./services/streakFeatureCore.js";
@@ -470,6 +471,7 @@ function startCrons() {
   startWeeklyRecapCron();
   startH2hChallengeCron();
   startStreakFeaturesCron();
+  startDeskPushCron();
   startBuddySessionCron();
   startWeeklyChallengeCron();
   startLastCallCron();

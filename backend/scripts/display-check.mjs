@@ -19,6 +19,8 @@ import { PostgresService } from "../dist/services/DbService.js";
 import displayRoutes from "../dist/routes/displayRoutes.js";
 import adminRoutes from "../dist/routes/adminRoutes.js";
 import publicRoutes from "../dist/routes/publicRoutes.js";
+import { setPushSenderForTests } from "../dist/services/deskPushService.js";
+import { runDeskPushChecks } from "../dist/services/deskPushEvents.js";
 import { requireAdmin } from "../dist/middleware/auth.js";
 import { createDisplayKey, hashDisplayKey, listDeskBoxes, setReviewSourceForTests } from "../dist/services/displayService.js";
 
@@ -52,6 +54,8 @@ function check(label, actual, expected) {
 async function cleanup() {
   await db.query(`DELETE FROM display_keys WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM desk_interest WHERE email LIKE 'display-check%'`);
+  await db.query(`DELETE FROM desk_push_subscriptions WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM desk_push_state WHERE key LIKE 'lead:display-check%' OR key IN ('users', 'reviews', 'record_day')`);
   await db.query(`DELETE FROM desk_settings WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM desk_commands WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM post_comments WHERE user_id = ANY($1::text[])`, [ALL]);
@@ -594,6 +598,68 @@ async function main() {
   check("activity: doodle in", detail2.activity.some((x) => x.kind === "doodle_in" && x.text === "Doodle from @admin"), true);
   check("activity: doodle out", (await (await admin(`desk/box/${adminBox}`)).json()).activity.some((x) => x.text === "Doodle to @owner"), true);
   for (let i = 0; i < 9; i++) await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart });
+  // ── push notifications for the desk remote (the admin PWA) ──
+  await db.query(`DELETE FROM desk_doodles WHERE from_user_id = $1 AND id <> (
+                    SELECT id FROM desk_doodles WHERE from_user_id = $1 ORDER BY created_at LIMIT 1)`, [ADMIN]);
+  const pushed = [];
+  setPushSenderForTests(async (sub, payload) => { pushed.push({ endpoint: sub.endpoint, ...JSON.parse(payload) }); });
+  const APPLE = "https://web.push.apple.com/QGuQyavXutnMH9uSbMGzvTfpSbM0z_test";
+  const sub = (endpoint) => ({ endpoint, keys: { p256dh: "B" + "A".repeat(86), auth: "A".repeat(22) } });
+  check("push: non-admin can't subscribe", (await post("desk/push/subscribe", { subscription: sub(APPLE) }, P + "stranger")).status, 403);
+  for (const bad of ["http://web.push.apple.com/x", "https://evil.example.com/x", "https://localhost/x",
+                     "https://web.push.apple.com.evil.com/x", "https://web.push.apple.com:8443/x", "nope"]) {
+    check(`push: refuses ${bad}`, (await post("desk/push/subscribe", { subscription: sub(bad) })).status, 400);
+  }
+  check("push: refuses junk keys", (await post("desk/push/subscribe", { subscription: { endpoint: APPLE, keys: { p256dh: "x", auth: "y" } } })).status, 400);
+  check("push: refuses an unknown kind", (await post("desk/push/subscribe", { subscription: sub(APPLE), kinds: ["doodle", "everything"] })).status, 400);
+  check("push: subscribe my phone", (await post("desk/push/subscribe", { subscription: sub(APPLE) }, OWNER)).status, 201);
+  const ADMIN_PHONE = "https://fcm.googleapis.com/fcm/send/display-check-admin";
+  check("push: the other founder's phone", (await post("desk/push/subscribe", { subscription: sub(ADMIN_PHONE), kinds: ["new_user", "interest", "doodle"] })).status, 201);
+  const pinfo = await (await admin("desk/push", "GET", OWNER)).json();
+  check("push: I see only my phone", pinfo.subscriptions.map((x) => x.endpoint), [APPLE]);
+  check("push: no keys handed back", JSON.stringify(pinfo).includes("A".repeat(22)), false);
+  check("push: offline alerts are opt-in", pinfo.subscriptions[0].kinds.includes("box_offline"), false);
+  check("push: can't change someone else's phone", (await post("desk/push/kinds", { endpoint: ADMIN_PHONE, kinds: [] }, OWNER)).status, 404);
+  check("push: can't unsubscribe someone else's phone", (await post("desk/push/unsubscribe", { endpoint: ADMIN_PHONE }, OWNER)).status, 404);
+  check("push: test goes to my phone only", [(await (await post("desk/push/test", {}, OWNER)).json()).sent, pushed.at(-1)?.endpoint], [1, APPLE]);
+  pushed.length = 0;
+  await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart });
+  await new Promise((r) => setTimeout(r, 200));
+  check("push: a doodle notifies its recipient", pushed.map((x) => [x.endpoint, x.kind, x.title]), [[APPLE, "doodle", "New doodle from @admin 🎨"]]);
+  pushed.length = 0;
+  await post(`desk/box/${ownerBox}/message`, { to: adminBox, text: "race you \u{1F525}" }, OWNER);
+  await new Promise((r) => setTimeout(r, 200));
+  check("push: a message notifies its recipient (who opted out of messages: nothing)", pushed, []);
+  await post(`desk/box/${adminBox}/message`, { to: ownerBox, text: "go \u{1F3C3}" });
+  await new Promise((r) => setTimeout(r, 200));
+  check("push: a message to me", pushed.map((x) => [x.endpoint, x.title, x.body]), [[APPLE, "Desk message from @admin", "GO 🏃"]]);
+  pushed.length = 0;
+  await fetch(`${base}/public/desk-interest`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Jo", email: "display-check-c@example.com", price: "99" }) });
+  await new Promise((r) => setTimeout(r, 200));
+  check("push: a new 'I'd buy one' tells the founders", pushed.map((x) => x.kind).sort(), ["interest", "interest"]);
+  pushed.length = 0;
+  await fetch(`${base}/public/desk-interest`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Jo", email: "display-check-c@example.com", price: "79" }) });
+  await new Promise((r) => setTimeout(r, 200));
+  check("push: …but not a repeat", pushed, []);
+  await runDeskPushChecks();                                  // baseline: no pushes
+  check("push: first check only remembers", pushed.filter((x) => x.kind === "new_user"), []);
+  await db.query(`INSERT INTO users (user_id, apple_sub, email, username) VALUES ($1, $2, $3, NULL)`, [P + "newbie", "sub-newbie", "newbie@example.com"]);
+  ALL.push(P + "newbie");
+  await runDeskPushChecks();
+  const nu = pushed.filter((x) => x.kind === "new_user");
+  check("push: a new user tells both founders", nu.length, 2);
+  check("push: …by count only, no name or email", /newbie|@example/.test(JSON.stringify(nu)), false);
+  pushed.length = 0;
+  await runDeskPushChecks();
+  check("push: and only once", pushed.filter((x) => x.kind === "new_user"), []);
+  check("push: unsubscribe my phone", (await post("desk/push/unsubscribe", { endpoint: APPLE }, OWNER)).status, 200);
+  pushed.length = 0;
+  await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart });
+  await new Promise((r) => setTimeout(r, 200));
+  check("push: nothing after unsubscribing", pushed, []);
+  setPushSenderForTests(null);
+  for (let i = 0; i < 10; i++) await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart });
+
   check("doodles are rate-limited", (await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart })).status, 429);
   check("new styles can be chosen", (await (await post(`desk/box/${ownerBox}/settings`, { style: 10 }, OWNER)).json()).settings.style, 10);
   await feed({ authorization: `Display ${key}`, "x-desk-state": "10,1,1,1350,390" });
@@ -618,7 +684,7 @@ async function main() {
   check("interest: honeypot quietly dropped", (await want({ name: "Bot", email: "display-check-bot@example.com", website: "http://spam" })).status, 200);
   check("non-admin can't read signups", (await admin("desk/interest", "GET", P + "stranger")).status, 403);
   const leads = await (await admin("desk/interest")).json();
-  const mineLeads = leads.rows.filter((r) => r.email.startsWith("display-check"));
+  const mineLeads = leads.rows.filter((r) => /^display-check-[ab]@/.test(r.email));
   check("admin reads signups", mineLeads.map((r) => [r.name, r.email, r.price]).sort(),
         [["Pat Lee", "display-check-a@example.com", "99"], ["Sam", "display-check-b@example.com", null]]);
   check("signup counts by price", leads.total >= 2 && leads.prices["99"] >= 1, true);

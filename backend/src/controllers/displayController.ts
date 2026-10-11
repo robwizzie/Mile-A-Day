@@ -30,6 +30,19 @@ import {
 } from "../services/displayService.js";
 import { logError } from "../services/errorLogService.js";
 import { listDeskInterest } from "../services/deskInterestService.js";
+import {
+  DEFAULT_KINDS,
+  DESK_PUSH_KINDS,
+  cleanKinds,
+  cleanSubscription,
+  listSubscriptions,
+  pushConfigured,
+  pushTo,
+  removeSubscription,
+  saveSubscription,
+  setKinds,
+  vapidPublicKey,
+} from "../services/deskPushService.js";
 
 /**
  * Desk display endpoints. See services/displayService.ts for the security
@@ -304,4 +317,64 @@ export async function adminDeskBoxDoodle(req: Request, res: Response) {
 export async function adminDeskInterest(_req: Request, res: Response) {
   noStore(res);
   res.json(await listDeskInterest());
+}
+
+// ─── desk remote push (the admin PWA on your own phone) ───────────────────
+
+/** GET /admin/desk/push: is push set up, the public key, and YOUR phones. */
+export async function adminDeskPush(req: Request, res: Response) {
+  noStore(res);
+  const me = viewer(req);
+  res.json({
+    enabled: pushConfigured(),
+    public_key: vapidPublicKey(),
+    kinds: DESK_PUSH_KINDS,
+    default_kinds: DEFAULT_KINDS,
+    subscriptions: me ? await listSubscriptions(me) : [],
+  });
+}
+
+/** POST /admin/desk/push/subscribe {subscription, kinds?}: this phone, for you. */
+export async function adminDeskPushSubscribe(req: Request, res: Response) {
+  noStore(res);
+  const me = viewer(req);
+  const sub = cleanSubscription(req.body?.subscription);
+  const kinds = req.body?.kinds === undefined ? DEFAULT_KINDS : cleanKinds(req.body?.kinds);
+  if (!me) return res.status(401).json({ error: "Sign in first" });
+  if (!pushConfigured()) return res.status(503).json({ error: "Push isn't set up on the server yet" });
+  if (!sub) return res.status(400).json({ error: "That isn't a browser push subscription" });
+  if (!kinds) return res.status(400).json({ error: "Unknown notification kind" });
+  await saveSubscription(me, sub, kinds);
+  res.status(201).json({ ok: true, kinds });
+}
+
+/** POST /admin/desk/push/kinds {endpoint, kinds}: what this phone gets. */
+export async function adminDeskPushKinds(req: Request, res: Response) {
+  noStore(res);
+  const me = viewer(req);
+  const kinds = cleanKinds(req.body?.kinds);
+  const endpoint = typeof req.body?.endpoint === "string" ? req.body.endpoint : "";
+  if (!me) return res.status(401).json({ error: "Sign in first" });
+  if (!kinds) return res.status(400).json({ error: "Unknown notification kind" });
+  if (!(await setKinds(me, endpoint, kinds))) return res.status(404).json({ error: "Not subscribed on this phone" });
+  res.json({ ok: true, kinds });
+}
+
+/** POST /admin/desk/push/unsubscribe {endpoint}: only your own. */
+export async function adminDeskPushUnsubscribe(req: Request, res: Response) {
+  noStore(res);
+  const me = viewer(req);
+  const endpoint = typeof req.body?.endpoint === "string" ? req.body.endpoint : "";
+  if (!me) return res.status(401).json({ error: "Sign in first" });
+  if (!(await removeSubscription(me, endpoint))) return res.status(404).json({ error: "Not subscribed on this phone" });
+  res.json({ ok: true });
+}
+
+/** POST /admin/desk/push/test: a test to your own phones. */
+export async function adminDeskPushTest(req: Request, res: Response) {
+  noStore(res);
+  const me = viewer(req);
+  if (!me) return res.status(401).json({ error: "Sign in first" });
+  const sent = await pushTo([me], "test", { title: "Mile A Day desk", body: "Notifications are on. 🔥", tag: "test" });
+  res.json({ sent });
 }
