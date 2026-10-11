@@ -86,7 +86,7 @@ export function drawLeds(ctx: CanvasRenderingContext2D, rgb: Uint8Array, x: numb
   const r = p * 0.36;
   ctx.fillStyle = "#050505";
   ctx.fillRect(x, y, w, h);
-  ctx.fillStyle = "#141414";                       // the dark LEDs
+  ctx.fillStyle = "#1d1d1d";                       // the dark LEDs (visible, like the real panel)
   ctx.beginPath();
   for (let yy = 0; yy < 32; yy++) {
     for (let xx = 0; xx < 64; xx++) {

@@ -167,20 +167,23 @@ export function DeskBox({ feed, style, mascot, bare = false, interactive = true,
       <div className="desk-box"
            style={{ transform: `translateX(${jiggle}px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg) rotateZ(${jiggle * 0.15}deg)` }}>
         <div className="desk-bezel">
-          {[0, 1, 2, 3].map((k) => <span key={k} className={`desk-screw desk-screw-${k}`} />)}
           <div className="desk-screen">
             <canvas ref={halo} width={64} height={32} aria-hidden className="desk-halo" />
             <canvas ref={canvas} role="img" aria-label="Mile A Day desk box showing live community stats"
                     className="desk-leds" />
             {state !== "ok" && <Loading state={state} />}
           </div>
+          <span className="desk-board" aria-hidden />
+          <svg className="desk-cable" viewBox="0 0 95 220" aria-hidden>
+            <rect x="0" y="0" width="16" height="12" rx="3" fill="#2a2a2c" />
+            <path d="M14 6 C 60 6, 80 40, 70 110 S 40 200, 95 215" fill="none" stroke="#151516" strokeWidth="7" strokeLinecap="round" />
+            <path d="M14 5 C 60 5, 79 39, 69 109 S 39 199, 94 214" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1.5" />
+          </svg>
         </div>
         <div className="desk-chin">
           <span className="desk-brand">MILE A DAY</span>
-          <span className="desk-status" />
         </div>
       </div>
-      <div className="desk-feet"><span /><span /></div>
       <div className="desk-shadow" />
     </div>
   );

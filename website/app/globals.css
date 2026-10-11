@@ -450,13 +450,16 @@ html {
   }
 }
 
-/* ── The desk box (components/desk/desk-box.tsx): a 3D-printed case with
-   layer lines, four screws, the LED panel behind a dark window, its light
-   spilling onto the desk. ── */
+/* ── The desk box (components/desk/desk-box.tsx), modelled on the real
+   3D-printed case: matte black PLA with faint layer lines, a thin frame
+   around the LED panel, a deep chin with raised white MILE A DAY lettering,
+   and the Matrix Portal board poking out of the right side with its USB-C
+   cable. Sizes are in container units so it scales as one piece. ── */
 .desk-scene {
   position: relative;
-  perspective: 1400px;
-  padding: 4% 2% 9%;
+  container-type: inline-size;
+  perspective: 1600px;
+  padding: 4% 9% 7% 3%;
   user-select: none;
   -webkit-user-select: none;
   cursor: grab;
@@ -464,58 +467,73 @@ html {
 .desk-scene:active { cursor: grabbing; }
 .desk-box {
   position: relative;
-  border-radius: clamp(10px, 2.2vw, 22px);
-  padding: 4.2% 4.6% 0;
+  border-radius: 1.1cqw;
+  padding: 3.6cqw 5.2cqw 0;
   background:
-    repeating-linear-gradient(0deg, rgba(255,255,255,0.028) 0 1px, transparent 1px 3px),
-    linear-gradient(180deg, #2a2a2e 0%, #1a1a1d 55%, #121214 100%);
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0 1px, transparent 1px 2px),
+    linear-gradient(180deg, #1c1c1d 0%, #141415 60%, #101011 100%);
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.10),
-    inset 0 -2px 0 rgba(0,0,0,0.5),
-    0 2px 0 #0c0c0d, 0 4px 0 #0a0a0b, 0 6px 0 #080809,
-    0 40px 70px -20px rgba(0,0,0,0.85);
+    inset 0 0.15cqw 0 rgba(255,255,255,0.07),
+    inset 0.15cqw 0 0 rgba(255,255,255,0.03),
+    inset -0.15cqw 0 0 rgba(0,0,0,0.5),
+    0 0.5cqw 0 #0b0b0c,
+    0 3cqw 5cqw -1.5cqw rgba(0,0,0,0.85);
   transition: transform 0.35s cubic-bezier(.2,.8,.2,1);
   transform-style: preserve-3d;
 }
 .desk-bezel { position: relative; }
+.desk-box::before {                 /* the case's top face, seen from just above */
+  content: ""; position: absolute; left: 0.5cqw; right: 0.5cqw; top: -1cqw; height: 1.1cqw;
+  border-radius: 1cqw 1cqw 0 0;
+  background: linear-gradient(180deg, #2a2a2c, #1d1d1f);
+}
 .desk-screen {
   position: relative;
-  border-radius: 6px;
   overflow: hidden;
-  background: #030303;
-  box-shadow: inset 0 0 0 2px #050505, inset 0 6px 18px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.05);
+  background: #070707;
+  border-radius: 0.3cqw;
+  box-shadow: 0 0 0 0.35cqw #0a0a0a, inset 0 0.6cqw 1.4cqw rgba(0,0,0,0.85);
 }
 .desk-leds { position: relative; display: block; width: 100%; aspect-ratio: 2 / 1; }
 .desk-halo {
   position: absolute; inset: 0; width: 100%; height: 100%;
-  filter: blur(18px) saturate(1.3); opacity: 0.35; pointer-events: none;
+  filter: blur(18px) saturate(1.3); opacity: 0.3; pointer-events: none;
 }
-.desk-screw {
-  position: absolute; width: clamp(5px, 0.9vw, 9px); aspect-ratio: 1; border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #6b6b70, #2a2a2d 60%, #151517);
-  box-shadow: 0 1px 1px rgba(0,0,0,0.6);
+.desk-chin {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  height: 12.5cqw;
 }
-.desk-screw::after { content: ""; position: absolute; left: 20%; right: 20%; top: 45%; height: 12%; background: #121214; }
-.desk-screw-0 { left: -3.2%; top: 8%; } .desk-screw-1 { right: -3.2%; top: 8%; }
-.desk-screw-2 { left: -3.2%; bottom: 8%; } .desk-screw-3 { right: -3.2%; bottom: 8%; }
-.desk-chin { display: flex; align-items: center; justify-content: center; position: relative; height: clamp(26px, 5.5vw, 54px); }
 .desk-brand {
-  font-family: var(--font-bebas-neue), sans-serif; letter-spacing: 0.32em;
-  font-size: clamp(10px, 1.6vw, 16px); color: #3c3c41;
-  text-shadow: 0 1px 0 rgba(255,255,255,0.06), 0 -1px 0 rgba(0,0,0,0.6);
+  font-family: var(--font-dm-sans), "Arial Rounded MT Bold", system-ui, sans-serif;
+  font-weight: 800; letter-spacing: 0.02em; line-height: 1;
+  font-size: 6.6cqw; color: #f4f2ee;
+  /* raised printed lettering: a lit top edge and a little depth below */
+  text-shadow: 0 -0.08cqw 0 #ffffff, 0 0.18cqw 0 #b9b6b0, 0 0.32cqw 0.4cqw rgba(0,0,0,0.55);
 }
-.desk-status {
-  position: absolute; right: 5%; width: 6px; height: 6px; border-radius: 50%;
-  background: #3ddc84; box-shadow: 0 0 8px #3ddc84; animation: desk-blink 2.6s ease-in-out infinite;
+/* the Matrix Portal sticking out of the right side, and its USB-C cable */
+.desk-board {
+  position: absolute; right: -8cqw; top: 33%; width: 3.2cqw; height: 34%; z-index: -1;
+  border-radius: 0.3cqw;
+  background: linear-gradient(90deg, #0d0d0e, #1b1b1d 60%, #0f0f10);
+  box-shadow: inset 0 0 0 0.12cqw #262628;
+}
+.desk-board::before {               /* gold pads along its edge */
+  content: ""; position: absolute; left: 0.5cqw; top: 8%; bottom: 8%; width: 0.35cqw;
+  background: repeating-linear-gradient(180deg, #a88b3d 0 0.35cqw, transparent 0.35cqw 1cqw);
+  opacity: 0.8;
+}
+.desk-board::after {                /* its little status light */
+  content: ""; position: absolute; right: 0.55cqw; top: 14%; width: 0.6cqw; height: 0.6cqw;
+  border-radius: 50%; background: #3ddc84; box-shadow: 0 0 0.8cqw #3ddc84;
+  animation: desk-blink 2.6s ease-in-out infinite;
+}
+.desk-cable { position: absolute; right: -14.6cqw; top: 52%; width: 9.5cqw; height: 22cqw; overflow: visible; pointer-events: none; }
+.desk-shadow {
+  position: absolute; left: 6%; right: 10%; bottom: 3%; height: 9%;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0.75), transparent 70%);
+  filter: blur(10px); pointer-events: none; z-index: -1;
 }
 @keyframes desk-blink { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
-.desk-feet { display: flex; justify-content: space-between; padding: 0 12%; margin-top: -2px; }
-.desk-feet span { width: 9%; height: clamp(5px, 1vw, 9px); border-radius: 0 0 6px 6px; background: #0d0d0e; }
-.desk-shadow {
-  position: absolute; left: 8%; right: 8%; bottom: 3%; height: 10%;
-  background: radial-gradient(ellipse at center, rgba(199,37,84,0.22), transparent 70%);
-  filter: blur(12px); pointer-events: none;
-}
-@media (prefers-reduced-motion: reduce) { .desk-box { transition: none; } .desk-status { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .desk-box { transition: none; } .desk-board::after { animation: none; } }
 .desk-pop { animation: desk-pop 0.5s cubic-bezier(.2,1.6,.4,1) both; }
 @keyframes desk-pop { from { transform: scale(0.3); opacity: 0 } to { transform: scale(1); opacity: 1 } }
