@@ -29,7 +29,8 @@
 		"multer": "^2.1.1",
 		"node-cron": "^4.2.1",
 		"pg": "^8.16.3",
-		"sharp": "^0.34.5"
+		"sharp": "^0.34.5",
+		"web-push": "^3.6.7"
 	},
 	"devDependencies": {
 		"@types/compression": "^1.8.1",
@@ -40,6 +41,7 @@
 		"@types/node-cron": "^3.0.11",
 		"@types/pg": "^8.15.4",
 		"@types/sharp": "^0.31.1",
+		"@types/web-push": "^3.6.4",
 		"drizzle-kit": "^0.31.10",
 		"tsx": "^4.20.3",
 		"typescript": "^5.8.3"

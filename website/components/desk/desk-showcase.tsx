@@ -22,12 +22,11 @@ const FEATURES = [
   ["Your mile and streak", "See at a glance whether today's mile is done. Flamey gets nervous when it's late."],
   ["Friends out running", "Live distance when a friend is out on a run, and a party when they finish."],
   ["Nudges and hypes", "The moment someone nudges or hypes you in the app, your box shows it."],
-  ["Head to head", "You against a friend's box: today, this week and streak, with a crown on the leader."],
   ["Doodles", "Draw a little picture on your phone and send it to a friend's box."],
   ["Your runs, replayed", "Each mile of your run drawn as a bar, with your fastest one in gold."],
 ];
 
-const PRICES = ["49", "79", "99", "129+"];
+const PRICES = ["79", "99", "129+"];
 
 export function DeskShowcase() {
   const feed = useDeskFeed();
@@ -190,7 +189,7 @@ function InterestForm() {
             </label>
             <fieldset className="flex flex-col gap-2">
               <legend className="mb-1.5 text-sm font-semibold">What would you pay? <span className="font-normal text-white/40">(optional)</span></legend>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 {PRICES.map((p) => (
                   <button type="button" key={p} onClick={() => setPrice((cur) => (cur === p ? null : p))}
                           aria-pressed={price === p}

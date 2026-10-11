@@ -1,0 +1,11 @@
+{
+  "name": "Mile A Day Desk",
+  "short_name": "MAD Desk",
+  "description": "The remote for your Mile A Day desk box.",
+  "start_url": "/admin/desk",
+  "scope": "/admin/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [{ "src": "/images/mad-circle-icon.png", "sizes": "256x256", "type": "image/png" }]
+}

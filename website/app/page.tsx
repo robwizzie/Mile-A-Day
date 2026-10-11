@@ -119,7 +119,6 @@ export default function Home() {
       <HeroSection />
       <MarqueeSection />
       <LiveStatsBand />
-      <DeskTeaserSection />
       <FeaturesSection />
       <FeedSection />
       <SocialSection />
@@ -129,6 +128,7 @@ export default function Home() {
       <HabitSection />
       <HowItWorksSection />
       <StorySection />
+      <DeskTeaserSection />
       <CtaSection />
       <Footer />
     </main>
