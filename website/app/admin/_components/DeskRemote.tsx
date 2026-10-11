@@ -27,7 +27,8 @@ const TEST_LABEL: Record<string, string> = {
   morning: "Good morning", mile: "Mile done", streak: "Streak milestone",
   yearago: "1 year ago", pr: "New PR", message: "Message", comment: "Comment",
   medal: "New medal", review: "App review", recap: "9pm recap", holiday: "Holiday",
-  newyear: "New Year", countdown: "New Year countdown",
+  newyear: "New Year", countdown: "New Year countdown", lead: "Lead change",
+  doodle: "Doodle", record: "Signup record",
 };
 
 type Kind = "run" | "walk";
@@ -45,10 +46,13 @@ type Feed = {
     live_miles: number | null;
     live_kind?: Kind | null;
     local_time: string;
+    miles_week?: number;
   };
   friends_running: { name: string; miles: number; kind?: Kind }[];
   friends_finished: { id: string; name: string; miles: number; kind?: Kind }[];
   friends_at_risk: { count: number; top: { name: string; streak: number }[] };
+  rival?: { name: string; miles_today: number; miles_week: number; streak: number; mile_done: boolean } | null;
+  growth?: { today: number; yesterday_same_time: number; week: number[]; dows: string; best_30: number } | null;
 };
 
 type BoxDetail = {
@@ -73,10 +77,12 @@ const STYLE_INFO: Record<string, string> = {
   CAMPFIRE: "Cozy fire with your mascot",
   RACE: "Today vs this time yesterday",
   CLOCK: "Clock and your streak",
+  VERSUS: "You vs your friend's desk: today, week, streak",
+  GROWTH: "Signups today and this week",
 };
 const ACTIVITY_ICON: Record<string, string> = {
   nudge: "👉", hype: "👏", message_in: "💬", message_out: "📤", medal: "🏅",
-  run: "✅", friend_run: "🏃", friend_mile: "🎉", remote: "📱",
+  run: "✅", friend_run: "🏃", friend_mile: "🎉", remote: "📱", doodle_in: "🎨", doodle_out: "🖌️",
 };
 const MESSAGE_MAX = 48;
 const EMOJI = ["🔥", "❤️", "👏", "🏃"];
@@ -126,6 +132,7 @@ type Preview = {
   choose(style: number, mascot: number, now: number): void;
   sleep(awake: number, start: number, end: number, now: number): void;
   test(scene: string, now: number): void;
+  doodle(code: string, now: number): void;
   frame(now: number): Uint8Array;
 };
 
@@ -156,10 +163,11 @@ function loadEngine(): Promise<Preview> {
 
 /** `sleep`: the box's hours ([-1,-1] = never sleeps) and whether it's awake;
  *  `forceAwake` while previewing a new look (show it as it looks by day). */
-function LivePreview({ feed, style, mascot, sleep, forceAwake, test }: {
+function LivePreview({ feed, style, mascot, sleep, forceAwake, test, doodle }: {
   feed: Feed; style: number; mascot: number;
   sleep: { awake: boolean; start: number; end: number }; forceAwake: boolean;
   test?: { scene: string; n: number } | null;
+  doodle?: { code: string; n: number } | null;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const engine = useRef<Preview | null>(null);
@@ -223,6 +231,11 @@ function LivePreview({ feed, style, mascot, sleep, forceAwake, test }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [test?.n]);
 
+  useEffect(() => {
+    if (doodle && started.current && engine.current) engine.current.doodle(doodle.code, now());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doodle?.n]);
+
   const awakeNow = forceAwake || sleep.awake;
   useEffect(() => {
     if (started.current && engine.current) engine.current.sleep(awakeNow ? 1 : 0, sleep.start, sleep.end, now());
@@ -243,6 +256,158 @@ function LivePreview({ feed, style, mascot, sleep, forceAwake, test }: {
           {state === "loading" ? "Drawing the real screen…" : "Preview unavailable"}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── doodles ────────────────────────────────────────────────────────────────
+
+/** The box's 8 doodle colours (digit = index), as the preview brightens them. */
+const INKS = ["#000000", "#ffffc9", "#ff0000", "#fcc927", "#fc9a0c", "#00ff00", "#489eff", "#731dac"];
+const INK_NAMES = ["Eraser", "White", "Red", "Gold", "Orange", "Green", "Blue", "Purple"];
+const DW = 64;
+const DH = 32;
+const RUN = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
+const DOODLE_MAX_CODE = 1600;   // the server's limit (keeps the box's feed small)
+
+/** Run-length code, exactly as the server sends it to the box. */
+function doodleCode(px: string): string {
+  let out = "";
+  for (let i = 0; i < px.length;) {
+    let n = 1;
+    while (n < 64 && i + n < px.length && px[i + n] === px[i]) n++;
+    out += px[i] + RUN[n - 1];
+    i += n;
+  }
+  return out;
+}
+
+function DoodlePad({ busy, recipients, to, setTo, onPreview, onSend }: {
+  busy: boolean; recipients: Recipient[]; to: string; setTo: (id: string) => void;
+  onPreview: (code: string) => void; onSend: (px: string) => Promise<boolean>;
+}) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const px = useRef<Uint8Array>(new Uint8Array(DW * DH));
+  const undo = useRef<Uint8Array[]>([]);
+  const last = useRef<{ x: number; y: number } | null>(null);
+  const [ink, setInk] = useState(2);
+  const [thick, setThick] = useState(false);
+  const [count, setCount] = useState(0);        // lit pixels
+  const [size, setSize] = useState(0);          // coded length
+
+  const paint = useCallback(() => {
+    const ctx = canvas.current?.getContext("2d");
+    if (!ctx) return;
+    const img = ctx.createImageData(DW, DH);
+    let lit = 0;
+    for (let i = 0; i < DW * DH; i++) {
+      const c = INKS[px.current[i]];
+      img.data[i * 4] = parseInt(c.slice(1, 3), 16);
+      img.data[i * 4 + 1] = parseInt(c.slice(3, 5), 16);
+      img.data[i * 4 + 2] = parseInt(c.slice(5, 7), 16);
+      img.data[i * 4 + 3] = 255;
+      if (px.current[i]) lit++;
+    }
+    ctx.putImageData(img, 0, 0);
+    setCount(lit);
+    setSize(doodleCode(Array.from(px.current).join("")).length);
+  }, []);
+
+  useEffect(paint, [paint]);
+
+  const dot = (x: number, y: number) => {
+    const r = thick ? 1 : 0;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const xx = x + dx, yy = y + dy;
+        if (xx >= 0 && xx < DW && yy >= 0 && yy < DH) px.current[yy * DW + xx] = ink;
+      }
+    }
+  };
+
+  const at = (e: React.PointerEvent) => {
+    const r = canvas.current!.getBoundingClientRect();
+    return { x: Math.floor(((e.clientX - r.left) / r.width) * DW), y: Math.floor(((e.clientY - r.top) / r.height) * DH) };
+  };
+
+  const down = (e: React.PointerEvent) => {
+    e.preventDefault();
+    canvas.current?.setPointerCapture(e.pointerId);
+    undo.current = [...undo.current.slice(-19), px.current.slice()];
+    const p = at(e);
+    dot(p.x, p.y);
+    last.current = p;
+    paint();
+  };
+  const move = (e: React.PointerEvent) => {
+    if (!last.current) return;
+    const p = at(e);
+    const a = last.current;
+    const steps = Math.max(Math.abs(p.x - a.x), Math.abs(p.y - a.y), 1);
+    for (let k = 1; k <= steps; k++) {          // a line, so fast strokes don't skip
+      dot(Math.round(a.x + ((p.x - a.x) * k) / steps), Math.round(a.y + ((p.y - a.y) * k) / steps));
+    }
+    last.current = p;
+    paint();
+  };
+  const up = () => { last.current = null; };
+
+  const clear = () => {
+    undo.current = [...undo.current.slice(-19), px.current.slice()];
+    px.current = new Uint8Array(DW * DH);
+    paint();
+  };
+  const back = () => {
+    const prev = undo.current.pop();
+    if (prev) { px.current = prev; paint(); }
+  };
+
+  const tooBusy = size > DOODLE_MAX_CODE;
+  const text = Array.from(px.current).join("");
+
+  return (
+    <div className="flex flex-col gap-2">
+      <canvas ref={canvas} width={DW} height={DH}
+              onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+              className="block w-full touch-none rounded-lg"
+              style={{ imageRendering: "pixelated", aspectRatio: "2 / 1", boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.15)" }} />
+      <div className="flex flex-wrap items-center gap-1.5">
+        {INKS.map((c, i) => (
+          <button key={c} aria-label={INK_NAMES[i]} title={INK_NAMES[i]} onClick={() => setInk(i)}
+                  className="h-8 w-8 rounded-full text-xs"
+                  style={{ background: i ? c : "rgba(255,255,255,0.08)",
+                           boxShadow: ink === i ? `0 0 0 2px #000, 0 0 0 4px ${MAD_RED}` : "inset 0 0 0 1px rgba(255,255,255,0.2)" }}>
+            {i === 0 ? "⌫" : ""}
+          </button>
+        ))}
+        <button onClick={() => setThick((t) => !t)} className="ml-auto rounded-lg bg-white/[0.08] px-2.5 py-1.5 text-xs font-bold">
+          {thick ? "Thick" : "Thin"}
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <button onClick={back} className="rounded-xl bg-white/[0.08] py-2 text-sm font-extrabold">Undo</button>
+        <button onClick={clear} className="rounded-xl bg-white/[0.08] py-2 text-sm font-extrabold">Clear</button>
+        <button disabled={!count || tooBusy} onClick={() => onPreview(doodleCode(text))}
+                className="rounded-xl bg-white/[0.08] py-2 text-sm font-extrabold disabled:opacity-40">Preview</button>
+      </div>
+      {recipients.length > 0 ? (
+        <div className="flex gap-2">
+          <select value={to} onChange={(e) => setTo(e.target.value)}
+                  className="min-w-0 flex-1 rounded-xl bg-white/[0.06] px-3 py-2.5 text-sm font-bold">
+            {recipients.map((r) => <option key={r.id} value={r.id}>To {boxName(r)}</option>)}
+          </select>
+          <button disabled={busy || !count || tooBusy || !to}
+                  onClick={async () => { if (await onSend(text)) clear(); }}
+                  className="rounded-xl px-5 py-2.5 text-sm font-extrabold disabled:opacity-40"
+                  style={{ background: MAD_RED }}>Send</button>
+        </div>
+      ) : (
+        <p className="text-sm text-white/50">No other desks to send to.</p>
+      )}
+      <p className="text-[11px] text-white/40">
+        {tooBusy ? "Too detailed for the box: try bigger shapes or fewer colours."
+          : "Only the pixels are sent. It fades in on their desk like a postcard, then goes back to their screen."}
+      </p>
     </div>
   );
 }
@@ -272,6 +437,7 @@ export function DeskRemote() {
   const [view, setView] = useState<{ style: number; mascot: number } | null>(null);   // previewing
   const [to, setTo] = useState("");
   const [text, setText] = useState("");
+  const [doodleReq, setDoodleReq] = useState<{ code: string; n: number } | null>(null);
 
   const say = (msg: string) => {
     setToast(msg);
@@ -415,6 +581,23 @@ export function DeskRemote() {
     }
   }
 
+  async function sendDoodle(px: string): Promise<boolean> {
+    if (!data || !to) return false;
+    setBusy(true);
+    try {
+      await postData(`desk/box/${data.box.id}/doodle`, { to, px });
+      const r = data.recipients.find((b) => b.id === to);
+      say(`Doodle sent to ${r ? boxName(r) : "that desk"}`);
+      load();
+      return true;
+    } catch (e) {
+      say((e as Error).message);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (error && !data) {
     return <main className="min-h-screen bg-black p-6 text-white/70">Couldn&apos;t load the desks: {error}</main>;
   }
@@ -466,7 +649,7 @@ export function DeskRemote() {
                      right={<span className="text-[11px] text-white/40">real data, live</span>}>
               <LivePreview key={data.box.id} feed={live} style={shown.style} mascot={shown.mascot}
                            sleep={{ awake, start: hours.start, end: hours.end }} forceAwake={dirty}
-                           test={testReq} />
+                           test={testReq} doodle={doodleReq} />
               {!st && (
                 <p className="mt-2 text-xs text-white/45">
                   {data.box.online ? "This box hasn't reported its screen yet (it needs the latest firmware)."
@@ -487,8 +670,11 @@ export function DeskRemote() {
                 ))}
               </div>
               <div className="mt-2 grid grid-cols-2 gap-2">
-                {data.styles.map((s, i) => (
-                  <button key={s} disabled={busy}
+                {data.styles.map((s, i) => {
+                  const missing = s === "VERSUS" && !live.rival ? "Needs a friend with a desk who shares runs"
+                    : s === "GROWTH" && !live.growth ? "Admins only" : null;
+                  return (
+                  <button key={s} disabled={busy || !!missing}
                           onClick={() => setView({ style: i, mascot: shown.mascot })}
                           className="rounded-xl px-3 py-2 text-left"
                           style={{ background: shown.style === i ? "rgba(217,64,89,0.25)" : "rgba(255,255,255,0.05)",
@@ -496,9 +682,12 @@ export function DeskRemote() {
                     <div className="text-sm font-extrabold">
                       {cap(s)} {onDesk.style === i && <span className="text-[10px] text-white/50">· on desk</span>}
                     </div>
-                    <div className="text-[11px] leading-tight text-white/45">{STYLE_INFO[s]}</div>
+                    <div className="text-[11px] leading-tight text-white/45">
+                      {missing ?? (s === "VERSUS" && live.rival ? `You vs @${live.rival.name}: today, week, streak` : STYLE_INFO[s])}
+                    </div>
                   </button>
-                ))}
+                  );
+                })}
               </div>
               {dirty && (
                 <div className="mt-3 grid grid-cols-2 gap-2">
@@ -597,6 +786,13 @@ export function DeskRemote() {
               </ul>
             </Section>
 
+            {/* ── doodles ── */}
+            <Section title="Doodle" right={<span className="text-[11px] text-white/40">64 × 32, like the screen</span>}>
+              <DoodlePad busy={busy} recipients={data.recipients} to={to} setTo={setTo}
+                         onPreview={(code) => setDoodleReq((r) => ({ code, n: (r?.n ?? 0) + 1 }))}
+                         onSend={sendDoodle} />
+            </Section>
+
             {/* ── live ── */}
             <Section title="Live now" right={<span className="text-[11px] text-white/40">every 15 s</span>}>
               <div className="grid grid-cols-3 gap-2 text-center">
@@ -611,6 +807,16 @@ export function DeskRemote() {
                 <Stat label="Hypes today" value={(live.community.hypes_today ?? 0).toLocaleString()} />
               </div>
               <RunsVsWalks c={live.community} />
+              {live.rival && (
+                <List title="Head to head" empty=""
+                      rows={[[`@${owner}`, `${live.me.miles_today.toFixed(2)} today · ${(live.me.miles_week ?? 0).toFixed(1)} this week · 🔥 ${live.me.streak}`],
+                             [`@${live.rival.name}`, `${live.rival.miles_today.toFixed(2)} today · ${live.rival.miles_week.toFixed(1)} this week · 🔥 ${live.rival.streak}`]]} />
+              )}
+              {live.growth && (
+                <List title="Signups" empty=""
+                      rows={[["Today", `${live.growth.today} (yesterday by now: ${live.growth.yesterday_same_time})`],
+                             ["Last 7 days", `${live.growth.week.reduce((a, b) => a + b, 0)} · best day in 30: ${live.growth.best_30}`]]} />
+              )}
               <List title="Friends out now" empty="No friends out right now"
                     rows={live.friends_running.map((f) => [`@${f.name}`, `${kindLabel(f.kind)} · ${f.miles.toFixed(1)} mi`])} />
               <List title="Just finished" empty="Nobody in the last 30 min"

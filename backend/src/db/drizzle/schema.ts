@@ -3451,6 +3451,39 @@ export const deskCommands = pgTable(
   ],
 );
 
+// Doodles drawn on the phone remote and sent to another desk: just pixels
+// (64x32, one palette code 0-7 per pixel), shown once, gone after 24 h.
+export const deskDoodles = pgTable(
+  "desk_doodles",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    toUserId: text("to_user_id").notNull(),
+    fromUserId: text("from_user_id").notNull(),
+    pixels: varchar({ length: 2048 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    index("idx_desk_doodles_to").using(
+      "btree",
+      table.toUserId.asc().nullsLast(),
+      table.createdAt.desc().nullsFirst(),
+    ),
+    foreignKey({
+      columns: [table.toUserId],
+      foreignColumns: [users.userId],
+      name: "desk_doodles_to_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.fromUserId],
+      foreignColumns: [users.userId],
+      name: "desk_doodles_from_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
 // The phone remote's choice of style / mascot for ONE box (display key):
 // Rob's and Dave's desks are set separately. `rev` goes up on every change
 // so the box applies each change once and its buttons still work.

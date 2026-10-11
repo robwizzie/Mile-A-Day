@@ -65,6 +65,17 @@ def test(scene, now):
         APP._update_night(now)
 
 
+def doodle(code, now):
+    """Play a doodle here before it's sent: how the other box will show it."""
+    from mad.gfx import upper_name
+    APP.queue = [("doodle", upper_name((APP.me or {}).get("username")), str(code)[:4096])]
+    APP.toast = None
+    APP.mode, APP.mode_start = "dash", now
+    APP.next_event_at = now
+    APP.wake_until = max(APP.wake_until, now + 120)
+    APP._update_night(now)
+
+
 def frame(now):
     APP.tick(now)
     pal = gfx.palette

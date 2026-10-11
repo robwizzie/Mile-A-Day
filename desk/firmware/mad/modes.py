@@ -1,11 +1,12 @@
 # Mile A Day desk counter - the full-screen dashboard styles:
-# ARCADE (endless runner), CAMPFIRE, RACE (today vs yesterday) and CLOCK.
+# ARCADE (endless runner), CAMPFIRE, RACE (today vs yesterday), CLOCK,
+# VERSUS (head to head with the other desk) and GROWTH (founder signups).
 import math
 import random
 from mad.gfx import (fit, fit_icon, miles_text, particles, BLACK, MAROON_DIM, MAROON, RED, WHITE, FAR, SPARK, GREEN, LOG, upper_name,
-                     FL_YELLOW, FL_GOLD, FL_ORANGE, FL_DEEP, WATER, WATER_LIGHT,
+                     FL_YELLOW, FL_GOLD, FL_ORANGE, FL_DEEP, WATER, WATER_LIGHT, HEAT_D,
                      F5, F3, FB, ICONS, text_width, draw_text, ink, draw_box, blit,
-                     fill, draw_icon, icon_width, commas, short, num, ease, ease_out)
+                     fill, draw_icon, icon_width, commas, short, num, ease, ease_out, crown)
 
 ARCADE_SPEED = 24.0       # world scroll, pixels per second
 ARCADE_GAP = 96           # pixels between obstacles (a coin sits halfway)
@@ -341,6 +342,92 @@ def clock(app, b, now, t):
     col = (RED if int(now * 2) % 2 else WHITE) if urgent else WHITE
     draw_box(b, 0, 64, 19, txt, col, F5 if text_width(txt) <= 63 else F3)
     draw_box(b, 0, 64, 27, ("KEEP %d GOING" % streak) if streak else "RUN YOUR MILE", RED, F3)
+
+
+# =================== VERSUS (head to head) ===================
+VS_PAGES = (("MILES TODAY", "miles_today"), ("MILES THIS WEEK", "miles_week"), ("DAY STREAK", "streak"))
+VS_PAGE_S = 5.0
+
+
+def _cut(v, q):
+    return int(v * q + 1e-6) / q            # never round up to a mile not yet run
+
+
+def vs_format(vals, room, whole):
+    """(format, font) that fits BOTH numbers in `room` px: same precision on
+    each side, the big digits when they fit."""
+    fmts = (("%d", 1),) if whole else (("%.2f", 100), ("%.1f", 10), ("%d", 1))
+    for font in (FB, F5):
+        for fmt, q in fmts:
+            if all(text_width(fmt % _cut(v, q), font) <= room for v in vals):
+                return fmt, q, font
+    return None, 1, F5
+
+
+def versus(app, b, now, t):
+    """Me vs the other desk, like a scoreboard: today, this week, streak.
+    A crown on whoever's ahead (nothing on a tie). Real numbers only."""
+    fill(b, 0, 0, 64, 32, BLACK)
+    me, r = app.me or {}, app.rival or {}
+    k = int(t // VS_PAGE_S) % len(VS_PAGES)
+    u = t - int(t // VS_PAGE_S) * VS_PAGE_S
+    title, key = VS_PAGES[k]
+    vals = (float(me.get(key) or 0), float(r.get(key) or 0))
+    whole = key == "streak"
+    fmt, q, font = vs_format(vals, 29, whole)
+    lead = 0 if vals[0] > vals[1] + 0.005 else 1 if vals[1] > vals[0] + 0.005 else -1
+    frac = ease_out(u / 1.0)                       # each page counts up
+    names = (upper_name(me.get("username"), 16), upper_name(r.get("name"), 16))
+    for j, (x0, x1) in enumerate(((0, 31), (33, 64))):
+        fit(b, x0 + 1, x1 - 1, 5, names[j], RED, F3, now)
+        v = vals[j] * frac
+        txt = (fmt % _cut(v, q)) if fmt else short(v)
+        col = FL_GOLD if j == lead else WHITE
+        draw_box(b, x0, x1, 13 if font is FB else 15, txt, col, font)
+        if j == lead:                                   # the crown drops in
+            cy = int(round(-4 + 4 * ease_out(u / 0.5)))
+            cx = x0 + (x1 - x0 - 7) // 2
+            crown(b, cx, cy)
+            if u > 0.6 and int(now * 3) % 4 == 0:       # a glint
+                b[cx + 3, cy] = SPARK
+    fill(b, 31, 5, 33, 23, MAROON_DIM)
+    draw_box(b, 0, 64, 26, title, RED, F3)
+
+
+# =================== GROWTH (founder mode) ===================
+def growth(app, b, now, t):
+    """Signups today (big), yesterday by this time, and the last 7 days as
+    bars. Totals only: nothing about anyone."""
+    fill(b, 0, 0, 64, 32, BLACK)
+    g = app.growth or {}
+    n = int(g.get("today") or 0)
+    yday = int(g.get("yesterday_same_time") or 0)
+    week = [max(0, int(x or 0)) for x in (g.get("week") or ())][-7:]
+    dows = str(g.get("dows") or "")[-7:]
+    frac = ease_out(t / 1.2)
+    txt = str(int(n * frac + 0.5))
+    if text_width(str(n), FB) <= 27:
+        draw_box(b, 0, 28, 4, txt, WHITE, FB)
+    else:
+        draw_box(b, 0, 28, 6, short(n * frac), WHITE, F5)
+    draw_box(b, 0, 28, 16, "SIGNUPS", RED, F3)
+    fit(b, 0, 28, 23, "YDAY %d" % yday, FAR, F3, now)
+    fill(b, 28, 4, 29, 28, MAROON_DIM)
+    top = max(week + [1])
+    x = 30
+    for i, v in enumerate(week):
+        today = i == len(week) - 1
+        h = int(round(10 * v / top * frac))
+        if v and h < 1:
+            h = 1
+        if h:
+            fill(b, x, 14 - h, x + 3, 14, RED if today else HEAT_D)
+        else:
+            fill(b, x, 13, x + 3, 14, MAROON_DIM)
+        if i < len(dows):
+            draw_box(b, x - 1, x + 4, 16, dows[i], WHITE if today else FAR, F3)
+        x += 5
+    fit(b, 29, 64, 23, "WEEK %d" % sum(week), WHITE, F3, now)
 
 
 # =================== LIVE (I'm out running) ===================

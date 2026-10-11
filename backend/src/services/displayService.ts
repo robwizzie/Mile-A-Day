@@ -9,6 +9,7 @@ import { localNowSql } from "./dailyResetTime.js";
 import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
 import { ownedFlameyItems, servedFlameyLook } from "./flameyService.js";
 import { postCommentMatchSql } from "./posts/postSql.js";
+import { VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL } from "./visibilityService.js";
 
 const db = PostgresService.getInstance();
 
@@ -63,6 +64,17 @@ const DESK_FLAMEY_SLOTS = ["color", "head", "eyes", "costume"] as const;
 const APP_STORE_ID = process.env.APP_STORE_ID || "6746970905";
 const REVIEWS_TTL_MS = 15 * 60 * 1000;
 const MAX_REVIEWS = 3;
+// Doodles: a 64x32 picture in 8 colours, one desk owner to another.
+export const DOODLE_W = 64;
+export const DOODLE_H = 32;
+const DOODLE_TTL_HOURS = 24;
+const MAX_DOODLES_PER_HOUR = 10;
+/** Run-length code on the wire: colour digit + one length char (1..64). */
+const DOODLE_RUN = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
+/** Busier pictures than this are refused (keeps the board's feed small). */
+export const DOODLE_MAX_CODE = 1600;
+// Founder mode growth screen: signup totals only, cached like the community block.
+const GROWTH_TTL_MS = 60_000;
 
 export function hashDisplayKey(key: string): string {
   return crypto.createHash("sha256").update(key, "utf8").digest("hex");
@@ -248,7 +260,7 @@ export async function listDisplayMessages(userId?: string): Promise<DisplayMessa
 // runs, medals and the rest only ever come from real activity.
 
 /** Board style / mascot ids, in the board's own order (mad/app.py). */
-export const DESK_STYLES = ["CLASSIC", "SPOTLIGHT", "ARCADE", "BIG", "CAMPFIRE", "RACE", "CLOCK"] as const;
+export const DESK_STYLES = ["CLASSIC", "SPOTLIGHT", "ARCADE", "BIG", "CAMPFIRE", "RACE", "CLOCK", "VERSUS", "GROWTH"] as const;
 export const DESK_MASCOTS = ["RUNNER", "FLAMEY"] as const;
 const COMMAND_WINDOW_SECONDS = 180;   // a box acts on a tap from the last 3 min
 const MAX_COMMANDS_PER_10_MIN = 30;
@@ -429,7 +441,7 @@ export const DESK_TEST_SCENES = [
   "user", "milestone", "nudge", "hype", "friend", "friend_walk", "finished",
   "friendmile", "atrisk", "reminder", "morning", "mile", "streak", "yearago",
   "pr", "message", "comment", "medal", "review", "recap", "holiday",
-  "newyear", "countdown",
+  "newyear", "countdown", "lead", "doodle", "record",
 ] as const;
 
 /** Queue one test animation for a box. Same rate limit as the other taps. */
@@ -462,6 +474,151 @@ export async function sendBoxMessage(fromBoxId: string, toBoxId: string, text: s
   const [from, to] = await Promise.all([boxOwner(fromBoxId), boxOwner(toBoxId)]);
   if (!from || !to) return null;
   return createDisplayMessage(to.userId, from.userId, text);
+}
+
+/** A doodle as the remote sends it: 2048 digits 0-7 (one per pixel, row by
+ *  row), with at least one lit pixel. Nothing else is accepted. */
+export function isDoodle(px: unknown): px is string {
+  return typeof px === "string" && px.length === DOODLE_W * DOODLE_H
+    && /^[0-7]+$/.test(px) && /[1-7]/.test(px);
+}
+
+/** Run-length code for the wire: colour digit + length char, runs of 1..64. */
+export function doodleCode(px: string): string {
+  let out = "";
+  let i = 0;
+  while (i < px.length) {
+    const c = px[i];
+    let n = 1;
+    while (n < 64 && i + n < px.length && px[i + n] === c) n++;
+    out += c + DOODLE_RUN[n - 1];
+    i += n;
+  }
+  return out;
+}
+
+/** A doodle from one box's owner to another box's owner. Null = unknown box,
+ *  false = rate-limited. */
+export async function sendBoxDoodle(fromBoxId: string, toBoxId: string, px: string) {
+  const [from, to] = await Promise.all([boxOwner(fromBoxId), boxOwner(toBoxId)]);
+  if (!from || !to) return null;
+  const recent = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM desk_doodles
+      WHERE from_user_id = $1 AND created_at > NOW() - INTERVAL '1 hour'`, [from.userId]);
+  if ((recent[0]?.n ?? 0) >= MAX_DOODLES_PER_HOUR) return false;
+  await db.query(`DELETE FROM desk_doodles WHERE expires_at < NOW() - INTERVAL '7 days'`);
+  const rows = await db.query<{ id: string; to_username: string | null; created_at: string }>(
+    `WITH ins AS (
+       INSERT INTO desk_doodles (to_user_id, from_user_id, pixels, expires_at)
+       VALUES ($1, $2, $3, NOW() + INTERVAL '${DOODLE_TTL_HOURS} hours')
+       RETURNING id, to_user_id, created_at
+     )
+     SELECT ins.id, u.username AS to_username, ins.created_at::text
+       FROM ins JOIN users u ON u.user_id = ins.to_user_id`,
+    [to.userId, from.userId, px],
+  );
+  return rows[0];
+}
+
+export interface DisplayRival {
+  name: string;
+  miles_today: number;
+  miles_week: number;
+  streak: number;
+  mile_done: boolean;
+}
+
+/** Head-to-head: the other desk owner, only when you're accepted friends and
+ *  they let friends see their runs (blocks either way and 'private' fail it).
+ *  Their own numbers as the app already shows them to a friend. */
+async function getRival(userId: string): Promise<DisplayRival | null> {
+  const who = await db.query<{ user_id: string; name: string }>(
+    `SELECT u.user_id, u.username AS name
+       FROM display_keys k
+       JOIN users u ON u.user_id = k.user_id
+       JOIN friendships f ON f.user_id = $1 AND f.friend_id = k.user_id AND f.status = 'accepted'
+      WHERE k.revoked_at IS NULL AND k.user_id <> $1 AND u.username IS NOT NULL
+        AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("k.user_id", "$1")}
+      GROUP BY u.user_id, u.username
+      ORDER BY MIN(k.created_at)
+      LIMIT 1`,
+    [userId],
+  );
+  const r = who[0];
+  if (!r) return null;
+  const [rows, today, coverage] = await Promise.all([
+    db.query<{ streak: number; week: number | null }>(
+      `WITH tz AS (
+         SELECT COALESCE((SELECT timezone_offset FROM workouts
+                           WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1), 0) AS off
+       ), loc AS (
+         SELECT (NOW() AT TIME ZONE 'UTC') + (tz.off || ' minutes')::interval AS t FROM tz
+       )
+       SELECT (${effectiveStreakSql("u")})::int AS streak, ${weekMilesSql("u.user_id")} AS week
+         FROM users u, loc WHERE u.user_id = $1`,
+      [r.user_id],
+    ),
+    getTodayMiles(r.user_id),
+    fetchTodayCoverage([r.user_id]),
+  ]);
+  const miles = Number(today) || 0;
+  return {
+    name: r.name,
+    miles_today: Math.round(miles * 100) / 100,
+    miles_week: Math.round((Number(rows[0]?.week) || 0) * 100) / 100,
+    streak: Number(rows[0]?.streak) || 0,
+    mile_done: miles >= DAILY_GOAL_TOLERANCE || Boolean(coverage[r.user_id]),
+  };
+}
+
+/** Miles from the user's local Monday through today (`loc.t` = their local now). */
+function weekMilesSql(userCol: string): string {
+  return `(SELECT COALESCE(SUM(w.distance), 0)::float FROM workouts w
+            WHERE w.user_id = ${userCol}
+              AND w.local_date BETWEEN loc.t::date - (EXTRACT(ISODOW FROM loc.t)::int - 1) AND loc.t::date
+              AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL)`;
+}
+
+export interface DisplayGrowth {
+  today: number;               // signups so far today (Eastern, the app's day)
+  yesterday_same_time: number; // signups yesterday up to this time of day
+  week: number[];              // the last 7 days, oldest first, today last
+  dows: string;                // their weekday letters, e.g. "SMTWTFS"
+  best_30: number;             // best single day in the 30 before today
+}
+
+let growthCache: { at: number; value: DisplayGrowth } | null = null;
+
+/** Founder mode: signup COUNTS only (no names, no ids, nothing per person). */
+export async function getGrowth(): Promise<DisplayGrowth> {
+  if (growthCache && Date.now() - growthCache.at < GROWTH_TTL_MS) return growthCache.value;
+  const rows = await db.query<{ day: string; dow: number; n: number }>(
+    `WITH c AS (
+       SELECT (created_at AT TIME ZONE 'America/New_York')::date AS day, COUNT(*)::int AS n
+         FROM users
+        WHERE created_at >= ((${TODAY_ET_DATE_SQL} - 31)::timestamp AT TIME ZONE 'America/New_York')
+        GROUP BY 1
+     )
+     SELECT g.day::date::text AS day, EXTRACT(DOW FROM g.day)::int AS dow, COALESCE(c.n, 0)::int AS n
+       FROM generate_series(${TODAY_ET_DATE_SQL} - 30, ${TODAY_ET_DATE_SQL}, INTERVAL '1 day') g(day)
+       LEFT JOIN c ON c.day = g.day::date
+      ORDER BY g.day`,
+  );
+  const same = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM users
+      WHERE created_at >= ((${TODAY_ET_DATE_SQL} - 1)::timestamp AT TIME ZONE 'America/New_York')
+        AND created_at < NOW() - INTERVAL '1 day'`,
+  );
+  const last7 = rows.slice(-7);
+  const value: DisplayGrowth = {
+    today: Number(rows[rows.length - 1]?.n) || 0,
+    yesterday_same_time: Number(same[0]?.n) || 0,
+    week: last7.map((r) => Number(r.n) || 0),
+    dows: last7.map((r) => "SMTWTFS"[Number(r.dow) % 7]).join(""),
+    best_30: Math.max(0, ...rows.slice(0, -1).map((r) => Number(r.n) || 0)),
+  };
+  growthCache = { at: Date.now(), value };
+  return value;
 }
 
 export interface DeskActivity { at: string; kind: string; text: string }
@@ -523,6 +680,15 @@ async function boxActivity(boxId: string, userId: string): Promise<DeskActivity[
         WHERE f.user_id = $1 AND f.status = 'accepted' AND u.username IS NOT NULL
           AND COALESCE(ns.share_live_presence, TRUE) = TRUE
           AND ${blocked("f.friend_id")}
+       UNION ALL
+       SELECT d.created_at, CASE WHEN d.to_user_id = $1 THEN 'doodle_in' ELSE 'doodle_out' END,
+              CASE WHEN d.to_user_id = $1 THEN 'Doodle from @' || COALESCE(fu.username, 'a friend')
+                   ELSE 'Doodle to @' || COALESCE(tu.username, '?') END
+         FROM desk_doodles d
+         LEFT JOIN users fu ON fu.user_id = d.from_user_id
+         LEFT JOIN users tu ON tu.user_id = d.to_user_id
+        WHERE (d.to_user_id = $1 OR d.from_user_id = $1) AND d.created_at > NOW() - ${days}
+          AND ${blocked("CASE WHEN d.to_user_id = $1 THEN d.from_user_id ELSE d.to_user_id END")}
        UNION ALL
        SELECT c.created_at, 'remote',
               CASE c.kind WHEN 'set' THEN 'Changed from the remote: ' || COALESCE(c.detail, '')
@@ -754,6 +920,7 @@ export interface DisplayFeed {
     minutes_to_midnight: number; // until the owner's local day ends
     year_ago_miles: number | null; // their own miles on this date last year
     local_date: string;          // "YYYY-MM-DD" in the owner's timezone (seasonal looks)
+    miles_week: number;          // their own miles since their local Monday
     live_miles: number | null;   // their own live session distance while running_now
     live_kind: "run" | "walk" | null; // what that live session is
     longest_run: number | null;  // their longest single run, all time
@@ -780,6 +947,13 @@ export interface DisplayFeed {
   commands: { id: string; kind: string; scene?: string }[];
   /** Founder mode: newest App Store reviews, only on admins' desks. */
   reviews: DeskReview[];
+  /** Founder mode: signup totals (no user details), only on admins' desks. */
+  growth: DisplayGrowth | null;
+  /** Head-to-head: the other desk owner, if you're friends and they share runs with friends. */
+  rival: DisplayRival | null;
+  /** The newest unexpired doodle sent TO the owner: sender's username and the
+   *  run-length-coded pixels (see doodleCode). */
+  doodles: { id: string; from: string; px: string; age_s: number }[];
   /** Unexpired desk messages sent TO the owner (newest first). */
   messages: { id: string; from: string; text: string; age_s: number }[];
   friends_running: { name: string; miles: number; kind: "run" | "walk" }[];
@@ -808,6 +982,7 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
       live_kind: "run" | "walk" | null;
       longest_run: number | null;
       fastest_mile_month: number | null;
+      miles_week: number | null;
     }>(
       `WITH tz AS (
          SELECT COALESCE((SELECT timezone_offset FROM workouts
@@ -843,7 +1018,8 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
                   AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
                   AND w.local_date >= date_trunc('month', loc.t)::date
                   AND ws.split_distance >= 0.999
-                  AND ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}) AS fastest_mile_month
+                  AND ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}) AS fastest_mile_month,
+              ${weekMilesSql("u.user_id")} AS miles_week
          FROM users u, loc
         WHERE u.user_id = $1`,
       [userId],
@@ -1070,7 +1246,27 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
   // Their day so far, the same numbers the notification shows.
   const friendStats = await Promise.all(friendMiles.map((f) => getTodayStats(f.sender).catch(() => null)));
   const isAdmin = roleRows[0]?.role === "admin";
-  const reviews = isAdmin ? await latestReviews() : [];
+  const [reviews, growth, rival, doodles] = await Promise.all([
+    isAdmin ? latestReviews() : Promise.resolve([] as DeskReview[]),
+    isAdmin ? getGrowth() : Promise.resolve(null),
+    getRival(userId),
+    // Doodles to the owner (blocks either way hide them). Sender by username only.
+    db.query<{ id: string; from: string | null; px: string; age_s: number }>(
+      `SELECT encode(sha256(('doodle:' || d.id::text)::bytea), 'hex') AS id,
+              fu.username AS "from", d.pixels AS px,
+              EXTRACT(EPOCH FROM (NOW() - d.created_at))::int AS age_s
+         FROM desk_doodles d
+         LEFT JOIN users fu ON fu.user_id = d.from_user_id
+        WHERE d.to_user_id = $1 AND d.expires_at > NOW()
+          AND NOT EXISTS (
+            SELECT 1 FROM user_blocks b
+             WHERE (b.blocker_id = $1 AND b.blocked_id = d.from_user_id)
+                OR (b.blocker_id = d.from_user_id AND b.blocked_id = $1))
+        ORDER BY d.created_at DESC
+        LIMIT 1`,
+      [userId],
+    ),
+  ]);
   const look = servedFlameyLook(closetRows[0]?.flamey_look, owned);
   let flamey: Partial<Record<(typeof DESK_FLAMEY_SLOTS)[number], string>> | null = null;
   for (const slot of DESK_FLAMEY_SLOTS) {
@@ -1098,6 +1294,7 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
       live_kind: me?.live_kind ?? null,
       longest_run: me?.longest_run == null ? null : Math.round(Number(me.longest_run) * 100) / 100,
       fastest_mile_month: me?.fastest_mile_month == null ? null : Math.round(Number(me.fastest_mile_month)),
+      miles_week: Math.round((Number(me?.miles_week) || 0) * 100) / 100,
       flamey,
       medals: medals.map((m) => ({
         id: m.id.slice(0, 16),
@@ -1110,6 +1307,14 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
       }),
     },
     reviews,
+    growth,
+    rival,
+    doodles: doodles.filter((d) => isDoodle(d.px)).map((d) => ({
+      id: d.id.slice(0, 16),
+      from: d.from ?? "FRIEND",
+      px: doodleCode(d.px),
+      age_s: Math.max(0, Number(d.age_s) || 0),
+    })),
     friends_miles: friendMiles.map((f, i) => ({
       id: f.id.slice(0, 16),
       name: f.name,

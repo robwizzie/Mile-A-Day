@@ -14,6 +14,10 @@ import {
   queueBoxTap,
   recordBoxState,
   sendBoxMessage,
+  sendBoxDoodle,
+  isDoodle,
+  doodleCode,
+  DOODLE_MAX_CODE,
   setBoxSettings,
   createDisplayKey,
   createDisplayMessage,
@@ -273,4 +277,23 @@ export async function adminDeskBoxMessage(req: Request, res: Response) {
   const message = await sendBoxMessage(id, to, text);
   if (!message) return res.status(404).json({ error: "No such desk" });
   res.status(201).json({ message });
+}
+
+/** POST /admin/desk/box/:id/doodle {to, px}: a 64x32 picture from your box to
+ *  another box. px = 2048 digits 0-7, nothing else; too busy a picture is
+ *  refused so the board's feed stays small. */
+export async function adminDeskBoxDoodle(req: Request, res: Response) {
+  noStore(res);
+  const px = req.body?.px;
+  const to = typeof req.body?.to === "string" ? req.body.to : "";
+  if (!isDoodle(px)) return res.status(400).json({ error: "Draw something first (64x32 pixels, 8 colours)" });
+  if (doodleCode(px).length > DOODLE_MAX_CODE) {
+    return res.status(400).json({ error: "That picture is too detailed for the box: try bigger shapes" });
+  }
+  const id = await ownBox(req, res);
+  if (!id) return;
+  const doodle = await sendBoxDoodle(id, to, px);
+  if (doodle === null) return res.status(404).json({ error: "No such desk" });
+  if (doodle === false) return res.status(429).json({ error: "That's a lot of doodles: try again in a bit" });
+  res.status(201).json({ doodle });
 }

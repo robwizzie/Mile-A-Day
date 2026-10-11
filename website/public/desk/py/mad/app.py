@@ -9,12 +9,15 @@ from mad.gfx import (BLACK, MAROON_DIM, MAROON, RED, WHITE, FL_YELLOW, GREEN,
                      text_width, draw_text, ink, draw_box, draw_centered, blit,
                      fill, draw_icon, icon_width, commas, short, num, ease,
                      ease_out, art_bitmap, set_dim, upper_name)
-LAZY = ("message", "holiday", "countdown", "medal", "review", "comment", "friendmile")   # scenes in extra.py
-MODES = (2, 4, 5, 6, 7)       # styles drawn by mad/modes.py
+LAZY = ("message", "holiday", "countdown", "medal", "review", "comment", "friendmile",
+        "doodle", "lead")     # scenes in extra.py
+MODES = (2, 4, 5, 6, 7, 8, 9)     # styles drawn by mad/modes.py
 
-STYLES = ("CLASSIC", "SPOTLIGHT", "ARCADE", "BIG", "CAMPFIRE", "RACE", "CLOCK")
+STYLES = ("CLASSIC", "SPOTLIGHT", "ARCADE", "BIG", "CAMPFIRE", "RACE", "CLOCK", "VERSUS", "GROWTH")
 CLOCK = 6
-LIVE = 7                 # not a choice: shown while the owner is out running
+VERSUS = 7               # head to head with the other desk (a friend's real numbers)
+GROWTH = 8               # founder mode: signups (admins' desks only)
+LIVE = 9                 # not a choice: shown while the owner is out running
 MASCOTS = ("RUNNER", "FLAMEY")
 BOOT_MIN = 3.0           # keep the logo up at least this long
 DASH_SECONDS = 25        # Classic: still dashboard time between stat shows
@@ -231,6 +234,12 @@ class App:
         self.last_m = None
         self.last_remind = None
         self.sched_at = 0.0
+        self.rival = None                # head to head: the other desk owner (feed)
+        self.growth = None               # founder mode signups (feed, admins only)
+        self.lead = None                 # who leads today: "me" / "rival" / None
+        self.vs_prev = None              # (my miles, their miles) at the last feed
+        self.seen_doodles = None
+        self.record_day = None           # signup record already celebrated (date)
 
     # ================= data in =================
     def set_data(self, data, live, now):
@@ -245,6 +254,9 @@ class App:
         self.me = data.get("me") if feed else None
         self.friends = (data.get("friends_running") or ())[:3] if feed else ()
         self.at_risk = (data.get("friends_at_risk") or {}) if feed else {}
+        r, g = (data.get("rival"), data.get("growth")) if feed else (None, None)
+        self.rival = r if isinstance(r, dict) else None
+        prev_growth, self.growth = self.growth, (g if isinstance(g, dict) else None)
         if self.me:
             try:
                 h, m, s = (int(x) for x in self.me.get("local_time", "").split(":"))
@@ -283,6 +295,12 @@ class App:
             self._friend_miles(data.get("friends_miles") or (), now)
             self._desk(data.get("desk"), now)
             self._commands(data.get("commands") or (), now)
+            self._doodles(data.get("doodles") or ())
+            if live and not first:
+                self._lead()
+                self._record(prev_growth)
+            else:
+                self._lead(quiet=True)
             names = tuple(upper_name(f.get("name")) for f in self.friends)
             for f, name in zip(self.friends, names):
                 if name not in self.running_names:
@@ -318,6 +336,70 @@ class App:
                 continue
             self.push(("message", upper_name(m.get("from")), str(m.get("text") or "")[:64]))
         self.seen_msgs = (ids + [i for i in seen if i not in ids])[:10]
+
+    def _doodles(self, doodles):
+        """A doodle from the other desk: each fades in once. At boot, only
+        ones from the last half hour."""
+        ids = [d.get("id") for d in doodles]
+        first = self.seen_doodles is None
+        seen = self.seen_doodles or []
+        for d in reversed(doodles):
+            px = d.get("px")
+            if (d.get("id") in seen or (first and (d.get("age_s") or 0) > 1800)
+                    or not isinstance(px, str) or len(px) > 4096):
+                continue
+            self.push(("doodle", upper_name(d.get("from")), px))
+        self.seen_doodles = (ids + [i for i in seen if i not in ids])[:10]
+
+    def leader(self):
+        """Who's ahead today: "me", "rival", or None for a tie / no rival."""
+        r = self.rival
+        if not (r and self.me):
+            return None
+        a, b = float(self.me.get("miles_today") or 0), float(r.get("miles_today") or 0)
+        if abs(a - b) < 0.005:
+            return None
+        return "me" if a > b else "rival"
+
+    def _lead(self, quiet=False):
+        """The lead changed hands: only when the new leader just ran (so a
+        midnight reset or a deleted run never throws a party)."""
+        ld = self.leader()
+        a = float((self.me or {}).get("miles_today") or 0)
+        b = float((self.rival or {}).get("miles_today") or 0)
+        prev, self.vs_prev = self.vs_prev, (a, b) if self.rival else None
+        old, self.lead = self.lead, ld
+        if quiet or not ld or ld == old or not prev:
+            return
+        ran = a > prev[0] + 0.005 if ld == "me" else b > prev[1] + 0.005
+        if ran:
+            name = (self.me.get("username") if ld == "me" else self.rival.get("name"))
+            self.push(("lead", upper_name(name, 16), max(a, b), min(a, b)))
+
+    def _record(self, prev):
+        """Founder mode: today's signups just passed the best day of the last 30."""
+        g = self.growth
+        if not g or not prev:
+            return
+        try:
+            n, best, was = int(g.get("today") or 0), int(g.get("best_30") or 0), int(prev.get("today") or 0)
+        except (ValueError, TypeError):
+            return
+        day = (g.get("dows") or "") + str(self.date)
+        if best > 0 and n > best >= was and self.record_day != day:
+            self.record_day = day
+            self.push(("pr", "SIGNUPS", "%d TODAY" % n, "RECORD!"))
+
+    def can_show(self, st):
+        """Race and Clock need my own numbers, Versus a rival, Growth the
+        founder numbers; without them the box shows Classic."""
+        if st in (5, 6):
+            return bool(self.me)
+        if st == VERSUS:
+            return bool(self.rival and self.me)
+        if st == GROWTH:
+            return bool(self.growth)
+        return True
 
     def _medals(self, medals):
         """Medals the owner just earned: each celebrates once. At boot, only
@@ -356,7 +438,7 @@ class App:
         st, ma = d.get("style"), d.get("mascot")
         if isinstance(ma, int) and 0 <= ma < len(MASCOTS):
             self.mascot = ma
-        if isinstance(st, int) and 0 <= st < len(STYLES) and (st not in (5, 6) or self.me):
+        if isinstance(st, int) and 0 <= st < len(STYLES):
             if st != self.style:
                 self.style = st
                 self._restart_dash(now)
@@ -614,7 +696,7 @@ class App:
             return LIVE
         if self.night:
             return CLOCK
-        return self.style
+        return self.style if self.can_show(self.style) else 0
 
     def _schedule(self, now):
         """Once a second: night mode, the 9pm recap, mile reminders."""
@@ -680,7 +762,7 @@ class App:
     def next_style(self, now):
         for _ in STYLES:
             self.style = (self.style + 1) % len(STYLES)
-            if self.style not in (5, 6) or self.me:    # Race/Clock need the feed
+            if self.can_show(self.style):     # Race/Clock/Versus/Growth need the feed
                 break
         if self.style not in MODES:
             unload("modes")                   # Classic/Spotlight/Big don't need it
@@ -979,11 +1061,14 @@ class App:
             _modes().campfire(self, fb, now, t)
         elif style == 5:
             _modes().race(self, fb, now, t)
+        elif style == LIVE:
+            _modes().live(self, fb, now, t)
+        elif style == VERSUS:
+            _modes().versus(self, fb, now, t)
+        elif style == GROWTH:
+            _modes().growth(self, fb, now, t)
         else:
-            if style == LIVE:
-                _modes().live(self, fb, now, t)
-            else:
-                _modes().clock(self, fb, now, t)
+            _modes().clock(self, fb, now, t)
 
     def big(self, fb, now, t):
         """BIG: one stat at a time, the user count between each."""

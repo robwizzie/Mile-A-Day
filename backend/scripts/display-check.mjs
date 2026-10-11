@@ -256,7 +256,7 @@ async function main() {
   const body = await res.json();
 
   // ── exact whitelist ──
-  check("top-level fields", Object.keys(body).sort(), ["alerts", "commands", "comments", "community", "desk", "friends_at_risk", "friends_finished", "friends_miles", "friends_running", "me", "messages", "reviews", "v"]);
+  check("top-level fields", Object.keys(body).sort(), ["alerts", "commands", "comments", "community", "desk", "doodles", "friends_at_risk", "friends_finished", "friends_miles", "friends_running", "growth", "me", "messages", "reviews", "rival", "v"]);
   check("community fields", Object.keys(body.community).sort(), [
     "active_7d", "badges_today", "hypes_today", "longest_streak", "miles_today",
     "miles_yesterday_same_time", "new_friends_today", "nudges_today", "out_running_now",
@@ -265,7 +265,7 @@ async function main() {
   check("community values are all numbers", Object.values(body.community).every((v) => typeof v === "number"), true);
   check("me fields", Object.keys(body.me).sort(), [
     "days", "fastest_mile_month", "flamey", "live_kind", "live_miles", "local_date", "local_time", "longest_run", "medals",
-    "mile_done", "miles_today", "minutes_to_midnight", "running_now", "streak", "username", "year_ago_miles"]);
+    "mile_done", "miles_today", "miles_week", "minutes_to_midnight", "running_now", "streak", "username", "year_ago_miles"]);
   const text = JSON.stringify(body);
   check("no emails anywhere", text.includes("@"), false);
   check("no real names anywhere", /Secret|Surname/.test(text), false);
@@ -300,6 +300,10 @@ async function main() {
   check("medal names cleaned", body.me.medals.some((m) => m.name === "TEST BMEDAL/B [FIRE]"), true);
   check("medal ids are opaque", body.me.medals.every((m) => /^[0-9a-f]{16}$/.test(m.id)), true);
   check("no reviews on a non-admin's desk", body.reviews, []);
+  check("no growth screen on a non-admin's desk", body.growth, null);
+  check("no rival while no friend has a desk", body.rival, null);
+  check("no doodles yet", body.doodles, []);
+  check("my week includes today's run", body.me.miles_week >= 1.02, true);
   check("heatmap: 64 days", body.me.days.length, 64);
   check("heatmap: today is last", body.me.days[63], 1);
   check("heatmap: token-covered day", body.me.days[60], -1);
@@ -358,6 +362,27 @@ async function main() {
   const nudgerFeed = await feed({ authorization: `Display ${made.key}` });
   check("their key shows THEIR data", (await nudgerFeed.json()).me.username, "nudger");
 
+  // ── head to head: a FRIEND with a desk, who shares runs with friends ──
+  await db.query(
+    `INSERT INTO workouts (workout_id, user_id, distance, local_date, date, timezone_offset,
+                           workout_type, device_end_date, calories, total_duration)
+     VALUES ($1, $2, 2.5, (NOW() AT TIME ZONE 'UTC')::date, (NOW() AT TIME ZONE 'UTC')::date, 0,
+             'running', NOW() - INTERVAL '3 minutes', 100, 900)`,
+    [P + "w3", NUDGER],
+  );
+  const vs = (await (await feed({ authorization: `Display ${key}` })).json()).rival;
+  check("rival fields", Object.keys(vs ?? {}).sort(), ["mile_done", "miles_today", "miles_week", "name", "streak"]);
+  check("rival is my friend with a desk", [vs?.name, vs?.miles_today, vs?.mile_done], ["nudger", 2.5, true]);
+  check("rival's week counts today", vs?.miles_week >= 2.5, true);
+  check("no rival for a desk owner who isn't a friend", (await (await feed({ authorization: `Display ${mine.key}` })).json()).rival, null);
+  check("…and the friend sees me back", (await (await feed({ authorization: `Display ${made.key}` })).json()).rival?.name, "owner");
+  await db.query(`INSERT INTO notification_settings (user_id, workout_visibility) VALUES ($1, 'private')`, [NUDGER]);
+  check("a rival who went private drops out", (await (await feed({ authorization: `Display ${key}` })).json()).rival, null);
+  await db.query(`UPDATE notification_settings SET workout_visibility = 'friends' WHERE user_id = $1`, [NUDGER]);
+  await db.query(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)`, [NUDGER, OWNER]);
+  check("a block drops the rival", (await (await feed({ authorization: `Display ${key}` })).json()).rival, null);
+  await db.query(`DELETE FROM user_blocks WHERE blocker_id = $1 AND blocked_id = $2`, [NUDGER, OWNER]);
+
   // ── App Store reviews: founders' (admins') desks only ──
   setReviewSourceForTests(async () => ({
     feed: {
@@ -378,6 +403,13 @@ async function main() {
   check("no reviewer names anywhere", JSON.stringify(adminFeed).includes("Jane"), false);
   const ownerAgain = await (await feed({ authorization: `Display ${key}` })).json();
   check("still no reviews for a non-admin", ownerAgain.reviews, []);
+  // ── growth (founder mode): totals only ──
+  const g = adminFeed.growth;
+  check("growth fields", Object.keys(g ?? {}).sort(), ["best_30", "dows", "today", "week", "yesterday_same_time"]);
+  check("growth: plain counts", [g.today, g.yesterday_same_time, g.best_30, ...g.week].every((n) => Number.isInteger(n) && n >= 0), true);
+  check("growth: 7 days, today last", [g.week.length, g.dows.length, g.week[6] === g.today], [7, 7, true]);
+  check("growth: our signups today are counted", g.today >= ALL.length, true);
+  check("growth: weekday letters only", /^[SMTWF]{7}$/.test(g.dows), true);
 
   // ── desk messages ──
   const sendMsg = (body, user = ADMIN) => fetch(`${base}/admin/display-messages`, {
@@ -484,7 +516,7 @@ async function main() {
   check("message to unknown box → 404", (await post(`desk/box/${adminBox}/message`, { to: "nope", text: "hi" })).status, 404);
   const detail = await (await admin(`desk/box/${ownerBox}`, "GET", OWNER)).json();
   check("box detail: the box", [detail.box.username, detail.box.online], ["owner", true]);
-  check("box detail: the test animations", detail.tests.includes("nudge") && detail.tests.includes("friend_walk"), true);
+  check("box detail: the test animations", ["nudge", "friend_walk", "lead", "doodle", "record"].every((x) => detail.tests.includes(x)), true);
   check("box detail: settings", detail.settings, { style: 2, mascot: 1, rev: 2, sleep_start: 1350, sleep_end: 390, never_sleep: false });
   check("box detail: state", detail.box.state.awake, false);
   check("box detail: recipients are other people's boxes", detail.recipients.map((b) => b.username).sort(), ["admin", "nudger"]);
@@ -503,6 +535,42 @@ async function main() {
          "Stat show started from the remote", "Test animation: nudge", "Woken up from the remote"]);
   check("activity: no emails or real names", /@example\.com|Secret|Surname/.test(JSON.stringify(detail.activity)), false);
   check("box detail: no key hashes", JSON.stringify(detail).includes(stored[0].key_hash), false);
+
+  // ── doodles: pixels only, box to box ──
+  const heart = Array.from({ length: 2048 }, (_, i) => {
+    const x = i % 64, y = Math.floor(i / 64);
+    return (x - 32) ** 2 + (y - 16) ** 2 < 64 ? "2" : y === 30 ? "3" : "0";
+  }).join("");
+  const noise = Array.from({ length: 2048 }, (_, i) => String(i % 8)).join("");
+  check("doodle: wrong size → 400", (await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: "12" })).status, 400);
+  check("doodle: letters → 400", (await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart.replace("2", "x") })).status, 400);
+  check("doodle: colour 8 → 400", (await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart.replace("2", "8") })).status, 400);
+  check("doodle: blank → 400", (await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: "0".repeat(2048) })).status, 400);
+  check("doodle: not a string → 400", (await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: [heart] })).status, 400);
+  check("doodle: too busy → 400", (await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: noise })).status, 400);
+  check("doodle: as someone else's box → 404", (await post(`desk/box/${ownerBox}/doodle`, { to: adminBox, px: heart })).status, 404);
+  check("doodle: to an unknown box → 404", (await post(`desk/box/${adminBox}/doodle`, { to: "nope", px: heart })).status, 404);
+  const dsent = await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart });
+  check("doodle sent", dsent.status, 201);
+  check("doodle reply: no pixels or ids of people", Object.keys((await dsent.json()).doodle).sort(), ["created_at", "id", "to_username"]);
+  const dfeed = await (await feed({ authorization: `Display ${key}` })).json();
+  check("doodle fields", Object.keys(dfeed.doodles[0] ?? {}).sort(), ["age_s", "from", "id", "px"]);
+  check("doodle from", dfeed.doodles.map((d) => d.from), ["admin"]);
+  check("doodle id is opaque", /^[0-9a-f]{16}$/.test(dfeed.doodles[0].id), true);
+  const RUN = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
+  let back = "";
+  const code = dfeed.doodles[0].px;
+  for (let i = 0; i < code.length; i += 2) back += code[i].repeat(RUN.indexOf(code[i + 1]) + 1);
+  check("doodle pixels round-trip", back === heart, true);
+  check("doodle code is compact", code.length < 400, true);
+  check("the sender's box doesn't get it", (await (await feed({ authorization: `Display ${adminKey}` })).json()).doodles, []);
+  const detail2 = await (await admin(`desk/box/${ownerBox}`, "GET", OWNER)).json();
+  check("activity: doodle in", detail2.activity.some((x) => x.kind === "doodle_in" && x.text === "Doodle from @admin"), true);
+  check("activity: doodle out", (await (await admin(`desk/box/${adminBox}`)).json()).activity.some((x) => x.text === "Doodle to @owner"), true);
+  for (let i = 0; i < 9; i++) await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart });
+  check("doodles are rate-limited", (await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart })).status, 429);
+  check("new styles can be chosen", (await (await post(`desk/box/${ownerBox}/settings`, { style: 8 }, OWNER)).json()).settings.style, 8);
+  await post(`desk/box/${ownerBox}/settings`, { style: 2 }, OWNER);
   for (let i = 0; i < 30; i++) await post(`desk/box/${ownerBox}/show`, {}, OWNER);
   check("taps are rate-limited", (await post(`desk/box/${ownerBox}/show`, {}, OWNER)).status, 429);
 
