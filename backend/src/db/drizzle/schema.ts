@@ -3707,3 +3707,129 @@ export const deskPushState = pgTable("desk_push_state", {
   value: text().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
 });
+
+/**
+ * MCP database connector (src/mcp). Six tables, all ROW LEVEL SECURITY with no
+ * policies: the connector's own database roles (pg_read_all_data, plus row
+ * grants for the write role) do NOT bypass RLS, so through the connector these
+ * tables read as empty and refuse every write. Only the app's own role (the
+ * owner) touches them. That is what stops a connector session from reading
+ * token hashes, planting a token, or erasing its audit trail.
+ */
+
+/// OAuth clients Claude registered with itself (dynamic client registration).
+/// Registration is open by spec; a client is powerless without a sign-in.
+export const mcpOauthClients = pgTable("mcp_oauth_clients", {
+  clientId: text("client_id").primaryKey().notNull(),
+  metadata: jsonb().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+}).enableRLS();
+
+/// One /authorize in flight (10 minutes). `browser_key_hash` binds it to the
+/// browser that opened it, so a sign-in link sent to someone else is useless.
+export const mcpOauthRequests = pgTable("mcp_oauth_requests", {
+  id: text().primaryKey().notNull(),
+  browserKeyHash: text("browser_key_hash").notNull(),
+  clientId: text("client_id").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  state: text(),
+  scope: text().notNull(),
+  resource: text().notNull(),
+  nonce: text().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+}).enableRLS();
+
+/// Authorization codes: hashed, single use, two minutes.
+export const mcpOauthCodes = pgTable("mcp_oauth_codes", {
+  codeHash: text("code_hash").primaryKey().notNull(),
+  clientId: text("client_id").notNull(),
+  userId: text("user_id").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  scope: text().notNull(),
+  resource: text().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+}).enableRLS();
+
+/// One completed sign-in. Every token hangs off a grant; revoking the grant
+/// (or it reaching expires_at, 30 days after sign-in) kills all of them.
+export const mcpOauthGrants = pgTable(
+  "mcp_oauth_grants",
+  {
+    grantId: uuid("grant_id").defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    clientId: text("client_id").notNull(),
+    scope: text().notNull(),
+    resource: text().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "mcp_oauth_grants_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+).enableRLS();
+
+/// Access (1 hour) and refresh tokens, stored as SHA-256 only.
+export const mcpOauthTokens = pgTable(
+  "mcp_oauth_tokens",
+  {
+    tokenHash: text("token_hash").primaryKey().notNull(),
+    grantId: uuid("grant_id").notNull(),
+    kind: text().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    // Refresh tokens rotate: set when this one was exchanged. Presenting it
+    // again after a short grace period revokes the whole grant.
+    usedAt: timestamp("used_at", { withTimezone: true, mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_mcp_oauth_tokens_grant").on(table.grantId),
+    foreignKey({
+      columns: [table.grantId],
+      foreignColumns: [mcpOauthGrants.grantId],
+      name: "mcp_oauth_tokens_grant_id_fkey",
+    }).onDelete("cascade"),
+    check("mcp_oauth_tokens_kind_check", sql`kind IN ('access', 'refresh')`),
+  ],
+).enableRLS();
+
+/// Every statement the connector runs, written by the app's role BEFORE the
+/// statement runs (no audit row, no statement) and finished after — plus
+/// sign-ins, refusals and token alarms (`tool` = sign_in, sign_in_denied, …).
+export const mcpAuditLog = pgTable(
+  "mcp_audit_log",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    // No foreign key: the record outlives the account.
+    userId: text("user_id"),
+    grantId: uuid("grant_id"),
+    tool: text().notNull(),
+    statement: text().notNull(),
+    commitRequested: boolean("commit_requested").default(false).notNull(),
+    // Rows the statement returned (query) or changed (execute).
+    rowCount: integer("row_count"),
+    // execute only: what changed, per table, as counted by Postgres.
+    changes: jsonb(),
+    committed: boolean().default(false).notNull(),
+    durationMs: integer("duration_ms"),
+    error: text(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [index("idx_mcp_audit_log_created").on(table.createdAt.desc())],
+).enableRLS();

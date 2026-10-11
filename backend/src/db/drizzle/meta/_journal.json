@@ -673,6 +673,13 @@
       "when": 1791688065229,
       "tag": "0095_desk_push",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1791748542808,
+      "tag": "0096_mcp_connector",
+      "breakpoints": true
     }
   ]
 }

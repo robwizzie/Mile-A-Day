@@ -40,6 +40,7 @@ import {
 } from "./middleware/rateLimit.js";
 import adminRoutes, { adminAuthRouter } from "./routes/adminRoutes.js";
 import displayRoutes from "./routes/displayRoutes.js";
+import { mountMcpConnector } from "./mcp/index.js";
 import { startCompetitionCron } from "./cron/competitionCron.js";
 import { startNotificationCron } from "./cron/notificationCron.js";
 import { startSilentSyncCron } from "./cron/silentSyncCron.js";
@@ -343,6 +344,9 @@ app.use("/public", publicRoutes);
 app.use("/admin/auth", adminAuthRouter);
 // Desk display feed: its own per-device key, never a user JWT (see displayService).
 app.use("/display", displayRoutes);
+// MCP database connector (src/mcp): its own OAuth sign-in, never an app JWT.
+// Mounts nothing unless MCP_ALLOWED_USERS is set.
+mountMcpConnector(app);
 
 app.use(authenticateToken);
 // Per-user backstop, far above any real client (see RATE_LIMIT_SPECS.global).

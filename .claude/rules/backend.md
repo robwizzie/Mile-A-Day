@@ -78,6 +78,7 @@ Details: docs/conventions/backend.md § Auth Pattern
 - Public routes mount BEFORE `authenticateToken`; `/dev/*` 403s unless `NODE_ENV=development`.
 - Protected routes mount AFTER; `req.userId` comes from the middleware.
 - Use `requireSelfAccess('paramName')` for own-resource routes.
+- MCP connector (`src/mcp`): who gets in AND which Apple ID is whom come only from env `MCP_ALLOWED_USERS` (+ `role = 'admin'`); `mcp_*` tables `.enableRLS()`; commits need the dry run's `confirm_token`; write role never `pg_write_all_data`; never `query_timeout`, a plain `Cursor` (use `SafeCursor`), or a checked-out client without an `error` listener. Check: `mcp-check`.
 
 ## Adding a New Endpoint
 Details: docs/conventions/backend.md § Adding a New Endpoint
