@@ -29,6 +29,7 @@ import {
   revokeDisplayKey,
 } from "../services/displayService.js";
 import { logError } from "../services/errorLogService.js";
+import { listDeskInterest } from "../services/deskInterestService.js";
 
 /**
  * Desk display endpoints. See services/displayService.ts for the security
@@ -296,4 +297,11 @@ export async function adminDeskBoxDoodle(req: Request, res: Response) {
   if (doodle === null) return res.status(404).json({ error: "No such desk" });
   if (doodle === false) return res.status(429).json({ error: "That's a lot of doodles: try again in a bit" });
   res.status(201).json({ doodle });
+}
+
+/** GET /admin/desk/interest: "I'd buy one" signups from mileaday.run/desk.
+ *  Company leads, so every admin (both founders) sees the list. */
+export async function adminDeskInterest(_req: Request, res: Response) {
+  noStore(res);
+  res.json(await listDeskInterest());
 }

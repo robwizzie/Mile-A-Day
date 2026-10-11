@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getData, postData } from "./lib";
 import { MAD_RED, MAD_SUCCESS } from "./theme";
+import { loadDeskEngine, type DeskEngine } from "@/lib/desk-engine";
+import { ShareClip } from "@/components/desk/share-clip";
 
 /**
  * The desk remote (/admin/desk), phone-first. Your own box(es) only,
@@ -28,7 +30,7 @@ const TEST_LABEL: Record<string, string> = {
   yearago: "1 year ago", pr: "New PR", message: "Message", comment: "Comment",
   medal: "New medal", review: "App review", recap: "9pm recap", holiday: "Holiday",
   newyear: "New Year", countdown: "New Year countdown", lead: "Lead change",
-  doodle: "Doodle", record: "Signup record",
+  doodle: "Doodle", record: "Signup record", replay: "Run replay", dizzy: "Shaken (dizzy)",
 };
 
 type Kind = "run" | "walk";
@@ -79,6 +81,8 @@ const STYLE_INFO: Record<string, string> = {
   CLOCK: "Clock and your streak",
   VERSUS: "You vs your friend's desk: today, week, streak",
   GROWTH: "Signups today and this week",
+  ODOMETER: "Every mile ever logged, on rolling wheels",
+  SHOWCASE: "Cycles every style, with a stat show (booths and demos)",
 };
 const ACTIVITY_ICON: Record<string, string> = {
   nudge: "👉", hype: "👏", message_in: "💬", message_out: "📤", medal: "🏅",
@@ -126,48 +130,17 @@ function storedBox(): string | null {
 
 // ─── the live preview: the box's own code drawing its real feed ─────────────
 
-type Preview = {
-  start(feed: string, style: number, mascot: number): void;
-  feed(feed: string, now: number): void;
-  choose(style: number, mascot: number, now: number): void;
-  sleep(awake: number, start: number, end: number, now: number): void;
-  test(scene: string, now: number): void;
-  doodle(code: string, now: number): void;
-  frame(now: number): Uint8Array;
-};
-
-let enginePromise: Promise<Preview> | null = null;
-
-/** Load MicroPython + the desk's code once per page. */
-function loadEngine(): Promise<Preview> {
-  if (enginePromise) return enginePromise;
-  enginePromise = (async () => {
-    // Plain dynamic import of a static file (kept out of the bundle).
-    const importer = new Function("u", "return import(u)") as (u: string) => Promise<any>;
-    const { loadMicroPython } = await importer("/desk/mp/micropython.mjs");
-    const mp = await loadMicroPython({ heapsize: 6 * 1024 * 1024 });
-    const files = ["displayio.py", "bitmaptools.py", "deskpreview.py",
-      ...["__init__", "gfx", "art", "app", "cards", "heat", "fx", "modes", "extra", "decor", "season", "closet", "testscenes"]
-        .map((m) => `mad/${m}.py`)];
-    mp.FS.mkdir("/mad");
-    await Promise.all(files.map(async (f) => {
-      const res = await fetch(`/desk/py/${f}`);
-      if (!res.ok) throw new Error(`preview file ${f}: ${res.status}`);
-      mp.FS.writeFile(`/${f}`, new Uint8Array(await res.arrayBuffer()));
-    }));
-    mp.runPython("import sys\nif '/' not in sys.path: sys.path.append('/')");
-    return mp.pyimport("deskpreview") as Preview;
-  })();
-  return enginePromise;
-}
+type Preview = DeskEngine;
+const loadEngine = loadDeskEngine;
 
 /** `sleep`: the box's hours ([-1,-1] = never sleeps) and whether it's awake;
  *  `forceAwake` while previewing a new look (show it as it looks by day). */
-function LivePreview({ feed, style, mascot, sleep, forceAwake, test, doodle }: {
+function LivePreview({ feed, style, mascot, sleep, forceAwake, test, doodle, frameRef }: {
   feed: Feed; style: number; mascot: number;
   sleep: { awake: boolean; start: number; end: number }; forceAwake: boolean;
   test?: { scene: string; n: number } | null;
   doodle?: { code: string; n: number } | null;
+  frameRef?: React.MutableRefObject<Uint8Array | null>;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const engine = useRef<Preview | null>(null);
@@ -198,6 +171,7 @@ function LivePreview({ feed, style, mascot, sleep, forceAwake, test, doodle }: {
           if (!ctx || !img || ts - last < 40) return;     // ~24 fps, like the box
           last = ts;
           const rgb = eng.frame(now());
+          if (frameRef) frameRef.current = rgb;
           for (let i = 0, j = 0; i < 2048; i++, j += 3) {
             // the panel's palette is dim on purpose (one USB supply); brighten
             // it for a phone screen the way the LEDs read in a room
@@ -438,6 +412,7 @@ export function DeskRemote() {
   const [to, setTo] = useState("");
   const [text, setText] = useState("");
   const [doodleReq, setDoodleReq] = useState<{ code: string; n: number } | null>(null);
+  const frameRef = useRef<Uint8Array | null>(null);
 
   const say = (msg: string) => {
     setToast(msg);
@@ -649,7 +624,7 @@ export function DeskRemote() {
                      right={<span className="text-[11px] text-white/40">real data, live</span>}>
               <LivePreview key={data.box.id} feed={live} style={shown.style} mascot={shown.mascot}
                            sleep={{ awake, start: hours.start, end: hours.end }} forceAwake={dirty}
-                           test={testReq} doodle={doodleReq} />
+                           test={testReq} doodle={doodleReq} frameRef={frameRef} />
               {!st && (
                 <p className="mt-2 text-xs text-white/45">
                   {data.box.online ? "This box hasn't reported its screen yet (it needs the latest firmware)."
@@ -703,6 +678,11 @@ export function DeskRemote() {
               <button onClick={statShow} className="mt-3 w-full rounded-xl bg-white/[0.08] py-2.5 text-sm font-extrabold">
                 ▶ Run the stat show now
               </button>
+            </Section>
+
+            {/* ── share a clip ── */}
+            <Section title="Share as GIF or video" right={<span className="text-[11px] text-white/40">for Instagram / TikTok</span>}>
+              <ShareClip frameRef={frameRef} />
             </Section>
 
             {/* ── test animations ── */}
@@ -842,6 +822,8 @@ export function DeskRemote() {
               )}
             </Section>
 
+            <InterestList />
+
             <p className="pb-6 text-center text-[11px] text-white/30">
               Tip: in Safari tap Share → Add to Home Screen to open this like an app.
             </p>
@@ -856,6 +838,54 @@ export function DeskRemote() {
         </div>
       )}
     </main>
+  );
+}
+
+/** "I'd buy one" signups from mileaday.run/desk (both founders see them). */
+function InterestList() {
+  const [d, setD] = useState<{ total: number; prices: Record<string, number>;
+                               rows: { name: string; email: string; price: string | null; created_at: string }[] } | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    getData<NonNullable<typeof d>>("desk/interest").then(setD).catch(() => setD(null));
+  }, []);
+  if (!d) return null;
+  const copy = () => {
+    const csv = ["name,email,price,signed_up", ...d.rows.map((r) =>
+      [r.name, r.email, r.price ?? "", r.created_at].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))].join("\n");
+    navigator.clipboard?.writeText(csv);
+  };
+  return (
+    <Section title={`Want one? (${d.total})`} right={<span className="text-[11px] text-white/40">mileaday.run/desk</span>}>
+      <div className="grid grid-cols-5 gap-1.5 text-center">
+        {["49", "79", "99", "129+", "none"].map((p) => (
+          <Stat key={p} label={p === "none" ? "No answer" : `$${p}`} value={String(d.prices[p] ?? 0)} />
+        ))}
+      </div>
+      {d.rows.length > 0 && (
+        <>
+          <button onClick={() => setOpen((o) => !o)} className="mt-3 w-full rounded-xl bg-white/[0.06] py-2 text-sm font-bold">
+            {open ? "Hide the list" : `Show all ${d.rows.length}`}
+          </button>
+          {open && (
+            <>
+              <ul className="mt-2 flex flex-col">
+                {d.rows.map((r) => (
+                  <li key={r.email} className="flex gap-2 border-b border-white/[0.06] py-2 text-sm last:border-0">
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="font-bold">{r.name}</span> <span className="text-white/50">{r.email}</span>
+                    </span>
+                    <span className="shrink-0 text-white/60">{r.price ? `$${r.price}` : "–"}</span>
+                    <span className="shrink-0 text-[11px] text-white/40">{ago(r.created_at)}</span>
+                  </li>
+                ))}
+              </ul>
+              <button onClick={copy} className="mt-2 w-full rounded-xl bg-white/[0.06] py-2 text-xs font-bold">Copy as CSV</button>
+            </>
+          )}
+        </>
+      )}
+    </Section>
   );
 }
 

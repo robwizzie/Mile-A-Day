@@ -3652,3 +3652,23 @@ export const workoutShoes = pgTable(
     ),
   ],
 );
+
+// "I'd buy a desk box" signups from mileaday.run/desk. Founders read them in
+// Admin; nothing else ever does. Email stored normalized; UNIQUE so a repeat
+// signup just updates the answers (and the endpoint can't probe the list).
+export const deskInterest = pgTable(
+  "desk_interest",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    name: varchar({ length: 60 }).notNull(),
+    email: varchar({ length: 254 }).notNull(),
+    price: varchar({ length: 8 }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [unique("desk_interest_email_unique").on(table.email)],
+);

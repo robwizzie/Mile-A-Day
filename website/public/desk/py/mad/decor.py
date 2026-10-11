@@ -185,7 +185,7 @@ def lights(b, y, now, look):
 # ---------------- per screen ----------------
 def backdrop(app, b, now, view):
     """Called after every frame (not the boot logo) while a season is on.
-    `view` is the dashboard style on screen (9 = my live run), or -1 for
+    `view` is the dashboard style on screen (11 = my live run), or -1 for
     alerts. Busy scenery only goes where there's open sky, so numbers and
     words never get cluttered."""
     look = app.look
@@ -204,10 +204,13 @@ def backdrop(app, b, now, view):
             lights(b, 17, now, look)
         elif view == 2:
             lights(b, 8, now, look)
-        elif view in (5, 9):
+        elif view in (5, 11):
             lights(b, 15, now, look)
             lights(b, 31, now, look)
             lights(b, 30, now, look)
+        elif view == 9:
+            lights(b, 1, now, look)
+            lights(b, 15, now, look)
         return
     if look == "NEWYEAR":
         fireworks(b, now)
@@ -220,7 +223,7 @@ def backdrop(app, b, now, view):
         snow(b, now)                                 # light snow, everywhere
         if view == 2:
             sleigh(b, now, y=11)                     # Arcade: Santa flies over
-        if view in (5, 9):                           # snowy tracks
+        if view in (5, 11):                           # snowy tracks
             snowy_track(b)
     elif look == "HALLOWEEN":
         if view == 2:                                # Arcade: moon + bats
@@ -229,7 +232,7 @@ def backdrop(app, b, now, view):
         elif view == 4:                              # Campfire: moon + bats by the fire
             moon(b, 19, 3)
             bats(b, now, (1, 5), 23, 9.0)
-        if view in (5, 9):
+        if view in (5, 11):
             lights(b, 15, now, look)
             lights(b, 31, now, look)
             lights(b, 30, now, look)
@@ -237,6 +240,9 @@ def backdrop(app, b, now, view):
         lights(b, 17, now, look)
     elif view == 2:
         lights(b, 8, now, look)
+    elif view == 9:                                  # the odometer's housing
+        lights(b, 1, now, look)
+        lights(b, 15, now, look)
 
 
 def snowy_track(b):

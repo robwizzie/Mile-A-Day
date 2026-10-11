@@ -18,6 +18,7 @@ import express from "express";
 import { PostgresService } from "../dist/services/DbService.js";
 import displayRoutes from "../dist/routes/displayRoutes.js";
 import adminRoutes from "../dist/routes/adminRoutes.js";
+import publicRoutes from "../dist/routes/publicRoutes.js";
 import { requireAdmin } from "../dist/middleware/auth.js";
 import { createDisplayKey, hashDisplayKey, listDeskBoxes, setReviewSourceForTests } from "../dist/services/displayService.js";
 
@@ -50,6 +51,7 @@ function check(label, actual, expected) {
 
 async function cleanup() {
   await db.query(`DELETE FROM display_keys WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM desk_interest WHERE email LIKE 'display-check%'`);
   await db.query(`DELETE FROM desk_settings WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM desk_commands WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM post_comments WHERE user_id = ANY($1::text[])`, [ALL]);
@@ -221,6 +223,8 @@ async function seed() {
 function server() {
   const app = express();
   app.use("/display", displayRoutes);
+  app.use(express.json());
+  app.use("/public", publicRoutes);
   // Stand-in for authenticateToken: the header says who the caller is.
   app.use((req, _res, next) => { req.userId = req.headers["x-test-user"]; next(); });
   app.use(express.json());
@@ -256,15 +260,15 @@ async function main() {
   const body = await res.json();
 
   // ── exact whitelist ──
-  check("top-level fields", Object.keys(body).sort(), ["alerts", "commands", "comments", "community", "desk", "doodles", "friends_at_risk", "friends_finished", "friends_miles", "friends_running", "growth", "me", "messages", "reviews", "rival", "v"]);
+  check("top-level fields", Object.keys(body).sort(), ["alerts", "commands", "comments", "community", "desk", "doodles", "friends_at_risk", "friends_finished", "friends_miles", "friends_running", "growth", "hours", "leaders", "me", "messages", "reviews", "rival", "v"]);
   check("community fields", Object.keys(body.community).sort(), [
-    "active_7d", "badges_today", "hypes_today", "longest_streak", "miles_today",
+    "active_7d", "badges_today", "hypes_today", "longest_streak", "miles_7d", "miles_today",
     "miles_yesterday_same_time", "new_friends_today", "nudges_today", "out_running_now",
     "photos_shared", "run_miles_today", "run_miles_total", "tokens_spent_today", "total_hypes", "total_miles",
     "total_users", "walk_miles_today", "walk_miles_total"]);
   check("community values are all numbers", Object.values(body.community).every((v) => typeof v === "number"), true);
   check("me fields", Object.keys(body.me).sort(), [
-    "days", "fastest_mile_month", "flamey", "live_kind", "live_miles", "local_date", "local_time", "longest_run", "medals",
+    "days", "fastest_mile", "fastest_mile_month", "flamey", "last_run", "live_kind", "live_miles", "local_date", "local_time", "longest_run", "longest_streak", "medals",
     "mile_done", "miles_today", "miles_week", "minutes_to_midnight", "running_now", "streak", "username", "year_ago_miles"]);
   const text = JSON.stringify(body);
   check("no emails anywhere", text.includes("@"), false);
@@ -304,6 +308,18 @@ async function main() {
   check("no rival while no friend has a desk", body.rival, null);
   check("no doodles yet", body.doodles, []);
   check("my week includes today's run", body.me.miles_week >= 1.02, true);
+  // ── score boards ──
+  check("hours: 24 plain counts", body.hours.length === 24 && body.hours.every((n) => Number.isInteger(n) && n >= 0), true);
+  check("hours: today's runs are in", body.hours.reduce((a, b) => a + b, 0) >= 2, true);
+  check("leaders: friends who share + me, no blocked/strangers", body.leaders.map((r) => [r.rank, r.name, r.streak, r.me]),
+        [[1, "runner", 40, false], [2, "done", 30, false], [3, "nudger", 9, false], [4, "hidden", 2, false], [5, "owner", 0, true]]);
+  check("leader fields", Object.keys(body.leaders[0] ?? {}).sort(), ["me", "name", "rank", "streak"]);
+  check("my last run (full plausible miles only)", body.me.last_run && [body.me.last_run.kind, body.me.last_run.miles, body.me.last_run.seconds, body.me.last_run.splits],
+        ["run", 1.02, 600, [480]]);
+  check("last run fields", Object.keys(body.me.last_run ?? {}).sort(), ["age_s", "id", "kind", "miles", "seconds", "splits"]);
+  check("last run id is opaque", /^[0-9a-f]{16}$/.test(body.me.last_run?.id ?? ""), true);
+  check("my records", [body.me.fastest_mile, body.me.longest_streak], [480, 0]);
+  check("goal pace is a number", typeof body.community.miles_7d === "number", true);
   check("heatmap: 64 days", body.me.days.length, 64);
   check("heatmap: today is last", body.me.days[63], 1);
   check("heatmap: token-covered day", body.me.days[60], -1);
@@ -371,12 +387,22 @@ async function main() {
     [P + "w3", NUDGER],
   );
   const vs = (await (await feed({ authorization: `Display ${key}` })).json()).rival;
-  check("rival fields", Object.keys(vs ?? {}).sort(), ["mile_done", "miles_today", "miles_week", "name", "streak"]);
+  check("rival fields", Object.keys(vs ?? {}).sort(), ["live_kind", "live_miles", "mile_done", "miles_today", "miles_week", "name", "running_now", "streak"]);
+  check("rival not out running", [vs?.running_now, vs?.live_miles], [false, null]);
+  await db.query(
+    `INSERT INTO live_tracking_sessions (user_id, workout_type, distance_miles, last_seen_at)
+     VALUES ($1, 'walking', 0.42, NOW() - INTERVAL '5 seconds')`, [NUDGER]);
+  const vsLive = (await (await feed({ authorization: `Display ${key}` })).json()).rival;
+  check("rival out now: live race", [vsLive?.running_now, vsLive?.live_miles, vsLive?.live_kind], [true, 0.42, "walk"]);
+  await db.query(`INSERT INTO notification_settings (user_id, share_live_presence) VALUES ($1, FALSE)
+                  ON CONFLICT (user_id) DO UPDATE SET share_live_presence = FALSE`, [NUDGER]);
+  check("…not if they hide live presence", (await (await feed({ authorization: `Display ${key}` })).json()).rival?.running_now, false);
+  await db.query(`UPDATE notification_settings SET share_live_presence = TRUE WHERE user_id = $1`, [NUDGER]);
   check("rival is my friend with a desk", [vs?.name, vs?.miles_today, vs?.mile_done], ["nudger", 2.5, true]);
   check("rival's week counts today", vs?.miles_week >= 2.5, true);
   check("no rival for a desk owner who isn't a friend", (await (await feed({ authorization: `Display ${mine.key}` })).json()).rival, null);
   check("…and the friend sees me back", (await (await feed({ authorization: `Display ${made.key}` })).json()).rival?.name, "owner");
-  await db.query(`INSERT INTO notification_settings (user_id, workout_visibility) VALUES ($1, 'private')`, [NUDGER]);
+  await db.query(`UPDATE notification_settings SET workout_visibility = 'private' WHERE user_id = $1`, [NUDGER]);
   check("a rival who went private drops out", (await (await feed({ authorization: `Display ${key}` })).json()).rival, null);
   await db.query(`UPDATE notification_settings SET workout_visibility = 'friends' WHERE user_id = $1`, [NUDGER]);
   await db.query(`INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)`, [NUDGER, OWNER]);
@@ -470,7 +496,7 @@ async function main() {
   check("…and the owner can't touch the admin's", (await post(`desk/box/${adminBox}/settings`, { style: 1 }, OWNER)).status, 404);
   check("unknown box → 404", (await admin("desk/box/00000000-0000-0000-0000-000000000000")).status, 404);
   check("garbage box id → 404", (await admin("desk/box/x';drop")).status, 404);
-  check("bad style → 400", (await post(`desk/box/${ownerBox}/settings`, { style: 9 }, OWNER)).status, 400);
+  check("bad style → 400", (await post(`desk/box/${ownerBox}/settings`, { style: 11 }, OWNER)).status, 400);
   check("nothing to set → 400", (await post(`desk/box/${ownerBox}/settings`, {}, OWNER)).status, 400);
   check("style string → 400", (await post(`desk/box/${ownerBox}/settings`, { style: "2" }, OWNER)).status, 400);
   check("set owner's box", (await (await post(`desk/box/${ownerBox}/settings`, { style: 2, mascot: 0 }, OWNER)).json()).settings,
@@ -569,10 +595,33 @@ async function main() {
   check("activity: doodle out", (await (await admin(`desk/box/${adminBox}`)).json()).activity.some((x) => x.text === "Doodle to @owner"), true);
   for (let i = 0; i < 9; i++) await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart });
   check("doodles are rate-limited", (await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart })).status, 429);
-  check("new styles can be chosen", (await (await post(`desk/box/${ownerBox}/settings`, { style: 8 }, OWNER)).json()).settings.style, 8);
+  check("new styles can be chosen", (await (await post(`desk/box/${ownerBox}/settings`, { style: 10 }, OWNER)).json()).settings.style, 10);
+  await feed({ authorization: `Display ${key}`, "x-desk-state": "10,1,1,1350,390" });
+  check("Showcase (style 10) reported", (await (await admin("desk/boxes", "GET", OWNER)).json()).boxes[0].state?.style, 10);
   await post(`desk/box/${ownerBox}/settings`, { style: 2 }, OWNER);
   for (let i = 0; i < 30; i++) await post(`desk/box/${ownerBox}/show`, {}, OWNER);
   check("taps are rate-limited", (await post(`desk/box/${ownerBox}/show`, {}, OWNER)).status, 429);
+
+  // ── the website's desk twin + "I'd buy one" ──
+  const pub = await fetch(`${base}/public/desk`);
+  const twin = await pub.json();
+  check("twin: open CORS for the site", pub.headers.get("access-control-allow-origin"), "*");
+  check("twin: aggregates only", Object.keys(twin).sort(), ["community", "hours", "v"]);
+  check("twin: community numbers only", Object.values(twin.community).every((v) => typeof v === "number"), true);
+  check("twin: no names or ids", /owner|admin|runner|nudger|display-check|@/.test(JSON.stringify(twin)), false);
+  const want = (b) => fetch(`${base}/public/desk-interest`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b) });
+  check("interest: needs a name", (await want({ email: "display-check-a@example.com" })).status, 400);
+  check("interest: needs an email", (await want({ name: "Pat", email: "nope" })).status, 400);
+  check("interest: saved", (await want({ name: " Pat <b>Lee</b> ", email: "Display-Check-A@Example.com", price: "79" })).status, 200);
+  check("interest: same answer for a repeat", (await want({ name: "Pat Lee", email: "display-check-a@example.com", price: "99" })).status, 200);
+  check("interest: junk price dropped", (await want({ name: "Sam", email: "display-check-b@example.com", price: "1000000" })).status, 200);
+  check("interest: honeypot quietly dropped", (await want({ name: "Bot", email: "display-check-bot@example.com", website: "http://spam" })).status, 200);
+  check("non-admin can't read signups", (await admin("desk/interest", "GET", P + "stranger")).status, 403);
+  const leads = await (await admin("desk/interest")).json();
+  const mineLeads = leads.rows.filter((r) => r.email.startsWith("display-check"));
+  check("admin reads signups", mineLeads.map((r) => [r.name, r.email, r.price]).sort(),
+        [["Pat Lee", "display-check-a@example.com", "99"], ["Sam", "display-check-b@example.com", null]]);
+  check("signup counts by price", leads.total >= 2 && leads.prices["99"] >= 1, true);
 
   // ── revoke ──
   const id = (await (await admin("display-keys", "GET", OWNER)).json()).keys.find((k) => k.username === "owner").id;

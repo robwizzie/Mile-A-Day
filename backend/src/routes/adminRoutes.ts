@@ -13,6 +13,7 @@ import {
   adminDeskBoxMessage,
   adminDeskBoxTest,
   adminDeskBoxDoodle,
+  adminDeskInterest,
 } from "../controllers/displayController.js";
 import {
   verifyAppleWeb,
@@ -80,6 +81,7 @@ adminRouter.post("/desk/box/:id/wake", adminDeskBoxTap("wake"));
 adminRouter.post("/desk/box/:id/message", adminDeskBoxMessage);
 adminRouter.post("/desk/box/:id/test", adminDeskBoxTest);
 adminRouter.post("/desk/box/:id/doodle", adminDeskBoxDoodle);
+adminRouter.get("/desk/interest", adminDeskInterest);
 adminRouter.get("/miles-by-day", milesByDay);
 adminRouter.get("/engagement", engagement);
 adminRouter.get("/signups-by-day", signupsByDay);

@@ -28,6 +28,10 @@ def length(ev):
         return DOODLE_END
     if kind == "lead":
         return 7.0
+    if kind == "replay":
+        return 8.5
+    if kind == "dizzy":
+        return 5.0
     return 7.5
 
 
@@ -547,3 +551,41 @@ def lead(app, b, ev, t, now, dt):
     if t > 2.0:
         fmt = "%.2f" if text_width("%.2f TO %.2f" % (a, c), F3) <= 40 else "%.1f"
         draw_box(b, x0, 64, 27, (fmt + " TO " + fmt) % (int(a * 100) / 100, int(c * 100) / 100), FAR, F3)
+
+
+# ---------------- my run, replayed mile by mile ----------------
+def replay(app, b, ev, t, now, dt):
+    """The run just synced: its miles draw in one by one (taller = faster),
+    the fastest glows gold, then a little confetti."""
+    from mad import boards
+    boards.splits_card(app, b, min(1.0, t / 3.2), now, ev[1] if len(ev) > 1 else None)
+    if t >= 3.2 and not app.popped:
+        app.popped = True
+        burst(app, 32, 10, 18, 12)
+    particles(app, b, dt, gravity=10)
+
+
+# ---------------- shaken: the mascot gets dizzy (cute) ----------------
+def _star(b, x, y, col):
+    for dx, dy in ((0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)):
+        if 0 <= x + dx < 64 and 0 <= y + dy < 32:
+            b[x + dx, y + dy] = col
+
+
+def dizzy(app, b, ev, t, now, dt):
+    """Picked up and shaken: the mascot sways and settles, three little stars
+    circle its head. WHOA! / SO DIZZY."""
+    f = app.mascot_frame(now, big=True)
+    calm = max(0.0, 1.0 - t / 3.8)
+    sway = int(round(3 * calm * math.sin(t * 7)))
+    x = (22 - f.width) // 2 + sway
+    y = (32 - f.height) // 2 + 2
+    app.draw_mascot(b, f, x, y, now)
+    cx, cy = x + f.width // 2, max(2, y - 1)
+    for k in range(3):
+        a = now * 4 + k * 2.094
+        sx = cx + int(round(8 * math.cos(a)))
+        sy = cy + int(round(2 * math.sin(a)))
+        _star(b, sx, sy, (FL_YELLOW, WHITE, FL_GOLD)[k])
+    typed(b, 23, 64, 7, "WHOA!", t - 0.3, FL_GOLD, F5)
+    typed(b, 23, 64, 18, "SO DIZZY", t - 0.9, RED, F3, 0.05)

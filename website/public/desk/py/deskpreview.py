@@ -76,6 +76,26 @@ def doodle(code, now):
     APP._update_night(now)
 
 
+def set_date(d):
+    """The website's twin: today's date (from the viewer's clock) for the
+    seasonal looks. Nothing else about anyone."""
+    if isinstance(d, str) and len(d) == 10:
+        APP.date = d
+        APP.apply_season()
+
+
+def poke(now):
+    """A tap on the box (the real box: its motion sensor): a little hop."""
+    APP.poke_at = now
+
+
+def dizzy(now):
+    """Shaken: the mascot gets dizzy, like the real box."""
+    if APP.mode in ("dash", "show") and not any(q[0] == "dizzy" for q in APP.queue):
+        APP.queue.append(("dizzy",))
+        APP.next_event_at = now
+
+
 def frame(now):
     APP.tick(now)
     pal = gfx.palette

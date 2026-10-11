@@ -458,6 +458,11 @@ def live(app, b, now, t):
     p = now - getattr(app, "_lv_party", -1e9)
     party = 0 <= p < PARTY
     splash = party and p < SPLASH          # first: a big "1 MILE!" moment
+    r = app.rival or {}
+    if r.get("running_now") and not party:          # both desks out: a live race
+        from mad import boards
+        boards.duel(app, b, now, t, v)
+        return
     name = upper_name(me.get("username"))
     walk = me.get("live_kind") == "walk"
     if splash:

@@ -1,7 +1,7 @@
 # Mile A Day desk counter - dashboard cards that live outside app.py: the
 # "me" card and the community mile goal. Kept small and resident; the
 # celebrations in mad/fx.py load only while one plays.
-from mad.gfx import (fit, fit_icon, MAROON_DIM, RED, WHITE, FAR, GREEN, FL_GOLD, WATER_LIGHT, F5, F3, text_width, draw_text,
+from mad.gfx import (clock, fit, fit_icon, MAROON_DIM, RED, WHITE, FAR, GREEN, FL_GOLD, WATER_LIGHT, F5, F3, text_width, draw_text,
                      draw_box, fill, draw_icon, icon_width, short, commas, upper_name)
 
 
@@ -46,7 +46,12 @@ def goal_card(app, b, frac=1.0):
     t = commas(left) + " TO GO"
     if text_width(t) > 56:
         t = short(left) + " TO GO"
-    draw_box(b, 0, 64, 21, t, RED)
+    col = RED
+    from mad import boards                 # when, at the community's real recent pace
+    eta = boards.goal_eta(app)
+    if eta and int(clock() / 3) % 2:
+        t, col = eta, (FL_GOLD if "HOUR" in eta else WHITE)
+    draw_box(b, 0, 64, 21, t, col, F5 if text_width(t) <= 62 else F3)
 
 
 def goal_line(app, b, y, frac, x0, x1):
