@@ -891,8 +891,8 @@ function InterestList() {
   };
   return (
     <Section title={`Want one? (${d.total})`} right={<span className="text-[11px] text-white/40">mileaday.run/desk</span>}>
-      <div className="grid grid-cols-5 gap-1.5 text-center">
-        {["49", "79", "99", "129+", "none"].map((p) => (
+      <div className="grid grid-cols-4 gap-1.5 text-center">
+        {["79", "99", "129+", "none"].map((p) => (
           <Stat key={p} label={p === "none" ? "No answer" : `$${p}`} value={String(d.prices[p] ?? 0)} />
         ))}
       </div>

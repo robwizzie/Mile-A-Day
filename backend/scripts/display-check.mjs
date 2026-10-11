@@ -680,13 +680,14 @@ async function main() {
   check("interest: needs an email", (await want({ name: "Pat", email: "nope" })).status, 400);
   check("interest: saved", (await want({ name: " Pat <b>Lee</b> ", email: "Display-Check-A@Example.com", price: "79" })).status, 200);
   check("interest: same answer for a repeat", (await want({ name: "Pat Lee", email: "display-check-a@example.com", price: "99" })).status, 200);
+  check("interest: $49 isn't an option (dropped)", (await want({ name: "Lo", email: "display-check-d@example.com", price: "49" })).status, 200);
   check("interest: junk price dropped", (await want({ name: "Sam", email: "display-check-b@example.com", price: "1000000" })).status, 200);
   check("interest: honeypot quietly dropped", (await want({ name: "Bot", email: "display-check-bot@example.com", website: "http://spam" })).status, 200);
   check("non-admin can't read signups", (await admin("desk/interest", "GET", P + "stranger")).status, 403);
   const leads = await (await admin("desk/interest")).json();
-  const mineLeads = leads.rows.filter((r) => /^display-check-[ab]@/.test(r.email));
+  const mineLeads = leads.rows.filter((r) => /^display-check-[abd]@/.test(r.email));
   check("admin reads signups", mineLeads.map((r) => [r.name, r.email, r.price]).sort(),
-        [["Pat Lee", "display-check-a@example.com", "99"], ["Sam", "display-check-b@example.com", null]]);
+        [["Lo", "display-check-d@example.com", null], ["Pat Lee", "display-check-a@example.com", "99"], ["Sam", "display-check-b@example.com", null]]);
   check("signup counts by price", leads.total >= 2 && leads.prices["99"] >= 1, true);
 
   // ── revoke ──

@@ -5,7 +5,7 @@ import { pushToAdmins } from "./deskPushService.js";
 const db = PostgresService.getInstance();
 
 /** The price answers the form offers (US dollars); anything else is dropped. */
-export const DESK_PRICES = ["49", "79", "99", "129+"] as const;
+export const DESK_PRICES = ["79", "99", "129+"] as const;
 const NAME_MAX = 60;
 
 /** A display name as typed, cleaned: letters, digits, spaces and a little
