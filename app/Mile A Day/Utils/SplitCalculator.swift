@@ -57,6 +57,11 @@ enum SplitCalculator {
             print("[SplitCalculator] Filtered out \(filteredCount) bad sample(s)")
         }
 
+        #if !os(watchOS)
+        // iPhone only: this file is ALSO in the Watch target
+        // (`WatchWorkoutUploader`), and `RouteGaps` is not. The Watch only
+        // uploads its own workouts, whose fine samples never take this path.
+        //
         // A sample this long says nothing about pace INSIDE it: the loop below
         // spreads its time evenly, so every mile it covers comes out at the
         // workout's average pace. Our own tracker saves a whole walk as ONE
@@ -73,6 +78,7 @@ enum SplitCalculator {
             }
             if longestMeters >= mileInMeters { return [] }
         }
+        #endif
 
         // Use timestamp-based durations anchored to workout start
         var splits: [WorkoutSplit] = []
@@ -127,6 +133,7 @@ enum SplitCalculator {
         return splits
     }
 
+    #if !os(watchOS)
     // MARK: - Route splits
 
     /// Mile splits from the route's own timestamps, for a workout whose
@@ -235,9 +242,11 @@ enum SplitCalculator {
         }
         return out
     }
+    #endif
 
     // MARK: - Private
 
+    #if !os(watchOS)
     /// Every location in the workout's route(s), oldest first; empty when it
     /// has none (indoor, no GPS, or route sharing off).
     private static func fetchRouteLocations(for workout: HKWorkout) async -> [CLLocation] {
@@ -273,6 +282,7 @@ enum SplitCalculator {
         }
         return locations.sorted { $0.timestamp < $1.timestamp }
     }
+    #endif
 
     private static func fetchDistanceSamples(
         for workout: HKWorkout,
