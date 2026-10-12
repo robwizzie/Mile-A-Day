@@ -76,7 +76,8 @@ struct TodayMileSummary {
             return "You've done it today: \(miles.distanceText) of \(goalText). \(streakSentence)"
         }
         if stepsDone {
-            return "You've done it today: \(steps.formatted()) steps. \(streakSentence)"
+            // Not `steps`: the stored count can still be yesterday's number.
+            return "You've done it today: 10,000+ steps. \(streakSentence)"
         }
         return "You're at \(miles.distanceText) of \(goalText) today — \(remainingText) to go. \(streakSentence)"
     }

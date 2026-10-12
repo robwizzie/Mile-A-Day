@@ -23,13 +23,21 @@ enum StepGoalDayStore {
     /// unguarded they can drop each other's days.
     private static let lock = NSLock()
 
-    /// The key for a date's local day — `DayKeyFormatter`, the WorkoutIndex's
-    /// own key format (current calendar and time zone, POSIX digits), so a
-    /// step day lines up with the index's days in every calendar. NOT the
-    /// server's `local_date`, which is always Gregorian: see
-    /// `DailyStepsSyncService.localDateString`.
+    /// The key for a date's local day, built EXACTLY as
+    /// `WorkoutIndex.dateKey(from:)` builds its keys (current calendar's
+    /// components, zero-padded ASCII), so a step day lines up with the
+    /// index's days in every calendar. NOT the server's `local_date`, which
+    /// is always Gregorian: see `DailyStepsSyncService.localDateString`.
     static func dayKey(for date: Date) -> String {
-        DayKeyFormatter.string(from: date)
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    /// The inverse of `dayKey`, in the same calendar.
+    private static func date(fromKey key: String) -> Date? {
+        let parts = key.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        return Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
     }
 
     /// Goal-met local days.
@@ -41,7 +49,7 @@ enum StepGoalDayStore {
     static var goalDays: Set<Date> {
         let calendar = Calendar.current
         return Set(goalDayKeys.compactMap { key in
-            DayKeyFormatter.date(from: key).map { calendar.startOfDay(for: $0) }
+            date(fromKey: key).map { calendar.startOfDay(for: $0) }
         })
     }
 

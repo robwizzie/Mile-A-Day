@@ -1784,6 +1784,16 @@ class WorkoutSyncService: ObservableObject {
     }
 
     private func performRecalibration(userId: String, localStreakDays: Int) async throws -> RecalibrateOutcome {
+        // 0. Steps: 10,000 steps completes a day, so the server should hold
+        //    every goal day before it re-counts below — the whole history
+        //    Health still has, then the recent 30 days' partial totals (a day
+        //    a late Watch sync left short). Best-effort; the server keeps the
+        //    GREATEST, so neither can lower a good day or fail this run. First,
+        //    because the merged step days can lengthen the local streak, and
+        //    the workout lookback below is sized from it.
+        await DailyStepsSyncService.shared.syncStepGoalHistory(force: true)
+        await DailyStepsSyncService.shared.backfillRecentDays(30)
+
         // 1. Flush any manual workouts still stuck in the retry queue.
         await flushPendingManualUploads()
 
@@ -1791,7 +1801,8 @@ class WorkoutSyncService: ObservableObject {
         //    are idempotent on the backend (ON CONFLICT (workout_id) DO UPDATE),
         //    so re-sending already-synced workouts is harmless and just backfills
         //    any that are missing. fullSync=true keeps this bulk re-push silent.
-        let lookbackDays = max(localStreakDays + 14, 60)
+        let streakDays = max(localStreakDays, HealthKitManager.shared.retroactiveStreak)
+        let lookbackDays = max(streakDays + 14, 60)
         let startOfToday = Calendar.current.startOfDay(for: Date())
         let since = Calendar.current.date(byAdding: .day, value: -lookbackDays, to: startOfToday) ?? startOfToday
         let workouts = try await fetchWorkouts(since: since)
@@ -1816,14 +1827,6 @@ class WorkoutSyncService: ObservableObject {
         //    against the backend's list for the same window.
         let hkUUIDs = Set(workouts.map { $0.uuid.uuidString })
         await removeOrphanedBackendWorkouts(since: since, hkUUIDs: hkUUIDs, userId: userId)
-
-        // 3b. Steps: 10,000 steps completes a day, so the server should hold
-        //     every goal day before it re-counts below — the whole history
-        //     Health still has, then the recent 30 days' partial totals (a day
-        //     a late Watch sync left short). Best-effort; the server keeps the
-        //     GREATEST, so neither can lower a good day or fail this run.
-        await DailyStepsSyncService.shared.syncStepGoalHistory(force: true)
-        await DailyStepsSyncService.shared.backfillRecentDays(30)
 
         // 4. Ask the backend to recompute the streak synchronously and return it.
         let response: RecalibrateStreakResponse = try await APIClient.fancyFetch(
