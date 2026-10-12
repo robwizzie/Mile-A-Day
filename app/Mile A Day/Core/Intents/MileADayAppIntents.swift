@@ -18,6 +18,7 @@ struct TodayMileSummary {
     let miles: Double
     let goal: Double
     let streak: Int
+    let steps: Int
 
     static func current() -> TodayMileSummary {
         let progress = WidgetDataStore.load()
@@ -25,15 +26,22 @@ struct TodayMileSummary {
             isFresh: WidgetDataStore.hasProgressForToday(),
             miles: max(progress.miles, 0),
             goal: progress.goal > 0 ? progress.goal : 1,
-            streak: max(WidgetDataStore.loadStreak(), 0)
+            streak: max(WidgetDataStore.loadStreak(), 0),
+            steps: max(WidgetDataStore.loadTodaySteps(), 0)
         )
     }
 
     /// Scoring rule, not the tracker's celebration rule: the server counts a
     /// day at 95% of the goal (`ProgressCalculator.isGoalCompleted`).
-    var isDone: Bool { ProgressCalculator.isGoalCompleted(current: miles, goal: goal) }
+    private var milesDone: Bool { ProgressCalculator.isGoalCompleted(current: miles, goal: goal) }
 
-    var fraction: Double { min(max(miles / goal, 0), 1) }
+    /// 10,000 steps completes the day too ("1 mile OR 10,000 steps").
+    private var stepsDone: Bool { steps >= ProgressCalculator.dailyStepGoal }
+
+    var isDone: Bool { milesDone || stepsDone }
+
+    /// The ring: full on a day the steps finished, whatever the miles read.
+    var fraction: Double { stepsDone ? 1 : min(max(miles / goal, 0), 1) }
 
     private var unit: DisplayDistanceUnit { DistanceUnits.current }
 
@@ -63,8 +71,11 @@ struct TodayMileSummary {
         guard isFresh else {
             return "Mile A Day hasn't updated today's progress yet. Open Mile A Day to refresh."
         }
-        if isDone {
+        if milesDone {
             return "You've done it today: \(miles.distanceText) of \(goalText). \(streakSentence)"
+        }
+        if stepsDone {
+            return "You've done it today: \(steps.formatted()) steps. \(streakSentence)"
         }
         return "You're at \(miles.distanceText) of \(goalText) today — \(remainingText) to go. \(streakSentence)"
     }

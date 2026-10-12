@@ -159,16 +159,21 @@ struct WeekMileDaysRow: View {
         return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
     }
 
+    /// A mile day or a 10k-step day ("1 mile OR 10,000 steps").
+    private func isDone(_ date: Date) -> Bool {
+        (healthManager.dailyMileGoals[Calendar.current.startOfDay(for: date)] ?? false)
+            || StepGoalDayStore.goalDayKeys.contains(StepGoalDayStore.dayKey(for: date))
+    }
+
     private var completedCount: Int {
-        let calendar = Calendar.current
-        return weekDays.filter { healthManager.dailyMileGoals[calendar.startOfDay(for: $0)] ?? false }.count
+        weekDays.filter { isDone($0) }.count
     }
 
     var body: some View {
         VStack(spacing: 12) {
             if showLabels {
                 HStack {
-                    Text("Mile days")
+                    Text("Goal days")
                         .madFont(size: 14, weight: .heavy, design: .rounded)
                         .foregroundColor(.white)
                     Spacer()
@@ -181,7 +186,7 @@ struct WeekMileDaysRow: View {
             HStack(spacing: 0) {
                 ForEach(weekDays, id: \.self) { date in
                     let calendar = Calendar.current
-                    let completed = healthManager.dailyMileGoals[calendar.startOfDay(for: date)] ?? false
+                    let completed = isDone(date)
                     let isToday = calendar.isDateInToday(date)
                     let isFuture = calendar.startOfDay(for: date) > calendar.startOfDay(for: Date())
 
@@ -246,6 +251,8 @@ struct ModernDashboardBody: View {
                 goalDistance: state.goal,
                 progress: state.progress,
                 isGoalCompleted: state.completed,
+                todaySteps: healthManager.todaysSteps,
+                stepGoalMet: StepGoalDayStore.isTodayMet(),
                 hasActiveWorkout: hasActiveWorkout,
                 distanceIsFresh: healthManager.hasFreshTodaysDistance,
                 showWorkoutView: $showWorkoutView
@@ -314,6 +321,8 @@ struct FunDashboardBody: View {
                 goalDistance: state.goal,
                 progress: state.progress,
                 isGoalCompleted: state.completed,
+                todaySteps: healthManager.todaysSteps,
+                stepGoalMet: StepGoalDayStore.isTodayMet(),
                 hasActiveWorkout: hasActiveWorkout,
                 distanceIsFresh: healthManager.hasFreshTodaysDistance,
                 showWorkoutView: $showWorkoutView
@@ -323,7 +332,8 @@ struct FunDashboardBody: View {
             .madTypeCap(.madFixedChromeCap)
 
             FunStartCard(
-                trustedDone: state.completed && healthManager.hasFreshTodaysDistance,
+                trustedDone: (state.completed && healthManager.hasFreshTodaysDistance)
+                    || StepGoalDayStore.isTodayMet(),
                 hasActiveWorkout: hasActiveWorkout,
                 showWorkoutView: $showWorkoutView,
                 onLogPastWorkout: onLogPastWorkout
@@ -354,6 +364,7 @@ struct FunDashboardBody: View {
 
     private var statusColor: Color {
         if state.completed && healthManager.hasFreshTodaysDistance { return .green }
+        if StepGoalDayStore.isTodayMet() { return .green }
         if userManager.currentUser.isStreakAtRisk { return .red }
         return .orange
     }
@@ -377,6 +388,12 @@ private struct ModernHeroCard: View {
     let goalDistance: Double
     let progress: Double
     let isGoalCompleted: Bool
+    /// Today's step count, for the hero's step bar.
+    let todaySteps: Int
+    /// Today's steps reached 10k — the day is done whatever the miles read
+    /// (`StepGoalDayStore.isTodayMet`, day-keyed, so it never carries
+    /// yesterday's count past midnight).
+    let stepGoalMet: Bool
     let hasActiveWorkout: Bool
     let distanceIsFresh: Bool
     @Binding var showWorkoutView: Bool
@@ -386,11 +403,15 @@ private struct ModernHeroCard: View {
     @State private var timer: Timer?
     @ObservedObject private var tokensState = StreakTokensState.shared
 
-    private var trustedDone: Bool { isGoalCompleted && distanceIsFresh }
+    private var trustedDone: Bool { (isGoalCompleted && distanceIsFresh) || stepGoalMet }
+    /// The flame reads the DAY: a mile or 10k steps. A steps-done day needs no
+    /// fresh distance to trust it — the step key is today's by construction.
+    private var dayCompleted: Bool { isGoalCompleted || stepGoalMet }
+    private var dayFresh: Bool { distanceIsFresh || stepGoalMet }
     private var flameHealth: FlameHealth {
         FlameHealth.forState(
-            isCompleted: isGoalCompleted,
-            distanceIsFresh: distanceIsFresh,
+            isCompleted: dayCompleted,
+            distanceIsFresh: dayFresh,
             isAtRisk: userManager.currentUser.isStreakAtRisk,
             secondsToReset: secondsUntilLocalMidnight,
             streak: userManager.currentUser.streak
@@ -399,10 +420,15 @@ private struct ModernHeroCard: View {
 
     private var flamePhase: StreakFlamePhase {
         StreakFlamePhase.forState(
-            isCompleted: isGoalCompleted,
-            distanceIsFresh: distanceIsFresh,
+            isCompleted: dayCompleted,
+            distanceIsFresh: dayFresh,
             streak: userManager.currentUser.streak
         )
+    }
+
+    /// The nearer of the two ways to finish, for the coals' warmth.
+    private var dayProgress: Double {
+        max(progress, Double(todaySteps) / Double(ProgressCalculator.dailyStepGoal))
     }
 
     /// A streak token is carrying today (almost always an Assist a friend's
@@ -429,6 +455,25 @@ private struct ModernHeroCard: View {
         return .orange
     }
 
+    /// The flame row's width, measured. 0 until the first layout pass, which
+    /// reads as "wide" — the full-size flame every phone had before.
+    @State private var flameRowWidth: CGFloat = 0
+
+    /// What the stat column needs for its three lines to read without
+    /// truncating ("0.42 mi", "DISTANCE", "6h 12m left").
+    private static let statColumnMinWidth: CGFloat = 112
+
+    /// The flame box's side: 172pt wherever the stat column still gets
+    /// `statColumnMinWidth` (every phone at 375pt and up), shrinking only
+    /// below that. At 320pt — an SE or mini under Display Zoom — a fixed
+    /// 172pt left the column ~62pt and cut every number in it ("0.4…").
+    private var flameBox: CGFloat {
+        guard flameRowWidth > 0 else { return 172 }
+        return min(172, max(118, flameRowWidth - 18 - Self.statColumnMinWidth))
+    }
+
+    private var flameScale: CGFloat { flameBox / 172 }
+
     var body: some View {
         VStack(spacing: 16) {
             HStack(alignment: .center, spacing: 18) {
@@ -441,22 +486,22 @@ private struct ModernHeroCard: View {
                         // Smaller and lifted: this hero overlays the streak
                         // number on the figure, and at ring size the number
                         // lands squarely on the buddy's face.
-                        InjuredFlameBuddyView(size: 112)
-                            .offset(y: -30)
+                        InjuredFlameBuddyView(size: 112 * flameScale)
+                            .offset(y: -30 * flameScale)
                     } else {
                         ProfessionalFlameView(
                             phase: flamePhase,
                             health: flameHealth,
-                            size: 166,
+                            size: 166 * flameScale,
                             ringProgress: timeLeftRingProgress,
                             dayEnd: StreakFlameClock.nextLocalMidnight(),
-                            coalWarmth: min(progress, 1)
+                            coalWarmth: min(dayProgress, 1)
                         )
                     }
 
                     VStack(spacing: 0) {
                         Text("\(heroStreakValue)")
-                            .madFont(size: 34, weight: .black, design: .rounded, monospacedDigit: true)
+                            .madFont(size: 34 * max(flameScale, 0.8), weight: .black, design: .rounded, monospacedDigit: true)
                             .foregroundColor(.white)
                             .shadow(color: .black.opacity(0.72), radius: 5, x: 0, y: 2)
                             .lineLimit(1)
@@ -469,9 +514,9 @@ private struct ModernHeroCard: View {
                                              : .white.opacity(0.88))
                             .shadow(color: .black.opacity(0.72), radius: 4, x: 0, y: 2)
                     }
-                    .offset(y: injuryPause.isPaused ? 54 : 39)
+                    .offset(y: (injuryPause.isPaused ? 54 : 39) * flameScale)
                 }
-                .frame(width: 172, height: 176)
+                .frame(width: flameBox, height: 176 * flameScale)
                 .layoutPriority(1)
 
                 // Savers head the stat column — beside the streak they
@@ -484,10 +529,30 @@ private struct ModernHeroCard: View {
                         goalMiles: userManager.currentUser.goalMiles,
                         fastestPace: healthManager.todaysFastestPace,
                         timeLeftText: formattedTimeOnly,
-                        statusColor: statusColor
+                        statusColor: statusColor,
+                        todaySteps: todaySteps,
+                        stepGoalMet: stepGoalMet
                     )
                 }
                 .frame(maxWidth: .infinity)
+            }
+            // The card sets this row's width (the stat column is flexible),
+            // so measuring it can't feed back into itself.
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { flameRowWidth = geo.size.width }
+                        .onChange(of: geo.size.width) { _, width in flameRowWidth = width }
+                }
+            )
+
+            if !injuryPause.isPaused {
+                DailyGoalBars(
+                    miles: currentDistance,
+                    goalMiles: userManager.currentUser.goalMiles,
+                    steps: todaySteps,
+                    stepGoalMet: stepGoalMet
+                )
             }
 
             RecordGhostRow(
@@ -777,6 +842,10 @@ private struct HeroStatColumn: View {
     /// Time until local midnight, e.g. "6h 30m".
     let timeLeftText: String
     let statusColor: Color
+    /// Today's steps, and whether they reached 10k — a day the steps finished
+    /// answers "how far to go?" with "Done", not miles still owed.
+    let todaySteps: Int
+    let stepGoalMet: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -803,7 +872,15 @@ private struct HeroStatColumn: View {
     @ViewBuilder
     private var middleLine: some View {
         let goal = max(goalMiles, 0.01)
-        if !ProgressCalculator.isGoalCompleted(current: currentDistance, goal: goal) {
+        if stepGoalMet && !ProgressCalculator.isGoalCompleted(current: currentDistance, goal: goal) {
+            ModernHeroStatLine(
+                icon: "checkmark.circle.fill",
+                value: "Done",
+                unit: "",
+                label: "\(todaySteps.formatted()) steps",
+                tint: MADTheme.Colors.success
+            )
+        } else if !ProgressCalculator.isGoalCompleted(current: currentDistance, goal: goal) {
             ModernHeroStatLine(
                 icon: "flag.checkered",
                 value: max(goal - currentDistance, 0).distanceToGoText,
@@ -836,6 +913,135 @@ private struct HeroStatColumn: View {
         let minutes = Int(shown)
         let seconds = Int((shown - Double(minutes)) * 60)
         return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+/// Option C of "1 mile OR 10,000 steps": the day's two ways to finish, side
+/// by side inside the hero, so the rule is visible where the day is.
+///
+/// Both heroes render this one view (Modern under the flame row, Fun under
+/// the buddy), so the two styles can't explain the goal differently. Sized
+/// for the narrowest phone first: at 320pt (an SE under Display Zoom) each
+/// path gets ~94pt, so every label is one short line that scales down
+/// before it would truncate, and nothing has a fixed width.
+private struct DailyGoalBars: View {
+    let miles: Double
+    let goalMiles: Double
+    let steps: Int
+    let stepGoalMet: Bool
+
+    private var goal: Double { max(goalMiles, 0.01) }
+    private var milesDone: Bool { ProgressCalculator.isGoalCompleted(current: miles, goal: goal) }
+    private var done: Bool { milesDone || stepGoalMet }
+    private var milesProgress: Double { min(max(miles / goal, 0), 1) }
+    private var stepsProgress: Double {
+        stepGoalMet ? 1 : min(max(Double(steps) / Double(ProgressCalculator.dailyStepGoal), 0), 1)
+    }
+
+    /// "1" / "2" / "1.61" in the display unit — a whole goal reads without
+    /// decimals, so "/ 1 mi" fits beside today's miles.
+    private var goalText: String {
+        let value = goal.inDisplayUnit
+        let isWhole = abs(value - value.rounded()) < 0.005
+        return isWhole ? String(Int(value.rounded())) : String(format: "%.2f", value)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("Today's goal · either one")
+                    .madFont(size: 10, weight: .black, design: .rounded)
+                    .textCase(.uppercase)
+                    .foregroundColor(.white.opacity(0.45))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Spacer(minLength: 4)
+                if done {
+                    HStack(spacing: 3) {
+                        Image(systemName: "checkmark")
+                            .madFont(size: 9, weight: .black)
+                            .accessibilityHidden(true)
+                        Text("Done")
+                            .madFont(size: 10, weight: .black, design: .rounded)
+                            .textCase(.uppercase)
+                    }
+                    .foregroundColor(MADTheme.Colors.success)
+                    .lineLimit(1)
+                    .fixedSize()
+                }
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                path(
+                    icon: "figure.run",
+                    value: miles.distanceText,
+                    target: "/ \(goalText) \(DistanceUnits.current.abbreviation)",
+                    progress: milesProgress,
+                    tint: milesDone ? MADTheme.Colors.success : MADTheme.Colors.madRed
+                )
+                Text("OR")
+                    .madFont(size: 9, weight: .black, design: .rounded)
+                    .foregroundColor(.white.opacity(0.6))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.white.opacity(0.10)))
+                    .fixedSize()
+                    .padding(.bottom, 1)
+                    .accessibilityHidden(true)
+                path(
+                    icon: "shoeprints.fill",
+                    value: steps.formatted(),
+                    target: "/ 10k",
+                    progress: stepsProgress,
+                    tint: stepGoalMet ? MADTheme.Colors.success : .orange
+                )
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.045))
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private func path(icon: String, value: String, target: String, progress: Double, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Image(systemName: icon)
+                    .madFont(size: 11, weight: .bold, maxScale: 1.2)
+                    .foregroundColor(tint)
+                Text(value)
+                    .madFont(size: 13, weight: .heavy, design: .rounded, monospacedDigit: true)
+                    .foregroundColor(.white)
+                Text(target)
+                    .madFont(size: 11, weight: .bold, design: .rounded)
+                    .foregroundColor(.white.opacity(0.45))
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+
+            Capsule()
+                .fill(Color.white.opacity(0.10))
+                .frame(height: 5)
+                .overlay(alignment: .leading) {
+                    GeometryReader { geo in
+                        Capsule()
+                            .fill(tint)
+                            .frame(width: max(5, geo.size.width * progress), height: 5)
+                    }
+                }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var accessibilityText: String {
+        let milesPart = "\(miles.distanceText) of \(goalText) \(DistanceUnits.current.plural)"
+        let stepsPart = "\(steps.formatted()) of 10,000 steps"
+        let status = done ? "Today's goal is done." : "Either one finishes today."
+        return "\(milesPart), or \(stepsPart). \(status)"
     }
 }
 
@@ -882,14 +1088,20 @@ private struct ModernStepsTile: View {
     @MADScaledMetric(relativeTo: .title2) private var tileHeight: CGFloat = 168
 
     private var steps: Int { healthManager.todaysSteps }
-    private var progress: Double { min(Double(steps) / 10000.0, 1) }
-    private var tint: Color { steps >= 10000 ? .green : .orange }
+    private var goal: Int { ProgressCalculator.dailyStepGoal }
+    private var progress: Double { min(Double(steps) / Double(goal), 1) }
+    private var tint: Color { steps >= goal ? .green : .orange }
+    /// Short on purpose: at 320pt (Display Zoom on an SE) the tile's text
+    /// column is ~110pt. The hero's "either one" bars carry the rule itself.
+    private var subtitle: String {
+        steps >= goal ? "Counts for streak" : "\(ProgressCalculator.formatProgress(progress)) of 10k"
+    }
 
     var body: some View {
         NavigationLink {
             StepsView(healthManager: healthManager, userManager: userManager)
         } label: {
-            ModernTile(icon: "shoeprints.fill", title: "Steps", value: steps.formatted(), subtitle: "\(ProgressCalculator.formatProgress(progress)) of 10k", tint: tint) {
+            ModernTile(icon: "shoeprints.fill", title: "Steps", value: steps.formatted(), subtitle: subtitle, tint: tint) {
                 Capsule()
                     .fill(Color.white.opacity(0.10))
                     .frame(height: 5)
@@ -1336,6 +1548,10 @@ private struct FlameBuddyHeroCard: View {
     let goalDistance: Double
     let progress: Double
     let isGoalCompleted: Bool
+    /// Today's step count, for the hero's step bar.
+    let todaySteps: Int
+    /// Today's steps reached 10k — see ModernHeroCard.stepGoalMet.
+    let stepGoalMet: Bool
     let hasActiveWorkout: Bool
     let distanceIsFresh: Bool
     @Binding var showWorkoutView: Bool
@@ -1365,7 +1581,14 @@ private struct FlameBuddyHeroCard: View {
     /// appearance / day / completion change, never in `body`.
     @State private var memory: FlameyMemory?
 
-    private var trustedDone: Bool { isGoalCompleted && distanceIsFresh }
+    private var trustedDone: Bool { (isGoalCompleted && distanceIsFresh) || stepGoalMet }
+    /// The flame reads the DAY: a mile or 10k steps (see ModernHeroCard).
+    private var dayCompleted: Bool { isGoalCompleted || stepGoalMet }
+    private var dayFresh: Bool { distanceIsFresh || stepGoalMet }
+    /// The nearer of the two ways to finish, for his mood and the coals.
+    private var dayProgress: Double {
+        max(progress, Double(todaySteps) / Double(ProgressCalculator.dailyStepGoal))
+    }
 
     /// The same stamp the widget compares against (FlameyMoodCore.swift).
     private static func localDayStamp(_ date: Date = Date()) -> String {
@@ -1377,7 +1600,7 @@ private struct FlameBuddyHeroCard: View {
     private var mood: FlameMood {
         var mood = FlameMood.resolve(
             phase: flamePhase,
-            progress: progress,
+            progress: min(dayProgress, 1),
             isAtRisk: userManager.currentUser.isStreakAtRisk && !trustedDone,
             hasActiveWorkout: hasActiveWorkout,
             streak: heroStreakValue,
@@ -1503,8 +1726,8 @@ private struct FlameBuddyHeroCard: View {
     }
     private var health: FlameHealth {
         FlameHealth.forState(
-            isCompleted: isGoalCompleted,
-            distanceIsFresh: distanceIsFresh,
+            isCompleted: dayCompleted,
+            distanceIsFresh: dayFresh,
             isAtRisk: userManager.currentUser.isStreakAtRisk,
             secondsToReset: userManager.currentUser.timeUntilStreakReset,
             streak: userManager.currentUser.streak
@@ -1513,8 +1736,8 @@ private struct FlameBuddyHeroCard: View {
 
     private var flamePhase: StreakFlamePhase {
         StreakFlamePhase.forState(
-            isCompleted: isGoalCompleted,
-            distanceIsFresh: distanceIsFresh,
+            isCompleted: dayCompleted,
+            distanceIsFresh: dayFresh,
             streak: userManager.currentUser.streak
         )
     }
@@ -1594,7 +1817,7 @@ private struct FlameBuddyHeroCard: View {
                                 size: buddySize,
                                 phase: flamePhase,
                                 dayEnd: StreakFlameClock.nextLocalMidnight(),
-                                coalWarmth: min(progress, 1),
+                                coalWarmth: min(dayProgress, 1),
                                 mood: currentMood,
                                 look: heroLook,
                                 // His column is narrow: the stat column sits
@@ -1665,6 +1888,15 @@ private struct FlameBuddyHeroCard: View {
                 .onChange(of: geo.size.width) { _, width in heroFrameWidth = width }
             }
             .frame(height: statFrameHeight + top)
+
+            if !injuryPause.isPaused {
+                DailyGoalBars(
+                    miles: currentDistance,
+                    goalMiles: userManager.currentUser.goalMiles,
+                    steps: todaySteps,
+                    stepGoalMet: stepGoalMet
+                )
+            }
 
             DashboardMilestoneBar(streak: userManager.currentUser.streak)
                 .padding(.horizontal, 2)
@@ -1884,7 +2116,9 @@ private struct FlameBuddyHeroCard: View {
                 goalMiles: userManager.currentUser.goalMiles,
                 fastestPace: healthManager.todaysFastestPace,
                 timeLeftText: formattedTimeOnly,
-                statusColor: statusColor
+                statusColor: statusColor,
+                todaySteps: todaySteps,
+                stepGoalMet: stepGoalMet
             )
 
             RecordGhostRow(

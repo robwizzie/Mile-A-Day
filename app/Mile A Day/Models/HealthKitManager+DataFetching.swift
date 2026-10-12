@@ -280,10 +280,18 @@ extension HealthKitManager {
 
             DispatchQueue.main.async {
                 if let sum = result?.sumQuantity() {
-                    self.todaysSteps = Int(sum.doubleValue(for: HKUnit.count()))
-                } else {
+                    let steps = Int(sum.doubleValue(for: HKUnit.count()))
+                    #if !os(watchOS)
+                    // Before the publish, so views redrawn by it read the key.
+                    StepGoalDayStore.record(steps: steps, on: now)
+                    #endif
+                    self.todaysSteps = steps
+                } else if error == nil {
                     self.todaysSteps = 0
                 }
+                // An ERROR (a locked phone's protected data) is not 0 steps:
+                // keep the last reading rather than blank the steps tile and
+                // the hero's step bar.
             }
         }
 

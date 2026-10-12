@@ -36,7 +36,10 @@ struct WidgetDataStore {
         // compiled into the widget extension, which can't see
         // ProgressCalculator. A raw `>=` drew "streak at risk" on the home
         // screen for a 0.97 mi day the app and the server both count as done.
+        // 10,000 steps completes the day too (`dailyStepGoal`, restated for
+        // the same reason).
         let isCompleted = todayMiles >= safeGoal * 0.95
+            || loadTodaySteps() >= dailyStepGoal
 
         // Skip no-op writes: every save triggers widget timeline reloads, and
         // iOS rations those per day — burning the budget on unchanged values
@@ -157,6 +160,10 @@ struct WidgetDataStore {
     private static let stepsKey = "today_steps"
     private static let stepsDayKey = "today_steps_day"
 
+    /// `ProgressCalculator.dailyStepGoal` — restated: the widget extension
+    /// compiles this file but not ProgressCalculator.
+    private static let dailyStepGoal = 10_000
+
     /// Re-render the flame widget once per this many steps.
     ///
     /// The STORED value is always exact — this only rations how often the
@@ -184,6 +191,17 @@ struct WidgetDataStore {
         guard isNewDay || steps != previous else { return }
         defaults.set(steps, forKey: stepsKey)
         defaults.set(stamp, forKey: stepsDayKey)
+
+        // Crossing the step goal completes the day ("1 mile OR 10,000
+        // steps"): re-save today's progress so `streak_completed_today` turns
+        // on and every progress widget reloads — the flame stops reading
+        // "at risk" on a day that's already safe. `load()` answers a stale
+        // day with 0 miles, which is what today has until the app writes.
+        if steps >= dailyStepGoal && (isNewDay || previous < dailyStepGoal) {
+            let progress = load()
+            save(todayMiles: progress.miles, goal: progress.goal)
+            return
+        }
 
         // In-between values ride along on the next miles/streak write or the
         // foreground full reload, so the row is never more than a bucket stale.

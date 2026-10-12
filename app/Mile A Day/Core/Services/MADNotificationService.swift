@@ -463,7 +463,8 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         // after the notification was scheduled but before it fired.
         if notification.request.identifier == Identifier.dailyReminder {
             let widgetData = WidgetDataStore.load()
-            let isCompleted = widgetData.miles >= widgetData.goal
+            // `streakCompleted` is the day's goal: a mile or 10,000 steps.
+            let isCompleted = widgetData.streakCompleted || widgetData.miles >= widgetData.goal
             let isReminderContent = notification.request.content.title.contains("waiting")
             if isCompleted && isReminderContent {
                 center.removePendingNotificationRequests(withIdentifiers: [Identifier.dailyReminder])

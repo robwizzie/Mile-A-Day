@@ -698,6 +698,14 @@ struct MADSettingsView: View {
     private func recalibrateStreak() async {
         guard !syncService.isRecalibrating else { return }
 
+        // Steps FIRST: 10,000 steps completes a day, so the server should hold
+        // every goal day before it re-counts the streak below — the whole
+        // history Health still has, then the recent 30 days' partial totals
+        // (a day a late Watch sync left short). Both best-effort; the server
+        // keeps the GREATEST, so neither can lower a good day.
+        await DailyStepsSyncService.shared.syncStepGoalHistory(force: true)
+        await DailyStepsSyncService.shared.backfillRecentDays(30)
+
         do {
             let outcome = try await WorkoutSyncService.shared.recalibrateStreak(
                 localStreakDays: healthManager.retroactiveStreak
@@ -719,13 +727,6 @@ struct MADSettingsView: View {
             recalibrateResultMessage =
                 "We couldn't finish recalibrating right now. Please check your connection and try again."
         }
-
-        // Steps live in a separate daily_steps table that only ever finalizes
-        // today (and yesterday once at rollover), so a day left partial by a
-        // late Watch sync is never revisited. Re-post the recent window; the
-        // backend keeps the GREATEST, so this back-corrects a stale day and
-        // never lowers a good one. Best-effort and independent of the result.
-        await DailyStepsSyncService.shared.backfillRecentDays(30)
     }
 
     /// Every past workout with a route in HealthKit but no map on the server,

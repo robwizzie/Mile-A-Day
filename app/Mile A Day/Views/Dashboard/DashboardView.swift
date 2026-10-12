@@ -646,6 +646,18 @@ struct DashboardView: View {
         return (distance, goal, progress, isCompleted)
     }
 
+    /// The DAY is done: the mile goal, or 10,000 steps. `currentState
+    /// .isCompleted` stays the MILE — it drives the mile celebration and the
+    /// photo prompt, which belong to a workout. This drives what's about the
+    /// streak: the at-risk Live Activity, and confetti for a steps finish.
+    private var dayDone: Bool {
+        ProgressCalculator.isDayComplete(
+            miles: currentState.distance,
+            goal: currentState.goal,
+            stepGoalMet: StepGoalDayStore.isTodayMet()
+        )
+    }
+
     /// Latest persisted in‑progress workout snapshot, if any.
     private var inProgressState: InProgressWorkoutState? {
         InProgressWorkoutStore.load()
@@ -1183,6 +1195,16 @@ struct DashboardView: View {
                 // Live Activity immediately.
                 syncStreakRiskActivity()
             }
+            .onChange(of: dayDone) { oldValue, newValue in
+                // Steps can finish the day with no mile — and no workout to
+                // celebrate — so this edge only confettis that case (the mile
+                // edge above owns its own), and retires the at-risk Live
+                // Activity either way.
+                if newValue && !oldValue && !currentState.isCompleted {
+                    triggerConfetti()
+                }
+                syncStreakRiskActivity()
+            }
             .onChange(of: healthManager.todaysDistance) { oldValue, newValue in
                 // Level-triggered: re-evaluate the goal celebration on EVERY fresh
                 // distance update, not only the isCompleted false→true edge. The
@@ -1267,9 +1289,12 @@ struct DashboardView: View {
             byAdding: .day, value: -(weekday - 1), to: calendar.startOfDay(for: today)
         ) else { return [] }
 
+        let stepDays = StepGoalDayStore.goalDayKeys
         return (0..<7).map { offset in
             guard let day = calendar.date(byAdding: .day, value: offset, to: startOfWeek) else { return false }
-            return healthManager.dailyMileGoals[calendar.startOfDay(for: day)] ?? false
+            // A mile day or a 10k-step day.
+            return (healthManager.dailyMileGoals[calendar.startOfDay(for: day)] ?? false)
+                || stepDays.contains(StepGoalDayStore.dayKey(for: day))
         }
     }
 
@@ -1294,7 +1319,8 @@ struct DashboardView: View {
             currentMiles: healthManager.todaysDistance,
             totalMiles: healthManager.totalLifetimeMiles,
             fastestPace: healthManager.fastestMilePace,
-            mostMilesInDay: healthManager.mostMilesInOneDay
+            mostMilesInDay: healthManager.mostMilesInOneDay,
+            stepGoalMet: StepGoalDayStore.isTodayMet()
         )
         syncWidgetData()
     }
@@ -1503,7 +1529,7 @@ struct DashboardView: View {
     private func syncStreakRiskActivity() {
         StreakRiskActivityManager.sync(
             isAtRisk: userManager.currentUser.isStreakAtRisk,
-            isCompleted: currentState.isCompleted,
+            isCompleted: dayDone,
             streak: userManager.currentUser.streak,
             goalMiles: currentState.goal,
             currentMiles: currentState.distance
