@@ -52,3 +52,4 @@ Use `npm` for all operations.
 
 ## Release notes
 - `lib/releases.ts` is the site's copy of the app's `WhatsNewCatalog` (newest first): adding a release there moves the home page's "New in" section, `/updates`, the hero pill, the footer's version and the JSON-LD `softwareVersion` together. Version = the App Store MARKETING_VERSION that shipped it. Support email lives once in `lib/site.ts`.
+- What's New screenshots are `RELEASE_SHOWCASE[version]` in `lib/releases.ts` (≤3, `title` = a feature title), real captures only, at `public/images/whats-new/<version>/`; `screenshot: null` hides the slot. The section's dropdown walks `RELEASES`.

@@ -451,3 +451,51 @@ export const CURRENT_RELEASE = RELEASES[0];
 export function releaseAnchor(version: string): string {
   return `v${version.replace(/\./g, "-")}`;
 }
+
+export type ReleaseShot = {
+  /** Must match a feature's `title` in that release, so it leaves the list below once shown. */
+  title: string;
+  caption: string;
+  blurb: string;
+  /**
+   * A REAL full-screen iPhone capture (1290×2796) in
+   * public/images/whats-new/<version>/, or null until one is taken. A null
+   * shot is never drawn — the feature just stays in the list — so the site
+   * never shows a mock-up in place of the app.
+   */
+  screenshot: string | null;
+};
+
+// Headliners per release, shown on real screenshots in the home page's
+// What's New section (whose dropdown walks back through RELEASES). Up to
+// three per release; capture them from the app on that version's screens.
+export const RELEASE_SHOWCASE: Record<string, ReleaseShot[]> = {
+  "1.2.07": [
+    { title: "Flamey's Closet", caption: "Flamey's Closet", blurb: "Every medal unlocks something for Flamey to wear. Name him, dress him, save the outfits you love.", screenshot: null },
+    { title: "Your Flamey, on your walks", caption: "Your walks, drawn", blurb: "Route Art on the feed, Flamey running beside you, and a Flyover of the whole walk.", screenshot: null },
+    { title: "Weekly Recap", caption: "Weekly Recap", blurb: "Every Saturday evening: your miles, your best day, and how your friends did.", screenshot: null },
+  ],
+  "1.2.05": [
+    { title: "Buddy Walks", caption: "Buddy Walks", blurb: "Walk together from anywhere, counting down to the same second.", screenshot: null },
+    { title: "Route Art", caption: "Route Art", blurb: "Your route, drawn and colored by the time of day you went out.", screenshot: null },
+    { title: "Compete, rebuilt", caption: "Compete, rebuilt", blurb: "What's live, what you've won, and how every challenge was completed.", screenshot: null },
+  ],
+  "1.2.03": [
+    { title: "A brand-new Dashboard", caption: "A new Dashboard", blurb: "Your mile, your streak and your tokens in one view.", screenshot: null },
+    { title: "Streak Tokens", caption: "Streak Tokens", blurb: "Backup for the days life gets in the way.", screenshot: null },
+    { title: "Comments, mentions & collabs", caption: "Comments & collabs", blurb: "Talk under a walk, tag a friend, post it together.", screenshot: null },
+  ],
+  "1.2.0": [
+    { title: "Feed & Stories", caption: "Feed & Stories", blurb: "See every friend's mile as it happens.", screenshot: null },
+    { title: "3D Medals", caption: "3D Medals", blurb: "Medals you can spin in your hand.", screenshot: null },
+    { title: "Head-to-Head", caption: "Head-to-Head", blurb: "Take on one friend, mile for mile.", screenshot: null },
+  ],
+  "1.1.0": [
+    { title: "Richer workout details", caption: "Workout details", blurb: "Splits, pace and heart rate for every mile.", screenshot: null },
+    { title: "Friends, organized", caption: "Friends, organized", blurb: "Requests, suggestions and friends in one place.", screenshot: null },
+  ],
+  "1.0": [
+    { title: "Daily mile streaks", caption: "Daily mile streaks", blurb: "One mile a day. Watch the streak grow.", screenshot: null },
+    { title: "Competitions", caption: "Competitions", blurb: "Race your friends in streaks, apex and more.", screenshot: null },
+  ],
+};
