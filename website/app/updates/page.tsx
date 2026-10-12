@@ -5,9 +5,11 @@ import { Footer } from "@/components/footer";
 import {
   RELEASES,
   CURRENT_RELEASE,
+  RELEASE_SHOWCASE,
   releaseAnchor,
   type Release,
 } from "@/lib/releases";
+import { ShowcaseCarousel, type ShowcaseSlide } from "@/components/showcase-carousel";
 import { APP_STORE_URL, SUPPORT_EMAIL, SUPPORT_MAILTO } from "@/lib/site";
 
 const TITLE = "What's New";
@@ -95,7 +97,10 @@ export default function UpdatesPage() {
       </header>
 
       <div className="px-6 pb-24">
-        <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-[250px_minmax(0,1fr)] lg:gap-14">
+        {/* minmax(0,1fr) on phones too: an `auto` column takes the min-content
+            width of what's inside it, and a carousel's track is every slide
+            side by side, so each release card went 1090px wide and was clipped. */}
+        <div className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)] gap-10 lg:grid-cols-[250px_minmax(0,1fr)] lg:gap-14">
           {/* Version index: a sticky list on desktop, a wrapping row of chips on phones. */}
           <nav
             aria-label="Versions"
@@ -163,6 +168,15 @@ function ReleaseEntry({
   release: Release;
   current: boolean;
 }) {
+  // The same real captures the home page's What's New shows for this version.
+  const slides: ShowcaseSlide[] = (RELEASE_SHOWCASE[release.version] ?? [])
+    .filter((s) => s.screenshot)
+    .map((s) => ({
+      ...s,
+      screenshot: s.screenshot!,
+      color: release.features.find((f) => f.title === s.title)?.color ?? "#c72554",
+    }));
+
   return (
     <article
       id={releaseAnchor(release.version)}
@@ -187,6 +201,12 @@ function ReleaseEntry({
       <p className="mt-1.5 max-w-2xl text-[15px] leading-relaxed text-[#a0a0a0]">
         {release.summary}
       </p>
+
+      {slides.length > 0 && (
+        <div className="mt-6">
+          <ShowcaseCarousel slides={slides} label={`${release.version} screenshots`} />
+        </div>
+      )}
 
       <ul className="mt-7 grid gap-x-8 gap-y-5 sm:grid-cols-2">
         {release.features.map((f) => (

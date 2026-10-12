@@ -82,14 +82,15 @@ export function HeroSection() {
 
         {/* Right: phone mockup */}
         <div className="animate-fade-in-up animate-delay-200 relative flex flex-1 items-center justify-center">
-          <div className="animate-float phone-mockup relative overflow-hidden p-3" style={{ width: 290 }}>
+          <div className="animate-float iphone-frame relative" style={{ width: 280 }}>
             <Image
-              src="/images/app-dashboard.png"
+              src="/images/hero/dashboard-2026-10.webp"
               alt="Mile A Day app dashboard showing a 511 day streak"
               width={776}
               height={1680}
-              sizes="(max-width: 768px) 260px, 290px"
-              className="w-full rounded-[32px]"
+              sizes="280px"
+              unoptimized
+              className="block h-auto w-full"
               priority
             />
           </div>
