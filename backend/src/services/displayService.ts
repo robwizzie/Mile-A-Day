@@ -1018,7 +1018,18 @@ async function boxActivity(
      LIMIT 30`,
     [userId],
   );
-  return [...rows, ...doodles, ...founder]
+  // Desk notifications with no table of their own (App Store reviews, record
+  // days, the Versus lead, a desk going offline), as they were pushed to this
+  // box's owner.
+  const pushed = await db.query<DeskActivity>(
+    `SELECT to_char(l.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at, l.kind, l.text
+       FROM desk_push_log l
+      WHERE l.user_id = $1 AND l.created_at > NOW() - ${days}
+      ORDER BY l.created_at DESC
+      LIMIT 30`,
+    [userId],
+  );
+  return [...rows, ...doodles, ...founder, ...pushed]
     .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
     .slice(0, 60);
 }

@@ -2,7 +2,7 @@ import { PostgresService } from "./DbService.js";
 import { TODAY_ET_DATE_SQL } from "./dailyResetTime.js";
 import { getTodayMiles } from "./workoutService.js";
 import { getGrowth, getRival, latestReviews, listDeskBoxes } from "./displayService.js";
-import { getState, pushConfigured, pushTo, pushToAdmins, setState } from "./deskPushService.js";
+import { getState, pruneDeskPushLog, pushConfigured, pushTo, pushToAdmins, setState } from "./deskPushService.js";
 
 const db = PostgresService.getInstance();
 
@@ -14,6 +14,7 @@ const db = PostgresService.getInstance();
  */
 export async function runDeskPushChecks(): Promise<void> {
   if (!pushConfigured()) return;
+  await pruneDeskPushLog();
   const subs = await db.query<{ user_id: string; kinds: string[] }>(
     `SELECT user_id, kinds FROM desk_push_subscriptions`);
   if (subs.length === 0) return;

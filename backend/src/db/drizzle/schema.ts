@@ -3708,6 +3708,34 @@ export const deskPushState = pgTable("desk_push_state", {
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
 });
 
+// Desk notifications whose event has no table of its own (App Store reviews,
+// record days, the Versus lead, a desk going offline), one row per person it
+// was for, so the remote's Activity log shows every push. Pruned after 30 days.
+export const deskPushLog = pgTable(
+  "desk_push_log",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    kind: varchar({ length: 32 }).notNull(),
+    text: varchar({ length: 300 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_desk_push_log_user").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.createdAt.desc().nullsFirst(),
+    ),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "desk_push_log_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
 /**
  * MCP database connector (src/mcp). Six tables, all ROW LEVEL SECURITY with no
  * policies: the connector's own database roles (pg_read_all_data, plus row

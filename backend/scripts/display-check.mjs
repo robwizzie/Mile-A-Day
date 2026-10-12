@@ -55,6 +55,7 @@ async function cleanup() {
   await db.query(`DELETE FROM display_keys WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM desk_interest WHERE email LIKE 'display-check%'`);
   await db.query(`DELETE FROM desk_push_subscriptions WHERE user_id = ANY($1::text[])`, [ALL]);
+  await db.query(`DELETE FROM desk_push_log WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM desk_push_state WHERE key LIKE 'lead:display-check%' OR key IN ('users', 'reviews', 'record_day')`);
   await db.query(`DELETE FROM desk_settings WHERE user_id = ANY($1::text[])`, [ALL]);
   await db.query(`DELETE FROM desk_commands WHERE user_id = ANY($1::text[])`, [ALL]);
@@ -655,6 +656,20 @@ async function main() {
   pushed.length = 0;
   await runDeskPushChecks();
   check("push: and only once", pushed.filter((x) => x.kind === "new_user"), []);
+  // A new App Store review lands in the founders' Activity even when their
+  // phone didn't ask for review pushes (OWNER is a founder by now too).
+  setReviewSourceForTests(async () => ({ feed: { entry: [
+    { id: { label: "r9" }, "im:rating": { label: "5" }, title: { label: "best streak app" } },
+    { id: { label: "r1" }, "im:rating": { label: "5" }, title: { label: "Love it!" } },
+  ] } }));
+  await runDeskPushChecks();
+  const reviewRows = (await (await admin(`desk/box/${adminBox}`)).json()).activity.filter((x) => x.kind === "review");
+  check("activity: a new review shows on the founder's desk", reviewRows.map((x) => x.text), ["★★★★★ New App Store review · BEST STREAK APP"]);
+  check("activity: …and the other founder's", (await (await admin(`desk/box/${ownerBox}`, "GET", OWNER)).json()).activity.some((x) => x.kind === "review"), true);
+  check("activity: logged for the founders only", (await db.query(
+    `SELECT COUNT(*)::int AS n FROM desk_push_log l JOIN users u USING (user_id) WHERE l.kind = 'review' AND u.role IS DISTINCT FROM 'admin'`))[0].n, 0);
+  await runDeskPushChecks();
+  check("activity: logged once", (await (await admin(`desk/box/${adminBox}`)).json()).activity.filter((x) => x.kind === "review").length, 1);
   check("push: unsubscribe my phone", (await post("desk/push/unsubscribe", { endpoint: APPLE }, OWNER)).status, 200);
   pushed.length = 0;
   await post(`desk/box/${adminBox}/doodle`, { to: ownerBox, px: heart });
