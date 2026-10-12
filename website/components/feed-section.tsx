@@ -193,7 +193,7 @@ function FeedPostCard() {
           height={1928}
           priority={false}
           className="h-full w-full object-cover object-[center_42%]"
-          sizes="(min-width: 1024px) 420px, 90vw"
+          sizes="(min-width: 640px) 420px, 90vw"
         />
 
         {/* Clap burst — hero clap + radiating mini claps (HypeBurstView) */}
