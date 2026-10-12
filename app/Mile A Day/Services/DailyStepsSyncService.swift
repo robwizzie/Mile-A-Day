@@ -199,7 +199,10 @@ final class DailyStepsSyncService {
         let calendar = Calendar.current
         let start: Date
         if full {
-            start = calendar.startOfDay(for: healthStore.earliestPermittedSampleDate())
+            // Health's own floor, but never before HealthKit existed (iOS 8,
+            // Sept 2014): the platform constraint can be far older, and the
+            // collection query walks every day in the range.
+            start = calendar.startOfDay(for: max(healthStore.earliestPermittedSampleDate(), Self.healthKitEpoch))
         } else {
             start = calendar.date(byAdding: .day, value: -14, to: calendar.startOfDay(for: now)) ?? now
         }
@@ -211,7 +214,7 @@ final class DailyStepsSyncService {
 
         let goalDays = history
             .filter { $0.value >= stepGoal }
-            .map { BatchDay(localDate: $0.key, steps: $0.value) }
+            .map { BatchDay(localDate: Self.localDateString(for: $0.key), steps: $0.value) }
             .sorted { $0.localDate < $1.localDate }
         var allSent = true
         var index = 0
@@ -231,6 +234,13 @@ final class DailyStepsSyncService {
 
     /// Below the server's 3,700-day cap with room to spare.
     private static let batchChunk = 3000
+
+    /// Sept 1, 2014 — HealthKit shipped with iOS 8 that month.
+    private static let healthKitEpoch: Date = {
+        var c = DateComponents()
+        c.year = 2014; c.month = 9; c.day = 1
+        return Calendar(identifier: .gregorian).date(from: c) ?? .distantPast
+    }()
 
     /// The goal days changed: redraw everything that judges a day done. The
     /// local streak walk reads `StepGoalDayStore`, so re-reading it from the
@@ -375,12 +385,12 @@ final class DailyStepsSyncService {
         }
     }
 
-    /// Daily totals from `start` through `end`, keyed "yyyy-MM-dd" (device
-    /// calendar). One statistics-collection query however long the range —
-    /// the same cumulative sum `fetchSteps` takes for a single day, so a day
-    /// reads the same number either way. Nil when the query fails (a locked
-    /// phone), so callers can tell "no data" from "couldn't read".
-    private func fetchDailySteps(from start: Date, to end: Date) async -> [String: Int]? {
+    /// Daily totals from `start` through `end`, keyed by each day's start.
+    /// One statistics-collection query however long the range — the same
+    /// cumulative sum `fetchSteps` takes for a single day, so a day reads the
+    /// same number either way. Nil when the query fails (a locked phone), so
+    /// callers can tell "no data" from "couldn't read".
+    private func fetchDailySteps(from start: Date, to end: Date) async -> [Date: Int]? {
         guard let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return nil }
         let calendar = Calendar.current
         let anchor = calendar.startOfDay(for: start)
@@ -401,10 +411,10 @@ final class DailyStepsSyncService {
                     continuation.resume(returning: nil)
                     return
                 }
-                var days: [String: Int] = [:]
+                var days: [Date: Int] = [:]
                 results.enumerateStatistics(from: anchor, to: end) { stats, _ in
                     guard let sum = stats.sumQuantity() else { return }
-                    days[Self.localDateString(for: stats.startDate)] = Int(sum.doubleValue(for: HKUnit.count()))
+                    days[calendar.startOfDay(for: stats.startDate)] = Int(sum.doubleValue(for: HKUnit.count()))
                 }
                 continuation.resume(returning: days)
             }
@@ -444,10 +454,23 @@ final class DailyStepsSyncService {
 
     // MARK: - Helpers
 
-    private static func localDateString(for date: Date) -> String {
+    /// The server's `local_date` for a date's local day: always Gregorian
+    /// with ASCII digits (the server validates `^\d{4}-\d{2}-\d{2}$`).
+    /// Without a calendar and locale this followed the device's, so a phone
+    /// on the Buddhist calendar sent "2569-…" and Arabic-Indic digits failed
+    /// validation outright. Cached — the history sync formats every day.
+    private static let serverDayFormatter: DateFormatter = {
         let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = TimeZone.current
-        return formatter.string(from: date)
+        return formatter
+    }()
+    private static let serverDayLock = NSLock()
+
+    private static func localDateString(for date: Date) -> String {
+        serverDayLock.lock(); defer { serverDayLock.unlock() }
+        serverDayFormatter.timeZone = TimeZone.current
+        return serverDayFormatter.string(from: date)
     }
 }

@@ -138,7 +138,7 @@ struct TodaysStepsCard: View {
 
                 // 10k steps completes the day for the streak, same as a mile.
                 // Its own short line so it never truncates on a narrow phone.
-                Text(steps >= ProgressCalculator.dailyStepGoal
+                Text(StepGoalDayStore.isTodayMet()
                      ? "Today counts for your streak"
                      : "10k keeps your streak")
                     .font(MADTheme.Typography.caption)

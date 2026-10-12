@@ -35,8 +35,9 @@ struct TodayMileSummary {
     /// day at 95% of the goal (`ProgressCalculator.isGoalCompleted`).
     private var milesDone: Bool { ProgressCalculator.isGoalCompleted(current: miles, goal: goal) }
 
-    /// 10,000 steps completes the day too ("1 mile OR 10,000 steps").
-    private var stepsDone: Bool { steps >= ProgressCalculator.dailyStepGoal }
+    /// 10,000 steps completes the day too ("1 mile OR 10,000 steps") —
+    /// from the app's day stamp, not `steps`, which can be yesterday's count.
+    private var stepsDone: Bool { WidgetDataStore.isStepGoalMetToday() }
 
     var isDone: Bool { milesDone || stepsDone }
 

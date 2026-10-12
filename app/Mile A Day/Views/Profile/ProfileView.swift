@@ -255,14 +255,6 @@ struct ProfileView: View {
         isRecalibratingStreak = true
         defer { isRecalibratingStreak = false }
 
-        // Steps FIRST: 10,000 steps completes a day, so the server should hold
-        // every goal day before it re-counts the streak below — the whole
-        // history Health still has, then the recent 30 days' partial totals
-        // (a day a late Watch sync left short). Both best-effort; the server
-        // keeps the GREATEST, so neither can lower a good day.
-        await DailyStepsSyncService.shared.syncStepGoalHistory(force: true)
-        await DailyStepsSyncService.shared.backfillRecentDays(30)
-
         do {
             let outcome = try await WorkoutSyncService.shared.recalibrateStreak(
                 localStreakDays: healthManager.retroactiveStreak

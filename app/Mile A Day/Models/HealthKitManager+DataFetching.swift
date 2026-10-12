@@ -286,12 +286,9 @@ extension HealthKitManager {
                     StepGoalDayStore.record(steps: steps, on: now)
                     #endif
                     self.todaysSteps = steps
-                } else if error == nil {
+                } else {
                     self.todaysSteps = 0
                 }
-                // An ERROR (a locked phone's protected data) is not 0 steps:
-                // keep the last reading rather than blank the steps tile and
-                // the hero's step bar.
             }
         }
 

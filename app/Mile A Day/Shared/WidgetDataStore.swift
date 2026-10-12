@@ -36,10 +36,11 @@ struct WidgetDataStore {
         // compiled into the widget extension, which can't see
         // ProgressCalculator. A raw `>=` drew "streak at risk" on the home
         // screen for a 0.97 mi day the app and the server both count as done.
-        // 10,000 steps completes the day too (`dailyStepGoal`, restated for
-        // the same reason).
+        // 10,000 steps completes the day too: the app stamps that day here
+        // (`saveStepGoalMetToday`) — never judged from the stored step count,
+        // which can carry yesterday's number into a new day.
         let isCompleted = todayMiles >= safeGoal * 0.95
-            || loadTodaySteps() >= dailyStepGoal
+            || defaults.string(forKey: stepGoalDayKey) == stamp
 
         // Skip no-op writes: every save triggers widget timeline reloads, and
         // iOS rations those per day — burning the budget on unchanged values
@@ -159,10 +160,29 @@ struct WidgetDataStore {
 
     private static let stepsKey = "today_steps"
     private static let stepsDayKey = "today_steps_day"
+    private static let stepGoalDayKey = "step_goal_met_day"
 
-    /// `ProgressCalculator.dailyStepGoal` — restated: the widget extension
-    /// compiles this file but not ProgressCalculator.
-    private static let dailyStepGoal = 10_000
+    /// Today's steps reached 10,000, so the day is done ("1 mile OR 10,000
+    /// steps"). Written by the app's `StepGoalDayStore` — which only ever
+    /// records a count read FOR that day — and re-saves today's progress so
+    /// `streak_completed_today` turns on and every progress widget reloads.
+    /// A no-op once today is stamped.
+    static func saveStepGoalMetToday() {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        let stamp = dayStamp()
+        guard defaults.string(forKey: stepGoalDayKey) != stamp else { return }
+        defaults.set(stamp, forKey: stepGoalDayKey)
+        // `load()` answers a stale day with 0 miles, which is what today has
+        // until the app writes its miles.
+        let progress = load()
+        save(todayMiles: progress.miles, goal: progress.goal)
+    }
+
+    /// Whether today was stamped by `saveStepGoalMetToday`.
+    static func isStepGoalMetToday() -> Bool {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return false }
+        return defaults.string(forKey: stepGoalDayKey) == dayStamp()
+    }
 
     /// Re-render the flame widget once per this many steps.
     ///
@@ -191,17 +211,6 @@ struct WidgetDataStore {
         guard isNewDay || steps != previous else { return }
         defaults.set(steps, forKey: stepsKey)
         defaults.set(stamp, forKey: stepsDayKey)
-
-        // Crossing the step goal completes the day ("1 mile OR 10,000
-        // steps"): re-save today's progress so `streak_completed_today` turns
-        // on and every progress widget reloads — the flame stops reading
-        // "at risk" on a day that's already safe. `load()` answers a stale
-        // day with 0 miles, which is what today has until the app writes.
-        if steps >= dailyStepGoal && (isNewDay || previous < dailyStepGoal) {
-            let progress = load()
-            save(todayMiles: progress.miles, goal: progress.goal)
-            return
-        }
 
         // In-between values ride along on the next miles/streak write or the
         // foreground full reload, so the row is never more than a bucket stale.

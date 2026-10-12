@@ -1817,6 +1817,14 @@ class WorkoutSyncService: ObservableObject {
         let hkUUIDs = Set(workouts.map { $0.uuid.uuidString })
         await removeOrphanedBackendWorkouts(since: since, hkUUIDs: hkUUIDs, userId: userId)
 
+        // 3b. Steps: 10,000 steps completes a day, so the server should hold
+        //     every goal day before it re-counts below — the whole history
+        //     Health still has, then the recent 30 days' partial totals (a day
+        //     a late Watch sync left short). Best-effort; the server keeps the
+        //     GREATEST, so neither can lower a good day or fail this run.
+        await DailyStepsSyncService.shared.syncStepGoalHistory(force: true)
+        await DailyStepsSyncService.shared.backfillRecentDays(30)
+
         // 4. Ask the backend to recompute the streak synchronously and return it.
         let response: RecalibrateStreakResponse = try await APIClient.fancyFetch(
             endpoint: "/workouts/\(userId)/recalibrate-streak",

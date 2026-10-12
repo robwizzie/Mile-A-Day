@@ -1094,7 +1094,9 @@ private struct ModernStepsTile: View {
     /// Short on purpose: at 320pt (Display Zoom on an SE) the tile's text
     /// column is ~110pt. The hero's "either one" bars carry the rule itself.
     private var subtitle: String {
-        steps >= goal ? "Counts for streak" : "\(ProgressCalculator.formatProgress(progress)) of 10k"
+        // The day-keyed store, not `steps`: the count can be yesterday's
+        // until the first read after midnight.
+        StepGoalDayStore.isTodayMet() ? "Counts for streak" : "\(ProgressCalculator.formatProgress(progress)) of 10k"
     }
 
     var body: some View {

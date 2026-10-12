@@ -1270,6 +1270,9 @@ struct DashboardView: View {
         let state = currentState
         WidgetDataStore.save(todayMiles: state.distance, goal: state.goal)
         WidgetDataStore.save(todaySteps: healthManager.todaysSteps)
+        // A day the steps finished: make sure the widgets know (no-op once
+        // they do).
+        StepGoalDayStore.syncWidgetFlag()
         // Before the streak save — that one carries the reload for both.
         WidgetDataStore.save(longestStreak: userManager.currentUser.longestStreak ?? 0)
         WidgetDataStore.save(streak: userManager.currentUser.streak)
