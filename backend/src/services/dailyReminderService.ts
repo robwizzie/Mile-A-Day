@@ -2,6 +2,7 @@ import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { challengeForNotification } from "./dailyChallengeService.js";
 import { standing } from "./h2hMatchupService.js";
+import { stepGoalMetSql } from "./streakFeatureCore.js";
 
 const db = PostgresService.getInstance();
 
@@ -372,6 +373,8 @@ export async function sendPendingDailyReminders(): Promise<void> {
 				   AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL),
 				0
 			  ) < t.goal_miles
+		  -- 10k steps finished the day too (STREAK_QUALIFYING_STEPS).
+		  AND NOT ${stepGoalMetSql("t.user_id", "(NOW() + (t.tz_offset || ' minutes')::interval)::date")}
 		`,
   );
 

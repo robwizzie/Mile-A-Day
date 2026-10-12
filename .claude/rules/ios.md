@@ -69,6 +69,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - Store/score/sync miles; convert only at the formatter (`DistanceUnits.current`); no bare `"… mi"` literals (widgets keep miles).
 - Icon-only controls get `.accessibilityLabel` on the glyph (`.accessibilityHidden(true)` beside text); guard every loop with `accessibilityReduceMotion`.
 - Dynamic Type via `.madFont(...)`/`@MADScaledMetric`, capped with `.madTypeCap` below any `.sheet`, never `.dynamicTypeSize`; never scale baked images.
+- Every UI change must look right at EVERY iPhone width, 320pt (SE/mini under Display Zoom) to 440pt (Pro Max): no fixed widths summing past 320; flex + `lineLimit`/`minimumScaleFactor`/`ViewThatFits`; mockups show 320, 375 and 440 frames.
 - Sharing is one surface, `ShareStudioView`; preview == render (`ShareCardView.render`); cards ImageRenderer-safe; `ShareTemplate.available` decides; empty `MADFacebookAppID` ⇒ system share sheet; mock new cards as HTML first.
 - Weekly recap: Sunday→Saturday; route `weekly_recap` in all four places via `WeeklyRecapLink`; declare `weeklyRecapV1`; reuse `weeklyRecapEnabled`.
 - Feature views live in `Views/<FeatureName>/` subdirectories.

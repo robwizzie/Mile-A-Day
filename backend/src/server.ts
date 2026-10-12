@@ -70,6 +70,7 @@ import { backfillLongestStreaks } from "./db/backfillLongestStreaks.js";
 import { backfillHolidayMedals } from "./db/backfillHolidayMedals.js";
 import { repairBadgeEarnedDates } from "./db/repairBadgeEarnedDates.js";
 import { backfillRetroBadges } from "./db/backfillRetroBadges.js";
+import { backfillStepStreaks } from "./db/backfillStepStreaks.js";
 import { backfillRoutePrivacyBounds } from "./db/backfillRoutePrivacyBounds.js";
 import {
   getUnifiedFeed,
@@ -434,6 +435,10 @@ runPendingMigrations()
       // everyone (what Recalibrate now does per user). Award-only, silent,
       // one user at a time, done-marker `badge_retro_v1` in maintenance_runs.
       void backfillRetroBadges();
+      // Same contract: "1 mile OR 10k steps" — re-count the stored streak,
+      // longest streak and streak medals of everyone with a 10k-step day
+      // already on file. Marker `step_streaks_v1`.
+      void backfillStepStreaks();
       // Same contract: cache every stored route's hide-start-&-end cut
       // (workout_routes.privacy_bounds). A row it hasn't reached is trimmed
       // at read anyway — this only makes that read cheap. Marker

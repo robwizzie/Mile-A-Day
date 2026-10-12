@@ -5,10 +5,16 @@ import { START_OF_TODAY_ET_SQL, TODAY_ET_DATE_SQL } from "./dailyResetTime.js";
 import { LIVE_PRESENCE_WINDOW_SECONDS } from "./liveTrackingService.js";
 import {
   DAILY_GOAL_TOLERANCE,
+  dailyGoalMet,
   getTodayMiles,
+  getTodaySteps,
   getTodayStats,
 } from "./workoutService.js";
-import { effectiveStreakSql, fetchTodayCoverage } from "./streakFeatureCore.js";
+import {
+  effectiveStreakSql,
+  fetchTodayCoverage,
+  stepGoalMetSql,
+} from "./streakFeatureCore.js";
 import { localNowSql } from "./dailyResetTime.js";
 import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
 import { ownedFlameyItems, servedFlameyLook } from "./flameyService.js";
@@ -746,7 +752,7 @@ export async function getRival(userId: string): Promise<DisplayRival | null> {
          FROM users u, loc WHERE u.user_id = $1`,
       [r.user_id],
     ),
-    getTodayMiles(r.user_id),
+    Promise.all([getTodayMiles(r.user_id), getTodaySteps(r.user_id)]),
     fetchTodayCoverage([r.user_id]),
     // Same presence rules as friends_running: fresh, not ended, shared.
     db.query<{ miles: number; kind: "run" | "walk" }>(
@@ -761,14 +767,15 @@ export async function getRival(userId: string): Promise<DisplayRival | null> {
       [r.user_id],
     ),
   ]);
-  const miles = Number(today) || 0;
+  const miles = Number(today[0]) || 0;
   const live = liveRows[0];
   return {
     name: r.name,
     miles_today: Math.round(miles * 100) / 100,
     miles_week: Math.round((Number(rows[0]?.week) || 0) * 100) / 100,
     streak: Number(rows[0]?.streak) || 0,
-    mile_done: miles >= DAILY_GOAL_TOLERANCE || Boolean(coverage[r.user_id]),
+    // The day's goal (a mile or 10k steps), not literally a mile.
+    mile_done: dailyGoalMet(miles, today[1]) || Boolean(coverage[r.user_id]),
     running_now: Boolean(live),
     live_miles: live ? Math.round(Number(live.miles) * 100) / 100 : null,
     live_kind: live ? live.kind : null,
@@ -1404,7 +1411,7 @@ export async function getDisplayFeed(
   const [
     community,
     meRows,
-    todayMiles,
+    [todayMiles, todaySteps],
     coverage,
     friends,
     alerts,
@@ -1485,7 +1492,7 @@ export async function getDisplayFeed(
         WHERE u.user_id = $1`,
       [userId],
     ),
-    getTodayMiles(userId),
+    Promise.all([getTodayMiles(userId), getTodaySteps(userId)]),
     fetchTodayCoverage([userId]),
     db.query<{ name: string; miles: number; kind: "run" | "walk" }>(
       `SELECT u.username AS name, ROUND(s.distance_miles::numeric, 1)::float AS miles,
@@ -1579,11 +1586,12 @@ export async function getDisplayFeed(
                          WHERE w.user_id = c.user_id
                            AND w.local_date = (c.local_now)::date
                            AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL), 0) < 0.95
+          AND NOT ${stepGoalMetSql("c.user_id", "(c.local_now)::date")}
         ORDER BY c.current_streak DESC`,
       [userId],
     ),
     // The owner's own last 64 local days (the streak heatmap).
-    db.query<{ miles: number; covered: boolean }>(
+    db.query<{ miles: number; covered: boolean; stepped: boolean }>(
       `WITH tz AS (
          SELECT COALESCE((SELECT timezone_offset FROM workouts
                            WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1), 0) AS off
@@ -1597,7 +1605,8 @@ export async function getDisplayFeed(
                          WHERE w.user_id = $1 AND w.local_date = days.day
                            AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL), 0)::float AS miles,
               EXISTS (SELECT 1 FROM streak_coverage sc
-                       WHERE sc.user_id = $1 AND sc.local_date = days.day) AS covered
+                       WHERE sc.user_id = $1 AND sc.local_date = days.day) AS covered,
+              ${stepGoalMetSql("$1", "days.day")} AS stepped
          FROM days
         ORDER BY days.day`,
       [userId],
@@ -1765,7 +1774,8 @@ export async function getDisplayFeed(
     community,
     me: {
       username: me?.username ?? null,
-      mile_done: miles >= DAILY_GOAL_TOLERANCE || covered,
+      // The day's goal (a mile or 10k steps), not literally a mile.
+      mile_done: dailyGoalMet(miles, todaySteps) || covered,
       miles_today: Math.round(miles * 100) / 100,
       streak: me?.streak ?? 0,
       running_now: Boolean(me?.running_now),
@@ -1802,9 +1812,11 @@ export async function getDisplayFeed(
       })),
       days: days.map((d) => {
         const mi = Number(d.miles) || 0;
-        return mi < DAILY_GOAL_TOLERANCE && d.covered
-          ? -1
-          : Math.round(mi * 10) / 10;
+        if (mi >= DAILY_GOAL_TOLERANCE) return Math.round(mi * 10) / 10;
+        // A 10k-step day is a done day: drawn as the lightest lit square
+        // (1 mi), since the desk firmware's colours are mile buckets.
+        if (d.stepped) return 1;
+        return d.covered ? -1 : Math.round(mi * 10) / 10;
       }),
     },
     reviews,

@@ -2,6 +2,7 @@ import { PostgresService } from "./DbService.js";
 import { isUserInQuietHours, sendPush } from "./pushNotificationService.js";
 import { refreshCurrentStreak } from "./leaderboardService.js";
 import { DAILY_GOAL_TOLERANCE } from "./workoutService.js";
+import { stepGoalMetSql } from "./streakFeatureCore.js";
 
 const db = PostgresService.getInstance();
 
@@ -86,7 +87,9 @@ export async function lastCallCandidates(
 			  WHERE w.user_id = l.user_id
 			    AND w.local_date = l.local_now::date
 			    AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL), 0)
-		      < l.goal_miles * $3`,
+		      < l.goal_miles * $3
+		  -- 10k steps finished the day too (STREAK_QUALIFYING_STEPS).
+		  AND NOT ${stepGoalMetSql("l.user_id", "l.local_now::date")}`,
     [at.toISOString(), LAST_CALL_LOCAL_HOUR, DAILY_GOAL_TOLERANCE],
   );
   return rows.map((r) => ({
@@ -103,12 +106,12 @@ export function lastCallCopy(streak: number): { title: string; body: string } {
   if (streak <= 1) {
     return {
       title: "Last call for today's mile",
-      body: "Two hours to midnight. One mile makes it a 2-day streak.",
+      body: "Two hours to midnight. A mile or 10,000 steps makes it a 2-day streak.",
     };
   }
   return {
     title: `Last call: ${streak}-day streak on the line`,
-    body: "Two hours to midnight and today's mile isn't in. One mile keeps it.",
+    body: "Two hours to midnight and today's goal isn't in. A mile or 10,000 steps keeps it.",
   };
 }
 

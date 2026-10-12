@@ -10,6 +10,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - Serve `moving_seconds` only via `displayMovingSecondsSql` (NULL under 50% of `total_duration`, per leg); iOS mirror `DisplayPace`.
 - Weekly `last_week` reads the SERVED row (`final_value`, else fresh `measure()`); never re-pick a past week.
 - Goal checks use `DAILY_GOAL_TOLERANCE` (0.95), never `>= 1.0`; `user_daily_challenges` stamps what was SERVED; split-based challenge queries also need `countedWorkoutSql('w')`.
+- A day is DONE at 0.95 mi OR 10k steps (`STREAK_QUALIFYING_STEPS`): SQL via `stepGoalDaysSql`/`stepGoalMetSql`, in-memory `dailyGoalMet`; never for posting, feed, meters, challenges; a crossing runs `stepGoalDaysLanded`. Check: `streak-check` §S.
 - `sweepCrewPhotoNudges` is library-tier copy, re-checks `photoOpen`, claims `photo_nudge_sent_at` (no default); `BUDDY_GROUP_JSON` miles are derived, never stored.
 - `getBuddyHistory`: post ids via `buddySessionPostIds` behind `DIRECT_POST_ACCESS_SQL`; NULL `final_distance_miles` = "not synced". Check: `buddy-history-check`.
 - Crew slides via `PUT /posts/:id/crew-photo`; resolve `coauthors[].route` at READ under each owner's `share_route_maps`; `lockUnearnedPhotos` blanks slides. Check: `buddy-group-post-check`.
