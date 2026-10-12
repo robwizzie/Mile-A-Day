@@ -138,6 +138,7 @@ Details: docs/conventions/backend.md § Push Notifications
 - Push `data` values must be strings; inbox previews authorize via `visiblePostPreviews`.
 - Gate client-visible changes PER DEVICE (`client_features`, `userSupports`); never reuse a string; env flags are kill switches only.
 - Widget refresh = silent `widget_refresh` push, only to `widget_refresh_push_v1` devices with matching `widget_kinds`, one per window. Check: `widget-refresh-check`.
+- Every desk PWA push (`pushTo`) must show in the remote's Activity (`boxActivity`): read it from its own table, else add the kind to `LOGGED_KINDS` (`desk_push_log`). Check: `display-check`.
 
 ## ESM Reminder
 Details: docs/conventions/backend.md § ESM Reminder
