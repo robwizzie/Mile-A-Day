@@ -108,6 +108,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - Overlap via padding, never `.offset`; never `.fixedSize` a data label; fit rows via `ViewThatFits`; gate hype/report/block on `PostCardView.isMine`, not `is_self`.
 - `ios.yml` diffs `github.event.before..HEAD` on push (never `HEAD^`); `workflow_dispatch` always type-checks.
 - CI only type-checks the app module: run `xcrun swiftc -typecheck -sdk $(xcrun --sdk iphoneos --show-sdk-path) -target arm64-apple-ios17.0` over the WHOLE module in one call; `-parse` is not enough.
+- `DashboardView.body`'s modifier chain is at Xcode's type-check time limit: never add another `.onChange`/`.onReceive` closure to it (CI's `swiftc -typecheck` still passes); observe from a helper or a service.
 - New Codable field: check for explicit `CodingKeys` first; persisted models' new fields must be Optional.
 - Target iOS 17.0: resolve newer SF Symbols at runtime (`UIImage(systemName:) != nil ? new : old`).
 - Link third-party apps only by App Store id (`itms-apps://apps.apple.com/app/id<N>`, `openAppStore`); never custom URL schemes.

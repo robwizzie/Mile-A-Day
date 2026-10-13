@@ -649,7 +649,13 @@ struct DashboardView: View {
     /// The DAY is done: the mile goal, or 10,000 steps. `currentState
     /// .isCompleted` stays the MILE — it drives the mile celebration and the
     /// photo prompt, which belong to a workout. This drives what's about the
-    /// streak: the at-risk Live Activity, and confetti for a steps finish.
+    /// streak: the at-risk Live Activity.
+    ///
+    /// Deliberately NOT observed with its own `.onChange` in `body`: one more
+    /// closure on that modifier chain put it past Xcode's "unable to
+    /// type-check this expression in reasonable time" limit (CI's
+    /// `swiftc -typecheck` still passed). A steps finish retires the Live
+    /// Activity from `DailyStepsSyncService.stepGoalDaysChanged` instead.
     private var dayDone: Bool {
         ProgressCalculator.isDayComplete(
             miles: currentState.distance,
@@ -1193,16 +1199,6 @@ struct DashboardView: View {
                 refreshMidRunPhotoWaiting()
                 // Mile landed (or state changed) — retire/refresh the at-risk
                 // Live Activity immediately.
-                syncStreakRiskActivity()
-            }
-            .onChange(of: dayDone) { oldValue, newValue in
-                // Steps can finish the day with no mile — and no workout to
-                // celebrate — so this edge only confettis that case (the mile
-                // edge above owns its own), and retires the at-risk Live
-                // Activity either way.
-                if newValue && !oldValue && !currentState.isCompleted {
-                    triggerConfetti()
-                }
                 syncStreakRiskActivity()
             }
             .onChange(of: healthManager.todaysDistance) { oldValue, newValue in
