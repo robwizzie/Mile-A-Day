@@ -156,7 +156,7 @@ Update the list as new sensitive areas emerge.
 
 - **Universal** (`~/.claude/references/`): `behavior.md`, `workflow-overrides.md`, `security.md`, `skill-catalog.md` — loaded at SessionStart and after PostCompact.
 - **Repo-specific** (`.claude/references/`): `conventions.md`, `gotchas.md`, `decisions.md`.
-- **Area-specific** (`.claude/rules/`): `backend.md`, `ios.md`, `website.md` — pre-existing, kept under 60 lines each.
+- **Area-specific** (`.claude/rules/`): `backend.md`, `ios.md`, `website.md` — one-line rules, auto-loaded by path; long-form reference in `docs/conventions/`.
 
 ---
 

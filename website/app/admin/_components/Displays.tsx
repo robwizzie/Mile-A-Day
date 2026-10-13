@@ -44,14 +44,15 @@ type DisplayKey = {
 
 export function DisplaysTab() {
   const [keys, setKeys] = useState<DisplayKey[] | null>(null);
-  const [username, setUsername] = useState("");
   const [label, setLabel] = useState("");
-  const [fresh, setFresh] = useState<{ key: string; who: string } | null>(null);
+  const [fresh, setFresh] = useState<{ key: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const [messages, setMessages] = useState<DisplayMessage[] | null>(null);
+  // Other people with a desk (names only): who I can message.
+  const [recipients, setRecipients] = useState<string[]>([]);
   const [msgTo, setMsgTo] = useState("");
   const [msgText, setMsgText] = useState("");
   const [msgBusy, setMsgBusy] = useState(false);
@@ -60,10 +61,11 @@ export function DisplaysTab() {
   const load = useCallback(async () => {
     const [res, msgs] = await Promise.all([
       getData<{ keys: DisplayKey[] }>("display-keys"),
-      getData<{ messages: DisplayMessage[] }>("display-messages"),
+      getData<{ messages: DisplayMessage[]; recipients?: string[] }>("display-messages"),
     ]);
     setKeys(res.keys);
     setMessages(msgs.messages);
+    setRecipients(msgs.recipients ?? []);
   }, []);
 
   const [now, setNow] = useState(() => Date.now());
@@ -79,10 +81,6 @@ export function DisplaysTab() {
   }, [load]);
 
   const offline = (keys ?? []).filter((k) => !k.revoked_at && !isOnline(k, now));
-  // People with a live desk display (one entry each).
-  const recipients = Array.from(
-    new Set((keys ?? []).filter((k) => !k.revoked_at && k.username).map((k) => k.username as string)),
-  );
 
   async function sendMessage() {
     setError(null);
@@ -114,11 +112,10 @@ export function DisplaysTab() {
     setError(null);
     setBusy(true);
     try {
-      const qs = new URLSearchParams({ username: username.trim(), label: label.trim() });
+      const qs = new URLSearchParams({ label: label.trim() });
       const res = await postData<{ key: string }>(`display-keys?${qs}`);
-      setFresh({ key: res.key, who: username.trim() });
+      setFresh({ key: res.key });
       setCopied(false);
-      setUsername("");
       setLabel("");
       await load();
     } catch (e: any) {
@@ -167,7 +164,7 @@ export function DisplaysTab() {
             onChange={(e) => setMsgTo(e.target.value)}
             className="rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none"
           >
-            {recipients.length === 0 && <option value="">No displays yet</option>}
+            {recipients.length === 0 && <option value="">No other desks yet</option>}
             {recipients.map((u) => (
               <option key={u} value={u}>
                 {u}&apos;s desk
@@ -227,16 +224,10 @@ export function DisplaysTab() {
       <section className={`${CARD} p-5`}>
         <h2 className="text-lg font-bold">New desk display key</h2>
         <p className="mt-1 text-sm text-white/50">
-          The display shows community totals plus this person&apos;s own mile, streak and the
-          nudges/hypes sent to them. Nothing else.
+          For your own desk: it shows community totals plus your own mile, streak and the
+          nudges/hypes sent to you. Nothing else. Each admin makes keys for their own account.
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="username"
-            className="rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm outline-none focus:border-white/30"
-          />
           <input
             value={label}
             onChange={(e) => setLabel(e.target.value)}
@@ -245,7 +236,7 @@ export function DisplaysTab() {
           />
           <button
             onClick={create}
-            disabled={busy || !username.trim()}
+            disabled={busy}
             className="rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-40"
             style={{ background: MAD_RED }}
           >
@@ -255,7 +246,7 @@ export function DisplaysTab() {
         {fresh && (
           <div className="mt-4 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4">
             <p className="text-sm font-semibold text-amber-200">
-              Key for {fresh.who}. Copy it now: it will not be shown again (hides in 2 minutes).
+              Your new key. Copy it now: it will not be shown again (hides in 2 minutes).
             </p>
             <code className="mt-2 block break-all rounded-lg bg-black/50 p-2 text-xs">{fresh.key}</code>
             <p className="mt-2 text-xs text-white/50">
@@ -284,7 +275,7 @@ export function DisplaysTab() {
       </section>
 
       <section className={`${CARD} p-5`}>
-        <h2 className="text-lg font-bold">Display keys</h2>
+        <h2 className="text-lg font-bold">Your display keys</h2>
         {!keys ? (
           <Loading />
         ) : keys.length === 0 ? (

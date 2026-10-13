@@ -1,5 +1,5 @@
 ---
-globs: website/**
+paths: website/**
 ---
 
 # Website Conventions

@@ -3,12 +3,18 @@ import { PostgresService } from "./DbService.js";
 import { getPublicStats } from "./publicStatsService.js";
 import { START_OF_TODAY_ET_SQL, TODAY_ET_DATE_SQL } from "./dailyResetTime.js";
 import { LIVE_PRESENCE_WINDOW_SECONDS } from "./liveTrackingService.js";
-import { DAILY_GOAL_TOLERANCE, getTodayMiles, getTodayStats } from "./workoutService.js";
+import {
+  DAILY_GOAL_TOLERANCE,
+  getTodayMiles,
+  getTodayStats,
+} from "./workoutService.js";
 import { effectiveStreakSql, fetchTodayCoverage } from "./streakFeatureCore.js";
 import { localNowSql } from "./dailyResetTime.js";
 import { MIN_PLAUSIBLE_MILE_SECONDS } from "./mileTime.js";
 import { ownedFlameyItems, servedFlameyLook } from "./flameyService.js";
 import { postCommentMatchSql } from "./posts/postSql.js";
+import { VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL } from "./visibilityService.js";
+import { prettyTokens, pushTo } from "./deskPushService.js";
 
 const db = PostgresService.getInstance();
 
@@ -43,7 +49,7 @@ const MAX_FRIENDS_RUNNING = 3;
 const MAX_FRIENDS_FINISHED = 3;
 const MAX_AT_RISK_NAMES = 3;
 const AT_RISK_MIN_STREAK = 3; // same floor as the admin "at risk" panel
-const HEATMAP_DAYS = 64;       // one per pixel column of the panel
+const HEATMAP_DAYS = 64; // one per pixel column of the panel
 const MESSAGE_TTL_HOURS = 24;
 const MAX_MESSAGES = 3;
 // "<friend> got their mile in!": the same announcements the owner's phone
@@ -63,6 +69,18 @@ const DESK_FLAMEY_SLOTS = ["color", "head", "eyes", "costume"] as const;
 const APP_STORE_ID = process.env.APP_STORE_ID || "6746970905";
 const REVIEWS_TTL_MS = 15 * 60 * 1000;
 const MAX_REVIEWS = 3;
+// Doodles: a 64x32 picture in 8 colours, one desk owner to another.
+export const DOODLE_W = 64;
+export const DOODLE_H = 32;
+const DOODLE_TTL_HOURS = 24;
+const MAX_DOODLES_PER_HOUR = 10;
+/** Run-length code on the wire: colour digit + one length char (1..64). */
+const DOODLE_RUN =
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
+/** Busier pictures than this are refused (keeps the board's feed small). */
+export const DOODLE_MAX_CODE = 1600;
+// Founder mode growth screen: signup totals only, cached like the community block.
+const GROWTH_TTL_MS = 60_000;
 
 export function hashDisplayKey(key: string): string {
   return crypto.createHash("sha256").update(key, "utf8").digest("hex");
@@ -91,7 +109,8 @@ export async function createDisplayKey(
   label: string,
   createdBy: string | null,
 ): Promise<{ key: string; row: DisplayKeyRow }> {
-  const key = DISPLAY_KEY_PREFIX + crypto.randomBytes(KEY_BYTES).toString("base64url");
+  const key =
+    DISPLAY_KEY_PREFIX + crypto.randomBytes(KEY_BYTES).toString("base64url");
   const [row] = await db.query<DisplayKeyRow>(
     `WITH ins AS (
        INSERT INTO display_keys (user_id, key_hash, key_prefix, label, created_by)
@@ -101,30 +120,58 @@ export async function createDisplayKey(
      SELECT ins.id, u.username, ins.label, ins.key_prefix,
             ins.created_at::text, ins.last_used_at::text, ins.revoked_at::text
        FROM ins JOIN users u ON u.user_id = ins.user_id`,
-    [userId, hashDisplayKey(key), key.slice(0, 9), label.slice(0, 60), createdBy],
+    [
+      userId,
+      hashDisplayKey(key),
+      key.slice(0, 9),
+      label.slice(0, 60),
+      createdBy,
+    ],
   );
   return { key, row };
 }
 
-export async function listDisplayKeys(): Promise<DisplayKeyRow[]> {
+/** Display keys: every one, or (with ownerId) only that person's own. */
+export async function listDisplayKeys(
+  ownerId?: string,
+): Promise<DisplayKeyRow[]> {
   // Never selects key_hash.
   return db.query<DisplayKeyRow>(
     `SELECT k.id, u.username, k.label, k.key_prefix, k.created_at::text,
             k.last_used_at::text, k.revoked_at::text
        FROM display_keys k JOIN users u ON u.user_id = k.user_id
+      WHERE ($1::text IS NULL OR k.user_id = $1)
       ORDER BY k.revoked_at IS NOT NULL, k.created_at DESC
       LIMIT 200`,
+    [ownerId ?? null],
   );
 }
 
-export async function revokeDisplayKey(id: string): Promise<boolean> {
+/** Revoke a live key; with ownerId, only if it is that person's own. */
+export async function revokeDisplayKey(
+  id: string,
+  ownerId?: string,
+): Promise<boolean> {
   const rows = await db.query(
     `UPDATE display_keys SET revoked_at = NOW()
-      WHERE id = $1 AND revoked_at IS NULL
+      WHERE id = $1 AND revoked_at IS NULL AND ($2::text IS NULL OR user_id = $2)
       RETURNING id`,
-    [id],
+    [id, ownerId ?? null],
   );
   return rows.length > 0;
+}
+
+/** Usernames of the people who have a desk (an active key), other than me:
+ *  who I can send a desk message to. Names only. */
+export async function deskOwnersExcept(userId: string): Promise<string[]> {
+  const rows = await db.query<{ username: string }>(
+    `SELECT DISTINCT u.username
+       FROM display_keys k JOIN users u ON u.user_id = k.user_id
+      WHERE k.revoked_at IS NULL AND k.user_id <> $1 AND u.username IS NOT NULL
+      ORDER BY u.username`,
+    [userId],
+  );
+  return rows.map((r) => r.username);
 }
 
 /** userId for a live (unrevoked) key whose owner still exists, else null. */
@@ -133,7 +180,9 @@ export async function resolveDisplayKey(key: string): Promise<string | null> {
 }
 
 /** The key's owner and the key (box) id, or null. Stamps last_used_at. */
-export async function resolveDisplayKeyRow(key: string): Promise<{ userId: string; keyId: string } | null> {
+export async function resolveDisplayKeyRow(
+  key: string,
+): Promise<{ userId: string; keyId: string } | null> {
   if (!isWellFormedKey(key)) return null;
   const rows = await db.query<{ id: string; user_id: string; stale: boolean }>(
     `SELECT k.id, k.user_id,
@@ -145,8 +194,9 @@ export async function resolveDisplayKeyRow(key: string): Promise<{ userId: strin
   if (!rows.length) return null;
   if (rows[0].stale) {
     // Best effort; a failed stamp never fails the request.
-    db.query(`UPDATE display_keys SET last_used_at = NOW() WHERE id = $1`, [rows[0].id])
-      .catch(() => undefined);
+    db.query(`UPDATE display_keys SET last_used_at = NOW() WHERE id = $1`, [
+      rows[0].id,
+    ]).catch(() => undefined);
   }
   return { userId: rows[0].user_id, keyId: rows[0].id };
 }
@@ -155,9 +205,12 @@ export async function resolveDisplayKeyRow(key: string): Promise<{ userId: strin
 
 /** Emoji the panel can draw as an icon, mapped to a token it understands. */
 const EMOJI_TOKENS: [RegExp, string][] = [
-  [/\u{1F525}/gu, "\u0001"],                                               // fire
-  [/(\u2764|\u2665|\u{1F496}|\u{1F497}|\u{1F493}|\u{1F495}|\u{1F9E1})\uFE0F?/gu, "\u0002"], // heart
-  [/\u{1F44F}[\u{1F3FB}-\u{1F3FF}]?/gu, "\u0003"],                        // clap
+  [/\u{1F525}/gu, "\u0001"], // fire
+  [
+    /(\u2764|\u2665|\u{1F496}|\u{1F497}|\u{1F493}|\u{1F495}|\u{1F9E1})\uFE0F?/gu,
+    "\u0002",
+  ], // heart
+  [/\u{1F44F}[\u{1F3FB}-\u{1F3FF}]?/gu, "\u0003"], // clap
   [/\u{1F3C3}[\u{1F3FB}-\u{1F3FF}]?(\u200D[\u2640\u2642]\uFE0F?)?/gu, "\u0004"], // runner
 ];
 const TOKEN_NAMES = ["", "[FIRE]", "[HEART]", "[CLAP]", "[RUN]"];
@@ -173,7 +226,8 @@ export function sanitizeDisplayText(raw: unknown): string | null {
   for (const [re, tok] of EMOJI_TOKENS) t = t.replace(re, ` ${tok} `);
   t = t.toUpperCase().replace(/[^A-Z0-9 .,!?'\-+#:/%&\u0001-\u0004]/g, "");
   t = t.replace(/\s+/g, " ").trim().slice(0, MESSAGE_MAX_CHARS).trim();
-  if (!t.replace(/[\u0001-\u0004 ]/g, "").length && !/[\u0001-\u0004]/.test(t)) return null;
+  if (!t.replace(/[\u0001-\u0004 ]/g, "").length && !/[\u0001-\u0004]/.test(t))
+    return null;
   return t.replace(/[\u0001-\u0004]/g, (c) => TOKEN_NAMES[c.charCodeAt(0)]);
 }
 
@@ -204,18 +258,32 @@ export async function createDisplayMessage(
        LEFT JOIN users fu ON fu.user_id = ins.from_user_id`,
     [toUserId, fromUserId, body],
   );
-  return rows[0];
+  const m = rows[0];
+  if (m && toUserId !== fromUserId) {
+    // a push to the recipient's own phone
+    pushTo([toUserId], "message", {
+      title: `Desk message from @${m.from_username ?? "Mile A Day"}`,
+      body: prettyTokens(m.body),
+      tag: "desk-message",
+    }).catch((e) => console.error("desk push (message):", e));
+  }
+  return m;
 }
 
-export async function listDisplayMessages(): Promise<DisplayMessageRow[]> {
+/** Recent desk messages: every one, or (with userId) only those to or from that person. */
+export async function listDisplayMessages(
+  userId?: string,
+): Promise<DisplayMessageRow[]> {
   return db.query<DisplayMessageRow>(
     `SELECT m.id, tu.username AS to_username, fu.username AS from_username, m.body,
             m.created_at::text, m.expires_at::text
        FROM display_messages m
        JOIN users tu ON tu.user_id = m.to_user_id
        LEFT JOIN users fu ON fu.user_id = m.from_user_id
+      WHERE ($1::text IS NULL OR m.to_user_id = $1 OR m.from_user_id = $1)
       ORDER BY m.created_at DESC
       LIMIT 30`,
+    [userId ?? null],
   );
 }
 
@@ -228,13 +296,25 @@ export async function listDisplayMessages(): Promise<DisplayMessageRow[]> {
 // runs, medals and the rest only ever come from real activity.
 
 /** Board style / mascot ids, in the board's own order (mad/app.py). */
-export const DESK_STYLES = ["CLASSIC", "SPOTLIGHT", "ARCADE", "BIG", "CAMPFIRE", "RACE", "CLOCK"] as const;
+export const DESK_STYLES = [
+  "CLASSIC",
+  "SPOTLIGHT",
+  "ARCADE",
+  "BIG",
+  "CAMPFIRE",
+  "RACE",
+  "CLOCK",
+  "VERSUS",
+  "GROWTH",
+  "ODOMETER",
+  "SHOWCASE",
+] as const;
 export const DESK_MASCOTS = ["RUNNER", "FLAMEY"] as const;
-const COMMAND_WINDOW_SECONDS = 180;   // a box acts on a tap from the last 3 min
+const COMMAND_WINDOW_SECONDS = 180; // a box acts on a tap from the last 3 min
 const MAX_COMMANDS_PER_10_MIN = 30;
 const DESK_HISTORY_DAYS = 14;
 const ACTIVITY_DAYS = 7;
-const ONLINE_MS = 10 * 60 * 1000;     // last_used_at is stamped at most every 2 min
+const ONLINE_MS = 10 * 60 * 1000; // last_used_at is stamped at most every 2 min
 
 export interface DeskSettings {
   style: number | null;
@@ -252,7 +332,7 @@ export interface DeskBoxState {
   style: number;
   mascot: number;
   awake: boolean;
-  sleep_start: number | null;   // the hours it's actually using; null = never sleeps
+  sleep_start: number | null; // the hours it's actually using; null = never sleeps
   sleep_end: number | null;
 }
 
@@ -260,21 +340,28 @@ export interface DeskBoxState {
  *  anything else is ignored. */
 export function parseBoxState(header: unknown): DeskBoxState | null {
   if (typeof header !== "string") return null;
-  const m = /^(\d),(\d),([01]),(-1|\d{1,4}),(-1|\d{1,4})$/.exec(header.trim());
+  const m = /^(\d{1,2}),(\d),([01]),(-1|\d{1,4}),(-1|\d{1,4})$/.exec(
+    header.trim(),
+  );
   if (!m) return null;
   const [style, mascot, awake, a, b] = m.slice(1).map(Number);
   if (style >= DESK_STYLES.length || mascot >= DESK_MASCOTS.length) return null;
   const ok = (v: number) => v === -1 || (v >= 0 && v < 1440);
   if (!ok(a) || !ok(b)) return null;
   return {
-    style, mascot, awake: awake === 1,
+    style,
+    mascot,
+    awake: awake === 1,
     sleep_start: a === -1 || b === -1 ? null : a,
     sleep_end: a === -1 || b === -1 ? null : b,
   };
 }
 
 /** Store a box's reported state: only when it changed (or every 2 min). */
-export async function recordBoxState(keyId: string, state: DeskBoxState): Promise<void> {
+export async function recordBoxState(
+  keyId: string,
+  state: DeskBoxState,
+): Promise<void> {
   await db.query(
     `UPDATE display_keys SET state = $2::jsonb, state_at = NOW()
       WHERE id = $1 AND (state IS DISTINCT FROM $2::jsonb OR state_at IS NULL
@@ -293,63 +380,106 @@ export interface DeskBox {
   state: DeskBoxState | null;
 }
 
-type BoxDbRow = { id: string; label: string; username: string | null; last_used_at: string | null;
-                  state: DeskBoxState | null; state_at: string | null };
+type BoxDbRow = {
+  id: string;
+  label: string;
+  username: string | null;
+  last_used_at: string | null;
+  state: DeskBoxState | null;
+  state_at: string | null;
+};
 
 function boxRow(r: BoxDbRow): DeskBox {
-  const fresh = (t: string | null) => t != null && Date.now() - Date.parse(t) < ONLINE_MS;
+  const fresh = (t: string | null) =>
+    t != null && Date.now() - Date.parse(t) < ONLINE_MS;
   return {
     id: r.id,
     label: r.label,
     username: r.username,
     last_seen: r.last_used_at,
     online: fresh(r.last_used_at),
-    state: fresh(r.state_at) && r.state
-      ? { style: r.state.style, mascot: r.state.mascot, awake: r.state.awake,
-          sleep_start: r.state.sleep_start, sleep_end: r.state.sleep_end }
-      : null,
+    state:
+      fresh(r.state_at) && r.state
+        ? {
+            style: r.state.style,
+            mascot: r.state.mascot,
+            awake: r.state.awake,
+            sleep_start: r.state.sleep_start,
+            sleep_end: r.state.sleep_end,
+          }
+        : null,
   };
 }
 
 /** Every active box (key), oldest first. Never the hash. */
-export async function listDeskBoxes(): Promise<DeskBox[]> {
+/** Active boxes: every one, or (with ownerId) only that person's own. */
+export async function listDeskBoxes(ownerId?: string): Promise<DeskBox[]> {
   const rows = await db.query<BoxDbRow>(
     `SELECT k.id, k.label, u.username, k.last_used_at::text, k.state, k.state_at::text
        FROM display_keys k JOIN users u ON u.user_id = k.user_id
-      WHERE k.revoked_at IS NULL
+      WHERE k.revoked_at IS NULL AND ($1::text IS NULL OR k.user_id = $1)
       ORDER BY k.created_at`,
+    [ownerId ?? null],
   );
   return rows.map(boxRow);
 }
 
-async function boxOwner(boxId: string): Promise<{ userId: string; box: DeskBox } | null> {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(boxId)) return null;
+/** Is this an active box whose display key belongs to this user? The desk
+ *  remote only ever acts on the signed-in person's own boxes. */
+export async function boxBelongsTo(
+  boxId: string,
+  userId: string | undefined,
+): Promise<boolean> {
+  if (!userId) return false;
+  const owner = await boxOwner(boxId);
+  return owner !== null && owner.userId === userId;
+}
+
+async function boxOwner(
+  boxId: string,
+): Promise<{ userId: string; box: DeskBox } | null> {
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      boxId,
+    )
+  )
+    return null;
   const rows = await db.query<BoxDbRow & { user_id: string }>(
     `SELECT k.id, k.user_id, k.label, u.username, k.last_used_at::text, k.state, k.state_at::text
        FROM display_keys k JOIN users u ON u.user_id = k.user_id
-      WHERE k.id = $1 AND k.revoked_at IS NULL`, [boxId]);
+      WHERE k.id = $1 AND k.revoked_at IS NULL`,
+    [boxId],
+  );
   return rows[0] ? { userId: rows[0].user_id, box: boxRow(rows[0]) } : null;
 }
 
-export async function getBoxSettings(keyId: string): Promise<DeskSettings | null> {
+export async function getBoxSettings(
+  keyId: string,
+): Promise<DeskSettings | null> {
   const rows = await db.query<DeskSettings>(
     `SELECT style, mascot, rev, sleep_start, sleep_end, never_sleep
-       FROM desk_box_settings WHERE key_id = $1`, [keyId]);
+       FROM desk_box_settings WHERE key_id = $1`,
+    [keyId],
+  );
   return rows[0] ?? null;
 }
 
 export interface BoxSettingsChange {
-  style: number | null;          // null = leave as is
+  style: number | null; // null = leave as is
   mascot: number | null;
   /** Sleep: a [start, end] pair (minutes), "never", "default", or undefined. */
   sleep?: [number, number] | "never" | "default";
 }
 
-const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+const hhmm = (m: number) =>
+  `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
 /** Change a box's style / mascot (bumps `rev`: the box applies it once) and/or
  *  its sleep hours (applied continuously). Logs it. Null = unknown box. */
-export async function setBoxSettings(boxId: string, change: BoxSettingsChange): Promise<DeskSettings | null> {
+export async function setBoxSettings(
+  boxId: string,
+  change: BoxSettingsChange,
+): Promise<DeskSettings | null> {
   const owner = await boxOwner(boxId);
   if (!owner) return null;
   const look = change.style != null || change.mascot != null;
@@ -370,17 +500,37 @@ export async function setBoxSettings(boxId: string, change: BoxSettingsChange): 
            never_sleep = CASE WHEN $5 THEN $8 ELSE desk_box_settings.never_sleep END,
            updated_at = NOW()
      RETURNING style, mascot, rev, sleep_start, sleep_end, never_sleep`,
-    [boxId, change.style, change.mascot, look, setSleep, start, end, setSleep ? never : null],
+    [
+      boxId,
+      change.style,
+      change.mascot,
+      look,
+      setSleep,
+      start,
+      end,
+      setSleep ? never : null,
+    ],
   );
   const st = rows[0];
   const parts: string[] = [];
   if (look) {
-    parts.push([st.style != null ? DESK_STYLES[st.style] : null, st.mascot != null ? DESK_MASCOTS[st.mascot] : null]
-      .filter(Boolean).join(" / "));
+    parts.push(
+      [
+        st.style != null ? DESK_STYLES[st.style] : null,
+        st.mascot != null ? DESK_MASCOTS[st.mascot] : null,
+      ]
+        .filter(Boolean)
+        .join(" / "),
+    );
   }
   if (setSleep) {
-    parts.push(never ? "never sleeps" : start != null && end != null
-      ? `sleeps ${hhmm(start)}–${hhmm(end)}` : "sleep hours back to the box's own");
+    parts.push(
+      never
+        ? "never sleeps"
+        : start != null && end != null
+          ? `sleeps ${hhmm(start)}–${hhmm(end)}`
+          : "sleep hours back to the box's own",
+    );
   }
   await db.query(
     `INSERT INTO desk_commands (user_id, key_id, kind, detail) VALUES ($1, $2, 'set', $3)`,
@@ -393,30 +543,375 @@ export async function setBoxSettings(boxId: string, change: BoxSettingsChange): 
  *  "wake" (bright for 30 minutes). False = rate-limited, null = unknown box. */
 export const DESK_TAPS = ["show", "wake"] as const;
 
-export async function queueBoxTap(boxId: string, kind: (typeof DESK_TAPS)[number]): Promise<boolean | null> {
+/** Animations the owner can test on their own box (desk/firmware/mad/testscenes.py).
+ *  The box plays the real scene with TEST in place of any name. */
+export const DESK_TEST_SCENES = [
+  "user",
+  "milestone",
+  "nudge",
+  "hype",
+  "friend",
+  "friend_walk",
+  "finished",
+  "friendmile",
+  "atrisk",
+  "reminder",
+  "morning",
+  "mile",
+  "streak",
+  "yearago",
+  "pr",
+  "message",
+  "comment",
+  "medal",
+  "review",
+  "recap",
+  "holiday",
+  "newyear",
+  "countdown",
+  "lead",
+  "doodle",
+  "record",
+  "replay",
+  "dizzy",
+] as const;
+
+/** Queue one test animation for a box. Same rate limit as the other taps. */
+export async function queueBoxTest(
+  boxId: string,
+  scene: (typeof DESK_TEST_SCENES)[number],
+): Promise<boolean | null> {
   const owner = await boxOwner(boxId);
   if (!owner) return null;
   const recent = await db.query<{ n: number }>(
     `SELECT COUNT(*)::int AS n FROM desk_commands
-      WHERE key_id = $1 AND created_at > NOW() - INTERVAL '10 minutes'`, [boxId]);
+      WHERE key_id = $1 AND created_at > NOW() - INTERVAL '10 minutes'`,
+    [boxId],
+  );
   if ((recent[0]?.n ?? 0) >= MAX_COMMANDS_PER_10_MIN) return false;
-  await db.query(`DELETE FROM desk_commands WHERE key_id = $1 AND created_at < NOW() - INTERVAL '30 days'`, [boxId]);
-  await db.query(`INSERT INTO desk_commands (user_id, key_id, kind) VALUES ($1, $2, $3)`, [owner.userId, boxId, kind]);
+  await db.query(
+    `INSERT INTO desk_commands (user_id, key_id, kind, detail) VALUES ($1, $2, 'test', $3)`,
+    [owner.userId, boxId, scene],
+  );
+  return true;
+}
+
+export async function queueBoxTap(
+  boxId: string,
+  kind: (typeof DESK_TAPS)[number],
+): Promise<boolean | null> {
+  const owner = await boxOwner(boxId);
+  if (!owner) return null;
+  const recent = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM desk_commands
+      WHERE key_id = $1 AND created_at > NOW() - INTERVAL '10 minutes'`,
+    [boxId],
+  );
+  if ((recent[0]?.n ?? 0) >= MAX_COMMANDS_PER_10_MIN) return false;
+  await db.query(
+    `DELETE FROM desk_commands WHERE key_id = $1 AND created_at < NOW() - INTERVAL '30 days'`,
+    [boxId],
+  );
+  await db.query(
+    `INSERT INTO desk_commands (user_id, key_id, kind) VALUES ($1, $2, $3)`,
+    [owner.userId, boxId, kind],
+  );
   return true;
 }
 
 /** A desk message from one box's owner to another box's owner. */
-export async function sendBoxMessage(fromBoxId: string, toBoxId: string, text: string) {
-  const [from, to] = await Promise.all([boxOwner(fromBoxId), boxOwner(toBoxId)]);
+export async function sendBoxMessage(
+  fromBoxId: string,
+  toBoxId: string,
+  text: string,
+) {
+  const [from, to] = await Promise.all([
+    boxOwner(fromBoxId),
+    boxOwner(toBoxId),
+  ]);
   if (!from || !to) return null;
   return createDisplayMessage(to.userId, from.userId, text);
 }
 
-export interface DeskActivity { at: string; kind: string; text: string }
+/** A doodle as the remote sends it: 2048 digits 0-7 (one per pixel, row by
+ *  row), with at least one lit pixel. Nothing else is accepted. */
+export function isDoodle(px: unknown): px is string {
+  return (
+    typeof px === "string" &&
+    px.length === DOODLE_W * DOODLE_H &&
+    /^[0-7]+$/.test(px) &&
+    /[1-7]/.test(px)
+  );
+}
+
+/** Run-length code for the wire: colour digit + length char, runs of 1..64. */
+export function doodleCode(px: string): string {
+  let out = "";
+  let i = 0;
+  while (i < px.length) {
+    const c = px[i];
+    let n = 1;
+    while (n < 64 && i + n < px.length && px[i + n] === c) n++;
+    out += c + DOODLE_RUN[n - 1];
+    i += n;
+  }
+  return out;
+}
+
+/** A doodle from one box's owner to another box's owner. Null = unknown box,
+ *  false = rate-limited. */
+export async function sendBoxDoodle(
+  fromBoxId: string,
+  toBoxId: string,
+  px: string,
+) {
+  const [from, to] = await Promise.all([
+    boxOwner(fromBoxId),
+    boxOwner(toBoxId),
+  ]);
+  if (!from || !to) return null;
+  const recent = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM desk_doodles
+      WHERE from_user_id = $1 AND created_at > NOW() - INTERVAL '1 hour'`,
+    [from.userId],
+  );
+  if ((recent[0]?.n ?? 0) >= MAX_DOODLES_PER_HOUR) return false;
+  await db.query(
+    `DELETE FROM desk_doodles WHERE expires_at < NOW() - INTERVAL '7 days'`,
+  );
+  const rows = await db.query<{
+    id: string;
+    to_username: string | null;
+    created_at: string;
+  }>(
+    `WITH ins AS (
+       INSERT INTO desk_doodles (to_user_id, from_user_id, pixels, expires_at)
+       VALUES ($1, $2, $3, NOW() + INTERVAL '${DOODLE_TTL_HOURS} hours')
+       RETURNING id, to_user_id, created_at
+     )
+     SELECT ins.id, u.username AS to_username, ins.created_at::text
+       FROM ins JOIN users u ON u.user_id = ins.to_user_id`,
+    [to.userId, from.userId, px],
+  );
+  if (rows[0] && to.userId !== from.userId) {
+    const fromName = from.box.username ?? "a friend";
+    pushTo([to.userId], "doodle", {
+      title: `New doodle from @${fromName} 🎨`,
+      body: "It's on your desk now. Tap to see it.",
+      tag: "doodle",
+    }).catch((e) => console.error("desk push (doodle):", e));
+  }
+  return rows[0];
+}
+
+export interface DisplayRival {
+  name: string;
+  miles_today: number;
+  miles_week: number;
+  streak: number;
+  mile_done: boolean;
+  /** Out on a tracked run right now (only if they share live presence). */
+  running_now: boolean;
+  live_miles: number | null;
+  live_kind: "run" | "walk" | null;
+}
+
+/** Head-to-head: the other desk owner, only when you're accepted friends and
+ *  they let friends see their runs (blocks either way and 'private' fail it).
+ *  Their own numbers as the app already shows them to a friend. */
+export async function getRival(userId: string): Promise<DisplayRival | null> {
+  const who = await db.query<{ user_id: string; name: string }>(
+    `SELECT u.user_id, u.username AS name
+       FROM display_keys k
+       JOIN users u ON u.user_id = k.user_id
+       JOIN friendships f ON f.user_id = $1 AND f.friend_id = k.user_id AND f.status = 'accepted'
+      WHERE k.revoked_at IS NULL AND k.user_id <> $1 AND u.username IS NOT NULL
+        AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("k.user_id", "$1")}
+      GROUP BY u.user_id, u.username
+      ORDER BY MIN(k.created_at)
+      LIMIT 1`,
+    [userId],
+  );
+  const r = who[0];
+  if (!r) return null;
+  const [rows, today, coverage, liveRows] = await Promise.all([
+    db.query<{ streak: number; week: number | null }>(
+      `WITH tz AS (
+         SELECT COALESCE((SELECT timezone_offset FROM workouts
+                           WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1), 0) AS off
+       ), loc AS (
+         SELECT (NOW() AT TIME ZONE 'UTC') + (tz.off || ' minutes')::interval AS t FROM tz
+       )
+       SELECT (${effectiveStreakSql("u")})::int AS streak, ${weekMilesSql("u.user_id")} AS week
+         FROM users u, loc WHERE u.user_id = $1`,
+      [r.user_id],
+    ),
+    getTodayMiles(r.user_id),
+    fetchTodayCoverage([r.user_id]),
+    // Same presence rules as friends_running: fresh, not ended, shared.
+    db.query<{ miles: number; kind: "run" | "walk" }>(
+      `SELECT s.distance_miles::float AS miles,
+              CASE WHEN s.workout_type = 'walking' THEN 'walk' ELSE 'run' END AS kind
+         FROM live_tracking_sessions s
+         LEFT JOIN notification_settings ns ON ns.user_id = s.user_id
+        WHERE s.user_id = $1 AND s.ended_at IS NULL
+          AND s.last_seen_at > NOW() - INTERVAL '${LIVE_PRESENCE_WINDOW_SECONDS} seconds'
+          AND COALESCE(ns.share_live_presence, TRUE) = TRUE
+        ORDER BY s.last_seen_at DESC LIMIT 1`,
+      [r.user_id],
+    ),
+  ]);
+  const miles = Number(today) || 0;
+  const live = liveRows[0];
+  return {
+    name: r.name,
+    miles_today: Math.round(miles * 100) / 100,
+    miles_week: Math.round((Number(rows[0]?.week) || 0) * 100) / 100,
+    streak: Number(rows[0]?.streak) || 0,
+    mile_done: miles >= DAILY_GOAL_TOLERANCE || Boolean(coverage[r.user_id]),
+    running_now: Boolean(live),
+    live_miles: live ? Math.round(Number(live.miles) * 100) / 100 : null,
+    live_kind: live ? live.kind : null,
+  };
+}
+
+/** The owner's streak leaderboard (see DisplayFeed.leaders). */
+async function getLeaders(userId: string): Promise<DisplayFeed["leaders"]> {
+  const rows = await db.query<{
+    name: string;
+    streak: number;
+    rank: number;
+    me: boolean;
+  }>(
+    `WITH pool AS (
+       SELECT u.username AS name, (${effectiveStreakSql("u")})::int AS streak, (u.user_id = $1) AS me
+         FROM users u
+        WHERE u.username IS NOT NULL
+          AND (u.user_id = $1 OR (
+                EXISTS (SELECT 1 FROM friendships f
+                         WHERE f.user_id = $1 AND f.friend_id = u.user_id AND f.status = 'accepted')
+                AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("u.user_id", "$1")}))
+     ), ranked AS (
+       SELECT name, streak, me, ROW_NUMBER() OVER (ORDER BY streak DESC, me DESC, name) AS rank FROM pool
+     )
+     SELECT name, streak, rank::int AS rank, me FROM ranked
+      WHERE rank <= 5 OR me
+      ORDER BY rank`,
+    [userId],
+  );
+  return rows.map((r) => ({
+    name: r.name,
+    streak: Number(r.streak) || 0,
+    rank: Number(r.rank),
+    me: Boolean(r.me),
+  }));
+}
+
+/** The owner's latest run or walk (last 12 h) with its full-mile splits. */
+async function getLastRun(
+  userId: string,
+): Promise<DisplayFeed["me"]["last_run"]> {
+  const rows = await db.query<{
+    id: string;
+    kind: "run" | "walk";
+    miles: number;
+    seconds: number;
+    age_s: number;
+    splits: number[] | null;
+  }>(
+    `SELECT encode(sha256(('run:' || w.workout_id)::bytea), 'hex') AS id,
+            CASE WHEN w.workout_type = 'walking' THEN 'walk' ELSE 'run' END AS kind,
+            w.distance::float AS miles, COALESCE(w.total_duration, 0)::float AS seconds,
+            EXTRACT(EPOCH FROM (NOW() - w.device_end_date))::int AS age_s,
+            (SELECT array_agg(ROUND(ws.split_pace)::int ORDER BY ws.split_number)
+               FROM workout_splits ws
+              WHERE ws.workout_id = w.workout_id AND ws.split_distance >= 0.95
+                AND ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}) AS splits
+       FROM workouts w
+      WHERE w.user_id = $1 AND w.workout_type IN ('running', 'walking')
+        AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+        AND w.device_end_date > NOW() - INTERVAL '12 hours' AND w.device_end_date <= NOW()
+        AND w.distance >= 0.25
+      ORDER BY w.device_end_date DESC
+      LIMIT 1`,
+    [userId],
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: r.id.slice(0, 16),
+    kind: r.kind,
+    miles: Math.round(Number(r.miles) * 100) / 100,
+    seconds: Math.round(Number(r.seconds) || 0),
+    splits: (r.splits ?? []).slice(0, 26).map((x) => Number(x) || 0),
+    age_s: Math.max(0, Number(r.age_s) || 0),
+  };
+}
+
+/** Miles from the user's local Monday through today (`loc.t` = their local now). */
+function weekMilesSql(userCol: string): string {
+  return `(SELECT COALESCE(SUM(w.distance), 0)::float FROM workouts w
+            WHERE w.user_id = ${userCol}
+              AND w.local_date BETWEEN loc.t::date - (EXTRACT(ISODOW FROM loc.t)::int - 1) AND loc.t::date
+              AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL)`;
+}
+
+export interface DisplayGrowth {
+  today: number; // signups so far today (Eastern, the app's day)
+  yesterday_same_time: number; // signups yesterday up to this time of day
+  week: number[]; // the last 7 days, oldest first, today last
+  dows: string; // their weekday letters, e.g. "SMTWTFS"
+  best_30: number; // best single day in the 30 before today
+}
+
+let growthCache: { at: number; value: DisplayGrowth } | null = null;
+
+/** Founder mode: signup COUNTS only (no names, no ids, nothing per person). */
+export async function getGrowth(): Promise<DisplayGrowth> {
+  if (growthCache && Date.now() - growthCache.at < GROWTH_TTL_MS)
+    return growthCache.value;
+  const rows = await db.query<{ day: string; dow: number; n: number }>(
+    `WITH c AS (
+       SELECT (created_at AT TIME ZONE 'America/New_York')::date AS day, COUNT(*)::int AS n
+         FROM users
+        WHERE created_at >= ((${TODAY_ET_DATE_SQL} - 31)::timestamp AT TIME ZONE 'America/New_York')
+        GROUP BY 1
+     )
+     SELECT g.day::date::text AS day, EXTRACT(DOW FROM g.day)::int AS dow, COALESCE(c.n, 0)::int AS n
+       FROM generate_series(${TODAY_ET_DATE_SQL} - 30, ${TODAY_ET_DATE_SQL}, INTERVAL '1 day') g(day)
+       LEFT JOIN c ON c.day = g.day::date
+      ORDER BY g.day`,
+  );
+  const same = await db.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM users
+      WHERE created_at >= ((${TODAY_ET_DATE_SQL} - 1)::timestamp AT TIME ZONE 'America/New_York')
+        AND created_at < NOW() - INTERVAL '1 day'`,
+  );
+  const last7 = rows.slice(-7);
+  const value: DisplayGrowth = {
+    today: Number(rows[rows.length - 1]?.n) || 0,
+    yesterday_same_time: Number(same[0]?.n) || 0,
+    week: last7.map((r) => Number(r.n) || 0),
+    dows: last7.map((r) => "SMTWTFS"[Number(r.dow) % 7]).join(""),
+    best_30: Math.max(0, ...rows.slice(0, -1).map((r) => Number(r.n) || 0)),
+  };
+  growthCache = { at: Date.now(), value };
+  return value;
+}
+
+export interface DeskActivity {
+  at: string;
+  kind: string;
+  text: string;
+  px?: string;
+}
 
 /** What happened on a box lately, newest first: real events only (from the
  *  same sources its feed uses), plus changes made from the remote. */
-async function boxActivity(boxId: string, userId: string): Promise<DeskActivity[]> {
+async function boxActivity(
+  boxId: string,
+  userId: string,
+): Promise<DeskActivity[]> {
   const days = `INTERVAL '${ACTIVITY_DAYS} days'`;
   const blocked = (col: string) => `NOT EXISTS (
             SELECT 1 FROM user_blocks b
@@ -471,10 +966,12 @@ async function boxActivity(boxId: string, userId: string): Promise<DeskActivity[
         WHERE f.user_id = $1 AND f.status = 'accepted' AND u.username IS NOT NULL
           AND COALESCE(ns.share_live_presence, TRUE) = TRUE
           AND ${blocked("f.friend_id")}
+
        UNION ALL
        SELECT c.created_at, 'remote',
               CASE c.kind WHEN 'set' THEN 'Changed from the remote: ' || COALESCE(c.detail, '')
                           WHEN 'wake' THEN 'Woken up from the remote'
+                          WHEN 'test' THEN 'Test animation: ' || COALESCE(c.detail, '')
                           ELSE 'Stat show started from the remote' END
          FROM desk_commands c
         WHERE c.key_id = $2 AND c.created_at > NOW() - ${days}
@@ -483,7 +980,58 @@ async function boxActivity(boxId: string, userId: string): Promise<DeskActivity[
      LIMIT 60`,
     [userId, boxId],
   );
-  return rows;
+  // Doodles the owner sent or got, with their pixels so the remote can show
+  // them (the owner drew or received every one of these).
+  const doodles = await db.query<DeskActivity>(
+    `SELECT to_char(d.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at,
+            CASE WHEN d.to_user_id = $1 THEN 'doodle_in' ELSE 'doodle_out' END AS kind,
+            CASE WHEN d.to_user_id = $1 THEN 'Doodle from @' || COALESCE(fu.username, 'a friend')
+                 ELSE 'Doodle to @' || COALESCE(tu.username, '?') END AS text,
+            d.pixels AS px
+       FROM desk_doodles d
+       LEFT JOIN users fu ON fu.user_id = d.from_user_id
+       LEFT JOIN users tu ON tu.user_id = d.to_user_id
+      WHERE (d.to_user_id = $1 OR d.from_user_id = $1) AND d.created_at > NOW() - ${days}
+        AND ${blocked("CASE WHEN d.to_user_id = $1 THEN d.from_user_id ELSE d.to_user_id END")}
+      ORDER BY d.created_at DESC
+      LIMIT 20`,
+    [userId],
+  );
+  // Founder mode (admins' boxes only): signups and "I'd buy one"s, so a desk
+  // party nobody was there to see still shows up here. Counts only, never
+  // who: user #N, and the price a desk signup picked.
+  const founder = await db.query<DeskActivity>(
+    `SELECT to_char(t AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at, kind, text FROM (
+       SELECT u.created_at AS t, 'new_user' AS kind,
+              'New user #' || to_char(u.n, 'FM999,999,999') || ' joined Mile A Day'
+                || CASE WHEN u.n % 50 = 0 THEN ' 🎉' ELSE '' END AS text
+         FROM (SELECT created_at, ROW_NUMBER() OVER (ORDER BY created_at, user_id) AS n FROM users) u
+        WHERE u.created_at > NOW() - ${days}
+       UNION ALL
+       SELECT i.created_at, 'interest',
+              'Someone wants a desk box' || COALESCE(' ($' || i.price || ')', '')
+         FROM desk_interest i
+        WHERE i.created_at > NOW() - ${days}
+     ) f
+     WHERE EXISTS (SELECT 1 FROM users me WHERE me.user_id = $1 AND me.role = 'admin')
+     ORDER BY t DESC
+     LIMIT 30`,
+    [userId],
+  );
+  // Desk notifications with no table of their own (App Store reviews, record
+  // days, the Versus lead, a desk going offline), as they were pushed to this
+  // box's owner.
+  const pushed = await db.query<DeskActivity>(
+    `SELECT to_char(l.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at, l.kind, l.text
+       FROM desk_push_log l
+      WHERE l.user_id = $1 AND l.created_at > NOW() - ${days}
+      ORDER BY l.created_at DESC
+      LIMIT 30`,
+    [userId],
+  );
+  return [...rows, ...doodles, ...founder, ...pushed]
+    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+    .slice(0, 60);
 }
 
 /** Everything the remote shows for one box. Null for an unknown box. */
@@ -493,7 +1041,13 @@ export async function getDeskBox(boxId: string) {
   const userId = owner.userId;
   const [settings, messages, others, feed, activity] = await Promise.all([
     getBoxSettings(boxId),
-    db.query<{ id: string; direction: "in" | "out"; who: string; text: string; at: string }>(
+    db.query<{
+      id: string;
+      direction: "in" | "out";
+      who: string;
+      text: string;
+      at: string;
+    }>(
       `SELECT encode(sha256(m.id::text::bytea), 'hex') AS id,
               CASE WHEN m.to_user_id = $1 THEN 'in' ELSE 'out' END AS direction,
               CASE WHEN m.to_user_id = $1 THEN COALESCE(fu.username, 'MILE A DAY')
@@ -506,7 +1060,9 @@ export async function getDeskBox(boxId: string) {
         WHERE (m.to_user_id = $1 OR m.from_user_id = $1)
           AND m.created_at > NOW() - INTERVAL '${DESK_HISTORY_DAYS} days'
         ORDER BY m.created_at DESC
-        LIMIT 50`, [userId]),
+        LIMIT 50`,
+      [userId],
+    ),
     listDeskBoxes(),
     getDisplayFeed(userId, boxId),
     boxActivity(boxId, userId),
@@ -515,10 +1071,24 @@ export async function getDeskBox(boxId: string) {
     box: owner.box,
     styles: DESK_STYLES,
     mascots: DESK_MASCOTS,
-    settings: settings ?? { style: null, mascot: null, rev: 0, sleep_start: null, sleep_end: null, never_sleep: false },
+    tests: DESK_TEST_SCENES,
+    settings: settings ?? {
+      style: null,
+      mascot: null,
+      rev: 0,
+      sleep_start: null,
+      sleep_end: null,
+      never_sleep: false,
+    },
     messages: messages.map((m) => ({ ...m, id: m.id.slice(0, 16) })),
-    // Message another box (not one owned by this box's owner).
-    recipients: others.filter((b) => b.id !== boxId && b.username && b.username !== owner.box.username),
+    // Message another box (not one owned by this box's owner). Name only:
+    // nothing about another person's box beyond who it belongs to.
+    recipients: others
+      .filter(
+        (b) =>
+          b.id !== boxId && b.username && b.username !== owner.box.username,
+      )
+      .map((b) => ({ id: b.id, label: b.label, username: b.username })),
     activity,
     // The same data the box itself gets: the page draws its real screen.
     live: feed,
@@ -527,7 +1097,11 @@ export async function getDeskBox(boxId: string) {
 
 // ─── App Store reviews (founder mode, admins' desks only) ──────────────────
 
-export interface DeskReview { id: string; stars: number; title: string }
+export interface DeskReview {
+  id: string;
+  stars: number;
+  title: string;
+}
 
 /** Parse Apple's public customer-reviews JSON into desk-safe rows: an opaque
  *  id, the star rating and the title cleaned for the panel. No author name,
@@ -544,7 +1118,11 @@ export function parseAppReviews(json: unknown): DeskReview[] {
     if (!rawId || !(stars >= 1 && stars <= 5)) continue;
     const title = sanitizeDisplayText(String(e?.title?.label ?? "")) ?? "";
     out.push({
-      id: crypto.createHash("sha256").update(`review:${rawId}`).digest("hex").slice(0, 16),
+      id: crypto
+        .createHash("sha256")
+        .update(`review:${rawId}`)
+        .digest("hex")
+        .slice(0, 16),
       stars: Math.round(stars),
       title,
     });
@@ -576,15 +1154,19 @@ export function setReviewSourceForTests(src: ReviewSource) {
   reviewsCache = null;
 }
 
-async function latestReviews(): Promise<DeskReview[]> {
-  if (reviewsCache && Date.now() - reviewsCache.at < REVIEWS_TTL_MS) return reviewsCache.data;
+export async function latestReviews(): Promise<DeskReview[]> {
+  if (reviewsCache && Date.now() - reviewsCache.at < REVIEWS_TTL_MS)
+    return reviewsCache.data;
   try {
     const data = parseAppReviews(await reviewSource());
     reviewsCache = { data, at: Date.now() };
     return data;
   } catch {
     // Apple's feed is down or slow: keep what we had, try again next time.
-    reviewsCache = { data: reviewsCache?.data ?? [], at: Date.now() - REVIEWS_TTL_MS + 60_000 };
+    reviewsCache = {
+      data: reviewsCache?.data ?? [],
+      at: Date.now() - REVIEWS_TTL_MS + 60_000,
+    };
     return reviewsCache.data;
   }
 }
@@ -611,6 +1193,8 @@ export interface DisplayCommunity {
   walk_miles_today: number;
   run_miles_total: number;
   walk_miles_total: number;
+  /** Miles over the last 7 full days (for the goal ETA: real recent pace). */
+  miles_7d: number;
 }
 
 let communityCache: { data: DisplayCommunity; at: number } | null = null;
@@ -656,7 +1240,10 @@ async function getCommunity(): Promise<DisplayCommunity> {
       (SELECT COALESCE(SUM(distance) FILTER (WHERE workout_type = 'running'), 0)
          FROM workouts WHERE deleted_at IS NULL AND exclusion_reason IS NULL)::float AS run_miles_total,
       (SELECT COALESCE(SUM(distance) FILTER (WHERE workout_type = 'walking'), 0)
-         FROM workouts WHERE deleted_at IS NULL AND exclusion_reason IS NULL)::float AS walk_miles_total
+         FROM workouts WHERE deleted_at IS NULL AND exclusion_reason IS NULL)::float AS walk_miles_total,
+      (SELECT COALESCE(SUM(distance), 0) FROM workouts
+        WHERE local_date BETWEEN ${TODAY_ET_DATE_SQL} - 7 AND ${TODAY_ET_DATE_SQL} - 1
+          AND deleted_at IS NULL AND exclusion_reason IS NULL)::float AS miles_7d
   `);
   const data: DisplayCommunity = {
     total_users: pub.total_users,
@@ -672,14 +1259,50 @@ async function getCommunity(): Promise<DisplayCommunity> {
     new_friends_today: row?.new_friends_today ?? 0,
     hypes_today: row?.hypes_today ?? 0,
     nudges_today: row?.nudges_today ?? 0,
-    miles_yesterday_same_time: Math.round((row?.miles_yesterday_same_time ?? 0) * 10) / 10,
+    miles_yesterday_same_time:
+      Math.round((row?.miles_yesterday_same_time ?? 0) * 10) / 10,
     run_miles_today: Math.round((row?.run_miles_today ?? 0) * 10) / 10,
     walk_miles_today: Math.round((row?.walk_miles_today ?? 0) * 10) / 10,
     run_miles_total: Math.round(row?.run_miles_total ?? 0),
     walk_miles_total: Math.round(row?.walk_miles_total ?? 0),
+    miles_7d: Math.round(row?.miles_7d ?? 0),
   };
   communityCache = { data, at: Date.now() };
   return data;
+}
+
+let hoursCache: { data: number[]; at: number } | null = null;
+
+/** Workouts finished so far today in each Eastern hour (24 counts, the
+ *  morning rush vs the night owls). Counts only. */
+export async function getCommunityHours(): Promise<number[]> {
+  if (hoursCache && Date.now() - hoursCache.at < COMMUNITY_TTL_MS)
+    return hoursCache.data;
+  const rows = await db.query<{ h: number; n: number }>(
+    `SELECT EXTRACT(HOUR FROM device_end_date AT TIME ZONE 'America/New_York')::int AS h, COUNT(*)::int AS n
+       FROM workouts
+      WHERE device_end_date >= ${START_OF_TODAY_ET_SQL} AND device_end_date <= NOW()
+        AND deleted_at IS NULL AND exclusion_reason IS NULL
+      GROUP BY 1`,
+  );
+  const data = Array.from({ length: 24 }, () => 0);
+  for (const r of rows) if (r.h >= 0 && r.h < 24) data[r.h] = Number(r.n) || 0;
+  hoursCache = { data, at: Date.now() };
+  return data;
+}
+
+/** The website's live desk twin (mileaday.run/desk): community aggregates
+ *  only, exactly what a box without a key shows. Nothing about any person. */
+export async function getPublicDeskFeed(): Promise<{
+  v: 1;
+  community: DisplayCommunity;
+  hours: number[];
+}> {
+  const [community, hours] = await Promise.all([
+    getCommunity(),
+    getCommunityHours(),
+  ]);
+  return { v: 1, community, hours };
 }
 
 // ─── Owner block ───────────────────────────────────────────────────────────
@@ -693,13 +1316,26 @@ export interface DisplayFeed {
     miles_today: number;
     streak: number;
     running_now: boolean;
-    local_time: string;          // "HH:MM:SS" in the owner's timezone
+    local_time: string; // "HH:MM:SS" in the owner's timezone
     minutes_to_midnight: number; // until the owner's local day ends
     year_ago_miles: number | null; // their own miles on this date last year
-    local_date: string;          // "YYYY-MM-DD" in the owner's timezone (seasonal looks)
-    live_miles: number | null;   // their own live session distance while running_now
+    local_date: string; // "YYYY-MM-DD" in the owner's timezone (seasonal looks)
+    miles_week: number; // their own miles since their local Monday
+    fastest_mile: number | null; // their fastest full-mile run split ever, seconds
+    longest_streak: number; // their best streak ever
+    /** Their latest run or walk from the last 12 h: distance, time and each
+     *  full mile's split (seconds), for the replay. */
+    last_run: {
+      id: string;
+      kind: "run" | "walk";
+      miles: number;
+      seconds: number;
+      splits: number[];
+      age_s: number;
+    } | null;
+    live_miles: number | null; // their own live session distance while running_now
     live_kind: "run" | "walk" | null; // what that live session is
-    longest_run: number | null;  // their longest single run, all time
+    longest_run: number | null; // their longest single run, all time
     fastest_mile_month: number | null; // their fastest full-mile split this local month, seconds
     /** Their own last 64 local days, oldest first: miles that day, or -1 for
      *  a day with no mile that a streak token covered. */
@@ -716,13 +1352,34 @@ export interface DisplayFeed {
   comments: { id: string; from: string; text: string; age_s: number }[];
   /** Friends who got their mile in (the owner's own "got their mile in!"
    *  notifications, last hour): their day so far. */
-  friends_miles: { id: string; name: string; kind: "run" | "walk"; miles: number; seconds: number; best_pace: number | null; age_s: number }[];
+  friends_miles: {
+    id: string;
+    name: string;
+    kind: "run" | "walk";
+    miles: number;
+    seconds: number;
+    best_pace: number | null;
+    age_s: number;
+  }[];
   /** This box's remote settings (style / mascot ids, rev bumps per change). */
   desk: DeskSettings | null;
   /** Remote taps for this box from the last 3 min: opaque id + "show" / "wake". */
-  commands: { id: string; kind: string }[];
+  commands: { id: string; kind: string; scene?: string }[];
   /** Founder mode: newest App Store reviews, only on admins' desks. */
   reviews: DeskReview[];
+  /** Founder mode: signup totals (no user details), only on admins' desks. */
+  growth: DisplayGrowth | null;
+  /** Head-to-head: the other desk owner, if you're friends and they share runs with friends. */
+  rival: DisplayRival | null;
+  /** Workouts finished today in each Eastern hour (community counts). */
+  hours: number[];
+  /** Streak leaderboard: the owner's top 5 among themselves and accepted
+   *  friends who share runs with friends (blocks and 'private' excluded),
+   *  plus the owner's own row if they're further down. */
+  leaders: { name: string; streak: number; rank: number; me: boolean }[];
+  /** The newest unexpired doodle sent TO the owner: sender's username and the
+   *  run-length-coded pixels (see doodleCode). */
+  doodles: { id: string; from: string; px: string; age_s: number }[];
   /** Unexpired desk messages sent TO the owner (newest first). */
   messages: { id: string; from: string; text: string; age_s: number }[];
   friends_running: { name: string; miles: number; kind: "run" | "walk" }[];
@@ -731,13 +1388,39 @@ export interface DisplayFeed {
    *  the app; blocks in either direction are excluded. */
   friends_at_risk: { count: number; top: { name: string; streak: number }[] };
   /** Friends whose tracked session ended in the last 30 min (same rules). */
-  friends_finished: { id: string; name: string; miles: number; kind: "run" | "walk" }[];
+  friends_finished: {
+    id: string;
+    name: string;
+    miles: number;
+    kind: "run" | "walk";
+  }[];
   alerts: { id: string; kind: "nudge" | "hype"; from: string; at: string }[];
 }
 
-export async function getDisplayFeed(userId: string, keyId?: string): Promise<DisplayFeed> {
-  const [community, meRows, todayMiles, coverage, friends, alerts, finished, atRisk, days, messages,
-         closetRows, owned, medals, roleRows, comments, desk, commands, friendMiles] = await Promise.all([
+export async function getDisplayFeed(
+  userId: string,
+  keyId?: string,
+): Promise<DisplayFeed> {
+  const [
+    community,
+    meRows,
+    todayMiles,
+    coverage,
+    friends,
+    alerts,
+    finished,
+    atRisk,
+    days,
+    messages,
+    closetRows,
+    owned,
+    medals,
+    roleRows,
+    comments,
+    desk,
+    commands,
+    friendMiles,
+  ] = await Promise.all([
     getCommunity(),
     db.query<{
       username: string | null;
@@ -751,6 +1434,9 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
       live_kind: "run" | "walk" | null;
       longest_run: number | null;
       fastest_mile_month: number | null;
+      miles_week: number | null;
+      fastest_mile: number | null;
+      longest_streak: number | null;
     }>(
       `WITH tz AS (
          SELECT COALESCE((SELECT timezone_offset FROM workouts
@@ -786,7 +1472,15 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
                   AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
                   AND w.local_date >= date_trunc('month', loc.t)::date
                   AND ws.split_distance >= 0.999
-                  AND ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}) AS fastest_mile_month
+                  AND ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}) AS fastest_mile_month,
+              ${weekMilesSql("u.user_id")} AS miles_week,
+              (SELECT MIN(ws.split_pace)::float FROM workout_splits ws
+                 JOIN workouts w ON w.workout_id = ws.workout_id
+                WHERE w.user_id = u.user_id AND w.workout_type = 'running'
+                  AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+                  AND ws.split_distance >= 0.999
+                  AND ws.split_pace >= ${MIN_PLAUSIBLE_MILE_SECONDS}) AS fastest_mile,
+              GREATEST(COALESCE(u.longest_streak, 0), (${effectiveStreakSql("u")}))::int AS longest_streak
          FROM users u, loc
         WHERE u.user_id = $1`,
       [userId],
@@ -920,7 +1614,10 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
         LIMIT ${MAX_MESSAGES}`,
       [userId],
     ),
-    db.query<{ flamey_look: unknown }>(`SELECT flamey_look FROM users WHERE user_id = $1`, [userId]),
+    db.query<{ flamey_look: unknown }>(
+      `SELECT flamey_look FROM users WHERE user_id = $1`,
+      [userId],
+    ),
     ownedFlameyItems(userId),
     // The owner's own newest medals (a badge's display name only).
     db.query<{ id: string; name: string; age_s: number }>(
@@ -933,7 +1630,10 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
         LIMIT ${MAX_MEDALS}`,
       [userId],
     ),
-    db.query<{ role: string | null }>(`SELECT role FROM users WHERE user_id = $1`, [userId]),
+    db.query<{ role: string | null }>(
+      `SELECT role FROM users WHERE user_id = $1`,
+      [userId],
+    ),
     // Comments on posts the owner is tagged in. Same thread rule as the app
     // (postCommentMatchSql: the post, its workout, every leg of a buddy
     // walk); never their own comments; blocks either way hide a comment,
@@ -972,18 +1672,26 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
     keyId ? getBoxSettings(keyId) : Promise.resolve(null),
     // Remote taps for THIS box ("show" / "wake": nothing else can be triggered).
     keyId
-      ? db.query<{ id: string; kind: string }>(
-          `SELECT encode(sha256(('cmd:' || id::text)::bytea), 'hex') AS id, kind
+      ? db.query<{ id: string; kind: string; detail: string | null }>(
+          `SELECT encode(sha256(('cmd:' || id::text)::bytea), 'hex') AS id, kind, detail
              FROM desk_commands
-            WHERE key_id = $1 AND kind IN ('show', 'wake')
+            WHERE key_id = $1 AND kind IN ('show', 'wake', 'test')
               AND created_at > NOW() - INTERVAL '${COMMAND_WINDOW_SECONDS} seconds'
             ORDER BY created_at DESC
             LIMIT 5`,
           [keyId],
         )
-      : Promise.resolve([] as { id: string; kind: string }[]),
+      : Promise.resolve(
+          [] as { id: string; kind: string; detail: string | null }[],
+        ),
     // The owner's own "<friend> got their mile in!" announcements.
-    db.query<{ id: string; sender: string; name: string; age_s: number; kind: "run" | "walk" }>(
+    db.query<{
+      id: string;
+      sender: string;
+      name: string;
+      age_s: number;
+      kind: "run" | "walk";
+    }>(
       `SELECT encode(sha256(('mile:' || n.id::text)::bytea), 'hex') AS id,
               n.data->>'user_id' AS sender, su.username AS name,
               -- what got them there: their latest run or walk
@@ -1011,11 +1719,39 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
     ),
   ]);
   // Their day so far, the same numbers the notification shows.
-  const friendStats = await Promise.all(friendMiles.map((f) => getTodayStats(f.sender).catch(() => null)));
+  const friendStats = await Promise.all(
+    friendMiles.map((f) => getTodayStats(f.sender).catch(() => null)),
+  );
   const isAdmin = roleRows[0]?.role === "admin";
-  const reviews = isAdmin ? await latestReviews() : [];
+  const [reviews, growth, rival, doodles, hours, leaders, lastRun] =
+    await Promise.all([
+      isAdmin ? latestReviews() : Promise.resolve([] as DeskReview[]),
+      isAdmin ? getGrowth() : Promise.resolve(null),
+      getRival(userId),
+      // Doodles to the owner (blocks either way hide them). Sender by username only.
+      db.query<{ id: string; from: string | null; px: string; age_s: number }>(
+        `SELECT encode(sha256(('doodle:' || d.id::text)::bytea), 'hex') AS id,
+              fu.username AS "from", d.pixels AS px,
+              EXTRACT(EPOCH FROM (NOW() - d.created_at))::int AS age_s
+         FROM desk_doodles d
+         LEFT JOIN users fu ON fu.user_id = d.from_user_id
+        WHERE d.to_user_id = $1 AND d.expires_at > NOW()
+          AND NOT EXISTS (
+            SELECT 1 FROM user_blocks b
+             WHERE (b.blocker_id = $1 AND b.blocked_id = d.from_user_id)
+                OR (b.blocker_id = d.from_user_id AND b.blocked_id = $1))
+        ORDER BY d.created_at DESC
+        LIMIT 1`,
+        [userId],
+      ),
+      getCommunityHours(),
+      getLeaders(userId),
+      getLastRun(userId),
+    ]);
   const look = servedFlameyLook(closetRows[0]?.flamey_look, owned);
-  let flamey: Partial<Record<(typeof DESK_FLAMEY_SLOTS)[number], string>> | null = null;
+  let flamey: Partial<
+    Record<(typeof DESK_FLAMEY_SLOTS)[number], string>
+  > | null = null;
   for (const slot of DESK_FLAMEY_SLOTS) {
     const item = look?.[slot];
     if (typeof item === "string") (flamey ??= {})[slot] = item;
@@ -1035,12 +1771,29 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
       running_now: Boolean(me?.running_now),
       local_time: me?.local_time ?? "00:00:00",
       minutes_to_midnight: me?.minutes_to_midnight ?? 0,
-      year_ago_miles: me?.year_ago_miles == null ? null : Math.round(Number(me.year_ago_miles) * 100) / 100,
+      year_ago_miles:
+        me?.year_ago_miles == null
+          ? null
+          : Math.round(Number(me.year_ago_miles) * 100) / 100,
       local_date: me?.local_date ?? "1970-01-01",
-      live_miles: me?.live_miles == null ? null : Math.round(Number(me.live_miles) * 100) / 100,
+      live_miles:
+        me?.live_miles == null
+          ? null
+          : Math.round(Number(me.live_miles) * 100) / 100,
       live_kind: me?.live_kind ?? null,
-      longest_run: me?.longest_run == null ? null : Math.round(Number(me.longest_run) * 100) / 100,
-      fastest_mile_month: me?.fastest_mile_month == null ? null : Math.round(Number(me.fastest_mile_month)),
+      longest_run:
+        me?.longest_run == null
+          ? null
+          : Math.round(Number(me.longest_run) * 100) / 100,
+      fastest_mile_month:
+        me?.fastest_mile_month == null
+          ? null
+          : Math.round(Number(me.fastest_mile_month)),
+      miles_week: Math.round((Number(me?.miles_week) || 0) * 100) / 100,
+      fastest_mile:
+        me?.fastest_mile == null ? null : Math.round(Number(me.fastest_mile)),
+      longest_streak: Number(me?.longest_streak) || 0,
+      last_run: lastRun,
       flamey,
       medals: medals.map((m) => ({
         id: m.id.slice(0, 16),
@@ -1049,39 +1802,78 @@ export async function getDisplayFeed(userId: string, keyId?: string): Promise<Di
       })),
       days: days.map((d) => {
         const mi = Number(d.miles) || 0;
-        return mi < DAILY_GOAL_TOLERANCE && d.covered ? -1 : Math.round(mi * 10) / 10;
+        return mi < DAILY_GOAL_TOLERANCE && d.covered
+          ? -1
+          : Math.round(mi * 10) / 10;
       }),
     },
     reviews,
+    growth,
+    rival,
+    hours,
+    leaders,
+    doodles: doodles
+      .filter((d) => isDoodle(d.px))
+      .map((d) => ({
+        id: d.id.slice(0, 16),
+        from: d.from ?? "FRIEND",
+        px: doodleCode(d.px),
+        age_s: Math.max(0, Number(d.age_s) || 0),
+      })),
     friends_miles: friendMiles.map((f, i) => ({
       id: f.id.slice(0, 16),
       name: f.name,
       kind: f.kind,
       miles: Math.round((friendStats[i]?.miles ?? 0) * 100) / 100,
       seconds: Math.round(friendStats[i]?.durationSeconds ?? 0),
-      best_pace: friendStats[i]?.bestSplitPaceSecMi == null ? null : Math.round(friendStats[i]!.bestSplitPaceSecMi!),
+      best_pace:
+        friendStats[i]?.bestSplitPaceSecMi == null
+          ? null
+          : Math.round(friendStats[i]!.bestSplitPaceSecMi!),
       age_s: Math.max(0, Number(f.age_s) || 0),
     })),
     desk,
-    commands: commands.map((c) => ({ id: c.id.slice(0, 16), kind: c.kind })),
-    comments: comments.map((c) => ({
-      id: c.id.slice(0, 16),
-      from: c.from ?? "FRIEND",
-      text: sanitizeDisplayText(c.text) ?? "",
-      age_s: Math.max(0, Number(c.age_s) || 0),
-    })).filter((c) => c.text),
+    commands: commands.map((c) =>
+      c.kind === "test"
+        ? { id: c.id.slice(0, 16), kind: c.kind, scene: c.detail ?? "" }
+        : { id: c.id.slice(0, 16), kind: c.kind },
+    ),
+    comments: comments
+      .map((c) => ({
+        id: c.id.slice(0, 16),
+        from: c.from ?? "FRIEND",
+        text: sanitizeDisplayText(c.text) ?? "",
+        age_s: Math.max(0, Number(c.age_s) || 0),
+      }))
+      .filter((c) => c.text),
     messages: messages.map((m) => ({
       id: m.id.slice(0, 16),
       from: m.from ?? "MILE A DAY",
       text: m.text,
       age_s: Math.max(0, Number(m.age_s) || 0),
     })),
-    friends_running: friends.map((f) => ({ name: f.name, miles: Number(f.miles) || 0, kind: f.kind })),
+    friends_running: friends.map((f) => ({
+      name: f.name,
+      miles: Number(f.miles) || 0,
+      kind: f.kind,
+    })),
     friends_at_risk: {
       count: atRisk.length,
-      top: atRisk.slice(0, MAX_AT_RISK_NAMES).map((r) => ({ name: r.name, streak: Number(r.streak) || 0 })),
+      top: atRisk
+        .slice(0, MAX_AT_RISK_NAMES)
+        .map((r) => ({ name: r.name, streak: Number(r.streak) || 0 })),
     },
-    friends_finished: finished.map((f) => ({ id: f.id.slice(0, 16), name: f.name, miles: Number(f.miles) || 0, kind: f.kind })),
-    alerts: alerts.map((a) => ({ id: a.id.slice(0, 16), kind: a.kind, from: a.from, at: a.at })),
+    friends_finished: finished.map((f) => ({
+      id: f.id.slice(0, 16),
+      name: f.name,
+      miles: Number(f.miles) || 0,
+      kind: f.kind,
+    })),
+    alerts: alerts.map((a) => ({
+      id: a.id.slice(0, 16),
+      kind: a.kind,
+      from: a.from,
+      at: a.at,
+    })),
   };
 }

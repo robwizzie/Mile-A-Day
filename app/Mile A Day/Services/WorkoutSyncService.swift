@@ -87,6 +87,7 @@ enum SyncFailure: Equatable {
             case .healthKitNotAvailable: self = .healthUnavailable
             case .notAuthenticated: self = .notSignedIn
             case .invalidResponse, .serverError, .networkError: self = .connection
+            case .alreadyRunning: self = .unknown
             }
             return
         }
@@ -1710,6 +1711,56 @@ class WorkoutSyncService: ObservableObject {
         let newBadgeIds: [String]
     }
 
+    /// A Recalibrate run as it happens, for `SyncStatusBanner` and the
+    /// Settings row. Lives here, not in the view that started it: the run
+    /// outlives that page, and the page's own flag reset when you left and
+    /// came back — so it read idle mid-run and let a second run start.
+    struct RecalibrationProgress: Equatable {
+        enum Stage: Equatable {
+            case reading
+            case uploading
+            case recomputing
+            case done(streak: Int)
+            case failed
+        }
+        var stage: Stage
+        /// Workouts read and re-sent so far, of `total`.
+        var checked: Int = 0
+        var total: Int = 0
+
+        var isRunning: Bool {
+            switch stage {
+            case .reading, .uploading, .recomputing: return true
+            case .done, .failed: return false
+            }
+        }
+
+        /// The upload is nearly all of the wall time; recomputing is one call.
+        var fraction: Double {
+            switch stage {
+            case .reading: return 0
+            case .uploading: return total > 0 ? 0.9 * Double(min(checked, total)) / Double(total) : 0
+            case .recomputing: return 0.95
+            case .done, .failed: return 1
+            }
+        }
+    }
+
+    @Published private(set) var recalibration: RecalibrationProgress?
+    var isRecalibrating: Bool { recalibration?.isRunning == true }
+    /// So a finished run's banner can't clear a newer run's.
+    private var recalibrationRunId = 0
+
+    private func finishRecalibration(_ stage: RecalibrationProgress.Stage) {
+        recalibration?.stage = stage
+        let runId = recalibrationRunId
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self, self.recalibrationRunId == runId else { return }
+            self.recalibration = nil
+        }
+    }
+
     /// Reconcile the server with the phone's HealthKit truth, then recompute the
     /// server streak. Fixes the case where a manual/backdated workout never
     /// reached the server (its upload failed and incremental sync can't re-pick
@@ -1718,7 +1769,21 @@ class WorkoutSyncService: ObservableObject {
     /// plus a buffer, with a sensible floor.
     func recalibrateStreak(localStreakDays: Int) async throws -> RecalibrateOutcome {
         guard let userId = currentUserId else { throw SyncError.notAuthenticated }
+        guard !isRecalibrating else { throw SyncError.alreadyRunning }
 
+        recalibrationRunId += 1
+        recalibration = RecalibrationProgress(stage: .reading)
+        do {
+            let outcome = try await performRecalibration(userId: userId, localStreakDays: localStreakDays)
+            finishRecalibration(.done(streak: outcome.streak))
+            return outcome
+        } catch {
+            finishRecalibration(.failed)
+            throw error
+        }
+    }
+
+    private func performRecalibration(userId: String, localStreakDays: Int) async throws -> RecalibrateOutcome {
         // 1. Flush any manual workouts still stuck in the retry queue.
         await flushPendingManualUploads()
 
@@ -1731,10 +1796,20 @@ class WorkoutSyncService: ObservableObject {
         let since = Calendar.current.date(byAdding: .day, value: -lookbackDays, to: startOfToday) ?? startOfToday
         let workouts = try await fetchWorkouts(since: since)
 
+        recalibration = RecalibrationProgress(stage: .uploading, checked: 0, total: workouts.count)
+        var sent = 0
         for batch in workouts.chunked(into: batchSize) {
-            try await uploadBatchWithRetry(batch, fullSync: true)
+            let base = sent
+            // Per workout, not per batch: packing 50 workouts' splits is most
+            // of the wait, and a count that only moved every 50 read as stuck.
+            try await uploadBatchWithRetry(batch, fullSync: true) { [weak self] prepared in
+                self?.recalibration?.checked = base + prepared
+            }
             markWorkoutsAsSynced(batch.map { $0.uuid.uuidString })
+            sent += batch.count
+            recalibration?.checked = sent
         }
+        recalibration?.stage = .recomputing
 
         // 3. Remove backend workouts that were deleted from Apple Health.
         //    Build the HK UUID set from what we just fetched, then compare
@@ -1909,6 +1984,7 @@ enum SyncError: LocalizedError {
     case invalidResponse
     case serverError(Int)
     case networkError(String)
+    case alreadyRunning
 
     var errorDescription: String? {
         switch self {
@@ -1922,6 +1998,8 @@ enum SyncError: LocalizedError {
             return "Server error: \(code)"
         case .networkError(let message):
             return "Network error: \(message)"
+        case .alreadyRunning:
+            return "Already running"
         }
     }
 }

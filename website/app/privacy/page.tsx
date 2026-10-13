@@ -24,7 +24,7 @@ export const metadata: Metadata = {
 
 export default function PrivacyPage() {
 	return (
-		<LegalPage title="PRIVACY POLICY" lastUpdated="May 16, 2026">
+		<LegalPage title="PRIVACY POLICY" lastUpdated="October 10, 2026">
 			<Section heading="Overview">
 				<p>
 					Mile A Day (&ldquo;we,&rdquo; &ldquo;us,&rdquo; or &ldquo;the app&rdquo;) is a fitness app that helps you
@@ -53,6 +53,12 @@ export default function PrivacyPage() {
 				<p>
 					<span className="font-semibold text-[#f5f5f5]">Social activity.</span> Friend connections, competitions you
 					join, and related activity needed to operate the social features of the app.
+				</p>
+				<p>
+					<span className="font-semibold text-[#f5f5f5]">Website sign-up lists.</span> If you join a list on our
+					website (like the Android waitlist or &ldquo;I&apos;d buy one&rdquo; for the Mile A Day desk box), we keep
+					the email address and any name or answers you give us, and use them only to contact you about that product.
+					Email us to be removed at any time.
 				</p>
 				<p>
 					<span className="font-semibold text-[#f5f5f5]">Usage and device data.</span> Basic technical information

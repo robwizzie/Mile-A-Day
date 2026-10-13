@@ -652,6 +652,41 @@
       "when": 1791258648298,
       "tag": "0092_shoe_defaults",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1791681629380,
+      "tag": "0093_desk_doodles",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1791683338889,
+      "tag": "0094_desk_interest",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1791688065229,
+      "tag": "0095_desk_push",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1791748542808,
+      "tag": "0096_mcp_connector",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1791783627434,
+      "tag": "0097_desk_push_log",
+      "breakpoints": true
     }
   ]
 }

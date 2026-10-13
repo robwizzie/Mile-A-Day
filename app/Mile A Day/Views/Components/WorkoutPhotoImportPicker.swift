@@ -5,6 +5,10 @@ import UIKit
 /// Outcome of importing a library photo into a walk/run.
 enum WorkoutPhotoImportResult {
     case accepted(UIImage)
+    /// A FRONT & BACK pair: either one of our own saved pairs restored from
+    /// `DualPairStore`, or two photos taken seconds apart that the user chose
+    /// to post together. `primary` is the one shown large.
+    case acceptedPair(primary: UIImage, secondary: UIImage, primaryWasFront: Bool)
     case cancelled
     case failed
 }
@@ -32,6 +36,12 @@ struct WorkoutPhotoImportPicker: View {
     @State private var isLoading = true
     @State private var isFetchingFull = false
     @State private var didFinish = false
+    /// Library photos we know are FRONT & BACK pairs (`DualPairStore`), so
+    /// the grid can say so before anyone taps.
+    @State private var pairIds: Set<String> = []
+    /// "Taken together?" — a picked photo with another shot seconds beside
+    /// it, offered as one front-and-back post.
+    @State private var pairOffer: PairOffer?
 
     /// Where the last pick landed. The picker is a fresh view every time it
     /// is presented — the composer's "Change", the prompt's second look —
@@ -48,6 +58,25 @@ struct WorkoutPhotoImportPicker: View {
                 header
                 Divider().overlay(Color.white.opacity(0.12))
                 content
+            }
+            if let offer = pairOffer, !isFetchingFull {
+                PairOfferOverlay(
+                    offer: offer,
+                    onSwap: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            pairOffer = offer.swapped
+                        }
+                    },
+                    onPair: { acceptPair(offer) },
+                    onSingle: {
+                        pairOffer = nil
+                        loadSingle(offer.picked)
+                    },
+                    onDismiss: {
+                        withAnimation(.easeOut(duration: 0.2)) { pairOffer = nil }
+                    }
+                )
+                .transition(.opacity)
             }
             if isFetchingFull {
                 Color.black.opacity(0.45).ignoresSafeArea()
@@ -162,8 +191,11 @@ struct WorkoutPhotoImportPicker: View {
                         spacing: spacing
                     ) {
                         ForEach(assets, id: \.localIdentifier) { asset in
-                            AssetThumbnailView(asset: asset, side: side)
-                                .onTapGesture { select(asset) }
+                            AssetThumbnailView(
+                                asset: asset, side: side,
+                                isPair: pairIds.contains(asset.localIdentifier)
+                            )
+                            .onTapGesture { select(asset) }
                         }
                     }
                 }
@@ -234,8 +266,11 @@ struct WorkoutPhotoImportPicker: View {
             }
         }
 
+        let pairs = Set(list.map(\.localIdentifier).filter { DualPairStore.isPair(assetId: $0) })
+
         await MainActor.run {
             assets = list
+            pairIds = pairs
             isLoading = false
         }
     }
@@ -244,9 +279,106 @@ struct WorkoutPhotoImportPicker: View {
 
     private func select(_ asset: PHAsset) {
         guard !isFetchingFull, !didFinish else { return }
-        isFetchingFull = true
         Self.lastPickedIdentifier = asset.localIdentifier
 
+        // One of our own FRONT & BACK saves: hand back both frames, so it
+        // posts as the swappable pair it was taken as, not a flat picture.
+        if pairIds.contains(asset.localIdentifier) {
+            isFetchingFull = true
+            let id = asset.localIdentifier
+            Task {
+                // Disk read off the main thread.
+                let pair = await Task.detached(priority: .userInitiated) {
+                    DualPairStore.pair(forAssetId: id)
+                }.value
+                isFetchingFull = false
+                if let pair {
+                    finish(.acceptedPair(
+                        primary: pair.primary, secondary: pair.secondary,
+                        primaryWasFront: pair.primaryWasFront))
+                } else {
+                    // Frames pruned since the grid loaded — the photo itself
+                    // still has both frames flattened into it.
+                    loadSingle(asset)
+                }
+            }
+            return
+        }
+
+        // Two loose photos taken seconds apart — a front-and-back from
+        // before pairs were remembered, or the camera app's own — are
+        // OFFERED as one post. Never paired silently: seconds apart is a
+        // strong hint, not proof, and the user can see which it was.
+        if let partner = companion(of: asset) {
+            MADHaptics.tap()
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                pairOffer = PairOffer(picked: asset, partner: partner)
+            }
+            return
+        }
+
+        loadSingle(asset)
+    }
+
+    /// The closest other photo in the window taken within
+    /// `companionGap` of this one, that isn't itself a remembered pair.
+    /// A front-and-back's second frame lands ~2s after the first.
+    private func companion(of asset: PHAsset) -> PHAsset? {
+        guard let date = asset.creationDate else { return nil }
+        return assets
+            .filter { other in
+                other.localIdentifier != asset.localIdentifier
+                    && !pairIds.contains(other.localIdentifier)
+                    && other.creationDate.map { abs($0.timeIntervalSince(date)) <= Self.companionGap } == true
+            }
+            .min { lhs, rhs in
+                abs(lhs.creationDate!.timeIntervalSince(date)) < abs(rhs.creationDate!.timeIntervalSince(date))
+            }
+    }
+
+    private static let companionGap: TimeInterval = 6
+
+    private func loadSingle(_ asset: PHAsset) {
+        guard !isFetchingFull, !didFinish else { return }
+        isFetchingFull = true
+        Self.requestFullImage(asset) { image in
+            isFetchingFull = false
+            if let image {
+                finish(.accepted(image))
+            } else {
+                finish(.failed)
+            }
+        }
+    }
+
+    private func acceptPair(_ offer: PairOffer) {
+        guard !isFetchingFull, !didFinish else { return }
+        isFetchingFull = true
+        let group = DispatchGroup()
+        var big: UIImage?
+        var small: UIImage?
+        group.enter()
+        Self.requestFullImage(offer.picked) { big = $0; group.leave() }
+        group.enter()
+        Self.requestFullImage(offer.partner) { small = $0; group.leave() }
+        group.notify(queue: .main) {
+            isFetchingFull = false
+            guard let big else {
+                finish(.failed)
+                return
+            }
+            guard let small else {
+                // The partner wouldn't load — still post what they tapped.
+                finish(.accepted(big))
+                return
+            }
+            finish(.acceptedPair(primary: big, secondary: small,
+                                 primaryWasFront: offer.pickedLooksFront))
+        }
+    }
+
+    /// Full-size image for a library photo, delivered on the main queue.
+    private static func requestFullImage(_ asset: PHAsset, completion: @escaping (UIImage?) -> Void) {
         let options = PHImageRequestOptions()
         options.deliveryMode = .highQualityFormat
         options.isNetworkAccessAllowed = true // download from iCloud if needed
@@ -264,14 +396,7 @@ struct WorkoutPhotoImportPicker: View {
             // while downloading; wait for the final, full-quality delivery.
             let degraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
             if degraded { return }
-            DispatchQueue.main.async {
-                isFetchingFull = false
-                if let image {
-                    finish(.accepted(image))
-                } else {
-                    finish(.failed)
-                }
-            }
+            DispatchQueue.main.async { completion(image) }
         }
     }
 
@@ -311,6 +436,7 @@ struct WorkoutPhotoImportPicker: View {
 private struct AssetThumbnailView: View {
     let asset: PHAsset
     let side: CGFloat
+    var isPair: Bool = false
 
     @State private var image: UIImage?
 
@@ -326,7 +452,13 @@ private struct AssetThumbnailView: View {
         }
         .frame(width: side, height: side)
         .clipped()
+        .overlay(alignment: .bottomLeading) {
+            if isPair { FrontBackBadge().padding(5) }
+        }
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(isPair ? "Front and back photo" : "Photo")
+        .accessibilityAddTraits(.isButton)
         .onAppear(perform: load)
     }
 
@@ -343,6 +475,190 @@ private struct AssetThumbnailView: View {
             targetSize: target,
             contentMode: .aspectFill,
             options: options
+        ) { img, _ in
+            guard let img else { return }
+            DispatchQueue.main.async { self.image = img }
+        }
+    }
+}
+
+/// "⧉ FRONT & BACK" — on a photo that will post as a pair.
+private struct FrontBackBadge: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "rectangle.inset.topright.filled")
+                .font(.system(size: 9, weight: .bold))
+            Text("FRONT & BACK")
+                .font(.system(size: 8, weight: .heavy, design: .rounded))
+                .tracking(0.4)
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Color.black.opacity(0.6)))
+        .accessibilityHidden(true)
+    }
+}
+
+/// A picked photo and the one taken seconds beside it.
+private struct PairOffer {
+    /// Shown LARGE.
+    let picked: PHAsset
+    /// The inset.
+    let partner: PHAsset
+
+    var swapped: PairOffer { PairOffer(picked: partner, partner: picked) }
+
+    /// Which lens took the large one isn't recorded on these photos, so it's
+    /// inferred from the order: a front-and-back shoots the camera you
+    /// framed (the back, by default) and then flips — so the LATER of the
+    /// two is the selfie. It only labels the composer's "Big photo · Back |
+    /// Front" chips, which the poster can change.
+    var pickedLooksFront: Bool {
+        guard let a = picked.creationDate, let b = partner.creationDate else { return false }
+        return a > b
+    }
+}
+
+/// "Taken together?" — the two photos side by side, the large one first,
+/// with a swap and the two answers. Drawn inside the picker (not a sheet):
+/// the picker is itself a cover, and this is one more question in it.
+private struct PairOfferOverlay: View {
+    let offer: PairOffer
+    let onSwap: () -> Void
+    let onPair: () -> Void
+    let onSingle: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Color.black.opacity(0.6)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onDismiss)
+
+            VStack(spacing: 16) {
+                VStack(spacing: 4) {
+                    Text("Taken together?")
+                        .font(.system(size: 20, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("These two were taken seconds apart. Post them as one front & back photo?")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.65))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                preview
+
+                Button(action: onPair) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "rectangle.inset.topright.filled")
+                        Text("Post as Front & Back")
+                    }
+                    .font(.system(size: 17, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(Capsule().fill(MADTheme.Colors.redGradient))
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+
+                Button(action: onSingle) {
+                    Text("Just this photo")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.75))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(20)
+            .padding(.bottom, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(Color(white: 0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+                    .ignoresSafeArea(edges: .bottom)
+            )
+            .transition(.move(edge: .bottom))
+        }
+    }
+
+    /// The post as it'll look: the large photo with the other inset in its
+    /// top-right corner, and a swap button to choose which is which.
+    private var preview: some View {
+        let width: CGFloat = 180
+        return ZStack(alignment: .topTrailing) {
+            LibraryAssetImage(asset: offer.picked, side: width * 1.25)
+                .frame(width: width, height: width * 1.25)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            LibraryAssetImage(asset: offer.partner, side: width * 0.42)
+                .frame(width: width * 0.34, height: width * 0.34 * 1.25)
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .strokeBorder(Color.white, lineWidth: 2)
+                )
+                .padding(10)
+        }
+        .overlay(alignment: .bottom) {
+            Button(action: onSwap) {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("Swap")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(Color.black.opacity(0.65)))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.25), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .padding(10)
+            .accessibilityLabel("Swap which photo is large")
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// A library photo drawn aspect-fill at roughly `side` points.
+private struct LibraryAssetImage: View {
+    let asset: PHAsset
+    let side: CGFloat
+
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(Color.white.opacity(0.06))
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            }
+        }
+        .clipped()
+        // Keyed to the asset: a swap hands this view the other photo.
+        .task(id: asset.localIdentifier) { load() }
+        .accessibilityHidden(true)
+    }
+
+    private func load() {
+        let scale = UIScreen.main.scale
+        let target = CGSize(width: side * scale, height: side * scale)
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .opportunistic
+        options.isNetworkAccessAllowed = true
+        options.resizeMode = .fast
+        PHImageManager.default().requestImage(
+            for: asset, targetSize: target, contentMode: .aspectFill, options: options
         ) { img, _ in
             guard let img else { return }
             DispatchQueue.main.async { self.image = img }

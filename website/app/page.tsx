@@ -3,6 +3,7 @@ import { Navbar } from "@/components/navbar";
 import { HeroSection } from "@/components/hero-section";
 import { MarqueeSection } from "@/components/marquee-section";
 import { LiveStatsBand } from "@/components/live-stats-band";
+import { DeskTeaserSection } from "@/components/desk-teaser-section";
 import { FeedSection } from "@/components/feed-section";
 import { WhatsNewSection } from "@/components/whats-new-section";
 import { FeaturesSection } from "@/components/features-section";
@@ -138,6 +139,7 @@ export default function Home() {
       <HowItWorksSection />
       <StorySection />
       <SupportSection />
+      <DeskTeaserSection />
       <CtaSection />
       <Footer />
     </main>

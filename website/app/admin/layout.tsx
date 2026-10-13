@@ -1,5 +1,13 @@
 import { Nunito } from "next/font/google";
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
+
+// Added to the home screen from here, the admin panel opens on the desk
+// remote as its own app (and can get web push: iOS needs that).
+export const metadata: Metadata = {
+  manifest: "/admin-desk.webmanifest",
+  appleWebApp: { capable: true, title: "MAD Desk", statusBarStyle: "black" },
+};
 
 /**
  * The admin area is set in rounded type to match the app, every label of

@@ -347,6 +347,17 @@ def art_bitmap(rows, w=None, h=None):
     return b
 
 
+CROWN = ("Y..Y..Y", "YY.Y.YY", "GGGGGGG", "GRGWGRG")
+
+
+def crown(b, x, y):
+    """A little gold crown, 7x4, top-left at (x, y) (Versus: who's ahead)."""
+    for yy, row in enumerate(CROWN):
+        for xx, ch in enumerate(row):
+            if ch != "." and 0 <= y + yy < 32 and 0 <= x + xx < 64:
+                b[x + xx, y + yy] = {"Y": FL_YELLOW, "G": FL_GOLD, "R": RED, "W": WHITE}[ch]
+
+
 def upper_name(s, n=30):
     """A username as the panel fonts can draw it."""
     s = (s or "FRIEND").upper()

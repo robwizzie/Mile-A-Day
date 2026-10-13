@@ -340,6 +340,14 @@ jobs:
       # service reads the (private) shoe tables.
       - name: Shoe tracker check
         run: node scripts/shoes-check.mjs
+      # MCP database connector: the full OAuth sign-in through the MCP SDK's own
+      # client, every sign-in attack (no cookie, wrong nonce, forged token,
+      # not allowlisted, replay), and the database guards — read role can't
+      # write, one statement per call, dry run + exact-count commit counted by
+      # Postgres (CTEs, cascades), DDL refused, mcp_* tables hidden by RLS, and
+      # a too-powerful role refused outright.
+      - name: MCP connector check
+        run: node scripts/mcp-check.mjs
 
   website:
     name: Website (lint + build)

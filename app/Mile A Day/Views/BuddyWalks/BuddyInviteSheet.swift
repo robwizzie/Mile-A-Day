@@ -33,8 +33,39 @@ struct BuddyInviteSheet: View {
         buddy.session?.id == session.id ? (buddy.session ?? session) : session
     }
 
+    /// Everyone with an invite out who hasn't answered yet — the server's
+    /// `invited` rows plus what this sheet just sent and the next poll hasn't
+    /// confirmed. Shown as its own section rather than silently dropped from
+    /// the friends list: a friend the host invited at the lobby and then
+    /// started without simply VANISHED from this picker, which reads as "the
+    /// app lost them" rather than "they already have an invite".
+    private var pendingInvites: [InvitedPerson] {
+        var people = current.participants
+            .filter { $0.status == .invited }
+            .map {
+                InvitedPerson(
+                    userId: $0.userId, name: $0.displayName,
+                    imageURL: $0.profileImageUrl)
+            }
+        let unconfirmed = unconfirmedInvites
+        for candidate in buddy.candidates where unconfirmed.contains(candidate.userId) {
+            people.append(
+                InvitedPerson(
+                    userId: candidate.userId, name: candidate.displayName,
+                    imageURL: candidate.profileImageUrl))
+        }
+        return people
+    }
+
+    /// Sent from here but not yet on the server's roster. Once the server has
+    /// ANY row for them its status is the truth (an invite they declined must
+    /// not keep reading "Invited").
+    private var unconfirmedInvites: Set<String> {
+        invitedIds.subtracting(current.participants.map(\.userId))
+    }
+
     private var invitable: [BuddyCandidate] {
-        let present = Set(current.lobbyParticipants.map(\.userId))
+        let present = Set(current.lobbyParticipants.map(\.userId)).union(unconfirmedInvites)
         return buddy.candidates.filter { !present.contains($0.userId) }
     }
 
@@ -68,12 +99,19 @@ struct BuddyInviteSheet: View {
                             }
                         }
 
+                        if !pendingInvites.isEmpty {
+                            sectionLabel("Invited")
+                            ForEach(pendingInvites) { person in
+                                invitedRow(person)
+                            }
+                        }
+
                         sectionLabel("Friends")
                         if invitable.isEmpty {
                             Text(
                                 buddy.candidates.isEmpty
                                     ? "No friends available to invite right now. Friends need the latest Mile A Day and buddy invites turned on."
-                                    : "Everyone you can invite is already in."
+                                    : "Everyone you can invite is already in or invited."
                             )
                             .font(MADTheme.Typography.caption)
                             .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
@@ -125,6 +163,41 @@ struct BuddyInviteSheet: View {
             .tracking(1.2)
             .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
             .padding(.horizontal, MADTheme.Spacing.md)
+    }
+
+    /// Someone with an invite out: no button, because there's nothing left
+    /// to do but wait — a second tap would only re-send the same push.
+    private func invitedRow(_ person: InvitedPerson) -> some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            AvatarView(name: person.name, imageURL: person.imageURL, size: 44)
+            Text(person.name)
+                .font(MADTheme.Typography.smallBold)
+                .foregroundStyle(MADTheme.Colors.madWhite)
+                .lineLimit(1)
+            Spacer(minLength: MADTheme.Spacing.xs)
+            HStack(spacing: 4) {
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .accessibilityHidden(true)
+                Text("Invited")
+                    .font(MADTheme.Typography.smallBold)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 34)
+            .background(Capsule().fill(MADTheme.Colors.madWhite.opacity(0.12)))
+            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+            .fixedSize()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                .fill(MADTheme.Colors.madWhite.opacity(0.08))
+        )
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(person.name), invited")
     }
 
     private func row(
@@ -189,7 +262,7 @@ struct BuddyInviteSheet: View {
             do {
                 _ = try await buddy.invite(userIds: [userId], sessionId: session.id)
                 MADHaptics.success()
-                invitedIds.insert(userId)
+                withAnimation(MADTheme.Animation.quick) { _ = invitedIds.insert(userId) }
             } catch {
                 MADHaptics.error()
                 errorText =
@@ -198,4 +271,13 @@ struct BuddyInviteSheet: View {
             invitingIds.remove(userId)
         }
     }
+}
+
+/// One row of the sheet's Invited section, from either source (the server's
+/// roster or an invite this sheet just sent).
+private struct InvitedPerson: Identifiable {
+    let userId: String
+    let name: String
+    let imageURL: String?
+    var id: String { userId }
 }

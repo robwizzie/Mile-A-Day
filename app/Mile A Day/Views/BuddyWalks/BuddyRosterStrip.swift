@@ -77,6 +77,14 @@ struct BuddyRosterStrip: View {
                         )
                     }
 
+                    // Invited and not here yet. Without these, a friend the
+                    // host invited and then started without was simply absent
+                    // from the strip — indistinguishable from never having
+                    // been asked, which sent people to invite them again.
+                    ForEach(pendingInvitees) { invitee in
+                        BuddyInvitedAvatar(participant: invitee)
+                    }
+
                     // The way to pull someone in from HERE — the screen a
                     // walker is actually looking at. It used to exist only in
                     // the lobby, which is gone the moment the walk starts, so
@@ -240,6 +248,11 @@ struct BuddyRosterStrip: View {
             }
             answeringIds.remove(request.userId)
         }
+    }
+
+    /// Invited, not yet walking. Never me: I'm on the walk this strip draws.
+    private var pendingInvitees: [BuddyParticipant] {
+        session.participants.filter { $0.status == .invited && $0.userId != currentUserId }
     }
 
     /// Own card first, then by distance. Seeing yourself in a stable position
@@ -545,6 +558,49 @@ private struct BuddyRosterAvatar: View {
     /// The app's whole premise, and the only target every participant shares
     /// when the session itself declares none.
     static let dailyMile: Double = 1.0
+}
+
+/// Someone with an invite out. Same footprint as a walker's tile (ring, name,
+/// number line, reserved age line) so the strip doesn't jog when they accept
+/// and turn into one — but greyed, on a dashed ring, with "Invited" where the
+/// distance goes, so it can't be mistaken for a walker at 0.00.
+private struct BuddyInvitedAvatar: View {
+    let participant: BuddyParticipant
+
+    var body: some View {
+        VStack(spacing: MADTheme.Spacing.xs) {
+            ZStack {
+                Circle()
+                    .strokeBorder(
+                        MADTheme.Colors.madWhite.opacity(0.35),
+                        style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                AvatarView(
+                    name: participant.displayName,
+                    imageURL: participant.profileImageUrl,
+                    size: 44)
+                    .grayscale(1)
+                    .opacity(0.6)
+            }
+            .frame(width: 52, height: 52)
+
+            Text(participant.displayName)
+                .font(MADTheme.Typography.caption)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
+                .lineLimit(1)
+
+            Text("Invited")
+                .font(MADTheme.Typography.smallBold)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+
+            Text(" ")
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+        }
+        .frame(width: 78)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(participant.displayName), invited, hasn't joined yet")
+    }
 }
 
 /// Co-op's distinguishing visual: one shared bar, segmented per person, so you
