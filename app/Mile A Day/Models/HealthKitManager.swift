@@ -3,6 +3,7 @@ import HealthKit
 import WidgetKit
 import WatchConnectivity
 import CoreLocation
+import os
 
 #if os(watchOS)
 private func workoutIndexLog(_ message: String) {}
@@ -274,7 +275,16 @@ final class WorkoutProcessor {
 /// keys days the way it always did. Dependency-free on purpose: this file is
 /// a Watch member.
 enum DayKeyFormatter {
-    private static let lock = NSLock()
+    /// An unfair lock, never `NSLock`: this is taken thousands of times per
+    /// index walk on HealthKit's background queues AND from main-thread view
+    /// bodies. `NSLock` is a default pthread mutex — no priority inheritance —
+    /// so when a backgrounded app's throttled utility thread was descheduled
+    /// holding it, the main thread waited on it with nothing boosting the
+    /// owner, and the background scene-update watchdog killed the app
+    /// (0x8BADF00D "stuck (deadlock)", ~0% app CPU, main parked in a pthread
+    /// mutex wait under a SwiftUI body). `os_unfair_lock` pushes the waiter's
+    /// priority onto the owner.
+    private static let lock = OSAllocatedUnfairLock()
     private static var cached: (DateFormatter, String)?
 
     private static func formatter() -> DateFormatter {
@@ -1902,9 +1912,12 @@ final class TrackedWorkoutLedger {
     /// Guarded by `lock`: the write lands on `finishWorkout`'s completion queue
     /// while the reads come from HealthKit's own query queues and the main
     /// thread, so an unsynchronised dictionary here is a data race, not a
-    /// theoretical one.
+    /// theoretical one. An unfair lock rather than `NSLock` for the reason on
+    /// `DayKeyFormatter.lock`: `madDistanceMiles` reads this from main-thread
+    /// view bodies while background queues hold it, and only `os_unfair_lock`
+    /// boosts a throttled owner.
     private var entries: [String: Entry]
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock()
 
     private init() {
         entries = Self.decode(defaults.data(forKey: Self.storageKey)) ?? [:]

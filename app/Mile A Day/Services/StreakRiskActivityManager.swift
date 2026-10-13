@@ -25,6 +25,22 @@ enum StreakRiskActivityManager {
         set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
     }
 
+    /// Ends any at-risk activity whose deadline (midnight) has passed.
+    ///
+    /// `sync` only runs while the Dashboard is on screen, and `staleDate`
+    /// only MARKS an activity stale — iOS keeps showing it (up to its 8-hour
+    /// cap) and re-rendering it the whole time. So without this, last night's
+    /// "Day 40 on the line" sat on the lock screen into the morning. Cheap and
+    /// safe to call from every background wake.
+    static func endExpired() {
+        guard #available(iOS 16.2, *) else { return }
+        let now = Date()
+        for activity in Activity<StreakRiskActivityAttributes>.activities
+        where activity.content.state.deadline <= now {
+            Task { await activity.end(nil, dismissalPolicy: .immediate) }
+        }
+    }
+
     static func sync(
         isAtRisk: Bool,
         isCompleted: Bool,
