@@ -458,7 +458,7 @@ export type ReleaseShot = {
   caption: string;
   blurb: string;
   /**
-   * A REAL full-screen iPhone capture (1290×2796) in
+   * A REAL full-screen iPhone capture (776×1680, via iPhone Mirroring) in
    * public/images/whats-new/<version>/, or null until one is taken. A null
    * shot is never drawn — the feature just stays in the list — so the site
    * never shows a mock-up in place of the app.
@@ -471,31 +471,31 @@ export type ReleaseShot = {
 // three per release; capture them from the app on that version's screens.
 export const RELEASE_SHOWCASE: Record<string, ReleaseShot[]> = {
   "1.2.07": [
-    { title: "Flamey's Closet", caption: "Flamey's Closet", blurb: "Every medal unlocks something for Flamey to wear. Name him, dress him, save the outfits you love.", screenshot: null },
-    { title: "Your Flamey, on your walks", caption: "Your walks, drawn", blurb: "Route Art on the feed, Flamey running beside you, and a Flyover of the whole walk.", screenshot: null },
-    { title: "Weekly Recap", caption: "Weekly Recap", blurb: "Every Saturday evening: your miles, your best day, and how your friends did.", screenshot: null },
+    { title: "Flamey's Closet", caption: "Flamey's Closet", blurb: "Every medal unlocks something for Flamey to wear. Name him, dress him, save the outfits you love.", screenshot: "/images/whats-new/1.2.07/flameys-closet.png" },
+    { title: "Your Flamey, on your walks", caption: "Flamey on the feed", blurb: "Friends on Fun bring their Flamey along, cheering them over the line on every walk.", screenshot: "/images/whats-new/1.2.07/your-flamey-on-your-walks.png" },
+    { title: "Weekly Recap", caption: "Weekly Recap", blurb: "Every Saturday evening: your miles, your best day, and how your friends did.", screenshot: "/images/whats-new/1.2.07/weekly-recap.png" },
   ],
   "1.2.05": [
     { title: "Buddy Walks", caption: "Buddy Walks", blurb: "Walk together from anywhere, counting down to the same second.", screenshot: null },
     { title: "Route Art", caption: "Route Art", blurb: "Your route, drawn and colored by the time of day you went out.", screenshot: null },
-    { title: "Compete, rebuilt", caption: "Compete, rebuilt", blurb: "What's live, what you've won, and how every challenge was completed.", screenshot: null },
+    { title: "Compete, rebuilt", caption: "Compete, rebuilt", blurb: "What's live, what you've won, and how every challenge was completed.", screenshot: "/images/whats-new/1.2.05/compete-rebuilt.png" },
   ],
   "1.2.03": [
-    { title: "A brand-new Dashboard", caption: "A new Dashboard", blurb: "Your mile, your streak and your tokens in one view.", screenshot: null },
-    { title: "Streak Tokens", caption: "Streak Tokens", blurb: "Backup for the days life gets in the way.", screenshot: null },
+    { title: "A brand-new Dashboard", caption: "A new Dashboard", blurb: "Your mile, your streak and your tokens in one view.", screenshot: "/images/whats-new/1.2.03/a-brand-new-dashboard.png" },
+    { title: "Streak Tokens", caption: "Streak Tokens", blurb: "Backup for the days life gets in the way.", screenshot: "/images/whats-new/1.2.03/streak-tokens.png" },
     { title: "Comments, mentions & collabs", caption: "Comments & collabs", blurb: "Talk under a walk, tag a friend, post it together.", screenshot: null },
   ],
   "1.2.0": [
-    { title: "Feed & Stories", caption: "Feed & Stories", blurb: "See every friend's mile as it happens.", screenshot: null },
-    { title: "3D Medals", caption: "3D Medals", blurb: "Medals you can spin in your hand.", screenshot: null },
+    { title: "Feed & Stories", caption: "Feed & Stories", blurb: "See every friend's mile as it happens.", screenshot: "/images/whats-new/1.2.0/feed-and-stories.png" },
+    { title: "3D Medals", caption: "3D Medals", blurb: "Medals you can spin in your hand.", screenshot: "/images/whats-new/1.2.0/3d-medals.png" },
     { title: "Head-to-Head", caption: "Head-to-Head", blurb: "Take on one friend, mile for mile.", screenshot: null },
   ],
   "1.1.0": [
     { title: "Richer workout details", caption: "Workout details", blurb: "Splits, pace and heart rate for every mile.", screenshot: null },
-    { title: "Friends, organized", caption: "Friends, organized", blurb: "Requests, suggestions and friends in one place.", screenshot: null },
+    { title: "Friends, organized", caption: "Friends, organized", blurb: "Requests, suggestions and friends in one place.", screenshot: "/images/whats-new/1.1.0/friends-organized.png" },
   ],
   "1.0": [
     { title: "Daily mile streaks", caption: "Daily mile streaks", blurb: "One mile a day. Watch the streak grow.", screenshot: null },
-    { title: "Competitions", caption: "Competitions", blurb: "Race your friends in streaks, apex and more.", screenshot: null },
+    { title: "Competitions", caption: "Competitions", blurb: "Race your friends in streaks, apex and more.", screenshot: "/images/whats-new/1.0/competitions.png" },
   ],
 };

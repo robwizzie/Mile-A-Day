@@ -85,9 +85,9 @@ export function HeroSection() {
           <div className="animate-float phone-mockup relative overflow-hidden p-3" style={{ width: 290 }}>
             <Image
               src="/images/app-dashboard.png"
-              alt="Mile A Day app dashboard showing a 288 day streak"
-              width={580}
-              height={1200}
+              alt="Mile A Day app dashboard showing a 511 day streak"
+              width={776}
+              height={1680}
               sizes="(max-width: 768px) 260px, 290px"
               className="w-full rounded-[32px]"
               priority

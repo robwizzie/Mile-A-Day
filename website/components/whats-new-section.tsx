@@ -70,8 +70,8 @@ export function WhatsNewSection() {
                   <Image
                     src={shot.screenshot!}
                     alt={`${shot.caption} in the Mile A Day app`}
-                    width={1290}
-                    height={2796}
+                    width={776}
+                    height={1680}
                     sizes="280px"
                     className="w-full rounded-[30px]"
                   />
