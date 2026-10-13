@@ -3451,6 +3451,39 @@ export const deskCommands = pgTable(
   ],
 );
 
+// Doodles drawn on the phone remote and sent to another desk: just pixels
+// (64x32, one palette code 0-7 per pixel), shown once, gone after 24 h.
+export const deskDoodles = pgTable(
+  "desk_doodles",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    toUserId: text("to_user_id").notNull(),
+    fromUserId: text("from_user_id").notNull(),
+    pixels: varchar({ length: 2048 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    index("idx_desk_doodles_to").using(
+      "btree",
+      table.toUserId.asc().nullsLast(),
+      table.createdAt.desc().nullsFirst(),
+    ),
+    foreignKey({
+      columns: [table.toUserId],
+      foreignColumns: [users.userId],
+      name: "desk_doodles_to_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.fromUserId],
+      foreignColumns: [users.userId],
+      name: "desk_doodles_from_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
 // The phone remote's choice of style / mascot for ONE box (display key):
 // Rob's and Dave's desks are set separately. `rev` goes up on every change
 // so the box applies each change once and its buttons still work.
@@ -3501,7 +3534,7 @@ export const shoes = pgTable(
     // Optional "replace at" mileage; NULL = no target.
     replaceAtMiles: doublePrecision("replace_at_miles"),
     // LEGACY (0087): one default for every activity. Superseded by
-    // `shoe_defaults` (0088), which backfilled from these; neither column is
+    // `shoe_defaults` (0092), which backfilled from these; neither column is
     // read or written any more. Left in place rather than dropped.
     isDefault: boolean("is_default").default(false).notNull(),
     defaultSince: timestamp("default_since", {
@@ -3619,3 +3652,212 @@ export const workoutShoes = pgTable(
     ),
   ],
 );
+
+// "I'd buy a desk box" signups from mileaday.run/desk. Founders read them in
+// Admin; nothing else ever does. Email stored normalized; UNIQUE so a repeat
+// signup just updates the answers (and the endpoint can't probe the list).
+export const deskInterest = pgTable(
+  "desk_interest",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    name: varchar({ length: 60 }).notNull(),
+    email: varchar({ length: 254 }).notNull(),
+    price: varchar({ length: 8 }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [unique("desk_interest_email_unique").on(table.email)],
+);
+
+// Web push for the desk remote (the admin PWA on a founder's phone). One row
+// per browser subscription, always the subscriber's own; `kinds` = which
+// desk notifications that phone wants.
+export const deskPushSubscriptions = pgTable(
+  "desk_push_subscriptions",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    endpoint: varchar({ length: 1024 }).notNull(),
+    p256dh: varchar({ length: 128 }).notNull(),
+    auth: varchar({ length: 64 }).notNull(),
+    kinds: text().array().notNull(),
+    failures: integer().default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+    lastOkAt: timestamp("last_ok_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    unique("desk_push_subscriptions_endpoint_unique").on(table.endpoint),
+    index("idx_desk_push_user").using("btree", table.userId.asc().nullsLast()),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "desk_push_subscriptions_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
+// What the desk push job last saw (user count, newest review, who led...),
+// so each event is sent once.
+export const deskPushState = pgTable("desk_push_state", {
+  key: varchar({ length: 128 }).primaryKey().notNull(),
+  value: text().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
+});
+
+// Desk notifications whose event has no table of its own (App Store reviews,
+// record days, the Versus lead, a desk going offline), one row per person it
+// was for, so the remote's Activity log shows every push. Pruned after 30 days.
+export const deskPushLog = pgTable(
+  "desk_push_log",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    kind: varchar({ length: 32 }).notNull(),
+    text: varchar({ length: 300 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_desk_push_log_user").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.createdAt.desc().nullsFirst(),
+    ),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "desk_push_log_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
+/**
+ * MCP database connector (src/mcp). Six tables, all ROW LEVEL SECURITY with no
+ * policies: the connector's own database roles (pg_read_all_data, plus row
+ * grants for the write role) do NOT bypass RLS, so through the connector these
+ * tables read as empty and refuse every write. Only the app's own role (the
+ * owner) touches them. That is what stops a connector session from reading
+ * token hashes, planting a token, or erasing its audit trail.
+ */
+
+/// OAuth clients Claude registered with itself (dynamic client registration).
+/// Registration is open by spec; a client is powerless without a sign-in.
+export const mcpOauthClients = pgTable("mcp_oauth_clients", {
+  clientId: text("client_id").primaryKey().notNull(),
+  metadata: jsonb().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+}).enableRLS();
+
+/// One /authorize in flight (10 minutes). `browser_key_hash` binds it to the
+/// browser that opened it, so a sign-in link sent to someone else is useless.
+export const mcpOauthRequests = pgTable("mcp_oauth_requests", {
+  id: text().primaryKey().notNull(),
+  browserKeyHash: text("browser_key_hash").notNull(),
+  clientId: text("client_id").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  state: text(),
+  scope: text().notNull(),
+  resource: text().notNull(),
+  nonce: text().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+}).enableRLS();
+
+/// Authorization codes: hashed, single use, two minutes.
+export const mcpOauthCodes = pgTable("mcp_oauth_codes", {
+  codeHash: text("code_hash").primaryKey().notNull(),
+  clientId: text("client_id").notNull(),
+  userId: text("user_id").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  scope: text().notNull(),
+  resource: text().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+}).enableRLS();
+
+/// One completed sign-in. Every token hangs off a grant; revoking the grant
+/// (or it reaching expires_at, 30 days after sign-in) kills all of them.
+export const mcpOauthGrants = pgTable(
+  "mcp_oauth_grants",
+  {
+    grantId: uuid("grant_id").defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    clientId: text("client_id").notNull(),
+    scope: text().notNull(),
+    resource: text().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "mcp_oauth_grants_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+).enableRLS();
+
+/// Access (1 hour) and refresh tokens, stored as SHA-256 only.
+export const mcpOauthTokens = pgTable(
+  "mcp_oauth_tokens",
+  {
+    tokenHash: text("token_hash").primaryKey().notNull(),
+    grantId: uuid("grant_id").notNull(),
+    kind: text().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    // Refresh tokens rotate: set when this one was exchanged. Presenting it
+    // again after a short grace period revokes the whole grant.
+    usedAt: timestamp("used_at", { withTimezone: true, mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_mcp_oauth_tokens_grant").on(table.grantId),
+    foreignKey({
+      columns: [table.grantId],
+      foreignColumns: [mcpOauthGrants.grantId],
+      name: "mcp_oauth_tokens_grant_id_fkey",
+    }).onDelete("cascade"),
+    check("mcp_oauth_tokens_kind_check", sql`kind IN ('access', 'refresh')`),
+  ],
+).enableRLS();
+
+/// Every statement the connector runs, written by the app's role BEFORE the
+/// statement runs (no audit row, no statement) and finished after — plus
+/// sign-ins, refusals and token alarms (`tool` = sign_in, sign_in_denied, …).
+export const mcpAuditLog = pgTable(
+  "mcp_audit_log",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    // No foreign key: the record outlives the account.
+    userId: text("user_id"),
+    grantId: uuid("grant_id"),
+    tool: text().notNull(),
+    statement: text().notNull(),
+    commitRequested: boolean("commit_requested").default(false).notNull(),
+    // Rows the statement returned (query) or changed (execute).
+    rowCount: integer("row_count"),
+    // execute only: what changed, per table, as counted by Postgres.
+    changes: jsonb(),
+    committed: boolean().default(false).notNull(),
+    durationMs: integer("duration_ms"),
+    error: text(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [index("idx_mcp_audit_log_created").on(table.createdAt.desc())],
+).enableRLS();

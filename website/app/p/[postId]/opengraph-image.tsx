@@ -36,7 +36,7 @@ export default async function Image({
 }) {
   const { postId } = await params;
   // `getPublicPost` already swallows failures into null, and every reader below
-  // handles null — the unfurl degrades to "A runner", it never 500s.
+  // handles null — the unfurl degrades to "Someone", it never 500s.
   const post = await getPublicPost(postId);
   const [fonts, icon, avatar] = await Promise.all([
     ogFonts(),

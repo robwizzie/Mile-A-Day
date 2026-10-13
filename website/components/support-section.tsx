@@ -15,7 +15,7 @@ const FAQ = [
   },
   {
     q: "Who can see my routes?",
-    a: "Only your friends, and by default the first and last stretch of every route is trimmed off so your front door stays private. You can change how much in Settings, turn route maps off, or use Stealth Mode to never record a map at all.",
+    a: "Your friends, by default. On top of that, the first and last stretch of every route is trimmed off so your front door stays private. You can change how much in Settings, turn route maps off, or use Stealth Mode to never record a map at all.",
   },
   {
     q: "Is Mile A Day free? Is there an Android app?",

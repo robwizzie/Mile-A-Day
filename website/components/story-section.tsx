@@ -70,7 +70,7 @@ export function StorySection() {
           {/* Blockquote */}
           <div className="reveal-left reveal-delay-3 rounded-r-2xl border-l-4 border-l-[#c72554] bg-[#1a1a1a]/50 p-6 my-7">
             <p className="text-[17px] font-medium italic leading-[1.7] text-[#f5f5f5]">
-              &ldquo;We&apos;re over 400 days in without missing a single one.
+              &ldquo;We&apos;re over 500 days in without missing a single one.
               What started as a dumb CoD skin bet became the best habit either
               of us ever built — so we turned it into an app.&rdquo;
             </p>

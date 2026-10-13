@@ -34,6 +34,7 @@ import {
   AudienceEventType,
 } from "./audienceSettingsService.js";
 import { getCloseFriendIds } from "./closeFriendsService.js";
+import { STREAK_QUALIFYING_STEPS, stepGoalDaysSql } from "./streakFeatureCore.js";
 
 const db = PostgresService.getInstance();
 
@@ -1035,12 +1036,18 @@ export async function checkStreaksBroken(): Promise<void> {
 					MAX(w.local_date) as last_active_date,
 					COUNT(DISTINCT w.local_date) as streak_candidate
 				FROM (
-					SELECT user_id, local_date, SUM(distance) as day_total
+					SELECT user_id, local_date
 					FROM workouts
 					WHERE local_date >= (CURRENT_DATE - INTERVAL '60 days')
 					AND deleted_at IS NULL AND exclusion_reason IS NULL
 					GROUP BY user_id, local_date
 					HAVING SUM(distance) >= 0.95
+					UNION
+					-- A 10k-step day qualifies too (STREAK_QUALIFYING_STEPS).
+					SELECT user_id, local_date
+					FROM daily_steps
+					WHERE local_date >= (CURRENT_DATE - INTERVAL '60 days')
+					AND steps >= ${STREAK_QUALIFYING_STEPS}
 				) w
 				GROUP BY w.user_id
 			)
@@ -1066,13 +1073,14 @@ export async function checkStreaksBroken(): Promise<void> {
         // We need to count consecutive days ending at their last_active_date
         const streakResult = await db.query(
           `WITH daily AS (
-						SELECT local_date, SUM(distance) as total
+						SELECT local_date
 						FROM workouts
 						WHERE user_id = $1 AND local_date <= $2
 						AND deleted_at IS NULL AND exclusion_reason IS NULL
 						GROUP BY local_date
 						HAVING SUM(distance) >= 0.95
-						ORDER BY local_date DESC
+						UNION
+						${stepGoalDaysSql("$1", "$2")}
 					),
 					numbered AS (
 						SELECT local_date,
@@ -1081,7 +1089,7 @@ export async function checkStreaksBroken(): Promise<void> {
 					)
 					SELECT COUNT(*) as streak_length
 					FROM numbered
-					WHERE grp = (SELECT grp FROM numbered LIMIT 1)`,
+					WHERE grp = (SELECT grp FROM numbered ORDER BY local_date DESC LIMIT 1)`,
           [user_id, yesterdayStr],
         );
 

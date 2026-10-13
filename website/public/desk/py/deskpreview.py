@@ -52,6 +52,50 @@ def sleep(awake, start, end, now):
     APP._update_night(now)
 
 
+def test(scene, now):
+    """Play one test animation here (the same scene the box would play)."""
+    from mad import testscenes
+    ev = testscenes.sample(APP, scene)
+    if ev:
+        APP.queue = [ev]
+        APP.toast = None
+        APP.mode, APP.mode_start = "dash", now
+        APP.next_event_at = now
+        APP.wake_until = max(APP.wake_until, now + 120)
+        APP._update_night(now)
+
+
+def doodle(code, now):
+    """Play a doodle here before it's sent: how the other box will show it."""
+    from mad.gfx import upper_name
+    APP.queue = [("doodle", upper_name((APP.me or {}).get("username")), str(code)[:4096])]
+    APP.toast = None
+    APP.mode, APP.mode_start = "dash", now
+    APP.next_event_at = now
+    APP.wake_until = max(APP.wake_until, now + 120)
+    APP._update_night(now)
+
+
+def set_date(d):
+    """The website's twin: today's date (from the viewer's clock) for the
+    seasonal looks. Nothing else about anyone."""
+    if isinstance(d, str) and len(d) == 10:
+        APP.date = d
+        APP.apply_season()
+
+
+def poke(now):
+    """A tap on the box (the real box: its motion sensor): a little hop."""
+    APP.poke_at = now
+
+
+def dizzy(now):
+    """Shaken: the mascot gets dizzy, like the real box."""
+    if APP.mode in ("dash", "show") and not any(q[0] == "dizzy" for q in APP.queue):
+        APP.queue.append(("dizzy",))
+        APP.next_event_at = now
+
+
 def frame(now):
     APP.tick(now)
     pal = gfx.palette

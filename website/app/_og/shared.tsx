@@ -187,6 +187,8 @@ export function PersonCard({
   name,
   handle,
   streak,
+  stats = null,
+  banner = null,
   headline,
   footnote,
 }: {
@@ -196,6 +198,11 @@ export function PersonCard({
   name: string;
   handle: string | null;
   streak: number | null;
+  /** A muted line under the streak ("312 miles · 14 friends"). */
+  stats?: string | null;
+  /** The profile's banner across the top: its CSS gradient, and the uploaded
+   *  photo (a data URI) over it when there is one. */
+  banner?: { gradient: string; image: string | null } | null;
   headline: string;
   footnote: string;
 }) {
@@ -215,7 +222,47 @@ export function PersonCard({
         fontFamily: "DM Sans",
       }}
     >
-      <Glow top={-300} left={640} size={860} alpha={0.32} />
+      {banner ? (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            // The card's padding box, not its content box: "100%" here
+            // stops 144px short of the right edge.
+            width: OG_SIZE.width,
+            height: 330,
+            display: "flex",
+            backgroundColor: "#000",
+            backgroundImage: banner.gradient,
+          }}
+        >
+          {banner.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={banner.image}
+              width={1200}
+              height={330}
+              alt=""
+              style={{ position: "absolute", top: 0, left: 0, width: 1200, height: 330, objectFit: "cover" }}
+            />
+          ) : null}
+          {/* The app's scrims: dark at the top for the lockup, then fade
+              into the card's ground so the banner has no hard edge. */}
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: OG_SIZE.width,
+              height: 330,
+              backgroundImage: `linear-gradient(180deg, rgba(0,0,0,0.42) 0%, rgba(0,0,0,0) 40%, rgba(10,10,10,0.75) 75%, ${BRAND.ground} 100%)`,
+            }}
+          />
+        </div>
+      ) : (
+        <Glow top={-300} left={640} size={860} alpha={0.32} />
+      )}
       <Glow top={360} left={-260} size={560} alpha={0.14} />
 
       <Lockup icon={icon} />
@@ -303,6 +350,19 @@ export function PersonCard({
             >
               <FlameGlyph size={30} />
               {streak.toLocaleString("en-US")} day streak
+            </div>
+          ) : null}
+          {stats ? (
+            <div
+              style={{
+                display: "flex",
+                marginTop: streak !== null ? 14 : 22,
+                fontSize: 28,
+                fontWeight: 500,
+                color: BRAND.muted,
+              }}
+            >
+              {stats}
             </div>
           ) : null}
         </div>

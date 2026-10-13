@@ -19,7 +19,7 @@ const steps = [
     number: 3,
     title: "BUILD YOUR STREAK",
     description:
-      "Watch your streak grow. Add friends. Start competitions. After 66 days, it's automatic.",
+      "Watch your streak grow. Add friends. Start competitions. Keep showing up and it becomes a habit.",
   },
 ]
 

@@ -1,17 +1,50 @@
 # Mile A Day desk counter - the full-screen dashboard styles:
-# ARCADE (endless runner), CAMPFIRE, RACE (today vs yesterday) and CLOCK.
+# ARCADE (endless runner), CAMPFIRE, RACE (today vs yesterday), CLOCK,
+# VERSUS (head to head with the other desk) and GROWTH (founder signups).
 import math
 import random
 from mad.gfx import (fit, fit_icon, miles_text, particles, BLACK, MAROON_DIM, MAROON, RED, WHITE, FAR, SPARK, GREEN, LOG, upper_name,
-                     FL_YELLOW, FL_GOLD, FL_ORANGE, FL_DEEP, WATER, WATER_LIGHT,
+                     FL_YELLOW, FL_GOLD, FL_ORANGE, FL_DEEP, WATER, WATER_LIGHT, HEAT_D,
                      F5, F3, FB, ICONS, text_width, draw_text, ink, draw_box, blit,
-                     fill, draw_icon, icon_width, commas, short, num, ease, ease_out)
+                     fill, draw_icon, icon_width, commas, short, num, ease, ease_out, crown)
 
 ARCADE_SPEED = 24.0       # world scroll, pixels per second
 ARCADE_GAP = 96           # pixels between obstacles (a coin sits halfway)
 # Obstacles: the runner clears hurdles, Flamey hops over water drops.
 HURDLE = ("#####", "#...#", "#...#", "#...#")
 DROP = ("..#..", ".###.", "#####", ".###.")
+# The game runs on its own clock, one fixed step per frame (the board paces
+# arcade frames to ARCADE_FPS), so it moves the same distance every frame
+# and never jumps or stutters, however long a frame took. The mascot never
+# stops: every six coins the game cuts to a full-screen stat card (like the
+# BIG view) for a few seconds, then picks up exactly where it left off. The
+# board's network fetch, which holds the panel for a second or two, waits
+# for that card: it's a still picture, so the pause is never seen.
+ARCADE_FPS = 24           # = ARCADE_SPEED: exactly 1 px of scroll per frame
+REST_AT0 = 192            # first card: 1 s after the first coin
+REST_EVERY = 6 * ARCADE_GAP
+REST_S = 3.0              # how long a card stays up (longer if a fetch runs long)
+CYCLE_S = REST_S + REST_EVERY / ARCADE_SPEED                  # 27 s
+WRAP_LAPS = 175           # 175 laps of 576 px: stars, dashes and hurdles all line up again
+WRAP_FRAMES = int(WRAP_LAPS * CYCLE_S * ARCADE_FPS)
+WRAP_AT = int(REST_AT0 / ARCADE_SPEED * ARCADE_FPS) + WRAP_FRAMES
+
+
+def arcade_distance(v):
+    """World distance at game time v, and whether the stat card is up."""
+    s = ARCADE_SPEED
+    t0 = REST_AT0 / s
+    if v < t0:
+        return v * s, False
+    w = v - t0
+    k = int(w // CYCLE_S)
+    u = w - k * CYCLE_S
+    base = REST_AT0 + k * REST_EVERY
+    if u < REST_S:
+        return base, True
+    return base + s * (u - REST_S), False
+
+
 HUD_LABEL = {3: "ACTIVE/WK", 4: "STREAK", 8: "TOKENS", 9: "BADGES", 10: "FRIENDS"}
 
 
@@ -31,7 +64,35 @@ def arcade(app, b, now, t):
     """An endless-runner game: the mascot runs (or Flamey hops) along a
     scrolling track, jumps hurdles (Flamey: water drops) and grabs a coin
     between each one. Every coin puts the next stat on the score bar."""
-    d = t * ARCADE_SPEED
+    # One fixed step per frame. Keeps going across alerts (an alert just
+    # pauses the game); starts over only after a long time away.
+    # (Whole frames, kept small: every ~55 min the count steps back by a
+    # whole number of laps, which moves nothing on screen, so the numbers
+    # never grow big enough to lose precision.)
+    last = getattr(app, "_arc_now", None)
+    if last is None or now - last > 60:
+        app._arc_f, app._arc_laps = 0, 0
+    else:
+        app._arc_f += 1
+        if app._arc_f >= WRAP_AT:
+            app._arc_f -= WRAP_FRAMES
+            app._arc_laps += WRAP_LAPS
+    app._arc_now = now
+    d, rest = arcade_distance(app._arc_f / ARCADE_FPS)
+    starting = rest and not getattr(app, "arcade_rest", False)
+    app.arcade_rest = rest
+    if rest:                                      # the stat card (a still picture)
+        if starting or getattr(app, "_arc_card", None) is None:
+            t0 = 70 + ARCADE_GAP / 2 + 64 - 14
+            coins = int((d - t0) // ARCADE_GAP) + 1 + 6 * app._arc_laps
+            order = (0,) + app.order
+            app._arc_card = order[coins % len(order)]
+            import gc
+            gc.collect()                          # tidy memory while it's still
+        app.card(b, app._arc_card, 1.0, now)
+        return
+    app._arc_card = None
+    mt = d / ARCADE_SPEED                         # legs, hops, coin spin follow the ground
     fill(b, 0, 0, 64, 32, BLACK)
     mx = 6
     for k in range(7):                               # stars (slow parallax)
@@ -50,6 +111,7 @@ def arcade(app, b, now, t):
     jump, jp = 0.0, 0.0
     t0 = 70 + ARCADE_GAP / 2 + 64 - (mx + 8)         # distance at the first coin grab
     coins = int((d - t0) // ARCADE_GAP) + 1 if d >= t0 else 0
+    hud = coins + 6 * app._arc_laps                  # (the score bar keeps counting)
     base = int((d - 70) // ARCADE_GAP)
     for k in range(base - 1, base + 3):
         if k < 0:
@@ -71,25 +133,25 @@ def arcade(app, b, now, t):
             if h > jump:
                 jump, jp = h, p
         cx = ox + ARCADE_GAP / 2                     # the coin after it
-        if mx + 8 < cx < 64 and dec and dec.arcade_coin(app, b, int(cx), now):
+        if mx + 8 < cx < 64 and dec and dec.arcade_coin(app, b, int(cx), mt):
             pass
         elif mx + 8 < cx < 64:
             cxi = int(cx)
-            w = (2, 1, 0, 1)[int(now * 6) % 4]       # spinning coin
+            w = (2, 1, 0, 1)[int(mt * 6) % 4]        # spinning coin
             for yy in range(5):
                 for xx in range(-w, w + 1):
                     if 0 <= cxi + xx < 64:
                         edge = abs(xx) == w or yy in (0, 4)
                         b[cxi + xx, 16 + yy] = FL_GOLD if edge else FL_YELLOW
-    f = app.mascot_frame(now)                        # runner: real jump poses
+    f = app.mascot_frame(mt)                         # runner: real jump poses
     if app.mascot == 0 and jump > 0.6:
         f = app.run_jump[1 if jump > 4.2 else (0 if jp > 2 else 2)]
     y = int(round(30 - f.height - jump))
     if app.mascot == 1 and jump == 0:                # Flamey hops as he goes
-        y -= int(round(abs(math.sin(t * math.pi * 2.2)) * 2))
-    app.draw_mascot(b, f, mx + (0 if app.mascot == 0 else 3), y, now)
+        y -= int(round(abs(math.sin(mt * math.pi * 2.2)) * 2))
+    app.draw_mascot(b, f, mx + (0 if app.mascot == 0 else 3), y, mt)
     if dec:
-        dec.arcade_turkey(app, b, now, t)
+        dec.arcade_turkey(app, b, mt, mt)
     last = 70 + (coins - 1) * ARCADE_GAP + ARCADE_GAP / 2 - d + 64 if coins else -99
     since = (mx + 8 - last) / ARCADE_SPEED
     if coins and since < 0.35:                       # coin grabbed: sparkle
@@ -99,7 +161,7 @@ def arcade(app, b, now, t):
             if 0 <= px < 64 and 8 < py < 32:
                 b[px, py] = SPARK
     order = (0,) + app.order                         # score bar: one stat per coin
-    i = order[coins % len(order)]
+    i = order[hud % len(order)]
     frac = ease_out(since / 0.8) if coins and since < 0.8 else 1.0
     ic = app_icon(i)
     label, col = app.stat_label(i)
@@ -121,7 +183,7 @@ def arcade(app, b, now, t):
             draw_text(b, 63 - (hi - lo) - lo, 1, lab, col, F3)
             break
     else:
-        fit(b, x, 63, 1, label, col, F3, now)
+        fit(b, x, 63, 1, label, col, F3, mt)
     fill(b, 0, 8, 64, 9, MAROON_DIM)
 
 
@@ -282,6 +344,92 @@ def clock(app, b, now, t):
     draw_box(b, 0, 64, 27, ("KEEP %d GOING" % streak) if streak else "RUN YOUR MILE", RED, F3)
 
 
+# =================== VERSUS (head to head) ===================
+VS_PAGES = (("MILES TODAY", "miles_today"), ("MILES THIS WEEK", "miles_week"), ("DAY STREAK", "streak"))
+VS_PAGE_S = 5.0
+
+
+def _cut(v, q):
+    return int(v * q + 1e-6) / q            # never round up to a mile not yet run
+
+
+def vs_format(vals, room, whole):
+    """(format, font) that fits BOTH numbers in `room` px: same precision on
+    each side, the big digits when they fit."""
+    fmts = (("%d", 1),) if whole else (("%.2f", 100), ("%.1f", 10), ("%d", 1))
+    for font in (FB, F5):
+        for fmt, q in fmts:
+            if all(text_width(fmt % _cut(v, q), font) <= room for v in vals):
+                return fmt, q, font
+    return None, 1, F5
+
+
+def versus(app, b, now, t):
+    """Me vs the other desk, like a scoreboard: today, this week, streak.
+    A crown on whoever's ahead (nothing on a tie). Real numbers only."""
+    fill(b, 0, 0, 64, 32, BLACK)
+    me, r = app.me or {}, app.rival or {}
+    k = int(t // VS_PAGE_S) % len(VS_PAGES)
+    u = t - int(t // VS_PAGE_S) * VS_PAGE_S
+    title, key = VS_PAGES[k]
+    vals = (float(me.get(key) or 0), float(r.get(key) or 0))
+    whole = key == "streak"
+    fmt, q, font = vs_format(vals, 29, whole)
+    lead = 0 if vals[0] > vals[1] + 0.005 else 1 if vals[1] > vals[0] + 0.005 else -1
+    frac = ease_out(u / 1.0)                       # each page counts up
+    names = (upper_name(me.get("username"), 16), upper_name(r.get("name"), 16))
+    for j, (x0, x1) in enumerate(((0, 31), (33, 64))):
+        fit(b, x0 + 1, x1 - 1, 5, names[j], RED, F3, now)
+        v = vals[j] * frac
+        txt = (fmt % _cut(v, q)) if fmt else short(v)
+        col = FL_GOLD if j == lead else WHITE
+        draw_box(b, x0, x1, 13 if font is FB else 15, txt, col, font)
+        if j == lead:                                   # the crown drops in
+            cy = int(round(-4 + 4 * ease_out(u / 0.5)))
+            cx = x0 + (x1 - x0 - 7) // 2
+            crown(b, cx, cy)
+            if u > 0.6 and int(now * 3) % 4 == 0:       # a glint
+                b[cx + 3, cy] = SPARK
+    fill(b, 31, 5, 33, 23, MAROON_DIM)
+    draw_box(b, 0, 64, 26, title, RED, F3)
+
+
+# =================== GROWTH (founder mode) ===================
+def growth(app, b, now, t):
+    """Signups today (big), yesterday by this time, and the last 7 days as
+    bars. Totals only: nothing about anyone."""
+    fill(b, 0, 0, 64, 32, BLACK)
+    g = app.growth or {}
+    n = int(g.get("today") or 0)
+    yday = int(g.get("yesterday_same_time") or 0)
+    week = [max(0, int(x or 0)) for x in (g.get("week") or ())][-7:]
+    dows = str(g.get("dows") or "")[-7:]
+    frac = ease_out(t / 1.2)
+    txt = str(int(n * frac + 0.5))
+    if text_width(str(n), FB) <= 27:
+        draw_box(b, 0, 28, 4, txt, WHITE, FB)
+    else:
+        draw_box(b, 0, 28, 6, short(n * frac), WHITE, F5)
+    draw_box(b, 0, 28, 16, "SIGNUPS", RED, F3)
+    fit(b, 0, 28, 23, "YDAY %d" % yday, FAR, F3, now)
+    fill(b, 28, 4, 29, 28, MAROON_DIM)
+    top = max(week + [1])
+    x = 30
+    for i, v in enumerate(week):
+        today = i == len(week) - 1
+        h = int(round(10 * v / top * frac))
+        if v and h < 1:
+            h = 1
+        if h:
+            fill(b, x, 14 - h, x + 3, 14, RED if today else HEAT_D)
+        else:
+            fill(b, x, 13, x + 3, 14, MAROON_DIM)
+        if i < len(dows):
+            draw_box(b, x - 1, x + 4, 16, dows[i], WHITE if today else FAR, F3)
+        x += 5
+    fit(b, 29, 64, 23, "WEEK %d" % sum(week), WHITE, F3, now)
+
+
 # =================== LIVE (I'm out running) ===================
 def live(app, b, now, t):
     """Shown on its own while the owner is out on a tracked run: name, the
@@ -310,6 +458,11 @@ def live(app, b, now, t):
     p = now - getattr(app, "_lv_party", -1e9)
     party = 0 <= p < PARTY
     splash = party and p < SPLASH          # first: a big "1 MILE!" moment
+    r = app.rival or {}
+    if r.get("running_now") and not party:          # both desks out: a live race
+        from mad import boards
+        boards.duel(app, b, now, t, v)
+        return
     name = upper_name(me.get("username"))
     walk = me.get("live_kind") == "walk"
     if splash:

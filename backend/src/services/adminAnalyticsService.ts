@@ -40,6 +40,7 @@ import {
   ENROLL_LOOKBACK_DAYS,
   METER_WINDOW_DAYS,
 } from "./streakFeatureService.js";
+import { stepGoalMetSql } from "./streakFeatureCore.js";
 
 const db = PostgresService.getInstance();
 
@@ -2584,7 +2585,8 @@ const AT_RISK_MIN_STREAK = 3;
  * knowable hours before it happens.
  *
  * Two things it has to get right or it cries wolf:
- *   - the threshold is the STREAK rule (a flat `SUM(distance) >= 0.95`),
+ *   - the threshold is the STREAK rule (a flat `SUM(distance) >= 0.95`, or
+ *     10k synced steps),
  *     NOT the daily-goal rule (`goal_miles * DAILY_GOAL_TOLERANCE`). They
  *     are different numbers for anyone whose goal isn't 1.0.
  *   - "today" and "hours left" are the RUNNER's local day via localNowSql,
@@ -2622,6 +2624,8 @@ export async function getAtRisk(): Promise<AtRiskUser[]> {
          AND ${COUNTING_WORKOUT}
      ) t ON TRUE
      WHERE COALESCE(t.miles, 0) < 0.95
+       -- 10k steps finished the day too (STREAK_QUALIFYING_STEPS).
+       AND NOT ${stepGoalMetSql("c.user_id", "(c.local_now)::date")}
      ORDER BY c.current_streak DESC, hours_left ASC
      LIMIT 50`,
     [AT_RISK_MIN_STREAK],

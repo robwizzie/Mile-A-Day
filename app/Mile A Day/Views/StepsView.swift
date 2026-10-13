@@ -135,6 +135,16 @@ struct TodaysStepsCard: View {
                         .fontWeight(.medium)
                         .foregroundColor(color)
                 }
+
+                // 10k steps completes the day for the streak, same as a mile.
+                // Its own short line so it never truncates on a narrow phone.
+                Text(StepGoalDayStore.isTodayMet()
+                     ? "Today counts for your streak"
+                     : "10k keeps your streak")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
 
             Spacer()

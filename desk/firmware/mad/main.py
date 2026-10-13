@@ -11,9 +11,12 @@
 #   UP   press -> next style: CLASSIC, SPOTLIGHT, ARCADE, BIG, CAMPFIRE,
 #               RACE, CLOCK (Race and Clock need a display key)
 #   DOWN press -> switch mascot: RUNNER <-> FLAMEY
-#   UP   hold  -> demo: play every alert once
 #   DOWN hold  -> play the stat show now
 #   (at night the first press just wakes the screen up for 2 minutes)
+# The box itself (its built-in motion sensor):
+#   tap        -> wakes it at night (by day the mascot gives a little hop)
+#   double tap -> next style
+#   shake      -> the mascot gets dizzy (stars and all)
 # Seasonal looks switch by date on their own: jack-o'-lantern Flamey and a
 # pumpkin-head runner Oct 25-31, Santa hats Dec 1-26, fireworks at New Year.
 #   (with matching scenery on every screen: snow, sleigh, bats, candy corn...)
@@ -44,6 +47,9 @@ import displayio
 import framebufferio
 import rgbmatrix
 import gc
+
+TICKS_MASK = (1 << 29) - 1      # supervisor.ticks_ms wraps at 2**29
+TICKS_HALF = 1 << 28
 
 # The matrix needs one big contiguous buffer: grab it before anything else
 # fragments memory (this was the MemoryError on boot).
@@ -340,6 +346,17 @@ def main():
     if not have_wifi:
         app.set_offline("SET UP WI-FI")
 
+    import supervisor
+    frame_due = supervisor.ticks_ms()
+    try:
+        from mad.motion import Motion
+        motion = Motion()
+        if not motion.ok:
+            motion = None
+    except Exception as e:
+        print("motion:", e)
+        motion = None
+    dizzy_at = -1e9
     while True:
         now = time.monotonic()
         # only fetch when the screen is still, so animations never stutter
@@ -380,6 +397,19 @@ def main():
             save_choice(app.style, app.mascot)      # (writes the nvm tag too)
             save_celebrated(app.celebrated)
             save_desk_rev(app.desk_rev)
+        mv = motion.poll(now) if motion else None
+        if mv:
+            if app.wake(now):
+                mv = None                       # night: it only wakes it
+            elif mv == "shake" and now - dizzy_at > 20 and app.mode in ("dash", "show"):
+                dizzy_at = now
+                app.push(("dizzy",))
+                app.next_event_at = min(app.next_event_at, now)
+            elif mv == "double" and app.mode in ("dash", "show"):
+                app.next_style(now)
+                save_choice(app.style, app.mascot)
+            elif mv == "tap":
+                app.poke_at = now
         if (up or down) and app.wake(now):
             up = down = None                   # night: the press only wakes it
         if app.mode in ("dash", "show") and (up or down):
@@ -387,8 +417,6 @@ def main():
                 app.next_style(now)
             elif down == "tap":
                 app.next_mascot(now)
-            elif up == "hold":
-                app.demo(now)
             elif down == "hold":
                 app.start_show(now)
             if up == "tap" or down == "tap":
@@ -396,7 +424,19 @@ def main():
 
         app.tick(time.monotonic())
         display.refresh()
-        time.sleep(0.01)
+        # Arcade advances one fixed step per frame, so its frames are paced
+        # to an even ARCADE_FPS (ticks_ms: exact milliseconds, however long
+        # the board has been on). Everything else just takes a short nap.
+        if app.mode == "dash" and app.view() == 2:
+            frame_due = (frame_due + 1000 // 24) & TICKS_MASK
+            wait = (frame_due - supervisor.ticks_ms()) & TICKS_MASK
+            if wait > TICKS_HALF:              # running late: don't try to catch up
+                frame_due = supervisor.ticks_ms()
+            else:
+                time.sleep(wait / 1000)
+        else:
+            frame_due = supervisor.ticks_ms()
+            time.sleep(0.01)
 
 
 def crash_screen(err):

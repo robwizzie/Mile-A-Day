@@ -125,9 +125,9 @@ enum PostDestination: String, CaseIterable, Identifiable {
 
     var footnote: String {
         switch self {
-        case .story: return "Disappears in 24 hours — friends who've done their mile can watch."
-        case .feed: return "Stays on your profile and in friends' feeds."
-        case .both: return "Posts to your story and your permanent feed."
+        case .story: return "Your friends can watch it for 24 hours — once they've done their own mile today."
+        case .feed: return "Stays on your profile and in your friends' feeds. Today's photo unlocks for each friend once they've done their mile."
+        case .both: return "Your story for 24 hours, plus your profile and your friends' feeds. Friends see the photo once they've done their mile."
         }
     }
 
@@ -547,6 +547,23 @@ final class PostComposerViewModel: ObservableObject {
         return ids.isEmpty ? nil : ids
     }
 
+    /// FRONT & BACK's swapped frame, with up to three attempts (0.5s, then
+    /// 1.5s apart). nil after the last one fails — the caller then publishes
+    /// an ordinary photo, which is still complete.
+    private static func uploadDualFrame(_ image: UIImage) async -> String? {
+        let backoff: [UInt64] = [500_000_000, 1_500_000_000]
+        for attempt in 0...backoff.count {
+            do {
+                return try await PostService.uploadMedia(image)
+            } catch {
+                print("[PostComposer] dual frame upload attempt \(attempt + 1) failed: \(error)")
+                guard attempt < backoff.count else { break }
+                try? await Task.sleep(nanoseconds: backoff[attempt])
+            }
+        }
+        return nil
+    }
+
     func publish() async -> Bool {
         guard !isPublishing else { return false }
         guard let flat = flatten() else {
@@ -595,9 +612,15 @@ final class PostComposerViewModel: ObservableObject {
             // ordinary photo rather than failing outright: the primary is
             // already a complete picture with the inset baked in, and losing
             // the tap-to-swap is a far smaller loss than losing the post.
+            //
+            // But it IS retried: one dropped request on a walker's cellular
+            // signal used to publish the post with no `dual_media_url`, so the
+            // card showed a baked inset that could never be tapped — and
+            // nothing anywhere said so. The primary just went up, so the
+            // network is usually only blipping.
             var dualMediaUrl: String?
             if isDualPhoto, let swapped = flatten(swapped: true) {
-                dualMediaUrl = try? await PostService.uploadMedia(swapped)
+                dualMediaUrl = await Self.uploadDualFrame(swapped)
             }
             if let crewPhotoPostId {
                 // Everything above this line is the ordinary composer — same
@@ -1248,6 +1271,16 @@ struct PostComposerView: View {
                                         // Declares the day tier to the server —
                                         // this photo is bounded by when it was
                                         // SHOT, not by when it's posted.
+                                        vm.photoSource = .library
+                                        vm.errorMessage = nil
+                                    case .acceptedPair(let primary, let secondary, let primaryWasFront):
+                                        // A FRONT & BACK from the library —
+                                        // restored as the pair it was taken
+                                        // as, so it posts swappable.
+                                        vm.clearDual()
+                                        vm.pickedImage = primary
+                                        vm.dualSecondary = secondary
+                                        vm.dualPrimaryWasFront = primaryWasFront
                                         vm.photoSource = .library
                                         vm.errorMessage = nil
                                     case .failed:

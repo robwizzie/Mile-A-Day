@@ -14,7 +14,10 @@ public `/public/stats` numbers.
 ## Setup
 
 1. Deploy (merging to `main` runs migration `0086_display_keys`).
-2. Admin dashboard → **Displays** → username + label → **Create key**.
+2. Signed in with **your own** account: Admin dashboard → **Displays** → label →
+   **Create key**. Keys are always for the signed-in admin's own account (naming
+   anyone else is refused), and each admin lists and revokes only their own keys
+   and sees only the desk messages to or from them.
    The key is shown once (it hides after 2 minutes). Copy it.
 3. On the board's `CIRCUITPY` drive, in `settings.toml`:
    `MAD_DISPLAY_KEY = "madk_..."`. The board restarts and switches to the feed.
@@ -34,7 +37,7 @@ public `/public/stats` numbers.
 | `friends_finished` | ≤ 3 × `{id, name, miles, kind}` — same friends rules as above, for sessions that ended in the last 30 min; `id` is an opaque hash |
 | `comments` | ≤ 3 × `{id, from, text, age_s}`: comments from the last 24 h on posts the owner is tagged in (someone else's collab or buddy-walk post where the owner is an accepted coauthor). Commenter by username only, text cleaned to the panel's characters; never the owner's own comments; blocks either way hide a comment, as in the thread. `id` is an opaque hash. |
 | `desk` | `{style, mascot, rev, sleep_start, sleep_end, never_sleep}` set for THIS box from the phone remote, or null. Style/mascot apply once per `rev`; sleep hours (minutes, owner's local time; null = the box's own `MAD_NIGHT`) apply as they are |
-| `commands` | ≤ 5 × `{id, kind}`: remote taps for this box from the last 3 min; `kind` is `show` (run the stat show) or `wake` (bright for 30 min) |
+| `commands` | ≤ 5 × `{id, kind, scene?}`: remote taps for this box from the last 3 min; `kind` is `show` (run the stat show), `wake` (bright for 30 min) or `test` (play the animation named in `scene`, with TEST in place of any name; owner only, from the remote's Test animations) |
 | `friends_miles` | ≤ 3 × `{id, name, miles, seconds, best_pace, age_s, kind}` (`kind` from their latest run/walk today): friends who "got their mile in" in the last hour — the owner's own announcements (so the friend's audience settings already applied, blocks excluded) — with that friend's day so far (the same numbers the notification shows) |
 | `messages` | ≤ 3 × `{id, from, text, age_s}`: unexpired desk messages sent TO the owner from Admin → Displays (sender username only, text cleaned to the panel's characters, 24 h expiry) |
 | `reviews` | founder mode, admin owners only (everyone else gets `[]`): ≤ 3 × `{id, stars, title}` from Apple's public App Store reviews feed for the app, newest first. `id` is an opaque hash, `title` is cleaned to the panel's characters; reviewer names and review text are never passed on. Fetched server-side at most every 15 min. |
@@ -72,8 +75,11 @@ real HTTP.
 
 ## The phone remote (mileaday.run/admin/desk)
 
-A phone-first page for every desk box. Pick a box (each display key is one
-box: Rob's, Dave's…; the choice is remembered on that phone), then:
+A phone-first page for your own desk box. Each admin signs in with their own
+account and sees and controls only the boxes whose display key belongs to
+them (Rob's box for Rob, Dave's for Dave); anyone else's box answers 404 on
+every endpoint. Messages can still go to any other box (by name only). If you
+own more than one box, pick one (remembered on that phone), then:
 
 - **The real screen.** The page runs the box's own code (`desk/firmware/mad`,
   copied to `website/public/desk/py`) in MicroPython WebAssembly on the box's
@@ -96,7 +102,9 @@ box: Rob's, Dave's…; the choice is remembered on that phone), then:
 
 API (admin only): `GET /admin/desk/boxes`, `GET /admin/desk/box/:id`,
 `POST /admin/desk/box/:id/settings {style?, mascot?}`,
-`POST /admin/desk/box/:id/show`, `POST /admin/desk/box/:id/message {to, text}`.
+`POST /admin/desk/box/:id/show`, `POST /admin/desk/box/:id/message {to, text}`,
+`POST /admin/desk/box/:id/test {scene}` (one of the box's test animations; it plays in
+the page's preview first, and on the box only when you tap Play on my box).
 Settings and taps are per box (key id); a box only ever sees its own. Taps
 are rate-limited (30 per 10 min) and expire after 3 minutes; the box polls
 every ~15 s. Its buttons still work: a remote change applies once (by `rev`).

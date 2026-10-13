@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ScreenshotLoader } from "@/components/screenshot-loader";
 
 export type ShowcaseSlide = {
   title: string;
@@ -24,7 +25,7 @@ const SHOT_H = 1680;
  * sit dead centre too — which is also what centres a release with ONE shot.
  * Arrows on wider screens, dots everywhere, swipe/trackpad/keyboard all move it.
  */
-export function ShowcaseCarousel({ slides }: { slides: ShowcaseSlide[] }) {
+export function ShowcaseCarousel({ slides, label = "Feature screenshots" }: { slides: ShowcaseSlide[]; label?: string }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState(0);
 
@@ -83,7 +84,7 @@ export function ShowcaseCarousel({ slides }: { slides: ShowcaseSlide[] }) {
       className="relative -mx-6 sm:mx-0"
       role="region"
       aria-roledescription="carousel"
-      aria-label="Feature screenshots"
+      aria-label={label}
       onKeyDown={(e) => {
         if (e.key === "ArrowRight") { e.preventDefault(); go(active + 1); }
         if (e.key === "ArrowLeft") { e.preventDefault(); go(active - 1); }
@@ -119,13 +120,9 @@ export function ShowcaseCarousel({ slides }: { slides: ShowcaseSlide[] }) {
                   style={{ background: `radial-gradient(closest-side, ${slide.color}55, transparent)` }}
                 />
                 <span className="iphone-frame relative block">
-                  <Image
+                  <ShotImage
                     src={slide.screenshot}
                     alt={`${slide.caption} in the Mile A Day app`}
-                    width={SHOT_W}
-                    height={SHOT_H}
-                    sizes="(max-width: 640px) 68vw, 260px"
-                    className="block h-auto w-full"
                   />
                 </span>
               </button>
@@ -180,5 +177,31 @@ export function ShowcaseCarousel({ slides }: { slides: ShowcaseSlide[] }) {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * One screenshot at its true aspect ratio, with the loader on the screen until
+ * the picture has arrived; then the picture fades in over it. The box is sized
+ * up front, so nothing in the carousel moves when it lands.
+ */
+function ShotImage({ src, alt }: { src: string; alt: string }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <span className="relative block" style={{ aspectRatio: `${SHOT_W} / ${SHOT_H}` }}>
+      {!loaded && <ScreenshotLoader />}
+      <Image
+        src={src}
+        alt={alt}
+        width={SHOT_W}
+        height={SHOT_H}
+        // Pre-sized WebP served straight from the CDN: the optimizer's
+        // first-request AVIF encode of a full-screen capture is what made
+        // these slow to appear.
+        unoptimized
+        onLoad={() => setLoaded(true)}
+        className={`block h-full w-full transition-opacity duration-500 motion-reduce:transition-none ${loaded ? "opacity-100" : "opacity-0"}`}
+      />
+    </span>
   );
 }

@@ -14,7 +14,8 @@ const db = PostgresService.getInstance();
  * is a stored snapshot, written only by `refreshStoredStreak`, and every read
  * (`readStoredStreak`, `effectiveStreakSql`) applies the calendar decay itself
  * from `streak_valid_through`. So every mutation that can change which days
- * qualify — a workout upload/edit/delete/exclusion, a coverage row, a pause —
+ * qualify — a workout upload/edit/delete/exclusion, a step total crossing
+ * STREAK_QUALIFYING_STEPS, a coverage row, a pause —
  * MUST call refreshStoredStreak (via leaderboardService.refreshCurrentStreak).
  * Miss one and the number is stale until the daily reconcile.
  *
@@ -51,6 +52,43 @@ export function streakFeaturesGloballyEnabled(): boolean {
  * break a streak), restated here because this module can't import that file.
  */
 export const STREAK_QUALIFYING_MILES = 0.95;
+
+/**
+ * ...or its synced step total reaches this. "1 mile OR 10,000 steps" is the
+ * daily goal: a day either one completes counts for the streak exactly like a
+ * mile day, everywhere a day is judged done (the walks, the morning sweep,
+ * reminders, last call, nudges, friends' status). Flat, never scaled by
+ * `goal_miles` — the mile half of the rule isn't either.
+ *
+ * Steps count ONLY for the day being done. Everything that's about a workout
+ * stays miles: posting, feed cards, Double Down / Save meters, challenges,
+ * competitions. The iOS mirror is `DailyGoal.qualifyingSteps`.
+ */
+export const STREAK_QUALIFYING_STEPS = 10000;
+
+/**
+ * The local days on which user `$userParam`'s synced steps met the goal, up to
+ * and including `$upToParam` — one SELECT of `local_date`, meant to be UNIONed
+ * with the mile days. Every "which days qualify" query uses this, so the rule
+ * can't drift between them.
+ */
+export function stepGoalDaysSql(userParam: string, upToParam: string): string {
+  return `SELECT local_date FROM daily_steps
+          WHERE user_id = ${userParam} AND local_date <= ${upToParam}::date
+            AND steps >= ${STREAK_QUALIFYING_STEPS}`;
+}
+
+/**
+ * Did `userExpr` meet the goal by steps on local day `dateExpr`? A boolean SQL
+ * predicate for the per-day "is it done" checks (reminders, last call,
+ * friends' status), OR'd with their miles test.
+ */
+export function stepGoalMetSql(userExpr: string, dateExpr: string): string {
+  return `EXISTS (SELECT 1 FROM daily_steps ds_goal
+                   WHERE ds_goal.user_id = ${userExpr}
+                     AND ds_goal.local_date = ${dateExpr}
+                     AND ds_goal.steps >= ${STREAK_QUALIFYING_STEPS})`;
+}
 
 /** One users-row read of everything the token logic needs. */
 export interface StreakFeatureUserRow {
@@ -358,11 +396,11 @@ export function effectiveStreakSql(alias: string): string {
 
 /**
  * The user's qualifying days ($1 = user, $2 = the latest day to consider):
- * every local_date whose counted miles reach the threshold, UNIONed with their
- * covered days when coverage applies. Un-enrolled users get the plain
- * qualifying-day set. `local_date <= $2` caps the walk at the user's today so
- * a future-dated row (a device clock ahead of itself) can't anchor the streak
- * off tomorrow and read a live run as 0.
+ * every local_date whose counted miles reach the threshold or whose synced
+ * steps do, UNIONed with their covered days when coverage applies.
+ * Un-enrolled users get the plain qualifying-day set. `local_date <= $2` caps
+ * the walk at the user's today so a future-dated row (a device clock ahead of
+ * itself) can't anchor the streak off tomorrow and read a live run as 0.
  */
 function qualifyingDaysSql(includeCoverage: boolean): string {
   return `SELECT local_date FROM workouts
@@ -370,6 +408,8 @@ function qualifyingDaysSql(includeCoverage: boolean): string {
             AND deleted_at IS NULL AND exclusion_reason IS NULL
           GROUP BY local_date
           HAVING SUM(distance) >= ${STREAK_QUALIFYING_MILES}
+          UNION
+          ${stepGoalDaysSql("$1", "$2")}
           ${
             includeCoverage
               ? `UNION
@@ -637,8 +677,8 @@ async function computeSnapshotWith(
 }
 
 /**
- * Recompute a user's current streak from their workouts (plus coverage and
- * pauses) WITHOUT writing it. `userToday` overrides the user's derived today —
+ * Recompute a user's current streak from their workouts and steps (plus
+ * coverage and pauses) WITHOUT writing it. `userToday` overrides the user's derived today —
  * the tests use that to ask "what will this read tomorrow?".
  */
 export async function computeStreakSnapshot(
@@ -953,6 +993,8 @@ export async function streakEndingAt(
        WHERE user_id = $1 AND local_date <= $2::date
          AND deleted_at IS NULL AND exclusion_reason IS NULL
        GROUP BY local_date HAVING SUM(distance) >= ${STREAK_QUALIFYING_MILES}
+       UNION
+       ${stepGoalDaysSql("$1", "$2")}
        UNION
        SELECT local_date FROM streak_coverage
        WHERE user_id = $1 AND local_date <= $2::date

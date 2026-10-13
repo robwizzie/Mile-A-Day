@@ -5,6 +5,13 @@ import {
   addToAndroidWaitlist,
   normalizeWaitlistEmail,
 } from "../services/waitlistService.js";
+import { getPublicDeskFeed } from "../services/displayService.js";
+import {
+  addDeskInterest,
+  cleanInterestName,
+  cleanInterestPrice,
+  normalizeInterestEmail,
+} from "../services/deskInterestService.js";
 
 /** Global community counters for the marketing site. Aggregates only — the
  *  service layer is the gate for what may ever appear in this payload. */
@@ -56,5 +63,37 @@ export async function getPublicPostController(req: Request, res: Response) {
     // a 500: it means "no such post", the same as any other bad link.
     console.warn("Public post lookup failed:", error);
     res.status(404).json({ error: "Post not found" });
+  }
+}
+
+/** GET /public/desk — the website's live desk twin. Community aggregates only
+ *  (the same block a box without a key shows), cached server-side. */
+export async function getPublicDeskController(_req: Request, res: Response) {
+  try {
+    res.setHeader("Cache-Control", "public, max-age=15");
+    res.json(await getPublicDeskFeed());
+  } catch (error) {
+    console.error("Failed to build the public desk feed:", error);
+    res.status(500).json({ error: "Failed to load" });
+  }
+}
+
+/** POST /public/desk-interest {name, email, price?} — "I'd buy one". A filled
+ *  honeypot field is quietly accepted and dropped. Same answer for new and
+ *  repeat emails, so addresses can't be probed. */
+export async function deskInterestController(req: Request, res: Response) {
+  if (typeof req.body?.website === "string" && req.body.website.trim()) {
+    return res.json({ ok: true });                // a bot filled the hidden field
+  }
+  const name = cleanInterestName(req.body?.name);
+  const email = normalizeInterestEmail(req.body?.email);
+  if (!name) return res.status(400).json({ error: "Please add your name" });
+  if (!email) return res.status(400).json({ error: "A valid email is required" });
+  try {
+    await addDeskInterest(name, email, cleanInterestPrice(req.body?.price));
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Failed to save desk interest:", error);
+    res.status(500).json({ error: "Failed to save" });
   }
 }

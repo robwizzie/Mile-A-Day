@@ -3,6 +3,7 @@ import { Navbar } from "@/components/navbar";
 import { HeroSection } from "@/components/hero-section";
 import { MarqueeSection } from "@/components/marquee-section";
 import { LiveStatsBand } from "@/components/live-stats-band";
+import { DeskTeaserSection } from "@/components/desk-teaser-section";
 import { FeedSection } from "@/components/feed-section";
 import { WhatsNewSection } from "@/components/whats-new-section";
 import { FeaturesSection } from "@/components/features-section";
@@ -83,7 +84,7 @@ const structuredData = {
         "Walk or run a mile every day, build streaks, earn medals, and compete with friends. Free on iPhone and Apple Watch.",
       url: SITE_URL,
       image: `${SITE_URL}/images/mad-circle-icon.png`,
-      screenshot: `${SITE_URL}/images/app-dashboard.png`,
+      screenshot: `${SITE_URL}/images/hero/dashboard-2026-10.webp`,
       inLanguage: "en-US",
       isAccessibleForFree: true,
       featureList: [
@@ -138,6 +139,7 @@ export default function Home() {
       <HowItWorksSection />
       <StorySection />
       <SupportSection />
+      <DeskTeaserSection />
       <CtaSection />
       <Footer />
     </main>

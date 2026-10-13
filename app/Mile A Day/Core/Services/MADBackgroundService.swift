@@ -387,7 +387,8 @@ final class MADBackgroundService: NSObject, ObservableObject {
             currentMiles: service.healthManager.todaysDistance,
             totalMiles: service.healthManager.totalLifetimeMiles,
             fastestPace: service.healthManager.fastestMilePace,
-            mostMilesInDay: service.healthManager.mostMilesInOneDay
+            mostMilesInDay: service.healthManager.mostMilesInOneDay,
+            stepGoalMet: StepGoalDayStore.isTodayMet()
         )
         
         service.log("[Background] User updated and saved - Current streak now: \(service.userManager.currentUser.streak)")
