@@ -6,13 +6,13 @@ import {
   Camera,
   Ellipsis,
   Flame,
-  Footprints,
-  Gauge,
   Hand,
   Hourglass,
   Map,
+  MessageCircle,
+  PersonStanding,
   Plus,
-  type LucideIcon,
+  Send,
 } from "lucide-react";
 import { ProfileAvatar } from "@/components/profile-avatar";
 
@@ -20,10 +20,12 @@ import { ProfileAvatar } from "@/components/profile-avatar";
 // Mile A Day — the button is solid orange, the tally icon is orange.
 const MAD_RED = "#D94059";
 const HYPE_ORANGE = "#FF9900";
+// MADTheme.Colors.walkBlue — walks are blue everywhere in the app.
+const WALK_BLUE = "#4099F2";
 
 const STORY_FRIENDS = [
-  { username: "dave", initials: "DS", label: "David" },
-  { username: "MegsMiles", initials: "MM", label: "Megs" },
+  { username: "dave", initials: "DS", label: "dave" },
+  { username: "MegsMiles", initials: "MM", label: "MegsMiles" },
 ];
 
 function TiltCard({
@@ -155,12 +157,16 @@ const MINI_CLAPS = Array.from({ length: 6 }, (_, i) => {
   };
 });
 
-/** Feed mock chrome stays custom; the media panel uses the real feed example
- * photo cropped out of the app screenshot. */
+/** The feed card as PostCardView draws it today: distance and walk/run ride
+ * the header subtitle, the action row is clap + count · comment · share with
+ * the PHOTO | MAP toggle at its end (FeedActionRow), streak and timestamp are
+ * ONE quiet meta line (FeedMetaLine), and the caption comes last, led by the
+ * author's name. The photo is the real feed example. Double-tap hypes, as in
+ * the app (doubleTapHype). */
 function FeedPostCard() {
   const [burst, setBurst] = useState(0);
+  const hyped = burst > 0;
 
-  // Mirrors doubleTapHype(): the burst replays on every double-tap.
   const hype = useCallback(() => {
     setBurst((b) => b + 1);
   }, []);
@@ -170,14 +176,11 @@ function FeedPostCard() {
       <div className="mb-3 flex items-center gap-2.5">
         <ProfileAvatar username="rob" initials="RW" size={40} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[15px] font-bold text-white">Rob</div>
-          <div className="text-xs font-medium text-white/50">2h ago</div>
-        </div>
-        <div
-          className="flex h-8 w-8 items-center justify-center rounded-full"
-          style={{ background: `${HYPE_ORANGE}1F` }}
-        >
-          <Footprints className="h-4 w-4" style={{ color: HYPE_ORANGE }} />
+          <div className="truncate text-[15px] font-bold text-white">rob</div>
+          <div className="flex items-center gap-1 text-xs font-medium text-white/50">
+            <PersonStanding className="h-3 w-3" style={{ color: WALK_BLUE }} strokeWidth={2.6} />
+            <span>Walk · 1.11 mi · 2h</span>
+          </div>
         </div>
         <Ellipsis className="h-5 w-5 text-white/45" />
       </div>
@@ -226,51 +229,41 @@ function FeedPostCard() {
         )}
       </div>
 
-      <div className="mt-2.5 flex flex-wrap gap-2">
-        <FeedChip icon={Flame} text="423 day streak" color={HYPE_ORANGE} />
-        <FeedChip icon={Footprints} text="1.11 mi" />
-        <FeedChip icon={Gauge} text="21:36 /mi" />
-      </div>
-
-      <p className="mt-3 text-[15px] font-medium leading-snug text-white/90">
-        Bugs tried to get me while I took the trash out, they did not succeed
-      </p>
-
-      <div className="mt-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-[14px] font-bold text-white/90">
-          <Hand
-            className="h-4 w-4"
-            style={{ color: HYPE_ORANGE, fill: `${HYPE_ORANGE}22` }}
-          />
-          <span>2 hypes</span>
-        </div>
+      {/* Action row: clap + count, comment, share … PHOTO | MAP */}
+      <div className="mt-3 flex items-center gap-4 px-0.5">
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-bold text-white shadow-[0_8px_24px_rgba(255,153,0,0.28)]"
-          style={{ background: HYPE_ORANGE }}
           onClick={hype}
+          aria-label="Hype this post"
+          className="flex items-center gap-1.5 text-[15px] font-bold text-white/90"
         >
-          <Hand className="h-4 w-4" />
-          Hype
+          <Hand
+            className="h-[22px] w-[22px]"
+            style={{ color: hyped ? HYPE_ORANGE : "#fff", fill: hyped ? HYPE_ORANGE : "transparent" }}
+            strokeWidth={2}
+          />
+          <span>{2 + Math.min(burst, 1)}</span>
         </button>
+        <MessageCircle className="h-[21px] w-[21px] text-white" strokeWidth={2} aria-hidden />
+        <Send className="h-[20px] w-[20px] text-white" strokeWidth={2} aria-hidden />
+        <div className="ml-auto flex rounded-full border border-white/10 bg-white/[0.06] p-0.5 text-[10px] font-extrabold tracking-wider">
+          <span className="rounded-full bg-white px-2.5 py-1 text-black">PHOTO</span>
+          <span className="px-2.5 py-1 text-white/70">MAP</span>
+        </div>
       </div>
-    </div>
-  );
-}
 
-function FeedChip({
-  icon: Icon,
-  text,
-  color = "rgba(255,255,255,0.78)",
-}: {
-  icon: LucideIcon;
-  text: string;
-  color?: string;
-}) {
-  return (
-    <div className="flex items-center gap-1.5 rounded-full bg-white/[0.08] px-2.5 py-1.5 text-xs font-bold text-white/80">
-      <Icon className="h-3.5 w-3.5" style={{ color }} />
-      <span style={{ color }}>{text}</span>
+      {/* Meta line: streak · timestamp */}
+      <div className="mt-2.5 flex items-center justify-between px-0.5 text-[12px] font-semibold">
+        <span className="flex items-center gap-1" style={{ color: HYPE_ORANGE }}>
+          <Flame className="h-3.5 w-3.5" /> 423-day streak
+        </span>
+        <span className="uppercase tracking-wide text-white/45">Jul 9 · 9:42 PM</span>
+      </div>
+
+      <p className="mt-2 px-0.5 text-[15px] leading-snug text-white/90">
+        <span className="font-bold text-white">rob</span>{" "}
+        Bugs tried to get me while I took the trash out, they did not succeed
+      </p>
     </div>
   );
 }
@@ -290,7 +283,7 @@ export function FeedSection() {
           {/* Left: copy */}
           <div>
             <span className="reveal mb-4 inline-block rounded-full border border-[#c72554]/30 bg-[#c72554]/10 px-3 py-1 text-sm font-semibold uppercase tracking-widest text-[#c72554]">
-              New — The Feed
+              The Feed
             </span>
             <h2 className="reveal reveal-delay-1 font-heading text-[clamp(40px,6vw,72px)] leading-[0.95] tracking-[-1px] text-[#f5f5f5]">
               EVERY MILE
@@ -326,7 +319,7 @@ export function FeedSection() {
                   icon: Map,
                   color: "#33B34D",
                   title: "Your route, your call",
-                  desc: "Show off the loop with a route map on your post — or keep it private with one toggle.",
+                  desc: "Your route drawn on the post, with a Flyover to replay it from above. The first and last stretch are trimmed so your front door stays yours — or keep the map off entirely.",
                 },
               ].map((item) => {
                 const Icon = item.icon;

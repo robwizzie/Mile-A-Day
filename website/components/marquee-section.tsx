@@ -6,7 +6,7 @@ const items = [
   "COMPETE WITH FRIENDS",
   "GET MAD",
   "WALK IT OR RUN IT",
-  "66 DAYS TO A HABIT",
+  "ONE DAY AT A TIME",
 ]
 
 function MarqueeItem({ text }: { text: string }) {

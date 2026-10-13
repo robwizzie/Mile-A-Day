@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bell,
   Calendar,
+  CalendarDays,
   CalendarClock,
   CalendarRange,
   Camera,
@@ -17,6 +18,7 @@ import {
   Globe,
   HeartPulse,
   Images,
+  LifeBuoy,
   LayoutGrid,
   Map,
   MapPinOff,
@@ -247,6 +249,12 @@ export const RELEASES: Release[] = [
         desc: "Earn Double Down, Streak Save, and Streak Assist by running — then use them to protect your streak, or rescue a friend's.",
       },
       {
+        icon: LifeBuoy,
+        color: "#D94059",
+        title: "Save a friend's streak",
+        desc: "You hold a Streak Assist every 30 days. Spending it takes a mile a friend walked past their goal — ask for one, or donate one of yours.",
+      },
+      {
         icon: Sparkles,
         color: "#FFD659",
         title: "The Pure Flame",
@@ -275,6 +283,12 @@ export const RELEASES: Release[] = [
         color: "#30B0C7",
         title: "Camera & composer",
         desc: "Pinch to zoom, a 0.5x ultra-wide lens, and a two-step composer that puts your caption first.",
+      },
+      {
+        icon: CalendarDays,
+        color: "#34C759",
+        title: "Your workouts, organized",
+        desc: "A calendar of every walk and run, swipe between workouts, and photos that load instantly.",
       },
       {
         icon: Footprints,

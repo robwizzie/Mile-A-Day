@@ -39,7 +39,7 @@ export async function getPublicPost(
 export function publicAuthorName(post: PublicPost | null): string {
   if (post?.username) return `@${post.username}`;
   if (post?.first_name) return post.first_name;
-  return "A runner";
+  return "Someone";
 }
 
 /** Two letters for the avatar fallback — the same source the name comes from. */

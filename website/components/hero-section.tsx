@@ -39,7 +39,7 @@ export function HeroSection() {
           </h1>
 
           <p className="animate-fade-in-up animate-delay-200 mt-6 max-w-lg text-lg leading-relaxed text-[#a0a0a0]">
-            The simplest fitness challenge that will change your life. No complicated programs. No expensive gear. Just lace up, tap Start Mile, and go. Walk it or run it — just get it done.
+            The simplest daily habit you'll actually keep. No complicated programs. No expensive gear. Just lace up, tap Start Mile, and go. Walk it or run it — just get it done.
           </p>
 
           <div className="animate-fade-in-up animate-delay-300 mt-8 flex flex-col items-center gap-4 sm:flex-row">
