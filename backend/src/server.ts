@@ -59,6 +59,7 @@ import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
 import { seedWeeklyChallenges } from "./services/weeklyChallengeService.js";
 import { PostgresService } from "./services/DbService.js";
+import { getPublicProfile } from "./services/publicProfileService.js";
 import {
   runPendingMigrations,
   getMigrationReport,
@@ -311,9 +312,9 @@ app.get(
   },
 );
 
-// Public endpoint: minimal profile by username for the marketing site's
-// /u/<username> share pages. Intentionally excludes email and any other
-// sensitive fields — this is world-readable.
+// Public endpoint: profile by username for the marketing site's
+// /u/<username> share pages. World-readable — what it publishes, and what a
+// 'private' account withholds, is decided in publicProfileService.
 app.get(
   "/public/users/:username",
   (req, res, next) => {
@@ -321,18 +322,11 @@ app.get(
     next();
   },
   async (req, res) => {
-    const db = PostgresService.getInstance();
-    const results = await db.query(
-      `SELECT user_id, username, first_name, last_name, bio,
-              profile_image_url, current_streak
-       FROM users
-       WHERE LOWER(username) = LOWER($1)`,
-      [req.params.username],
-    );
-    if (!results.length) {
+    const profile = await getPublicProfile(req.params.username);
+    if (!profile) {
       return res.status(404).json({ error: "Not found" });
     }
-    res.json(results[0]);
+    res.json(profile);
   },
 );
 
