@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
+import { ShowcaseCarousel, type ShowcaseSlide } from "@/components/showcase-carousel";
 import { useState } from "react";
 import { ArrowRight, ChevronDown } from "lucide-react";
 import { RELEASES, CURRENT_RELEASE, RELEASE_SHOWCASE } from "@/lib/releases";
@@ -21,6 +21,11 @@ export function WhatsNewSection() {
   const shots = (RELEASE_SHOWCASE[release.version] ?? []).filter((s) => s.screenshot);
   const shown = new Set(shots.map((s) => s.title));
   const rest = release.features.filter((f) => !shown.has(f.title));
+  const slides: ShowcaseSlide[] = shots.map((s) => ({
+    ...s,
+    screenshot: s.screenshot!,
+    color: release.features.find((f) => f.title === s.title)?.color ?? "#c72554",
+  }));
 
   return (
     <section
@@ -62,24 +67,9 @@ export function WhatsNewSection() {
           </p>
         </div>
 
-        {shots.length > 0 && (
-          <div key={release.version} className="mb-14 grid gap-x-8 gap-y-12 sm:grid-cols-2 md:grid-cols-3">
-            {shots.map((shot) => (
-              <div key={shot.title} className={`animate-in fade-in duration-500 flex flex-col items-center text-center`}>
-                <div className="phone-mockup w-full max-w-[280px] overflow-hidden p-2.5">
-                  <Image
-                    src={shot.screenshot!}
-                    alt={`${shot.caption} in the Mile A Day app`}
-                    width={776}
-                    height={1680}
-                    sizes="280px"
-                    className="w-full rounded-[30px]"
-                  />
-                </div>
-                <h3 className="font-heading mt-6 text-[24px] uppercase tracking-[1px] text-[#f5f5f5]">{shot.caption}</h3>
-                <p className="mt-1.5 max-w-xs text-sm leading-relaxed text-[#a0a0a0]">{shot.blurb}</p>
-              </div>
-            ))}
+        {slides.length > 0 && (
+          <div key={release.version} className="animate-in fade-in mb-14 duration-500">
+            <ShowcaseCarousel slides={slides} />
           </div>
         )}
 
