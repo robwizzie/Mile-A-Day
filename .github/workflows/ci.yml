@@ -340,6 +340,13 @@ jobs:
       # service reads the (private) shoe tables.
       - name: Shoe tracker check
         run: node scripts/shoes-check.mjs
+      # The world-readable profile (/public/users/:username) and post-link
+      # preview: the streak reads through effectiveStreakSql (the raw column
+      # advertises a dead streak until the hourly sweep), lifetime miles /
+      # friend count / medals are published unless the account is 'private',
+      # and no sensitive column rides along. Both leak or lie in public.
+      - name: Public profile check
+        run: node scripts/public-profile-check.mjs
       # MCP database connector: the full OAuth sign-in through the MCP SDK's own
       # client, every sign-in attack (no cookie, wrong nonce, forged token,
       # not allowlisted, replay), and the database guards — read role can't
