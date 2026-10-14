@@ -98,7 +98,7 @@ struct StreakRiskLiveActivity: Widget {
 
                 DynamicIslandExpandedRegion(.trailing) {
                     VStack(alignment: .trailing, spacing: 0) {
-                        Text(timerInterval: Date()...context.state.deadline, countsDown: true)
+                        StreakRiskCountdown(deadline: context.state.deadline)
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .foregroundColor(.red)
@@ -162,6 +162,29 @@ struct StreakRiskLiveActivity: Widget {
     }
 }
 
+// MARK: - Countdown
+
+/// The system-rendered countdown to midnight — and the reason this file once
+/// crashed the widget extension in a loop. `Date()...deadline` is a
+/// `ClosedRange`, which TRAPS when its lower bound passes its upper one, and
+/// the activity outlives its deadline routinely: `staleDate` only marks it
+/// stale, nothing removes it until the app next runs (up to iOS's 8-hour
+/// cap), and the system re-renders it all the while. Every render after local
+/// midnight was an EXC_BREAKPOINT. Past the deadline it now draws a static
+/// "0:00" — the day is over, which is exactly what that says.
+struct StreakRiskCountdown: View {
+    let deadline: Date
+
+    var body: some View {
+        let now = Date()
+        if deadline > now {
+            Text(timerInterval: now...deadline, countsDown: true)
+        } else {
+            Text(verbatim: "0:00")
+        }
+    }
+}
+
 // MARK: - Lock screen view
 
 private struct StreakRiskLockScreenView: View {
@@ -193,7 +216,7 @@ private struct StreakRiskLockScreenView: View {
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.7))
 
-                Text(timerInterval: Date()...context.state.deadline, countsDown: true)
+                StreakRiskCountdown(deadline: context.state.deadline)
                     .font(.system(size: 26, weight: .black, design: .rounded))
                     .monospacedDigit()
                     .foregroundColor(.red)

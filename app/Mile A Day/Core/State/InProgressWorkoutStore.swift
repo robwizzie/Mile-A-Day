@@ -1,6 +1,7 @@
 import Foundation
 import HealthKit
 import CoreLocation
+import os
 
 /// Lightweight, persistent representation of an in‑progress workout.
 /// This ensures we can always restore the user's active workout UI/state
@@ -208,8 +209,9 @@ enum InProgressWorkoutStore {
     /// is what flips the Live Activity to TRACKING INTERRUPTED. Coherent
     /// because this enum is the only reader/writer of the key and only the
     /// main app process uses it. `cacheLoaded` distinguishes "cached nothing"
-    /// (cleared) from "not read yet".
-    private static let cacheLock = NSLock()
+    /// (cleared) from "not read yet". Unfair lock, not `NSLock` — see
+    /// `DayKeyFormatter.lock` (main-thread readers must boost the owner).
+    private static let cacheLock = OSAllocatedUnfairLock()
     private static var cachedState: InProgressWorkoutState?
     private static var cacheLoaded = false
 
