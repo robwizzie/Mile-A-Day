@@ -66,7 +66,7 @@ export function DeskShowcase() {
         <div className="mx-auto mt-8 max-w-3xl">
           <DeskBox feed={feed} style={style} mascot={mascot} onNextStyle={nextStyle} />
           <p className="mt-1 text-center text-xs text-white/40">
-            Just like the real one: tap it, double-tap for the next style, or shake it side to side.
+            Just like the real one: tap it, or shake it side to side.
           </p>
         </div>
 

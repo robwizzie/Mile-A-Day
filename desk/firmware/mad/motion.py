@@ -1,8 +1,8 @@
 # Mile A Day desk counter - tap and shake, from the Matrix Portal M4's
 # built-in LIS3DH accelerometer (I2C 0x19). A few registers, no library:
 #   tap        -> wakes the screen at night (a little hop by day)
-#   double tap -> next style
 #   shake      -> the mascot gets dizzy
+# (Never the style: only the UP button and the phone remote change that.)
 # If the sensor isn't there (or answers oddly) everything here stays off.
 ADDR = 0x19
 WHO_AM_I = 0x33
@@ -31,7 +31,7 @@ class Motion:
             self._write(0x23, 0x88)        # CTRL_REG4: block update, high-res, +-2 g
             self._write(0x22, 0x80)        # CTRL_REG3: click on INT1
             self._write(0x38, 0x3F)        # CLICK_CFG: single + double tap, every axis
-            self._write(0x3A, 0x80 | 60)   # CLICK_THS: latch until read, ~1 g
+            self._write(0x3A, 0x80 | 90)   # CLICK_THS: latch until read, ~1.4 g (a real tap, not a bump)
             self._write(0x3B, 10)          # TIME_LIMIT
             self._write(0x3C, 20)          # TIME_LATENCY
             self._write(0x3D, 255)         # TIME_WINDOW

@@ -7,16 +7,16 @@ import { drawLeds, frameToImage, loadDeskEngine, localDate, type DeskEngine } fr
  * A live Mile A Day desk box: the box's own code running here on real
  * community numbers, drawn as an LED panel in its case.
  *
- * Like the real box: tap it for a little hop, double-tap for the next style,
+ * Like the real box: tap it for a little hop,
  * and shake it (drag it side to side fast) and the mascot gets dizzy.
  */
-export function DeskBox({ feed, style, mascot, bare = false, interactive = true, onNextStyle, className, maxDpr = 2 }: {
+export function DeskBox({ feed, style, mascot, bare = false, interactive = true, className, maxDpr = 2 }: {
   feed: string | null;          // the /public/desk JSON
   style: number;
   mascot: number;
   bare?: boolean;               // just the LEDs (TV mode), no case
   interactive?: boolean;
-  onNextStyle?: () => void;
+  onNextStyle?: () => void;     // (unused: only the buttons change the style)
   className?: string;
   maxDpr?: number;
 }) {
@@ -98,9 +98,8 @@ export function DeskBox({ feed, style, mascot, bare = false, interactive = true,
     return () => ro.disconnect();
   }, [maxDpr]);
 
-  // tap / double-tap / shake (drag side to side)
+  // tap / shake (drag side to side)
   const gesture = useRef<{ x: number; at: number; moved: number; dir: number; flips: number[]; startX: number } | null>(null);
-  const lastTap = useRef(0);
   const down = (e: React.PointerEvent) => {
     if (!interactive) return;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -136,14 +135,7 @@ export function DeskBox({ feed, style, mascot, bare = false, interactive = true,
     setJiggle(0);
     if (!g || !engine.current) return;
     if (g.moved < 8 && performance.now() - g.at < 350) {
-      const t = performance.now();
-      if (t - lastTap.current < 380) {
-        lastTap.current = 0;
-        onNextStyle?.();
-      } else {
-        lastTap.current = t;
-        engine.current.poke(now());
-      }
+      engine.current.poke(now());          // (the style only changes from the buttons below)
     }
   };
   const leave = () => { setTilt({ x: 0, y: 0 }); up(); };

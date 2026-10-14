@@ -15,8 +15,9 @@
 #   (at night the first press just wakes the screen up for 2 minutes)
 # The box itself (its built-in motion sensor):
 #   tap        -> wakes it at night (by day the mascot gives a little hop)
-#   double tap -> next style
 #   shake      -> the mascot gets dizzy (stars and all)
+# Only the UP button and the phone remote change the style: a knock on the
+# desk never does.
 # Seasonal looks switch by date on their own: jack-o'-lantern Flamey and a
 # pumpkin-head runner Oct 25-31, Santa hats Dec 1-26, fireworks at New Year.
 #   (with matching scenery on every screen: snow, sleigh, bats, candy corn...)
@@ -405,10 +406,7 @@ def main():
                 dizzy_at = now
                 app.push(("dizzy",))
                 app.next_event_at = min(app.next_event_at, now)
-            elif mv == "double" and app.mode in ("dash", "show"):
-                app.next_style(now)
-                save_choice(app.style, app.mascot)
-            elif mv == "tap":
+            elif mv in ("tap", "double"):
                 app.poke_at = now
         if (up or down) and app.wake(now):
             up = down = None                   # night: the press only wakes it
