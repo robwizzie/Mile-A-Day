@@ -185,6 +185,7 @@ When in doubt: cite the guideline number, propose the compliant path, and ask be
 - A crew slide shows its owner's caption or none; edit via `EditCaptionSheet(subject: .myCollabSlide)`; `setCrewCaption` ≠ `onEditCaption`.
 - Highlights hold post + face; key `ForEach` on `PostHighlightItem.id`, never `post_id`; `canHighlight` must not reuse `canCurateOnProfile`.
 - Never open the lobby over a recording walk (`BuddyWalkRouting.openTarget()`); "am I walking" = `InProgressWorkoutStore.load()?.isActive`; "Start now" is host-only `startNow()`.
+- Locks are `OSAllocatedUnfairLock`, never `NSLock`, for anything a main-thread view body can take while background queues also take it (`DayKeyFormatter`, `TrackedWorkoutLedger`, `InProgressWorkoutStore.cacheLock`). `NSLock` is a default pthread mutex with NO priority inheritance: in a backgrounded app a throttled utility thread descheduled while holding it left the main thread parked in `__psynch_mutexwait` under a SwiftUI body, and the background scene-update watchdog killed it (0x8BADF00D "stuck (deadlock)", ~0% app CPU) — the main-app SIGKILL group in builds 573/595. An unfair lock boosts its owner.
 - Never nest a Button in a Button's label; overlay controls as ZStack siblings.
 - Rank via `Competition.ranked`/`standing(for:)` (score → distance → name → user_id); never a place from an index.
 - Compete UI uses `CompeteDesign`; no materials/gradients; arm reveal flags in the shared table.
