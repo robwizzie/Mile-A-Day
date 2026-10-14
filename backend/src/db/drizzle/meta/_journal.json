@@ -687,6 +687,13 @@
       "when": 1791783627434,
       "tag": "0097_desk_push_log",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1791938662334,
+      "tag": "0098_route_walked_steps",
+      "breakpoints": true
     }
   ]
 }

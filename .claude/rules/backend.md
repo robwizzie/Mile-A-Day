@@ -37,6 +37,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - Admin analytics: bounded aggregates + TTL cache; DELTA assertions only; import constants from `streakFeatureService.ts`. Check: `admin-analytics-check`.
 - Stealth is a RECORDING rule (`stealth_windows`, sticky `workouts.stealth`): a stealth workout has NO `workout_routes` row; serve `stealth` owner-only.
 - Serve routes to non-owners only via `servedRouteFrom(...)`; a cut change ⇒ NULL `privacy_bounds`, bump marker, update `RoutePrivacyTrim`. Check: `route-privacy-check`.
+- `servedRouteFrom` fills walked long steps (`mad_route_fill_walked_steps`, route ≈ `workouts.distance`) so iOS `RouteGaps` doesn't cut straights; keep its bars equal to `RouteGaps`'. Check: `route-walked-steps-check`.
 - Resolve `users.referral_detail` against usernames (trim, case-fold, strip `@`); report unmatched separately.
 - `profile_banner_url` is written only by `POST /users/:id/banner/upload`; `PATCH /users/:id` can only CLEAR it.
 - Flamey gates on `dashboard_style = 'fun'`; `flamey` block friends-only; pokes need both sides Fun; date medals by history (`redateBadges`). Check: `flamey-check`.
