@@ -770,8 +770,19 @@ struct StreakTokensDetailView: View {
                             )
                             tokenCard(kind: .save, meter: payload.streak_save, unit: "run days")
                             tokenCard(kind: .assist, meter: payload.streak_assist, unit: "days")
-                            if !plusStore.isPlus {
-                                plusUpsell
+                            // The sheet hangs off this always-present
+                            // Group: the card itself leaves the tree the
+                            // moment a purchase makes the user Plus.
+                            Group {
+                                if !plusStore.isPlus {
+                                    plusUpsell
+                                }
+                            }
+                            .sheet(isPresented: $showPlusPaywall) {
+                                PlusPaywallView(context: .streakTokens) { purchased in
+                                    guard purchased else { return }
+                                    Task { await tokensState.refreshStatus() }
+                                }
                             }
 
                             rulesCard
@@ -800,8 +811,9 @@ struct StreakTokensDetailView: View {
     }
 
     /// Mile A Day+ fills the two earned meters faster. Shown only to people
-    /// who don't have it, under the meters it would change. The paywall sheet
-    /// hangs off this card, not the body (two sheets on one node compete).
+    /// who don't have it, under the meters it would change. Its paywall sheet
+    /// is on the Group around it in `body` (not this card, which disappears
+    /// on purchase, and not the body node, where two sheets would compete).
     private var plusUpsell: some View {
         Button {
             MADHaptics.tap()
@@ -839,12 +851,6 @@ struct StreakTokensDetailView: View {
             )
         }
         .buttonStyle(.plain)
-        .sheet(isPresented: $showPlusPaywall) {
-            PlusPaywallView(context: .streakTokens) { purchased in
-                guard purchased else { return }
-                Task { await tokensState.refreshStatus() }
-            }
-        }
     }
 
     /// The three rules that apply to every token, which no per-token card

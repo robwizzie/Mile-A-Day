@@ -483,19 +483,21 @@ enum PlusPlanCopy {
         let price = "\(product.displayPrice) per \(longUnit(period))"
         let renew = "Renews automatically unless cancelled at least 24 hours before the end of the period. "
             + "Manage or cancel anytime in your Apple ID's Subscriptions settings."
-        if trialEligible, let trial = freeTrial(product) {
+        if trialEligible, let trial = freeTrial(product, adjective: false) {
             return "Free for \(trial), then \(price). \(renew)"
         }
         return "\(price). \(renew)"
     }
 
-    /// "1 week" / "7 days" — the free-trial length, when this product offers one.
-    static func freeTrial(_ product: Product) -> String? {
+    /// The free-trial length, when this product offers one: "7-day" as an
+    /// adjective ("Start your 7-day free trial"), "7 days" as a noun ("Free
+    /// for 7 days").
+    static func freeTrial(_ product: Product, adjective: Bool = true) -> String? {
         guard let offer = product.subscription?.introductoryOffer, offer.paymentMode == .freeTrial else { return nil }
-        return describe(offer.period)
+        return describe(offer.period, adjective: adjective)
     }
 
-    private static func describe(_ period: Product.SubscriptionPeriod) -> String {
+    private static func describe(_ period: Product.SubscriptionPeriod, adjective: Bool) -> String {
         let n = period.value
         let unit: String
         switch period.unit {
@@ -505,7 +507,8 @@ enum PlusPlanCopy {
         case .year: unit = "year"
         @unknown default: unit = "period"
         }
-        return n == 1 ? "1 \(unit)" : "\(n)-\(unit)"
+        if n == 1 { return "1 \(unit)" }
+        return adjective ? "\(n)-\(unit)" : "\(n) \(unit)s"
     }
 
     private static func shortUnit(_ period: Product.SubscriptionPeriod) -> String {
@@ -528,7 +531,7 @@ enum PlusPlanCopy {
             @unknown default: return "period"
             }
         }
-        return describe(period)
+        return describe(period, adjective: false)
     }
 }
 
@@ -537,7 +540,7 @@ enum PlusStatusCopy {
     static func line(for status: PlusStatus?) -> String? {
         guard let status, status.is_plus else { return nil }
         let date = status.expiresDate.map { $0.formatted(date: .abbreviated, time: .omitted) }
-        switch status.source {
+        switch status.source ?? "" {
         case "founding":
             return "Founding Runner — free through \(date ?? "2027"). Thank you for being here early."
         case "lifetime":
