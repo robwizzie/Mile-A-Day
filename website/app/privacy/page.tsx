@@ -24,7 +24,7 @@ export const metadata: Metadata = {
 
 export default function PrivacyPage() {
 	return (
-		<LegalPage title="PRIVACY POLICY" lastUpdated="October 10, 2026">
+		<LegalPage title="PRIVACY POLICY" lastUpdated="October 15, 2026">
 			<Section heading="Overview">
 				<p>
 					Mile A Day (&ldquo;we,&rdquo; &ldquo;us,&rdquo; or &ldquo;the app&rdquo;) is a fitness app that helps you
@@ -55,6 +55,13 @@ export default function PrivacyPage() {
 					join, and related activity needed to operate the social features of the app.
 				</p>
 				<p>
+					<span className="font-semibold text-[#f5f5f5]">Purchase information.</span> If you buy Mile A Day+ or a gift,
+					Apple sends us a signed record of the transaction: the product, purchase and expiry dates, transaction
+					identifiers, whether it is a free trial or shared through Family Sharing, renewal status, and whether it was
+					refunded. We link this to your account to turn Mile A Day+ on and off and to manage gift codes. We never
+					receive your payment card or billing details; Apple handles payment.
+				</p>
+				<p>
 					<span className="font-semibold text-[#f5f5f5]">Website sign-up lists.</span> If you join a list on our
 					website (like the Android waitlist or &ldquo;I&apos;d buy one&rdquo; for the Mile A Day desk box), we keep
 					the email address and any name or answers you give us, and use them only to contact you about that product.
@@ -72,6 +79,7 @@ export default function PrivacyPage() {
 					<li>To calculate and display your daily mile progress, streaks, and personal records.</li>
 					<li>To power friends, leaderboards, and competitions.</li>
 					<li>To send notifications you have enabled, such as streak reminders.</li>
+					<li>To provide Mile A Day+ when you have it, including gifts and Family Sharing.</li>
 					<li>To maintain, troubleshoot, and improve the app.</li>
 				</ul>
 			</Section>
