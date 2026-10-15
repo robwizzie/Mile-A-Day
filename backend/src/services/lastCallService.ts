@@ -139,6 +139,13 @@ export function lastCallCopy(
 }
 
 /**
+ * Off until the app version with Monthly Flames is on the App Store: people
+ * on the build before it have never seen a Monthly Flame, so naming one in
+ * their last call would only confuse them. Flip to true with that release.
+ */
+const NAME_MONTHLY_FLAME_IN_LAST_CALL = false;
+
+/**
  * Fun-dashboard users (the ones who see Flamey) whose month is still perfect
  * from the 1st — at least two days in, so it's a run worth naming — get the
  * Monthly Flame named in their last call. Never throws: a failed read just
@@ -187,7 +194,10 @@ export async function sendPendingLastCalls(
       if (streak <= 0) continue;
       if (await isUserInQuietHours(c.user_id)) continue;
       await sendPush(c.user_id, {
-        ...lastCallCopy(streak, await perfectMonthAtStake(c.user_id)),
+        ...lastCallCopy(
+          streak,
+          NAME_MONTHLY_FLAME_IN_LAST_CALL ? await perfectMonthAtStake(c.user_id) : null,
+        ),
         type: "streak_last_call",
         // Strings only: shipped inboxes decode `data` as [String: String].
         data: {

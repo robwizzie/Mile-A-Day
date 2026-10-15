@@ -52,7 +52,9 @@ enum PlusPerk: CaseIterable, Identifiable {
 
 /// The Mile A Day+ paywall. Skippable everywhere, prices from the App Store
 /// (never hard-coded), and the renewal terms spelled out beside the button —
-/// the disclosures App Review checks for (3.1.2).
+/// the disclosures App Review checks for (3.1.2). The button, its terms and
+/// Restore / Terms / Privacy ride a bar pinned to the bottom, so they're on
+/// screen at every scroll position and every iPhone size.
 struct PlusPaywallView: View {
     enum Context {
         case onboarding, settings, flamey, streakTokens
@@ -79,41 +81,30 @@ struct PlusPaywallView: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            LinearGradient(
-                colors: [Color(red: 0.14, green: 0.06, blue: 0.10), Color(red: 0.05, green: 0.03, blue: 0.05)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            background
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: MADTheme.Spacing.lg) {
                     header
-                        .padding(.top, MADTheme.Spacing.xl)
-                    perks
+                        .padding(.top, MADTheme.Spacing.lg)
                     if store.isPlus {
                         alreadyPlus
                     } else {
-                        plans
-                        purchaseButton
-                        finePrint
-                    }
-                    footerLinks
-                    if context == .onboarding && !store.isPlus {
-                        Button {
-                            MADHaptics.tap()
-                            finish(purchased: false)
-                        } label: {
-                            Text("Not now")
-                                .madFont(size: 16, weight: .semibold, design: .rounded, maxScale: 1.4)
-                                .foregroundColor(.white.opacity(0.6))
-                                .frame(maxWidth: .infinity, minHeight: 44)
+                        if context == .flamey {
+                            extras
+                            tokens
+                        } else {
+                            tokens
+                            extras
                         }
-                        .buttonStyle(.plain)
+                        plans
                     }
                 }
                 .padding(.horizontal, MADTheme.Spacing.screenGutter)
-                .padding(.bottom, MADTheme.Spacing.xl)
+                .padding(.bottom, MADTheme.Spacing.lg)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !store.isPlus { purchaseBar }
             }
             .madTypeCap(.madCardCap)
 
@@ -152,86 +143,123 @@ struct PlusPaywallView: View {
         }
     }
 
+    private var background: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.16, green: 0.06, blue: 0.11), Color(red: 0.05, green: 0.03, blue: 0.06)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            RadialGradient(colors: [Color.orange.opacity(0.22), .clear], center: .top,
+                           startRadius: 10, endRadius: 360)
+        }
+        .ignoresSafeArea()
+    }
+
     // MARK: Header
 
     private var header: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(colors: [.orange, MADTheme.Colors.madRed],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 84, height: 84)
-                    .shadow(color: MADTheme.Colors.madRed.opacity(0.5), radius: 18)
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 40, weight: .bold))
-                    .foregroundColor(.white)
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(Color.white, Color.orange)
-                    .offset(x: 30, y: -30)
-            }
-            .accessibilityHidden(true)
+            PlusLookShowcase(size: 120)
 
             Text("Mile A Day+")
-                .madFont(size: 32, weight: .black, design: .rounded, maxScale: 1.4)
-                .foregroundColor(.white)
+                .madFont(size: 34, weight: .black, design: .rounded, maxScale: 1.4)
+                .foregroundStyle(LinearGradient(colors: [Color(red: 1.0, green: 0.82, blue: 0.45), .orange, MADTheme.Colors.madRed],
+                                                startPoint: .leading, endPoint: .trailing))
                 .accessibilityAddTraits(.isHeader)
             Text(headline)
                 .madFont(size: 16, weight: .medium, design: .rounded)
-                .foregroundColor(.white.opacity(0.7))
+                .foregroundColor(.white.opacity(0.75))
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private var headline: String {
         switch context {
-        case .streakTokens: return "Protect your streak sooner."
-        case .flamey: return "Give Flamey something new to wear."
-        case .onboarding, .settings: return "Everything you love about Mile A Day stays free. Plus is a little extra."
+        case .streakTokens: return "Earn your streak tokens in about half the time."
+        case .flamey: return "Dress Flamey in looks only Plus members have."
+        case .onboarding: return "Your daily mile is free, forever. Plus makes protecting your streak easier and Flamey a lot more fun."
+        case .settings: return "Everything you love about Mile A Day stays free. Plus is a little extra."
         }
     }
 
-    private var perks: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            ForEach(PlusPerk.allCases) { perk in
-                HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
-                    Image(systemName: perk.icon)
-                        .madFont(size: 16, weight: .bold, maxScale: 1.3)
-                        .foregroundColor(perk.tint)
-                        .frame(width: 36, height: 36)
-                        .background(Circle().fill(perk.tint.opacity(0.15)))
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(perk.title)
-                            .madFont(size: 16, weight: .bold, design: .rounded)
-                            .foregroundColor(.white)
-                        Text(perk.detail)
-                            .madFont(size: 14, weight: .regular, design: .rounded)
-                            .foregroundColor(.white.opacity(0.65))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .accessibilityElement(children: .combine)
-            }
+    // MARK: What you get
+
+    private var tokens: some View {
+        PlusTokenComparison()
+            .padding(MADTheme.Spacing.md)
+            .background(card)
+    }
+
+    private var extras: some View {
+        VStack(spacing: 0) {
+            extraRow(PlusPerk.flameyColors)
+            Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 52)
+            extraRow(PlusPerk.family)
+            Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 52)
+            extraRow(PlusPerk.support)
         }
-        .padding(MADTheme.Spacing.md)
-        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.white.opacity(0.05)))
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.vertical, 6)
+        .background(card)
+    }
+
+    private func extraRow(_ perk: PlusPerk) -> some View {
+        HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
+            Image(systemName: perk.icon)
+                .madFont(size: 15, weight: .bold, maxScale: 1.3)
+                .foregroundColor(perk.tint)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(perk.tint.opacity(0.15)))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(perk.title)
+                    .madFont(size: 15, weight: .bold, design: .rounded)
+                    .foregroundColor(.white)
+                Text(perk.detail)
+                    .madFont(size: 13, weight: .regular, design: .rounded)
+                    .foregroundColor(.white.opacity(0.62))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var card: some View {
+        RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .fill(Color.white.opacity(0.055))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+            )
     }
 
     // MARK: Already Plus
 
     private var alreadyPlus: some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            Label("You're on Mile A Day+", systemImage: "checkmark.seal.fill")
-                .madFont(size: 18, weight: .heavy, design: .rounded)
-                .foregroundColor(.green)
-            if let line = PlusStatusCopy.line(for: store.status) {
-                Text(line)
-                    .madFont(size: 14, weight: .medium, design: .rounded)
-                    .foregroundColor(.white.opacity(0.7))
-                    .multilineTextAlignment(.center)
+        VStack(spacing: MADTheme.Spacing.md) {
+            if store.status?.source == "founding" {
+                FoundingRunnerCard()
+            } else {
+                VStack(spacing: 6) {
+                    Label("You're on Mile A Day+", systemImage: "checkmark.seal.fill")
+                        .madFont(size: 18, weight: .heavy, design: .rounded)
+                        .foregroundColor(.green)
+                    if let line = PlusStatusCopy.line(for: store.status) {
+                        Text(line)
+                            .madFont(size: 14, weight: .medium, design: .rounded)
+                            .foregroundColor(.white.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(MADTheme.Spacing.md)
+                .background(card)
             }
+            tokens
             Button {
                 finish(purchased: false)
             } label: {
@@ -242,7 +270,6 @@ struct PlusPaywallView: View {
                     .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(MADTheme.Colors.madRed))
             }
             .buttonStyle(.plain)
-            .padding(.top, MADTheme.Spacing.sm)
         }
     }
 
@@ -271,6 +298,11 @@ struct PlusPaywallView: View {
             .frame(maxWidth: .infinity, minHeight: 120)
         } else {
             VStack(spacing: MADTheme.Spacing.sm) {
+                Text("CHOOSE YOUR PLAN")
+                    .madFont(size: 11, weight: .heavy, design: .rounded, maxScale: 1.3)
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.45))
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 ForEach(PlusProducts.plans, id: \.self) { id in
                     if let product = store.product(id) {
                         planCard(product)
@@ -280,38 +312,49 @@ struct PlusPaywallView: View {
         }
     }
 
+    private var yearlySavings: Int? {
+        guard let yearly = store.product(PlusProducts.yearly),
+              let monthly = store.product(PlusProducts.monthly) else { return nil }
+        return PlusPlanCopy.savingsPercent(yearly: yearly, monthly: monthly)
+    }
+
     private func planCard(_ product: Product) -> some View {
         let isSelected = selected == product.id
+        let savings = product.id == PlusProducts.yearly ? yearlySavings : nil
         return Button {
             MADHaptics.tap()
-            selected = product.id
+            withAnimation(.easeOut(duration: 0.15)) { selected = product.id }
         } label: {
             HStack(spacing: MADTheme.Spacing.md) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .madFont(size: 20, weight: .semibold, maxScale: 1.3)
+                    .madFont(size: 22, weight: .semibold, maxScale: 1.3)
                     .foregroundColor(isSelected ? .orange : .white.opacity(0.35))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(PlusPlanCopy.title(product))
-                            .madFont(size: 17, weight: .heavy, design: .rounded)
-                            .foregroundColor(.white)
-                        if let badge = PlusPlanCopy.badge(product, trialEligible: store.trialEligible) {
-                            Text(badge)
-                                .madFont(size: 11, weight: .black, design: .rounded, maxScale: 1.3)
-                                .foregroundColor(.black)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(Color.orange))
-                                .lineLimit(1)
-                                .fixedSize()
-                        }
+                    // The badge sits on its own line: beside the title it
+                    // crowds the price off a 320pt screen.
+                    if let badge = PlusPlanCopy.badge(product, trialEligible: store.trialEligible, savings: savings) {
+                        Text(badge)
+                            .madFont(size: 10, weight: .black, design: .rounded, maxScale: 1.3)
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(LinearGradient(colors: [Color(red: 1.0, green: 0.82, blue: 0.45), .orange],
+                                                                      startPoint: .leading, endPoint: .trailing)))
+                            .lineLimit(1)
+                            .fixedSize()
                     }
+                    Text(PlusPlanCopy.title(product))
+                        .madFont(size: 17, weight: .heavy, design: .rounded)
+                        .foregroundColor(.white)
+                        .lineLimit(1)
                     Text(PlusPlanCopy.subtitle(product))
                         .madFont(size: 13, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.6))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.85)
                 }
-                Spacer(minLength: 0)
+                Spacer(minLength: 4)
                 Text(PlusPlanCopy.priceLabel(product))
                     .madFont(size: 16, weight: .bold, design: .rounded)
                     .foregroundColor(.white)
@@ -320,19 +363,52 @@ struct PlusPaywallView: View {
             }
             .padding(MADTheme.Spacing.md)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.white.opacity(isSelected ? 0.1 : 0.04))
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(isSelected ? Color.orange.opacity(0.12) : Color.white.opacity(0.04))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .strokeBorder(isSelected ? Color.orange : Color.white.opacity(0.1), lineWidth: isSelected ? 2 : 1)
             )
+            .scaleEffect(isSelected ? 1 : 0.985)
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var selectedProduct: Product? { store.product(selected) }
+
+    // MARK: The pinned purchase bar
+
+    private var purchaseBar: some View {
+        VStack(spacing: 8) {
+            purchaseButton
+            finePrint
+            footerLinks
+            if context == .onboarding {
+                Button {
+                    MADHaptics.tap()
+                    finish(purchased: false)
+                } label: {
+                    Text("Not now")
+                        .madFont(size: 16, weight: .semibold, design: .rounded, maxScale: 1.4)
+                        .foregroundColor(.white.opacity(0.65))
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, MADTheme.Spacing.screenGutter)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
+        .background(
+            LinearGradient(colors: [Color(red: 0.05, green: 0.03, blue: 0.06).opacity(0.0),
+                                    Color(red: 0.05, green: 0.03, blue: 0.06).opacity(0.96),
+                                    Color(red: 0.05, green: 0.03, blue: 0.06)],
+                           startPoint: .top, endPoint: .init(x: 0.5, y: 0.25))
+                .ignoresSafeArea(edges: .bottom)
+        )
+    }
 
     private var purchaseButton: some View {
         Button {
@@ -347,6 +423,8 @@ struct PlusPaywallView: View {
                     Text(selectedProduct.map { PlusPlanCopy.callToAction($0, trialEligible: store.trialEligible) } ?? "Continue")
                         .madFont(size: 18, weight: .heavy, design: .rounded, maxScale: 1.4)
                         .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 56)
@@ -355,6 +433,7 @@ struct PlusPaywallView: View {
                     .fill(LinearGradient(colors: [.orange, MADTheme.Colors.madRed],
                                          startPoint: .leading, endPoint: .trailing))
             )
+            .shadow(color: MADTheme.Colors.madRed.opacity(0.45), radius: 14, y: 6)
         }
         .buttonStyle(.plain)
         .disabled(selectedProduct == nil || store.isBusy)
@@ -365,7 +444,7 @@ struct PlusPaywallView: View {
     private var finePrint: some View {
         if let product = selectedProduct {
             Text(PlusPlanCopy.terms(product, trialEligible: store.trialEligible))
-                .madFont(size: 12, weight: .regular, design: .rounded)
+                .madFont(size: 11, weight: .regular, design: .rounded, maxScale: 1.3)
                 .foregroundColor(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -382,8 +461,10 @@ struct PlusPaywallView: View {
             Text("·").accessibilityHidden(true)
             Button("Privacy") { legalURL = PlusLinks.privacy }
         }
-        .madFont(size: 13, weight: .semibold, design: .rounded, maxScale: 1.4)
+        .madFont(size: 12, weight: .semibold, design: .rounded, maxScale: 1.3)
         .foregroundColor(.white.opacity(0.6))
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
         .disabled(store.isBusy)
     }
 
@@ -444,13 +525,24 @@ enum PlusPlanCopy {
         }
     }
 
-    static func badge(_ product: Product, trialEligible: Bool) -> String? {
+    static func badge(_ product: Product, trialEligible: Bool, savings: Int? = nil) -> String? {
         if product.id == PlusProducts.yearly {
             if let trial = freeTrial(product), trialEligible { return "\(trial.uppercased()) FREE" }
+            if let savings { return "SAVE \(savings)%" }
             return "BEST VALUE"
         }
-        if product.id == PlusProducts.lifetime { return "ONE TIME" }
+        if product.id == PlusProducts.lifetime { return "PAY ONCE" }
         return nil
+    }
+
+    /// How much cheaper a year is than twelve months, from the App Store's
+    /// own prices; nil when it isn't meaningfully cheaper.
+    static func savingsPercent(yearly: Product, monthly: Product) -> Int? {
+        let twelve = monthly.price * 12
+        guard twelve > 0 else { return nil }
+        let ratio = NSDecimalNumber(decimal: yearly.price / twelve).doubleValue
+        let percent = Int(((1 - ratio) * 100).rounded(.down))
+        return percent >= 5 ? percent : nil
     }
 
     static func subtitle(_ product: Product) -> String {
@@ -459,7 +551,7 @@ enum PlusPlanCopy {
             let perMonth = (product.price / 12).formatted(product.priceFormatStyle)
             return "Just \(perMonth)/month, billed yearly"
         case PlusProducts.monthly: return "Billed monthly"
-        case PlusProducts.lifetime: return "Pay once, Plus forever"
+        case PlusProducts.lifetime: return "Pay once, Plus forever — no subscription"
         default: return product.description
         }
     }
