@@ -118,7 +118,7 @@ struct DashboardView: View {
     /// in a pocket. Held here and presented on the next `.active`.
     @State private var trackerDeferredForForeground = false
 
-    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStyle.modern.rawValue
+    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
     @State private var showDashboardStyleChooser = false
     @State private var showInsights = false
 
@@ -670,7 +670,7 @@ struct DashboardView: View {
     }
 
     private var dashboardStyle: DashboardStyle {
-        DashboardStyle(rawValue: dashboardStyleRaw) ?? .modern
+        DashboardStyle(rawValue: dashboardStyleRaw) ?? DashboardStylePreference.defaultStyle
     }
 
     var body: some View {
@@ -1037,7 +1037,7 @@ struct DashboardView: View {
                         },
                         onDismiss: {
                             DashboardStylePreference.markChosen()
-                            dashboardStyleRaw = DashboardStyle.modern.rawValue
+                            dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
                             withAnimation(.easeInOut(duration: 0.22)) {
                                 showDashboardStyleChooser = false
                             }
@@ -1502,7 +1502,8 @@ struct DashboardView: View {
     }
 
     private func maybePresentDashboardStyleChooser() {
-        guard !DashboardStylePreference.hasChosen,
+        guard DashboardStylePreference.offersChoice,
+              !DashboardStylePreference.hasChosen,
               !showDashboardStyleChooser else { return }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {

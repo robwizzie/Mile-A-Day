@@ -281,10 +281,10 @@ struct DashboardInsightsRow: View {
 struct DashboardCustomizeView: View {
     @AppStorage(DashboardCards.funKey) private var funRaw = ""
     @AppStorage(DashboardCards.modernKey) private var modernRaw = ""
-    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStyle.modern.rawValue
+    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
     @Environment(\.dismiss) private var dismiss
 
-    private var style: DashboardStyle { DashboardStyle(rawValue: dashboardStyleRaw) ?? .modern }
+    private var style: DashboardStyle { DashboardStyle(rawValue: dashboardStyleRaw) ?? DashboardStylePreference.defaultStyle }
     private var raw: String { style == .fun ? funRaw : modernRaw }
     private var onCards: [DashboardCard] { DashboardCards.ordered(in: raw, for: style) }
     private var offCards: [DashboardCard] { DashboardCards.off(in: raw, for: style) }
@@ -297,9 +297,11 @@ struct DashboardCustomizeView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List {
-                    plainRow(header("Look"))
-                    plainRow(lookTiles)
-                    plainRow(footnote("Changes right away, behind this sheet."))
+                    if DashboardStylePreference.offersChoice {
+                        plainRow(header("Look"))
+                        plainRow(lookTiles)
+                        plainRow(footnote("Changes right away, behind this sheet."))
+                    }
 
                     plainRow(header("On your dashboard"))
                     if onCards.isEmpty {
@@ -424,7 +426,7 @@ struct DashboardCustomizeView: View {
 
     private var lookTiles: some View {
         HStack(spacing: 10) {
-            ForEach(DashboardStyle.allCases) { option in
+            ForEach(DashboardStylePreference.offered) { option in
                 styleChoice(option)
             }
         }

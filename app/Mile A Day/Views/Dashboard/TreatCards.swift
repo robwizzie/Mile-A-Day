@@ -5,7 +5,7 @@ import SwiftUI
 /// style, so Insights matches whichever dashboard the user chose.
 struct TreatsCard: View {
     @ObservedObject var healthManager: HealthKitManager
-    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStyle.modern.rawValue
+    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
 
     var body: some View {
         if DashboardStyle(rawValue: dashboardStyleRaw) == .fun {
