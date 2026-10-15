@@ -207,12 +207,25 @@ export function flameyBadgeIds(): string[] {
 }
 
 /**
+ * Users who own every catalog item regardless of medals (the team, for
+ * testing and showing off the closet). Only ownership changes: their medals,
+ * streaks and badge rows are untouched.
+ */
+const FLAMEY_ALL_ACCESS_USER_IDS: ReadonlySet<string> = new Set([
+  "be5dd0ffcd874f39ae8824d462d32300", // dave
+]);
+
+/**
  * Items owned given the user's earned badge ids, in catalog order.
  * `purchase` items are never owned yet — no purchase ledger exists.
  */
 export function ownedFlameyItemIds(
   earnedBadgeIds: Iterable<string>,
+  userId?: string,
 ): Set<string> {
+  if (userId && FLAMEY_ALL_ACCESS_USER_IDS.has(userId)) {
+    return new Set(FLAMEY_CATALOG.keys());
+  }
   const earned = new Set(earnedBadgeIds);
   const owned = new Set<string>();
   for (const item of FLAMEY_CATALOG.values()) {

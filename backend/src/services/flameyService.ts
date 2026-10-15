@@ -90,7 +90,7 @@ export async function flameyBlockFor(
     `SELECT badge_id FROM user_badges WHERE user_id = $1`,
     [targetUserId],
   );
-  const owned = ownedFlameyItemIds(badgeRows.map((r) => r.badge_id));
+  const owned = ownedFlameyItemIds(badgeRows.map((r) => r.badge_id), targetUserId);
   const held = new Set(
     badgeRows
       .map((r) => holidayKeyFromBadgeId(r.badge_id))
@@ -129,7 +129,7 @@ export async function ownedFlameyItems(userId: string): Promise<Set<string>> {
     `SELECT badge_id FROM user_badges WHERE user_id = $1`,
     [userId],
   );
-  return ownedFlameyItemIds(rows.map((r) => r.badge_id));
+  return ownedFlameyItemIds(rows.map((r) => r.badge_id), userId);
 }
 
 export type LookParse =
