@@ -24,7 +24,7 @@ struct UserProfileDetailView: View {
     @State private var rescueStatus: FriendRescueStatus?
     /// The viewer's dashboard style — half of FriendFlameyCard's own
     /// visibility rule, mirrored so the Nudge pill can step aside for it.
-    @AppStorage(DashboardStylePreference.key) private var viewerDashboardStyle = DashboardStyle.modern.rawValue
+    @AppStorage(DashboardStylePreference.key) private var viewerDashboardStyle = DashboardStylePreference.defaultStyle.rawValue
 
     @State private var userStats: UserStats?
     /// Today's miles off the stats payload, for the goal ring. Held beside

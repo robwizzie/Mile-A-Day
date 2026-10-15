@@ -275,7 +275,7 @@ struct FriendFlameyCard: View {
     var badges: [Badge] = []
     var catalogBadges: [Badge] = []
 
-    @AppStorage(DashboardStylePreference.key) private var viewerStyle = DashboardStyle.modern.rawValue
+    @AppStorage(DashboardStylePreference.key) private var viewerStyle = DashboardStylePreference.defaultStyle.rawValue
     @State private var showWardrobe = false
 
     // Poke state machine (see `poke()`).

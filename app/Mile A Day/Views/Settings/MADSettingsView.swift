@@ -24,7 +24,7 @@ struct MADSettingsView: View {
     @Environment(\.appStateManager) var appStateManager
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStyle.modern.rawValue
+    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
     /// Same key the tracking screen's speaker button and the Ghost Race sheet
     /// write, so all three are one switch.
     @AppStorage(GhostCoach.enabledKey) private var coachEnabled = true
@@ -177,28 +177,31 @@ struct MADSettingsView: View {
             }
             .buttonStyle(.plain)
 
-            divider
+            // One style for now, so nothing to pick (`DashboardStylePreference.offered`).
+            if DashboardStylePreference.offersChoice {
+                divider
 
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                MADSettingsRow(
-                    icon: "paintbrush.pointed.fill",
-                    title: "Dashboard Style",
-                    subtitle: selectedStyle.subtitle,
-                    iconColor: .orange
-                )
-                Picker("Dashboard Style", selection: $dashboardStyleRaw) {
-                    ForEach(DashboardStyle.allCases) { style in
-                        Text(style.title).tag(style.rawValue)
+                VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                    MADSettingsRow(
+                        icon: "paintbrush.pointed.fill",
+                        title: "Dashboard Style",
+                        subtitle: selectedStyle.subtitle,
+                        iconColor: .orange
+                    )
+                    Picker("Dashboard Style", selection: $dashboardStyleRaw) {
+                        ForEach(DashboardStylePreference.offered) { style in
+                            Text(style.title).tag(style.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: dashboardStyleRaw) { _, newValue in
+                        DashboardStylePreference.current = DashboardStyle(rawValue: newValue) ?? DashboardStylePreference.defaultStyle
+                        DashboardStylePreference.markChosen()
+                        MADHaptics.tap()
                     }
                 }
-                .pickerStyle(.segmented)
-                .onChange(of: dashboardStyleRaw) { _, newValue in
-                    DashboardStylePreference.current = DashboardStyle(rawValue: newValue) ?? .modern
-                    DashboardStylePreference.markChosen()
-                    MADHaptics.tap()
-                }
+                .padding(.bottom, MADTheme.Spacing.xs)
             }
-            .padding(.bottom, MADTheme.Spacing.xs)
 
             // Flamey lives on the Fun dashboard only, so his Closet does too.
             if selectedStyle == .fun {
@@ -685,7 +688,7 @@ struct MADSettingsView: View {
     }
 
     private var selectedStyle: DashboardStyle {
-        DashboardStyle(rawValue: dashboardStyleRaw) ?? .modern
+        DashboardStyle(rawValue: dashboardStyleRaw) ?? DashboardStylePreference.defaultStyle
     }
 
     private var versionFooter: some View {
