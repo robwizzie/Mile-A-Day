@@ -399,7 +399,7 @@ enum FlameyMonthlyFX {
     static func draw(_ fx: Set<FlameyPaletteEffect>, in ctx: inout GraphicsContext, w: CGFloat, h: CGFloat,
                      unit size: CGFloat) {
         guard !fx.isDisjoint(with: effects) else { return }
-        let hx = FlameyPalette.hex
+        func hx(_ v: UInt32, _ o: Double = 1) -> Color { FlameyPalette.hex(v, o) }
         func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * w, y: y * h) }
         let s = size
 

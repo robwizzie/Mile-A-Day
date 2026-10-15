@@ -152,6 +152,8 @@ struct FlameyMonthlyFlamesView: View {
                     Text("THIS MONTH · \(FlameyItem.monthName(c.month).uppercased())")
                         .madFont(size: 11, weight: .black, design: .rounded, maxScale: 1.3)
                         .tracking(1)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         .foregroundColor(glow)
                     Text(item.displayName)
                         .madFont(size: 24, weight: .black, design: .rounded)

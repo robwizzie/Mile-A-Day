@@ -243,7 +243,7 @@ struct FlameyClosetView: View {
                     .foregroundColor(FlameyClosetStyle.ember)
                     .lineLimit(1)
                     .fixedSize()
-                    .frame(minWidth: 88, minHeight: 44, alignment: .trailing)
+                    .frame(minWidth: 80, minHeight: 44, alignment: .trailing)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
