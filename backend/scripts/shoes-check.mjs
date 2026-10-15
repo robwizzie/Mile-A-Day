@@ -25,6 +25,7 @@
  * Usage (same env as ci-smoke):
  *   DATABASE_URL=... node scripts/shoes-check.mjs
  */
+import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
 import { PostgresService } from "../dist/services/DbService.js";
@@ -475,7 +476,7 @@ async function main() {
   // account deletion — nothing else. A feed/profile/friend query that joined
   // them would be a leak this check exists to stop at review time.
   const dist = path.resolve(
-    path.dirname(new URL(import.meta.url).pathname),
+    path.dirname(fileURLToPath(import.meta.url)),
     "../dist",
   );
   const allowed = new Set([
