@@ -1311,7 +1311,7 @@ struct PostCardView: View {
             action: { onOpenComments?() }
         )
         .disabled(onOpenComments == nil)
-        if isMine || (onShare != nil && post.share_to_feed != false) {
+        if canOpenStudio || (onShare != nil && post.share_to_feed != false) {
             footerIconButton(
                 icon: "paperplane",
                 label: nil,
@@ -1436,23 +1436,57 @@ struct PostCardView: View {
     /// studio (every face, Instagram included); somebody else's still shares
     /// the link, because exporting a friend's route hands their loop to the
     /// open web and route art is own-content only.
+    ///
+    /// A buddy walk you were credited on is your walk too: it opens the studio
+    /// like a solo post, built from YOUR numbers and YOUR route.
     private func sharePostOrRoute() {
-        guard isMine else {
+        guard canOpenStudio else {
             onShare?()
             return
         }
         MADHaptics.tap()
         TelemetryService.record(ShareTelemetry.opened)
-        storyShare = storyContent()
+        let photoURL = sharePhotoURL
+        if let photoURL, FeedImageCache.image(for: photoURL) == nil {
+            // On screen means almost always cached; a slide swiped to before
+            // it finished loading is fetched rather than dropped.
+            Task { @MainActor in
+                let image = await FeedImageLoader.fullImage(for: photoURL)
+                storyShare = storyContent(photo: image)
+            }
+        } else {
+            storyShare = storyContent(photo: photoURL.flatMap { FeedImageCache.image(for: $0) })
+        }
     }
 
-    /// This card, as a story. The photo is taken from the feed's own cache —
-    /// it is the picture already on screen, so it is there — and its absence
-    /// simply drops the Photo face rather than blocking the share.
-    private func storyContent() -> MADStoryContent {
+    /// The author, or a credited participant on a buddy walk.
+    private var canOpenStudio: Bool { isMine || myCoauthorRow != nil }
+
+    /// The picture the share leads with: the slide on screen when it's a
+    /// photo — on a buddy walk, whichever shot the viewer swiped to, exactly
+    /// like a solo post shares the photo it shows — else the sharer's own
+    /// (the map face, the lock).
+    private var sharePhotoURL: URL? {
+        let pages = mediaPages
+        if mediaPage < pages.count {
+            switch pages[mediaPage] {
+            case .photo(let url, _, _, _): return url
+            case .crewPhoto(let url, _, _, _, _, _, _): return url
+            default: break
+            }
+        }
+        if !isMine, let mine = myCoauthorRow { return mine.mediaURL }
+        return post.storyPhotoURL ?? post.photoURL
+    }
+
+    /// This card, as a story. The photo is the one on screen (see
+    /// `sharePhotoURL`); its absence simply drops the Photo face rather than
+    /// blocking the share.
+    private func storyContent(photo: UIImage?) -> MADStoryContent {
+        if !isMine, let mine = myCoauthorRow {
+            return crewStoryContent(mine, photo: photo)
+        }
         let stats = post.stats_snapshot
-        let cachedPhoto = (post.storyPhotoURL ?? post.photoURL)
-            .flatMap { FeedImageCache.image(for: $0) }
         var content = MADStoryContent(
             distanceMiles: stats?.distance,
             paceSecondsPerMile: stats?.pace,
@@ -1463,12 +1497,46 @@ struct PostCardView: View {
             dateText: stats?.date,
             coordinates: post.routeCoordinates ?? [],
             routeColor: ActivityCardView.color(post.workout_type),
-            photo: cachedPhoto,
+            photo: photo,
             avatar: RouteArtAvatar(name: post.displayName,
                                    imageURL: post.profile_image_url)
         )
         // Lets the studio cut the shared route exactly where the server does.
         content.workoutId = post.workout_id
+        return content
+    }
+
+    /// A credited participant's story of somebody else's buddy post: their
+    /// own distance, time and route — the post's stats snapshot is the
+    /// author's, and route art is own-content only — under their own name.
+    private func crewStoryContent(_ mine: PostCoauthorItem, photo: UIImage?) -> MADStoryContent {
+        let pace = mine.distance_miles.flatMap { miles -> Double? in
+            guard miles > 0 else { return nil }
+            return DisplayPace.secondsPerMile(distanceMiles: miles,
+                                              movingSeconds: mine.moving_seconds,
+                                              elapsedSeconds: mine.duration_seconds)
+        }
+        // The snapshot's streak is the author's. Mine is only known for today.
+        let postedToday = RelativeTime.date(from: post.created_at)
+            .map { Calendar.current.isDateInToday($0) } ?? false
+        var content = MADStoryContent(
+            distanceMiles: mine.distance_miles,
+            paceSecondsPerMile: pace,
+            durationSeconds: mine.duration_seconds,
+            streak: postedToday ? UserManager.shared.freshBackendStreak : nil,
+            activityName: Self.activityNoun(post.workout_type, pace: pace),
+            date: nil,
+            dateText: post.stats_snapshot?.date,
+            // Hidden from this post by me ⇒ not on my story either.
+            coordinates: mine.include_route == false ? [] : (mine.routeCoordinates ?? []),
+            routeColor: ActivityCardView.color(post.workout_type),
+            photo: photo,
+            avatar: RouteArtAvatar(name: mine.displayName,
+                                   imageURL: mine.profile_image_url)
+        )
+        // Same trim the server applies to my line (nil on older servers:
+        // the studio then seeds from the route itself).
+        content.workoutId = mine.workout_id
         return content
     }
 

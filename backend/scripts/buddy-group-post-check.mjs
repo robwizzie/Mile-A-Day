@@ -385,6 +385,19 @@ async function main() {
     "drawn",
   );
 
+  // The workout a line resolves from seeds the phone's share-card trim, so
+  // a participant gets it on their OWN row and nobody else ever does.
+  check(
+    "a participant's own row carries their workout id",
+    (await crewEntry(PAL, postId, PAL))?.workout_id ?? null,
+    `grp-w-${PAL}`,
+  );
+  check(
+    "...and nobody else's view of it does",
+    (await crewEntry(OUT, postId, PAL))?.workout_id ?? null,
+    null,
+  );
+
   // ── 5b. A credit row that lost its session still resolves through the
   // POST's. "3 of you" already read p.buddy_session_id; the routes read only
   // the credit row's, so such a card counted everyone and drew one line.
