@@ -348,6 +348,12 @@ class HealthKitManager: ObservableObject {
     }
     @Published var mostMilesWorkouts: [HKWorkout] = []
     @Published var todaysSteps: Int = 0
+    /// The local day `todaysSteps` was READ for (start of that day), or nil
+    /// before the first successful read. The number alone can't say which
+    /// day it belongs to: an app resumed after midnight still holds
+    /// yesterday's count until the next fetch lands, and the widget mirror
+    /// must never stamp that as today's.
+    var todaysStepsDay: Date?
     @Published var dailyStepsData: [Date: Int] = [:]
     @Published var dailyMileGoals: [Date: Bool] = [:]
     /// Streak tokens currently held (0–3), mirrored from the iPhone via

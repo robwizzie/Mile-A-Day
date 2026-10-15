@@ -1265,7 +1265,7 @@ struct DashboardView: View {
     private func syncWidgetData() {
         let state = currentState
         WidgetDataStore.save(todayMiles: state.distance, goal: state.goal)
-        WidgetDataStore.save(todaySteps: healthManager.todaysSteps)
+        WidgetDataStore.save(todaySteps: healthManager.todaysSteps, readOn: healthManager.todaysStepsDay)
         // A day the steps finished: make sure the widgets know (no-op once
         // they do).
         StepGoalDayStore.syncWidgetFlag()

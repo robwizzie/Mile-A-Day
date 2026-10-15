@@ -254,8 +254,9 @@ final class DailyStepsSyncService {
         if let todaySteps {
             // A fresh read of TODAY (only passed on a crossing, so >= 10k) —
             // replaces whatever the property held, yesterday's count included.
+            hk.todaysStepsDay = Calendar.current.startOfDay(for: Date())
             hk.todaysSteps = todaySteps
-            WidgetDataStore.save(todaySteps: todaySteps)
+            WidgetDataStore.save(todaySteps: todaySteps, readOn: Date())
         }
         if StepGoalDayStore.isTodayMet() {
             // Today is safe: retire the lock screen's "streak at risk"

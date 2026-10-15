@@ -90,6 +90,7 @@ struct StreakFlameProvider: TimelineProvider {
         var flameyBadges: Set<String> = []
         var signupDate: Date? = nil
         var flameyChoice: FlameyLookChoice = .basic
+        var flameyServerItems: Set<FlameyItem> = []
         /// The local day a poke woke him on the dashboard.
         var wokenDay: String = ""
     }
@@ -156,6 +157,7 @@ struct StreakFlameProvider: TimelineProvider {
             flameyBadges: WidgetDataStore.loadFlameyBadgeIds(),
             signupDate: WidgetDataStore.loadFlameySignupDate(),
             flameyChoice: WidgetDataStore.loadFlameyChoice(),
+            flameyServerItems: WidgetDataStore.loadFlameyServerItems(),
             wokenDay: WidgetDataStore.loadFlameyWokenDay()
         )
     }
@@ -203,7 +205,9 @@ struct StreakFlameProvider: TimelineProvider {
             // outfit on the coal — he isn't lit.
             look: snapshot.isFun && phase != .coal
                 ? FlameyLook.resolve(owned: FlameyWardrobe.owned(earnedBadgeIds: snapshot.flameyBadges
-                                        .union(FlameyWardrobe.impliedBadgeIds(longestStreak: max(snapshot.longestStreak, snapshot.streak)))),
+                                        .union(FlameyWardrobe.impliedBadgeIds(longestStreak: max(snapshot.longestStreak, snapshot.streak))))
+                                        // Plus items + Monthly Flames: granted with no medal.
+                                        .union(snapshot.flameyServerItems),
                                      choice: snapshot.flameyChoice,
                                      date: date,
                                      mood: mood?.props ?? [],
