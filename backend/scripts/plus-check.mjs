@@ -56,6 +56,7 @@ import {
   DOUBLE_DOWN_TARGET_DAYS,
   STREAK_ASSIST_TARGET_DAYS,
   STREAK_SAVE_TARGET_RUN_DAYS,
+  STREAK_SAVE_WALK_DAY_CREDIT,
   getMeters,
 } from "../dist/services/streakFeatureService.js";
 import { getStreakFeatureRow } from "../dist/services/streakFeatureCore.js";
@@ -511,14 +512,14 @@ try {
 
   // ── 7. Perks ─────────────────────────────────────────────────────────
   const today = new Date().toISOString().slice(0, 10);
-  async function seedRunDays(userId, days) {
-    for (let i = 0; i < days; i++) {
+  async function seedRunDays(userId, days, type = "running", from = 0) {
+    for (let i = from; i < from + days; i++) {
       const d = new Date(Date.now() - i * DAY).toISOString().slice(0, 10);
       await db.query(
         `INSERT INTO workouts (workout_id, user_id, distance, local_date, date, timezone_offset,
                                workout_type, device_end_date, calories, total_duration)
-         VALUES ($1, $2, 1.2, $3::date, $3::date, 0, 'running', $3::date + time '12:00', 100, 600)`,
-        [`pc-w-${userId}-${i}`, userId, d],
+         VALUES ($1, $2, 1.2, $3::date, $3::date, 0, $4, $3::date + time '12:00', 100, 600)`,
+        [`pc-w-${userId}-${i}`, userId, d, type],
       );
     }
     await db.query(
@@ -553,6 +554,26 @@ try {
     [plusMeters.double_down.held, freeMeters.double_down.held],
     [true, false],
   );
+  // Walk days fill the Save at STREAK_SAVE_WALK_DAY_CREDIT (½) of a run day,
+  // retroactively over the meter window: 3 runs + 8 walks = 7 → held (free).
+  await seedRunDays(THIEF, 3, "running");
+  await seedRunDays(THIEF, 8, "walking", 3);
+  const mixed = await getMeters(THIEF, await getStreakFeatureRow(THIEF), today);
+  check(
+    "Save: 3 runs + 8 walks = 7 run days, held",
+    [mixed.streak_save.progress, mixed.streak_save.run_days, mixed.streak_save.walk_days,
+     mixed.streak_save.held, mixed.streak_save.walk_day_credit],
+    [7, 3, 8, true, STREAK_SAVE_WALK_DAY_CREDIT],
+  );
+  check("…walks still fill Double Down whole", mixed.double_down.progress, 11);
+  await seedRunDays(TAKER, 9, "walking");
+  const walker = await getMeters(TAKER, await getStreakFeatureRow(TAKER), today);
+  check(
+    "Save: 9 walk days = 4.5, not held yet (free)",
+    [walker.streak_save.progress, walker.streak_save.held],
+    [4.5, false],
+  );
+
   check(
     "Assist targets",
     [plusMeters.streak_assist.target, freeMeters.streak_assist.target],

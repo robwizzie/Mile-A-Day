@@ -52,7 +52,7 @@ struct TokenStoryOverlay: View {
         case "streak_assist":
             return "Someone spent 20 hard-earned over-goal miles on you. Send them some love."
         default:
-            return "Your Streak Save was spent — \(saveDays) run days earns the next one."
+            return "Your Streak Save was spent — \(saveDays) run days (or \(saveDays * 2) walk days) earns the next one."
         }
     }
 

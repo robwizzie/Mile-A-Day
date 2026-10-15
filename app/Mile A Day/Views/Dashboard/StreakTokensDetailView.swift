@@ -68,12 +68,13 @@ enum StreakTokenKind {
 
     /// `target` is the meter's own (the server's — Mile A Day+ fills all
     /// three meters faster), so the copy never disagrees with the bar under it.
-    func howToEarn(target: Int) -> String {
+    func howToEarn(target: Int, walkCredit: Double = 0.5) -> String {
         switch self {
         case .doubleDown:
             return "Complete your mile on \(target) days — runs or walks both count."
         case .save:
-            return "Run your full mile on \(target) days. Running only — walks don't tick this one."
+            let walkDays = Int((Double(target) / max(walkCredit, 0.1)).rounded(.up))
+            return "Run your full mile on \(target) days — or walk it on \(walkDays). A walk day counts as half a run, so mixing works and running gets you there fastest."
         case .assist:
             return "One every \(target) days — the countdown starts the day you spend one, so a brand-new account is already holding its first. Holding one is half of a save; a friend's spare mile is the other half."
         }
@@ -390,7 +391,7 @@ struct StreakTokensCard: View {
                             progress: payload.streak_save.fraction,
                             caption: payload.streak_save.held
                                 ? "Available"
-                                : "\(Int(payload.streak_save.progress))/\(Int(payload.streak_save.target))"
+                                : payload.streak_save.countCaption
                         )
                         medallionCell(
                             kind: .assist,
@@ -1021,7 +1022,8 @@ struct StreakTokensDetailView: View {
             // it" is the live question and "how do I get another" is the
             // follow-up. The badge + "when it fires" line stay visible while
             // collapsed — they ARE the answer; the prose is behind the tap.
-            tokenHowItWorks(kind: kind, target: Int(meter.target.rounded()))
+            tokenHowItWorks(kind: kind, target: Int(meter.target.rounded()),
+                            walkCredit: meter.walk_day_credit ?? 0.5)
 
             TokenMeterBar(kind: kind, meter: meter, unit: unit)
         }
@@ -1032,7 +1034,7 @@ struct StreakTokensDetailView: View {
     /// The collapsed "How it works" row: usage badge + when it fires, one
     /// tap from the full instruction and how to earn another. Collapsed by
     /// default — three tokens' worth of paragraphs was the wall of text.
-    private func tokenHowItWorks(kind: StreakTokenKind, target: Int) -> some View {
+    private func tokenHowItWorks(kind: StreakTokenKind, target: Int, walkCredit: Double) -> some View {
         let expanded = expandedTokens.contains(kind.raw)
         return VStack(alignment: .leading, spacing: 8) {
             Button {
@@ -1092,7 +1094,7 @@ struct StreakTokensDetailView: View {
                         Text("How to earn")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(kind.tint)
-                        Text(kind.howToEarn(target: target))
+                        Text(kind.howToEarn(target: target, walkCredit: walkCredit))
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1256,6 +1258,12 @@ private struct TokenMeterBar: View {
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .foregroundColor(meter.held ? .green : .secondary)
+            if let breakdown {
+                Text(breakdown)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.secondary.opacity(0.8))
+            }
         }
         .onAppear {
             // Reduce Motion: show the final fill immediately, no shimmer loop.
@@ -1275,6 +1283,15 @@ private struct TokenMeterBar: View {
                 }
             }
         }
+    }
+
+    /// Streak Save: what the progress is made of, once walks are in it.
+    private var breakdown: String? {
+        guard kind == .save, !meter.held, let walks = meter.walk_days, walks > 0 else { return nil }
+        let runs = meter.run_days ?? 0
+        let walkPart = walks == 1 ? "1 walk" : "\(walks) walks"
+        let runPart = runs == 1 ? "1 run" : "\(runs) runs"
+        return "\(runPart) + \(walkPart) (walks count ½)"
     }
 
     private var statusLine: String {

@@ -36,6 +36,7 @@ import {
 import {
   DOUBLE_DOWN_TARGET_DAYS,
   STREAK_SAVE_TARGET_RUN_DAYS,
+  STREAK_SAVE_WALK_DAY_CREDIT,
   STREAK_ASSIST_TARGET_DAYS,
   ENROLL_LOOKBACK_DAYS,
   METER_WINDOW_DAYS,
@@ -392,7 +393,7 @@ async function loadStreakTokenStats(): Promise<StreakTokenStats> {
       )
       SELECT COUNT(*)::int AS enrolled,
              COUNT(*) FILTER (WHERE dd.n >= $1::int)::int AS double_down,
-             COUNT(*) FILTER (WHERE sv.n >= $2::int)::int AS streak_save,
+             COUNT(*) FILTER (WHERE sv.n >= $2::numeric)::int AS streak_save,
              COUNT(*) FILTER (WHERE e.streak_assist_last_used IS NULL
                OR (${TODAY_ET_DATE_SQL} - e.streak_assist_last_used) >= $3::int)::int AS streak_assist
       FROM enrolled e
@@ -406,10 +407,13 @@ async function loadStreakTokenStats(): Promise<StreakTokenStats> {
         ) x
       ) dd ON TRUE
       LEFT JOIN LATERAL (
-        SELECT COUNT(*)::int AS n FROM (
-          SELECT w.local_date FROM workouts w
+        -- Run days count 1, other mile days STREAK_SAVE_WALK_DAY_CREDIT ($6),
+        -- same as getMeters.
+        SELECT COALESCE(SUM(CASE WHEN x.run >= 0.95 THEN 1 ELSE $6::numeric END), 0) AS n FROM (
+          SELECT w.local_date,
+                 COALESCE(SUM(w.distance) FILTER (WHERE w.workout_type = 'running'), 0) AS run
+          FROM workouts w
           WHERE w.user_id = e.user_id AND ${COUNTING_WORKOUT}
-            AND w.workout_type = 'running'
             AND w.local_date > GREATEST(e.floor_date, e.streak_save_last_used)
             AND w.local_date <= ${TODAY_ET_DATE_SQL}
           GROUP BY w.local_date HAVING SUM(w.distance) >= 0.95
@@ -422,6 +426,7 @@ async function loadStreakTokenStats(): Promise<StreakTokenStats> {
         STREAK_ASSIST_TARGET_DAYS,
         ENROLL_LOOKBACK_DAYS,
         METER_WINDOW_DAYS,
+        STREAK_SAVE_WALK_DAY_CREDIT,
       ],
     ),
     db.query<StreakTokenStats["assist_offers"][number]>(`
