@@ -323,7 +323,8 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
          trackSpikes = "track_spikes", rocketBoots = "rocket_boots", lightningKicks = "lightning_kicks",
          wingedSandals = "winged_sandals"
     // costume
-    case ghostSheet = "ghost_sheet", astronautHelmet = "astronaut_helmet", pumpkinSuit = "pumpkin_suit"
+    case ghostSheet = "ghost_sheet", astronautHelmet = "astronaut_helmet", pumpkinSuit = "pumpkin_suit",
+         skeletonSuit = "skeleton_suit"
     // held
     case checkeredFlag = "checkered_flag", stopwatch, pomPoms = "pom_poms", foamFinger = "foam_finger",
          megaphone, confettiCannon = "confetti_cannon"
@@ -370,7 +371,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         case .canvasSneakers, .trainers, .racingFlats, .neonSoles, .trackSpikes, .rocketBoots,
              .lightningKicks, .wingedSandals:
             return .feet
-        case .ghostSheet, .astronautHelmet, .pumpkinSuit:
+        case .ghostSheet, .astronautHelmet, .pumpkinSuit, .skeletonSuit:
             return .costume
         case .checkeredFlag, .stopwatch, .pomPoms, .foamFinger, .megaphone, .confettiCannon:
             return .held
@@ -480,6 +481,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         case .ghostSheet: return .badge("ghost_beat_10")
         case .astronautHelmet: return .badge("miles_2500")
         case .pumpkinSuit: return .badge(HolidayKey.halloween.badgeId)
+        case .skeletonSuit: return .plus
         case .checkeredFlag: return .badge("comp_started_1")
         case .stopwatch: return .badge("comp_started_10")
         case .pomPoms: return .badge("hype_1")
@@ -669,6 +671,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         case .ghostSheet: return 10
         case .astronautHelmet: return 20
         case .pumpkinSuit: return 5
+        case .skeletonSuit: return 15
         // held
         case .pomPoms: return 10
         case .checkeredFlag: return 12
@@ -722,9 +725,12 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         case .ghostSheet: return [.head, .eyes, .chest, .feet, .back, .held]
         // A fishbowl: no hat fits inside, and the collar sits on his chest.
         case .astronautHelmet: return [.head, .chest]
-        // Sat in a pumpkin: its stem is his hat, it swallows his feet, his
-        // middle and the arm a held item needs.
+        // Sat in a jack-o'-lantern: no hat fits its lid, it swallows his
+        // feet, his middle and the arm a held item needs.
         case .pumpkinSuit: return [.head, .chest, .feet, .held]
+        // A bone-print onesie with a skull mask: glasses can't sit on a
+        // skull, nothing goes over the ribs, and the leg bones are his feet.
+        case .skeletonSuit: return [.eyes, .chest, .feet]
         default: return []
         }
     }
@@ -843,6 +849,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         case .ghostSheet: return "Ghost Sheet"
         case .astronautHelmet: return "Astronaut Helmet"
         case .pumpkinSuit: return "Pumpkin Suit"
+        case .skeletonSuit: return "Skeleton Suit"
         case .checkeredFlag: return "Checkered Flag"
         case .stopwatch: return "Stopwatch"
         case .pomPoms: return "Pom-Poms"

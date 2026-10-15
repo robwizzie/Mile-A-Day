@@ -84,7 +84,7 @@ struct PlusSettingsView: View {
                     .foregroundColor(.orange)
             }
             Text(PlusStatusCopy.line(for: store.status)
-                 ?? "Faster streak tokens, Plus-only Flamey colors, and Family Sharing — while everything you love stays free.")
+                 ?? "Faster streak tokens, Plus-only Flamey looks, and Family Sharing — while everything you love stays free.")
                 .madFont(size: 15, weight: .regular, design: .rounded)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

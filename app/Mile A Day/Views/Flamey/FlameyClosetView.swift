@@ -33,6 +33,8 @@ struct FlameyClosetView: View {
     var onDone: () -> Void = {}
     /// "What I've unlocked" — the host shows the first-run walkthrough again.
     var onShowJourney: () -> Void = {}
+    /// Raise Monthly Flames on arrival (the dashboard's month card).
+    var opensMonthly: Bool = false
     /// False only for a snapshot (ImageRenderer can't see into a ScrollView).
     var scrollable: Bool = true
     /// Snapshot of the scrolled state (the harness): compact stage, and the
@@ -106,6 +108,12 @@ struct FlameyClosetView: View {
             }
         }
         .madTypeCap(.madCardCap)
+        .onAppear {
+            // After the cover has finished presenting: a sheet raised in the
+            // same transaction as its host's presentation is dropped.
+            guard opensMonthly, scrollable else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { sheet = .monthly }
+        }
         .onChange(of: model.lineAt) { _, _ in scheduleLineClear() }
         .sheet(item: $model.detail) { item in
             FlameyItemDetailView(item: item, model: model, onClose: { model.detail = nil })

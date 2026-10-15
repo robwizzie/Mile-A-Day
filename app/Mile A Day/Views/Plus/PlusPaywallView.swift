@@ -30,7 +30,7 @@ enum PlusPerk: CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .fasterTokens: return "Streak tokens, faster"
-        case .flameyColors: return "Plus-only Flamey colors"
+        case .flameyColors: return "Plus-only Flamey looks"
         case .family: return "Share with your family"
         case .support: return "Keep Mile A Day independent"
         }
@@ -41,7 +41,7 @@ enum PlusPerk: CaseIterable, Identifiable {
         case .fasterTokens:
             return "Earn a Double Down in 10 days instead of 14, and a Streak Save in 5 runs instead of 7."
         case .flameyColors:
-            return "Dress Flamey in Electric, Rose Gold, Obsidian and Tropic."
+            return "Electric, Rose Gold, Obsidian and Tropic colors, plus the glow-in-the-dark Skeleton Suit."
         case .family:
             return "One subscription covers up to five family members with Family Sharing."
         case .support:

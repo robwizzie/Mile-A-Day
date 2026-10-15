@@ -152,6 +152,7 @@ const ROWS: ReadonlyArray<readonly [string, FlameySlot, string]> = [
   ["ghost_sheet", "costume", "ghost_beat_10"],
   ["astronaut_helmet", "costume", "miles_2500"],
   ["pumpkin_suit", "costume", "holiday_halloween"],
+  ["skeleton_suit", "costume", "plus"],
   // held
   ["checkered_flag", "held", "comp_started_1"],
   ["stopwatch", "held", "comp_started_10"],

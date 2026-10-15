@@ -311,7 +311,14 @@ struct ShareFlameyEnvelope: Equatable {
         case .cosmic:
             return Self(left: -0.58, right: 0.58, top: -0.76, bottom: 0.52)
         case .pumpkinSuit:
-            return Self(left: -0.45, right: 0.46, top: -0.76, bottom: 0.52)
+            // The jack-o'-lantern is wider than he is; his tip is its candle.
+            return Self(left: -0.58, right: 0.58, top: -0.71, bottom: 0.53)
+        case .twinkleLights:
+            // Halo + the tree-top star on a bare tip.
+            return Self(left: -0.58, right: 0.58, top: -0.80, bottom: 0.52)
+        case .jackOLantern:
+            // Embers + the pumpkin stem on a bare tip.
+            return Self(left: -0.52, right: 0.52, top: -0.76, bottom: 0.52)
         case .nightcap, .cowboyHat:
             return Self(left: -0.45, right: 0.46, top: -0.75, bottom: 0.52)
         case .aviatorCap:

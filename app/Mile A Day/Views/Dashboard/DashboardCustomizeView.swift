@@ -53,6 +53,8 @@ struct DashboardCardsBlock: View {
                 HallOfStreaksSection(userId: userManager.currentUser.backendUserId, isSelf: true)
             case .routeMap:
                 RouteMapCard(style: style)
+            case .monthlyFlame:
+                MonthlyFlameCard()
             }
         }
     }

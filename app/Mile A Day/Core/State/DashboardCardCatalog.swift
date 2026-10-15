@@ -17,8 +17,14 @@ enum DashboardCard: String, CaseIterable, Identifiable {
     case weeklyChallenge
     case streakHistory
     case routeMap
+    case monthlyFlame
 
     var id: String { rawValue }
+
+    /// Monthly Flames are Flamey's, and Flamey only lives on Fun.
+    func isAvailable(for style: DashboardStyle) -> Bool {
+        self != .monthlyFlame || style == .fun
+    }
 
     var title: String {
         switch self {
@@ -32,6 +38,7 @@ enum DashboardCard: String, CaseIterable, Identifiable {
         case .weeklyChallenge: return "Weekly challenge"
         case .streakHistory: return "Hall of Streaks"
         case .routeMap: return "Your routes"
+        case .monthlyFlame: return "This month's flame"
         }
     }
 
@@ -57,6 +64,8 @@ enum DashboardCard: String, CaseIterable, Identifiable {
             return "Your best streaks ever, from the profile's Hall of Streaks."
         case .routeMap:
             return "Every walk and run you've mapped, on one map."
+        case .monthlyFlame:
+            return "Your days so far this month — every one of them unlocks Flamey's Monthly Flame."
         }
     }
 
@@ -72,6 +81,7 @@ enum DashboardCard: String, CaseIterable, Identifiable {
         case .weeklyChallenge: return "calendar.badge.checkmark"
         case .streakHistory: return "crown.fill"
         case .routeMap: return "map.fill"
+        case .monthlyFlame: return "calendar"
         }
     }
 
@@ -106,7 +116,7 @@ enum DashboardCards {
         var seen = Set<DashboardCard>()
         return raw.split(separator: ",")
             .compactMap { DashboardCard(rawValue: String($0)) }
-            .filter { seen.insert($0).inserted }
+            .filter { $0.isAvailable(for: style) && seen.insert($0).inserted }
     }
 
     static func raw(_ cards: [DashboardCard]) -> String {
@@ -120,7 +130,7 @@ enum DashboardCards {
     /// The cards NOT on the dashboard, in catalogue order.
     static func off(in raw: String, for style: DashboardStyle) -> [DashboardCard] {
         let on = Set(ordered(in: raw, for: style))
-        return DashboardCard.allCases.filter { !on.contains($0) }
+        return DashboardCard.allCases.filter { !on.contains($0) && $0.isAvailable(for: style) }
     }
 
     /// On ⇒ appended to the end (a new card lands last, where the user can

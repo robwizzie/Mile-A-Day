@@ -116,6 +116,7 @@ extension FlameyItem {
         case .turkeyFeathers: return "🦃"
         case .countdownHat: return "🎉"
         case .ghostSheet, .friendlyGhost: return "👻"
+        case .skeletonSuit: return "💀"
         case .astronautHelmet: return "🧑‍🚀"
         case .polaroid: return "📸"
         default: break

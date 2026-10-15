@@ -160,7 +160,6 @@ enum FlameyArt {
         case .ghostSheet: return 0.14
         case .leprechaunHat, .starHat, .beanie: return 0.13
         case .heartBopper, .santaHat: return 0.10
-        case .pumpkinSuit: return 0.07
         case .cowboyHat, .nightcap: return 0.06
         case .aviatorCap, .directorsBeret, .safariHat: return 0.05
         case .bucketHat, .ballCap, .astronautHelmet: return 0.03
@@ -1350,6 +1349,7 @@ enum FlameyArt {
         switch item {
         case .ghostSheet: ghostSheet(&ctx, a, u, palette: palette)
         case .pumpkinSuit: pumpkin(&ctx, a, u)
+        case .skeletonSuit: skeletonSuit(&ctx, a, u)
         case .astronautHelmet: astronaut(&ctx, a, u)
         default: break
         }
@@ -1414,35 +1414,186 @@ enum FlameyArt {
         ctx.fill(circle(0.40 * u, cy - R * 1.12, 0.028 * u), with: .color(hx(0xE8384F)))
     }
 
-    /// Halloween: sat in a carved pumpkin, with its stem on his tip.
+    /// Halloween: sat inside a carved jack-o'-lantern. His face shows through
+    /// its carved window (so he still blinks and emotes), his tip pokes out
+    /// of the top as its candle, and the stem and a leaf sit off to one side.
+    /// Drawn LAST of the costumes, over his body and face — the window is a
+    /// hole in the pumpkin, never paint over him.
     static func pumpkin(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.84 * u, h = 0.25 * u
-        let top = a.bottom - 0.135 * u
-        let g = placed(ctx, 0, top + h / 2)
-        var shell = Path()
-        shell.move(to: pt(-w * 0.5, 0))
-        shell.addCurve(to: pt(0, -h * 0.42), control1: pt(-w * 0.5, -h * 0.62), control2: pt(-w * 0.16, -h * 0.56))
-        shell.addCurve(to: pt(w * 0.5, 0), control1: pt(w * 0.16, -h * 0.56), control2: pt(w * 0.5, -h * 0.62))
-        shell.addCurve(to: pt(0, h * 0.5), control1: pt(w * 0.5, h * 0.62), control2: pt(w * 0.2, h * 0.6))
-        shell.addCurve(to: pt(-w * 0.5, 0), control1: pt(-w * 0.2, h * 0.6), control2: pt(-w * 0.5, h * 0.62))
-        shell.closeSubpath()
-        g.fill(shell, with: .color(hx(0xF07B1A)))
-        for f in [-0.28, 0, 0.28] as [CGFloat] {
-            var rib = Path()
-            rib.move(to: pt(f * w, -h * 0.45))
-            rib.addQuadCurve(to: pt(f * w, h * 0.5), control: pt(f * w * 1.5, 0))
-            g.stroke(rib, with: .color(hx(0xC75A0D)), style: StrokeStyle(lineWidth: 0.012 * u, lineCap: .round))
-        }
-        var rim = Path()
-        rim.move(to: pt(-w * 0.36, -h * 0.34))
-        for i in 0...8 {
-            rim.addLine(to: pt(-w * 0.36 + CGFloat(i) * w * 0.09, -h * 0.34 + (i % 2 == 1 ? h * 0.1 : 0)))
-        }
-        g.stroke(rim, with: .color(hx(0x8A3A06)), style: StrokeStyle(lineWidth: 0.012 * u, lineJoin: .round))
-        g.fill(ellipse(-w * 0.26, -h * 0.05, w * 0.07, h * 0.16), with: .color(hx(0xFFB15C, 0.45)))
-        g.stroke(shell, with: .color(hx(0x8A3A06)), lineWidth: lw(u) * 0.8)
+        let top = a.bottom - 0.74 * u, bot = a.bottom + 0.035 * u
+        let cy = (top + bot) / 2, h = bot - top
+        let wy = a.faceY + 0.035 * u, wrx = 0.27 * u, wry = 0.215 * u
+        let window = ellipse(0, wy, wrx, wry)
 
-        pumpkinStem(&ctx, a, u)
+        // Candle warmth round the whole pumpkin.
+        var warm = ctx
+        warm.addFilter(.blur(radius: 0.08 * u))
+        warm.fill(ellipse(0, cy, 0.52 * u, h * 0.5), with: .color(hx(0xFF9628, 0.30)))
+
+        // The shell: five lobes, outer ones darker and behind, every crease
+        // inked — everywhere except the carved window.
+        var shell = ctx
+        shell.clip(to: window, options: .inverse)
+        let lobes: [(CGFloat, CGFloat, CGFloat, UInt32, UInt32)] = [
+            (-0.36, 0.17, 0.44, 0xD85A0C, 0x9A3606), (0.36, 0.17, 0.44, 0xD85A0C, 0x9A3606),
+            (-0.20, 0.25, 0.49, 0xF27A1A, 0xB4460A), (0.20, 0.25, 0.49, 0xF27A1A, 0xB4460A),
+            (0, 0.25, 0.50, 0xFF9A2E, 0xC8520C),
+        ]
+        for (x, rx, ry, c1, c2) in lobes {
+            let lobe = ellipse(x * u, cy, rx * u, ry * h)
+            shell.fill(lobe, with: lin([hx(c1), hx(c2)], pt(0, top), pt(0, bot)))
+            shell.stroke(lobe, with: .color(hx(0x6E2404, 0.7)), lineWidth: 0.012 * u)
+        }
+        shell.fill(ellipse(-0.33 * u, cy - 0.12 * u, 0.035 * u, 0.13 * u), with: .color(hx(0xFFECBE, 0.35)))
+        shell.fill(ellipse(-0.12 * u, cy - 0.20 * u, 0.025 * u, 0.07 * u), with: .color(hx(0xFFECBE, 0.22)))
+
+        // Inside the window: candlelight spilling round its edge, and two
+        // carved teeth poking up from its bottom.
+        var inside = ctx
+        inside.clip(to: window)
+        inside.fill(Path(CGRect(x: -wrx, y: wy - wry, width: wrx * 2, height: wry * 2)),
+                    with: .radialGradient(Gradient(colors: [hx(0xFFC850, 0), hx(0xFFAA28, 0.45)]),
+                                          center: pt(0, wy), startRadius: wry * 0.55, endRadius: wrx * 1.05))
+        for tx in [-0.11, 0.11] as [CGFloat] {
+            var tooth = Path()
+            tooth.move(to: pt(tx * u - 0.045 * u, wy + wry + 0.01 * u))
+            tooth.addLine(to: pt(tx * u, wy + wry - 0.07 * u))
+            tooth.addLine(to: pt(tx * u + 0.045 * u, wy + wry + 0.01 * u))
+            tooth.closeSubpath()
+            inside.fill(tooth, with: .color(hx(0xE8670F)))
+        }
+
+        // The carved rim: pale flesh lit from inside, a dark cut outside it.
+        var rim = ctx
+        rim.addFilter(.shadow(color: hx(0xFFD65A, 0.9), radius: 0.05 * u))
+        rim.stroke(window, with: .color(hx(0xFFCF6A)), lineWidth: 0.03 * u)
+        ctx.stroke(ellipse(0, wy, wrx + 0.018 * u, wry + 0.018 * u), with: .color(hx(0x782804, 0.8)),
+                   lineWidth: 0.012 * u)
+
+        // Stem off to one side (his flame is the candle), a curl, a leaf.
+        let stem = placed(ctx, 0.17 * u, top + 0.03 * u, 20)
+        stem.fill(rrect(-0.032 * u, -0.13 * u, 0.064 * u, 0.14 * u, 0.02 * u), with: .color(hx(0x5E7A2A)))
+        stem.fill(rrect(-0.04 * u, -0.145 * u, 0.08 * u, 0.035 * u, 0.015 * u), with: .color(hx(0x7E9C3A)))
+        var curl = Path()
+        curl.move(to: pt(0.14 * u, top + 0.02 * u))
+        curl.addCurve(to: pt(0.02 * u, top + 0.04 * u), control1: pt(0.05 * u, top - 0.06 * u), control2: pt(-0.04 * u, top))
+        ctx.stroke(curl, with: .color(hx(0x4F8F2A)), style: StrokeStyle(lineWidth: 0.016 * u, lineCap: .round))
+        let leafCtx = placed(ctx, 0.30 * u, top + 0.03 * u, 29)
+        var leaf = Path()
+        leaf.move(to: .zero)
+        leaf.addQuadCurve(to: pt(0.15 * u, 0), control: pt(0.07 * u, -0.07 * u))
+        leaf.addQuadCurve(to: .zero, control: pt(0.07 * u, 0.05 * u))
+        leafCtx.fill(leaf, with: .color(hx(0x5FA83A)))
+        var vein = Path()
+        vein.move(to: .zero)
+        vein.addLine(to: pt(0.13 * u, 0))
+        leafCtx.stroke(vein, with: .color(hx(0x3E7A22)), lineWidth: 0.008 * u)
+    }
+
+    /// Mile A Day+: a glow-in-the-dark skeleton onesie. Black from the hood
+    /// line down (his tip stays flame), ribs fanning out from behind a bone
+    /// skull mask, bone legs and feet. His own eyes and smile show through
+    /// the mask's holes, so he still blinks and emotes.
+    static func skeletonSuit(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
+        let bone = hx(0xF2EEDC)
+        let ink = hx(0x2A2830)
+        let boneGlow = GraphicsContext.Filter.shadow(color: hx(0xBEFFC8, 0.55), radius: 0.03 * u)
+
+        // The onesie, inside his outline, below a soft hood line.
+        let hood = a.topY + 0.24 * u
+        var suit = Path()
+        suit.move(to: pt(-0.5 * u, hood + 0.05 * u))
+        suit.addQuadCurve(to: pt(0, hood + 0.01 * u), control: pt(-0.1 * u, hood - 0.03 * u))
+        suit.addQuadCurve(to: pt(0.5 * u, hood + 0.05 * u), control: pt(0.1 * u, hood - 0.03 * u))
+        suit.addLine(to: pt(0.5 * u, a.bottom + 0.05 * u))
+        suit.addLine(to: pt(-0.5 * u, a.bottom + 0.05 * u))
+        suit.closeSubpath()
+        var body = ctx
+        body.clip(to: FlameBuddyOuterShape(wobble: 0).path(in: bodyRect(a, u)))
+        body.fill(suit, with: lin([hx(0x2C2A33), hx(0x141318)], pt(0, hood), pt(0, a.bottom)))
+
+        // Ribs down his flanks and a little pelvis, glowing.
+        var bones = body
+        bones.addFilter(boneGlow)
+        for i in 0..<3 {
+            let y = a.faceY - 0.02 * u + CGFloat(i) * 0.075 * u
+            for sx in [-1.0, 1.0] as [CGFloat] {
+                var rib = Path()
+                rib.move(to: pt(sx * 0.20 * u, y))
+                rib.addQuadCurve(to: pt(sx * 0.40 * u, y + 0.07 * u), control: pt(sx * 0.36 * u, y - 0.01 * u))
+                bones.stroke(rib, with: .color(bone), style: StrokeStyle(lineWidth: 0.024 * u, lineCap: .round))
+            }
+        }
+        for sx in [-1.0, 1.0] as [CGFloat] {
+            let hip = placed(bones, sx * 0.06 * u, a.bottom - 0.045 * u, Double(sx) * 17)
+            hip.fill(ellipse(0, 0, 0.05 * u, 0.032 * u), with: .color(bone))
+        }
+
+        // Leg bones in black sleeves, bone feet.
+        var legs = ctx
+        legs.addFilter(.shadow(color: hx(0xBEFFC8, 0.5), radius: 0.025 * u))
+        for sx in [-1.0, 1.0] as [CGFloat] {
+            let x = sx * legSpread * u
+            legs.fill(rrect(x - 0.05 * u, a.bottom - 0.02 * u, 0.10 * u, max(0.02 * u, a.feet - a.bottom + 0.02 * u), 0.05 * u),
+                      with: .color(hx(0x1A191F)))
+            var shin = Path()
+            shin.move(to: pt(x, a.bottom))
+            shin.addLine(to: pt(x, a.feet - 0.03 * u))
+            legs.stroke(shin, with: .color(bone), style: StrokeStyle(lineWidth: 0.022 * u, lineCap: .round))
+            legs.fill(ellipse(x + sx * 0.02 * u, a.feet - 0.01 * u, 0.075 * u, 0.04 * u), with: .color(hx(0x1A191F)))
+            for dx in [-0.012, 0.012] as [CGFloat] {
+                legs.fill(ellipse(x + dx * u, a.feet - 0.035 * u, 0.016 * u, 0.014 * u), with: .color(bone))
+            }
+            for t in [-0.035, 0, 0.035] as [CGFloat] {
+                legs.fill(ellipse(x + sx * 0.02 * u + t * u, a.feet - 0.005 * u, 0.012 * u, 0.01 * u), with: .color(bone))
+            }
+        }
+
+        // The skull mask, with holes where his eyes and mouth are.
+        var holes = Path()
+        for sx in [-1.0, 1.0] as [CGFloat] {
+            holes.addPath(ellipse(sx * a.eyeX, a.faceY, 0.066 * u, 0.088 * u))
+        }
+        let mouth = ellipse(0, a.faceY + 0.135 * u, 0.105 * u, 0.055 * u)
+        holes.addPath(mouth)
+        let sy = a.faceY + 0.005 * u
+        var skull = Path()
+        skull.move(to: pt(-0.25 * u, sy + 0.02 * u))
+        skull.addCurve(to: pt(0.25 * u, sy + 0.02 * u), control1: pt(-0.27 * u, sy - 0.20 * u), control2: pt(0.27 * u, sy - 0.20 * u))
+        skull.addCurve(to: pt(0.15 * u, sy + 0.13 * u), control1: pt(0.25 * u, sy + 0.09 * u), control2: pt(0.20 * u, sy + 0.12 * u))
+        skull.addLine(to: pt(0.14 * u, sy + 0.20 * u))
+        skull.addQuadCurve(to: pt(-0.14 * u, sy + 0.20 * u), control: pt(0, sy + 0.235 * u))
+        skull.addLine(to: pt(-0.15 * u, sy + 0.13 * u))
+        skull.addCurve(to: pt(-0.25 * u, sy + 0.02 * u), control1: pt(-0.20 * u, sy + 0.12 * u), control2: pt(-0.25 * u, sy + 0.09 * u))
+        skull.closeSubpath()
+        var mask = ctx
+        mask.clip(to: holes, options: .inverse)
+        mask.addFilter(.shadow(color: hx(0xBEFFC8, 0.6), radius: 0.05 * u))
+        mask.fill(skull, with: .color(hx(0xF4F0E0)))
+
+        // Socket rims, the nose, teeth along the top of the mouth and the
+        // jaw's stitch lines.
+        for sx in [-1.0, 1.0] as [CGFloat] {
+            ctx.stroke(ellipse(sx * a.eyeX, a.faceY, 0.066 * u, 0.088 * u), with: .color(ink), lineWidth: 0.016 * u)
+        }
+        var nose = Path()
+        nose.move(to: pt(0, a.faceY + 0.045 * u))
+        nose.addLine(to: pt(-0.022 * u, a.faceY + 0.08 * u))
+        nose.addLine(to: pt(0.022 * u, a.faceY + 0.08 * u))
+        nose.closeSubpath()
+        ctx.fill(nose, with: .color(ink))
+        ctx.stroke(mouth, with: .color(ink), lineWidth: 0.012 * u)
+        var teeth = ctx
+        teeth.clip(to: mouth)
+        for t in [-0.06, -0.02, 0.02, 0.06] as [CGFloat] {
+            teeth.fill(rrect(t * u - 0.017 * u, a.faceY + 0.075 * u, 0.034 * u, 0.035 * u, 0.008 * u), with: .color(hx(0xF4F0E0)))
+        }
+        for t in [-0.075, -0.04, 0.04, 0.075] as [CGFloat] {
+            var stitch = Path()
+            stitch.move(to: pt(t * u, a.faceY + 0.165 * u))
+            stitch.addLine(to: pt(t * u, a.faceY + 0.205 * u))
+            ctx.stroke(stitch, with: .color(ink), lineWidth: 0.008 * u)
+        }
     }
 
     /// The pumpkin's stem and curl on his tip (the Pumpkin Suit, and the

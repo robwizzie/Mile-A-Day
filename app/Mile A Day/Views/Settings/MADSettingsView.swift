@@ -540,7 +540,7 @@ struct MADSettingsView: View {
 
     private var plusSubtitle: String {
         guard let status = plusStore.status, status.is_plus else {
-            return "Faster streak tokens, Flamey colors, gifting"
+            return "Faster streak tokens, Flamey looks, gifting"
         }
         if status.isFoundingRunner && status.source == "founding" { return "Founding Runner — Plus is on us" }
         return "Active — manage, gift or restore"
