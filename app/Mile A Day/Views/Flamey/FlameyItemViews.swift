@@ -565,7 +565,7 @@ struct FlameyItemDetailView: View {
     private var preview: some View {
         let size: CGFloat = 104
         let look = model.preview(with: item)
-        let glow = FlameyPalette.palette(for: look.color)?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
+        let glow = look.figurePalette?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
         return ZStack(alignment: .bottom) {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(RadialGradient(colors: [glow.opacity(0.26), Color.white.opacity(0.03)],

@@ -600,7 +600,7 @@ extension FlameyDressedBody where Skin == EmptyView, Prop == EmptyView {
                        asleep: Bool = false) -> FlameBuddyFigure {
         FlameBuddyFigure(health: health, flickerPhase: flickerPhase, blink: blink, size: size,
                          showsFace: !look.wears(.ghostSheet), vigor: vigor, asleep: asleep, grounded: true,
-                         palette: health == .dead ? nil : FlameyPalette.palette(for: look.color),
+                         palette: health == .dead ? nil : look.figurePalette,
                          lift: look.bodyLift * scale, legLength: look.standLift)
     }
 }

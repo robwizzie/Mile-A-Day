@@ -671,3 +671,29 @@ enum FlameyMonthlyFX {
         return p
     }
 }
+
+// MARK: - Costume skins
+
+extension FlameyPalette {
+    /// The Skeleton Suit is a whole-body onesie: his arms and legs are its
+    /// black sleeves (never his flame colour, in any pose or animation), the
+    /// hood under the suit art is the same black, and he glows bone-green.
+    static let skeletonSuit = FlameyPalette(
+        outer: [hex(0x3A3646), hex(0x2A2734), hex(0x1A1822)],
+        inner: [hex(0x2A2734), hex(0x1A1822)],
+        glow: hex(0xBEFFC8),
+        eye: hex(0x2B2734),
+        rim: hex(0xC8BEFF, 0.35))
+}
+
+extension FlameyLook {
+    /// The palette his FIGURE is drawn in — body, arms, legs and glow: his
+    /// colour, unless a costume skins all of him. Every surface that builds
+    /// a `FlameBuddyFigure` (or a glow) from a look reads this, never
+    /// `FlameyPalette.palette(for: color)`, so a suit can't leave flame-
+    /// coloured limbs poking out of it.
+    var figurePalette: FlameyPalette? {
+        if wears(.skeletonSuit) { return FlameyPalette.skeletonSuit }
+        return FlameyPalette.palette(for: color)
+    }
+}

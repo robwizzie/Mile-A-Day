@@ -49,7 +49,7 @@ struct FlameyUnlockView: View {
     }
 
     private var glow: Color {
-        FlameyPalette.palette(for: look.color)?.glow ?? Color(red: 1, green: 0.6, blue: 0.25)
+        look.figurePalette?.glow ?? Color(red: 1, green: 0.6, blue: 0.25)
     }
 
     var body: some View {

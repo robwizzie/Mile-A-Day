@@ -207,7 +207,7 @@ struct FlameyClosetView: View {
     }
 
     private var stageGlow: Color {
-        FlameyPalette.palette(for: model.stageLook.color)?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
+        model.stageLook.figurePalette?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
     }
 
     private var topBar: some View {

@@ -100,7 +100,7 @@ struct InjuredFlameBuddyView: View {
             showsFace: true,
             vigor: pausedVigor,
             grounded: grounded,
-            palette: dressed.flatMap { FlameyPalette.palette(for: $0.color) },
+            palette: dressed.flatMap { $0.figurePalette },
             lift: (dressed?.bodyLift ?? 0) * scale,
             legLength: dressed?.standLift ?? 0
         )

@@ -173,6 +173,7 @@ When in doubt: cite the guideline number, propose the compliant path, and ask be
 - Throttle Flyover overlay invalidation by time; odometer base recomputed from the leg index.
 - Every dashboard card below the day's cards is switchable, stored per style (`dashboardCardsFunV1`/`ModernV1`); mount `DashboardCustomizeRow` after the style `switch`.
 - Flamey: one look via `FlameyLook.resolve(...)` (owning never dresses him); six shared files stay BYTE-IDENTICAL in `Views/Components/` and `MileADayWidgets/` (cp + cmp); no control in the hero's top-left; the Closet edits a draft (`saveDraft`); bubble anchors at `FlameyArt.crest`.
+- Build a figure's palette (body, arms, legs, glow) from `FlameyLook.figurePalette`, never `FlameyPalette.palette(for: look.color)`: a whole-body costume (`skeletonSuit`) skins his limbs.
 - Workouts rows draw their own map (`WorkoutRoutePreviewCard`); the host list reads `WorkoutRouteCache` and passes traces in.
 - Pause gaps are cut at DRAW time by `RouteGaps` (`resume()` still nils the anchor); gaps add zero length; clock via `collapsingGaps`.
 - `RouteArtView` is the default route face; routeless ⇒ `IndoorWorkoutCard`, never labelled "indoor" (`RoutelessCardStyle.resolve`); feed motion transform-only, no `TimelineView` in cards.
