@@ -94,7 +94,7 @@ export async function flameyBlockFor(
     ),
     isPlusActive(targetUserId),
   ]);
-  const owned = ownedFlameyItemIds(badgeRows.map((r) => r.badge_id), plus);
+  const owned = ownedFlameyItemIds(badgeRows.map((r) => r.badge_id), targetUserId, plus);
   const held = new Set(
     badgeRows
       .map((r) => holidayKeyFromBadgeId(r.badge_id))
@@ -136,7 +136,7 @@ export async function ownedFlameyItems(userId: string): Promise<Set<string>> {
     ),
     isPlusActive(userId),
   ]);
-  return ownedFlameyItemIds(rows.map((r) => r.badge_id), plus);
+  return ownedFlameyItemIds(rows.map((r) => r.badge_id), userId, plus);
 }
 
 export type LookParse =

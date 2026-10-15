@@ -26,7 +26,15 @@ extension HealthKitManager {
             }
         }.sorted(by: >)
 
-        guard !daysWithQualifyingWorkouts.isEmpty else {
+        // Days that count without a workout: token-covered days and, on the
+        // phone, 10k-step days ("1 mile OR 10,000 steps"). The step store is
+        // iPhone-only; the Watch shows the phone's streak.
+        var extraDays = StreakCoverageStore.coveredDays
+        #if !os(watchOS)
+        extraDays.formUnion(StepGoalDayStore.goalDays)
+        #endif
+
+        guard !daysWithQualifyingWorkouts.isEmpty || !extraDays.isEmpty else {
             return 0
         }
 
@@ -54,10 +62,10 @@ extension HealthKitManager {
 
         // Calculate current streak. Set lookup keeps the walk-back O(1) per
         // day — Array.contains made a 365-day streak do 365 linear scans.
-        // Union in token-covered days (Streak Save / Double Down / Assist) so
-        // a rescued day doesn't break the walk; empty store = identical.
+        // Union in token-covered and step-goal days (above) so a day without
+        // a workout doesn't break the walk; empty stores = identical.
         let qualifyingDaySet = Set(daysWithQualifyingWorkouts)
-            .union(StreakCoverageStore.coveredDays)
+            .union(extraDays)
         var currentStreak = 0
         var checkDate = today
 

@@ -46,7 +46,9 @@ const EARLY = "lc-early"; // local 21:00 → not yet
 const NO_DEVICE = "lc-nodevice"; // nowhere to send
 const NEARLY = "lc-nearly"; // 0.96 of the goal walked → counts as done
 const STALE = "lc-stale"; // stored streak 9 but nothing walked for a week → refresh says 0
-const ALL = [DUE, ONE, DONE, NOSTREAK, OPTED_OUT, SAME_HOUR, EARLY, NO_DEVICE, NEARLY, STALE];
+const STEPPED = "lc-stepped"; // no mile, but exactly 10,000 steps today → done
+const SHORT_STEPS = "lc-shortsteps"; // no mile and 9,999 steps → still due
+const ALL = [DUE, ONE, DONE, NOSTREAK, OPTED_OUT, SAME_HOUR, EARLY, NO_DEVICE, NEARLY, STALE, STEPPED, SHORT_STEPS];
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -62,6 +64,7 @@ async function cleanup() {
   await db.query(`DELETE FROM notification_log WHERE user_id = ANY($1)`, [ALL]);
   await db.query(`DELETE FROM device_tokens WHERE user_id = ANY($1)`, [ALL]);
   await db.query(`DELETE FROM workouts WHERE user_id = ANY($1)`, [ALL]);
+  await db.query(`DELETE FROM daily_steps WHERE user_id = ANY($1)`, [ALL]);
   await db.query(`DELETE FROM notification_settings WHERE user_id = ANY($1)`, [ALL]);
   await db.query(`DELETE FROM users WHERE user_id = ANY($1)`, [ALL]);
 }
@@ -88,6 +91,8 @@ async function seed() {
     [NO_DEVICE, 7, TEN_PM, true, 18, false],
     [NEARLY, 7, TEN_PM, true, 18, true],
     [STALE, 9, TEN_PM, true, 18, true],
+    [STEPPED, 6, TEN_PM, true, 18, true],
+    [SHORT_STEPS, 6, TEN_PM, true, 18, true],
   ];
   for (const [id, streak, tz, remindersOn, hour, device] of users) {
     await db.query(
@@ -108,7 +113,7 @@ async function seed() {
     }
   }
   // Yesterday's mile keeps the refreshed streak alive for everyone but STALE.
-  for (const id of [ONE, DONE, OPTED_OUT, SAME_HOUR, NO_DEVICE, NEARLY]) {
+  for (const id of [ONE, DONE, OPTED_OUT, SAME_HOUR, NO_DEVICE, NEARLY, STEPPED, SHORT_STEPS]) {
     await walk(id, localDate(TEN_PM, 1), 1.0);
   }
   // DUE's stored 12 has to be TRUE — the send path refreshes it and uses the
@@ -118,6 +123,13 @@ async function seed() {
   await walk(DONE, TODAY_LOCAL, 1.2);
   await walk(NEARLY, TODAY_LOCAL, 0.96); // >= 0.95 × goal is a done day
   await walk(STALE, localDate(TEN_PM, 8), 1.0); // a week ago — the stored 9 is a lie
+  const steps = (id, n) =>
+    db.query(
+      `INSERT INTO daily_steps (user_id, local_date, steps, timezone_offset) VALUES ($1, $2::date, $3, $4)`,
+      [id, TODAY_LOCAL, n, TEN_PM],
+    );
+  await steps(STEPPED, 10000); // 10k steps is a done day, mile or not
+  await steps(SHORT_STEPS, 9999);
 }
 
 try {
@@ -125,9 +137,11 @@ try {
   await seed();
 
   const ids = (await lastCallCandidates(AT)).map((c) => c.user_id).sort();
-  check("candidates at local 10 PM with a streak and no mile", ids.join(","), [DUE, ONE, STALE].sort().join(","));
+  check("candidates at local 10 PM with a streak and no mile", ids.join(","), [DUE, ONE, STALE, SHORT_STEPS].sort().join(","));
   check("…DONE walked today", ids.includes(DONE), false);
   check("…NEARLY's 0.96 counts as done (tolerance)", ids.includes(NEARLY), false);
+  check("…STEPPED's 10,000 steps count as done", ids.includes(STEPPED), false);
+  check("…SHORT_STEPS's 9,999 don't", ids.includes(SHORT_STEPS), true);
   check("…NOSTREAK has nothing to lose", ids.includes(NOSTREAK), false);
   check("…OPTED_OUT turned reminders off", ids.includes(OPTED_OUT), false);
   check("…SAME_HOUR's reminder already fires at 22", ids.includes(SAME_HOUR), false);
@@ -144,9 +158,9 @@ try {
   check("…and the 9 PM cohort's turn has come", later.includes(EARLY), true);
 
   check("copy for a 12-day streak", lastCallCopy(12).title, "Last call: 12-day streak on the line");
-  check("copy for a 1-day streak", lastCallCopy(1).body, "Two hours to midnight. One mile makes it a 2-day streak.");
+  check("copy for a 1-day streak", lastCallCopy(1).body, "Two hours to midnight. A mile or 10,000 steps makes it a 2-day streak.");
 
-  // The send path: DUE and ONE get an inbox row, STALE's refreshed streak
+  // The send path: DUE, ONE and SHORT_STEPS get an inbox row, STALE's refreshed streak
   // is 0 so it gets nothing, nobody else is touched.
   const sent = await sendPendingLastCalls(AT);
   await new Promise((r) => setTimeout(r, 300)); // inbox writes are fire-and-forget
@@ -157,7 +171,7 @@ try {
         [id],
       )
     );
-  check("sent count", sent, 2);
+  check("sent count", sent, 3);
   check("DUE has one last call in the inbox", (await inbox(DUE)).length, 1);
   check("…with the streak in the title", (await inbox(DUE))[0].title, "Last call: 12-day streak on the line");
   check("…and string-valued data", typeof (await inbox(DUE))[0].data.streak, "string");
@@ -165,6 +179,7 @@ try {
   check("STALE (stored 9, refreshed 0) got nothing", (await inbox(STALE)).length, 0);
   check("…and its stored streak was corrected", (await db.query(`SELECT current_streak FROM users WHERE user_id = $1`, [STALE]))[0].current_streak, 0);
   check("DONE got nothing", (await inbox(DONE)).length, 0);
+  check("STEPPED got nothing", (await inbox(STEPPED)).length, 0);
   check("EARLY got nothing yet", (await inbox(EARLY)).length, 0);
 } finally {
   await cleanup();

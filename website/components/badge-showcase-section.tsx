@@ -15,10 +15,10 @@ const rarityStyles: Record<Rarity, { from: string; to: string; accent: string; l
   common: { from: "#73A6F2", to: "#4D80CC", accent: "#0A84FF", label: "COMMON" },
 }
 
-const TOTAL_MEDALS = 63
+const TOTAL_MEDALS = 104
 
 // Real medals from the app's catalog — names, requirements, and rarities
-// match backend/scripts/badges-seed.sql. Representative subset of the 63.
+// match backend/scripts/badges-seed.sql. Representative subset; the app's Medals screen counts 104 (79 of 104 on a real shelf, Oct 2026).
 const medals: {
   name: string
   req: string
@@ -85,7 +85,7 @@ export function BadgeShowcaseSection() {
             COLLECT EVERY MEDAL
           </h2>
           <p className="reveal reveal-delay-2 mt-4 text-base leading-relaxed text-[#a0a0a0]">
-            63 medals to earn. From your first mile to your thousandth day, there&apos;s always something to chase.
+            100+ medals to earn. From your first mile to your thousandth day, there&apos;s always something to chase.
           </p>
         </div>
 
@@ -134,7 +134,7 @@ export function BadgeShowcaseSection() {
                 return (
                   <div
                     key={rarity}
-                    className="flex items-center gap-1.5 rounded-full px-3 py-1"
+                    className="flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1"
                     style={{ background: `${style.accent}26` }}
                   >
                     <span className="h-2 w-2 rounded-full" style={{ background: style.accent }} />
@@ -148,7 +148,7 @@ export function BadgeShowcaseSection() {
           </div>
         </div>
 
-        {/* Filter chips — same set as the app's Medals screen */}
+        {/* Filter chips — the first few of the app's Medals screen filters */}
         <div className="reveal reveal-delay-3 mb-8 flex flex-wrap justify-center gap-2">
           {filters.map((f) => {
             const selected = filter === f.id
@@ -195,26 +195,40 @@ export function BadgeShowcaseSection() {
                       style={{ background: `radial-gradient(circle, ${style.accent}5C 18%, transparent 65%)` }}
                     />
                   )}
+                  {/* Struck medal, after MedalView: lit metal rim, recessed
+                      face, raised inner ring, embossed icon. */}
                   <div
-                    className="relative flex h-[68px] w-[68px] items-center justify-center rounded-full"
+                    className="relative h-[72px] w-[72px] rounded-full"
                     style={{
                       background: medal.unlocked
-                        ? `linear-gradient(135deg, ${style.from}, ${style.to})`
-                        : "linear-gradient(135deg, #404040, #262626)",
-                      border: medal.unlocked
-                        ? "2px solid rgba(255,255,255,0.5)"
-                        : "2px solid rgba(255,255,255,0.08)",
-                      boxShadow: medal.unlocked ? `0 6px 12px ${style.accent}66` : "none",
+                        ? `radial-gradient(circle at 30% 22%, rgba(255,255,255,0.6), transparent 42%), linear-gradient(145deg, ${style.from}, ${style.to})`
+                        : "linear-gradient(145deg, #4a4a4a, #222)",
+                      boxShadow: medal.unlocked
+                        ? `inset 0 2px 3px rgba(255,255,255,0.65), inset 0 -3px 5px rgba(0,0,0,0.4), 0 8px 16px ${style.accent}59`
+                        : "inset 0 2px 3px rgba(255,255,255,0.08), inset 0 -3px 5px rgba(0,0,0,0.5)",
                     }}
                   >
-                    {medal.unlocked && (
-                      <div className="pointer-events-none absolute inset-[6px] rounded-full border border-white/20" />
-                    )}
-                    <Icon
-                      className={medal.unlocked ? "h-7 w-7 text-white drop-shadow-md" : "h-7 w-7 text-white/15"}
-                    />
+                    <div
+                      className="absolute inset-[7px] flex items-center justify-center rounded-full"
+                      style={{
+                        background: medal.unlocked
+                          ? `linear-gradient(325deg, ${style.from}, ${style.to})`
+                          : "linear-gradient(325deg, #3a3a3a, #1c1c1c)",
+                        boxShadow: "inset 0 3px 6px rgba(0,0,0,0.38), inset 0 -1px 2px rgba(255,255,255,0.3)",
+                      }}
+                    >
+                      <div
+                        className="pointer-events-none absolute inset-[4px] rounded-full"
+                        style={{ border: `1.5px solid ${medal.unlocked ? "rgba(255,255,255,0.38)" : "rgba(255,255,255,0.06)"}` }}
+                      />
+                      <Icon
+                        className={medal.unlocked ? "h-6 w-6 text-white" : "h-6 w-6 text-white/15"}
+                        style={medal.unlocked ? { filter: "drop-shadow(0 1px 0 rgba(255,255,255,0.45)) drop-shadow(0 -1px 1px rgba(0,0,0,0.35))" } : undefined}
+                        strokeWidth={2.4}
+                      />
+                    </div>
                     {!medal.unlocked && (
-                      <Lock className="absolute right-0.5 top-0.5 h-3.5 w-3.5 text-white/40" />
+                      <Lock className="absolute right-0 top-0 h-3.5 w-3.5 text-white/40" />
                     )}
                   </div>
                 </div>
@@ -250,7 +264,7 @@ export function BadgeShowcaseSection() {
         </div>
 
         <p className="reveal mt-10 text-center text-sm text-[#666]">
-          …and {TOTAL_MEDALS - medals.length} more to discover, including daily challenge and special medals.
+          …and {TOTAL_MEDALS - medals.length} more to discover, including Buddy Walk, Ghost Race, holiday and challenge medals.
         </p>
       </div>
     </section>

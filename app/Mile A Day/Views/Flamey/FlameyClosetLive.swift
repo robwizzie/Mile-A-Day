@@ -125,7 +125,10 @@ enum FlameyClosetSync {
 
     private static func storeServerOwned(_ ids: [String]?) {
         guard let userId, let ids else { return }
+        guard UserDefaults.standard.stringArray(forKey: serverOwnedPrefix + userId) != ids else { return }
         UserDefaults.standard.set(ids, forKey: serverOwnedPrefix + userId)
+        // Server-granted items are worn too, so the widget's copy moves with them.
+        FlameyFacts.mirrorToWidget()
     }
 
     /// The choice changed on this phone: keep it locally now, push shortly.

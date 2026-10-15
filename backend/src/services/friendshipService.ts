@@ -1,7 +1,12 @@
 import { Friendship, User } from "../types/user.js";
 import { PostgresService } from "./DbService.js";
 import { runHypeMatchSql, runHypedByViewerMatchSql } from "./hypeService.js";
-import { effectiveStreakSql } from "./streakFeatureCore.js";
+import {
+  effectiveStreakSql,
+  userTodaySql,
+  STREAK_QUALIFYING_MILES,
+  STREAK_QUALIFYING_STEPS,
+} from "./streakFeatureCore.js";
 import { START_OF_TODAY_ET_SQL } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
@@ -238,6 +243,9 @@ export interface FriendActivity {
   last_name: string | null;
   profile_image_url: string | null;
   today_miles: number;
+  /** Additive: the friend's synced step total for their today (0 if none). */
+  today_steps: number;
+  /** Today's goal met: 0.95 mi OR 10,000 steps (the streak rule). */
   completed_today: boolean;
 }
 
@@ -265,7 +273,11 @@ export async function getFriendsActivityToday(
 					)::interval
 				)::date
 				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
-			), 0)::float as today_miles
+			), 0)::float as today_miles,
+			COALESCE((
+				SELECT ds.steps FROM daily_steps ds
+				WHERE ds.user_id = u.user_id AND ds.local_date = ${userTodaySql("u")}
+			), 0)::int as today_steps
 		FROM friendships f
 		JOIN users u ON u.user_id = f.friend_id
 		WHERE f.user_id = $1
@@ -278,7 +290,10 @@ export async function getFriendsActivityToday(
   return results.map((r: any) => ({
     ...r,
     today_miles: parseFloat(r.today_miles) || 0,
-    completed_today: parseFloat(r.today_miles) >= 1.0,
+    today_steps: Number(r.today_steps) || 0,
+    completed_today:
+      (parseFloat(r.today_miles) || 0) >= STREAK_QUALIFYING_MILES ||
+      (Number(r.today_steps) || 0) >= STREAK_QUALIFYING_STEPS,
   }));
 }
 

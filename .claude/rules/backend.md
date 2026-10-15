@@ -10,6 +10,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - Serve `moving_seconds` only via `displayMovingSecondsSql` (NULL under 50% of `total_duration`, per leg); iOS mirror `DisplayPace`.
 - Weekly `last_week` reads the SERVED row (`final_value`, else fresh `measure()`); never re-pick a past week.
 - Goal checks use `DAILY_GOAL_TOLERANCE` (0.95), never `>= 1.0`; `user_daily_challenges` stamps what was SERVED; split-based challenge queries also need `countedWorkoutSql('w')`.
+- A day is DONE at 0.95 mi OR 10k steps (`STREAK_QUALIFYING_STEPS`): SQL via `stepGoalDaysSql`/`stepGoalMetSql`, in-memory `dailyGoalMet`; never for posting, feed, meters, challenges; a crossing runs `stepGoalDaysLanded`. Check: `streak-check` §S.
 - `sweepCrewPhotoNudges` is library-tier copy, re-checks `photoOpen`, claims `photo_nudge_sent_at` (no default); `BUDDY_GROUP_JSON` miles are derived, never stored.
 - `getBuddyHistory`: post ids via `buddySessionPostIds` behind `DIRECT_POST_ACCESS_SQL`; NULL `final_distance_miles` = "not synced". Check: `buddy-history-check`.
 - Crew slides via `PUT /posts/:id/crew-photo`; resolve `coauthors[].route` at READ under each owner's `share_route_maps`; `lockUnearnedPhotos` blanks slides. Check: `buddy-group-post-check`.
@@ -36,6 +37,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - Admin analytics: bounded aggregates + TTL cache; DELTA assertions only; import constants from `streakFeatureService.ts`. Check: `admin-analytics-check`.
 - Stealth is a RECORDING rule (`stealth_windows`, sticky `workouts.stealth`): a stealth workout has NO `workout_routes` row; serve `stealth` owner-only.
 - Serve routes to non-owners only via `servedRouteFrom(...)`; a cut change ⇒ NULL `privacy_bounds`, bump marker, update `RoutePrivacyTrim`. Check: `route-privacy-check`.
+- `servedRouteFrom` fills walked long steps (`mad_route_fill_walked_steps`, route ≈ `workouts.distance`) so iOS `RouteGaps` doesn't cut straights; keep its bars equal to `RouteGaps`'. Check: `route-walked-steps-check`.
 - Resolve `users.referral_detail` against usernames (trim, case-fold, strip `@`); report unmatched separately.
 - `profile_banner_url` is written only by `POST /users/:id/banner/upload`; `PATCH /users/:id` can only CLEAR it.
 - Flamey gates on `dashboard_style = 'fun'`; `flamey` block friends-only; pokes need both sides Fun; date medals by history (`redateBadges`). Check: `flamey-check`.
@@ -44,6 +46,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - Medals judge WHOLE history; `recalibrateBadges` is award-only; > `BADGE_PUSH_BURST_LIMIT` ⇒ one summary push. Check: `badge-recalibrate-check`.
 - Rate limits key on `clientIp()`, never `req.ip`; `TRUST_PROXY_HOPS`, never `true`; unknown IP ⇒ skip. Check: `rate-limit-check`.
 - Shoes are OWNER-ONLY (only `shoeService` reads them); one rule `shoeActivitySql` (iOS `ShoeActivity.of`); mileage derived. Check: `shoes-check`.
+- `/public/users/:username` comes only from `publicProfileService.getPublicProfile`: streak via `effectiveStreakSql` (also `getPublicPostPreview`); `total_miles`/`friend_count`/`medals` null for `workout_visibility = 'private'`. Check: `public-profile-check`.
 
 ## Architecture: Routes -> Controllers -> Services
 Details: docs/conventions/backend.md § Architecture: Routes -> Controllers -> Services

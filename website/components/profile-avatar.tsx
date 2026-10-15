@@ -49,7 +49,7 @@ export function ProfileAvatar({
       style={{ width: size, height: size, ...style }}
     >
       {src ? (
-        <Image src={src} alt={initials} fill className="object-cover" sizes={`${size}px`} />
+        <Image src={src} alt={initials} fill className="object-cover" sizes={`${size}px`} onError={() => setSrc(null)} />
       ) : (
         <span
           className="flex h-full w-full items-center justify-center font-bold text-white/60"

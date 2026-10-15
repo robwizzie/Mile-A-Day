@@ -7,6 +7,8 @@ import {
   streakEndingAt,
   fetchPauseIntervals,
   StreakFeatureUserRow,
+  STREAK_QUALIFYING_STEPS,
+  stepGoalMetSql,
 } from "./streakFeatureCore.js";
 import {
   getInjuryPauseStatus,
@@ -234,17 +236,24 @@ export async function getMeters(
   };
 }
 
-/** Qualifying + covered day lookups for a small recent window. */
+/** Qualifying (miles or steps) + covered day lookups for a small recent window. */
 async function recentDayFacts(
   userId: string,
   fromDate: string,
 ): Promise<{ qualified: Set<string>; covered: Set<string> }> {
   const [qual, cov] = await Promise.all([
     db.query<{ d: string }>(
+      // A 10k-step day stands on its own exactly like a mile day: the sweep
+      // must not spend a Save on it, record a break over it, or call it at
+      // risk (STREAK_QUALIFYING_STEPS).
       `SELECT to_char(local_date, 'YYYY-MM-DD') AS d FROM workouts
        WHERE user_id = $1 AND local_date >= $2::date
          AND deleted_at IS NULL AND exclusion_reason IS NULL
-       GROUP BY local_date HAVING SUM(distance) >= 0.95`,
+       GROUP BY local_date HAVING SUM(distance) >= 0.95
+       UNION
+       SELECT to_char(local_date, 'YYYY-MM-DD') FROM daily_steps
+       WHERE user_id = $1 AND local_date >= $2::date
+         AND steps >= ${STREAK_QUALIFYING_STEPS}`,
       [userId, fromDate],
     ),
     db.query<{ d: string }>(
@@ -311,15 +320,15 @@ const LAST_USED_COLUMN: Record<string, string> = {
 const REFUND_COPY: Record<string, { title: string; body: string }> = {
   double_down_recover: {
     title: "\u{1F525} Double Down back in your pocket",
-    body: "You ran the day we'd covered for you, so the token is yours again.",
+    body: "You hit your goal on the day we'd covered, so the token is yours again.",
   },
   streak_save: {
     title: "\u2744\uFE0F Streak Save back in your pocket",
-    body: "You ran the day we'd covered for you, so the token is yours again.",
+    body: "You hit your goal on the day we'd covered, so the token is yours again.",
   },
   streak_assist: {
     title: "\u{1F91D} Streak Assist returned",
-    body: "You ran the day anyway — your Assist is back and your friend's mile is theirs again.",
+    body: "You hit your goal that day anyway — your Assist is back and your friend's mile is theirs again.",
   },
 };
 
@@ -370,9 +379,11 @@ export async function refundEarnedCoverage(
   // behind that. Older coverage is settled history.
   const windowFloor = dateStrMinus(userToday, REFUND_WINDOW_DAYS);
 
-  // The same flat 0.95 rule the streak walk and `recentDayFacts` use — a
-  // refund must never disagree with the walk about whether a day stands on
-  // its own. Goal-scaled would be wrong here for the same reason it is there.
+  // The same flat rule the streak walk and `recentDayFacts` use (0.95 mi OR
+  // 10k steps) — a refund must never disagree with the walk about whether a
+  // day stands on its own. Goal-scaled would be wrong here for the same
+  // reason it is there. Steps matter most here: a late-night 10k often syncs
+  // only the next morning, after the sweep has already spent a Save on it.
   const candidates = await db.query<{
     local_date: string;
     kind: string;
@@ -390,7 +401,7 @@ export async function refundEarnedCoverage(
        FROM streak_coverage sc
       WHERE sc.user_id = $1
         AND sc.local_date >= $2::date
-        AND EXISTS (
+        AND (EXISTS (
           SELECT 1 FROM workouts w
            WHERE w.user_id = sc.user_id
              AND w.local_date = sc.local_date
@@ -398,7 +409,7 @@ export async function refundEarnedCoverage(
              AND w.exclusion_reason IS NULL
           GROUP BY w.local_date
           HAVING SUM(w.distance) >= 0.95
-        )
+        ) OR ${stepGoalMetSql("sc.user_id", "sc.local_date")})
       ORDER BY sc.local_date DESC`,
     [userId, windowFloor],
   );
@@ -1548,6 +1559,11 @@ export async function getAssistableFriends(
             AND w.exclusion_reason IS NULL
             AND w.local_date > t.today - 4 AND w.local_date <= t.today
           GROUP BY w.local_date HAVING SUM(w.distance) >= 0.95
+         UNION
+         SELECT to_char(ds.local_date, 'YYYY-MM-DD') FROM daily_steps ds
+          WHERE ds.user_id = u.user_id
+            AND ds.local_date > t.today - 4 AND ds.local_date <= t.today
+            AND ds.steps >= ${STREAK_QUALIFYING_STEPS}
          UNION
          SELECT to_char(sc.local_date, 'YYYY-MM-DD') FROM streak_coverage sc
           WHERE sc.user_id = u.user_id AND sc.local_date > t.today - 4

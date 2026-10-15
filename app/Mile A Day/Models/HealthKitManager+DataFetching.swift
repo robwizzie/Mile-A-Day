@@ -280,7 +280,12 @@ extension HealthKitManager {
 
             DispatchQueue.main.async {
                 if let sum = result?.sumQuantity() {
-                    self.todaysSteps = Int(sum.doubleValue(for: HKUnit.count()))
+                    let steps = Int(sum.doubleValue(for: HKUnit.count()))
+                    #if !os(watchOS)
+                    // Before the publish, so views redrawn by it read the key.
+                    StepGoalDayStore.record(steps: steps, on: now)
+                    #endif
+                    self.todaysSteps = steps
                 } else {
                     self.todaysSteps = 0
                 }

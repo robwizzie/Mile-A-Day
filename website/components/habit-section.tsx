@@ -1,4 +1,4 @@
-import { Timer, Flame, TrendingUp } from "lucide-react"
+import { Rabbit, Flame, CalendarDays } from "lucide-react"
 
 export function HabitSection() {
   return (
@@ -71,7 +71,7 @@ export function HabitSection() {
             </h3>
             <p className="text-[13px] leading-relaxed text-[#a0a0a0]">
               It&apos;s just what you do now. You don&apos;t negotiate with yourself. You lace up and
-              go. Congratulations — you&apos;re a runner.
+              go. Congratulations — you&apos;re a walker. Or a runner. Either counts.
             </p>
           </div>
         </div>
@@ -83,9 +83,9 @@ export function HabitSection() {
           </h3>
           <div className="grid gap-4 sm:grid-cols-3">
             {[
-              { icon: Timer, label: "Fastest Mile", value: "5:12", color: "#33B34D" },
-              { icon: Flame, label: "Longest Streak", value: "288 days", color: "#FF9900" },
-              { icon: TrendingUp, label: "Most In A Day", value: "26.2 mi", color: "#D94059" },
+              { icon: Rabbit, label: "Fastest Mile", value: "5:12", color: "#33B34D" },
+              { icon: Flame, label: "Longest Streak", value: "511 days", color: "#FF9900" },
+              { icon: CalendarDays, label: "Most in One Day", value: "26.2 mi", color: "#BF5AF2" },
             ].map((record, i) => (
               <div
                 key={record.label}

@@ -4,10 +4,12 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import { Menu, X } from "lucide-react";
 
+// Root-relative so the same bar works on /updates as on the home page.
 const navLinks = [
-  { label: "Features", href: "#features" },
-  { label: "Competitions", href: "#competitions" },
-  { label: "Our Story", href: "#story" },
+  { label: "Features", href: "/#features" },
+  { label: "Competitions", href: "/#competitions" },
+  { label: "What's New", href: "/updates" },
+  { label: "Help", href: "/#support" },
 ];
 
 export function Navbar() {

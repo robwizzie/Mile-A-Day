@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import WidgetKit
+import os
 
 /// The two widget snapshots that describe OTHER people — competition standings
 /// and today's friends leaderboard — and the silent push that keeps them live.
@@ -230,7 +231,7 @@ enum WidgetLiveRefresh {
 /// side claims it first calls the handler, the other does nothing. iOS treats
 /// a second call as a programming error.
 final class OneShotLatch: @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock()
     private var claimed = false
 
     func claim() -> Bool {

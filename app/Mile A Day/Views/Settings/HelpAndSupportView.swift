@@ -67,7 +67,7 @@ struct HelpAndSupportView: View {
 
                         faqItem(
                             question: "How does streak tracking work?",
-                            answer: "Your streak counts consecutive days where you've completed at least your daily mile goal. Missing a day resets your streak to zero. Make sure to log your workout through Apple Fitness or any compatible app — it syncs automatically via HealthKit."
+                            answer: "Your streak counts consecutive days where you've done a mile or walked 10,000 steps — either one counts for the day. Missing a day resets your streak to zero. Workouts from Apple Fitness or any compatible app, and steps from Apple Health, sync automatically via HealthKit."
                         )
 
                         faqItem(
@@ -87,7 +87,7 @@ struct HelpAndSupportView: View {
 
                         faqItem(
                             question: "How does the step goal work?",
-                            answer: "The step goal tracks your daily steps from Apple Health with a target of 10,000 steps. The calendar view shows your step progress for each day with color-coded indicators. This is separate from your mile streak goal."
+                            answer: "The step goal tracks your daily steps from Apple Health with a target of 10,000 steps. Reaching it completes your day for the streak, just like a mile does — so a busy day on your feet keeps your streak alive. The calendar view shows your step progress for each day with color-coded indicators."
                         )
                     }
                     .padding(MADTheme.Spacing.md)

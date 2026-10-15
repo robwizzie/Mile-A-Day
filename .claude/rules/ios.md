@@ -52,6 +52,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - `FreshPostWindowManager`: gate posting on `canPostToday`, capture only on `isCameraOpen`; `.camera` `photo_source` only for in-session shots; never re-anchor (`anchoredIds`); `syncPostWindow()` only adopts.
 - Type backend `timestamptz` as `String` in DTOs; parse with `.withFractionalSeconds` (`BuddyDate`).
 - Goal scoring uses `isGoalCompleted(current:goal:)` (clamp goal > 0), never `>= goal` (in-workout alert and competitions excepted); day miles via `countedMiles(onLocalDay:)`.
+- The DAY is done at a mile OR 10k steps (`isDayComplete`, `dailyStepGoal`); steps-done reads `StepGoalDayStore.isTodayMet()`, never `todaysSteps`; walks union `StepGoalDayStore`, behind `#if !os(watchOS)` in Watch-member files; celebration/posting stay miles.
 - Never use `HKWorkout.totalDistance` for display/sums: use `madDistanceMiles` (tracked floor, `userOverride` wins); sync uploads it too.
 - Dedup via `WorkoutDedup.breakdown(in:)` (consent first); grandfather sources by timestamp.
 - The tracker's WALK · OUTDOOR descriptor is the distance caption; never back in the top bar.
@@ -69,6 +70,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - Store/score/sync miles; convert only at the formatter (`DistanceUnits.current`); no bare `"… mi"` literals (widgets keep miles).
 - Icon-only controls get `.accessibilityLabel` on the glyph (`.accessibilityHidden(true)` beside text); guard every loop with `accessibilityReduceMotion`.
 - Dynamic Type via `.madFont(...)`/`@MADScaledMetric`, capped with `.madTypeCap` below any `.sheet`, never `.dynamicTypeSize`; never scale baked images.
+- Every UI change must look right at EVERY iPhone width, 320pt (SE/mini under Display Zoom) to 440pt (Pro Max): no fixed widths summing past 320; flex + `lineLimit`/`minimumScaleFactor`/`ViewThatFits`; mockups show 320, 375 and 440 frames.
 - Sharing is one surface, `ShareStudioView`; preview == render (`ShareCardView.render`); cards ImageRenderer-safe; `ShareTemplate.available` decides; empty `MADFacebookAppID` ⇒ system share sheet; mock new cards as HTML first.
 - Weekly recap: Sunday→Saturday; route `weekly_recap` in all four places via `WeeklyRecapLink`; declare `weeklyRecapV1`; reuse `weeklyRecapEnabled`.
 - Feature views live in `Views/<FeatureName>/` subdirectories.
@@ -106,6 +108,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - Overlap via padding, never `.offset`; never `.fixedSize` a data label; fit rows via `ViewThatFits`; gate hype/report/block on `PostCardView.isMine`, not `is_self`.
 - `ios.yml` diffs `github.event.before..HEAD` on push (never `HEAD^`); `workflow_dispatch` always type-checks.
 - CI only type-checks the app module: run `xcrun swiftc -typecheck -sdk $(xcrun --sdk iphoneos --show-sdk-path) -target arm64-apple-ios17.0` over the WHOLE module in one call; `-parse` is not enough.
+- `DashboardView.body`'s modifier chain is at Xcode's type-check time limit: never add another `.onChange`/`.onReceive` closure to it (CI's `swiftc -typecheck` still passes); observe from a helper or a service.
 - New Codable field: check for explicit `CodingKeys` first; persisted models' new fields must be Optional.
 - Target iOS 17.0: resolve newer SF Symbols at runtime (`UIImage(systemName:) != nil ? new : old`).
 - Link third-party apps only by App Store id (`itms-apps://apps.apple.com/app/id<N>`, `openAppStore`); never custom URL schemes.
@@ -189,6 +192,7 @@ When in doubt: cite the guideline number, propose the compliant path, and ask be
 - A crew slide shows its owner's caption or none; edit via `EditCaptionSheet(subject: .myCollabSlide)`; `setCrewCaption` ≠ `onEditCaption`.
 - Highlights hold post + face; key `ForEach` on `PostHighlightItem.id`, never `post_id`; `canHighlight` must not reuse `canCurateOnProfile`.
 - Never open the lobby over a recording walk (`BuddyWalkRouting.openTarget()`); "am I walking" = `InProgressWorkoutStore.load()?.isActive`; "Start now" is host-only `startNow()`.
+- Locks are `OSAllocatedUnfairLock`, never `NSLock`, for anything a main-thread view body can take while background queues also take it (`DayKeyFormatter`, `TrackedWorkoutLedger`, `InProgressWorkoutStore.cacheLock`). `NSLock` is a default pthread mutex with NO priority inheritance: in a backgrounded app a throttled utility thread descheduled while holding it left the main thread parked in `__psynch_mutexwait` under a SwiftUI body, and the background scene-update watchdog killed it (0x8BADF00D "stuck (deadlock)", ~0% app CPU) — the main-app SIGKILL group in builds 573/595. An unfair lock boosts its owner.
 - Never nest a Button in a Button's label; overlay controls as ZStack siblings.
 - Rank via `Competition.ranked`/`standing(for:)` (score → distance → name → user_id); never a place from an index.
 - Compete UI uses `CompeteDesign`; no materials/gradients; arm reveal flags in the shared table.

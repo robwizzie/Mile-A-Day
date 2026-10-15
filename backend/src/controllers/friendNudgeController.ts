@@ -12,7 +12,8 @@ import { hasUnlimitedActions } from "../services/privilegedUsers.js";
 import { shouldSendNotification } from "../services/notificationSettingsService.js";
 import {
   getTodayMiles,
-  DAILY_GOAL_TOLERANCE,
+  getTodaySteps,
+  dailyGoalMet,
 } from "../services/workoutService.js";
 import {
   effectiveStreakSql,
@@ -94,14 +95,17 @@ export async function nudgeFriend(req: AuthenticatedRequest, res: Response) {
       return res.status(403).json({ error: "flamey_unavailable" });
     }
 
-    // Check if friend has already completed their mile today — same 0.95
-    // tolerance as streak counting, so a day the streak credits can't be
+    // Check if friend has already finished today — the same rule as streak
+    // counting (0.95 mi or 10k steps), so a day the streak credits can't be
     // nudged as "incomplete".
-    const friendTodayMiles = await getTodayMiles(friendId);
-    if (friendTodayMiles >= DAILY_GOAL_TOLERANCE) {
+    const [friendTodayMiles, friendTodaySteps] = await Promise.all([
+      getTodayMiles(friendId),
+      getTodaySteps(friendId),
+    ]);
+    if (dailyGoalMet(friendTodayMiles, friendTodaySteps)) {
       return res
         .status(400)
-        .json({ error: "This friend has already completed their mile today" });
+        .json({ error: "This friend has already hit their goal today" });
     }
 
     // Rate limit: 1 nudge per friend per 24h
@@ -164,17 +168,26 @@ export async function checkNudgeStatus(
   const senderId = req.userId!;
 
   try {
-    const [nudgedToday, unlimited, friendTodayMiles, streaks, coverage] =
-      await Promise.all([
-        hasNudgedFriendToday(senderId, friendId),
-        hasUnlimitedActions(senderId),
-        getTodayMiles(friendId),
-        fetchStreaks([friendId]),
-        fetchTodayCoverage([friendId]),
-      ]);
+    const [
+      nudgedToday,
+      unlimited,
+      friendTodayMiles,
+      friendTodaySteps,
+      streaks,
+      coverage,
+    ] = await Promise.all([
+      hasNudgedFriendToday(senderId, friendId),
+      hasUnlimitedActions(senderId),
+      getTodayMiles(friendId),
+      getTodaySteps(friendId),
+      fetchStreaks([friendId]),
+      fetchTodayCoverage([friendId]),
+    ]);
     const canNudge = unlimited || !nudgedToday;
 
-    const hasCompletedMile = friendTodayMiles >= DAILY_GOAL_TOLERANCE;
+    // "Completed" is the day's goal: a mile OR 10k steps. The field keeps its
+    // name for shipped builds; `today_steps` says which one it was.
+    const hasCompletedMile = dailyGoalMet(friendTodayMiles, friendTodaySteps);
     const covered = coverage[friendId] ?? null;
 
     res.status(200).json({
@@ -193,6 +206,7 @@ export async function checkNudgeStatus(
       has_nudged_today: nudgedToday,
       unlimited_nudges: unlimited,
       today_miles: Math.round(friendTodayMiles * 100) / 100,
+      today_steps: friendTodaySteps,
       current_streak: streaks[friendId] ?? 0,
     });
   } catch (error: any) {
@@ -225,6 +239,7 @@ export async function checkNudgeStatusBatch(
         has_nudged_today: boolean;
         unlimited_nudges: boolean;
         today_miles: number;
+        today_steps: number;
         current_streak: number;
         today_covered: {
           local_date: string;
@@ -246,13 +261,18 @@ export async function checkNudgeStatusBatch(
 
     await Promise.all(
       friendIds.map(async (friendId: string) => {
-        const [nudgedToday, friendTodayMiles] = await Promise.all([
-          hasNudgedFriendToday(senderId, friendId),
-          getTodayMiles(friendId),
-        ]);
+        const [nudgedToday, friendTodayMiles, friendTodaySteps] =
+          await Promise.all([
+            hasNudgedFriendToday(senderId, friendId),
+            getTodayMiles(friendId),
+            getTodaySteps(friendId),
+          ]);
         const canNudge = unlimited || !nudgedToday;
 
-        const hasCompletedMile = friendTodayMiles >= DAILY_GOAL_TOLERANCE;
+        const hasCompletedMile = dailyGoalMet(
+          friendTodayMiles,
+          friendTodaySteps,
+        );
         statuses[friendId] = {
           can_nudge: canNudge && !hasCompletedMile,
           has_completed_mile: hasCompletedMile,
@@ -261,6 +281,7 @@ export async function checkNudgeStatusBatch(
           has_nudged_today: nudgedToday,
           unlimited_nudges: unlimited,
           today_miles: Math.round(friendTodayMiles * 100) / 100,
+          today_steps: friendTodaySteps,
           current_streak: streaks[friendId] ?? 0,
           today_covered: coverage[friendId] ?? null,
         };

@@ -262,6 +262,20 @@ struct ProgressCalculator {
     /// match, or the app shows "locked" states the server would allow.
     static let dailyGoalTolerance = 0.95
 
+    /// "1 mile OR 10,000 steps": a day whose steps reach this is complete,
+    /// exactly like a mile day — the server's `STREAK_QUALIFYING_STEPS`
+    /// (streakFeatureCore.ts). Flat, never scaled by the mile goal. Steps
+    /// count ONLY for the day being done: posting, the mile celebration,
+    /// challenges and competitions stay miles.
+    static let dailyStepGoal = 10_000
+
+    /// Is the DAY done — the mile goal (within tolerance) or the step goal?
+    /// The streak's rule, for "done today" surfaces. Distance scoring (the
+    /// tracker, challenges) keeps `isGoalCompleted`.
+    static func isDayComplete(miles: Double, goal: Double, stepGoalMet: Bool) -> Bool {
+        stepGoalMet || isGoalCompleted(current: miles, goal: max(goal, 0.01))
+    }
+
     /// Calculates progress percentage, ensuring it never exceeds 100%
     /// - Parameters:
     ///   - current: Current distance completed

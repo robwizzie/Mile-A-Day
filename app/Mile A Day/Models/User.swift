@@ -113,6 +113,7 @@ struct User: Identifiable, Codable {
         totalMiles: Double,
         fastestPace: TimeInterval,
         mostMilesInDay: Double,
+        stepGoalMet: Bool = false,
         date: Date = Date()
     ) {
         // Update streak (use retroactive streak from HealthKit)
@@ -143,11 +144,14 @@ struct User: Identifiable, Codable {
             self.mostMilesInOneDay = mostMilesInDay
         }
         
-        // Only update completion date if we've completed a mile today
-        if miles >= 0.95 && Calendar.current.isDateInToday(date) {
+        // Only update completion date if today is done — a mile, or 10,000
+        // steps (`stepGoalMet`, the caller's read of the day-keyed step store;
+        // this file is also a Watch member, so it takes the answer, not the
+        // store).
+        if (miles >= 0.95 || stepGoalMet) && Calendar.current.isDateInToday(date) {
             lastCompletionDate = date
         } else if Calendar.current.isDateInToday(date) {
-            // If it's today but we haven't completed a mile, clear the completion date
+            // If it's today but the day isn't done, clear the completion date
             // This ensures isStreakActiveToday returns false
             lastCompletionDate = nil
         }

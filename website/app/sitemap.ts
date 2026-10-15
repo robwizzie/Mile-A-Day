@@ -15,6 +15,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 1,
     },
     {
+      // Moves with every App Store release (lib/releases.ts).
+      url: `${BASE_URL}/updates`,
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
+    {
       url: `${BASE_URL}/desk`,
       lastModified: "2026-10-10",
       changeFrequency: "monthly",
