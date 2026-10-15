@@ -27,6 +27,49 @@ enum WhatsNewCatalog {
     /// names, no "beta"), one short line per feature.
     static let releases: [WhatsNewRelease] = [
         WhatsNewRelease(
+            id: 6,
+            versionLabel: "Halloween 2026 Update",
+            headline: "Monthly Flames, and Mile A Day+",
+            features: [
+                WhatsNewFeature(
+                    icon: "calendar",
+                    title: "Monthly Flames",
+                    blurb: "Walk your mile every single day of a month to unlock that month's Flamey form, from Frostbite in January to Twinkle Lights in December. Perfect months you've already had count too.",
+                    tint: .orange
+                ),
+                WhatsNewFeature(
+                    icon: "theatermasks.fill",
+                    title: "Halloween costumes",
+                    blurb: "The Pumpkin Suit is redrawn for Halloween, and the glow-in-the-dark Skeleton Suit joins it for Mile A Day+ members.",
+                    tint: .purple
+                ),
+                WhatsNewFeature(
+                    icon: "figure.walk",
+                    title: "Walks earn a Streak Save",
+                    blurb: "A walk day now counts as half a run toward your Streak Save, so walkers can earn one too. Running is still the fastest way there.",
+                    tint: MADTheme.Colors.walkBlue
+                ),
+                WhatsNewFeature(
+                    icon: "sparkles",
+                    title: "Mile A Day+",
+                    blurb: "An optional membership: streak tokens in about half the time, Plus-only Flamey looks and Family Sharing. Your daily mile stays free, forever.",
+                    tint: MADTheme.Colors.madRed
+                ),
+                WhatsNewFeature(
+                    icon: "square.grid.2x2.fill",
+                    title: "This month, on your dashboard",
+                    blurb: "An optional card follows your Monthly Flame day by day. Add it from Customize.",
+                    tint: .teal
+                ),
+                WhatsNewFeature(
+                    icon: "gift.fill",
+                    title: "Gift a year of Plus",
+                    blurb: "Buy a year for a friend and send them a code from Settings › Mile A Day+.",
+                    tint: .pink
+                ),
+            ]
+        ),
+        WhatsNewRelease(
             id: 5,
             versionLabel: "October 2026 Update",
             headline: "Flamey gets a wardrobe",
@@ -331,6 +374,12 @@ struct WhatsNewView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var revealed = false
+    @ObservedObject private var plus = PlusStore.shared
+    @State private var showPaywall = false
+
+    /// The Mile A Day+ release leads with what it means for THIS account.
+    private var isPlusRelease: Bool { release.id == 6 }
+    private var isFounder: Bool { plus.status?.source == "founding" }
 
     var body: some View {
         ZStack {
@@ -340,6 +389,7 @@ struct WhatsNewView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
                         header
+                        if isPlusRelease { plusHero }
                         VStack(spacing: 10) {
                             ForEach(Array(release.features.enumerated()), id: \.element.id) { index, feature in
                                 featureRow(feature)
@@ -357,6 +407,25 @@ struct WhatsNewView: View {
                     }
                     .padding(MADTheme.Spacing.md)
                     .padding(.top, MADTheme.Spacing.lg)
+                }
+
+                if isPlusRelease && isFounder && DashboardStylePreference.current == .fun {
+                    Button {
+                        MADHaptics.tap()
+                        WhatsNewManager.markSeen()
+                        dismiss()
+                        // After the sheet is gone: the Closet is a cover.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                            FlameyClosetLink.shared.open(focus: .electric)
+                        }
+                    } label: {
+                        Text("Try on a Plus look")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(FoundingRunnerCard.gold)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, MADTheme.Spacing.md)
                 }
 
                 // Pinned dismiss CTA
@@ -380,11 +449,65 @@ struct WhatsNewView: View {
             }
         }
         .presentationDragIndicator(.visible)
+        .task {
+            if isPlusRelease && plus.status == nil { await plus.fetchStatus() }
+        }
+        .sheet(isPresented: $showPaywall) {
+            PlusPaywallView(context: .settings)
+        }
         .onAppear {
             revealed = true
             // Opening the sheet counts as seeing the release, however it closes
             // (swipe-down included) — never nag someone twice.
             WhatsNewManager.markSeen()
+        }
+    }
+
+    /// Founding Runners (every account from before Plus) hear first that it's
+    /// theirs for life; anyone else gets a look at it. Nothing until the
+    /// status has loaded, so no one is told the wrong thing.
+    @ViewBuilder
+    private var plusHero: some View {
+        if isFounder {
+            FoundingRunnerCard()
+        } else if plus.status != nil, !plus.isPlus {
+            HStack(spacing: 14) {
+                FlameBuddyView(health: .healthy, size: 64, still: true, showsMoodBubble: false,
+                               look: PlusLookShowcase.look(.electric, detail: .compact), wardrobeReach: 0.8)
+                    .frame(width: 64, height: 64)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Meet Mile A Day+")
+                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("Faster streak tokens and looks only Plus members have.")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.65))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button {
+                        MADHaptics.tap()
+                        showPaywall = true
+                    } label: {
+                        Text("Take a look")
+                            .font(.system(size: 14, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .background(Capsule().fill(MADTheme.Colors.redGradient))
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.orange.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(Color.orange.opacity(0.3), lineWidth: 1)
+                    )
+            )
         }
     }
 

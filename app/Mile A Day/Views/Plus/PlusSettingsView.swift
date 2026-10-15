@@ -24,10 +24,10 @@ struct PlusSettingsView: View {
         ScrollView {
             VStack(spacing: MADTheme.Spacing.lg) {
                 statusCard
+                perksCard
                 giftCard
                 if !gifts.isEmpty { giftsList }
                 accountCard
-                perksCard
                 legal
             }
             .padding(.horizontal, MADTheme.Spacing.md)
@@ -68,44 +68,76 @@ struct PlusSettingsView: View {
 
     // MARK: Status
 
+    @ViewBuilder
     private var statusCard: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: store.isPlus ? "checkmark.seal.fill" : "sparkles")
-                    .madFont(size: 22, weight: .bold, maxScale: 1.3)
-                    .foregroundColor(store.isPlus ? .green : .orange)
+        if store.status?.source == "founding" {
+            FoundingRunnerCard()
+        } else if store.isPlus {
+            HStack(alignment: .center, spacing: MADTheme.Spacing.md) {
+                FlameBuddyView(health: .healthy, size: 64, still: true, showsMoodBubble: false,
+                               look: PlusLookShowcase.look(.electric, detail: .compact), wardrobeReach: 0.8)
+                    .frame(width: 64, height: 64)
                     .accessibilityHidden(true)
-                Text(store.isPlus ? "You're on Mile A Day+" : "Mile A Day+")
-                    .madFont(size: 20, weight: .heavy, design: .rounded)
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("You're on Mile A Day+", systemImage: "checkmark.seal.fill")
+                        .madFont(size: 18, weight: .heavy, design: .rounded)
+                        .foregroundColor(.green)
+                    if let line = PlusStatusCopy.line(for: store.status) {
+                        Text(line)
+                            .madFont(size: 14, weight: .regular, design: .rounded)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 0)
             }
-            if store.status?.isFoundingRunner == true {
-                Label("Founding Runner", systemImage: "medal.fill")
-                    .madFont(size: 13, weight: .heavy, design: .rounded)
-                    .foregroundColor(.orange)
-            }
-            Text(PlusStatusCopy.line(for: store.status)
-                 ?? "Faster streak tokens, Plus-only Flamey looks, and Family Sharing — while everything you love stays free.")
-                .madFont(size: 15, weight: .regular, design: .rounded)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if !store.isPlus {
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
+        } else {
+            VStack(spacing: MADTheme.Spacing.sm) {
+                PlusLookShowcase(size: 92)
+                Text("Mile A Day+")
+                    .madFont(size: 24, weight: .black, design: .rounded)
+                    .foregroundStyle(LinearGradient(colors: [Color(red: 1.0, green: 0.82, blue: 0.45), .orange, MADTheme.Colors.madRed],
+                                                    startPoint: .leading, endPoint: .trailing))
+                Text("Faster streak tokens, Plus-only Flamey looks and Family Sharing — while everything you love stays free.")
+                    .madFont(size: 14, weight: .regular, design: .rounded)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                 Button {
                     MADHaptics.action()
                     showPaywall = true
                 } label: {
-                    Text("See plans")
+                    Text(trialCTA)
                         .madFont(size: 17, weight: .heavy, design: .rounded, maxScale: 1.4)
                         .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .frame(maxWidth: .infinity, minHeight: 50)
-                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MADTheme.Colors.madRed))
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(LinearGradient(colors: [.orange, MADTheme.Colors.madRed],
+                                                     startPoint: .leading, endPoint: .trailing))
+                        )
                 }
                 .buttonStyle(.plain)
                 .padding(.top, MADTheme.Spacing.xs)
             }
+            .frame(maxWidth: .infinity)
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+    }
+
+    /// "Try 1 week free" when the App Store says this Apple ID can still
+    /// take the yearly trial, else "See plans".
+    private var trialCTA: String {
+        if store.trialEligible, let yearly = store.product(PlusProducts.yearly),
+           let trial = PlusPlanCopy.freeTrial(yearly, adjective: false) {
+            return "Try \(trial) free"
+        }
+        return "See plans"
     }
 
     // MARK: Gifts
@@ -226,11 +258,13 @@ struct PlusSettingsView: View {
 
     private var perksCard: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("WHAT'S INCLUDED")
+            Text(store.isPlus ? "WHAT YOU GET" : "WHAT'S INCLUDED")
                 .madFont(size: 11, weight: .heavy, design: .rounded)
                 .tracking(1.2)
                 .foregroundColor(.secondary)
-            ForEach(PlusPerk.allCases) { perk in
+            PlusTokenComparison(onDark: false)
+            Divider().overlay(Color.white.opacity(0.06))
+            ForEach([PlusPerk.flameyColors, .family, .support]) { perk in
                 HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
                     Image(systemName: perk.icon)
                         .madFont(size: 15, weight: .bold, maxScale: 1.3)
