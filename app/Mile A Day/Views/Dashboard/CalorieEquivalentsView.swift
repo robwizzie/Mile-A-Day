@@ -11,7 +11,7 @@ struct CalorieEquivalentsView: View {
     @ObservedObject var healthManager: HealthKitManager
     let model: TreatCounterModel
     @Environment(\.dismiss) private var dismiss
-    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStyle.modern.rawValue
+    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
 
     private var isFun: Bool { DashboardStyle(rawValue: dashboardStyleRaw) == .fun }
 

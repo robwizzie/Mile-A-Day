@@ -23,6 +23,9 @@ struct Mile_A_DayApp: App {
         StartMileLaunch.handler = { request in
             DeepLinkRouter.shared.requestOpenTracker(activity: request.activity)
         }
+        // Everyone is on the Fun dashboard for now — move a stored "modern"
+        // over before any view reads the style.
+        DashboardStylePreference.enforceOffered()
     }
 
     var body: some Scene {

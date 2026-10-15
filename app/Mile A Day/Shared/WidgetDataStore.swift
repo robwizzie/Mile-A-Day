@@ -269,10 +269,10 @@ struct WidgetDataStore {
         }
     }
 
-    /// Defaults to "modern" to match `DashboardStylePreference.current`.
+    /// Defaults to "fun" to match `DashboardStylePreference.defaultStyle`.
     static func loadDashboardStyle() -> String {
-        guard let defaults = UserDefaults(suiteName: suiteName) else { return "modern" }
-        return defaults.string(forKey: dashboardStyleKey) ?? "modern"
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return "fun" }
+        return defaults.string(forKey: dashboardStyleKey) ?? "fun"
     }
 
     // MARK: - Flamey's wardrobe facts (streak flame widget, Fun style)

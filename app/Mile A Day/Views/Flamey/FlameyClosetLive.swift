@@ -797,7 +797,7 @@ struct HeroClosetButton: View {
 
 /// "Flamey's Closet" on your own profile (Fun only).
 struct FlameyClosetProfileRow: View {
-    @AppStorage(DashboardStylePreference.key) private var styleRaw = DashboardStyle.modern.rawValue
+    @AppStorage(DashboardStylePreference.key) private var styleRaw = DashboardStylePreference.defaultStyle.rawValue
     /// Re-reads the look when the Closet closes (the choice lives in
     /// UserDefaults, which nothing here observes).
     @ObservedObject private var link = FlameyClosetLink.shared
@@ -827,7 +827,7 @@ struct FlameyClosetProfileRow: View {
 struct FlameyMedalItemGlyphLive: View {
     let badgeId: String
     let earned: Bool
-    @AppStorage(DashboardStylePreference.key) private var styleRaw = DashboardStyle.modern.rawValue
+    @AppStorage(DashboardStylePreference.key) private var styleRaw = DashboardStylePreference.defaultStyle.rawValue
 
     var body: some View {
         let items = FlameyMedalLink.items(forBadge: badgeId)
@@ -845,7 +845,7 @@ struct FlameyMedalItemGlyphLive: View {
 struct FlameyMedalUnlockCardLive: View {
     let badgeId: String
     let earned: Bool
-    @AppStorage(DashboardStylePreference.key) private var styleRaw = DashboardStyle.modern.rawValue
+    @AppStorage(DashboardStylePreference.key) private var styleRaw = DashboardStylePreference.defaultStyle.rawValue
     @State private var closet: FlameyClosetLink.Request?
 
     var body: some View {
