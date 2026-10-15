@@ -58,8 +58,10 @@ app version that sells Plus.**
 ## 4. Founding Runners
 
 Every account created before `FOUNDING_CUTOFF` (`2026-10-15T00:00:00Z`) is
-Plus free through `FOUNDING_ENDS` (end of 2027) — no data is written, it's
-derived from `users.created_at`. Accounts created after the cutoff (the ad
+Plus for life (no end date) — no data is written, it's derived from
+`users.created_at`. A Founding Runner (or a lifetime buyer) who tries to
+redeem a gift code is refused with `already_lifetime` and the code stays
+unspent, so it can be passed on. Accounts created after the cutoff (the ad
 traffic) see the trial offer once at the end of onboarding.
 
 ## 5. Testing

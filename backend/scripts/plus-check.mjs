@@ -6,7 +6,7 @@
  * check is the library's job; this pins what WE do with a verified payload:
  *
  *   1. Founding Runners: an account created before FOUNDING_CUTOFF is Plus
- *      (source "founding") until FOUNDING_ENDS; one created after is not.
+ *      for life (source "founding", no expiry); one created after is not.
  *   2. Subscriptions: a verified transaction makes the poster Plus until
  *      expiresDate; re-posting is idempotent; an OLDER transaction never
  *      rolls a newer one back; a lapse ends Plus (renewing ⇒ 1-day grace,
@@ -17,13 +17,14 @@
  *   5. Gifts: one code per Apple transaction (re-post returns the SAME code),
  *      the transaction belongs to the first poster; redeem once (409 on the
  *      second, 404 on garbage, case/dash-insensitive); the window stacks after
- *      the redeemer's own free time; a refund VOIDS the code and ends the
- *      window it granted.
+ *      the redeemer's other gifts; someone with Plus for life (founder or
+ *      lifetime) is refused and the code stays unspent; a refund VOIDS the
+ *      code and ends the window it granted.
  *   6. Server notifications: attributed by original transaction, or by
  *      appAccountToken for a transaction never posted; auto-renew off is
  *      stored; billing grace extends expiry.
- *   7. Perks: Plus fills Double Down / Streak Save meters at the Plus
- *      targets; Plus-only Flamey items are owned only while Plus, and a stored
+ *   7. Perks: Plus fills the Double Down / Streak Save / Assist meters at
+ *      the Plus targets; Plus-only Flamey items are owned only while Plus, and a stored
  *      Plus look drops at read on lapse (row untouched).
  *   8. HTTP: /plus/status, /plus/gifts, /plus/gifts/redeem and the
  *      /plus/transactions body guard, self-scoped on the token.
@@ -37,9 +38,9 @@ import plusRoutes from "../dist/routes/plusRoutes.js";
 import { generateAccessToken } from "../dist/services/tokenService.js";
 import {
   FOUNDING_CUTOFF,
-  FOUNDING_ENDS,
   PLUS_DOUBLE_DOWN_TARGET_DAYS,
   PLUS_PRODUCTS,
+  PLUS_STREAK_ASSIST_TARGET_DAYS,
   PLUS_STREAK_SAVE_TARGET_RUN_DAYS,
 } from "../dist/services/plusCatalog.js";
 import {
@@ -53,6 +54,7 @@ import {
 } from "../dist/services/plusService.js";
 import {
   DOUBLE_DOWN_TARGET_DAYS,
+  STREAK_ASSIST_TARGET_DAYS,
   STREAK_SAVE_TARGET_RUN_DAYS,
   getMeters,
 } from "../dist/services/streakFeatureService.js";
@@ -166,18 +168,17 @@ try {
 
   // ── 1. Founding Runners ──────────────────────────────────────────────
   const f = await status(FOUNDER);
-  const foundingActive = Date.now() < Date.parse(FOUNDING_ENDS);
   check(
-    "founder is Plus (while the founding window is open)",
-    f.is_plus,
-    foundingActive,
+    "founder is Plus for life",
+    [f.is_plus, f.source, f.expires_at],
+    [true, "founding", null],
   );
-  check("founder source", f.source, foundingActive ? "founding" : null);
   check(
-    "founder flagged as Founding Runner",
+    "founder flagged as Founding Runner, no end date",
     [f.founding_runner, f.founding_ends_at],
-    [true, FOUNDING_ENDS],
+    [true, null],
   );
+  check("isPlusActive agrees (founder)", await isPlusActive(FOUNDER), true);
   const n = await status(NEWBIE);
   check(
     "new account is not Plus",
@@ -426,13 +427,21 @@ try {
   const g2 = await recordTransaction(GIVER, tx(PLUS_PRODUCTS.giftYear));
   const r2 = await redeemGift(TAKER, g2.gift.code);
   check("second gift stacks after the first", r2.starts_at, r1.ends_at);
-  // A founder's gift starts after the founding window.
+  // Plus for life already: refused, and the code stays unspent.
   const g3 = await recordTransaction(GIVER, tx(PLUS_PRODUCTS.giftYear));
-  const r3 = await redeemGift(FOUNDER, g3.gift.code);
+  check("founder can't redeem a gift", await redeemGift(FOUNDER, g3.gift.code), {
+    ok: false,
+    error: "already_lifetime",
+  });
+  check("lifetime buyer can't redeem a gift", await redeemGift(LIFER, g3.gift.code), {
+    ok: false,
+    error: "already_lifetime",
+  });
   check(
-    "founder's gift starts when founding ends",
-    r3.starts_at,
-    new Date(FOUNDING_ENDS).toISOString(),
+    "refused code is still unredeemed",
+    (await db.query(`SELECT redeemed_by FROM plus_gifts WHERE code = $1`, [g3.gift.code]))[0]
+      .redeemed_by,
+    null,
   );
 
   // Refund of the first gift voids it and ends the window it granted.
@@ -545,9 +554,21 @@ try {
     [true, false],
   );
   check(
-    "Assist is the same for everyone",
-    plusMeters.streak_assist.target,
-    freeMeters.streak_assist.target,
+    "Assist targets",
+    [plusMeters.streak_assist.target, freeMeters.streak_assist.target],
+    [PLUS_STREAK_ASSIST_TARGET_DAYS, STREAK_ASSIST_TARGET_DAYS],
+  );
+  // Spent an Assist 20 days ago: back for Plus (14), not yet for free (30).
+  await db.query(
+    `UPDATE users SET streak_assist_last_used = $2::date - 20 WHERE user_id = ANY($1)`,
+    [[SUBBER, NEWBIE], today],
+  );
+  const plusAssist = await getMeters(SUBBER, await getStreakFeatureRow(SUBBER), today);
+  const freeAssist = await getMeters(NEWBIE, await getStreakFeatureRow(NEWBIE), today);
+  check(
+    "20 days after an Assist: Plus holds one again, free doesn't yet",
+    [plusAssist.streak_assist.held, freeAssist.streak_assist.held],
+    [true, false],
   );
 
   const plusItems = [...FLAMEY_CATALOG.values()]

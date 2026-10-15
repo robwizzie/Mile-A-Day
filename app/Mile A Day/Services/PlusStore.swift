@@ -35,10 +35,10 @@ struct PlusStatus: Codable, Equatable {
     struct Perks: Codable, Equatable {
         let double_down_target: Int
         let streak_save_target: Int
+        let streak_assist_target: Int?
     }
 
     var expiresDate: Date? { BuddyDate.parse(expires_at) }
-    var foundingEndsDate: Date? { BuddyDate.parse(founding_ends_at) }
     var isFoundingRunner: Bool { founding_runner == true }
 }
 
@@ -283,13 +283,14 @@ final class PlusStore: ObservableObject {
     }
 
     enum RedeemError: Error {
-        case invalidCode, alreadyRedeemed, voided, other(String)
+        case invalidCode, alreadyRedeemed, voided, alreadyLifetime, other(String)
 
         var message: String {
             switch self {
             case .invalidCode: return "That code doesn't match a gift. Check it and try again."
             case .alreadyRedeemed: return "That gift has already been redeemed."
             case .voided: return "That gift was refunded and can't be redeemed."
+            case .alreadyLifetime: return "You already have Plus for life, so this code is still unused. Pass it on to a friend!"
             case .other(let m): return m
             }
         }
@@ -309,7 +310,11 @@ final class PlusStore: ObservableObject {
         } catch APIError.notFound {
             return .failure(.invalidCode)
         } catch APIError.conflict(let message) {
-            return .failure(message == "gift_voided" ? .voided : .alreadyRedeemed)
+            switch message {
+            case "gift_voided": return .failure(.voided)
+            case "already_lifetime": return .failure(.alreadyLifetime)
+            default: return .failure(.alreadyRedeemed)
+            }
         } catch APIError.rateLimited(let message) {
             return .failure(.other(message))
         } catch {

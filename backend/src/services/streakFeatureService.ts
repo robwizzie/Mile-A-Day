@@ -18,9 +18,10 @@ import {
 import { getUserLocalToday, getMilesOnLocalDate } from "./workoutService.js";
 import { refreshCurrentStreak } from "./leaderboardService.js";
 import { sendPush } from "./pushNotificationService.js";
-import { isPlusActive } from "./plusService.js";
+import { isPlusActive, plusActiveSql } from "./plusService.js";
 import {
   PLUS_DOUBLE_DOWN_TARGET_DAYS,
+  PLUS_STREAK_ASSIST_TARGET_DAYS,
   PLUS_STREAK_SAVE_TARGET_RUN_DAYS,
 } from "./plusCatalog.js";
 
@@ -127,7 +128,7 @@ function dateOnly(value: string | Date | null): string | null {
  *
  * Clamped at 0 because `streak_assist_last_used` is stamped in the SPENDER's
  * local today, which can legitimately read a day ahead of a caller further
- * west — a negative here would render as a countdown longer than 30.
+ * west — a negative here would render as a countdown longer than the target.
  */
 function assistDaysElapsed(
   lastUsed: string | null,
@@ -204,7 +205,7 @@ export async function getMeters(
   const ddDays = Number(rows[0]?.dd_days ?? 0);
   const saveDays = Number(rows[0]?.save_days ?? 0);
   const assistDays = assistDaysElapsed(row.streak_assist_last_used, userToday);
-  // Mile A Day+ fills the two EARNED meters faster (plusCatalog.ts). Read
+  // Mile A Day+ fills all three meters faster (plusCatalog.ts). Read
   // live, so a lapse puts the regular target back on the next read — a token
   // already spent stays spent, one not yet held simply needs the longer run.
   const plus = await isPlusActive(userId);
@@ -212,6 +213,9 @@ export async function getMeters(
   const saveTarget = plus
     ? PLUS_STREAK_SAVE_TARGET_RUN_DAYS
     : STREAK_SAVE_TARGET_RUN_DAYS;
+  const assistTarget = plus
+    ? PLUS_STREAK_ASSIST_TARGET_DAYS
+    : STREAK_ASSIST_TARGET_DAYS;
 
   return {
     double_down: {
@@ -227,9 +231,9 @@ export async function getMeters(
       last_used: row.streak_save_last_used,
     },
     streak_assist: {
-      progress: Math.min(assistDays, STREAK_ASSIST_TARGET_DAYS),
-      target: STREAK_ASSIST_TARGET_DAYS,
-      held: assistDays >= STREAK_ASSIST_TARGET_DAYS,
+      progress: Math.min(assistDays, assistTarget),
+      target: assistTarget,
+      held: assistDays >= assistTarget,
       last_used: row.streak_assist_last_used,
     },
     goalMiles,
@@ -1582,11 +1586,12 @@ export async function getAssistableFriends(
      WHERE f.user_id = $1 AND f.status = 'accepted'
        AND u.streak_features_at IS NOT NULL
        -- Holding an Assist is now just a date: never spent one, or spent one
-       -- at least ${STREAK_ASSIST_TARGET_DAYS} days ago. Same rule as
-       -- assistDaysElapsed(), cheap enough to state right here instead of
-       -- inlining a meter subquery per friend.
+       -- at least ${STREAK_ASSIST_TARGET_DAYS} days ago (${PLUS_STREAK_ASSIST_TARGET_DAYS} for a
+       -- Mile A Day+ friend). Same rule as getMeters(), cheap enough to state
+       -- right here instead of inlining a meter subquery per friend.
        AND (u.streak_assist_last_used IS NULL
-            OR u.streak_assist_last_used <= t.today - ${STREAK_ASSIST_TARGET_DAYS})
+            OR u.streak_assist_last_used <= t.today - (CASE WHEN ${plusActiveSql("u")}
+                 THEN ${PLUS_STREAK_ASSIST_TARGET_DAYS} ELSE ${STREAK_ASSIST_TARGET_DAYS} END))
        -- A paused friend's streak is frozen, so none of their missed days is
        -- worth an Assist: the token and the donated mile would buy a day that
        -- was never going to break. Filtered in the query rather than after it,

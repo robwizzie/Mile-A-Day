@@ -40,23 +40,23 @@ export function giftMonths(productId: string): number {
 
 /**
  * Founding Runners: every account created before Plus was announced (the
- * paid-ads push) gets Plus free through the end of 2027, derived from
- * `users.created_at` — nothing is written per user, so there is no backfill
- * and nothing to undo. Never move the cutoff BACK (that takes Plus away from
+ * paid-ads push) has Plus for LIFE, derived from `users.created_at` — nothing
+ * is written per user, so there is no backfill and nothing to undo, and there
+ * is no end date. Never move the cutoff BACK (that takes Plus away from
  * people who were told they have it); moving it forward also widens the
  * check scripts' seeded users into Founding Runners, so seed them after it.
  */
 export const FOUNDING_CUTOFF = "2026-10-15T00:00:00Z";
-export const FOUNDING_ENDS = "2028-01-01T00:00:00Z";
 
 /**
- * Streak-token perks: Plus fills the two EARNED meters faster. The Assist
- * (a 30-day allowance spent with a friend's mile) is deliberately the same
- * for everyone — it's the social token, and friends shouldn't see a paid
- * difference in what they can do for each other.
+ * Streak-token perks: Plus fills all three meters faster — Double Down in 5
+ * mile days instead of 14, Streak Save in 3 runs instead of 7, and the Assist
+ * allowance comes round every 14 days instead of 30. Still spent the same way
+ * (an Assist still needs a friend's spare mile).
  */
-export const PLUS_DOUBLE_DOWN_TARGET_DAYS = 10;
-export const PLUS_STREAK_SAVE_TARGET_RUN_DAYS = 5;
+export const PLUS_DOUBLE_DOWN_TARGET_DAYS = 5;
+export const PLUS_STREAK_SAVE_TARGET_RUN_DAYS = 3;
+export const PLUS_STREAK_ASSIST_TARGET_DAYS = 14;
 
 /**
  * Grace after a subscription's `expires_at` while it is still set to renew:

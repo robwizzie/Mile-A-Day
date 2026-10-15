@@ -2,10 +2,10 @@ import crypto from "node:crypto";
 import { PostgresService } from "./DbService.js";
 import {
   FOUNDING_CUTOFF,
-  FOUNDING_ENDS,
   PLUS_DOUBLE_DOWN_TARGET_DAYS,
   PLUS_PRODUCTS,
   PLUS_STREAK_SAVE_TARGET_RUN_DAYS,
+  PLUS_STREAK_ASSIST_TARGET_DAYS,
   RENEWAL_GRACE_SQL,
   giftMonths,
   plusProductKind,
@@ -17,8 +17,7 @@ const db = PostgresService.getInstance();
  * Mile A Day+ entitlement and ledger.
  *
  * A user is Plus when ANY of these holds right now (`plusActiveSql`):
- *   - a Founding Runner (account created before FOUNDING_CUTOFF), until
- *     FOUNDING_ENDS;
+ *   - a Founding Runner (account created before FOUNDING_CUTOFF) — for life;
  *   - a `plus_purchases` row that is unrevoked and unexpired (lifetime rows
  *     never expire; a renewing subscription gets RENEWAL_GRACE past expiry);
  *   - a redeemed, unvoided gift whose window covers now.
@@ -28,7 +27,7 @@ const db = PostgresService.getInstance();
 
 /** SQL boolean: is the users row aliased `u` Plus right now. */
 export const plusActiveSql = (u: string) => `(
-	(${u}.created_at < '${FOUNDING_CUTOFF}'::timestamptz AND now() < '${FOUNDING_ENDS}'::timestamptz)
+	${u}.created_at < '${FOUNDING_CUTOFF}'::timestamptz
 	OR EXISTS (
 		SELECT 1 FROM plus_purchases pp
 		WHERE pp.user_id = ${u}.user_id AND pp.revoked_at IS NULL
@@ -67,7 +66,11 @@ export interface PlusStatus {
   /** True once this account has ever started a subscription (trial eligibility hint). */
   ever_subscribed: boolean;
   products: typeof PLUS_PRODUCTS;
-  perks: { double_down_target: number; streak_save_target: number };
+  perks: {
+    double_down_target: number;
+    streak_save_target: number;
+    streak_assist_target: number;
+  };
 }
 
 interface PurchaseRow {
@@ -83,15 +86,13 @@ interface PurchaseRow {
 export async function getPlusStatus(
   userId: string,
 ): Promise<PlusStatus | null> {
-  const users = await db.query<{ founding: boolean; founding_active: boolean }>(
-    `SELECT (u.created_at < '${FOUNDING_CUTOFF}'::timestamptz) AS founding,
-            (u.created_at < '${FOUNDING_CUTOFF}'::timestamptz
-              AND now() < '${FOUNDING_ENDS}'::timestamptz) AS founding_active
+  const users = await db.query<{ founding: boolean }>(
+    `SELECT (u.created_at < '${FOUNDING_CUTOFF}'::timestamptz) AS founding
        FROM users u WHERE u.user_id = $1`,
     [userId],
   );
   if (!users.length) return null;
-  const { founding, founding_active } = users[0];
+  const { founding } = users[0];
 
   const [purchases, gifts] = await Promise.all([
     db.query<PurchaseRow>(
@@ -118,9 +119,13 @@ export async function getPlusStatus(
   let source: PlusSource | null = null;
   let expires_at: string | null = null;
   let carrier: PurchaseRow | undefined;
+  // A Founding Runner's Plus is for life, so it outranks everything but a
+  // lifetime purchase (it never expires, so expires_at stays null).
   if (lifetime) {
     source = "lifetime";
     carrier = lifetime;
+  } else if (founding) {
+    source = "founding";
   } else if (sub) {
     source = "subscription";
     carrier = sub;
@@ -128,9 +133,6 @@ export async function getPlusStatus(
   } else if (gift) {
     source = "gift";
     expires_at = gift.grant_ends_at;
-  } else if (founding_active) {
-    source = "founding";
-    expires_at = FOUNDING_ENDS;
   }
 
   const isPlus = source !== null;
@@ -142,12 +144,14 @@ export async function getPlusStatus(
     in_trial: source === "subscription" && sub?.in_trial === true,
     family_shared: carrier?.ownership === "FAMILY_SHARED",
     founding_runner: founding,
-    founding_ends_at: founding ? FOUNDING_ENDS : null,
+    // Kept for the response shape; a Founding Runner's Plus never ends.
+    founding_ends_at: null,
     ever_subscribed: purchases.some((p) => p.kind === "subscription"),
     products: PLUS_PRODUCTS,
     perks: {
       double_down_target: PLUS_DOUBLE_DOWN_TARGET_DAYS,
       streak_save_target: PLUS_STREAK_SAVE_TARGET_RUN_DAYS,
+      streak_assist_target: PLUS_STREAK_ASSIST_TARGET_DAYS,
     },
   };
 }
@@ -417,13 +421,17 @@ export async function listGifts(userId: string): Promise<GiftOut[]> {
 
 export type RedeemResult =
   | { ok: true; starts_at: string; ends_at: string }
-  | { ok: false; error: "invalid_code" | "already_redeemed" | "gift_voided" };
+  | {
+      ok: false;
+      error: "invalid_code" | "already_redeemed" | "gift_voided" | "already_lifetime";
+    };
 
 /**
- * Redeem a gift code. The window starts when the redeemer's existing free
- * time (founding or other gifts) ends, so a gift never overlaps time they
- * already had; a paid subscription is not counted — that's billed by Apple
- * and the user manages it there.
+ * Redeem a gift code. The window starts when the redeemer's other gifts
+ * end, so a gift never overlaps time they already had; a paid subscription
+ * is not counted — that's billed by Apple and the user manages it there.
+ * Someone who already has Plus for life (a Founding Runner or a lifetime
+ * purchase) is refused BEFORE the code is spent, so it can go to someone else.
  */
 export async function redeemGift(
   userId: string,
@@ -440,6 +448,17 @@ export async function redeemGift(
   if (found[0].voided_at) return { ok: false, error: "gift_voided" };
   if (found[0].redeemed_by) return { ok: false, error: "already_redeemed" };
 
+  const lifetime = await db.query(
+    `SELECT 1 FROM users u
+      WHERE u.user_id = $1
+        AND (u.created_at < '${FOUNDING_CUTOFF}'::timestamptz
+             OR EXISTS (SELECT 1 FROM plus_purchases pp
+                         WHERE pp.user_id = u.user_id AND pp.kind = 'lifetime'
+                           AND pp.revoked_at IS NULL))`,
+    [userId],
+  );
+  if (lifetime.length) return { ok: false, error: "already_lifetime" };
+
   const rows = await db.query<{
     grant_starts_at: string;
     grant_ends_at: string;
@@ -448,10 +467,7 @@ export async function redeemGift(
        SELECT GREATEST(
          now(),
          COALESCE((SELECT MAX(g2.grant_ends_at) FROM plus_gifts g2
-                    WHERE g2.redeemed_by = $2 AND g2.voided_at IS NULL), now()),
-         CASE WHEN u.created_at < '${FOUNDING_CUTOFF}'::timestamptz
-              THEN '${FOUNDING_ENDS}'::timestamptz ELSE now() END
-       ) AS at
+                    WHERE g2.redeemed_by = $2 AND g2.voided_at IS NULL), now())) AS at
        FROM users u WHERE u.user_id = $2
      )
      UPDATE plus_gifts g

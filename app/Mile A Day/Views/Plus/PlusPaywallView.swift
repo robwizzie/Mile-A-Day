@@ -39,7 +39,7 @@ enum PlusPerk: CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .fasterTokens:
-            return "Earn a Double Down in 10 days instead of 14, and a Streak Save in 5 runs instead of 7."
+            return "Double Down in 5 days instead of 14, Streak Save in 3 runs instead of 7, and a Streak Assist every 14 days instead of 30."
         case .flameyColors:
             return "Electric, Rose Gold, Obsidian and Tropic colors, plus the glow-in-the-dark Skeleton Suit."
         case .family:
@@ -542,7 +542,7 @@ enum PlusStatusCopy {
         let date = status.expiresDate.map { $0.formatted(date: .abbreviated, time: .omitted) }
         switch status.source ?? "" {
         case "founding":
-            return "Founding Runner — free through \(date ?? "2027"). Thank you for being here early."
+            return "Founding Runner — Plus for life, on us. Thank you for being here early."
         case "lifetime":
             return status.family_shared == true ? "Lifetime, shared through Family Sharing." : "Lifetime — it's yours for good."
         case "gift":

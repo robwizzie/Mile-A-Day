@@ -149,7 +149,8 @@ Details: docs/conventions/backend.md § Mile A Day+
 - Entitlement is DERIVED at read (`plusActiveSql`/`isPlusActive`/`getPlusStatus`), never stored on `users`; perks read it live (`getMeters`, `ownedFlameyItems`). Check: `plus-check`.
 - Record only VERIFIED StoreKit JWS (`appleStoreVerifier.verifyTransaction`) via `recordTransaction`; product → grant only from `plusCatalog.ts` (`PLUS_PRODUCTS`, mirrored by iOS `PlusProducts`); never rename a product id.
 - `plus_purchases` upserts move FORWARD only (`purchased_at <=`); a refund stamps `revoked_at`, never deletes; gifts are one code per Apple `transaction_id`, voided (never deleted) on refund.
-- Never move `FOUNDING_CUTOFF` back; check scripts seed users AFTER it (or they become Founding Runners).
+- Founding Runners are Plus for life (no end constant). Never move `FOUNDING_CUTOFF` back; check scripts seed users AFTER it (or they become Founding Runners).
+- A Plus meter target lives in `plusCatalog.ts`; any SQL that decides "holds an Assist" must use the same per-user target (`getAssistableFriends`).
 
 ## ESM Reminder
 Details: docs/conventions/backend.md § ESM Reminder

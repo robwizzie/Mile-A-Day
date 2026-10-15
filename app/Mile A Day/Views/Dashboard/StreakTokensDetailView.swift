@@ -66,9 +66,8 @@ enum StreakTokenKind {
         }
     }
 
-    /// `target` is the meter's own (the server's — Mile A Day+ fills the
-    /// Double Down and Streak Save meters faster), so the copy never
-    /// disagrees with the bar under it.
+    /// `target` is the meter's own (the server's — Mile A Day+ fills all
+    /// three meters faster), so the copy never disagrees with the bar under it.
     func howToEarn(target: Int) -> String {
         switch self {
         case .doubleDown:
@@ -76,7 +75,7 @@ enum StreakTokenKind {
         case .save:
             return "Run your full mile on \(target) days. Running only — walks don't tick this one."
         case .assist:
-            return "One every 30 days — the countdown starts the day you spend one, so a brand-new account is already holding its first. Holding one is half of a save; a friend's spare mile is the other half."
+            return "One every \(target) days — the countdown starts the day you spend one, so a brand-new account is already holding its first. Holding one is half of a save; a friend's spare mile is the other half."
         }
     }
 
@@ -830,7 +829,7 @@ struct StreakTokensDetailView: View {
                     Text("Fill these faster with Mile A Day+")
                         .madFont(size: 14, weight: .heavy, design: .rounded)
                         .foregroundColor(.white)
-                    Text("Double Down in 10 days, Streak Save in 5 runs.")
+                    Text("Double Down in 5 days, Streak Save in 3 runs, an Assist every 14 days.")
                         .madFont(size: 12, weight: .medium, design: .rounded)
                         .foregroundColor(.white.opacity(0.6))
                 }
