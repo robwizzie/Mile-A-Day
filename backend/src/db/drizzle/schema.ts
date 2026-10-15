@@ -3861,3 +3861,74 @@ export const mcpAuditLog = pgTable(
   },
   (table) => [index("idx_mcp_audit_log_created").on(table.createdAt.desc())],
 ).enableRLS();
+
+// ─── Mile A Day+ ─────────────────────────────────────────────────────────
+// The purchase ledger. One row per (Apple original transaction, MAD account):
+// a subscription or the lifetime unlock, as last VERIFIED from a StoreKit 2
+// signed transaction (client post or App Store Server Notification). Rows are
+// never deleted — a refund stamps `revoked_at`, a lapse is just `expires_at`
+// in the past. Entitlement is DERIVED at read (`plusActiveSql`), never stored.
+export const plusPurchases = pgTable(
+  "plus_purchases",
+  {
+    originalTransactionId: text("original_transaction_id").notNull(),
+    userId: text("user_id").notNull(),
+    productId: text("product_id").notNull(),
+    // The latest transaction seen for this original (renewals move it).
+    transactionId: text("transaction_id").notNull(),
+    // 'subscription' | 'lifetime'
+    kind: text().notNull(),
+    // Apple's ownershipType: PURCHASED | FAMILY_SHARED
+    ownership: text().notNull(),
+    // Apple's environment: Production | Sandbox
+    environment: text().notNull(),
+    purchasedAt: timestamp("purchased_at", { withTimezone: true, mode: "string" }).notNull(),
+    // NULL = never expires (lifetime).
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+    inTrial: boolean("in_trial").default(false).notNull(),
+    // From renewal info when a notification carried it; NULL = unknown.
+    autoRenew: boolean("auto_renew"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.originalTransactionId, table.userId],
+      name: "plus_purchases_pkey",
+    }),
+    index("idx_plus_purchases_user").on(table.userId),
+  ],
+);
+
+// "Gift a year of Plus": one row per gift purchase (a consumable), carrying
+// the shareable code. Redeeming stamps the redeemer and the window it grants;
+// a refund of the purchase stamps `voided_at`, which ends that window too.
+export const plusGifts = pgTable(
+  "plus_gifts",
+  {
+    code: varchar({ length: 16 }).primaryKey().notNull(),
+    purchaserId: text("purchaser_id").notNull(),
+    transactionId: text("transaction_id").notNull(),
+    productId: text("product_id").notNull(),
+    environment: text().notNull(),
+    months: integer().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    redeemedBy: text("redeemed_by"),
+    redeemedAt: timestamp("redeemed_at", { withTimezone: true, mode: "string" }),
+    grantStartsAt: timestamp("grant_starts_at", { withTimezone: true, mode: "string" }),
+    grantEndsAt: timestamp("grant_ends_at", { withTimezone: true, mode: "string" }),
+    voidedAt: timestamp("voided_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    unique("plus_gifts_transaction_unique").on(table.transactionId),
+    index("idx_plus_gifts_purchaser").on(table.purchaserId),
+    index("idx_plus_gifts_redeemed_by").on(table.redeemedBy),
+  ],
+);

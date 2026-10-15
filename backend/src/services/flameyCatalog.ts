@@ -1,11 +1,13 @@
 /**
  * Flamey's Closet — the canonical cosmetics catalog.
  *
- * Every item sits in exactly ONE slot and is unlocked by exactly one thing.
- * Today that is a MEDAL (a `badges.badge_id` the user holds in `user_badges`)
- * or `always` (everyone owns it); `purchase` exists so a future StoreKit item
- * is representable without changing the shape, and is owned by nobody until a
- * purchase ledger exists. Item ids are stored in `users.flamey_look` and
+ * Every item sits in exactly ONE slot and is unlocked by exactly one thing:
+ * a MEDAL (a `badges.badge_id` the user holds in `user_badges`), `always`
+ * (everyone owns it), `plus` (owned while the user is Mile A Day+ — see
+ * plusService; a lapse makes it read as "auto" again, never rewriting the
+ * stored look) or `month` (a Monthly Flame, owned once that calendar month
+ * has been PERFECT in any year — see monthlyFlames.ts). `purchase` is reserved for a future one-off StoreKit item and
+ * is owned by nobody. Item ids are stored in `users.flamey_look` and
  * mirrored by the iOS catalog — never rename one; retire it instead (an
  * unknown id is dropped at read, which reads as "auto" for that slot).
  *
@@ -35,6 +37,8 @@ export type FlameySlot = (typeof FLAMEY_SLOTS)[number];
 export type FlameyUnlock =
   | { kind: "always" }
   | { kind: "badge"; id: string }
+  | { kind: "plus" }
+  | { kind: "month"; month: number }
   | { kind: "purchase"; productId: string };
 
 export interface FlameyItem {
@@ -43,7 +47,7 @@ export interface FlameyItem {
   unlock: FlameyUnlock;
 }
 
-// [itemId, slot, unlocking badge id | "always"]
+// [itemId, slot, unlocking badge id | "always" | "plus" | "month:<1-12>"]
 const ROWS: ReadonlyArray<readonly [string, FlameySlot, string]> = [
   // color
   ["classic", "color", "always"],
@@ -71,6 +75,24 @@ const ROWS: ReadonlyArray<readonly [string, FlameySlot, string]> = [
   ["cosmic", "color", "streak_730"],
   ["eternal", "color", "streak_1000"],
   ["phantom", "color", "ghost_beat_50"],
+  // Mile A Day+ colors
+  ["electric", "color", "plus"],
+  ["rose_gold", "color", "plus"],
+  ["obsidian", "color", "plus"],
+  ["tropic", "color", "plus"],
+  // Monthly Flames — a perfect month (monthlyFlames.ts, same ids)
+  ["frostbite", "color", "month:1"],
+  ["sweetheart", "color", "month:2"],
+  ["lucky_clover", "color", "month:3"],
+  ["april_showers", "color", "month:4"],
+  ["wildflower", "color", "month:5"],
+  ["sunburst", "color", "month:6"],
+  ["firecracker", "color", "month:7"],
+  ["watermelon", "color", "month:8"],
+  ["falling_leaves", "color", "month:9"],
+  ["jack_o_lantern", "color", "month:10"],
+  ["sweater_weather", "color", "month:11"],
+  ["twinkle_lights", "color", "month:12"],
   // head
   ["sweatband", "head", "special_first_mile"],
   ["ball_cap", "head", "miles_25"],
@@ -130,6 +152,7 @@ const ROWS: ReadonlyArray<readonly [string, FlameySlot, string]> = [
   ["ghost_sheet", "costume", "ghost_beat_10"],
   ["astronaut_helmet", "costume", "miles_2500"],
   ["pumpkin_suit", "costume", "holiday_halloween"],
+  ["skeleton_suit", "costume", "plus"],
   // held
   ["checkered_flag", "held", "comp_started_1"],
   ["stopwatch", "held", "comp_started_10"],
@@ -182,7 +205,11 @@ function buildCatalog(): ReadonlyMap<string, FlameyItem> {
       unlock:
         unlock === "always"
           ? { kind: "always" }
-          : { kind: "badge", id: unlock },
+          : unlock === "plus"
+            ? { kind: "plus" }
+            : unlock.startsWith("month:")
+              ? { kind: "month", month: Number(unlock.slice("month:".length)) }
+              : { kind: "badge", id: unlock },
     });
   }
   return map;
@@ -217,12 +244,14 @@ const FLAMEY_ALL_ACCESS_USER_IDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Items owned given the user's earned badge ids, in catalog order.
- * `purchase` items are never owned yet — no purchase ledger exists.
+ * Items owned given the user's earned badge ids, Plus state and perfect
+ * months (1–12), in catalog order. `purchase` items are never owned yet.
  */
 export function ownedFlameyItemIds(
   earnedBadgeIds: Iterable<string>,
   userId?: string,
+  plus = false,
+  perfectMonths: ReadonlySet<number> | ReadonlyMap<number, unknown> = new Set<number>(),
 ): Set<string> {
   if (userId && FLAMEY_ALL_ACCESS_USER_IDS.has(userId)) {
     return new Set(FLAMEY_CATALOG.keys());
@@ -231,6 +260,10 @@ export function ownedFlameyItemIds(
   const owned = new Set<string>();
   for (const item of FLAMEY_CATALOG.values()) {
     if (item.unlock.kind === "always") owned.add(item.id);
+    else if (item.unlock.kind === "plus" && plus) owned.add(item.id);
+    else if (item.unlock.kind === "month" && perfectMonths.has(item.unlock.month)) {
+      owned.add(item.id);
+    }
     else if (item.unlock.kind === "badge" && earned.has(item.unlock.id)) {
       owned.add(item.id);
     }

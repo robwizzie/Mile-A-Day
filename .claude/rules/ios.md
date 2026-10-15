@@ -125,6 +125,14 @@ Details: docs/conventions/ios.md § Key Patterns
 - `PostComposerView.init` resolves buddy context for every door (`buddySessionForWorkout`, `lastFinishedSession` fallback); stashed snaps are `.library`.
 - Shoes are private (never on friend profiles/posts/shares); defaults per `ShoeActivity`; pickers pass the activity.
 
+## Mile A Day+
+Details: docs/conventions/ios.md § Mile A Day+
+- Entitlement is the server's (`PlusStore.status`); never unlock from a local StoreKit check; `finish()` a transaction only after the server's `results[i]` says ok or `retryable: false`.
+- Purchases pass `.appAccountToken` (`PlusStore.appAccountToken`); product ids live in `PlusProducts` (mirrors backend `PLUS_PRODUCTS`).
+- The paywall sells only shipped perks (`PlusPerk`); prices/periods come from `Product`, never literals; keep Restore + Terms + Privacy + the renewal line beside the button (3.1.2).
+- Plus-only Flamey items use `FlameyUnlock.plus` and are granted only by the server's `owned_item_ids`.
+- Monthly Flames are `color` items with `FlameyUnlock.month(n)` (server-granted); their art is palette + `FlameyMonthlyFX` INSIDE his outline (never a new silhouette) plus a bare-tip crown (`FlameyArt.monthCrown`, counted in `crest`); progress comes only from the closet's `monthly_flames` (`FlameyMonthlyStore`).
+
 ## Auth / Session
 Details: docs/conventions/ios.md § Auth / Session
 - "Who am I" = the token's `sub` (`TokenUtils.subject`); `SessionIdentity.enforce()` catches drift; never blanket-sign-out on 403.
@@ -165,6 +173,7 @@ When in doubt: cite the guideline number, propose the compliant path, and ask be
 - Throttle Flyover overlay invalidation by time; odometer base recomputed from the leg index.
 - Every dashboard card below the day's cards is switchable, stored per style (`dashboardCardsFunV1`/`ModernV1`); mount `DashboardCustomizeRow` after the style `switch`.
 - Flamey: one look via `FlameyLook.resolve(...)` (owning never dresses him); six shared files stay BYTE-IDENTICAL in `Views/Components/` and `MileADayWidgets/` (cp + cmp); no control in the hero's top-left; the Closet edits a draft (`saveDraft`); bubble anchors at `FlameyArt.crest`.
+- Build a figure's palette (body, arms, legs, glow) from `FlameyLook.figurePalette`, never `FlameyPalette.palette(for: look.color)`: a whole-body costume (`skeletonSuit`) skins his limbs.
 - Workouts rows draw their own map (`WorkoutRoutePreviewCard`); the host list reads `WorkoutRouteCache` and passes traces in.
 - Pause gaps are cut at DRAW time by `RouteGaps` (`resume()` still nils the anchor); gaps add zero length; clock via `collapsingGaps`.
 - `RouteArtView` is the default route face; routeless ⇒ `IndoorWorkoutCard`, never labelled "indoor" (`RoutelessCardStyle.resolve`); feed motion transform-only, no `TimelineView` in cards.

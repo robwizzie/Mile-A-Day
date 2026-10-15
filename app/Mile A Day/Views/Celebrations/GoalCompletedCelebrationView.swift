@@ -627,7 +627,7 @@ struct GoalCompletedCelebrationView: View {
                         progress: payload.streak_save.fraction,
                         caption: payload.streak_save.held
                             ? "Ready"
-                            : "\(Int(payload.streak_save.progress))/\(Int(payload.streak_save.target))"
+                            : payload.streak_save.countCaption
                     )
                     recapCell(
                         kind: .assist,

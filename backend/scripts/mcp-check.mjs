@@ -10,6 +10,7 @@
 // Refuses to run if they already exist in the cluster.
 //
 // Usage: npm run build && DATABASE_URL=... node scripts/mcp-check.mjs
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import http from "node:http";
@@ -63,7 +64,7 @@ const dropRoles = async () => {
 };
 try {
   execFileSync("psql", [process.env.DATABASE_URL, "-q", "-v", `ro_pw=${PW}`, "-v", `rw_pw=${PW}`,
-    "-f", new URL("./mcp-db-roles.sql", import.meta.url).pathname], { stdio: ["ignore", "ignore", "inherit"] });
+    "-f", fileURLToPath(new URL("./mcp-db-roles.sql", import.meta.url))], { stdio: ["ignore", "ignore", "inherit"] });
 } catch {
   console.log("mcp-check: FAILED — scripts/mcp-db-roles.sql did not run cleanly");
   await dropRoles();

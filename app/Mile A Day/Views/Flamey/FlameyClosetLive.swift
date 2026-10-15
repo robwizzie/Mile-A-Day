@@ -29,6 +29,8 @@ final class FlameyClosetLink: ObservableObject {
         /// Open `focus`'s card on arrival (a medal's "See it in Flamey's
         /// Closet", `mileaday://flamey-closet?item=<id>`).
         var openDetail: Bool = false
+        /// Open straight onto Monthly Flames (the dashboard's month card).
+        var monthly: Bool = false
     }
 
     @Published var pending: Request?
@@ -36,9 +38,10 @@ final class FlameyClosetLink: ObservableObject {
     private init() {}
 
     func open(highlighting items: Set<FlameyItem> = [], focus: FlameyItem? = nil, journey: Bool = false,
-              openDetail: Bool = false) {
+              openDetail: Bool = false, monthly: Bool = false) {
         guard DashboardStylePreference.current == .fun else { return }
-        pending = Request(highlight: items, focus: focus, journey: journey, openDetail: openDetail && focus != nil)
+        pending = Request(highlight: items, focus: focus, journey: journey, openDetail: openDetail && focus != nil,
+                          monthly: monthly)
     }
 
     /// The same, raised only AFTER a sheet has finished dismissing — a
@@ -172,8 +175,10 @@ enum FlameyClosetSync {
         let name: String??
         /// nil = no `outfits` key (older server).
         let outfits: [OutfitDTO]?
+        /// nil = no `monthly_flames` key (older server).
+        let monthly_flames: FlameyMonthlyStatus?
 
-        enum CodingKeys: String, CodingKey { case look, owned_item_ids, name, outfits }
+        enum CodingKeys: String, CodingKey { case look, owned_item_ids, name, outfits, monthly_flames }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -185,6 +190,7 @@ enum FlameyClosetSync {
                 name = nil
             }
             outfits = try? c.decodeIfPresent([OutfitDTO].self, forKey: .outfits)
+            monthly_flames = try? c.decodeIfPresent(FlameyMonthlyStatus.self, forKey: .monthly_flames)
         }
     }
 
@@ -241,6 +247,28 @@ enum FlameyClosetSync {
         await pull(force: false)
     }
 
+    /// Re-read the closet now (the Monthly Flames screen opening: this
+    /// month's progress should be today's, not the last foreground's).
+    static func refreshNow() async {
+        lastPullAt = nil
+        await pull(force: false)
+    }
+
+    /// The same, at most every five minutes (the dashboard's month card,
+    /// which appears on every visit to the tab).
+    static func refreshIfStale() async {
+        if let last = lastPullAt, Date().timeIntervalSince(last) < 300 { return }
+        await pull(force: false)
+    }
+
+    /// Mile A Day+ started or ended: re-read what the server says is owned
+    /// (Plus-only items follow entitlement) without waiting for the next
+    /// foreground's throttle.
+    static func refreshOwnedItems() async {
+        lastPullAt = nil
+        await pull(force: false)
+    }
+
     private static func pull(force: Bool) async {
         guard TokenStore.hasTokens, let userId else { return }
         guard force || !isDirty else { return }
@@ -248,6 +276,7 @@ enum FlameyClosetSync {
         guard let closet = try? await APIClient.fancyFetch(endpoint: "/users/\(userId)/flamey-closet",
                                                            responseType: Closet.self) else { return }
         storeServerOwned(closet.owned_item_ids)
+        if let monthly = closet.monthly_flames { FlameyMonthlyStore.save(monthly) }
         // Another phone may have renamed him or changed the outfits; a
         // change still waiting to go up from THIS phone wins.
         if let name = closet.name, !isNameDirty {
@@ -595,7 +624,7 @@ struct FlameyClosetScreen: View {
         // A request aimed at ONE item (from a medal, a deep link) goes
         // straight there; the first-run walkthrough waits for a plain open.
         _showingJourney = State(initialValue: request.journey
-            || (!FlameyJourneyLedger.seen && !request.openDetail))
+            || (!FlameyJourneyLedger.seen && !request.openDetail && !request.monthly))
     }
 
     var body: some View {
@@ -606,7 +635,7 @@ struct FlameyClosetScreen: View {
             } else {
                 FlameyClosetView(model: model, onDone: { dismiss() }, onShowJourney: {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { showingJourney = true }
-                })
+                }, opensMonthly: request.monthly)
                 .transition(.opacity)
             }
         }

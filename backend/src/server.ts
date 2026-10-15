@@ -28,6 +28,7 @@ import diagnosticsRoutes from "./routes/diagnosticsRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
 import buddyRoutes from "./routes/buddyRoutes.js";
 import injuryPauseRoutes from "./routes/injuryPauseRoutes.js";
+import plusRoutes, { storePublicRouter } from "./routes/plusRoutes.js";
 import {
   authenticateToken,
   requireAdmin,
@@ -335,6 +336,8 @@ app.use("/auth", authRoutes);
 app.use("/dev", devRoutes);
 app.use("/badges", publicBadgesRouter);
 app.use("/public", publicRoutes);
+// Apple App Store Server Notifications (signed by Apple, verified in the controller).
+app.use("/store", storePublicRouter);
 // Admin login (Apple-web verify) is public — it's how the dashboard gets a token.
 app.use("/admin/auth", adminAuthRouter);
 // Desk display feed: its own per-device key, never a user JWT (see displayService).
@@ -365,6 +368,7 @@ app.use("/blocks", blocksRoutes);
 app.use("/leaderboard", leaderboardRoutes);
 app.use("/buddy", buddyRoutes);
 app.use("/streak", injuryPauseRoutes);
+app.use("/plus", plusRoutes);
 app.use("/live", liveTrackingRoutes);
 app.use("/ghosts", ghostRoutes);
 app.use("/telemetry", telemetryRoutes);

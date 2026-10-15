@@ -18,6 +18,12 @@ import {
 import { getUserLocalToday, getMilesOnLocalDate } from "./workoutService.js";
 import { refreshCurrentStreak } from "./leaderboardService.js";
 import { sendPush } from "./pushNotificationService.js";
+import { isPlusActive, plusActiveSql } from "./plusService.js";
+import {
+  PLUS_DOUBLE_DOWN_TARGET_DAYS,
+  PLUS_STREAK_ASSIST_TARGET_DAYS,
+  PLUS_STREAK_SAVE_TARGET_RUN_DAYS,
+} from "./plusCatalog.js";
 
 const db = PostgresService.getInstance();
 
@@ -28,10 +34,13 @@ const db = PostgresService.getInstance();
  *   🔥 Double Down    — meter: 14 mile-completing days (run OR walk). Held at
  *                       14. Spend: miss yesterday, run 2× your goal today →
  *                       yesterday is covered. Detected on the upload path.
- *   ❄️ Streak Save    — meter: 7 mile-completing RUN days (walks and short
- *                       jogs don't tick it). Held at 7. Spent automatically by
- *                       the sweep when a miss can't be (or wasn't) Double
- *                       Downed.
+ *   ❄️ Streak Save    — meter: 7 RUN days, in run-day units: a day whose
+ *                       running alone completes the mile counts 1, a day
+ *                       completed any other way (a walk, a walk + short jog)
+ *                       counts ½ — so runners earn it fastest, walk-only
+ *                       users in twice the days, and mixed weeks add up.
+ *                       Held at 7. Spent automatically by the sweep when a
+ *                       miss can't be (or wasn't) Double Downed.
  *   🤝 Streak Assist  — meter: TIME, not effort. One every 30 days, counted
  *                       from the day you last spent one; never spent one and
  *                       you're already holding it. Spent on YOUR OWN broken
@@ -61,6 +70,12 @@ const db = PostgresService.getInstance();
 // most likely to need tuning after launch.
 export const DOUBLE_DOWN_TARGET_DAYS = 14;
 export const STREAK_SAVE_TARGET_RUN_DAYS = 7;
+// What a mile day that ISN'T a full run is worth to the Streak Save meter, in
+// run days. Walk-only users were locked out of the Save entirely; half keeps
+// running the fast way (the token exists to promote it) while giving walkers
+// a real path. Derived like every meter, so it applies retroactively over the
+// meter window and to every future day with no backfill.
+export const STREAK_SAVE_WALK_DAY_CREDIT = 0.5;
 // The Assist is the one meter that isn't earned by running. It's a 30-day
 // allowance measured from the last spend, so a new account holds one on day
 // one (nothing spent yet) and spending one starts a visible countdown. That
@@ -95,6 +110,10 @@ export interface MeterState {
   target: number;
   held: boolean;
   last_used: string | null;
+  /** Streak Save only (additive): the days behind `progress`, by kind. */
+  run_days?: number;
+  walk_days?: number;
+  walk_day_credit?: number;
 }
 
 export interface StreakFeatureMeters {
@@ -122,7 +141,7 @@ function dateOnly(value: string | Date | null): string | null {
  *
  * Clamped at 0 because `streak_assist_last_used` is stamped in the SPENDER's
  * local today, which can legitimately read a day ahead of a caller further
- * west — a negative here would render as a countdown longer than 30.
+ * west — a negative here would render as a countdown longer than the target.
  */
 function assistDaysElapsed(
   lastUsed: string | null,
@@ -153,9 +172,9 @@ function meterFloor(
 
 /**
  * Derive all three meters in one query. "Day counts" uses the same flat
- * 0.95-mile rule as the streak walks; the Save meter additionally requires the
- * RUNNING workouts alone to complete the mile (the "7 days of running a mile"
- * rule — a short jog alongside a long walk does not tick it).
+ * 0.95-mile rule as the streak walks. The Save meter splits those days: the
+ * RUNNING workouts alone completing the mile is a run day (1), anything else
+ * that completes it is a walk day (STREAK_SAVE_WALK_DAY_CREDIT).
  */
 export async function getMeters(
   userId: string,
@@ -177,7 +196,8 @@ export async function getMeters(
 
   const rows = await db.query<{
     dd_days: string | number;
-    save_days: string | number;
+    save_run_days: string | number;
+    save_walk_days: string | number;
   }>(
     `SELECT
       (SELECT COUNT(*) FROM (
@@ -186,37 +206,60 @@ export async function getMeters(
           AND local_date > $2::date AND local_date <= $4::date
         GROUP BY local_date HAVING SUM(distance) >= 0.95
       ) dd) AS dd_days,
-      (SELECT COUNT(*) FROM (
-        SELECT local_date FROM workouts
-        WHERE user_id = $1 AND deleted_at IS NULL AND exclusion_reason IS NULL
-          AND workout_type = 'running'
-          AND local_date > $3::date AND local_date <= $4::date
-        GROUP BY local_date HAVING SUM(distance) >= 0.95
-      ) sv) AS save_days`,
+      sv.run_days AS save_run_days,
+      sv.walk_days AS save_walk_days
+     FROM (
+       SELECT COUNT(*) FILTER (WHERE run >= 0.95) AS run_days,
+              COUNT(*) FILTER (WHERE run < 0.95) AS walk_days
+       FROM (
+         SELECT local_date,
+                COALESCE(SUM(distance) FILTER (WHERE workout_type = 'running'), 0) AS run
+         FROM workouts
+         WHERE user_id = $1 AND deleted_at IS NULL AND exclusion_reason IS NULL
+           AND local_date > $3::date AND local_date <= $4::date
+         GROUP BY local_date HAVING SUM(distance) >= 0.95
+       ) d
+     ) sv`,
     [userId, ddFloor, saveFloor, userToday],
   );
 
   const ddDays = Number(rows[0]?.dd_days ?? 0);
-  const saveDays = Number(rows[0]?.save_days ?? 0);
+  const saveRunDays = Number(rows[0]?.save_run_days ?? 0);
+  const saveWalkDays = Number(rows[0]?.save_walk_days ?? 0);
+  const saveDays = saveRunDays + saveWalkDays * STREAK_SAVE_WALK_DAY_CREDIT;
   const assistDays = assistDaysElapsed(row.streak_assist_last_used, userToday);
+  // Mile A Day+ fills all three meters faster (plusCatalog.ts). Read
+  // live, so a lapse puts the regular target back on the next read — a token
+  // already spent stays spent, one not yet held simply needs the longer run.
+  const plus = await isPlusActive(userId);
+  const ddTarget = plus ? PLUS_DOUBLE_DOWN_TARGET_DAYS : DOUBLE_DOWN_TARGET_DAYS;
+  const saveTarget = plus
+    ? PLUS_STREAK_SAVE_TARGET_RUN_DAYS
+    : STREAK_SAVE_TARGET_RUN_DAYS;
+  const assistTarget = plus
+    ? PLUS_STREAK_ASSIST_TARGET_DAYS
+    : STREAK_ASSIST_TARGET_DAYS;
 
   return {
     double_down: {
-      progress: Math.min(ddDays, DOUBLE_DOWN_TARGET_DAYS),
-      target: DOUBLE_DOWN_TARGET_DAYS,
-      held: ddDays >= DOUBLE_DOWN_TARGET_DAYS,
+      progress: Math.min(ddDays, ddTarget),
+      target: ddTarget,
+      held: ddDays >= ddTarget,
       last_used: row.double_down_last_used,
     },
     streak_save: {
-      progress: Math.min(saveDays, STREAK_SAVE_TARGET_RUN_DAYS),
-      target: STREAK_SAVE_TARGET_RUN_DAYS,
-      held: saveDays >= STREAK_SAVE_TARGET_RUN_DAYS,
+      progress: Math.min(saveDays, saveTarget),
+      target: saveTarget,
+      held: saveDays >= saveTarget,
       last_used: row.streak_save_last_used,
+      run_days: saveRunDays,
+      walk_days: saveWalkDays,
+      walk_day_credit: STREAK_SAVE_WALK_DAY_CREDIT,
     },
     streak_assist: {
-      progress: Math.min(assistDays, STREAK_ASSIST_TARGET_DAYS),
-      target: STREAK_ASSIST_TARGET_DAYS,
-      held: assistDays >= STREAK_ASSIST_TARGET_DAYS,
+      progress: Math.min(assistDays, assistTarget),
+      target: assistTarget,
+      held: assistDays >= assistTarget,
       last_used: row.streak_assist_last_used,
     },
     goalMiles,
@@ -1569,11 +1612,12 @@ export async function getAssistableFriends(
      WHERE f.user_id = $1 AND f.status = 'accepted'
        AND u.streak_features_at IS NOT NULL
        -- Holding an Assist is now just a date: never spent one, or spent one
-       -- at least ${STREAK_ASSIST_TARGET_DAYS} days ago. Same rule as
-       -- assistDaysElapsed(), cheap enough to state right here instead of
-       -- inlining a meter subquery per friend.
+       -- at least ${STREAK_ASSIST_TARGET_DAYS} days ago (${PLUS_STREAK_ASSIST_TARGET_DAYS} for a
+       -- Mile A Day+ friend). Same rule as getMeters(), cheap enough to state
+       -- right here instead of inlining a meter subquery per friend.
        AND (u.streak_assist_last_used IS NULL
-            OR u.streak_assist_last_used <= t.today - ${STREAK_ASSIST_TARGET_DAYS})
+            OR u.streak_assist_last_used <= t.today - (CASE WHEN ${plusActiveSql("u")}
+                 THEN ${PLUS_STREAK_ASSIST_TARGET_DAYS} ELSE ${STREAK_ASSIST_TARGET_DAYS} END))
        -- A paused friend's streak is frozen, so none of their missed days is
        -- worth an Assist: the token and the donated mile would buy a day that
        -- was never going to break. Filtered in the query rather than after it,

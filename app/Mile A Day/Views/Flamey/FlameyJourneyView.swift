@@ -353,7 +353,7 @@ struct FlameyJourneyView: View {
     private var stageLook: FlameyLook { model.look(for: picks) }
 
     private var glow: Color {
-        FlameyPalette.palette(for: stageLook.color)?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
+        stageLook.figurePalette?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
     }
 
     private var topBar: some View {

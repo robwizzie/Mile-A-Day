@@ -8,6 +8,19 @@ struct StreakTokenMeter: Codable {
     let target: Double
     let held: Bool
     let last_used: String?
+    /// Streak Save only (newer servers): the days behind `progress`. A run
+    /// day counts 1, a walk day `walk_day_credit` (½), so progress can be
+    /// fractional.
+    var run_days: Int? = nil
+    var walk_days: Int? = nil
+    var walk_day_credit: Double? = nil
+
+    /// "3.5/7" — whole numbers stay whole.
+    var countCaption: String { "\(Self.number(progress))/\(Self.number(target))" }
+
+    static func number(_ v: Double) -> String {
+        v.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(v)) : String(format: "%.1f", v)
+    }
 
     /// 0…1 for progress rings.
     var fraction: Double {

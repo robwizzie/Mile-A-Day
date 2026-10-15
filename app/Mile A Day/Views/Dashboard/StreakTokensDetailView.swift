@@ -66,14 +66,17 @@ enum StreakTokenKind {
         }
     }
 
-    var howToEarn: String {
+    /// `target` is the meter's own (the server's — Mile A Day+ fills all
+    /// three meters faster), so the copy never disagrees with the bar under it.
+    func howToEarn(target: Int, walkCredit: Double = 0.5) -> String {
         switch self {
         case .doubleDown:
-            return "Complete your mile on 14 days — runs or walks both count."
+            return "Complete your mile on \(target) days — runs or walks both count."
         case .save:
-            return "Run your full mile on 7 days. Running only — walks don't tick this one."
+            let walkDays = Int((Double(target) / max(walkCredit, 0.1)).rounded(.up))
+            return "Run your full mile on \(target) days — or walk it on \(walkDays). A walk day counts as half a run, so mixing works and running gets you there fastest."
         case .assist:
-            return "One every 30 days — the countdown starts the day you spend one, so a brand-new account is already holding its first. Holding one is half of a save; a friend's spare mile is the other half."
+            return "One every \(target) days — the countdown starts the day you spend one, so a brand-new account is already holding its first. Holding one is half of a save; a friend's spare mile is the other half."
         }
     }
 
@@ -388,7 +391,7 @@ struct StreakTokensCard: View {
                             progress: payload.streak_save.fraction,
                             caption: payload.streak_save.held
                                 ? "Available"
-                                : "\(Int(payload.streak_save.progress))/\(Int(payload.streak_save.target))"
+                                : payload.streak_save.countCaption
                         )
                         medallionCell(
                             kind: .assist,
@@ -660,6 +663,8 @@ struct StreakTokensCard: View {
 /// "easily known how to unlock and what they do" surface.
 struct StreakTokensDetailView: View {
     @ObservedObject var tokensState = StreakTokensState.shared
+    @ObservedObject private var plusStore = PlusStore.shared
+    @State private var showPlusPaywall = false
     @Environment(\.dismiss) private var dismiss
     @State private var showPureFlameInfo = false
     /// Token cards whose "How it works" is open (by `kind.raw`). Collapsed by
@@ -765,6 +770,20 @@ struct StreakTokensDetailView: View {
                             )
                             tokenCard(kind: .save, meter: payload.streak_save, unit: "run days")
                             tokenCard(kind: .assist, meter: payload.streak_assist, unit: "days")
+                            // The sheet hangs off this always-present
+                            // Group: the card itself leaves the tree the
+                            // moment a purchase makes the user Plus.
+                            Group {
+                                if !plusStore.isPlus {
+                                    plusUpsell
+                                }
+                            }
+                            .sheet(isPresented: $showPlusPaywall) {
+                                PlusPaywallView(context: .streakTokens) { purchased in
+                                    guard purchased else { return }
+                                    Task { await tokensState.refreshStatus() }
+                                }
+                            }
 
                             rulesCard
                             naturalCard(payload.natural_streak)
@@ -789,6 +808,49 @@ struct StreakTokensDetailView: View {
             }
             .task { await tokensState.refreshStatus() }
         }
+    }
+
+    /// Mile A Day+ fills the two earned meters faster. Shown only to people
+    /// who don't have it, under the meters it would change. Its paywall sheet
+    /// is on the Group around it in `body` (not this card, which disappears
+    /// on purchase, and not the body node, where two sheets would compete).
+    private var plusUpsell: some View {
+        Button {
+            MADHaptics.tap()
+            showPlusPaywall = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.orange)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(Color.orange.opacity(0.15)))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Fill these faster with Mile A Day+")
+                        .madFont(size: 14, weight: .heavy, design: .rounded)
+                        .foregroundColor(.white)
+                    Text("Double Down in 5 days, Streak Save in 3 runs, an Assist every 14 days.")
+                        .madFont(size: 12, weight: .medium, design: .rounded)
+                        .foregroundColor(.white.opacity(0.6))
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+                    .accessibilityHidden(true)
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(Color.orange.opacity(0.25), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     /// The three rules that apply to every token, which no per-token card
@@ -960,7 +1022,8 @@ struct StreakTokensDetailView: View {
             // it" is the live question and "how do I get another" is the
             // follow-up. The badge + "when it fires" line stay visible while
             // collapsed — they ARE the answer; the prose is behind the tap.
-            tokenHowItWorks(kind: kind)
+            tokenHowItWorks(kind: kind, target: Int(meter.target.rounded()),
+                            walkCredit: meter.walk_day_credit ?? 0.5)
 
             TokenMeterBar(kind: kind, meter: meter, unit: unit)
         }
@@ -971,7 +1034,7 @@ struct StreakTokensDetailView: View {
     /// The collapsed "How it works" row: usage badge + when it fires, one
     /// tap from the full instruction and how to earn another. Collapsed by
     /// default — three tokens' worth of paragraphs was the wall of text.
-    private func tokenHowItWorks(kind: StreakTokenKind) -> some View {
+    private func tokenHowItWorks(kind: StreakTokenKind, target: Int, walkCredit: Double) -> some View {
         let expanded = expandedTokens.contains(kind.raw)
         return VStack(alignment: .leading, spacing: 8) {
             Button {
@@ -1031,7 +1094,7 @@ struct StreakTokensDetailView: View {
                         Text("How to earn")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(kind.tint)
-                        Text(kind.howToEarn)
+                        Text(kind.howToEarn(target: target, walkCredit: walkCredit))
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -1195,6 +1258,12 @@ private struct TokenMeterBar: View {
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .foregroundColor(meter.held ? .green : .secondary)
+            if let breakdown {
+                Text(breakdown)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.secondary.opacity(0.8))
+            }
         }
         .onAppear {
             // Reduce Motion: show the final fill immediately, no shimmer loop.
@@ -1214,6 +1283,15 @@ private struct TokenMeterBar: View {
                 }
             }
         }
+    }
+
+    /// Streak Save: what the progress is made of, once walks are in it.
+    private var breakdown: String? {
+        guard kind == .save, !meter.held, let walks = meter.walk_days, walks > 0 else { return nil }
+        let runs = meter.run_days ?? 0
+        let walkPart = walks == 1 ? "1 walk" : "\(walks) walks"
+        let runPart = runs == 1 ? "1 run" : "\(runs) runs"
+        return "\(runPart) + \(walkPart) (walks count ½)"
     }
 
     private var statusLine: String {

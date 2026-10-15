@@ -160,7 +160,7 @@ enum FlameyArt {
         case .ghostSheet: return 0.14
         case .leprechaunHat, .starHat, .beanie: return 0.13
         case .heartBopper, .santaHat: return 0.10
-        case .pumpkinSuit: return 0.07
+        case .pumpkinSuit: return 0.09
         case .cowboyHat, .nightcap: return 0.06
         case .aviatorCap, .directorsBeret, .safariHat: return 0.05
         case .bucketHat, .ballCap, .astronautHelmet: return 0.03
@@ -171,7 +171,39 @@ enum FlameyArt {
     /// The crest of the look: how far its highest drawn point sits above
     /// his tip (body units). A bare tip still flickers a little above 0.98.
     static func crest(of look: FlameyLook) -> CGFloat {
-        max(0.03, [look[.head], look[.costume]].compactMap { $0 }.map(headRise).max() ?? 0)
+        let crown = monthCrown(of: look).map(monthCrownRise) ?? 0
+        return max(0.03, crown, [look[.head], look[.costume]].compactMap { $0 }.map(headRise).max() ?? 0)
+    }
+
+    // MARK: - Monthly Flame crowns
+
+    /// A Monthly Flame that tops his tip: October's pumpkin stem, December's
+    /// tree-top star. Only on a bare tip — any hat or costume wins, so every
+    /// head piece still sits exactly where it always does.
+    static func monthCrown(of look: FlameyLook) -> FlameyItem? {
+        guard look[.head] == nil, look[.costume] == nil, let color = look[.color] else { return nil }
+        return color == .jackOLantern || color == .twinkleLights ? color : nil
+    }
+
+    static func monthCrownRise(_ item: FlameyItem) -> CGFloat {
+        item == .twinkleLights ? 0.13 : 0.07
+    }
+
+    static func drawMonthCrown(_ item: FlameyItem, in ctx: inout GraphicsContext, a: Anchors, u: CGFloat) {
+        switch item {
+        case .jackOLantern:
+            pumpkinStem(&ctx, a, u)
+        case .twinkleLights:
+            let cy = a.topY - 0.03 * u
+            var glow = ctx
+            glow.addFilter(.blur(radius: 0.04 * u))
+            glow.fill(circle(0, cy, 0.09 * u), with: .color(hx(0xFFE27A, 0.7)))
+            let shape = star(0, cy, 0.085 * u, inner: 0.45)
+            ctx.fill(shape, with: lin([hx(0xFFF6B8), hx(0xFFC83A)], pt(0, cy - 0.085 * u), pt(0, cy + 0.085 * u)))
+            ctx.stroke(shape, with: .color(hx(0xB8860B)), lineWidth: lw(u) * 0.8)
+        default:
+            break
+        }
     }
 
     /// The look's top, as a fraction of the view's `size` from its centre
@@ -1318,6 +1350,7 @@ enum FlameyArt {
         switch item {
         case .ghostSheet: ghostSheet(&ctx, a, u, palette: palette)
         case .pumpkinSuit: pumpkin(&ctx, a, u)
+        case .skeletonSuit: skeletonSuit(&ctx, a, u)
         case .astronautHelmet: astronaut(&ctx, a, u)
         default: break
         }
@@ -1382,34 +1415,207 @@ enum FlameyArt {
         ctx.fill(circle(0.40 * u, cy - R * 1.12, 0.028 * u), with: .color(hx(0xE8384F)))
     }
 
-    /// Halloween: sat in a carved pumpkin, with its stem on his tip.
+    /// Halloween: sat inside a carved jack-o'-lantern, barely wider than he
+    /// is. His face shows through its carved window (so he still blinks and
+    /// emotes), and its lid is a snug dome over his whole tip, candlelight
+    /// glowing in the seam. The window is a HOLE in the pumpkin, never paint
+    /// over him; nothing of his flame shows above the lid.
     static func pumpkin(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let w = 0.84 * u, h = 0.25 * u
-        let top = a.bottom - 0.135 * u
-        let g = placed(ctx, 0, top + h / 2)
-        var shell = Path()
-        shell.move(to: pt(-w * 0.5, 0))
-        shell.addCurve(to: pt(0, -h * 0.42), control1: pt(-w * 0.5, -h * 0.62), control2: pt(-w * 0.16, -h * 0.56))
-        shell.addCurve(to: pt(w * 0.5, 0), control1: pt(w * 0.16, -h * 0.56), control2: pt(w * 0.5, -h * 0.62))
-        shell.addCurve(to: pt(0, h * 0.5), control1: pt(w * 0.5, h * 0.62), control2: pt(w * 0.2, h * 0.6))
-        shell.addCurve(to: pt(-w * 0.5, 0), control1: pt(-w * 0.2, h * 0.6), control2: pt(-w * 0.5, h * 0.62))
-        shell.closeSubpath()
-        g.fill(shell, with: .color(hx(0xF07B1A)))
-        for f in [-0.28, 0, 0.28] as [CGFloat] {
-            var rib = Path()
-            rib.move(to: pt(f * w, -h * 0.45))
-            rib.addQuadCurve(to: pt(f * w, h * 0.5), control: pt(f * w * 1.5, 0))
-            g.stroke(rib, with: .color(hx(0xC75A0D)), style: StrokeStyle(lineWidth: 0.012 * u, lineCap: .round))
-        }
-        var rim = Path()
-        rim.move(to: pt(-w * 0.36, -h * 0.34))
-        for i in 0...8 {
-            rim.addLine(to: pt(-w * 0.36 + CGFloat(i) * w * 0.09, -h * 0.34 + (i % 2 == 1 ? h * 0.1 : 0)))
-        }
-        g.stroke(rim, with: .color(hx(0x8A3A06)), style: StrokeStyle(lineWidth: 0.012 * u, lineJoin: .round))
-        g.fill(ellipse(-w * 0.26, -h * 0.05, w * 0.07, h * 0.16), with: .color(hx(0xFFB15C, 0.45)))
-        g.stroke(shell, with: .color(hx(0x8A3A06)), lineWidth: lw(u) * 0.8)
+        let top = a.bottom - 0.88 * u, bot = a.bottom + 0.04 * u
+        let cy = (top + bot) / 2, h = bot - top
+        let wy = a.faceY + 0.02 * u, wrx = 0.26 * u, wry = 0.22 * u
+        let window = ellipse(0, wy, wrx, wry)
+        let crease = hx(0x6E2404, 0.55)
 
+        // Candle warmth round the whole pumpkin.
+        var warm = ctx
+        warm.addFilter(.blur(radius: 0.07 * u))
+        warm.fill(ellipse(0, cy, 0.48 * u, h * 0.52), with: .color(hx(0xFF9628, 0.28)))
+
+        // The shell: five lobes, outer ones darker and behind, every crease
+        // inked — everywhere except the carved window.
+        var shell = ctx
+        shell.clip(to: window, options: .inverse)
+        let lobes: [(CGFloat, CGFloat, CGFloat, UInt32, UInt32)] = [
+            (-0.29, 0.18, 0.46, 0xE2650F, 0xA63C07), (0.29, 0.18, 0.46, 0xE2650F, 0xA63C07),
+            (-0.16, 0.23, 0.50, 0xF8851E, 0xBC4B0A), (0.16, 0.23, 0.50, 0xF8851E, 0xBC4B0A),
+            (0, 0.23, 0.51, 0xFFA43A, 0xCC560D),
+        ]
+        for (x, rx, ry, c1, c2) in lobes {
+            let lobe = ellipse(x * u, cy, rx * u, ry * h)
+            shell.fill(lobe, with: lin([hx(c1), hx(c2)], pt(0, top), pt(0, bot)))
+            shell.stroke(lobe, with: .color(crease), lineWidth: 0.011 * u)
+        }
+        shell.fill(ellipse(-0.30 * u, cy - 0.08 * u, 0.028 * u, 0.11 * u), with: .color(hx(0xFFF0CD, 0.45)))
+        shell.fill(ellipse(-0.12 * u, cy - 0.22 * u, 0.02 * u, 0.055 * u), with: .color(hx(0xFFF0CD, 0.30)))
+
+        // Inside the window: candlelight round its edge, two rounded teeth.
+        var inside = ctx
+        inside.clip(to: window)
+        inside.fill(Path(CGRect(x: -wrx, y: wy - wry, width: wrx * 2, height: wry * 2)),
+                    with: .radialGradient(Gradient(colors: [hx(0xFFC850, 0), hx(0xFFAA28, 0.45)]),
+                                          center: pt(0, wy), startRadius: wry * 0.6, endRadius: wrx * 1.05))
+        for sx in [-1.0, 1.0] as [CGFloat] {
+            inside.fill(rrect(sx * 0.12 * u - 0.028 * u, wy + wry - 0.05 * u, 0.056 * u, 0.066 * u, 0.02 * u),
+                        with: .color(hx(0xEE7316)))
+        }
+
+        // The carved rim, lit from inside.
+        var rim = ctx
+        rim.addFilter(.shadow(color: hx(0xFFD65A, 0.9), radius: 0.05 * u))
+        rim.stroke(window, with: .color(hx(0xFFD27A)), lineWidth: 0.028 * u)
+
+        // The lid: a dome over his whole tip, sat on the pumpkin's top, with
+        // its ribs, a shine, a glowing seam, the stem, a curl and a leaf.
+        let lidW = 0.20 * u, lidH = 0.20 * u
+        let lid = placed(ctx, 0, top + 0.07 * u, -3.4)
+        var dome = Path()
+        dome.move(to: pt(-lidW, 0))
+        dome.addCurve(to: pt(lidW, 0), control1: pt(-lidW, -lidH * 1.05), control2: pt(lidW, -lidH * 1.05))
+        dome.addQuadCurve(to: pt(-lidW, 0), control: pt(0, lidH * 0.22))
+        dome.closeSubpath()
+        var shade = lid
+        shade.addFilter(.shadow(color: hx(0x501802, 0.35), radius: 0.03 * u, y: 0.01 * u))
+        shade.fill(dome, with: lin([hx(0xFFB052), hx(0xE0660F)], pt(0, -lidH), pt(0, 0)))
+        lid.stroke(dome, with: .color(crease), lineWidth: 0.011 * u)
+        var ribs = Path()
+        ribs.move(to: pt(-0.07 * u, -lidH * 0.72))
+        ribs.addQuadCurve(to: pt(-0.09 * u, lidH * 0.07), control: pt(-0.10 * u, -lidH * 0.3))
+        ribs.move(to: pt(0.07 * u, -lidH * 0.72))
+        ribs.addQuadCurve(to: pt(0.09 * u, lidH * 0.07), control: pt(0.10 * u, -lidH * 0.3))
+        lid.stroke(ribs, with: .color(crease), lineWidth: 0.011 * u)
+        lid.fill(ellipse(-0.12 * u, -lidH * 0.45, 0.016 * u, 0.04 * u), with: .color(hx(0xFFF0CD, 0.5)))
+        var seam = Path()
+        seam.move(to: pt(-lidW * 0.9, lidH * 0.04))
+        seam.addQuadCurve(to: pt(lidW * 0.9, lidH * 0.04), control: pt(0, lidH * 0.24))
+        var lit = lid
+        lit.addFilter(.shadow(color: hx(0xFFD65A, 0.9), radius: 0.03 * u))
+        lit.stroke(seam, with: .color(hx(0xFFD27A)), style: StrokeStyle(lineWidth: 0.014 * u, lineCap: .round))
+        let stemTop = -lidH * 0.78
+        lid.fill(rrect(-0.024 * u, stemTop - 0.085 * u, 0.048 * u, 0.095 * u, 0.018 * u), with: .color(hx(0x6B8A2E)))
+        lid.fill(rrect(-0.03 * u, stemTop - 0.095 * u, 0.06 * u, 0.026 * u, 0.011 * u), with: .color(hx(0x86A63E)))
+        var curl = Path()
+        curl.move(to: pt(0.02 * u, stemTop - 0.02 * u))
+        curl.addCurve(to: pt(0.09 * u, stemTop + 0.015 * u), control1: pt(0.09 * u, stemTop - 0.09 * u),
+                      control2: pt(0.14 * u, stemTop))
+        lid.stroke(curl, with: .color(hx(0x4F9A2A)), style: StrokeStyle(lineWidth: 0.013 * u, lineCap: .round))
+        let leafCtx = placed(lid, -0.025 * u, stemTop - 0.03 * u, -149)
+        var leaf = Path()
+        leaf.move(to: .zero)
+        leaf.addQuadCurve(to: pt(0.12 * u, 0), control: pt(0.055 * u, -0.055 * u))
+        leaf.addQuadCurve(to: .zero, control: pt(0.055 * u, 0.04 * u))
+        leafCtx.fill(leaf, with: .color(hx(0x62B23E)))
+    }
+
+    /// Mile A Day+: a cosy glow-in-the-dark skeleton onesie. The hood covers
+    /// all of him — his tip becomes its soft point, with a little bone bow
+    /// on it — over a round skull that wears its own cartoon face: big
+    /// glossy eyes glowing green at the bottom, a heart nose and a stitched
+    /// smile. Chunky ribs peek out either side; his legs are bones in black
+    /// sleeves.
+    static func skeletonSuit(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
+        let bone = hx(0xF6F2E4)
+        let ink = hx(0x2B2734)
+        let glow = hx(0xBEFFC8, 0.55)
+        let rect = bodyRect(a, u)
+        let outline = FlameBuddyOuterShape(wobble: 0).path(in: rect)
+
+        // The hood: his whole outline, a soft sheen down one side.
+        var hood = ctx
+        hood.clip(to: outline)
+        hood.fill(Path(rect.insetBy(dx: -0.05 * u, dy: -0.05 * u)),
+                  with: lin([hx(0x3A3646), hx(0x1A1822)], pt(0, a.topY), pt(0, a.bottom)))
+        let sheen = placed(hood, rect.minX, rect.minY, -24)
+        sheen.fill(Path(CGRect(x: -0.05 * rect.width, y: 0.10 * rect.height, width: 0.14 * rect.width,
+                               height: rect.height * 1.4)), with: .color(.white.opacity(0.07)))
+
+        // Chunky ribs peeking out either side of the skull.
+        var ribs = hood
+        ribs.addFilter(.shadow(color: glow, radius: 0.03 * u))
+        for i in 0..<2 {
+            let y = a.faceY + 0.06 * u + CGFloat(i) * 0.075 * u
+            for sx in [-1.0, 1.0] as [CGFloat] {
+                var rib = Path()
+                rib.move(to: pt(sx * 0.25 * u, y))
+                rib.addQuadCurve(to: pt(sx * 0.36 * u, y + 0.04 * u), control: pt(sx * 0.34 * u, y - 0.01 * u))
+                ribs.stroke(rib, with: .color(bone), style: StrokeStyle(lineWidth: 0.03 * u, lineCap: .round))
+            }
+        }
+        ctx.stroke(outline, with: .color(hx(0xC8BEFF, 0.25)), lineWidth: lw(u) * 1.2)
+
+        // The bone bow on his hood point.
+        var bow = placed(ctx, 0.03 * u, a.topY + 0.07 * u, -29)
+        bow.addFilter(.shadow(color: hx(0xBEFFC8, 0.6), radius: 0.03 * u))
+        bow.fill(rrect(-0.06 * u, -0.014 * u, 0.12 * u, 0.028 * u, 0.014 * u), with: .color(bone))
+        for x in [-0.06, 0.06] as [CGFloat] {
+            for y in [-0.017, 0.017] as [CGFloat] {
+                bow.fill(circle(x * u, y * u, 0.02 * u), with: .color(bone))
+            }
+        }
+
+        // Legs: black sleeves, bone shins, round bone feet.
+        var legs = ctx
+        legs.addFilter(.shadow(color: hx(0xBEFFC8, 0.5), radius: 0.025 * u))
+        for sx in [-1.0, 1.0] as [CGFloat] {
+            let x = sx * legSpread * u
+            ctx.fill(rrect(x - 0.05 * u, a.bottom - 0.02 * u, 0.10 * u, max(0.02 * u, a.feet - a.bottom + 0.02 * u), 0.05 * u),
+                     with: .color(hx(0x1E1C26)))
+            var shin = Path()
+            shin.move(to: pt(x, a.bottom + 0.005 * u))
+            shin.addLine(to: pt(x, a.feet - 0.035 * u))
+            legs.stroke(shin, with: .color(bone), style: StrokeStyle(lineWidth: 0.024 * u, lineCap: .round))
+            legs.fill(ellipse(x + sx * 0.015 * u, a.feet - 0.01 * u, 0.075 * u, 0.042 * u), with: .color(hx(0x1E1C26)))
+            legs.fill(ellipse(x + sx * 0.015 * u, a.feet - 0.012 * u, 0.05 * u, 0.022 * u), with: .color(bone))
+        }
+
+        // The skull, solid over his face: it wears its own.
+        let sy = a.faceY + 0.01 * u
+        var skull = Path()
+        skull.move(to: pt(-0.27 * u, sy))
+        skull.addCurve(to: pt(0.27 * u, sy), control1: pt(-0.29 * u, sy - 0.26 * u), control2: pt(0.29 * u, sy - 0.26 * u))
+        skull.addCurve(to: pt(0.15 * u, sy + 0.15 * u), control1: pt(0.26 * u, sy + 0.10 * u), control2: pt(0.19 * u, sy + 0.13 * u))
+        skull.addQuadCurve(to: pt(0, sy + 0.225 * u), control: pt(0.15 * u, sy + 0.22 * u))
+        skull.addQuadCurve(to: pt(-0.15 * u, sy + 0.15 * u), control: pt(-0.15 * u, sy + 0.22 * u))
+        skull.addCurve(to: pt(-0.27 * u, sy), control1: pt(-0.19 * u, sy + 0.13 * u), control2: pt(-0.26 * u, sy + 0.10 * u))
+        skull.closeSubpath()
+        var lit = ctx
+        lit.addFilter(.shadow(color: glow, radius: 0.05 * u))
+        lit.fill(skull, with: .color(bone))
+
+        // Big round sockets, each a glossy cartoon eye: a soft green glow
+        // pooled at the bottom, a big sparkle and a little one.
+        for sx in [-1.0, 1.0] as [CGFloat] {
+            let ex = sx * a.eyeX, ey = a.faceY
+            var socket = placed(ctx, ex, ey, Double(sx) * 6.9)
+            let shape = ellipse(0, 0, 0.078 * u, 0.088 * u)
+            socket.fill(shape, with: .color(ink))
+            socket.clip(to: shape)
+            socket.fill(Path(CGRect(x: -0.1 * u, y: -0.1 * u, width: 0.2 * u, height: 0.2 * u)),
+                        with: .radialGradient(Gradient(colors: [hx(0x96FFBE, 0.55), hx(0x96FFBE, 0)]),
+                                              center: pt(0, 0.07 * u), startRadius: 0, endRadius: 0.07 * u))
+            ctx.fill(circle(ex + 0.022 * u, ey - 0.03 * u, 0.026 * u), with: .color(.white))
+            ctx.fill(circle(ex - 0.024 * u, ey + 0.03 * u, 0.011 * u), with: .color(.white))
+        }
+
+        // A little heart nose and a stitched smile.
+        ctx.fill(FlameyMonthlyFX.heart(0, a.faceY + 0.075 * u, 0.024 * u), with: .color(ink))
+        let my = a.faceY + 0.143 * u, mw = 0.13 * u
+        var smile = Path()
+        smile.move(to: pt(-mw, my))
+        smile.addQuadCurve(to: pt(mw, my), control: pt(0, my + 0.062 * u))
+        ctx.stroke(smile, with: .color(ink), style: StrokeStyle(lineWidth: 0.014 * u, lineCap: .round))
+        var stitches = Path()
+        for t in [-0.6, -0.2, 0.2, 0.6] as [CGFloat] {
+            let y = my + (1 - t * t) * 0.031 * u
+            stitches.move(to: pt(t * mw, y - 0.022 * u))
+            stitches.addLine(to: pt(t * mw, y + 0.022 * u))
+        }
+        ctx.stroke(stitches, with: .color(ink), style: StrokeStyle(lineWidth: 0.01 * u, lineCap: .round))
+    }
+
+    /// The pumpkin's stem and curl on his tip (the Pumpkin Suit, and the
+    /// Jack-o'-Lantern Monthly Flame on a bare tip).
+    static func pumpkinStem(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
         let stem = placed(ctx, 0.01 * u, a.topY + 0.02 * u)
         var stalk = stem
         stalk.rotate(by: .degrees(10))

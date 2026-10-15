@@ -20,6 +20,7 @@ struct MADSettingsView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var friendService: FriendService
     @ObservedObject private var injuryPause = InjuryPauseState.shared
+    @ObservedObject private var plusStore = PlusStore.shared
     @Environment(\.appStateManager) var appStateManager
     @Environment(\.dismiss) private var dismiss
 
@@ -69,6 +70,7 @@ struct MADSettingsView: View {
                 HealthAccessBanner {
                     healthAccessLinkActive = true
                 }
+                plusSection
                 yourDaySection
                 notificationsAndPrivacySection
                 healthAndDataSection
@@ -522,6 +524,29 @@ struct MADSettingsView: View {
         case .unavailable: return "Not available on this device"
         case .granted: return "What Mile A Day reads from Apple Health"
         }
+    }
+
+    // MARK: - Mile A Day+
+
+    private var plusSection: some View {
+        section("MILE A DAY+", icon: "sparkles", iconColor: .orange) {
+            NavigationLink(destination: PlusSettingsView()) {
+                MADSettingsRow(
+                    icon: plusStore.isPlus ? "checkmark.seal.fill" : "sparkles",
+                    title: "Mile A Day+",
+                    subtitle: plusSubtitle,
+                    iconColor: .orange
+                )
+            }
+        }
+    }
+
+    private var plusSubtitle: String {
+        guard let status = plusStore.status, status.is_plus else {
+            return "Faster streak tokens, Flamey looks, gifting"
+        }
+        if status.isFoundingRunner && status.source == "founding" { return "Founding Runner — Plus is on us" }
+        return "Active — manage, gift or restore"
     }
 
     // MARK: - Help

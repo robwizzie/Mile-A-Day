@@ -51,6 +51,15 @@ struct RootView: View {
                         removal: .move(edge: .leading).combined(with: .opacity)
                     ))
 
+            case .plusOffer:
+                PlusPaywallView(context: .onboarding) { _ in
+                    appStateManager.completePlusOffer()
+                }
+                .transition(.asymmetric(
+                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                    removal: .opacity
+                ))
+
             case .main:
                 MainTabView()
                     .environmentObject(healthManager)

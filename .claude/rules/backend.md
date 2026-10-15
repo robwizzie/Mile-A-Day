@@ -28,6 +28,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - `workouts.feed_role` is FEED display only, never in `SUM(distance)`; written only by `feedRoleStatements` (advisory lock), after every mutation incl. the OLD local_date.
 - Splice `duplicateExclusionStatements` after the upsert, before `feedRoleStatements`; write only NULL `exclusion_reason`; gate on `users.dedupe_since`.
 - Streak Assist = recipient token + donor's extra mile, coverage only on accept; targets via `pickTargetDay`; re-check `stampedBreakDetail().bridged`; show `restored_streak`.
+- Streak Save meter is in RUN-day units: run-alone ≥0.95 = 1, any other mile day = `STREAK_SAVE_WALK_DAY_CREDIT` (½); same rule in `getMeters` and `adminAnalyticsService`. Check: `plus-check`.
 - `refundEarnedCoverage` DELETES a run day's `streak_coverage` row; every spend writes `prior_last_used` + `spent_stamp`. Check: `streak-check` §G2.
 - Today surfaces read `today_covered` / `fetchTodayCoverage`; never re-derive coverage from `frozen_dates`.
 - Streak is STORED: write via `refreshCurrentStreak`, read via `readStoredStreak`/`effectiveStreakSql`; every qualifying mutation awaits `refreshCurrentStreak`. Check: `streak-check`.
@@ -42,6 +43,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - `profile_banner_url` is written only by `POST /users/:id/banner/upload`; `PATCH /users/:id` can only CLEAR it.
 - Flamey gates on `dashboard_style = 'fun'`; `flamey` block friends-only; pokes need both sides Fun; date medals by history (`redateBadges`). Check: `flamey-check`.
 - `PUT …/flamey-look` rejects unknown/unowned (`invalid_flamey_look`); `servedFlameyLook` drops revoked items without rewriting. Check: `flamey-closet-check`.
+- Monthly Flames: a month's form is owned once that calendar month was PERFECT (every day done by the streak's union: miles, `stepGoalDaysSql`, `streak_coverage`) in any year — derived at read (`perfectMonths`), never a badge row; ids in `MONTHLY_FLAMES` = catalog `month:N`. Check: `monthly-flames-check`.
 - Flamey names go through `parseDisplayName`; `earned_detail` is one query per badge FAMILY reusing evaluator rules. Check: `flamey-profile-check`.
 - Medals judge WHOLE history; `recalibrateBadges` is award-only; > `BADGE_PUSH_BURST_LIMIT` ⇒ one summary push. Check: `badge-recalibrate-check`.
 - Rate limits key on `clientIp()`, never `req.ip`; `TRUST_PROXY_HOPS`, never `true`; unknown IP ⇒ skip. Check: `rate-limit-check`.
@@ -142,6 +144,14 @@ Details: docs/conventions/backend.md § Push Notifications
 - Gate client-visible changes PER DEVICE (`client_features`, `userSupports`); never reuse a string; env flags are kill switches only.
 - Widget refresh = silent `widget_refresh` push, only to `widget_refresh_push_v1` devices with matching `widget_kinds`, one per window. Check: `widget-refresh-check`.
 - Every desk PWA push (`pushTo`) must show in the remote's Activity (`boxActivity`): read it from its own table, else add the kind to `LOGGED_KINDS` (`desk_push_log`). Check: `display-check`.
+
+## Mile A Day+
+Details: docs/conventions/backend.md § Mile A Day+
+- Entitlement is DERIVED at read (`plusActiveSql`/`isPlusActive`/`getPlusStatus`), never stored on `users`; perks read it live (`getMeters`, `ownedFlameyItems`). Check: `plus-check`.
+- Record only VERIFIED StoreKit JWS (`appleStoreVerifier.verifyTransaction`) via `recordTransaction`; product → grant only from `plusCatalog.ts` (`PLUS_PRODUCTS`, mirrored by iOS `PlusProducts`); never rename a product id.
+- `plus_purchases` upserts move FORWARD only (`purchased_at <=`); a refund stamps `revoked_at`, never deletes; gifts are one code per Apple `transaction_id`, voided (never deleted) on refund.
+- Founding Runners are Plus for life (no end constant). Never move `FOUNDING_CUTOFF` back; check scripts seed users AFTER it (or they become Founding Runners).
+- A Plus meter target lives in `plusCatalog.ts`; any SQL that decides "holds an Assist" must use the same per-user target (`getAssistableFriends`).
 
 ## ESM Reminder
 Details: docs/conventions/backend.md § ESM Reminder

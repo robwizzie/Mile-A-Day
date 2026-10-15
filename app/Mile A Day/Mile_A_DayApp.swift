@@ -60,6 +60,9 @@ struct Mile_A_DayApp: App {
                             // Streak-tokens enrollment stamp (idempotent; covers
                             // users who authed on an older build).
                             StreakFeatureService.enrollIfNeeded()
+                            // Mile A Day+: post anything StoreKit left
+                            // unfinished and re-read entitlement.
+                            await PlusStore.shared.refresh()
                             // 10k-step days count for the streak: the whole
                             // step history once per account, then a recent
                             // window once a day (a no-op otherwise). Last, so

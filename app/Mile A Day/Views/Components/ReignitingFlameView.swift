@@ -189,7 +189,7 @@ struct ReignitingFlameView: View, Animatable {
         let figure = FlameBuddyFigure(
             health: health, flickerPhase: phase, blink: blink, size: size,
             showsFace: !look.wears(.ghostSheet), vigor: vigor, blaze: blaze,
-            palette: FlameyPalette.palette(for: look.color),
+            palette: look.figurePalette,
             lift: look.bodyLift * scale, legLength: look.standLift
         )
         let lit = smoothstep(0.80, 1.0, clampedProgress)
