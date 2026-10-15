@@ -213,6 +213,7 @@ export function flameyBadgeIds(): string[] {
  */
 const FLAMEY_ALL_ACCESS_USER_IDS: ReadonlySet<string> = new Set([
   "be5dd0ffcd874f39ae8824d462d32300", // dave
+  "417f6f966c0143fa8d12e5d9133da401", // mad
 ]);
 
 /**
