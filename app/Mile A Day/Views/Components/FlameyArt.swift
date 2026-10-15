@@ -160,7 +160,7 @@ enum FlameyArt {
         case .ghostSheet: return 0.14
         case .leprechaunHat, .starHat, .beanie: return 0.13
         case .heartBopper, .santaHat: return 0.10
-        case .pumpkinSuit: return 0.07
+        case .pumpkinSuit: return 0.09
         case .cowboyHat, .nightcap: return 0.06
         case .aviatorCap, .directorsBeret, .safariHat: return 0.05
         case .bucketHat, .ballCap, .astronautHelmet: return 0.03
@@ -1415,42 +1415,39 @@ enum FlameyArt {
         ctx.fill(circle(0.40 * u, cy - R * 1.12, 0.028 * u), with: .color(hx(0xE8384F)))
     }
 
-    /// Halloween: sat inside a chubby carved jack-o'-lantern. His face shows
-    /// through its carved window (so he still blinks and emotes), rosy
-    /// cheeks either side, and his tip is hidden under a little lid the
-    /// candle has popped and tilted, warm light spilling out under it. The
-    /// window is a HOLE in the pumpkin, never paint over him.
+    /// Halloween: sat inside a carved jack-o'-lantern, barely wider than he
+    /// is. His face shows through its carved window (so he still blinks and
+    /// emotes), and its lid is a snug dome over his whole tip, candlelight
+    /// glowing in the seam. The window is a HOLE in the pumpkin, never paint
+    /// over him; nothing of his flame shows above the lid.
     static func pumpkin(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
-        let top = a.bottom - 0.84 * u, bot = a.bottom + 0.04 * u
+        let top = a.bottom - 0.88 * u, bot = a.bottom + 0.04 * u
         let cy = (top + bot) / 2, h = bot - top
-        let wy = a.faceY + 0.03 * u, wrx = 0.29 * u, wry = 0.235 * u
+        let wy = a.faceY + 0.02 * u, wrx = 0.26 * u, wry = 0.22 * u
         let window = ellipse(0, wy, wrx, wry)
         let crease = hx(0x6E2404, 0.55)
 
         // Candle warmth round the whole pumpkin.
         var warm = ctx
-        warm.addFilter(.blur(radius: 0.08 * u))
-        warm.fill(ellipse(0, cy, 0.56 * u, h * 0.52), with: .color(hx(0xFF9628, 0.30)))
+        warm.addFilter(.blur(radius: 0.07 * u))
+        warm.fill(ellipse(0, cy, 0.48 * u, h * 0.52), with: .color(hx(0xFF9628, 0.28)))
 
-        // The shell: five chubby lobes, outer ones darker and behind, every
-        // crease inked — everywhere except the carved window.
+        // The shell: five lobes, outer ones darker and behind, every crease
+        // inked — everywhere except the carved window.
         var shell = ctx
         shell.clip(to: window, options: .inverse)
         let lobes: [(CGFloat, CGFloat, CGFloat, UInt32, UInt32)] = [
-            (-0.38, 0.20, 0.46, 0xE2650F, 0xA63C07), (0.38, 0.20, 0.46, 0xE2650F, 0xA63C07),
-            (-0.21, 0.27, 0.50, 0xF8851E, 0xBC4B0A), (0.21, 0.27, 0.50, 0xF8851E, 0xBC4B0A),
-            (0, 0.27, 0.51, 0xFFA43A, 0xCC560D),
+            (-0.29, 0.18, 0.46, 0xE2650F, 0xA63C07), (0.29, 0.18, 0.46, 0xE2650F, 0xA63C07),
+            (-0.16, 0.23, 0.50, 0xF8851E, 0xBC4B0A), (0.16, 0.23, 0.50, 0xF8851E, 0xBC4B0A),
+            (0, 0.23, 0.51, 0xFFA43A, 0xCC560D),
         ]
         for (x, rx, ry, c1, c2) in lobes {
             let lobe = ellipse(x * u, cy, rx * u, ry * h)
             shell.fill(lobe, with: lin([hx(c1), hx(c2)], pt(0, top), pt(0, bot)))
             shell.stroke(lobe, with: .color(crease), lineWidth: 0.011 * u)
         }
-        shell.fill(ellipse(-0.36 * u, cy - 0.10 * u, 0.032 * u, 0.12 * u), with: .color(hx(0xFFF0CD, 0.45)))
-        shell.fill(ellipse(-0.14 * u, cy - 0.21 * u, 0.022 * u, 0.06 * u), with: .color(hx(0xFFF0CD, 0.30)))
-        for sx in [-1.0, 1.0] as [CGFloat] {
-            shell.fill(ellipse(sx * 0.37 * u, wy + 0.10 * u, 0.055 * u, 0.035 * u), with: .color(hx(0xFF6E78, 0.45)))
-        }
+        shell.fill(ellipse(-0.30 * u, cy - 0.08 * u, 0.028 * u, 0.11 * u), with: .color(hx(0xFFF0CD, 0.45)))
+        shell.fill(ellipse(-0.12 * u, cy - 0.22 * u, 0.02 * u, 0.055 * u), with: .color(hx(0xFFF0CD, 0.30)))
 
         // Inside the window: candlelight round its edge, two rounded teeth.
         var inside = ctx
@@ -1459,39 +1456,44 @@ enum FlameyArt {
                     with: .radialGradient(Gradient(colors: [hx(0xFFC850, 0), hx(0xFFAA28, 0.45)]),
                                           center: pt(0, wy), startRadius: wry * 0.6, endRadius: wrx * 1.05))
         for sx in [-1.0, 1.0] as [CGFloat] {
-            inside.fill(rrect(sx * 0.13 * u - 0.03 * u, wy + wry - 0.05 * u, 0.06 * u, 0.07 * u, 0.02 * u),
+            inside.fill(rrect(sx * 0.12 * u - 0.028 * u, wy + wry - 0.05 * u, 0.056 * u, 0.066 * u, 0.02 * u),
                         with: .color(hx(0xEE7316)))
         }
 
         // The carved rim, lit from inside.
         var rim = ctx
         rim.addFilter(.shadow(color: hx(0xFFD65A, 0.9), radius: 0.05 * u))
-        rim.stroke(window, with: .color(hx(0xFFD27A)), lineWidth: 0.03 * u)
+        rim.stroke(window, with: .color(hx(0xFFD27A)), lineWidth: 0.028 * u)
 
-        // The lid over his tip: light spilling from under it, then the lid
-        // itself, tilted, with its ribs, a shine, the stem, a curl, a leaf.
-        let ly = top + 0.03 * u, lidW = 0.17 * u, lidH = 0.10 * u
-        var spill = ctx
-        spill.addFilter(.blur(radius: 0.03 * u))
-        spill.fill(ellipse(0, ly, 0.15 * u, 0.035 * u), with: .color(hx(0xFFD65A, 0.9)))
-        let lid = placed(ctx, 0.015 * u, ly - 0.035 * u, -8)
-        var cap = Path()
-        cap.move(to: pt(-lidW, lidH * 0.3))
-        cap.addCurve(to: pt(lidW, lidH * 0.3), control1: pt(-lidW, -lidH * 1.15), control2: pt(lidW, -lidH * 1.15))
-        cap.addQuadCurve(to: pt(-lidW, lidH * 0.3), control: pt(0, lidH * 0.55))
-        cap.closeSubpath()
-        lid.fill(cap, with: lin([hx(0xFFAE48), hx(0xE0660F)], pt(0, -lidH), pt(0, lidH * 0.3)))
-        lid.stroke(cap, with: .color(crease), lineWidth: 0.011 * u)
+        // The lid: a dome over his whole tip, sat on the pumpkin's top, with
+        // its ribs, a shine, a glowing seam, the stem, a curl and a leaf.
+        let lidW = 0.20 * u, lidH = 0.20 * u
+        let lid = placed(ctx, 0, top + 0.07 * u, -3.4)
+        var dome = Path()
+        dome.move(to: pt(-lidW, 0))
+        dome.addCurve(to: pt(lidW, 0), control1: pt(-lidW, -lidH * 1.05), control2: pt(lidW, -lidH * 1.05))
+        dome.addQuadCurve(to: pt(-lidW, 0), control: pt(0, lidH * 0.22))
+        dome.closeSubpath()
+        var shade = lid
+        shade.addFilter(.shadow(color: hx(0x501802, 0.35), radius: 0.03 * u, y: 0.01 * u))
+        shade.fill(dome, with: lin([hx(0xFFB052), hx(0xE0660F)], pt(0, -lidH), pt(0, 0)))
+        lid.stroke(dome, with: .color(crease), lineWidth: 0.011 * u)
         var ribs = Path()
-        ribs.move(to: pt(-0.07 * u, -lidH * 0.6))
-        ribs.addQuadCurve(to: pt(-0.08 * u, lidH * 0.35), control: pt(-0.09 * u, 0))
-        ribs.move(to: pt(0.07 * u, -lidH * 0.6))
-        ribs.addQuadCurve(to: pt(0.08 * u, lidH * 0.35), control: pt(0.09 * u, 0))
+        ribs.move(to: pt(-0.07 * u, -lidH * 0.72))
+        ribs.addQuadCurve(to: pt(-0.09 * u, lidH * 0.07), control: pt(-0.10 * u, -lidH * 0.3))
+        ribs.move(to: pt(0.07 * u, -lidH * 0.72))
+        ribs.addQuadCurve(to: pt(0.09 * u, lidH * 0.07), control: pt(0.10 * u, -lidH * 0.3))
         lid.stroke(ribs, with: .color(crease), lineWidth: 0.011 * u)
-        lid.fill(ellipse(-0.10 * u, -lidH * 0.3, 0.015 * u, 0.03 * u), with: .color(hx(0xFFF0CD, 0.45)))
-        let stemTop = -lidH * 0.8
-        lid.fill(rrect(-0.024 * u, stemTop - 0.09 * u, 0.048 * u, 0.10 * u, 0.018 * u), with: .color(hx(0x6B8A2E)))
-        lid.fill(rrect(-0.03 * u, stemTop - 0.10 * u, 0.06 * u, 0.026 * u, 0.011 * u), with: .color(hx(0x86A63E)))
+        lid.fill(ellipse(-0.12 * u, -lidH * 0.45, 0.016 * u, 0.04 * u), with: .color(hx(0xFFF0CD, 0.5)))
+        var seam = Path()
+        seam.move(to: pt(-lidW * 0.9, lidH * 0.04))
+        seam.addQuadCurve(to: pt(lidW * 0.9, lidH * 0.04), control: pt(0, lidH * 0.24))
+        var lit = lid
+        lit.addFilter(.shadow(color: hx(0xFFD65A, 0.9), radius: 0.03 * u))
+        lit.stroke(seam, with: .color(hx(0xFFD27A)), style: StrokeStyle(lineWidth: 0.014 * u, lineCap: .round))
+        let stemTop = -lidH * 0.78
+        lid.fill(rrect(-0.024 * u, stemTop - 0.085 * u, 0.048 * u, 0.095 * u, 0.018 * u), with: .color(hx(0x6B8A2E)))
+        lid.fill(rrect(-0.03 * u, stemTop - 0.095 * u, 0.06 * u, 0.026 * u, 0.011 * u), with: .color(hx(0x86A63E)))
         var curl = Path()
         curl.move(to: pt(0.02 * u, stemTop - 0.02 * u))
         curl.addCurve(to: pt(0.09 * u, stemTop + 0.015 * u), control1: pt(0.09 * u, stemTop - 0.09 * u),
@@ -1507,30 +1509,20 @@ enum FlameyArt {
 
     /// Mile A Day+: a cosy glow-in-the-dark skeleton onesie. The hood covers
     /// all of him — his tip becomes its soft point, with a little bone bow
-    /// on it — over a round, friendly skull (blushing, heart nose, two
-    /// teeth). His own eyes and smile show through the skull's holes, so he
-    /// still blinks and emotes; chunky ribs peek out either side and his
-    /// legs are bones in black sleeves.
+    /// on it — over a round skull that wears its own cartoon face: big
+    /// glossy eyes glowing green at the bottom, a heart nose and a stitched
+    /// smile. Chunky ribs peek out either side; his legs are bones in black
+    /// sleeves.
     static func skeletonSuit(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
         let bone = hx(0xF6F2E4)
-        let ink = hx(0x3A3646)
+        let ink = hx(0x2B2734)
         let glow = hx(0xBEFFC8, 0.55)
         let rect = bodyRect(a, u)
         let outline = FlameBuddyOuterShape(wobble: 0).path(in: rect)
 
-        // Holes where his own eyes and smile show through — cut from the
-        // hood as well as the skull, or the suit would paint over his face.
-        var holes = Path()
-        for sx in [-1.0, 1.0] as [CGFloat] {
-            holes.addPath(ellipse(sx * a.eyeX, a.faceY, 0.07 * u, 0.09 * u))
-        }
-        let mouth = ellipse(0, a.faceY + 0.13 * u, 0.10 * u, 0.055 * u)
-        holes.addPath(mouth)
-
         // The hood: his whole outline, a soft sheen down one side.
         var hood = ctx
         hood.clip(to: outline)
-        hood.clip(to: holes, options: .inverse)
         hood.fill(Path(rect.insetBy(dx: -0.05 * u, dy: -0.05 * u)),
                   with: lin([hx(0x3A3646), hx(0x1A1822)], pt(0, a.topY), pt(0, a.bottom)))
         let sheen = placed(hood, rect.minX, rect.minY, -24)
@@ -1576,7 +1568,7 @@ enum FlameyArt {
             legs.fill(ellipse(x + sx * 0.015 * u, a.feet - 0.012 * u, 0.05 * u, 0.022 * u), with: .color(bone))
         }
 
-        // The skull over his face.
+        // The skull, solid over his face: it wears its own.
         let sy = a.faceY + 0.01 * u
         var skull = Path()
         skull.move(to: pt(-0.27 * u, sy))
@@ -1586,26 +1578,39 @@ enum FlameyArt {
         skull.addQuadCurve(to: pt(-0.15 * u, sy + 0.15 * u), control: pt(-0.15 * u, sy + 0.22 * u))
         skull.addCurve(to: pt(-0.27 * u, sy), control1: pt(-0.19 * u, sy + 0.13 * u), control2: pt(-0.26 * u, sy + 0.10 * u))
         skull.closeSubpath()
-        var face = ctx
-        face.clip(to: holes, options: .inverse)
-        var lit = face
+        var lit = ctx
         lit.addFilter(.shadow(color: glow, radius: 0.05 * u))
         lit.fill(skull, with: .color(bone))
+
+        // Big round sockets, each a glossy cartoon eye: a soft green glow
+        // pooled at the bottom, a big sparkle and a little one.
         for sx in [-1.0, 1.0] as [CGFloat] {
-            face.fill(ellipse(sx * 0.205 * u, a.faceY + 0.085 * u, 0.04 * u, 0.024 * u), with: .color(hx(0xFF8CA0, 0.55)))
+            let ex = sx * a.eyeX, ey = a.faceY
+            var socket = placed(ctx, ex, ey, Double(sx) * 6.9)
+            let shape = ellipse(0, 0, 0.078 * u, 0.088 * u)
+            socket.fill(shape, with: .color(ink))
+            socket.clip(to: shape)
+            socket.fill(Path(CGRect(x: -0.1 * u, y: -0.1 * u, width: 0.2 * u, height: 0.2 * u)),
+                        with: .radialGradient(Gradient(colors: [hx(0x96FFBE, 0.55), hx(0x96FFBE, 0)]),
+                                              center: pt(0, 0.07 * u), startRadius: 0, endRadius: 0.07 * u))
+            ctx.fill(circle(ex + 0.022 * u, ey - 0.03 * u, 0.026 * u), with: .color(.white))
+            ctx.fill(circle(ex - 0.024 * u, ey + 0.03 * u, 0.011 * u), with: .color(.white))
         }
 
-        // Soft socket rims, a heart nose, two rounded teeth.
-        for sx in [-1.0, 1.0] as [CGFloat] {
-            ctx.stroke(ellipse(sx * a.eyeX, a.faceY, 0.07 * u, 0.09 * u), with: .color(ink), lineWidth: 0.012 * u)
+        // A little heart nose and a stitched smile.
+        ctx.fill(FlameyMonthlyFX.heart(0, a.faceY + 0.075 * u, 0.024 * u), with: .color(ink))
+        let my = a.faceY + 0.143 * u, mw = 0.13 * u
+        var smile = Path()
+        smile.move(to: pt(-mw, my))
+        smile.addQuadCurve(to: pt(mw, my), control: pt(0, my + 0.062 * u))
+        ctx.stroke(smile, with: .color(ink), style: StrokeStyle(lineWidth: 0.014 * u, lineCap: .round))
+        var stitches = Path()
+        for t in [-0.6, -0.2, 0.2, 0.6] as [CGFloat] {
+            let y = my + (1 - t * t) * 0.031 * u
+            stitches.move(to: pt(t * mw, y - 0.022 * u))
+            stitches.addLine(to: pt(t * mw, y + 0.022 * u))
         }
-        ctx.fill(FlameyMonthlyFX.heart(0, a.faceY + 0.06 * u, 0.022 * u), with: .color(ink))
-        ctx.stroke(mouth, with: .color(ink), lineWidth: 0.01 * u)
-        var teeth = ctx
-        teeth.clip(to: mouth)
-        for t in [-0.03, 0.03] as [CGFloat] {
-            teeth.fill(rrect(t * u - 0.022 * u, a.faceY + 0.07 * u, 0.044 * u, 0.045 * u, 0.012 * u), with: .color(bone))
-        }
+        ctx.stroke(stitches, with: .color(ink), style: StrokeStyle(lineWidth: 0.01 * u, lineCap: .round))
     }
 
     /// The pumpkin's stem and curl on his tip (the Pumpkin Suit, and the
