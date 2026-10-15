@@ -622,6 +622,11 @@ const MULTI_COAUTHORS_JSON = `(
 			THEN ${coauthorOnProfileMultiSql("$1")} END,
 		'include_route', CASE WHEN pca.user_id = $1
 			THEN pca.include_route END,
+		-- Additive, own row only: the workout their line was resolved from,
+		-- so the phone's story share (RoutePrivacyTrim, keyed by workout id)
+		-- cuts their route exactly where this server cuts it for friends.
+		'workout_id', CASE WHEN pca.user_id = $1
+			THEN ${CREW_WORKOUT_ID_SQL} END,
 		-- HOW FAR this person went and HOW LONG it took them. A card whose
 		-- whole subject is that several people went out together showed one
 		-- combined number and one person's stat strip, so "how did we each

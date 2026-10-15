@@ -138,6 +138,10 @@ struct PostCoauthorItem: Codable, Identifiable, Equatable {
     /// maps setting" rather than "off".
     var on_feed: Bool?
     var include_route: Bool?
+    /// The workout MY line was resolved from — like the switches above, only
+    /// ever sent on my own row, and nil on older servers. Seeds the share
+    /// studio's route trim so a story cuts my route where the server does.
+    var workout_id: String? = nil
     /// How far THIS person went and how long it took them — the numbers that
     /// let a card about several people walking together say what each of them
     /// did. Nil on older servers and on a collab with no linked walk.

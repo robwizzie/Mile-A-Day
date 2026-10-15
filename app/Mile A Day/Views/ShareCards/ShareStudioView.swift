@@ -399,18 +399,45 @@ struct ShareStudioView: View {
 
     // MARK: Options
 
-    @ViewBuilder
+    /// The focused card's options, over an invisible copy of the TALLEST set
+    /// any card here offers.
+    ///
+    /// The reserve is what keeps the carousel still: it takes whatever height
+    /// is left, and its page width is height-bound on most phones. Sized to
+    /// the focused card alone, this block grew and shrank as `selection`
+    /// flipped mid-swipe (a Picture card has a stat row, Flamey has none), so
+    /// every page and the content margins changed size under the finger and
+    /// the view-aligned scroll lost its target and stuck between cards.
     private var options: some View {
-        let showsShape = current.formats.count > 1
-        let showsStats = current.usesStatToggle && availableStats.count > 1
+        let shapeSample = templates.first { $0.formats.count > 1 }
+        let anyStats = availableStats.count > 1 && templates.contains { $0.usesStatToggle }
+        let anySticker = templates.contains { $0.formats.contains(.sticker) }
+        return ZStack(alignment: .top) {
+            optionRows(template: shapeSample ?? current,
+                       showsShape: shapeSample != nil,
+                       showsStats: anyStats,
+                       showsExplainer: anySticker)
+                .hidden()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            optionRows(template: current,
+                       showsShape: current.formats.count > 1,
+                       showsStats: current.usesStatToggle && availableStats.count > 1,
+                       showsExplainer: effectiveFormat(current) == .sticker)
+        }
+    }
+
+    @ViewBuilder
+    private func optionRows(template: ShareTemplate, showsShape: Bool,
+                            showsStats: Bool, showsExplainer: Bool) -> some View {
         VStack(spacing: 10) {
             if showsShape {
                 HStack(spacing: 8) {
-                    ForEach(current.formats) { option in
+                    ForEach(template.formats) { option in
                         segment(title: option.title, icon: option.icon,
-                                selected: option == effectiveFormat(current)) {
+                                selected: option == effectiveFormat(template)) {
                             format = option
-                            cacheRender(of: current)
+                            cacheRender(of: template)
                         }
                     }
                 }
@@ -424,7 +451,7 @@ struct ShareStudioView: View {
                     }
                 }
             }
-            if effectiveFormat(current) == .sticker {
+            if showsExplainer {
                 // "Sticker" names a FILE property (a see-through edge) no
                 // preview can show — so the sheet says what it does.
                 Text(MADStoryFormat.sticker.explainer)
