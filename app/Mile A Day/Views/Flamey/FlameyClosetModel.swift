@@ -100,7 +100,7 @@ extension FlameySlot {
     /// section header, instead of item by item.
     var familyRule: String {
         switch self {
-        case .color: return "Colors come from streak medals — the longer the streak, the rarer the flame."
+        case .color: return "Colors come from streak medals — the longer the streak, the rarer the flame. A perfect month unlocks that month’s Monthly Flame (📅 up top)."
         case .head: return "Hats come from lifetime-mile medals — walk further, better hats."
         case .eyes: return "Eyewear comes from daily-challenge medals."
         case .chest: return "Chest pieces come from weekly-challenge medals."

@@ -253,6 +253,9 @@ def apply(app, look, wear=None):
         _uncolor(flames)
         app.recolored = False
     costume = wear.get("costume") if look != "HALLOWEEN" else None
+    # The app's October Monthly Flame IS the jack-o'-lantern look here.
+    if costume is None and look != "HALLOWEEN" and wear.get("color") == "jack_o_lantern":
+        costume = "pumpkin_suit"
     theme = dict(GREEN_THEME) if look == "STPATRICK" else {}
     tones = None
     if closet and look not in ("HALLOWEEN", "STPATRICK") and costume not in ("pumpkin_suit", "ghost_sheet"):

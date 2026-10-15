@@ -257,7 +257,7 @@ enum FlameyRenderDetail: String, Codable, Hashable {
 enum FlameyFamily: String, CaseIterable, Hashable {
     case starter, streakDays, lifetimeMiles, pace, dailyChallenges, weeklyChallenges,
          competitionsEntered, competitionsWon, organizer, hypes, distanceInADay,
-         buddyWalks, ghosts, stories, nudges, firsts, holidays, mood, plus
+         buddyWalks, ghosts, stories, nudges, firsts, holidays, mood, plus, monthly
 
     var displayName: String {
         switch self {
@@ -280,6 +280,7 @@ enum FlameyFamily: String, CaseIterable, Hashable {
         case .holidays: return "Holidays"
         case .mood: return "Moods"
         case .plus: return "Mile A Day+"
+        case .monthly: return "Monthly Flames"
         }
     }
 }
@@ -297,6 +298,10 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
          gold, prism, cosmic, eternal, phantom
     // color — Mile A Day+ (owned while Plus; the server's owned list decides)
     case electric, roseGold = "rose_gold", obsidian, tropic
+    // color — Monthly Flames (a perfect calendar month; the server decides)
+    case frostbite, sweetheart, luckyClover = "lucky_clover", aprilShowers = "april_showers", wildflower,
+         sunburst, firecracker, watermelon, fallingLeaves = "falling_leaves", jackOLantern = "jack_o_lantern",
+         sweaterWeather = "sweater_weather", twinkleLights = "twinkle_lights"
     // head
     case sweatband, ballCap = "ball_cap", visor, beanie, bucketHat = "bucket_hat", safariHat = "safari_hat",
          cowboyHat = "cowboy_hat", aviatorCap = "aviator_cap", headlampHelmet = "headlamp_helmet", crown,
@@ -346,7 +351,9 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         switch self {
         case .classic, .ember, .lime, .ruby, .lavender, .sunflower, .mint, .sapphire, .violet, .rose, .teal,
              .arctic, .midnight, .sunset, .aurora, .ocean, .lavaLamp, .galaxy, .candy, .northernLights,
-             .gold, .prism, .cosmic, .eternal, .phantom, .electric, .roseGold, .obsidian, .tropic:
+             .gold, .prism, .cosmic, .eternal, .phantom, .electric, .roseGold, .obsidian, .tropic,
+             .frostbite, .sweetheart, .luckyClover, .aprilShowers, .wildflower, .sunburst, .firecracker,
+             .watermelon, .fallingLeaves, .jackOLantern, .sweaterWeather, .twinkleLights:
             return .color
         case .sweatband, .ballCap, .visor, .beanie, .bucketHat, .safariHat, .cowboyHat, .aviatorCap,
              .headlampHelmet, .crown, .laurelWreath, .vikingHelmet, .directorsBeret, .santaHat, .heartBopper,
@@ -408,6 +415,18 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         case .eternal: return .badge("streak_1000")
         case .phantom: return .badge("ghost_beat_50")
         case .electric, .roseGold, .obsidian, .tropic: return .plus
+        case .frostbite: return .month(1)
+        case .sweetheart: return .month(2)
+        case .luckyClover: return .month(3)
+        case .aprilShowers: return .month(4)
+        case .wildflower: return .month(5)
+        case .sunburst: return .month(6)
+        case .firecracker: return .month(7)
+        case .watermelon: return .month(8)
+        case .fallingLeaves: return .month(9)
+        case .jackOLantern: return .month(10)
+        case .sweaterWeather: return .month(11)
+        case .twinkleLights: return .month(12)
         case .sweatband: return .badge("special_first_mile")
         case .ballCap: return .badge("miles_25")
         case .visor: return .badge("miles_50")
@@ -503,6 +522,30 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         return nil
     }
 
+    /// The calendar month (1–12) a Monthly Flame belongs to; nil otherwise.
+    var month: Int? {
+        if case .month(let m) = unlock { return m }
+        return nil
+    }
+
+    /// The twelve Monthly Flames, January first. Mirrors the backend's
+    /// `MONTHLY_FLAMES` (monthlyFlames.ts).
+    static let monthlyFlames: [FlameyItem] = [
+        .frostbite, .sweetheart, .luckyClover, .aprilShowers, .wildflower, .sunburst,
+        .firecracker, .watermelon, .fallingLeaves, .jackOLantern, .sweaterWeather, .twinkleLights,
+    ]
+
+    static func monthlyFlame(for month: Int) -> FlameyItem? {
+        monthlyFlames.first { $0.month == month }
+    }
+
+    /// "October" — fixed English, like the rest of the closet's copy.
+    static func monthName(_ month: Int) -> String {
+        let names = ["January", "February", "March", "April", "May", "June", "July",
+                     "August", "September", "October", "November", "December"]
+        return (1...12).contains(month) ? names[month - 1] : ""
+    }
+
     /// The holiday this item is the outfit for — worn automatically on the
     /// day, owned or not. The scarf covers both Christmas Eve and Day.
     var holidays: [HolidayKey] {
@@ -531,7 +574,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         if isMoodProp || isHolidayOutfit { return false }
         switch slot {
         case .costume: return false
-        default: return self != .phantom && unlock != .plus
+        default: return self != .phantom && unlock != .plus && month == nil
         }
     }
 
@@ -568,6 +611,8 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         case .eternal: return 1000
         case .phantom: return 95
         case .electric, .roseGold, .obsidian, .tropic: return 96
+        case .frostbite, .sweetheart, .luckyClover, .aprilShowers, .wildflower, .sunburst, .firecracker,
+             .watermelon, .fallingLeaves, .jackOLantern, .sweaterWeather, .twinkleLights: return 97
         // head
         case .sweatband: return 1
         case .ballCap: return 10
@@ -733,6 +778,18 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         case .roseGold: return "Rose Gold"
         case .obsidian: return "Obsidian"
         case .tropic: return "Tropic"
+        case .frostbite: return "Frostbite"
+        case .sweetheart: return "Sweetheart"
+        case .luckyClover: return "Lucky Clover"
+        case .aprilShowers: return "April Showers"
+        case .wildflower: return "Wildflower"
+        case .sunburst: return "Sunburst"
+        case .firecracker: return "Firecracker"
+        case .watermelon: return "Watermelon"
+        case .fallingLeaves: return "Falling Leaves"
+        case .jackOLantern: return "Jack-o'-Lantern"
+        case .sweaterWeather: return "Sweater Weather"
+        case .twinkleLights: return "Twinkle Lights"
         case .sweatband: return "Sweatband"
         case .ballCap: return "Ball Cap"
         case .visor: return "Visor"
@@ -831,6 +888,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         if isMoodProp { return .mood }
         if isHolidayOutfit { return .holidays }
         if unlock == .plus { return .plus }
+        if month != nil { return .monthly }
         guard let id = badgeId else { return .starter }
         if id.hasPrefix("streak_") || id.hasPrefix("consistency_") { return .streakDays }
         if id.hasPrefix("miles_") { return .lifetimeMiles }
@@ -856,6 +914,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         case .always: return "Always his"
         case .purchase: return "In the shop"
         case .plus: return "Included with Mile A Day+"
+        case .month(let m): return "Walk your mile every day of \(FlameyItem.monthName(m))"
         case .badge(let id): return Self.unlockCopy(badgeId: id)
         case .streak(let days): return "Reach a \(days.formatted())-day streak"
         }
@@ -914,6 +973,9 @@ enum FlameyUnlock: Hashable {
     /// server's `owned_item_ids` (which checks entitlement) is what grants it,
     /// so a lapse drops it everywhere at once.
     case plus
+    /// A Monthly Flame: his once that calendar month (1–12) has been PERFECT
+    /// — every day done, any year. Server-decided like `.plus`.
+    case month(Int)
     /// Reserved for a one-off purchasable item (StoreKit product id). Nothing
     /// uses it yet; owned by nobody.
     case purchase(productId: String)
@@ -933,7 +995,7 @@ enum FlameyWardrobe {
             switch item.unlock {
             case .always: return true
             case .badge(let id): return earnedBadgeIds.contains(id)
-            case .plus, .purchase, .streak: return false
+            case .plus, .month, .purchase, .streak: return false
             }
         })
     }

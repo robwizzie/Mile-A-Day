@@ -4,6 +4,7 @@ import { effectiveStreakSql } from "./streakFeatureCore.js";
 import { HOLIDAYS, holidayKeyFromBadgeId, type HolidayKey } from "./holidays.js";
 import { parseDisplayName, type NameRejection } from "./nameModeration.js";
 import { isPlusActive } from "./plusService.js";
+import { monthlyFlamesStatus, perfectMonths, type MonthlyFlamesStatus } from "./monthlyFlames.js";
 import {
   FLAMEY_CATALOG,
   FLAMEY_CATALOG_VERSION,
@@ -87,14 +88,15 @@ export async function flameyBlockFor(
   }
 
   // Every badge row: the holiday keys and the closet's ownership read ONE set.
-  const [badgeRows, plus] = await Promise.all([
+  const [badgeRows, plus, months] = await Promise.all([
     db.query<{ badge_id: string }>(
       `SELECT badge_id FROM user_badges WHERE user_id = $1`,
       [targetUserId],
     ),
     isPlusActive(targetUserId),
+    perfectMonths(targetUserId),
   ]);
-  const owned = ownedFlameyItemIds(badgeRows.map((r) => r.badge_id), targetUserId, plus);
+  const owned = ownedFlameyItemIds(badgeRows.map((r) => r.badge_id), targetUserId, plus, months);
   const held = new Set(
     badgeRows
       .map((r) => holidayKeyFromBadgeId(r.badge_id))
@@ -127,16 +129,20 @@ export async function bothUseFun(a: string, b: string): Promise<boolean> {
 /** `{ <slot>: <itemId> | null }` — absent slot = auto, null = bare. */
 export type FlameyLook = Partial<Record<FlameySlot, string | null>>;
 
-/** Items this user owns right now, from their badge rows and Plus state. */
-export async function ownedFlameyItems(userId: string): Promise<Set<string>> {
-  const [rows, plus] = await Promise.all([
+/** Items this user owns right now, from their badges, Plus and perfect months. */
+export async function ownedFlameyItems(
+  userId: string,
+  months?: Map<number, number>,
+): Promise<Set<string>> {
+  const [rows, plus, perfect] = await Promise.all([
     db.query<{ badge_id: string }>(
       `SELECT badge_id FROM user_badges WHERE user_id = $1`,
       [userId],
     ),
     isPlusActive(userId),
+    months ?? perfectMonths(userId),
   ]);
-  return ownedFlameyItemIds(rows.map((r) => r.badge_id), userId, plus);
+  return ownedFlameyItemIds(rows.map((r) => r.badge_id), userId, plus, perfect);
 }
 
 export type LookParse =
@@ -212,6 +218,8 @@ export interface FlameyCloset {
   name: string | null;
   /** Saved outfits, in the user's order. Additive. */
   outfits: FlameyOutfit[];
+  /** Monthly Flames: which months are earned + this month's progress. Additive. */
+  monthly_flames: MonthlyFlamesStatus;
 }
 
 /** Self-only closet read; null for an unknown user. */
@@ -221,13 +229,18 @@ export async function getFlameyCloset(userId: string): Promise<FlameyCloset | nu
     [userId],
   );
   if (!rows.length) return null;
-  const owned = await ownedFlameyItems(userId);
+  const months = await perfectMonths(userId);
+  const [owned, monthly] = await Promise.all([
+    ownedFlameyItems(userId, months),
+    monthlyFlamesStatus(userId, months),
+  ]);
   return {
     look: servedFlameyLook(rows[0].flamey_look, owned),
     owned_item_ids: [...owned],
     catalog_version: FLAMEY_CATALOG_VERSION,
     name: rows[0].flamey_name ?? null,
     outfits: await readFlameyOutfits(userId, owned),
+    monthly_flames: monthly,
   };
 }
 

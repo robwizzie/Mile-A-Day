@@ -49,7 +49,7 @@ struct FlameyClosetView: View {
     /// The Closet's own sheets (the item card rides `model.detail`, on a
     /// different node — two sheets on one node drop one).
     enum ClosetSheet: String, Identifiable {
-        case name, saveOutfit, outfits
+        case name, saveOutfit, outfits, monthly
         var id: String { rawValue }
     }
 
@@ -137,6 +137,11 @@ struct FlameyClosetView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FlameyClosetStyle.ground)
+        case .monthly:
+            FlameyMonthlyFlamesView(model: model) { sheet = nil }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(FlameyClosetStyle.ground)
         }
     }
 
@@ -204,12 +209,25 @@ struct FlameyClosetView: View {
                 Image(systemName: "sparkles")
                     .madFont(size: 16, weight: .bold, maxScale: 1.3)
                     .foregroundColor(FlameyClosetStyle.ember)
-                    .frame(width: 60, height: 44, alignment: .leading)
+                    .frame(width: 40, height: 44, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("What I've unlocked")
             .accessibilityHint("Walks you through dressing him in what your medals have unlocked")
+            Button {
+                MADHaptics.tap()
+                sheet = .monthly
+            } label: {
+                Image(systemName: "calendar")
+                    .madFont(size: 16, weight: .bold, maxScale: 1.3)
+                    .foregroundColor(FlameyClosetStyle.ember)
+                    .frame(width: 40, height: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Monthly Flames")
+            .accessibilityHint("A new look for every month you walk every day")
             Spacer(minLength: 0)
             // Just a title: renaming lives on his name plate, under him.
             Text("\(model.possessiveName) Closet")
@@ -225,7 +243,7 @@ struct FlameyClosetView: View {
                     .foregroundColor(FlameyClosetStyle.ember)
                     .lineLimit(1)
                     .fixedSize()
-                    .frame(minWidth: 60, minHeight: 44, alignment: .trailing)
+                    .frame(minWidth: 88, minHeight: 44, alignment: .trailing)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

@@ -171,7 +171,39 @@ enum FlameyArt {
     /// The crest of the look: how far its highest drawn point sits above
     /// his tip (body units). A bare tip still flickers a little above 0.98.
     static func crest(of look: FlameyLook) -> CGFloat {
-        max(0.03, [look[.head], look[.costume]].compactMap { $0 }.map(headRise).max() ?? 0)
+        let crown = monthCrown(of: look).map(monthCrownRise) ?? 0
+        return max(0.03, crown, [look[.head], look[.costume]].compactMap { $0 }.map(headRise).max() ?? 0)
+    }
+
+    // MARK: - Monthly Flame crowns
+
+    /// A Monthly Flame that tops his tip: October's pumpkin stem, December's
+    /// tree-top star. Only on a bare tip — any hat or costume wins, so every
+    /// head piece still sits exactly where it always does.
+    static func monthCrown(of look: FlameyLook) -> FlameyItem? {
+        guard look[.head] == nil, look[.costume] == nil, let color = look[.color] else { return nil }
+        return color == .jackOLantern || color == .twinkleLights ? color : nil
+    }
+
+    static func monthCrownRise(_ item: FlameyItem) -> CGFloat {
+        item == .twinkleLights ? 0.13 : 0.07
+    }
+
+    static func drawMonthCrown(_ item: FlameyItem, in ctx: inout GraphicsContext, a: Anchors, u: CGFloat) {
+        switch item {
+        case .jackOLantern:
+            pumpkinStem(&ctx, a, u)
+        case .twinkleLights:
+            let cy = a.topY - 0.03 * u
+            var glow = ctx
+            glow.addFilter(.blur(radius: 0.04 * u))
+            glow.fill(circle(0, cy, 0.09 * u), with: .color(hx(0xFFE27A, 0.7)))
+            let shape = star(0, cy, 0.085 * u, inner: 0.45)
+            ctx.fill(shape, with: lin([hx(0xFFF6B8), hx(0xFFC83A)], pt(0, cy - 0.085 * u), pt(0, cy + 0.085 * u)))
+            ctx.stroke(shape, with: .color(hx(0xB8860B)), lineWidth: lw(u) * 0.8)
+        default:
+            break
+        }
     }
 
     /// The look's top, as a fraction of the view's `size` from its centre
@@ -1410,6 +1442,12 @@ enum FlameyArt {
         g.fill(ellipse(-w * 0.26, -h * 0.05, w * 0.07, h * 0.16), with: .color(hx(0xFFB15C, 0.45)))
         g.stroke(shell, with: .color(hx(0x8A3A06)), lineWidth: lw(u) * 0.8)
 
+        pumpkinStem(&ctx, a, u)
+    }
+
+    /// The pumpkin's stem and curl on his tip (the Pumpkin Suit, and the
+    /// Jack-o'-Lantern Monthly Flame on a bare tip).
+    static func pumpkinStem(_ ctx: inout GraphicsContext, _ a: Anchors, _ u: CGFloat) {
         let stem = placed(ctx, 0.01 * u, a.topY + 0.02 * u)
         var stalk = stem
         stalk.rotate(by: .degrees(10))

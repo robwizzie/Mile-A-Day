@@ -645,13 +645,16 @@ struct FlameyItemDetailView: View {
                 }
             } else {
                 HStack(spacing: 10) {
-                    Image(systemName: item.unlock == .plus ? "sparkles" : "gift.fill")
+                    Image(systemName: item.unlock == .plus ? "sparkles" : item.month != nil ? "calendar" : "gift.fill")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(FlameyClosetStyle.ember)
                         .accessibilityHidden(true)
                     Text(item.unlock == .plus
                          ? (owned ? "Yours with Mile A Day+." : "Included with Mile A Day+.")
-                         : "Always his — no medal needed.")
+                         : item.month.map { m in
+                             owned ? "A Monthly Flame — yours for a perfect \(FlameyItem.monthName(m))."
+                                   : "A Monthly Flame — walk your mile every day of \(FlameyItem.monthName(m)) to unlock it for good."
+                         } ?? "Always his — no medal needed.")
                         .madFont(size: 15, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.8))
                 }

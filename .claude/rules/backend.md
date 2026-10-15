@@ -42,6 +42,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - `profile_banner_url` is written only by `POST /users/:id/banner/upload`; `PATCH /users/:id` can only CLEAR it.
 - Flamey gates on `dashboard_style = 'fun'`; `flamey` block friends-only; pokes need both sides Fun; date medals by history (`redateBadges`). Check: `flamey-check`.
 - `PUT …/flamey-look` rejects unknown/unowned (`invalid_flamey_look`); `servedFlameyLook` drops revoked items without rewriting. Check: `flamey-closet-check`.
+- Monthly Flames: a month's form is owned once that calendar month was PERFECT (every day done by the streak's union: miles, `stepGoalDaysSql`, `streak_coverage`) in any year — derived at read (`perfectMonths`), never a badge row; ids in `MONTHLY_FLAMES` = catalog `month:N`. Check: `monthly-flames-check`.
 - Flamey names go through `parseDisplayName`; `earned_detail` is one query per badge FAMILY reusing evaluator rules. Check: `flamey-profile-check`.
 - Medals judge WHOLE history; `recalibrateBadges` is award-only; > `BADGE_PUSH_BURST_LIMIT` ⇒ one summary push. Check: `badge-recalibrate-check`.
 - Rate limits key on `clientIp()`, never `req.ip`; `TRUST_PROXY_HOPS`, never `true`; unknown IP ⇒ skip. Check: `rate-limit-check`.

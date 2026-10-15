@@ -257,6 +257,9 @@ struct FlameyOutfitLayer: View {
                 for item in items where item.slot == .feet || (item.slot == .costume && item != .astronautHelmet) {
                     FlameyArt.drawFront(item, in: &ctx, a: a, u: u, palette: palette, jets: jets)
                 }
+                if let crown = FlameyArt.monthCrown(of: look) {
+                    FlameyArt.drawMonthCrown(crown, in: &ctx, a: a, u: u)
+                }
                 if let back = look[.back] { FlameyArt.drawBackFront(back, in: &ctx, a: a, u: u) }
                 for item in items where [.chest, .eyes, .head].contains(item.slot) {
                     FlameyArt.drawFront(item, in: &ctx, a: a, u: u, palette: palette, jets: jets)

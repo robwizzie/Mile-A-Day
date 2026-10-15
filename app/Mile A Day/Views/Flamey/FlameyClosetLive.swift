@@ -172,8 +172,10 @@ enum FlameyClosetSync {
         let name: String??
         /// nil = no `outfits` key (older server).
         let outfits: [OutfitDTO]?
+        /// nil = no `monthly_flames` key (older server).
+        let monthly_flames: FlameyMonthlyStatus?
 
-        enum CodingKeys: String, CodingKey { case look, owned_item_ids, name, outfits }
+        enum CodingKeys: String, CodingKey { case look, owned_item_ids, name, outfits, monthly_flames }
 
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -185,6 +187,7 @@ enum FlameyClosetSync {
                 name = nil
             }
             outfits = try? c.decodeIfPresent([OutfitDTO].self, forKey: .outfits)
+            monthly_flames = try? c.decodeIfPresent(FlameyMonthlyStatus.self, forKey: .monthly_flames)
         }
     }
 
@@ -241,6 +244,13 @@ enum FlameyClosetSync {
         await pull(force: false)
     }
 
+    /// Re-read the closet now (the Monthly Flames screen opening: this
+    /// month's progress should be today's, not the last foreground's).
+    static func refreshNow() async {
+        lastPullAt = nil
+        await pull(force: false)
+    }
+
     /// Mile A Day+ started or ended: re-read what the server says is owned
     /// (Plus-only items follow entitlement) without waiting for the next
     /// foreground's throttle.
@@ -256,6 +266,7 @@ enum FlameyClosetSync {
         guard let closet = try? await APIClient.fancyFetch(endpoint: "/users/\(userId)/flamey-closet",
                                                            responseType: Closet.self) else { return }
         storeServerOwned(closet.owned_item_ids)
+        if let monthly = closet.monthly_flames { FlameyMonthlyStore.save(monthly) }
         // Another phone may have renamed him or changed the outfits; a
         // change still waiting to go up from THIS phone wins.
         if let name = closet.name, !isNameDirty {

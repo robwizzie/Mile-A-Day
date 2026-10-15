@@ -159,6 +159,12 @@ try {
 
   check("copy for a 12-day streak", lastCallCopy(12).title, "Last call: 12-day streak on the line");
   check("copy for a 1-day streak", lastCallCopy(1).body, "Two hours to midnight. A mile or 10,000 steps makes it a 2-day streak.");
+  check(
+    "copy names a perfect month at stake",
+    lastCallCopy(12, { month: 10, flameName: "Jack-o'-Lantern" }).body,
+    "Miss today and your perfect October ends — and the Jack-o'-Lantern Flamey with it. A mile or 10,000 steps keeps both.",
+  );
+  check("a 1-day streak never claims a perfect month", lastCallCopy(1, { month: 10, flameName: "x" }).title, "Last call for today's mile");
 
   // The send path: DUE, ONE and SHORT_STEPS get an inbox row, STALE's refreshed streak
   // is 0 so it gets nothing, nobody else is touched.

@@ -361,6 +361,13 @@ jobs:
       # Plus-only Flamey items follow entitlement live. Every miss is money.
       - name: Mile A Day+ check
         run: node scripts/plus-check.mjs
+      # Monthly Flames: a perfect calendar month (every day done by the
+      # streak's own rule — miles, 10k steps or a token) unlocks that month's
+      # Flamey form, evergreen; one missing / short / deleted / duplicate day
+      # doesn't; the closet reports all twelve plus this month's live
+      # progress. A form that never unlocks is reported by nobody.
+      - name: Monthly Flames check
+        run: node scripts/monthly-flames-check.mjs
       # MCP database connector: the full OAuth sign-in through the MCP SDK's own
       # client, every sign-in attack (no cookie, wrong nonce, forged token,
       # not allowlisted, replay), and the database guards — read role can't
