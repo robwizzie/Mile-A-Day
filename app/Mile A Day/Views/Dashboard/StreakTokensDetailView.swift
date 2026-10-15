@@ -1022,7 +1022,7 @@ struct StreakTokensDetailView: View {
             // it" is the live question and "how do I get another" is the
             // follow-up. The badge + "when it fires" line stay visible while
             // collapsed — they ARE the answer; the prose is behind the tap.
-            tokenHowItWorks(kind: kind)
+            tokenHowItWorks(kind: kind, target: Int(meter.target.rounded()))
 
             TokenMeterBar(kind: kind, meter: meter, unit: unit)
         }
@@ -1033,7 +1033,7 @@ struct StreakTokensDetailView: View {
     /// The collapsed "How it works" row: usage badge + when it fires, one
     /// tap from the full instruction and how to earn another. Collapsed by
     /// default — three tokens' worth of paragraphs was the wall of text.
-    private func tokenHowItWorks(kind: StreakTokenKind) -> some View {
+    private func tokenHowItWorks(kind: StreakTokenKind, target: Int) -> some View {
         let expanded = expandedTokens.contains(kind.raw)
         return VStack(alignment: .leading, spacing: 8) {
             Button {
@@ -1093,7 +1093,7 @@ struct StreakTokensDetailView: View {
                         Text("How to earn")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(kind.tint)
-                        Text(kind.howToEarn(target: Int(meter.target.rounded())))
+                        Text(kind.howToEarn(target: target))
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
