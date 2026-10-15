@@ -770,7 +770,7 @@ struct FlameyItemDetailView: View {
             .buttonStyle(.plain)
         }
         .sheet(isPresented: $showPlusPaywall) {
-            PlusPaywallView(context: .flamey) { purchased in
+            PlusPaywallView(context: .flamey, tryOnStart: item) { purchased in
                 guard purchased else { return }
                 model.grantPlusItems()
                 Task { await FlameyClosetSync.refreshOwnedItems() }

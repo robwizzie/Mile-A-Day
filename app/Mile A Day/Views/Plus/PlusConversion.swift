@@ -15,7 +15,7 @@ enum PlusPaywallVariant {
         if let served = status?.paywall_variant { return served }
         guard let id = SessionIdentity.cachedUserId, !id.isEmpty else { return "streak" }
         let digest = SHA256.hash(data: Data("paywall:\(id)".utf8))
-        let first = digest.makeIterator().next() ?? 0
+        let first = Array(digest).first ?? 0
         return first % 2 == 0 ? "streak" : "flamey"
     }
 }
@@ -61,7 +61,7 @@ struct PlusWelcomeView: View {
         guard let status = store.status else { return "Thanks for supporting Mile A Day." }
         let date = status.expiresDate.map { $0.formatted(.dateTime.month(.abbreviated).day()) }
         if status.in_trial == true, let date {
-            return "Your free week runs until \(date). Cancel anytime in Settings › Apple ID › Subscriptions."
+            return "Your free trial runs until \(date). Cancel at least a day before in Settings › Apple ID › Subscriptions."
         }
         switch status.source ?? "" {
         case "lifetime": return "It's yours for good. Thanks for supporting Mile A Day."
@@ -219,9 +219,9 @@ struct PlusWelcomeView: View {
 /// disappears the moment a purchase makes them Plus.
 struct PlusStreakCard: View {
     let streak: Int
-    /// The parent stack's spacing: taken back while the card is hidden, so
-    /// the always-present host adds no gap to the dashboard.
-    var stackSpacing: CGFloat = 0
+    /// Space above the card when it shows. The host sits in a zero-spacing
+    /// stack with the card above it, so a hidden card adds no gap.
+    var topSpacing: CGFloat = 0
 
     @ObservedObject private var store = PlusStore.shared
     @ObservedObject private var tokens = StreakTokensState.shared
@@ -280,6 +280,7 @@ struct PlusStreakCard: View {
         VStack(spacing: 0) {
             if let current {
                 card(current)
+                    .padding(.top, topSpacing)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                     .onAppear {
                         guard !reportedShown else { return }
@@ -288,7 +289,6 @@ struct PlusStreakCard: View {
                     }
             }
         }
-        .padding(.top, current == nil ? -stackSpacing : 0)
         .sheet(isPresented: $showPaywall) {
             PlusPaywallView(context: current?.atRisk == true ? .streakAtRisk : .streakTokens,
                             note: current?.note)

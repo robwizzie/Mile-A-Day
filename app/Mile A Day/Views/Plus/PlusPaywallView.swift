@@ -73,6 +73,8 @@ struct PlusPaywallView: View {
     /// A line about THIS user's tokens ("You're 2 runs from a Streak Save…"),
     /// shown on the streak layout.
     var note: String? = nil
+    /// The Closet layout's first look: the locked item that opened it.
+    var tryOnStart: FlameyItem? = nil
     /// Called once when the paywall is done: `true` after a purchase.
     var onFinish: (_ purchased: Bool) -> Void = { _ in }
 
@@ -110,9 +112,10 @@ struct PlusPaywallView: View {
 
             if celebrating {
                 PlusWelcomeView(
-                    // Onboarding hands off to the app; the Closet door is
-                    // already in the Closet.
-                    showsDressUp: context != .onboarding && context != .flamey,
+                    // Only from the dashboard card: every other door is
+                    // itself a sheet (or onboarding, or already the Closet),
+                    // and a Closet raised over it would be dropped.
+                    showsDressUp: context == .streakAtRisk,
                     onDressUp: {
                         finish(purchased: true)
                         FlameyClosetLink.shared.openAfterDismiss(focus: .electric)
@@ -163,6 +166,7 @@ struct PlusPaywallView: View {
             await store.loadProducts()
             loadAttempted = true
             if store.status == nil { await store.fetchStatus() }
+            if let tryOnStart, PlusLookShowcase.looks.contains(tryOnStart) { tryOn = tryOnStart }
             recordView()
         }
         .alert(item: $alert) { item in
@@ -374,6 +378,7 @@ struct PlusPaywallView: View {
                     .madFont(size: 16, weight: .black, design: .rounded)
                     .foregroundColor(tint)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 Text(free)
                     .madFont(size: 12, weight: .bold, design: .rounded)
                     .foregroundColor(.white.opacity(0.5))
@@ -397,18 +402,19 @@ struct PlusPaywallView: View {
 
     private var trialTimeline: some View {
         let yearly = store.product(PlusProducts.yearly)
-        let trialEnd = Calendar.current.date(byAdding: .day, value: 7, to: Date())
-            .map { $0.formatted(.dateTime.month(.abbreviated).day()) } ?? "day 7"
+        // The trial's real length, from the App Store's offer.
+        let trialEnd = yearly.flatMap { PlusPlanCopy.trialEndDate($0) }
+            .map { $0.formatted(.dateTime.month(.abbreviated).day()) } ?? "When it ends"
         let price = yearly.map { PlusPlanCopy.priceLabel($0) } ?? ""
         return VStack(alignment: .leading, spacing: 0) {
-            Text("HOW YOUR FREE WEEK WORKS")
+            Text("HOW YOUR FREE TRIAL WORKS")
                 .madFont(size: 12, weight: .black, design: .rounded, maxScale: 1.3)
                 .tracking(1.2)
                 .foregroundColor(.white.opacity(0.6))
                 .padding(.bottom, 10)
             timelineStep(title: "Today", detail: "Everything in Plus unlocks. Your tokens speed up right away.",
                          dot: .filled, last: false)
-            timelineStep(title: "Any time this week", detail: "Cancel in Settings › Apple ID › Subscriptions. You won't be charged.",
+            timelineStep(title: "Change your mind?", detail: "Cancel in Settings › Apple ID › Subscriptions at least a day before it ends and you won't be charged.",
                          dot: .ring, last: false)
             timelineStep(title: trialEnd, detail: "Your year of Plus begins at \(price), unless you cancelled.",
                          dot: .dim, last: true)
@@ -496,8 +502,12 @@ struct PlusPaywallView: View {
                 withAnimation(.easeOut(duration: 0.15)) { selected = id }
             } label: {
                 VStack(spacing: 1) {
-                    Text("\(PlusPlanCopy.title(product)) · \(PlusPlanCopy.priceLabel(product))")
+                    Text(PlusPlanCopy.title(product))
                         .madFont(size: 14, weight: .black, design: .rounded, maxScale: 1.3)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    Text(PlusPlanCopy.priceLabel(product))
+                        .madFont(size: 13, weight: .heavy, design: .rounded, maxScale: 1.3)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                     if id == PlusProducts.yearly, let savings = yearlySavings {
@@ -507,6 +517,7 @@ struct PlusPaywallView: View {
                     }
                 }
                 .foregroundColor(on ? Color(red: 0.1, green: 0.04, blue: 0.06) : .white.opacity(0.78))
+                .padding(.vertical, 6)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(on ? Color.white : Color.clear))
             }
@@ -581,8 +592,9 @@ struct PlusPaywallView: View {
                         Text(item.displayName)
                             .madFont(size: 10, weight: .heavy, design: .rounded, maxScale: 1.2)
                             .foregroundColor(.white.opacity(0.85))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.65)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
                     }
                     .frame(maxWidth: .infinity, minHeight: 70)
                     .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -612,6 +624,7 @@ struct PlusPaywallView: View {
             .foregroundColor(tint)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
+            .padding(.horizontal, 8)
             .frame(maxWidth: .infinity, minHeight: 32)
             .background(Capsule().fill(tint.opacity(0.14)))
     }
@@ -1022,6 +1035,19 @@ enum PlusPlanCopy {
     static func freeTrial(_ product: Product, adjective: Bool = true) -> String? {
         guard let offer = product.subscription?.introductoryOffer, offer.paymentMode == .freeTrial else { return nil }
         return describe(offer.period, adjective: adjective)
+    }
+
+    /// When a free trial started now would end, from the offer's own period.
+    static func trialEndDate(_ product: Product, from start: Date = Date()) -> Date? {
+        guard let offer = product.subscription?.introductoryOffer, offer.paymentMode == .freeTrial else { return nil }
+        let n = offer.period.value
+        switch offer.period.unit {
+        case .day: return Calendar.current.date(byAdding: .day, value: n, to: start)
+        case .week: return Calendar.current.date(byAdding: .day, value: 7 * n, to: start)
+        case .month: return Calendar.current.date(byAdding: .month, value: n, to: start)
+        case .year: return Calendar.current.date(byAdding: .year, value: n, to: start)
+        @unknown default: return nil
+        }
     }
 
     private static func describe(_ period: Product.SubscriptionPeriod, adjective: Bool) -> String {
