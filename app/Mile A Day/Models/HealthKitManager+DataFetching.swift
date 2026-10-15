@@ -285,6 +285,7 @@ extension HealthKitManager {
                     // Before the publish, so views redrawn by it read the key.
                     StepGoalDayStore.record(steps: steps, on: now)
                     #endif
+                    self.todaysStepsDay = startOfDay
                     self.todaysSteps = steps
                 } else {
                     self.todaysSteps = 0

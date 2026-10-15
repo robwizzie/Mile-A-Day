@@ -182,6 +182,9 @@ enum FlameyFacts {
             .union(FlameyWardrobe.impliedBadgeIds(longestStreak: longestStreak))
             // The widget stores badge ids; a server-granted item rides as its own.
             .union(FlameyClosetSync.serverOwned.compactMap(\.badgeId))
+        // Plus items and Monthly Flames have no badge id, so they ride as
+        // item ids of their own (the badge ids above stay for older widgets).
+        let serverOwned = FlameyClosetSync.serverOwned
         let signup = signupDate
         let longest = longestStreak
         let choice = self.choice
@@ -194,11 +197,12 @@ enum FlameyFacts {
                                date: $0, signupDate: WidgetDataStore.loadFlameySignupDate(), detail: .compact)
         }
         let after = days.map {
-            FlameyLook.resolve(owned: FlameyWardrobe.owned(earnedBadgeIds: badges), choice: choice,
+            FlameyLook.resolve(owned: FlameyWardrobe.owned(earnedBadgeIds: badges).union(serverOwned), choice: choice,
                                date: $0, signupDate: signup, detail: .compact)
         }
         WidgetDataStore.save(longestStreak: longest)
         WidgetDataStore.save(flameyChoice: choice)
+        WidgetDataStore.save(flameyServerItemIds: serverOwned.map(\.rawValue))
         WidgetDataStore.save(flameyBadgeIds: Array(badges), signupDate: signup, reload: before != after)
     }
 }

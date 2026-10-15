@@ -195,16 +195,26 @@ struct WidgetDataStore {
 
     /// Today's step count for the flame widget's stat row.
     ///
-    /// Monotonic within the day: `HealthKitManager.todaysSteps` is set to 0
-    /// when its query FAILS (a locked device — protected data), and a real step
-    /// count never goes down, so a zero after a real reading is always a bad
-    /// read. Taking it would blank the widget's row at random.
-    static func save(todaySteps: Int) {
+    /// `readOn` is the day the count was READ for (`todaysStepsDay`); nil
+    /// means no read has landed yet. A count read for any other day is
+    /// dropped: `todaysSteps` is a bare number, and an app resumed after
+    /// midnight still holds yesterday's total until its next fetch — stamped
+    /// as today's, the max-guard below then pinned it for the rest of the
+    /// day, so the widget showed yesterday's steps while the app showed today's.
+    ///
+    /// Otherwise monotonic within the day: `HealthKitManager.todaysSteps` is
+    /// set to 0 when its query FAILS (a locked device — protected data), so a
+    /// zero after a real reading is a bad read and taking it would blank the
+    /// widget's row at random. A NONZERO read for today is a real reading,
+    /// though, and it wins even when lower — that is what heals a row a stale
+    /// count already got into (and any build that wrote one before this fix).
+    static func save(todaySteps: Int, readOn: Date?) {
         guard let defaults = UserDefaults(suiteName: suiteName) else { return }
         let stamp = dayStamp()
+        guard let readOn, dayStamp(for: readOn) == stamp else { return }
         let isNewDay = defaults.string(forKey: stepsDayKey) != stamp
         let previous = isNewDay ? 0 : defaults.integer(forKey: stepsKey)
-        let steps = isNewDay ? max(0, todaySteps) : max(previous, todaySteps)
+        let steps = todaySteps > 0 ? todaySteps : previous
 
         // A new day always writes (yesterday's count has to clear) — otherwise
         // only a real change is worth touching disk.
@@ -331,11 +341,35 @@ struct WidgetDataStore {
         return choice
     }
 
+    private static let flameyServerItemsKey = "flamey_server_item_ids"
+
+    /// The items the server says this account owns (`owned_item_ids`), as
+    /// raw item ids. Badge ids can't carry them all: Mile A Day+ items and
+    /// the Monthly Flames are granted with NO medal, so a badge-only mirror
+    /// dropped them and the widget's `FlameyLook.resolve` threw the Closet
+    /// pick away — the app wore the new outfit, the widget wore basic.
+    /// Written without a reload — the badge save after it reloads when the
+    /// resolved look actually moved.
+    static func save(flameyServerItemIds: [String]) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        let sorted = flameyServerItemIds.sorted()
+        if defaults.stringArray(forKey: flameyServerItemsKey) == sorted { return }
+        defaults.set(sorted, forKey: flameyServerItemsKey)
+    }
+
+    /// Ids this build doesn't know are dropped, so a newer app's catalog
+    /// never breaks an older widget.
+    static func loadFlameyServerItems() -> Set<FlameyItem> {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return [] }
+        return Set((defaults.stringArray(forKey: flameyServerItemsKey) ?? []).compactMap(FlameyItem.init(rawValue:)))
+    }
+
     /// Everything he owns, from the mirrored medals plus the streak colours
-    /// the mirrored longest streak implies.
+    /// the mirrored longest streak implies, plus what the server granted.
     static func loadFlameyOwnedItems() -> Set<FlameyItem> {
         FlameyWardrobe.owned(earnedBadgeIds: loadFlameyBadgeIds()
             .union(FlameyWardrobe.impliedBadgeIds(longestStreak: loadLongestStreak())))
+            .union(loadFlameyServerItems())
     }
 
     private static let flameyWokenDayKey = "flamey_woken_day"
