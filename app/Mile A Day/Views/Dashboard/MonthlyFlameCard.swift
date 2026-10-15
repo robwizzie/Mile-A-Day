@@ -24,33 +24,36 @@ struct MonthlyFlameCard: View {
             MADHaptics.tap()
             FlameyClosetLink.shared.open(focus: item, monthly: true)
         } label: {
-            HStack(alignment: .center, spacing: MADTheme.Spacing.md) {
-                figure
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("\(FlameyItem.monthName(month).uppercased()) · MONTHLY FLAME")
-                        .madFont(size: 10, weight: .black, design: .rounded, maxScale: 1.3)
-                        .tracking(0.8)
-                        .foregroundColor(glow)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    Text(item.displayName)
-                        .madFont(size: 19, weight: .heavy, design: .rounded)
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                    if let current = status?.current, current.month == month {
-                        progress(current)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: MADTheme.Spacing.md) {
+                    figure
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("\(FlameyItem.monthName(month).uppercased()) · MONTHLY FLAME")
+                            .madFont(size: 10, weight: .black, design: .rounded, maxScale: 1.3)
+                            .tracking(0.8)
+                            .foregroundColor(glow)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                        Text(item.displayName)
+                            .madFont(size: 19, weight: .heavy, design: .rounded)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                        Text(line)
+                            .madFont(size: 12, weight: .semibold, design: .rounded)
+                            .foregroundColor(.white.opacity(0.7))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Text(line)
-                        .madFont(size: 12, weight: .semibold, design: .rounded)
-                        .foregroundColor(.white.opacity(0.7))
-                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white.opacity(0.35))
+                        .accessibilityHidden(true)
                 }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.white.opacity(0.35))
-                    .accessibilityHidden(true)
+                // Full card width, so each day of a 31-day month stays a dot.
+                if let current = status?.current, current.month == month {
+                    progress(current)
+                }
             }
             .padding(MADTheme.Spacing.md)
             .background(

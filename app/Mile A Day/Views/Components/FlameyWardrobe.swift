@@ -728,9 +728,9 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         // Sat in a jack-o'-lantern: no hat fits its lid, it swallows his
         // feet, his middle and the arm a held item needs.
         case .pumpkinSuit: return [.head, .chest, .feet, .held]
-        // A bone-print onesie with a skull mask: glasses can't sit on a
-        // skull, nothing goes over the ribs, and the leg bones are his feet.
-        case .skeletonSuit: return [.eyes, .chest, .feet]
+        // A hooded bone onesie: the bone bow is its hat, glasses can't sit
+        // on a skull, nothing goes over the ribs, the leg bones are his feet.
+        case .skeletonSuit: return [.head, .eyes, .chest, .feet]
         default: return []
         }
     }

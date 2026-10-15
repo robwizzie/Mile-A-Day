@@ -35,6 +35,7 @@ struct FlameyClosetView: View {
     var onShowJourney: () -> Void = {}
     /// Raise Monthly Flames on arrival (the dashboard's month card).
     var opensMonthly: Bool = false
+    @State private var didOpenMonthly = false
     /// False only for a snapshot (ImageRenderer can't see into a ScrollView).
     var scrollable: Bool = true
     /// Snapshot of the scrolled state (the harness): compact stage, and the
@@ -111,7 +112,8 @@ struct FlameyClosetView: View {
         .onAppear {
             // After the cover has finished presenting: a sheet raised in the
             // same transaction as its host's presentation is dropped.
-            guard opensMonthly, scrollable else { return }
+            guard opensMonthly, scrollable, !didOpenMonthly else { return }
+            didOpenMonthly = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { sheet = .monthly }
         }
         .onChange(of: model.lineAt) { _, _ in scheduleLineClear() }
