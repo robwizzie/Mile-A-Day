@@ -71,6 +71,24 @@ export interface PlusStatus {
     streak_save_target: number;
     streak_assist_target: number;
   };
+  /**
+   * Which onboarding paywall this account gets (an A/B test, additive):
+   * "streak" (protect-your-streak + trial timeline) or "flamey" (Flamey
+   * trying on the Plus looks). Stable per account.
+   */
+  paywall_variant: PaywallVariant;
+}
+
+export type PaywallVariant = "streak" | "flamey";
+
+/**
+ * A stable 50/50 split by account: the first byte of sha256(user id). Same
+ * answer on every read and every device, no row to write, and independent
+ * of anything else hashed from the id.
+ */
+export function paywallVariantFor(userId: string): PaywallVariant {
+  const byte = crypto.createHash("sha256").update(`paywall:${userId}`).digest()[0];
+  return byte % 2 === 0 ? "streak" : "flamey";
 }
 
 interface PurchaseRow {
@@ -153,6 +171,7 @@ export async function getPlusStatus(
       streak_save_target: PLUS_STREAK_SAVE_TARGET_RUN_DAYS,
       streak_assist_target: PLUS_STREAK_ASSIST_TARGET_DAYS,
     },
+    paywall_variant: paywallVariantFor(userId),
   };
 }
 

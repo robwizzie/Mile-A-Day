@@ -49,6 +49,7 @@ import {
   getPlusStatus,
   isPlusActive,
   listGifts,
+  paywallVariantFor,
   recordTransaction,
   redeemGift,
 } from "../dist/services/plusService.js";
@@ -61,6 +62,7 @@ import {
 } from "../dist/services/streakFeatureService.js";
 import { getStreakFeatureRow } from "../dist/services/streakFeatureCore.js";
 import { FLAMEY_CATALOG } from "../dist/services/flameyCatalog.js";
+import { TRACKED_FEATURES } from "../dist/services/telemetryService.js";
 import {
   ownedFlameyItems,
   servedFlameyLook,
@@ -188,6 +190,28 @@ try {
   );
   check("isPlusActive agrees (newbie)", await isPlusActive(NEWBIE), false);
   check("status carries product ids", n.products, PLUS_PRODUCTS);
+
+  // Onboarding paywall A/B: stable per account, both arms used, ~50/50.
+  check("status carries the paywall variant", n.paywall_variant, paywallVariantFor(NEWBIE));
+  check("…and it's stable", (await status(NEWBIE)).paywall_variant, n.paywall_variant);
+  const arms = { streak: 0, flamey: 0 };
+  for (let i = 0; i < 2000; i++) arms[paywallVariantFor(`u${i.toString(16).padStart(32, "0")}`)]++;
+  check(
+    "variants split close to 50/50",
+    arms.streak > 900 && arms.flamey > 900 && arms.streak + arms.flamey === 2000,
+    true,
+  );
+  check(
+    "telemetry allowlists the Plus funnel events",
+    [
+      "plus_paywall_streak",
+      "plus_paywall_flamey",
+      "plus_paywall_closet",
+      "plus_streak_card_shown",
+      "plus_streak_card_tapped",
+    ].every((f) => TRACKED_FEATURES.has(f)),
+    true,
+  );
 
   // ── 2. Subscriptions ─────────────────────────────────────────────────
   const sub1 = tx(PLUS_PRODUCTS.yearly, {

@@ -31,6 +31,8 @@ struct PlusStatus: Codable, Equatable {
     let founding_ends_at: String?
     let ever_subscribed: Bool?
     let perks: Perks?
+    /// Onboarding paywall A/B arm: "streak" | "flamey" (newer servers).
+    let paywall_variant: String?
 
     struct Perks: Codable, Equatable {
         let double_down_target: Int

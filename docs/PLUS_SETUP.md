@@ -64,7 +64,31 @@ redeem a gift code is refused with `already_lifetime` and the code stays
 unspent, so it can be passed on. Accounts created after the cutoff (the ad
 traffic) see the trial offer once at the end of onboarding.
 
-## 5. Testing
+## 5. The onboarding paywall A/B test
+
+New accounts get one of two onboarding paywalls, fixed per account
+(`paywallVariantFor` in plusService.ts): **streak** (protect-your-streak and
+the free-week timeline) or **flamey** (Flamey trying on the Plus looks). The
+app logs which one each person saw (`plus_paywall_streak` /
+`plus_paywall_flamey` in `feature_events`). Compare purchases per arm with:
+
+```sql
+SELECT fe.feature AS variant,
+       COUNT(DISTINCT fe.user_id) AS saw,
+       COUNT(DISTINCT pp.user_id) AS bought,
+       ROUND(100.0 * COUNT(DISTINCT pp.user_id) / NULLIF(COUNT(DISTINCT fe.user_id), 0), 1) AS pct
+  FROM feature_events fe
+  LEFT JOIN plus_purchases pp
+         ON pp.user_id = fe.user_id AND pp.ownership = 'PURCHASED'
+ WHERE fe.feature IN ('plus_paywall_streak', 'plus_paywall_flamey')
+ GROUP BY fe.feature;
+```
+
+`bought` counts trials started too (a trial is a subscription row); add
+`AND pp.in_trial = false` once trials have had a week to convert. The admin
+dashboard's "What people actually use" panel also shows a Mile A Day+ group.
+
+## 6. Testing
 
 - **Xcode**: File › New › File › StoreKit Configuration File, "Sync with App
   Store Connect" (or add the four products by hand), then Edit Scheme › Run ›

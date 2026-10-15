@@ -339,6 +339,10 @@ struct FunDashboardBody: View {
                 onLogPastWorkout: onLogPastWorkout
             )
 
+            // Mile A Day+ at the moment it would have helped: hides itself
+            // unless the streak is at risk or Plus would already hold a Save.
+            PlusStreakCard(streak: userManager.currentUser.streak, stackSpacing: 18)
+
             HStack(alignment: .top, spacing: 12) {
                 ModernStepsTile(healthManager: healthManager, userManager: userManager)
                 ModernBadgesTile(userManager: userManager, healthManager: healthManager)
