@@ -24,7 +24,7 @@ export const metadata: Metadata = {
 
 export default function TermsPage() {
 	return (
-		<LegalPage title="TERMS OF USE" lastUpdated="May 16, 2026">
+		<LegalPage title="TERMS OF USE" lastUpdated="October 15, 2026">
 			<Section heading="Acceptance of Terms">
 				<p>
 					These Terms of Use (&ldquo;Terms&rdquo;) govern your use of the Mile A Day app and related services
@@ -81,6 +81,101 @@ export default function TermsPage() {
 				</p>
 			</Section>
 
+			<Section heading="Mile A Day+">
+				<p>
+					Mile A Day+ is an optional membership. Logging your daily mile, streaks, friends, the feed and competitions
+					remain free. Mile A Day+ adds extras such as faster-earning streak tokens, Mile A Day+-only looks for Flamey,
+					and Family Sharing. The features included in Mile A Day+ are described in the app and may change over time;
+					the free core of the app is not part of Mile A Day+.
+				</p>
+				<p>
+					Mile A Day+ is sold only through Apple&rsquo;s App Store and is subject to Apple&rsquo;s Media Services Terms
+					and Conditions as well as these Terms. All purchases are charged to the payment method on your Apple ID. We
+					never receive or store your payment card details.
+				</p>
+			</Section>
+
+			<Section heading="Subscriptions and Auto-Renewal">
+				<p>
+					Mile A Day+ is offered as a monthly or yearly auto-renewing subscription. Prices are shown in the app before
+					you buy and may vary by country.
+				</p>
+				<ul className="list-disc space-y-2 pl-6">
+					<li>Payment is charged to your Apple ID when you confirm the purchase.</li>
+					<li>
+						Your subscription renews automatically at the same price and for the same period unless auto-renew is
+						turned off at least 24 hours before the end of the current period. Your Apple ID is charged for the renewal
+						within 24 hours before the current period ends.
+					</li>
+					<li>
+						You can manage or cancel your subscription at any time in your Apple ID&rsquo;s Subscriptions settings
+						(Settings &rsaquo; your name &rsaquo; Subscriptions on iPhone), or from Settings &rsaquo; Mile A Day+ in the
+						app. Cancelling stops future renewals; you keep Mile A Day+ until the end of the period you have already
+						paid for.
+					</li>
+					<li>
+						If the price of your subscription changes, Apple will notify you in advance and, where required, ask for
+						your consent before the new price applies.
+					</li>
+				</ul>
+			</Section>
+
+			<Section heading="Free Trials">
+				<p>
+					Some plans include a free trial for eligible new subscribers, as shown in the app. Eligibility is decided
+					by Apple, generally once per Apple ID. Unless you cancel at least 24 hours before the trial ends, the
+					subscription begins and your Apple ID is charged at the end of the trial. Any unused portion of a free
+					trial is forfeited when you buy a subscription to the same plan.
+				</p>
+			</Section>
+
+			<Section heading="Lifetime Purchase">
+				<p>
+					The Lifetime option is a one-time, non-renewing purchase that gives your account Mile A Day+ for as long as
+					we offer Mile A Day+ in the app. It does not renew and you will not be charged again for it.
+				</p>
+			</Section>
+
+			<Section heading="Founding Runners">
+				<p>
+					Accounts created before Mile A Day+ launched are Founding Runners and receive Mile A Day+ free of charge for
+					as long as we offer Mile A Day+ in the app. No payment details are needed and nothing renews. Founding
+					Runner status belongs to the account it was granted to and cannot be transferred.
+				</p>
+			</Section>
+
+			<Section heading="Gifts">
+				<p>
+					You can buy a year of Mile A Day+ as a gift. Each gift purchase produces one code that can be redeemed once,
+					by one account, for 12 months of Mile A Day+ starting when it is redeemed (or, if the recipient already has
+					gifted time, when that time ends). Gift codes have no cash value, cannot be exchanged or resold, and do not
+					renew. A code cannot be redeemed by an account that already has Mile A Day+ for life (a Founding Runner or a
+					Lifetime purchase); it stays unused so it can be given to someone else. If a gift purchase is refunded, its
+					code stops working and any time it granted ends.
+				</p>
+			</Section>
+
+			<Section heading="Family Sharing">
+				<p>
+					Where Family Sharing is enabled for a plan, members of your Apple Family Sharing group may also use Mile A
+					Day+ on their own Mile A Day accounts, as provided by Apple. Family access ends if the purchase ends, is
+					refunded, or the member leaves the family group.
+				</p>
+			</Section>
+
+			<Section heading="Refunds and Restoring Purchases">
+				<p>
+					All purchases are processed by Apple, and refund requests are handled by Apple under its policies; you can
+					request one at reportaproblem.apple.com. We cannot issue refunds directly. If a purchase is refunded or
+					revoked, the Mile A Day+ access it provided ends. Except where required by law, we do not provide refunds
+					or credits for partial subscription periods.
+				</p>
+				<p>
+					If you reinstall the app or switch devices, use Restore Purchases in Settings &rsaquo; Mile A Day+ to
+					reconnect purchases made with your Apple ID. Purchases are linked to the Mile A Day account that made them.
+				</p>
+			</Section>
+
 			<Section heading="Intellectual Property">
 				<p>
 					The Mile A Day app, including its name, logo, design, and software, is owned by us and protected by applicable
@@ -90,8 +185,9 @@ export default function TermsPage() {
 
 			<Section heading="Termination">
 				<p>
-					You may stop using the app and delete your account at any time from within the app. We may suspend or
-					terminate your access if you violate these Terms or if we discontinue the service.
+					You may stop using the app and delete your account at any time from within the app. Deleting your account
+					does not cancel an App Store subscription; cancel it in your Apple ID&rsquo;s Subscriptions settings. We may
+					suspend or terminate your access if you violate these Terms or if we discontinue the service.
 				</p>
 			</Section>
 
