@@ -259,6 +259,7 @@ class UserManager: ObservableObject {
         #if !os(watchOS)
         Task { @MainActor in InjuryPauseState.shared.reset() }
         Task { @MainActor in ShoeStore.shared.reset() }
+        Task { @MainActor in PlusStore.shared.reset() }
         #endif
 
         currentUser.appleId = nil

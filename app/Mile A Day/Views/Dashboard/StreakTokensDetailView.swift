@@ -66,12 +66,15 @@ enum StreakTokenKind {
         }
     }
 
-    var howToEarn: String {
+    /// `target` is the meter's own (the server's — Mile A Day+ fills the
+    /// Double Down and Streak Save meters faster), so the copy never
+    /// disagrees with the bar under it.
+    func howToEarn(target: Int) -> String {
         switch self {
         case .doubleDown:
-            return "Complete your mile on 14 days — runs or walks both count."
+            return "Complete your mile on \(target) days — runs or walks both count."
         case .save:
-            return "Run your full mile on 7 days. Running only — walks don't tick this one."
+            return "Run your full mile on \(target) days. Running only — walks don't tick this one."
         case .assist:
             return "One every 30 days — the countdown starts the day you spend one, so a brand-new account is already holding its first. Holding one is half of a save; a friend's spare mile is the other half."
         }
@@ -660,6 +663,8 @@ struct StreakTokensCard: View {
 /// "easily known how to unlock and what they do" surface.
 struct StreakTokensDetailView: View {
     @ObservedObject var tokensState = StreakTokensState.shared
+    @ObservedObject private var plusStore = PlusStore.shared
+    @State private var showPlusPaywall = false
     @Environment(\.dismiss) private var dismiss
     @State private var showPureFlameInfo = false
     /// Token cards whose "How it works" is open (by `kind.raw`). Collapsed by
@@ -765,6 +770,9 @@ struct StreakTokensDetailView: View {
                             )
                             tokenCard(kind: .save, meter: payload.streak_save, unit: "run days")
                             tokenCard(kind: .assist, meter: payload.streak_assist, unit: "days")
+                            if !plusStore.isPlus {
+                                plusUpsell
+                            }
 
                             rulesCard
                             naturalCard(payload.natural_streak)
@@ -788,6 +796,54 @@ struct StreakTokensDetailView: View {
                 }
             }
             .task { await tokensState.refreshStatus() }
+        }
+    }
+
+    /// Mile A Day+ fills the two earned meters faster. Shown only to people
+    /// who don't have it, under the meters it would change. The paywall sheet
+    /// hangs off this card, not the body (two sheets on one node compete).
+    private var plusUpsell: some View {
+        Button {
+            MADHaptics.tap()
+            showPlusPaywall = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.orange)
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(Color.orange.opacity(0.15)))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Fill these faster with Mile A Day+")
+                        .madFont(size: 14, weight: .heavy, design: .rounded)
+                        .foregroundColor(.white)
+                    Text("Double Down in 10 days, Streak Save in 5 runs.")
+                        .madFont(size: 12, weight: .medium, design: .rounded)
+                        .foregroundColor(.white.opacity(0.6))
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+                    .accessibilityHidden(true)
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(Color.orange.opacity(0.25), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showPlusPaywall) {
+            PlusPaywallView(context: .streakTokens) { purchased in
+                guard purchased else { return }
+                Task { await tokensState.refreshStatus() }
+            }
         }
     }
 
@@ -1031,7 +1087,7 @@ struct StreakTokensDetailView: View {
                         Text("How to earn")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(kind.tint)
-                        Text(kind.howToEarn)
+                        Text(kind.howToEarn(target: Int(meter.target.rounded())))
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

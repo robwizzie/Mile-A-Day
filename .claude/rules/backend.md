@@ -140,6 +140,13 @@ Details: docs/conventions/backend.md § Push Notifications
 - Widget refresh = silent `widget_refresh` push, only to `widget_refresh_push_v1` devices with matching `widget_kinds`, one per window. Check: `widget-refresh-check`.
 - Every desk PWA push (`pushTo`) must show in the remote's Activity (`boxActivity`): read it from its own table, else add the kind to `LOGGED_KINDS` (`desk_push_log`). Check: `display-check`.
 
+## Mile A Day+
+Details: docs/conventions/backend.md § Mile A Day+
+- Entitlement is DERIVED at read (`plusActiveSql`/`isPlusActive`/`getPlusStatus`), never stored on `users`; perks read it live (`getMeters`, `ownedFlameyItems`). Check: `plus-check`.
+- Record only VERIFIED StoreKit JWS (`appleStoreVerifier.verifyTransaction`) via `recordTransaction`; product → grant only from `plusCatalog.ts` (`PLUS_PRODUCTS`, mirrored by iOS `PlusProducts`); never rename a product id.
+- `plus_purchases` upserts move FORWARD only (`purchased_at <=`); a refund stamps `revoked_at`, never deletes; gifts are one code per Apple `transaction_id`, voided (never deleted) on refund.
+- Never move `FOUNDING_CUTOFF` back; check scripts seed users AFTER it (or they become Founding Runners).
+
 ## ESM Reminder
 Details: docs/conventions/backend.md § ESM Reminder
 All imports MUST end with `.js` extension, e.g. `import { foo } from './services/fooService.js';`

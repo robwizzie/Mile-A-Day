@@ -106,6 +106,24 @@ struct FlameyPalette: Hashable {
             return FlameyPalette(outer: [h(0xF2FFFB), h(0xB8F0E6), h(0x6FA8C8)],
                                  inner: [.white, h(0xE0FBF4)], glow: h(0x9FFFE0), core: h(0xE8FFF8),
                                  eye: h(0x10283A), rim: Color.white.opacity(0.8), bodyOpacity: 0.74)
+        // MARK: Mile A Day+
+        case .electric:
+            return FlameyPalette(outer: [h(0x9BF6FF), h(0x3A8BFF), h(0x5B2BFF), h(0x1A0B6E)],
+                                 inner: [h(0xF4FDFF), h(0x9FE8FF)], glow: h(0x4F8BFF), core: h(0xD8F6FF),
+                                 eye: h(0x0B0838), rim: h(0xB8F0FF, 0.7), effects: [.sheen, .halo])
+        case .roseGold:
+            return FlameyPalette(outer: [h(0xFFE3D6), h(0xF0A58C), h(0xC86E62), h(0x6E3233)],
+                                 inner: [h(0xFFF6F0), h(0xFFCDB8)], glow: h(0xF29A86), core: h(0xFFE6DA),
+                                 eye: h(0x3A1618), rim: h(0xFFE9DE, 0.8), effects: [.sheen],
+                                 start: .topLeading, end: .bottom)
+        case .obsidian:
+            return FlameyPalette(outer: [h(0x5A5A66), h(0x26262E), h(0x0C0C10)],
+                                 inner: [h(0xFFD9A0), h(0xFF7A2E)], glow: h(0xFF6A1F), core: h(0xFFC27A),
+                                 eye: h(0xFFB15C), rim: h(0x8A8A99, 0.6), effects: [.hotCore, .embers])
+        case .tropic:
+            return FlameyPalette(outer: [h(0xFFF27A), h(0x37E0B5), h(0x14A6C8), h(0xFF5FA2)],
+                                 inner: [h(0xFFFFF2), h(0xB8FFE6)], glow: h(0x2FD9C0), core: h(0xE8FFF6),
+                                 eye: h(0x08303A), effects: [.waves])
         // MARK: Gradients
         case .sunset:
             return FlameyPalette(outer: [h(0xFFE07A), h(0xFF7A45), h(0xE8386F), h(0x6E2A8C)],

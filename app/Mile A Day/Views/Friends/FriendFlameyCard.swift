@@ -136,6 +136,7 @@ extension FlameyItem {
         case .nudges: return "💬"
         case .holidays: return "🎁"
         case .mood: return "🙂"
+        case .plus: return "💎"
         }
     }
 

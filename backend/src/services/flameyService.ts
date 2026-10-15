@@ -3,6 +3,7 @@ import { areFriends } from "./friendshipService.js";
 import { effectiveStreakSql } from "./streakFeatureCore.js";
 import { HOLIDAYS, holidayKeyFromBadgeId, type HolidayKey } from "./holidays.js";
 import { parseDisplayName, type NameRejection } from "./nameModeration.js";
+import { isPlusActive } from "./plusService.js";
 import {
   FLAMEY_CATALOG,
   FLAMEY_CATALOG_VERSION,
@@ -86,11 +87,14 @@ export async function flameyBlockFor(
   }
 
   // Every badge row: the holiday keys and the closet's ownership read ONE set.
-  const badgeRows = await db.query<{ badge_id: string }>(
-    `SELECT badge_id FROM user_badges WHERE user_id = $1`,
-    [targetUserId],
-  );
-  const owned = ownedFlameyItemIds(badgeRows.map((r) => r.badge_id));
+  const [badgeRows, plus] = await Promise.all([
+    db.query<{ badge_id: string }>(
+      `SELECT badge_id FROM user_badges WHERE user_id = $1`,
+      [targetUserId],
+    ),
+    isPlusActive(targetUserId),
+  ]);
+  const owned = ownedFlameyItemIds(badgeRows.map((r) => r.badge_id), plus);
   const held = new Set(
     badgeRows
       .map((r) => holidayKeyFromBadgeId(r.badge_id))
@@ -123,13 +127,16 @@ export async function bothUseFun(a: string, b: string): Promise<boolean> {
 /** `{ <slot>: <itemId> | null }` — absent slot = auto, null = bare. */
 export type FlameyLook = Partial<Record<FlameySlot, string | null>>;
 
-/** Items this user owns right now, from their badge rows. */
+/** Items this user owns right now, from their badge rows and Plus state. */
 export async function ownedFlameyItems(userId: string): Promise<Set<string>> {
-  const rows = await db.query<{ badge_id: string }>(
-    `SELECT badge_id FROM user_badges WHERE user_id = $1`,
-    [userId],
-  );
-  return ownedFlameyItemIds(rows.map((r) => r.badge_id));
+  const [rows, plus] = await Promise.all([
+    db.query<{ badge_id: string }>(
+      `SELECT badge_id FROM user_badges WHERE user_id = $1`,
+      [userId],
+    ),
+    isPlusActive(userId),
+  ]);
+  return ownedFlameyItemIds(rows.map((r) => r.badge_id), plus);
 }
 
 export type LookParse =

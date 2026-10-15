@@ -15,6 +15,8 @@ class AppStateManager: ObservableObject {
         case usernameSetup
         case personalization
         case healthAccess
+        /// Mile A Day+ offer, once, after setup. Skippable; never a gate.
+        case plusOffer
         case main
     }
     
@@ -89,6 +91,9 @@ class AppStateManager: ObservableObject {
         // switch flips — this only marks that the UI exists here.
         StreakFeatureService.enrollIfNeeded()
 
+        // Mile A Day+ entitlement for the account that just signed in.
+        Task { @MainActor in await PlusStore.shared.refresh() }
+
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 if userManager.currentUser.hasUsername {
@@ -137,17 +142,39 @@ class AppStateManager: ObservableObject {
         }
     }
 
-    /// Complete health access and check if workout sync is needed
+    /// Complete health access, then offer Mile A Day+ once before the app.
+    /// Setup is already COMPLETE here (the flag is set first), so quitting on
+    /// the offer resumes straight to the main app — it is never shown again.
+    /// A Founding Runner (already Plus) skips it.
     func completeHealthAccess() {
         userDefaults.set(true, forKey: hasCompletedFullSetupKey)
 
-        DispatchQueue.main.async {
+        // A MainActor task (not DispatchQueue.main) because PlusStore is
+        // main-actor isolated.
+        Task { @MainActor in
             withAnimation(MADTheme.Animation.standard) {
-                self.currentState = .main
-                // Initial sync runs in the background — non-blocking.
-                WorkoutSyncService.shared.startInitialSyncIfNeeded()
+                if PlusStore.shared.isPlus {
+                    self.enterMain()
+                } else {
+                    self.currentState = .plusOffer
+                }
             }
         }
+    }
+
+    /// The onboarding Mile A Day+ offer was bought or skipped.
+    func completePlusOffer() {
+        DispatchQueue.main.async {
+            withAnimation(MADTheme.Animation.standard) {
+                self.enterMain()
+            }
+        }
+    }
+
+    @MainActor private func enterMain() {
+        currentState = .main
+        // Initial sync runs in the background — non-blocking.
+        WorkoutSyncService.shared.startInitialSyncIfNeeded()
     }
 
     /// Sign out user (for testing purposes)

@@ -505,6 +505,9 @@ struct FlameyItemDetailView: View {
 
     /// "View workout": the medal's workout, on a sheet over this card.
     @State private var workout: FlameyWorkoutRef?
+    /// A Plus-only item's paywall (on `actions`, not the body: two sheets on
+    /// one node compete and one never presents).
+    @State private var showPlusPaywall = false
 
     private var owned: Bool { model.owns(item) }
     private var worn: Bool { model.isWorn(item) }
@@ -642,11 +645,13 @@ struct FlameyItemDetailView: View {
                 }
             } else {
                 HStack(spacing: 10) {
-                    Image(systemName: "gift.fill")
+                    Image(systemName: item.unlock == .plus ? "sparkles" : "gift.fill")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(FlameyClosetStyle.ember)
                         .accessibilityHidden(true)
-                    Text("Always his — no medal needed.")
+                    Text(item.unlock == .plus
+                         ? (owned ? "Yours with Mile A Day+." : "Included with Mile A Day+.")
+                         : "Always his — no medal needed.")
                         .madFont(size: 15, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.8))
                 }
@@ -737,6 +742,11 @@ struct FlameyItemDetailView: View {
                         onClose()
                     }
                 }
+            } else if item.unlock == .plus, model.onEarn != nil {
+                primary("Get Mile A Day+", icon: "sparkles", filled: true) {
+                    MADHaptics.action()
+                    showPlusPaywall = true
+                }
             } else if model.onEarn != nil, let title = route?.buttonTitle, let route {
                 primary(title, icon: route.icon, filled: true) {
                     MADHaptics.action()
@@ -755,6 +765,13 @@ struct FlameyItemDetailView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+        }
+        .sheet(isPresented: $showPlusPaywall) {
+            PlusPaywallView(context: .flamey) { purchased in
+                guard purchased else { return }
+                model.grantPlusItems()
+                Task { await FlameyClosetSync.refreshOwnedItems() }
+            }
         }
     }
 

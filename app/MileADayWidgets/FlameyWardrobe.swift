@@ -257,7 +257,7 @@ enum FlameyRenderDetail: String, Codable, Hashable {
 enum FlameyFamily: String, CaseIterable, Hashable {
     case starter, streakDays, lifetimeMiles, pace, dailyChallenges, weeklyChallenges,
          competitionsEntered, competitionsWon, organizer, hypes, distanceInADay,
-         buddyWalks, ghosts, stories, nudges, firsts, holidays, mood
+         buddyWalks, ghosts, stories, nudges, firsts, holidays, mood, plus
 
     var displayName: String {
         switch self {
@@ -279,6 +279,7 @@ enum FlameyFamily: String, CaseIterable, Hashable {
         case .firsts: return "Firsts"
         case .holidays: return "Holidays"
         case .mood: return "Moods"
+        case .plus: return "Mile A Day+"
         }
     }
 }
@@ -294,6 +295,8 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
     case classic, ember, lime, ruby, lavender, sunflower, mint, sapphire, violet, rose, teal, arctic, midnight,
          sunset, aurora, ocean, lavaLamp = "lava_lamp", galaxy, candy, northernLights = "northern_lights",
          gold, prism, cosmic, eternal, phantom
+    // color — Mile A Day+ (owned while Plus; the server's owned list decides)
+    case electric, roseGold = "rose_gold", obsidian, tropic
     // head
     case sweatband, ballCap = "ball_cap", visor, beanie, bucketHat = "bucket_hat", safariHat = "safari_hat",
          cowboyHat = "cowboy_hat", aviatorCap = "aviator_cap", headlampHelmet = "headlamp_helmet", crown,
@@ -343,7 +346,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         switch self {
         case .classic, .ember, .lime, .ruby, .lavender, .sunflower, .mint, .sapphire, .violet, .rose, .teal,
              .arctic, .midnight, .sunset, .aurora, .ocean, .lavaLamp, .galaxy, .candy, .northernLights,
-             .gold, .prism, .cosmic, .eternal, .phantom:
+             .gold, .prism, .cosmic, .eternal, .phantom, .electric, .roseGold, .obsidian, .tropic:
             return .color
         case .sweatband, .ballCap, .visor, .beanie, .bucketHat, .safariHat, .cowboyHat, .aviatorCap,
              .headlampHelmet, .crown, .laurelWreath, .vikingHelmet, .directorsBeret, .santaHat, .heartBopper,
@@ -404,6 +407,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         case .cosmic: return .badge("streak_730")
         case .eternal: return .badge("streak_1000")
         case .phantom: return .badge("ghost_beat_50")
+        case .electric, .roseGold, .obsidian, .tropic: return .plus
         case .sweatband: return .badge("special_first_mile")
         case .ballCap: return .badge("miles_25")
         case .visor: return .badge("miles_50")
@@ -527,7 +531,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         if isMoodProp || isHolidayOutfit { return false }
         switch slot {
         case .costume: return false
-        default: return self != .phantom
+        default: return self != .phantom && unlock != .plus
         }
     }
 
@@ -563,6 +567,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         case .cosmic: return 730
         case .eternal: return 1000
         case .phantom: return 95
+        case .electric, .roseGold, .obsidian, .tropic: return 96
         // head
         case .sweatband: return 1
         case .ballCap: return 10
@@ -724,6 +729,10 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         case .cosmic: return "Cosmic"
         case .eternal: return "Eternal"
         case .phantom: return "Phantom"
+        case .electric: return "Electric"
+        case .roseGold: return "Rose Gold"
+        case .obsidian: return "Obsidian"
+        case .tropic: return "Tropic"
         case .sweatband: return "Sweatband"
         case .ballCap: return "Ball Cap"
         case .visor: return "Visor"
@@ -821,6 +830,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
     var family: FlameyFamily {
         if isMoodProp { return .mood }
         if isHolidayOutfit { return .holidays }
+        if unlock == .plus { return .plus }
         guard let id = badgeId else { return .starter }
         if id.hasPrefix("streak_") || id.hasPrefix("consistency_") { return .streakDays }
         if id.hasPrefix("miles_") { return .lifetimeMiles }
@@ -845,6 +855,7 @@ enum FlameyItem: String, CaseIterable, Codable, Hashable {
         switch unlock {
         case .always: return "Always his"
         case .purchase: return "In the shop"
+        case .plus: return "Included with Mile A Day+"
         case .badge(let id): return Self.unlockCopy(badgeId: id)
         case .streak(let days): return "Reach a \(days.formatted())-day streak"
         }
@@ -899,8 +910,12 @@ enum FlameyUnlock: Hashable {
     case always
     /// His once this badge is earned.
     case badge(String)
-    /// Reserved for a purchasable item (StoreKit product id). Nothing uses it
-    /// yet; owned by nobody until a purchase ledger exists.
+    /// His while the user has Mile A Day+. Never derived locally: the
+    /// server's `owned_item_ids` (which checks entitlement) is what grants it,
+    /// so a lapse drops it everywhere at once.
+    case plus
+    /// Reserved for a one-off purchasable item (StoreKit product id). Nothing
+    /// uses it yet; owned by nobody.
     case purchase(productId: String)
     /// Retired: streak gear used to unlock on the LONGEST streak alone. Kept
     /// so the shape can express it again; no item uses it.
@@ -918,7 +933,7 @@ enum FlameyWardrobe {
             switch item.unlock {
             case .always: return true
             case .badge(let id): return earnedBadgeIds.contains(id)
-            case .purchase, .streak: return false
+            case .plus, .purchase, .streak: return false
             }
         })
     }

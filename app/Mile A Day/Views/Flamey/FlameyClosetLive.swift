@@ -238,6 +238,14 @@ enum FlameyClosetSync {
         await pull(force: false)
     }
 
+    /// Mile A Day+ started or ended: re-read what the server says is owned
+    /// (Plus-only items follow entitlement) without waiting for the next
+    /// foreground's throttle.
+    static func refreshOwnedItems() async {
+        lastPullAt = nil
+        await pull(force: false)
+    }
+
     private static func pull(force: Bool) async {
         guard TokenStore.hasTokens, let userId else { return }
         guard force || !isDirty else { return }

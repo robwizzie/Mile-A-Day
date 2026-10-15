@@ -16,6 +16,11 @@ import {
 import { getUserLocalToday, getMilesOnLocalDate } from "./workoutService.js";
 import { refreshCurrentStreak } from "./leaderboardService.js";
 import { sendPush } from "./pushNotificationService.js";
+import { isPlusActive } from "./plusService.js";
+import {
+  PLUS_DOUBLE_DOWN_TARGET_DAYS,
+  PLUS_STREAK_SAVE_TARGET_RUN_DAYS,
+} from "./plusCatalog.js";
 
 const db = PostgresService.getInstance();
 
@@ -197,18 +202,26 @@ export async function getMeters(
   const ddDays = Number(rows[0]?.dd_days ?? 0);
   const saveDays = Number(rows[0]?.save_days ?? 0);
   const assistDays = assistDaysElapsed(row.streak_assist_last_used, userToday);
+  // Mile A Day+ fills the two EARNED meters faster (plusCatalog.ts). Read
+  // live, so a lapse puts the regular target back on the next read — a token
+  // already spent stays spent, one not yet held simply needs the longer run.
+  const plus = await isPlusActive(userId);
+  const ddTarget = plus ? PLUS_DOUBLE_DOWN_TARGET_DAYS : DOUBLE_DOWN_TARGET_DAYS;
+  const saveTarget = plus
+    ? PLUS_STREAK_SAVE_TARGET_RUN_DAYS
+    : STREAK_SAVE_TARGET_RUN_DAYS;
 
   return {
     double_down: {
-      progress: Math.min(ddDays, DOUBLE_DOWN_TARGET_DAYS),
-      target: DOUBLE_DOWN_TARGET_DAYS,
-      held: ddDays >= DOUBLE_DOWN_TARGET_DAYS,
+      progress: Math.min(ddDays, ddTarget),
+      target: ddTarget,
+      held: ddDays >= ddTarget,
       last_used: row.double_down_last_used,
     },
     streak_save: {
-      progress: Math.min(saveDays, STREAK_SAVE_TARGET_RUN_DAYS),
-      target: STREAK_SAVE_TARGET_RUN_DAYS,
-      held: saveDays >= STREAK_SAVE_TARGET_RUN_DAYS,
+      progress: Math.min(saveDays, saveTarget),
+      target: saveTarget,
+      held: saveDays >= saveTarget,
       last_used: row.streak_save_last_used,
     },
     streak_assist: {

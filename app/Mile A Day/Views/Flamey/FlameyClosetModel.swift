@@ -1067,6 +1067,12 @@ final class FlameyClosetModel {
     /// Picks shown in the Closet's draft, unsaved.
     func setDraft(_ next: FlameyLookChoice) { choice = next }
 
+    /// Mile A Day+ just started on this screen: the Plus-only items are his
+    /// now (the server's owned list says the same on the next pull).
+    func grantPlusItems() {
+        owned.formUnion(FlameyItem.allCases.filter { $0.unlock == .plus })
+    }
+
     /// The server's copy replaced ours (a 400 re-sync, another device).
     /// A draft in progress is kept.
     func adopt(choice: FlameyLookChoice, owned: Set<FlameyItem>? = nil) {

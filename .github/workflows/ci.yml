@@ -340,6 +340,15 @@ jobs:
       # service reads the (private) shoe tables.
       - name: Shoe tracker check
         run: node scripts/shoes-check.mjs
+      # Mile A Day+: what we do with an Apple-VERIFIED transaction. Founding
+      # Runners by signup date; a subscription is Plus until expiry (renewing
+      # ⇒ 1-day grace), re-posts idempotent, never rolled back by an older
+      # transaction; refund ends it, refund-reversed restores it; lifetime
+      # never expires; one gift code per transaction, redeemed once, stacked
+      # after existing free time, voided by a refund; Plus meter targets and
+      # Plus-only Flamey items follow entitlement live. Every miss is money.
+      - name: Mile A Day+ check
+        run: node scripts/plus-check.mjs
       # MCP database connector: the full OAuth sign-in through the MCP SDK's own
       # client, every sign-in attack (no cookie, wrong nonce, forged token,
       # not allowlisted, replay), and the database guards — read role can't

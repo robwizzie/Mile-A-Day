@@ -122,6 +122,13 @@ Details: docs/conventions/ios.md § Key Patterns
 - `PostComposerView.init` resolves buddy context for every door (`buddySessionForWorkout`, `lastFinishedSession` fallback); stashed snaps are `.library`.
 - Shoes are private (never on friend profiles/posts/shares); defaults per `ShoeActivity`; pickers pass the activity.
 
+## Mile A Day+
+Details: docs/conventions/ios.md § Mile A Day+
+- Entitlement is the server's (`PlusStore.status`); never unlock from a local StoreKit check; `finish()` a transaction only after the server's `results[i]` says ok or `retryable: false`.
+- Purchases pass `.appAccountToken` (`PlusStore.appAccountToken`); product ids live in `PlusProducts` (mirrors backend `PLUS_PRODUCTS`).
+- The paywall sells only shipped perks (`PlusPerk`); prices/periods come from `Product`, never literals; keep Restore + Terms + Privacy + the renewal line beside the button (3.1.2).
+- Plus-only Flamey items use `FlameyUnlock.plus` and are granted only by the server's `owned_item_ids`.
+
 ## Auth / Session
 Details: docs/conventions/ios.md § Auth / Session
 - "Who am I" = the token's `sub` (`TokenUtils.subject`); `SessionIdentity.enforce()` catches drift; never blanket-sign-out on 403.

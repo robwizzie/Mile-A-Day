@@ -57,6 +57,9 @@ struct Mile_A_DayApp: App {
                             // Streak-tokens enrollment stamp (idempotent; covers
                             // users who authed on an older build).
                             StreakFeatureService.enrollIfNeeded()
+                            // Mile A Day+: post anything StoreKit left
+                            // unfinished and re-read entitlement.
+                            await PlusStore.shared.refresh()
                         }
                     }
                 }
