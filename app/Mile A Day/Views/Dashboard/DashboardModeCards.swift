@@ -331,13 +331,19 @@ struct FunDashboardBody: View {
             // column beside Flamey is ~155pt wide, so it caps here.
             .madTypeCap(.madFixedChromeCap)
 
-            FunStartCard(
-                trustedDone: (state.completed && healthManager.hasFreshTodaysDistance)
-                    || StepGoalDayStore.isTodayMet(),
-                hasActiveWorkout: hasActiveWorkout,
-                showWorkoutView: $showWorkoutView,
-                onLogPastWorkout: onLogPastWorkout
-            )
+            VStack(spacing: 0) {
+                FunStartCard(
+                    trustedDone: (state.completed && healthManager.hasFreshTodaysDistance)
+                        || StepGoalDayStore.isTodayMet(),
+                    hasActiveWorkout: hasActiveWorkout,
+                    showWorkoutView: $showWorkoutView,
+                    onLogPastWorkout: onLogPastWorkout
+                )
+                // Mile A Day+ at the moment it would have helped: hides itself
+                // unless the streak is at risk or Plus would already hold a
+                // Save. Zero-spacing stack: hidden, it adds no gap.
+                PlusStreakCard(streak: userManager.currentUser.streak, topSpacing: 18)
+            }
 
             HStack(alignment: .top, spacing: 12) {
                 ModernStepsTile(healthManager: healthManager, userManager: userManager)

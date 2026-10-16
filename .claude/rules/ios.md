@@ -131,6 +131,7 @@ Details: docs/conventions/ios.md § Mile A Day+
 - Purchases pass `.appAccountToken` (`PlusStore.appAccountToken`); product ids live in `PlusProducts` (mirrors backend `PLUS_PRODUCTS`).
 - The paywall sells only shipped perks (`PlusPerk`); prices/periods come from `Product`, never literals; keep Restore + Terms + Privacy + the renewal line beside the button (3.1.2).
 - Plus-only Flamey items use `FlameyUnlock.plus` and are granted only by the server's `owned_item_ids`.
+- Paywall layout follows `PlusPaywallView.Layout`: onboarding = A/B arm (`PlusPaywallVariant.current`, mirrors server `paywallVariantFor`), tokens/at-risk = `.streak`, Closet = `.closet`, Settings = `.flamey`; log views via `PlusTelemetry`; `PlusStreakCard` hosts its sheet on the always-present VStack.
 - Preview a Plus look via `PlusLookShowcase.look(_:)` (fixed non-holiday date, no signup date); founders read `status.source == "founding"` → `FoundingRunnerCard`; token numbers in `PlusTokenComparison` mirror backend targets.
 - Monthly Flames are `color` items with `FlameyUnlock.month(n)` (server-granted); their art is palette + `FlameyMonthlyFX` INSIDE his outline (never a new silhouette) plus a bare-tip crown (`FlameyArt.monthCrown`, counted in `crest`); progress comes only from the closet's `monthly_flames` (`FlameyMonthlyStore`).
 

@@ -25,7 +25,14 @@
  */
 
 import { PostgresService } from "./DbService.js";
-import { FLYOVER_PLAY_FEATURE } from "./telemetryService.js";
+import {
+  FLYOVER_PLAY_FEATURE,
+  PLUS_PAYWALL_CLOSET_FEATURE,
+  PLUS_PAYWALL_FLAMEY_FEATURE,
+  PLUS_PAYWALL_STREAK_FEATURE,
+  PLUS_STREAK_CARD_SHOWN_FEATURE,
+  PLUS_STREAK_CARD_TAPPED_FEATURE,
+} from "./telemetryService.js";
 import { getSignatureRows } from "./diagnosticsService.js";
 import { PERSON_REFERRAL_SOURCES, referralHandleSql } from "./userService.js";
 import {
@@ -684,6 +691,63 @@ const ADOPTION_SOURCES: {
     actor: "w.user_id",
     at: "w.created_at",
     where: "w.source IN ('manual', 'edited')",
+  },
+  // Mile A Day+ funnel. The two onboarding paywalls are an A/B test: compare
+  // each "Saw … paywall" against "Bought Mile A Day+" for the same people
+  // (docs/PLUS_SETUP.md has the per-variant query).
+  {
+    key: PLUS_PAYWALL_STREAK_FEATURE,
+    label: "Saw the streak paywall",
+    group: "Mile A Day+",
+    from: "feature_events fe",
+    actor: "fe.user_id",
+    at: "fe.created_at",
+    where: `fe.feature = '${PLUS_PAYWALL_STREAK_FEATURE}'`,
+  },
+  {
+    key: PLUS_PAYWALL_FLAMEY_FEATURE,
+    label: "Saw the Flamey paywall",
+    group: "Mile A Day+",
+    from: "feature_events fe",
+    actor: "fe.user_id",
+    at: "fe.created_at",
+    where: `fe.feature = '${PLUS_PAYWALL_FLAMEY_FEATURE}'`,
+  },
+  {
+    key: PLUS_PAYWALL_CLOSET_FEATURE,
+    label: "Saw the Closet paywall",
+    group: "Mile A Day+",
+    from: "feature_events fe",
+    actor: "fe.user_id",
+    at: "fe.created_at",
+    where: `fe.feature = '${PLUS_PAYWALL_CLOSET_FEATURE}'`,
+  },
+  {
+    key: PLUS_STREAK_CARD_SHOWN_FEATURE,
+    label: "Saw the protect-your-streak card",
+    group: "Mile A Day+",
+    from: "feature_events fe",
+    actor: "fe.user_id",
+    at: "fe.created_at",
+    where: `fe.feature = '${PLUS_STREAK_CARD_SHOWN_FEATURE}'`,
+  },
+  {
+    key: PLUS_STREAK_CARD_TAPPED_FEATURE,
+    label: "Tapped the protect-your-streak card",
+    group: "Mile A Day+",
+    from: "feature_events fe",
+    actor: "fe.user_id",
+    at: "fe.created_at",
+    where: `fe.feature = '${PLUS_STREAK_CARD_TAPPED_FEATURE}'`,
+  },
+  {
+    key: "plus_purchase",
+    label: "Bought Mile A Day+ (incl. trials)",
+    group: "Mile A Day+",
+    from: "plus_purchases pp",
+    actor: "pp.user_id",
+    at: "pp.purchased_at",
+    where: "pp.ownership = 'PURCHASED'",
   },
 ];
 
