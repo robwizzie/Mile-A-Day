@@ -219,6 +219,8 @@ struct PlusWelcomeView: View {
 /// disappears the moment a purchase makes them Plus.
 struct PlusStreakCard: View {
     let streak: Int
+    /// Developer preview (Debug builds): always shows, with sample numbers.
+    var preview = false
     /// Space above the card when it shows. The host sits in a zero-spacing
     /// stack with the card above it, so a hidden card adds no gap.
     var topSpacing: CGFloat = 0
@@ -242,6 +244,12 @@ struct PlusStreakCard: View {
     }
 
     private var offer: Offer? {
+        if preview {
+            return Offer(atRisk: true, title: "Your 23-day streak is on the line",
+                         body: "With Mile A Day+, a Streak Save would already be waiting to cover a missed day.",
+                         note: "With Plus, your Streak Save would already be ready.",
+                         freeLeft: 3.5, plusLeft: 0, freeTarget: 7, plusTarget: 3, progress: 3.5)
+        }
         guard let status = store.status, !status.is_plus,
               let payload = tokens.payload, !tokens.isPreviewingSampleData,
               streak >= 3 else { return nil }
@@ -283,7 +291,7 @@ struct PlusStreakCard: View {
                     .padding(.top, topSpacing)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                     .onAppear {
-                        guard !reportedShown else { return }
+                        guard !reportedShown, !preview else { return }
                         reportedShown = true
                         PlusTelemetry.streakCardShown()
                     }
@@ -291,7 +299,8 @@ struct PlusStreakCard: View {
         }
         .sheet(isPresented: $showPaywall) {
             PlusPaywallView(context: current?.atRisk == true ? .streakAtRisk : .streakTokens,
-                            note: current?.note)
+                            note: current?.note,
+                            previewLayout: preview ? .streak : nil)
         }
     }
 
@@ -300,7 +309,7 @@ struct PlusStreakCard: View {
         return ZStack(alignment: .topTrailing) {
             Button {
                 MADHaptics.action()
-                PlusTelemetry.streakCardTapped()
+                if !preview { PlusTelemetry.streakCardTapped() }
                 showPaywall = true
             } label: {
                 VStack(alignment: .leading, spacing: 12) {

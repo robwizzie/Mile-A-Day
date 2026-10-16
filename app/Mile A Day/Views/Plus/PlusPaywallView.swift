@@ -75,6 +75,9 @@ struct PlusPaywallView: View {
     var note: String? = nil
     /// The Closet layout's first look: the locked item that opened it.
     var tryOnStart: FlameyItem? = nil
+    /// Developer previews (Debug builds): show the selling screens even on an
+    /// account that already has Plus, in the given layout, and log nothing.
+    var previewLayout: Layout? = nil
     /// Called once when the paywall is done: `true` after a purchase.
     var onFinish: (_ purchased: Bool) -> Void = { _ in }
 
@@ -97,7 +100,11 @@ struct PlusPaywallView: View {
         var finishAfter = false
     }
 
+    /// A preview shows the selling screens whatever this account has.
+    private var showsMember: Bool { store.isPlus && previewLayout == nil }
+
     private var layout: Layout {
+        if let previewLayout { return previewLayout }
         switch context {
         case .onboarding: return PlusPaywallVariant.current(store.status) == "flamey" ? .flamey : .streak
         case .streakTokens, .streakAtRisk: return .streak
@@ -126,7 +133,7 @@ struct PlusPaywallView: View {
             } else {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: MADTheme.Spacing.lg) {
-                        if store.isPlus {
+                        if showsMember {
                             header
                                 .padding(.top, MADTheme.Spacing.lg)
                             alreadyPlus
@@ -142,7 +149,7 @@ struct PlusPaywallView: View {
                     .padding(.bottom, MADTheme.Spacing.lg)
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if !store.isPlus { purchaseBar }
+                    if !showsMember { purchaseBar }
                 }
                 .madTypeCap(.madCardCap)
 
@@ -187,7 +194,7 @@ struct PlusPaywallView: View {
     /// Which paywall this person saw, once per open: the onboarding A/B arms
     /// (compared against purchases server-side) and the Closet door.
     private func recordView() {
-        guard !recordedView, !store.isPlus else { return }
+        guard !recordedView, !store.isPlus, previewLayout == nil else { return }
         recordedView = true
         switch (context, layout) {
         case (.onboarding, .streak): PlusTelemetry.paywallStreak()
