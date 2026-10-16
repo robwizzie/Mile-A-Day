@@ -37,6 +37,9 @@ struct DeveloperSettingsView: View {
     @ObservedObject private var tokensState = StreakTokensState.shared
     @State private var tokenStatusResult: String?
     @State private var customBaseURL = ""
+    #if DEBUG
+    @State private var plusPreview: PlusPreview?
+    #endif
 
     var body: some View {
         List {
@@ -178,6 +181,10 @@ struct DeveloperSettingsView: View {
                     }
                 }
             }
+            #endif
+
+            #if DEBUG
+            plusPreviewSection
             #endif
 
             // Review Prompt Section
@@ -819,4 +826,92 @@ struct DeveloperSettingsView_Previews: PreviewProvider {
     }
 }
 
+#endif
+
+#if DEBUG
+// MARK: - Mile A Day+ previews
+
+/// Every Mile A Day+ selling screen, reachable from an account that already
+/// has Plus (a Founding Runner can't otherwise see them). Previews log no
+/// telemetry; a purchase made from one is a real sandbox purchase.
+enum PlusPreview: String, Identifiable, CaseIterable {
+    case streak, flamey, closet, welcome, card
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .streak: return "Paywall: protect your streak"
+        case .flamey: return "Paywall: Flamey showcase"
+        case .closet: return "Paywall: Closet try-on"
+        case .welcome: return "After buying: welcome screen"
+        case .card: return "Dashboard: protect-your-streak card"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .streak: return "snowflake"
+        case .flamey: return "flame.fill"
+        case .closet: return "tshirt.fill"
+        case .welcome: return "party.popper.fill"
+        case .card: return "rectangle.stack.fill"
+        }
+    }
+}
+
+extension DeveloperSettingsView {
+    var plusPreviewSection: some View {
+        Section(
+            header: Text("Mile A Day+ previews"),
+            footer: Text("Opens the selling screens even though this account has Plus. Plans load from the App Store sandbox, so they only appear once the products exist in App Store Connect.")
+        ) {
+            ForEach(PlusPreview.allCases) { preview in
+                Button {
+                    plusPreview = preview
+                } label: {
+                    HStack {
+                        Image(systemName: preview.icon)
+                            .foregroundColor(.orange)
+                            .frame(width: 24)
+                        Text(preview.title)
+                        Spacer()
+                    }
+                }
+            }
+        }
+        .sheet(item: $plusPreview) { preview in
+            PlusPreviewHost(preview: preview)
+        }
+    }
+}
+
+private struct PlusPreviewHost: View {
+    let preview: PlusPreview
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        switch preview {
+        case .streak:
+            PlusPaywallView(context: .onboarding, previewLayout: .streak) { _ in dismiss() }
+        case .flamey:
+            PlusPaywallView(context: .settings, previewLayout: .flamey)
+        case .closet:
+            PlusPaywallView(context: .flamey, tryOnStart: .roseGold, previewLayout: .closet)
+        case .welcome:
+            ZStack {
+                Color(red: 0.08, green: 0.04, blue: 0.07).ignoresSafeArea()
+                PlusWelcomeView(showsDressUp: true, onDressUp: { dismiss() }, onDone: { dismiss() })
+            }
+            .preferredColorScheme(.dark)
+        case .card:
+            ScrollView {
+                PlusStreakCard(streak: 23, preview: true)
+                    .padding(16)
+            }
+            .background(Color(red: 0.07, green: 0.04, blue: 0.06).ignoresSafeArea())
+            .preferredColorScheme(.dark)
+        }
+    }
+}
 #endif
