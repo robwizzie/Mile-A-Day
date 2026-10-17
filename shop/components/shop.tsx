@@ -14,13 +14,10 @@ import {
 } from "@/lib/catalog";
 import { THEME_KEY, type ThemeChoice } from "@/lib/theme";
 import { SharedDefs } from "./designs";
-import { Garment3D, SIDE_TURN, TURN_EASE, garmentWidth, hungSize } from "./garment";
-import type { CardRenderer, HungPiece, Stage } from "./three/engine";
-import { useDarkTheme, useEngine } from "./three/react";
+import { Garment3D, SIDE_TURN, TURN_EASE, garmentWidth, hungSize, sideWidth } from "./garment";
+import { GarmentStage } from "./garment-gl";
+import { LICENSE, MODEL_CREDITS } from "@/lib/models";
 
-const SIDE_COS = Math.abs(Math.cos((SIDE_TURN * Math.PI) / 180));
-/** 3D pieces rest a little more open than edge-on, so side prints read. */
-const REST_3D = -66;
 const HERO = PRODUCTS[0];
 const GUTTER = "max(24px, calc((100vw - 1024px) / 2 + 24px))";
 
@@ -44,6 +41,7 @@ export function Shop() {
   }, []);
 
   return (
+    <GarmentStage zIndex={30}>
     <div className="flex min-h-dvh flex-col">
       <SharedDefs />
       <Ribbon onOpen={() => show(0)} />
@@ -59,7 +57,7 @@ export function Shop() {
             </p>
           </div>
 
-          <div className="mt-14 sm:mt-20">
+          <div className="mt-10 sm:mt-12">
             <DesktopRack active={active} onHover={setActive} onOpen={show} />
             <MobileRack active={active} onActive={setActive} onOpen={show} />
           </div>
@@ -75,6 +73,7 @@ export function Shop() {
 
       {open != null && <Detail index={open} onClose={() => show(null)} onGo={show} />}
     </div>
+    </GarmentStage>
   );
 }
 
@@ -174,16 +173,6 @@ function ThemeToggle() {
 
 // ── Desktop rack: everything hangs side-on; hover turns one to face you. ───
 
-// Room the 3D canvas keeps around the rack for hooks, perspective and shadows.
-const PAD_X = 90;
-const PAD_TOP = 40;
-const PAD_BOTTOM = 48;
-
-/** Height of a 3D piece from the rail down: hook shank + garment. */
-function hang3d(p: Product, h: number) {
-  return h * (0.13 + (p.art.kind === "photo" ? p.art.scale ?? 1 : 1));
-}
-
 function DesktopRack({
   active,
   onHover,
@@ -193,18 +182,12 @@ function DesktopRack({
   onHover: (i: number) => void;
   onOpen: (i: number) => void;
 }) {
-  const engine = useEngine();
-  const dark = useDarkTheme();
   const [hover, setHover] = useState<number | null>(null);
   const [flipped, setFlipped] = useState(false);
   const preferred = useDesktopGarmentHeight();
   const box = useRef<HTMLDivElement>(null);
   const [boxW, setBoxW] = useState(980);
   const swingRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const stage = useRef<Stage | null>(null);
-  const hung = useRef<HungPiece[]>([]);
-  const placed = useRef(false);
 
   useLayoutEffect(() => {
     const el = box.current;
@@ -214,133 +197,76 @@ function DesktopRack({
     return () => ro.disconnect();
   }, []);
 
-  // Side-on, a 3D piece shows its edge plus the sleeve falling back.
-  const sideFrac = engine ? 0.34 : SIDE_COS;
   // Every piece stays on the rail: size the row (with one piece turned open)
   // to fit between the rail's ends at any width. Layout is linear in height.
   const rowAt = (h: number) => {
-    const widths = PRODUCTS.map((p) => garmentWidth(p, h));
-    const rest = widths.reduce((a, w) => a + w * sideFrac + h * 0.08, 0);
-    return rest + Math.max(...widths.map((w) => w + h * 0.24 - (w * sideFrac + h * 0.08)));
+    const sides = PRODUCTS.map((p) => sideWidth(p, h) + h * 0.08);
+    const rest = sides.reduce((a, s) => a + s, 0);
+    return rest + Math.max(...PRODUCTS.map((p, i) => garmentWidth(p, h) + h * 0.24 - sides[i]));
   };
   const usable = Math.max(200, boxW - 56);
   const height = Math.min(preferred, Math.floor((preferred * usable) / rowAt(preferred)));
+
   // A side-on piece takes its edge-on width, the turned one its full width.
+  // Everything slides on transforms, so it stays smooth.
   const gap = height * 0.08;
   let cursor = 0;
   const layout = PRODUCTS.map((p, i) => {
     const w = garmentWidth(p, height);
-    const slot = hover === i ? w + gap * 3 : w * sideFrac + gap;
+    const slot = hover === i ? w + gap * 3 : sideWidth(p, height) + gap;
     const x = cursor;
     cursor += slot;
     return { w, slot, x };
   });
   const offset = Math.max(28, (boxW - cursor) / 2);
-  const three = !!engine;
-  const tallest = Math.max(...PRODUCTS.map((p) => (three ? hang3d(p, height) : hungSize(p, height).height)));
-  const boxH = tallest + 56;
-
-  // The 3D rack: one canvas, every piece on one rail.
-  useEffect(() => {
-    if (!engine || !canvas.current) return;
-    const s = new engine.Stage(canvas.current, { railR: 3.5 });
-    stage.current = s;
-    hung.current = PRODUCTS.map((p, i) => s.add(p, height, { x: 0, turn: SIDE_TURN, dropIn: 200 + i * 90 }));
-    placed.current = false;
-    return () => {
-      s.dispose();
-      stage.current = null;
-      hung.current = [];
-    };
-  }, [engine]);
-
-  useEffect(() => {
-    const s = stage.current;
-    if (!s) return;
-    s.resize(boxW + PAD_X * 2, boxH + PAD_TOP + PAD_BOTTOM);
-    s.setRail(PAD_X - 16, boxW + PAD_X + 16, PAD_TOP);
-    hung.current.forEach((p) => p.setHeight(height));
-  }, [engine, boxW, boxH, height]);
-
-  useEffect(() => stage.current?.setTheme(dark), [engine, dark]);
-
-  // Every render: slide and turn toward the layout (springs do the motion).
-  useEffect(() => {
-    const s = stage.current;
-    if (!s) return;
-    hung.current.forEach((p, i) => {
-      const { x, slot } = layout[i];
-      const wx = s.wx(PAD_X + offset + x + slot / 2);
-      p.x.set(wx, !placed.current);
-      p.turn.set((hover === i ? (flipped ? 180 : 0) : REST_3D) + s.facing(wx), !placed.current);
-    });
-    placed.current = true;
-    s.invalidate();
-  });
+  const tallest = Math.max(...PRODUCTS.map((p) => hungSize(p, height).height));
 
   const enter = (i: number) => {
     if (hover === i) return;
     setHover(i);
     setFlipped(false);
     onHover(i);
-    hung.current[i]?.kick();
-    const el = swingRefs.current[i];
-    if (el) {
-      el.classList.remove("swing");
-      void el.offsetWidth; // restart the animation
-      el.classList.add("swing");
-    }
   };
 
   return (
     <div className="relative mx-auto hidden w-full max-w-[1024px] px-6 md:block">
-      {engine === null && <Rail />}
+      <Rail />
       <div
         ref={box}
         className="relative"
-        style={{ height: boxH }}
+        style={{ height: tallest + 56 }}
         onMouseLeave={() => {
           setHover(null);
           setFlipped(false);
         }}
       >
-        {engine !== null && (
-          <canvas
-            ref={canvas}
-            className="pointer-events-none absolute"
-            style={{ left: -PAD_X, top: -PAD_TOP, width: boxW + PAD_X * 2, height: boxH + PAD_TOP + PAD_BOTTOM }}
-            aria-hidden="true"
-          />
-        )}
-
-        {engine === null &&
-          PRODUCTS.map((p, i) => {
-            const { w, x, slot } = layout[i];
-            const isHover = hover === i;
-            return (
-              <div
-                key={p.id}
-                className="rack-slot pointer-events-none absolute left-0 top-0"
-                style={{
-                  transform: `translateX(${offset + x + slot / 2 - w / 2}px)`,
-                  transition: `transform 0.8s ${TURN_EASE}`,
-                  zIndex: isHover ? 30 : active === i ? 20 : 10 + i,
-                }}
-              >
-                <div className="drop-in" style={{ animationDelay: `${200 + i * 70}ms` }}>
-                  <div
-                    ref={(el) => {
-                      swingRefs.current[i] = el;
-                    }}
-                    className="origin-top"
-                    style={{ marginTop: -2 }}
-                  >
-                    <Garment3D product={p} height={height} turn={isHover ? (flipped ? 180 : 0) : SIDE_TURN} />
-                  </div>
+        {PRODUCTS.map((p, i) => {
+          const { w, x, slot } = layout[i];
+          const isHover = hover === i;
+          return (
+            <div
+              key={p.id}
+              className="rack-slot pointer-events-none absolute left-0 top-0"
+              style={{
+                transform: `translateX(${offset + x + slot / 2 - w / 2}px)`,
+                transition: `transform 0.8s ${TURN_EASE}`,
+                zIndex: isHover ? 30 : active === i ? 20 : 10 + i,
+              }}
+            >
+              <div className="drop-in" style={{ animationDelay: `${200 + i * 70}ms` }}>
+                <div
+                  ref={(el) => {
+                    swingRefs.current[i] = el;
+                  }}
+                  className="origin-top"
+                  style={{ marginTop: -2 }}
+                >
+                  <Garment3D product={p} height={height} turn={isHover ? (flipped ? 180 : 0) : SIDE_TURN} />
                 </div>
               </div>
-            );
-          })}
+            </div>
+          );
+        })}
 
         {/* Hit areas, one per slot, above the art: hover turns, click opens. */}
         {PRODUCTS.map((p, i) => {
@@ -368,7 +294,7 @@ function DesktopRack({
           <div
             className="absolute left-0 z-50"
             style={{
-              top: (three ? hang3d(PRODUCTS[hover], height) : hungSize(PRODUCTS[hover], height).height) + 14,
+              top: hungSize(PRODUCTS[hover], height).height + 10,
               transform: `translateX(${offset + layout[hover].x + layout[hover].slot / 2}px) translateX(-50%)`,
               transition: `transform 0.8s ${TURN_EASE}`,
             }}
@@ -415,7 +341,7 @@ function useDesktopGarmentHeight() {
   const [h, setH] = useState(240);
   useEffect(() => {
     const fit = () => {
-      const byWidth = (Math.min(window.innerWidth, 1024) - 48) / 4.2;
+      const byWidth = (Math.min(window.innerWidth, 1024) - 48) / 3.6;
       const byHeight = window.innerHeight * 0.31;
       setH(Math.round(Math.max(170, Math.min(290, byWidth, byHeight))));
     };
@@ -445,23 +371,13 @@ function MobileRack({
   onActive: (i: number) => void;
   onOpen: (i: number) => void;
 }) {
-  const engine = useEngine();
-  const dark = useDarkTheme();
   const scroller = useRef<HTMLDivElement>(null);
   const items = useRef<(HTMLDivElement | null)[]>([]);
   const [itemW, setItemW] = useState(240);
-  const [vw, setVw] = useState(375);
   const [flipped, setFlipped] = useState(false);
-  const flippedRef = useRef(false);
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const stage = useRef<Stage | null>(null);
-  const hung = useRef<HungPiece[]>([]);
 
   useEffect(() => {
-    const fit = () => {
-      setVw(window.innerWidth);
-      setItemW(Math.round(Math.min(window.innerWidth * 0.62, 320)));
-    };
+    const fit = () => setItemW(Math.round(Math.min(window.innerWidth * 0.62, 320)));
     fit();
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
@@ -469,60 +385,27 @@ function MobileRack({
 
   // Sized so the widest piece (the hoodie) fits its slot when facing you.
   const garmentH = Math.round(itemW / Math.max(...PRODUCTS.map((p) => garmentWidth(p, 1))));
-  const three = !!engine;
-  const tallest = Math.max(...PRODUCTS.map((p) => (three ? hang3d(p, garmentH) : hungSize(p, garmentH).height)));
-  const canvasH = tallest + PAD_TOP + 40;
-
-  useEffect(() => {
-    if (!engine || !canvas.current) return;
-    const s = new engine.Stage(canvas.current, { railR: 3, shadowSize: 1024 });
-    stage.current = s;
-    hung.current = PRODUCTS.map((p, i) => s.add(p, garmentH, { x: 0, turn: SIDE_TURN, dropIn: 150 + Math.abs(i - active) * 90 }));
-    return () => {
-      s.dispose();
-      stage.current = null;
-      hung.current = [];
-    };
-  }, [engine]);
+  const tallest = Math.max(...PRODUCTS.map((p) => hungSize(p, garmentH).height));
 
   const paint = useCallback(() => {
     const el = scroller.current;
     if (!el) return;
     const pos = el.scrollLeft / itemW;
-    const s = stage.current;
-    const center = Math.round(pos);
     items.current.forEach((node, i) => {
+      if (!node) return;
       const d = Math.max(-3, Math.min(3, i - pos));
       const a = Math.abs(d);
       const near = Math.min(a, 1);
       // Neighbours slide in tight, the way side-on pieces pack on a rail.
       const shift = -Math.sign(d) * (0.3 * near + 0.66 * Math.max(0, a - 1)) * itemW;
-      const piece = hung.current[i];
-      if (s && piece) {
-        const wx = s.wx(vw / 2 + d * itemW + shift);
-        piece.x.set(wx, true);
-        piece.turn.set(REST_3D * near + (flippedRef.current && i === center ? 180 : 0) + s.facing(wx), true);
-      }
-      if (!node) return;
-      if (s) return; // the 3D rack draws the pieces; the DOM only takes taps
-      node.style.transform = `translateX(${shift}px) perspective(1600px) rotateY(${SIDE_TURN * near}deg) scale(${1 - 0.1 * near})`;
+      // The turn itself is the garment's (drawn in 3D): it reads data-yaw.
+      node.style.transform = `translateX(${shift}px) scale(${1 - 0.1 * near})`;
+      node.dataset.yaw = String(SIDE_TURN * near);
       node.style.opacity = String(1 - 0.15 * near - 0.12 * Math.max(0, a - 1));
       node.style.zIndex = String(30 - Math.round(a * 4));
     });
-    s?.invalidate();
-    onActive(Math.max(0, Math.min(PRODUCTS.length - 1, center)));
-  }, [itemW, vw, onActive]);
-
-  useEffect(() => {
-    const s = stage.current;
-    if (!s) return;
-    s.resize(vw, canvasH);
-    s.setRail(14, vw - 14, PAD_TOP);
-    hung.current.forEach((p) => p.setHeight(garmentH));
-    paint();
-  }, [engine, vw, canvasH, garmentH, paint]);
-
-  useEffect(() => stage.current?.setTheme(dark), [engine, dark]);
+    onActive(Math.max(0, Math.min(PRODUCTS.length - 1, Math.round(pos))));
+  }, [itemW, onActive]);
 
   useEffect(() => {
     const el = scroller.current;
@@ -540,20 +423,7 @@ function MobileRack({
     };
   }, [paint]);
 
-  useEffect(() => {
-    setFlipped(false);
-    flippedRef.current = false;
-  }, [active]);
-
-  const flip = (back: boolean) => {
-    setFlipped(back);
-    flippedRef.current = back;
-    const piece = hung.current[active];
-    if (piece) {
-      piece.turn.set(back ? 180 : 0);
-      piece.kick(0.6);
-    }
-  };
+  useEffect(() => setFlipped(false), [active]);
 
   // Keep the rail on the active piece (e.g. after browsing in the detail view).
   useEffect(() => {
@@ -565,17 +435,10 @@ function MobileRack({
 
   return (
     <div className="relative md:hidden">
-      {engine === null && <Rail />}
-      {engine !== null && (
-        <canvas
-          ref={canvas}
-          className="pointer-events-none absolute left-0"
-          style={{ top: -PAD_TOP, width: vw, height: canvasH }}
-          aria-hidden="true"
-        />
-      )}
+      <Rail />
       <div
         ref={scroller}
+        data-gl-clip
         className="no-scrollbar relative flex snap-x snap-mandatory overflow-x-auto overflow-y-hidden"
         style={{ paddingInline: `calc(50vw - ${itemW / 2}px)`, height: tallest + 8 }}
       >
@@ -596,16 +459,15 @@ function MobileRack({
                 }}
                 aria-label={`${p.name}, ${p.colorName}. ${statusLabel(p)}`}
                 className="garment-3d block outline-none"
-                style={engine !== null ? { width: garmentWidth(p, garmentH), height: tallest } : undefined}
               >
-                {engine === null && <Garment3D product={p} height={garmentH} turn={i === active && flipped ? 180 : 0} />}
+                <Garment3D product={p} height={garmentH} turn={i === active && flipped ? 180 : 0} />
               </button>
             </div>
           </div>
         ))}
       </div>
       <div className="mt-4 flex justify-center">
-        <SideSwitch back={flipped} onChange={flip} small />
+        <SideSwitch back={flipped} onChange={setFlipped} small />
       </div>
     </div>
   );
@@ -662,6 +524,7 @@ function Collection({ onOpen }: { onOpen: (i: number) => void }) {
       </div>
       {/* Cards start in line with the heading and scroll to the window edge. */}
       <div
+        data-gl-clip
         className="no-scrollbar mt-6 flex snap-x snap-mandatory gap-5 overflow-x-auto py-4"
         style={{ paddingInline: GUTTER, scrollPaddingInline: GUTTER }}
       >
@@ -674,42 +537,8 @@ function Collection({ onOpen }: { onOpen: (i: number) => void }) {
   );
 }
 
-const CARD_W = 300;
-const CARD_ART_H = 310;
-const cardGarmentH = (p: Product) => (p.art.kind === "photo" ? 184 : 214);
-let cards: CardRenderer | null = null;
-
 function CollectionCard({ product, onOpen }: { product: Product; onOpen: () => void }) {
-  const engine = useEngine();
-  const dark = useDarkTheme();
   const [back, setBack] = useState(false);
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const spin = useRef({ x: -22, v: 0 });
-
-  // A three-quarter view at rest; hovering turns it round to the back.
-  useEffect(() => {
-    if (!engine || !canvas.current) return;
-    cards ??= new engine.CardRenderer(CARD_W, CARD_ART_H, cardGarmentH);
-    cards.setTheme(dark);
-    const target = back ? 202 : -22;
-    const s = spin.current;
-    let raf = 0;
-    let last = performance.now();
-    const frame = (now: number) => {
-      const dt = Math.min((now - last) / 1000, 1 / 30);
-      last = now;
-      for (let i = 0; i < 4; i++) {
-        const a = -110 * (s.x - target) - 2 * Math.sqrt(110) * 0.82 * s.v;
-        s.v += (a * dt) / 4;
-        s.x += (s.v * dt) / 4;
-      }
-      void cards!.draw(product, s.x, canvas.current!);
-      if (Math.abs(s.x - target) > 0.05 || Math.abs(s.v) > 0.05) raf = requestAnimationFrame(frame);
-    };
-    raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
-  }, [engine, back, dark, product]);
-
   return (
     <button
       type="button"
@@ -719,32 +548,20 @@ function CollectionCard({ product, onOpen }: { product: Product; onOpen: () => v
       onFocus={() => setBack(true)}
       onBlur={() => setBack(false)}
       aria-label={`${product.name}, ${product.colorName}. ${statusLabel(product)}`}
-      className="group relative flex h-[440px] w-[300px] shrink-0 snap-start flex-col overflow-hidden rounded-[22px] bg-surface text-left shadow-[0_2px_12px_rgba(0,0,0,0.06)] transition-[transform,box-shadow] duration-500 hover:scale-[1.012] hover:shadow-[0_12px_36px_rgba(0,0,0,0.12)]"
+      data-gl-clip
+      className="group relative flex h-[440px] w-[300px] shrink-0 snap-start flex-col overflow-hidden rounded-[22px] bg-surface p-7 text-left shadow-[0_2px_12px_rgba(0,0,0,0.06)] transition-[transform,box-shadow] duration-500 hover:scale-[1.012] hover:shadow-[0_12px_36px_rgba(0,0,0,0.12)]"
       style={{ transitionTimingFunction: TURN_EASE }}
     >
-      <div className="relative z-10 px-7 pt-7">
-        <Eyebrow product={product} className="text-[12px]" />
-        <h3 className="display mt-1 text-[22px] leading-[1.15]">{product.name}</h3>
-        <p className="mt-1 text-[14px] text-ink-soft">
-          {product.colorName}
-          {product.price != null && ` · ${formatPrice(product.price)}`}
-        </p>
+      <Eyebrow product={product} className="text-[12px]" />
+      <h3 className="display mt-1 text-[22px] leading-[1.15]">{product.name}</h3>
+      <p className="mt-1 text-[14px] text-ink-soft">
+        {product.colorName}
+        {product.price != null && ` · ${formatPrice(product.price)}`}
+      </p>
+      <div className="mt-auto flex justify-center">
+        <Garment3D product={product} height={product.art.kind === "photo" ? 196 : 222} turn={back ? 180 : 0} />
       </div>
-      {engine === null ? (
-        <div className="mt-auto flex justify-center pb-7">
-          <Garment3D product={product} height={product.art.kind === "photo" ? 196 : 222} turn={back ? 180 : 0} />
-        </div>
-      ) : (
-        <canvas
-          ref={canvas}
-          width={CARD_W * 2}
-          height={CARD_ART_H * 2}
-          className="absolute inset-x-0 bottom-0"
-          style={{ width: CARD_W, height: CARD_ART_H }}
-          aria-hidden="true"
-        />
-      )}
-      <span className="absolute bottom-5 right-5 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-bg-2 text-ink-soft opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+      <span className="absolute bottom-5 right-5 flex h-8 w-8 items-center justify-center rounded-full bg-bg-2 text-ink-soft opacity-0 transition-opacity duration-300 group-hover:opacity-100">
         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
           <path d="M12 5v14M5 12h14" />
         </svg>
@@ -837,7 +654,8 @@ function Detail({ index, onClose, onGo }: { index: number; onClose: () => void; 
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="sheet-in relative flex max-h-[94dvh] w-full max-w-[1040px] flex-col overflow-y-auto overscroll-contain rounded-t-[28px] bg-surface shadow-[0_30px_100px_rgba(0,0,0,0.35)] sm:rounded-[28px] md:grid md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] md:overflow-hidden">
+      <GarmentStage zIndex={10}>
+      <div data-gl-clip className="sheet-in relative flex max-h-[94dvh] w-full max-w-[1040px] flex-col overflow-y-auto overscroll-contain rounded-t-[28px] bg-surface shadow-[0_30px_100px_rgba(0,0,0,0.35)] sm:rounded-[28px] md:grid md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] md:overflow-hidden">
         <button
           type="button"
           onClick={onClose}
@@ -871,7 +689,15 @@ function Detail({ index, onClose, onGo }: { index: number; onClose: () => void; 
             onPointerUp={settle}
             onPointerCancel={settle}
           >
-            <DetailPiece product={product} height={height} turn={turn} dragging={dragging} />
+            <div className="rail absolute left-1/2 top-[2px] h-[5px] w-[min(70%,340px)] -translate-x-1/2 rounded-full" aria-hidden="true" />
+            <div key={index} className="origin-top">
+              <Garment3D
+                product={product}
+                height={height}
+                turn={turn}
+                transition={dragging ? "none" : `transform 0.9s ${TURN_EASE}, --turn 0.9s ${TURN_EASE}`}
+              />
+            </div>
           </div>
 
           <div className="relative mt-5 flex w-full items-center justify-between">
@@ -966,86 +792,7 @@ function Detail({ index, onClose, onGo }: { index: number; onClose: () => void; 
           </ul>
         </div>
       </div>
-    </div>
-  );
-}
-
-/** The piece in the detail sheet: 3D when available, CSS otherwise. */
-function DetailPiece({ product, height, turn, dragging }: { product: Product; height: number; turn: number; dragging: boolean }) {
-  const engine = useEngine();
-  const dark = useDarkTheme();
-  const wrap = useRef<HTMLDivElement>(null);
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const stage = useRef<Stage | null>(null);
-  const piece = useRef<HungPiece | null>(null);
-  const [w, setW] = useState(420);
-  const H = hang3d(product, height) + 24;
-
-  useLayoutEffect(() => {
-    const el = wrap.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setW(el.clientWidth));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [engine]);
-
-  useEffect(() => {
-    if (!engine || !canvas.current) return;
-    const s = new engine.Stage(canvas.current, { railR: 3.5 });
-    stage.current = s;
-    return () => {
-      s.dispose();
-      stage.current = null;
-      piece.current = null;
-    };
-  }, [engine]);
-
-  useEffect(() => {
-    const s = stage.current;
-    if (!s) return;
-    s.resize(w, H + PAD_TOP + 30);
-    s.setRail(w * 0.14, w * 0.86, PAD_TOP);
-    piece.current?.x.set(s.wx(w / 2), true);
-  }, [engine, w, H]);
-
-  // A new piece arrives side-on (the sheet then turns it to face you).
-  useEffect(() => {
-    const s = stage.current;
-    if (!s) return;
-    if (piece.current) s.remove(piece.current);
-    piece.current = s.add(product, height, { x: w / 2, turn: SIDE_TURN, dropIn: 60 });
-  }, [engine, product, height]);
-
-  useEffect(() => {
-    piece.current?.turn.set(turn, dragging);
-    stage.current?.invalidate();
-  }, [turn, dragging, engine, product]);
-
-  useEffect(() => stage.current?.setTheme(dark), [engine, dark]);
-
-  if (engine === null)
-    return (
-      <>
-        <div className="rail absolute left-1/2 top-[2px] h-[5px] w-[min(70%,340px)] -translate-x-1/2 rounded-full" aria-hidden="true" />
-        <div key={product.id} className="swing origin-top">
-          <Garment3D
-            product={product}
-            height={height}
-            turn={turn}
-            transition={dragging ? "none" : `transform 0.9s ${TURN_EASE}, --side 0.9s ${TURN_EASE}`}
-          />
-        </div>
-      </>
-    );
-
-  return (
-    <div ref={wrap} className="relative w-full" style={{ height: H }}>
-      <canvas
-        ref={canvas}
-        className="pointer-events-none absolute left-0"
-        style={{ top: -PAD_TOP, width: w, height: H + PAD_TOP + 30 }}
-        aria-hidden="true"
-      />
+      </GarmentStage>
     </div>
   );
 }
@@ -1057,7 +804,9 @@ function useDetailHeight(product: Product) {
       const w = window.innerWidth;
       const maxW = w < 768 ? w - 64 : Math.min(w * 0.4, 500);
       const byW = maxW / (garmentWidth(product, 100) / 100);
-      setH(Math.round(Math.min(byW, window.innerHeight * (w < 768 ? 0.36 : 0.5), 440)));
+      // The whole hung piece (a hood rides above the hook line) fits the stage.
+      const byH = Math.min(window.innerHeight * (w < 768 ? 0.42 : 0.6), 480) / (hungSize(product, 100).height / 100);
+      setH(Math.round(Math.min(byW, byH)));
     };
     fit();
     window.addEventListener("resize", fit);
@@ -1093,6 +842,23 @@ function Footer() {
             Contact us
           </a>
           .
+        </p>
+        <p className="border-b border-line py-4 leading-relaxed">
+          3D garments based on{" "}
+          {Object.values(MODEL_CREDITS).map((m, i, all) => (
+            <span key={m.url}>
+              <a href={m.url} className="hover:text-ink hover:underline">
+                {m.title}
+              </a>{" "}
+              by {m.author}
+              {i < all.length - 1 ? ", " : ""}
+            </span>
+          ))}
+          , licensed under{" "}
+          <a href={LICENSE.url} className="hover:text-ink hover:underline">
+            {LICENSE.name}
+          </a>{" "}
+          (recoloured, reshaped and printed with our designs).
         </p>
         <div className="flex flex-col gap-2 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p>Copyright © {new Date().getFullYear()} Mile A Day. All rights reserved.</p>
