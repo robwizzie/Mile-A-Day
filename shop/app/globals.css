@@ -107,14 +107,6 @@ body {
   box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.3);
 }
 
-/* A garment's turn in degrees. Registered so it transitions alongside the
-   transform: each slice of a curved photo shades itself from it. */
-@property --turn {
-  syntax: "<number>";
-  inherits: true;
-  initial-value: 0;
-}
-
 .garment-3d,
 .garment-face,
 .garment-ink {
@@ -132,31 +124,10 @@ body {
 }
 /* Anything flat on a face shows from its own side only. (No filter on the
    containers: a filter flattens the 3D inside it.) */
-.garment-strip,
-.garment-shadow,
 .garment-hanger,
 .garment-flat {
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
-}
-.garment-strip {
-  transform-origin: 0 50%;
-  background-repeat: no-repeat;
-  /* Light from the front, a touch to the left: a slice facing you is lit,
-     one turned away falls into shade. */
-  filter: brightness(calc(0.74 + 0.26 * max(0, cos((var(--turn) + var(--a) - 12) * 1deg))));
-}
-.garment-shadow {
-  filter: brightness(0) blur(12px);
-  opacity: 0.16;
-}
-:root[data-theme="dark"] .garment-shadow {
-  opacity: 0.5;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .garment-shadow {
-    opacity: 0.5;
-  }
 }
 .garment-flat {
   filter: drop-shadow(0 18px 22px var(--garment-shadow));

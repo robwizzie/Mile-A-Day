@@ -15,6 +15,8 @@ import {
 import { THEME_KEY, type ThemeChoice } from "@/lib/theme";
 import { SharedDefs } from "./designs";
 import { Garment3D, SIDE_TURN, TURN_EASE, garmentWidth, hungSize, sideWidth } from "./garment";
+import { GarmentStage } from "./garment-gl";
+import { LICENSE, MODEL_CREDITS } from "@/lib/models";
 
 const HERO = PRODUCTS[0];
 const GUTTER = "max(24px, calc((100vw - 1024px) / 2 + 24px))";
@@ -39,6 +41,7 @@ export function Shop() {
   }, []);
 
   return (
+    <GarmentStage zIndex={30}>
     <div className="flex min-h-dvh flex-col">
       <SharedDefs />
       <Ribbon onOpen={() => show(0)} />
@@ -70,6 +73,7 @@ export function Shop() {
 
       {open != null && <Detail index={open} onClose={() => show(null)} onGo={show} />}
     </div>
+    </GarmentStage>
   );
 }
 
@@ -222,12 +226,6 @@ function DesktopRack({
     setHover(i);
     setFlipped(false);
     onHover(i);
-    const el = swingRefs.current[i];
-    if (el) {
-      el.classList.remove("swing");
-      void el.offsetWidth; // restart the animation
-      el.classList.add("swing");
-    }
   };
 
   return (
@@ -400,7 +398,9 @@ function MobileRack({
       const near = Math.min(a, 1);
       // Neighbours slide in tight, the way side-on pieces pack on a rail.
       const shift = -Math.sign(d) * (0.3 * near + 0.66 * Math.max(0, a - 1)) * itemW;
-      node.style.transform = `translateX(${shift}px) perspective(1600px) rotateY(${SIDE_TURN * near}deg) scale(${1 - 0.1 * near})`;
+      // The turn itself is the garment's (drawn in 3D): it reads data-yaw.
+      node.style.transform = `translateX(${shift}px) scale(${1 - 0.1 * near})`;
+      node.dataset.yaw = String(SIDE_TURN * near);
       node.style.opacity = String(1 - 0.15 * near - 0.12 * Math.max(0, a - 1));
       node.style.zIndex = String(30 - Math.round(a * 4));
     });
@@ -438,6 +438,7 @@ function MobileRack({
       <Rail />
       <div
         ref={scroller}
+        data-gl-clip
         className="no-scrollbar relative flex snap-x snap-mandatory overflow-x-auto overflow-y-hidden"
         style={{ paddingInline: `calc(50vw - ${itemW / 2}px)`, height: tallest + 8 }}
       >
@@ -523,6 +524,7 @@ function Collection({ onOpen }: { onOpen: (i: number) => void }) {
       </div>
       {/* Cards start in line with the heading and scroll to the window edge. */}
       <div
+        data-gl-clip
         className="no-scrollbar mt-6 flex snap-x snap-mandatory gap-5 overflow-x-auto py-4"
         style={{ paddingInline: GUTTER, scrollPaddingInline: GUTTER }}
       >
@@ -546,6 +548,7 @@ function CollectionCard({ product, onOpen }: { product: Product; onOpen: () => v
       onFocus={() => setBack(true)}
       onBlur={() => setBack(false)}
       aria-label={`${product.name}, ${product.colorName}. ${statusLabel(product)}`}
+      data-gl-clip
       className="group relative flex h-[440px] w-[300px] shrink-0 snap-start flex-col overflow-hidden rounded-[22px] bg-surface p-7 text-left shadow-[0_2px_12px_rgba(0,0,0,0.06)] transition-[transform,box-shadow] duration-500 hover:scale-[1.012] hover:shadow-[0_12px_36px_rgba(0,0,0,0.12)]"
       style={{ transitionTimingFunction: TURN_EASE }}
     >
@@ -651,7 +654,8 @@ function Detail({ index, onClose, onGo }: { index: number; onClose: () => void; 
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="sheet-in relative flex max-h-[94dvh] w-full max-w-[1040px] flex-col overflow-y-auto overscroll-contain rounded-t-[28px] bg-surface shadow-[0_30px_100px_rgba(0,0,0,0.35)] sm:rounded-[28px] md:grid md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] md:overflow-hidden">
+      <GarmentStage zIndex={10}>
+      <div data-gl-clip className="sheet-in relative flex max-h-[94dvh] w-full max-w-[1040px] flex-col overflow-y-auto overscroll-contain rounded-t-[28px] bg-surface shadow-[0_30px_100px_rgba(0,0,0,0.35)] sm:rounded-[28px] md:grid md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] md:overflow-hidden">
         <button
           type="button"
           onClick={onClose}
@@ -686,7 +690,7 @@ function Detail({ index, onClose, onGo }: { index: number; onClose: () => void; 
             onPointerCancel={settle}
           >
             <div className="rail absolute left-1/2 top-[2px] h-[5px] w-[min(70%,340px)] -translate-x-1/2 rounded-full" aria-hidden="true" />
-            <div key={index} className="swing origin-top">
+            <div key={index} className="origin-top">
               <Garment3D
                 product={product}
                 height={height}
@@ -788,6 +792,7 @@ function Detail({ index, onClose, onGo }: { index: number; onClose: () => void; 
           </ul>
         </div>
       </div>
+      </GarmentStage>
     </div>
   );
 }
@@ -799,7 +804,9 @@ function useDetailHeight(product: Product) {
       const w = window.innerWidth;
       const maxW = w < 768 ? w - 64 : Math.min(w * 0.4, 500);
       const byW = maxW / (garmentWidth(product, 100) / 100);
-      setH(Math.round(Math.min(byW, window.innerHeight * (w < 768 ? 0.36 : 0.5), 440)));
+      // The whole hung piece (a hood rides above the hook line) fits the stage.
+      const byH = Math.min(window.innerHeight * (w < 768 ? 0.42 : 0.6), 480) / (hungSize(product, 100).height / 100);
+      setH(Math.round(Math.min(byW, byH)));
     };
     fit();
     window.addEventListener("resize", fit);
@@ -835,6 +842,23 @@ function Footer() {
             Contact us
           </a>
           .
+        </p>
+        <p className="border-b border-line py-4 leading-relaxed">
+          3D garments based on{" "}
+          {Object.values(MODEL_CREDITS).map((m, i, all) => (
+            <span key={m.url}>
+              <a href={m.url} className="hover:text-ink hover:underline">
+                {m.title}
+              </a>{" "}
+              by {m.author}
+              {i < all.length - 1 ? ", " : ""}
+            </span>
+          ))}
+          , licensed under{" "}
+          <a href={LICENSE.url} className="hover:text-ink hover:underline">
+            {LICENSE.name}
+          </a>{" "}
+          (recoloured, reshaped and printed with our designs).
         </p>
         <div className="flex flex-col gap-2 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <p>Copyright © {new Date().getFullYear()} Mile A Day. All rights reserved.</p>

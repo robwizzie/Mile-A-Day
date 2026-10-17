@@ -7,20 +7,27 @@
     "build": "next build",
     "start": "next start --port 3100",
     "prints": "tsx scripts/export-prints.tsx",
-    "cutouts": "tsx scripts/cutout-mockups.ts"
+    "cutouts": "tsx scripts/cutout-mockups.ts",
+    "models": "tsx scripts/prep-models.ts"
   },
   "dependencies": {
     "@vercel/analytics": "1.6.1",
     "next": "16.1.6",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "three": "^0.170.0"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.1.1",
+    "@gltf-transform/extensions": "^4.1.1",
+    "@gltf-transform/functions": "^4.1.1",
     "@resvg/resvg-js": "^2.6.2",
     "@tailwindcss/postcss": "^4.2.0",
     "@types/node": "^22",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
+    "@types/three": "^0.170.0",
+    "meshoptimizer": "^0.22.0",
     "postcss": "^8.5",
     "tailwindcss": "^4.2.0",
     "tsx": "^4.19.2",

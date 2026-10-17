@@ -1,59 +1,50 @@
 import type { CSSProperties } from "react";
 import type { Product } from "@/lib/catalog";
-import { BODIES } from "@/lib/garment-bodies";
+import { HOOK_RISE, bounds, type ModelId } from "@/lib/models";
 import { DrawnGarment } from "./designs";
+import { GlGarment } from "./garment-gl";
 
 /** Rack angle for a piece that isn't facing you: nearly edge-on, like a real rail. */
 export const SIDE_TURN = -76;
 
-/** The drawn box is 400×440; photos keep their own proportions. */
+/** A model this tall (metres) is drawn at the `height` callers ask for; others scale with it. */
+const REF_HEIGHT = 0.7;
+
+function modelOf(product: Product): ModelId | undefined {
+  return product.art.kind === "photo" ? product.art.model : undefined;
+}
+
+/** The drawn box is 400×440; photos keep their own proportions; models their real ones. */
 export function garmentWidth(product: Product, height: number) {
+  const model = modelOf(product);
+  if (model) return (garmentHeight(product, height) * bounds(model).width) / bounds(model).height;
   return product.art.kind === "photo" ? garmentHeight(product, height) * product.art.aspect : (height * 400) / 440;
 }
 
 export function garmentHeight(product: Product, height: number) {
+  const model = modelOf(product);
+  if (model) return (height * bounds(model).height) / REF_HEIGHT;
   return product.art.kind === "photo" ? height * (product.art.scale ?? 1) : height;
 }
 
-/** Vertical strips a photo is cut into to curve it round the torso. */
-const STRIPS = 40;
-/** Half the torso's thickness, as a share of its width (a hung piece with some body to it). */
-const DEPTH = 0.2;
-
-/**
- * How far a photo garment stands out of its centre plane at each strip edge,
- * left to right as seen from the front: one smooth dome across the piece,
- * as deep as its torso is wide, easing out along the sleeves (no crease
- * where body meets sleeve). The back photo bulges the other way by the same
- * amount, so the two meet at the edges and the piece has real thickness
- * when it turns.
- */
-function profile(product: Product, width: number): number[] {
-  if (product.art.kind !== "photo") return [];
-  const [l, r] = BODIES[product.art.front] ?? [0.2, 0.8];
-  const centre = ((l + r) / 2) * width;
-  const depth = DEPTH * (r - l) * width;
-  const reach = Math.max(centre, width - centre);
-  return Array.from({ length: STRIPS + 1 }, (_, i) => {
-    const t = ((i / STRIPS) * width - centre) / reach;
-    return depth * Math.pow(Math.max(0, 1 - t * t), 0.7);
-  });
-}
-
-/** Width a piece takes on the rail when it hangs side-on: its edge plus its thickness. */
+/** Width a piece takes on the rail when it hangs side-on: its edge plus its depth. */
 export function sideWidth(product: Product, height: number) {
-  const w = garmentWidth(product, height);
-  const deepest = Math.max(0, ...profile(product, w));
   const a = (SIDE_TURN * Math.PI) / 180;
-  return w * Math.abs(Math.cos(a)) + 2 * deepest * Math.abs(Math.sin(a));
+  const model = modelOf(product);
+  if (!model) return garmentWidth(product, height) * Math.abs(Math.cos(a));
+  const b = bounds(model);
+  const ppm = garmentHeight(product, height) / b.height;
+  return ppm * (b.width * Math.abs(Math.cos(a)) + b.depth * Math.abs(Math.sin(a)));
 }
 
-/** Hanger height above the garment, as a share of the garment's height. */
+/** Hanger height above the garment, as a share of the garment's height (drawn and photo pieces). */
 const HANGER = 0.17;
 
-/** Total box a garment on its hanger takes (for layout). */
+/** Total box a garment on its hanger takes (for layout): hook top to hem. */
 export function hungSize(product: Product, height: number) {
   const h = garmentHeight(product, height);
+  const model = modelOf(product);
+  if (model) return { width: garmentWidth(product, height), height: (h * (bounds(model).height + HOOK_RISE)) / bounds(model).height };
   return { width: garmentWidth(product, height), height: h + h * HANGER * 0.72 };
 }
 
@@ -80,6 +71,33 @@ export function Garment3D({
   style?: CSSProperties;
 }) {
   const { width, height: total } = hungSize(product, height);
+  const model = modelOf(product);
+  if (model && product.art.kind === "photo") {
+    // Until the model is in (or with no WebGL), the photo stands in.
+    const h = garmentHeight(product, height);
+    const back = Math.abs(((((turn + 180) % 360) + 360) % 360) - 180) > 90;
+    return (
+      <GlGarment
+        product={product}
+        model={model}
+        width={width}
+        height={total}
+        turn={turn}
+        immediate={transition === "none"}
+        className={className}
+        style={style}
+        photo={
+          <img
+            src={back ? product.art.back : product.art.front}
+            alt=""
+            draggable={false}
+            className="absolute inset-x-0 bottom-0 w-full select-none object-contain"
+            style={{ height: h }}
+          />
+        }
+      />
+    );
+  }
   return (
     <div
       className={`garment-3d relative ${className ?? ""}`}
@@ -109,61 +127,12 @@ function Face({ product, height, side }: { product: Product; height: number; sid
       <Hanger style={{ height: hangerH, width: hangerH * 1.6 }} />
       <div className="garment-ink relative w-full" style={{ height: h, marginTop: -hangerH * 0.28 }}>
         {art.kind === "photo" ? (
-          <Curved product={product} src={side === "back" ? art.back : art.front} width={garmentWidth(product, height)} height={h} back={side === "back"} />
+          <img src={side === "back" ? art.back : art.front} alt="" draggable={false} className="garment-flat h-full w-full select-none object-contain" />
         ) : (
           <DrawnGarment cut={art.cut} color={art.color} design={art.design} side={side} className="garment-flat h-full w-full" />
         )}
       </div>
     </div>
-  );
-}
-
-/**
- * A photo bent round the torso: STRIPS vertical slices of it, each stood out
- * by the profile and angled to meet its neighbours, so the piece has a
- * rounded body you can see from the side. Each slice is shaded by which way
- * it faces as the piece turns (--turn, plus its own angle --a).
- */
-function Curved({ product, src, width, height, back }: { product: Product; src: string; width: number; height: number; back: boolean }) {
-  const depth = profile(product, width);
-  // Seen from behind, left and right swap.
-  const z = back ? [...depth].reverse() : depth;
-  const dx = width / STRIPS;
-  // Rounded so the server's markup matches the client's exactly.
-  const r = (n: number) => Math.round(n * 100) / 100;
-  return (
-    <>
-      <img
-        src={src}
-        alt=""
-        draggable={false}
-        className="garment-shadow pointer-events-none absolute inset-0 h-full w-full select-none"
-        style={{ transform: "translateY(14px)" }}
-      />
-      {z.slice(0, -1).map((z0, i) => {
-        const rise = z[i + 1] - z0;
-        const angle = Math.atan2(rise, dx);
-        return (
-          <div
-            key={i}
-            className="garment-strip absolute top-0"
-            style={
-              {
-                left: r(i * dx),
-                // A hair of overlap hides the seams between slices.
-                width: r(dx + 1.25),
-                height: r(height),
-                backgroundImage: `url(${src})`,
-                backgroundSize: `${r(width)}px ${r(height)}px`,
-                backgroundPosition: `${r(-i * dx)}px 0`,
-                transform: `translateZ(${r(z0)}px) rotateY(${r((-angle * 180) / Math.PI)}deg) scaleX(${r(Math.hypot(dx, rise) / dx)})`,
-                "--a": r((-angle * 180) / Math.PI + (back ? 180 : 0)),
-              } as CSSProperties
-            }
-          />
-        );
-      })}
-    </>
   );
 }
 

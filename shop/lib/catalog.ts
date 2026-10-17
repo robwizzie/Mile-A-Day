@@ -1,6 +1,8 @@
 // Everything the shop sells, in rack order. One file so a new drop is a new
 // entry here and a garment image in public/garments/ — nothing else.
 
+import type { ModelId } from "./models";
+
 export const APP_STORE_URL = "https://apps.apple.com/us/app/mile-a-day/id6746970905";
 export const SITE_URL = "https://mileaday.run";
 export const SUPPORT_EMAIL = "support@mileaday.run";
@@ -27,6 +29,8 @@ export type Art =
       scale?: number;
       /** The drawn design printed on it, for `npm run prints`. */
       design?: DesignId;
+      /** Its 3D model (lib/models.ts); the photo shows until that loads. */
+      model?: ModelId;
     }
   | { kind: "drawn"; cut: Cut; color: string; design: DesignId };
 
@@ -59,7 +63,7 @@ export const PRODUCTS: Product[] = [
     status: "available",
     colorName: "Black",
     swatch: "#0d0d0d",
-    art: { kind: "photo", front: "/garments/hoodie-front.webp", back: "/garments/hoodie-back.webp", aspect: 1210 / 1000, scale: 1.12 },
+    art: { kind: "photo", front: "/garments/hoodie-front.webp", back: "/garments/hoodie-back.webp", aspect: 1210 / 1000, scale: 1.12, model: "hoodie" },
     description:
       "The MAD runner on the chest, Go The Extra Mile across the back, and a red bolt down each sleeve. Heavy and soft, cut roomy for cold-morning miles and post-run couches.",
     details: ["Oversized, dropped-shoulder fit", "Brushed fleece inside", "Front, back and both sleeves printed", "Printed to order and shipped to you"],
@@ -74,7 +78,7 @@ export const PRODUCTS: Product[] = [
     status: "soon",
     colorName: "White",
     swatch: "#f7f6f2",
-    art: { kind: "photo", front: "/garments/daily-mile-tee-front.webp", back: "/garments/daily-mile-tee-back.webp", aspect: 1208 / 1016, design: "daily-mile" },
+    art: { kind: "photo", front: "/garments/daily-mile-tee-front.webp", back: "/garments/daily-mile-tee-back.webp", aspect: 1208 / 1016, design: "daily-mile", model: "tee" },
     description:
       "A small MAD badge up front. On the back, the whole idea in three words and a week of checked-off days.",
     details: ["Soft cotton, regular fit", "MAD badge on the chest", "Big back print", "Printed to order"],
@@ -89,7 +93,7 @@ export const PRODUCTS: Product[] = [
     status: "soon",
     colorName: "Navy",
     swatch: "#1d3354",
-    art: { kind: "photo", front: "/garments/extra-mile-long-sleeve-front.webp", back: "/garments/extra-mile-long-sleeve-back.webp", aspect: 1242 / 750, scale: 0.9, design: "extra-mile" },
+    art: { kind: "photo", front: "/garments/extra-mile-long-sleeve-front.webp", back: "/garments/extra-mile-long-sleeve-back.webp", aspect: 1242 / 750, scale: 0.9, design: "extra-mile", model: "longsleeve" },
     description:
       "MAD on the chest and a 1.00 mile with its route across the back. For the miles that start before sunrise.",
     details: ["Boxy fit, sun-faded cotton", "Chest and back prints", "Printed to order"],
@@ -104,7 +108,7 @@ export const PRODUCTS: Product[] = [
     status: "soon",
     colorName: "Black",
     swatch: "#151515",
-    art: { kind: "photo", front: "/garments/streak-tee-front.webp", back: "/garments/streak-tee-back.webp", aspect: 1210 / 1017, design: "streak" },
+    art: { kind: "photo", front: "/garments/streak-tee-front.webp", back: "/garments/streak-tee-back.webp", aspect: 1210 / 1017, design: "streak", model: "tee" },
     description: "The one rule on the front. The number everyone's chasing on the back.",
     details: ["Soft cotton, regular fit", "Front and back prints", "Printed to order"],
     sizes: ["S", "M", "L", "XL", "2XL"],
@@ -118,7 +122,7 @@ export const PRODUCTS: Product[] = [
     status: "soon",
     colorName: "Heather Gray",
     swatch: "#9a9a9a",
-    art: { kind: "photo", front: "/garments/run-club-tank-front.webp", back: "/garments/run-club-tank-back.webp", aspect: 802 / 1055, design: "run-club" },
+    art: { kind: "photo", front: "/garments/run-club-tank-front.webp", back: "/garments/run-club-tank-back.webp", aspect: 802 / 1055, design: "run-club", model: "tank" },
     description: "A collegiate Mile A Day Run Club front for hot-weather miles, with a small MAD on the back.",
     details: ["Relaxed crewneck fit", "Front and back prints", "Printed to order"],
     sizes: ["S", "M", "L", "XL", "2XL"],
@@ -132,7 +136,7 @@ export const PRODUCTS: Product[] = [
     status: "later",
     colorName: "Cream",
     swatch: "#efe6d2",
-    art: { kind: "photo", front: "/garments/flamey-tee-front.webp", back: "/garments/flamey-tee-back.webp", aspect: 1208 / 1016, design: "flamey-lit" },
+    art: { kind: "photo", front: "/garments/flamey-tee-front.webp", back: "/garments/flamey-tee-back.webp", aspect: 1208 / 1016, design: "flamey-lit", model: "tee" },
     description: "Flamey keeps your streak lit. Now he can come on the run with you.",
     details: ["Soft cotton, regular fit", "Big Flamey front print", "Still Lit. on the back", "Printed to order"],
     sizes: ["S", "M", "L", "XL", "2XL"],
@@ -146,7 +150,7 @@ export const PRODUCTS: Product[] = [
     status: "later",
     colorName: "Black",
     swatch: "#161414",
-    art: { kind: "photo", front: "/garments/flamey-run-crew-front.webp", back: "/garments/flamey-run-crew-back.webp", aspect: 1192 / 917, design: "flamey-crew" },
+    art: { kind: "photo", front: "/garments/flamey-run-crew-front.webp", back: "/garments/flamey-run-crew-back.webp", aspect: 1192 / 917, design: "flamey-crew", model: "longsleeve" },
     description: "A tiny Flamey on the chest and Flamey at full speed with his run crew across the back.",
     details: ["Soft cotton, regular fit", "Chest and back prints", "Printed to order"],
     sizes: ["S", "M", "L", "XL", "2XL"],
