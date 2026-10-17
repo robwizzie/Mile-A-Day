@@ -1,0 +1,197 @@
+@import "tailwindcss";
+
+/* Light is a bright studio (the way a real rack is shot); dark is a lit
+   showroom. Both follow the visitor's system setting unless they pick one
+   (html[data-theme], set before paint by the script in layout.tsx). The
+   reds and fonts are the app's and mileaday.run's. */
+:root {
+  color-scheme: light;
+  --paper: #f1ede6;
+  --ink: #141210;
+  --ink-soft: #6b655d;
+  --line: rgba(20, 18, 16, 0.12);
+  --dot: rgba(20, 18, 16, 0.13);
+  --card: rgba(246, 243, 238, 0.86);
+  --scrim: rgba(241, 237, 230, 0.62);
+  --spot: transparent;
+  --garment-shadow: rgba(20, 18, 16, 0.22);
+  --footer: #141210;
+  --footer-ink: rgba(241, 237, 230, 0.7);
+  --mad-red: #c72554;
+  --mad-burgundy: #8b1538;
+  --mad-pink: #ff4d7d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #0d0c0c;
+    --ink: #f3efe9;
+    --ink-soft: #9a938a;
+    --line: rgba(255, 255, 255, 0.12);
+    --dot: rgba(255, 255, 255, 0.075);
+    --card: rgba(24, 22, 22, 0.82);
+    --scrim: rgba(13, 12, 12, 0.6);
+    --spot: rgba(255, 244, 230, 0.075);
+    --garment-shadow: rgba(0, 0, 0, 0.6);
+    --footer: #060505;
+    --footer-ink: rgba(243, 239, 233, 0.6);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0d0c0c;
+  --ink: #f3efe9;
+  --ink-soft: #9a938a;
+  --line: rgba(255, 255, 255, 0.12);
+  --dot: rgba(255, 255, 255, 0.075);
+  --card: rgba(24, 22, 22, 0.82);
+  --scrim: rgba(13, 12, 12, 0.6);
+  --spot: rgba(255, 244, 230, 0.075);
+  --garment-shadow: rgba(0, 0, 0, 0.6);
+  --footer: #060505;
+  --footer-ink: rgba(243, 239, 233, 0.6);
+}
+
+@theme inline {
+  --font-sans: var(--font-dm-sans), system-ui, sans-serif;
+  --font-heading: var(--font-bebas-neue), Impact, sans-serif;
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-line: var(--line);
+  --color-card: var(--card);
+  --color-mad-red: var(--mad-red);
+  --color-mad-burgundy: var(--mad-burgundy);
+}
+
+html,
+body {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+body {
+  overflow-x: hidden;
+  transition: background-color 0.4s ease, color 0.4s ease;
+}
+
+/* A faint dot grid, like a studio backdrop, with a soft spotlight over the
+   rack in dark mode so black garments keep their edges. */
+.backdrop {
+  background-image:
+    radial-gradient(ellipse 60% 45% at 50% 42%, var(--spot), transparent 70%),
+    radial-gradient(var(--dot) 1px, transparent 1.2px);
+  background-size: 100% 100%, 22px 22px;
+  background-position: center;
+}
+
+/* The chrome rail. */
+.rail {
+  background: linear-gradient(180deg, #fdfdfd 0%, #c9c9c9 38%, #8e8e8e 62%, #d6d6d6 100%);
+  box-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.35);
+}
+.rail-cap {
+  background: radial-gradient(circle at 35% 35%, #ffffff, #9a9a9a 60%, #6d6d6d);
+  box-shadow: 0 4px 10px -4px rgba(0, 0, 0, 0.4);
+}
+
+/* How side-on a garment is (0 front … 1 edge-on). Registered so it can
+   transition: it dims the face as it turns away, like light falling off. */
+@property --side {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+.garment-3d {
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.garment-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.garment-face.is-back {
+  transform: rotateY(180deg);
+}
+.garment-ink {
+  filter: brightness(calc(1 - var(--side) * 0.28)) drop-shadow(0 22px 18px var(--garment-shadow));
+}
+
+/* A garment swings from its hook when touched, settling like fabric. */
+@keyframes sway {
+  0% { transform: rotate(0deg); }
+  18% { transform: rotate(2.6deg); }
+  40% { transform: rotate(-1.8deg); }
+  60% { transform: rotate(1deg); }
+  80% { transform: rotate(-0.4deg); }
+  100% { transform: rotate(0deg); }
+}
+.swing {
+  animation: sway 1.3s cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.marquee {
+  animation: marquee 42s linear infinite;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise {
+  animation: rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes drop-in {
+  from { opacity: 0; transform: translateY(-34px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.drop-in {
+  animation: drop-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.fade {
+  animation: fade 0.35s ease both;
+}
+
+@keyframes sheet-up {
+  from { opacity: 0; transform: translateY(22px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.sheet-up {
+  animation: sheet-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swing,
+  .marquee,
+  .rise,
+  .drop-in,
+  .sheet-up,
+  .fade {
+    animation: none !important;
+  }
+  .garment-3d,
+  .rack-slot {
+    transition: none !important;
+  }
+}

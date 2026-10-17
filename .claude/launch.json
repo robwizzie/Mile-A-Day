@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "shop",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "shop", "run", "dev"],
+      "port": 3100
+    }
+  ]
+}
