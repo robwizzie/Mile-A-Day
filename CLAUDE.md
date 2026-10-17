@@ -7,7 +7,7 @@ Gamified fitness app: run a mile every day, build streaks, compete with friends.
 - `app/` - iOS app (Swift/SwiftUI, targets iOS + watchOS + Widgets)
 - `backend/` - REST API (TypeScript, Express 5.1, PostgreSQL)
 - `website/` - Marketing site (Next.js 16, React 19, Tailwind CSS 4)
-- `shop/` - Merch store for mileaday.shop (Next.js 16, own Vercel project). Products live in `shop/lib/catalog.ts`; checkout is Shopify cart permalinks (`NEXT_PUBLIC_SHOPIFY_DOMAIN` + per-size variant ids), fulfilled by Tapstitch. Garments are photo cutouts (or drawn art in `components/designs.tsx` until a piece has real Tapstitch mockups) turned with CSS 3D. `npm run prints` exports each drawn design's print-ready PNGs and a placement guide to `shop/print-files/`. Not in CI yet: `cd shop && npm run build` is the check.
+- `shop/` - Merch store for mileaday.shop (Next.js 16, own Vercel project). Products live in `shop/lib/catalog.ts`; checkout is Shopify cart permalinks (`NEXT_PUBLIC_SHOPIFY_DOMAIN` + per-size variant ids), fulfilled by Tapstitch. Garments are photo cutouts of Tapstitch mockups turned with CSS 3D; `npm run cutouts -- <dir>` makes them from `<id>-front.png`/`-back.png` flat-lays. The print art is drawn in `components/designs.tsx`; `npm run prints` exports it as print-ready PNGs plus a placement guide to `shop/print-files/`. Not in CI yet: `cd shop && npm run build` is the check.
 
 ## Quick Commands
 

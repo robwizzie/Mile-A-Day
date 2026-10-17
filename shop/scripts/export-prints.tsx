@@ -32,24 +32,26 @@ async function main() {
   const guide: string[] = [
     "# Print files",
     "",
-    "Production prints for the drawn Mile A Day pieces, made by `npm run prints` from `components/designs.tsx`.",
+    "Production prints for the Mile A Day pieces, made by `npm run prints` from `components/designs.tsx`.",
     "Transparent PNGs at **300 DPI**, trimmed to the artwork. Sizes assume a size M (about 20 in wide flat).",
     "",
     "In Tapstitch: **Add new design** → pick the blank → upload each file to its print area → set the width and",
-    "position below → **Download mockups** (front and back, flat on white or transparent) and drop them in",
-    "`shop/public/garments/` as `<product-id>-front.png` / `-back.png`.",
+    "position below → **Save Design**. Save the design's front and back mockups (flat on white) to a folder as",
+    "`<product-id>-front.png` / `-back.png`, then `npm run cutouts -- <folder>` writes the rack photos to",
+    "`shop/public/garments/` and prints each piece's aspect for `lib/catalog.ts`.",
     "",
   ];
 
   for (const p of PRODUCTS) {
-    if (p.art.kind !== "drawn") continue;
-    const parts: ("front" | "back" | "sleeve")[] = ["front", "back", ...(hasSleevePrint(p.art.design) ? (["sleeve"] as const) : [])];
+    const design = p.art.design;
+    if (!design) continue;
+    const parts: ("front" | "back" | "sleeve")[] = ["front", "back", ...(hasSleevePrint(design) ? (["sleeve"] as const) : [])];
     await mkdir(join(OUT, p.id), { recursive: true });
     guide.push(`## ${p.name} — ${p.colorName} (\`${p.id}\`)`, "", `Blank: ${p.kind}, ${p.colorName.toLowerCase()}.`, "");
     guide.push("| File | Print area | Width | Height | Placement |", "|---|---|---|---|---|");
 
     for (const part of parts) {
-      const markup = renderToStaticMarkup(<PrintOnly design={p.art.design} part={part} />)
+      const markup = renderToStaticMarkup(<PrintOnly design={design} part={part} />)
         .replaceAll("var(--font-bebas-neue), Impact, sans-serif", "Bebas Neue")
         .replaceAll("var(--font-dm-sans), sans-serif", "DM Sans");
       const png = new Resvg(markup, {

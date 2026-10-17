@@ -1,11 +1,12 @@
 # Print files
 
-Production prints for the drawn Mile A Day pieces, made by `npm run prints` from `components/designs.tsx`.
+Production prints for the Mile A Day pieces, made by `npm run prints` from `components/designs.tsx`.
 Transparent PNGs at **300 DPI**, trimmed to the artwork. Sizes assume a size M (about 20 in wide flat).
 
 In Tapstitch: **Add new design** → pick the blank → upload each file to its print area → set the width and
-position below → **Download mockups** (front and back, flat on white or transparent) and drop them in
-`shop/public/garments/` as `<product-id>-front.png` / `-back.png`.
+position below → **Save Design**. Save the design's front and back mockups (flat on white) to a folder as
+`<product-id>-front.png` / `-back.png`, then `npm run cutouts -- <folder>` writes the rack photos to
+`shop/public/garments/` and prints each piece's aspect for `lib/catalog.ts`.
 
 ## One Mile Every Day Tee — White (`daily-mile-tee`)
 
@@ -16,9 +17,9 @@ Blank: Everyday cotton tee, white.
 | `daily-mile-tee/front.png` | Front | 2.2 in | 2.2 in | 3.1 in to the wearer's left of centre (left chest), top 3.9 in below the collar |
 | `daily-mile-tee/back.png` | Back | 10.2 in | 12.7 in | centred, top 3.8 in below the collar |
 
-## Extra Mile Long Sleeve — Burgundy (`extra-mile-long-sleeve`)
+## Extra Mile Long Sleeve — Navy (`extra-mile-long-sleeve`)
 
-Blank: Cotton long sleeve, burgundy.
+Blank: Sun-faded boxy long sleeve, navy.
 
 | File | Print area | Width | Height | Placement |
 |---|---|---|---|---|
@@ -35,9 +36,9 @@ Blank: Everyday cotton tee, black.
 | `streak-tee/front.png` | Front | 8.4 in | 5.2 in | centred, top 3.4 in below the collar |
 | `streak-tee/back.png` | Back | 10.2 in | 11.6 in | centred, top 5.3 in below the collar |
 
-## Run Club Tank — Heather (`run-club-tank`)
+## Run Club Tank — Heather Gray (`run-club-tank`)
 
-Blank: Performance tank, heather.
+Blank: Crewneck tank, heather gray.
 
 | File | Print area | Width | Height | Placement |
 |---|---|---|---|---|
