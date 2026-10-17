@@ -18,6 +18,8 @@ import { CUTS, drape, type Fabric, type Tailored } from "./drape";
 // ── Assets ─────────────────────────────────────────────────────────────────
 
 type Piece = Tailored & {
+  /** The fabric's own colour (seams and edge-on walls show this). */
+  base: THREE.Color;
   frontMap: THREE.Texture;
   backMap: THREE.Texture;
   /** Width ÷ height of the garment box. */
@@ -113,10 +115,10 @@ function averageColor(img: HTMLImageElement) {
 
 /** Cloth weight per cut: fleece is fuller and folds deeper than jersey. */
 const FABRIC: Record<keyof typeof CUTS, Fabric> = {
-  tee: { body: 0.007, shoulders: 0.02, folds: 0.016 },
-  longsleeve: { body: 0.007, shoulders: 0.02, folds: 0.016 },
-  tank: { body: 0.006, shoulders: 0.016, folds: 0.014 },
-  hoodie: { body: 0.018, shoulders: 0.03, folds: 0.02 },
+  tee: { body: 0.008, shoulders: 0.022, folds: 0.026, droop: 0.38 },
+  longsleeve: { body: 0.008, shoulders: 0.022, folds: 0.026, droop: 0.06 },
+  tank: { body: 0.007, shoulders: 0.018, folds: 0.022, droop: 0 },
+  hoodie: { body: 0.02, shoulders: 0.032, folds: 0.03, droop: 0.12 },
 };
 
 async function buildPiece(p: Product): Promise<Piece> {
@@ -127,6 +129,7 @@ async function buildPiece(p: Product): Promise<Piece> {
   // The photo's cutout is cut just inside its soft edge (see texture()).
   return {
     ...drape(front, CUTS[key], FABRIC[key], p.art.kind === "photo" ? 0.92 : 0.5),
+    base: new THREE.Color().setStyle(averageColor(front)),
     frontMap: texture(front),
     backMap: texture(back),
     aspect,
@@ -168,6 +171,7 @@ function hookMesh(railR: number, wire: number, shank: number) {
 function hangerBody(h: Tailored["hanger"]) {
   const g = new THREE.Group();
   const w = h.halfWidth;
+  if (!w) return g;
   const curve = new THREE.CatmullRomCurve3([
     new THREE.Vector3(-w, h.shoulderY, 0),
     new THREE.Vector3(-w * 0.5, (h.shoulderY + h.centerY) / 2 + 0.008, 0),
@@ -200,8 +204,11 @@ function weave() {
   const img = ctx.createImageData(S, S);
   for (let y = 0; y < S; y++)
     for (let x = 0; x < S; x++) {
-      const knit = Math.sin((x / S) * Math.PI * 2 * 32) * 0.5 + Math.sin((y / S) * Math.PI * 2 * 48 + Math.sin((x / S) * Math.PI * 64)) * 0.5;
-      const v = 128 + knit * 40 + (Math.random() - 0.5) * 50;
+      // Little interlocking loops, like jersey, plus a touch of grain.
+      const u = (x / S) * Math.PI * 2 * 24;
+      const w = (y / S) * Math.PI * 2 * 32;
+      const knit = Math.abs(Math.sin(u + 0.5 * Math.sin(w))) * Math.abs(Math.cos(w * 0.5));
+      const v = 110 + knit * 50 + (Math.random() - 0.5) * 36;
       const i = (y * S + x) * 4;
       img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
       img.data[i + 3] = 255;
@@ -213,7 +220,63 @@ function weave() {
   return weaveTexture;
 }
 
-function fabric(map: THREE.Texture) {
+/** Per-piece cloth state, shared by its materials as shader uniforms. */
+type Cloth = {
+  uLag: { value: number };
+  uSwayX: { value: number };
+  uSwayZ: { value: number };
+  uRipple: { value: number };
+  uTime: { value: number };
+  uBase: { value: THREE.Color };
+};
+
+// The fabric moves in the vertex shader: below the hanger it lags when the
+// piece turns (twisting about the hook), swings when it slides or rocks, and
+// a ripple runs down it while it's moving. aMotion.x is how free a point is
+// (0 on the hanger, 1 at the hem and cuffs); aMotion.y marks the sleeves.
+const CLOTH_VERTEX_PARS = /* glsl */ `
+attribute vec2 aMotion;
+attribute float aEdge;
+uniform float uLag;
+uniform float uSwayX;
+uniform float uSwayZ;
+uniform float uRipple;
+uniform float uTime;
+varying float vEdge;
+`;
+const CLOTH_ANGLE = /* glsl */ `
+float clothW = aMotion.x;
+float clothA = uLag * (clothW * clothW * 0.9 + abs(aMotion.y) * 0.35 * clothW);
+float clothC = cos(clothA);
+float clothS = sin(clothA);
+`;
+const CLOTH_NORMAL = /* glsl */ `
+objectNormal.xz = vec2(objectNormal.x * clothC + objectNormal.z * clothS, -objectNormal.x * clothS + objectNormal.z * clothC);
+`;
+const CLOTH_POSITION = /* glsl */ `
+transformed.xz = vec2(transformed.x * clothC + transformed.z * clothS, -transformed.x * clothS + transformed.z * clothC);
+float clothW2 = clothW * clothW;
+transformed.x += uSwayX * clothW2;
+transformed.z += uSwayZ * clothW2;
+transformed.z += uRipple * clothW * 0.028 * sin(uTime * 7.0 + position.y * 15.0 + position.x * 5.0);
+transformed.x += uRipple * clothW * 0.01 * sin(uTime * 5.3 + position.y * 11.0);
+`;
+
+function injectCloth(shader: THREE.WebGLProgramParametersWithUniforms, cloth: Cloth, withNormals: boolean) {
+  Object.assign(shader.uniforms, cloth);
+  shader.vertexShader = shader.vertexShader
+    .replace("#include <common>", `#include <common>\n${CLOTH_VERTEX_PARS}`)
+    .replace("#include <begin_vertex>", `#include <begin_vertex>\n${withNormals ? "" : CLOTH_ANGLE}${CLOTH_POSITION}\nvEdge = aEdge;`);
+  if (withNormals)
+    shader.vertexShader = shader.vertexShader.replace(
+      "#include <beginnormal_vertex>",
+      `#include <beginnormal_vertex>\n${CLOTH_ANGLE}${CLOTH_NORMAL}`,
+    );
+}
+
+/** Fabric: double-sided, so the neckline, hem and cuffs show the inside —
+ *  shaded darker, the way the inside of a garment is. */
+function fabric(map: THREE.Texture, cloth: Cloth) {
   const m = new THREE.MeshPhysicalMaterial({
     map,
     bumpMap: weave(),
@@ -226,11 +289,26 @@ function fabric(map: THREE.Texture) {
     side: THREE.DoubleSide,
   });
   m.onBeforeCompile = (shader) => {
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <map_fragment>",
-      "#include <map_fragment>\n\tif (!gl_FrontFacing) diffuseColor.rgb *= 0.42;",
-    );
+    injectCloth(shader, cloth, true);
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nuniform vec3 uBase;\nvarying float vEdge;")
+      // The knit fades out where the surface turns edge-on (its UVs stretch there).
+      .replace(
+        "#include <bumpmap_pars_fragment>",
+        THREE.ShaderChunk.bumpmap_pars_fragment.replace(/bumpScale \*/g, "bumpScale * (1.0 - clamp(vEdge * 1.5, 0.0, 1.0)) *"),
+      )
+      .replace(
+        "#include <map_fragment>",
+        "#include <map_fragment>\n\tdiffuseColor.rgb = mix(diffuseColor.rgb, uBase, clamp(vEdge, 0.0, 1.0) * 0.9);\n\tif (!gl_FrontFacing) diffuseColor.rgb *= 0.42;",
+      );
   };
+  return m;
+}
+
+/** The shadow pass moves with the cloth too. */
+function clothDepth(cloth: Cloth) {
+  const m = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  m.onBeforeCompile = (shader) => injectCloth(shader, cloth, false);
   return m;
 }
 
@@ -243,6 +321,7 @@ class Spring {
     public target: number,
     private k: number,
     private zeta: number,
+    private eps = 0.02,
   ) {}
   set(t: number, immediate = false) {
     this.target = t;
@@ -258,7 +337,7 @@ class Spring {
     this.x += this.v * dt;
   }
   get settled() {
-    return Math.abs(this.x - this.target) < 0.02 && Math.abs(this.v) < 0.02;
+    return Math.abs(this.x - this.target) < this.eps && Math.abs(this.v) < this.eps;
   }
 }
 
@@ -275,6 +354,23 @@ export class HungPiece {
   private rockZ = new Spring(0, 0, 50, 0.22);
   private drop: Spring;
   private dropDelay = 0;
+  // Cloth: the fabric below the hanger follows the hanger loosely.
+  private lag = new Spring(0, 0, 24, 0.3, 0.002);
+  private swayX = new Spring(0, 0, 20, 0.28, 0.0005);
+  private swayZ = new Spring(0, 0, 20, 0.28, 0.0005);
+  private ripple = 0;
+  private prevTurn: number;
+  private prevX: number;
+  private vTurn = 0;
+  private vX = 0;
+  private cloth: Cloth = {
+    uLag: { value: 0 },
+    uSwayX: { value: 0 },
+    uSwayZ: { value: 0 },
+    uRipple: { value: 0 },
+    uTime: { value: 0 },
+    uBase: { value: new THREE.Color() },
+  };
   /** Extra vertical offset in px (the lab lays pieces out in rows). */
   yOffset = 0;
   ready = false;
@@ -291,6 +387,8 @@ export class HungPiece {
     this.x = new Spring(opts.x, opts.x, 140, 0.9);
     this.turn = new Spring(opts.turn, opts.turn, 110, 0.8);
     this.drop = new Spring(opts.dropIn != null ? 1 : 0, 0, 70, 0.75);
+    this.prevTurn = opts.turn;
+    this.prevX = opts.x;
     this.dropDelay = opts.dropIn ?? 0;
     this.root.add(this.rock);
     this.rock.add(this.swivel);
@@ -314,10 +412,13 @@ export class HungPiece {
     this.rock.add(hook);
     this.swivel.position.copy(swivel);
 
-    const front = fabric(piece.frontMap);
-    const back = fabric(piece.backMap);
+    this.cloth.uBase.value.copy(piece.base);
+    const front = fabric(piece.frontMap, this.cloth);
+    const back = fabric(piece.backMap, this.cloth);
+    const depth = clothDepth(this.cloth);
     for (const part of piece.parts) {
       const mesh = new THREE.Mesh(part.geometry, part.side === "front" ? front : back);
+      mesh.customDepthMaterial = depth;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.garment.add(mesh);
@@ -354,6 +455,29 @@ export class HungPiece {
     this.rockX.step(dt);
     this.rockZ.step(dt);
     if (now >= this.dropDelay) this.drop.step(dt);
+    // Cloth follows the hanger's motion (measured, so a drag or a swipe that
+    // sets the angle directly still makes the fabric swing).
+    if (dt > 0) {
+      const k = Math.min(1, dt * 18);
+      this.vTurn += ((this.turn.x - this.prevTurn) / dt - this.vTurn) * k;
+      this.vX += ((this.x.x - this.prevX) / dt - this.vX) * k;
+      this.prevTurn = this.turn.x;
+      this.prevX = this.x.x;
+      const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v));
+      this.lag.set(clamp(-this.vTurn * 0.0032, 0.55));
+      this.swayX.set(clamp((-this.vX / this.heightPx) * 0.22, 0.12));
+      this.swayZ.set(clamp(-this.rockX.v * 0.035, 0.09));
+      this.lag.step(dt);
+      this.swayX.step(dt);
+      this.swayZ.step(dt);
+      const energy = Math.min(1, Math.abs(this.vTurn) / 260 + Math.abs(this.vX) / 700 + Math.abs(this.rockX.v) * 0.35 + Math.abs(this.lag.v) * 0.5);
+      this.ripple = Math.max(energy, this.ripple * Math.exp(-dt * 1.4));
+      this.cloth.uTime.value += dt;
+    }
+    this.cloth.uLag.value = this.lag.x;
+    this.cloth.uSwayX.value = this.swayX.x;
+    this.cloth.uSwayZ.value = this.swayZ.x;
+    this.cloth.uRipple.value = this.ripple;
     this.root.position.x = this.x.x;
     this.root.position.y = this.stage.railY + this.yOffset + this.drop.x * 22;
     this.swivel.rotation.y = THREE.MathUtils.degToRad(this.turn.x);
@@ -362,7 +486,17 @@ export class HungPiece {
   }
 
   get settled() {
-    return this.x.settled && this.turn.settled && this.rockX.settled && this.rockZ.settled && this.drop.settled;
+    return (
+      this.x.settled &&
+      this.turn.settled &&
+      this.rockX.settled &&
+      this.rockZ.settled &&
+      this.drop.settled &&
+      this.lag.settled &&
+      this.swayX.settled &&
+      this.swayZ.settled &&
+      this.ripple < 0.01
+    );
   }
 }
 

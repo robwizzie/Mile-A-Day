@@ -39,7 +39,36 @@ export function Lab() {
       await Promise.all(pieces.map((p) => p.loaded));
       for (const p of pieces) for (let i = 0; i < 90; i++) p.step(1 / 30, 1e9);
       s.renderNow();
-      const name = new URLSearchParams(window.location.search).get("snap");
+      const q = new URLSearchParams(window.location.search);
+      const name = q.get("snap");
+
+      // ?motion=1: turn every piece to face front, then nudge it, and save a
+      // filmstrip of frames (one row per moment) to judge how the cloth moves.
+      if (q.get("motion") && name) {
+        const times = [0, 0.12, 0.25, 0.4, 0.6, 0.9, 1.4, 2.2];
+        const strip = document.createElement("canvas");
+        const src = s.renderer.domElement;
+        const cellH = src.height / angles.length;
+        strip.width = src.width;
+        strip.height = cellH * times.length;
+        const ctx = strip.getContext("2d")!;
+        ctx.fillStyle = "#f5f5f7";
+        ctx.fillRect(0, 0, strip.width, strip.height);
+        let t = 0;
+        for (const p of pieces) p.turn.set(0);
+        for (let f = 0; f < times.length; f++) {
+          while (t < times[f]) {
+            for (const p of pieces) p.step(1 / 240, 1e9);
+            t += 1 / 240;
+            if (Math.abs(t - 0.9) < 1 / 480) for (const p of pieces) p.kick(1);
+          }
+          s.renderNow();
+          ctx.drawImage(src, 0, 0, src.width, cellH, 0, f * cellH, src.width, cellH);
+        }
+        await fetch("/lab/snap", { method: "POST", body: JSON.stringify({ name, data: strip.toDataURL("image/png") }) });
+        (window as unknown as { __labReady?: boolean }).__labReady = true;
+        return;
+      }
       if (name) {
         const data = canvas.current.toDataURL("image/png");
         await fetch("/lab/snap", { method: "POST", body: JSON.stringify({ name, data }) });
