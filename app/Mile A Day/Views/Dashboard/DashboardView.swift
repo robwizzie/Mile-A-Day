@@ -118,7 +118,7 @@ struct DashboardView: View {
     /// in a pocket. Held here and presented on the next `.active`.
     @State private var trackerDeferredForForeground = false
 
-    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStyle.modern.rawValue
+    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
     @State private var showDashboardStyleChooser = false
     @State private var showInsights = false
 
@@ -646,13 +646,31 @@ struct DashboardView: View {
         return (distance, goal, progress, isCompleted)
     }
 
+    /// The DAY is done: the mile goal, or 10,000 steps. `currentState
+    /// .isCompleted` stays the MILE — it drives the mile celebration and the
+    /// photo prompt, which belong to a workout. This drives what's about the
+    /// streak: the at-risk Live Activity.
+    ///
+    /// Deliberately NOT observed with its own `.onChange` in `body`: one more
+    /// closure on that modifier chain put it past Xcode's "unable to
+    /// type-check this expression in reasonable time" limit (CI's
+    /// `swiftc -typecheck` still passed). A steps finish retires the Live
+    /// Activity from `DailyStepsSyncService.stepGoalDaysChanged` instead.
+    private var dayDone: Bool {
+        ProgressCalculator.isDayComplete(
+            miles: currentState.distance,
+            goal: currentState.goal,
+            stepGoalMet: StepGoalDayStore.isTodayMet()
+        )
+    }
+
     /// Latest persisted in‑progress workout snapshot, if any.
     private var inProgressState: InProgressWorkoutState? {
         InProgressWorkoutStore.load()
     }
 
     private var dashboardStyle: DashboardStyle {
-        DashboardStyle(rawValue: dashboardStyleRaw) ?? .modern
+        DashboardStyle(rawValue: dashboardStyleRaw) ?? DashboardStylePreference.defaultStyle
     }
 
     var body: some View {
@@ -1019,7 +1037,7 @@ struct DashboardView: View {
                         },
                         onDismiss: {
                             DashboardStylePreference.markChosen()
-                            dashboardStyleRaw = DashboardStyle.modern.rawValue
+                            dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
                             withAnimation(.easeInOut(duration: 0.22)) {
                                 showDashboardStyleChooser = false
                             }
@@ -1247,7 +1265,10 @@ struct DashboardView: View {
     private func syncWidgetData() {
         let state = currentState
         WidgetDataStore.save(todayMiles: state.distance, goal: state.goal)
-        WidgetDataStore.save(todaySteps: healthManager.todaysSteps)
+        WidgetDataStore.save(todaySteps: healthManager.todaysSteps, readOn: healthManager.todaysStepsDay)
+        // A day the steps finished: make sure the widgets know (no-op once
+        // they do).
+        StepGoalDayStore.syncWidgetFlag()
         // Before the streak save — that one carries the reload for both.
         WidgetDataStore.save(longestStreak: userManager.currentUser.longestStreak ?? 0)
         WidgetDataStore.save(streak: userManager.currentUser.streak)
@@ -1267,9 +1288,12 @@ struct DashboardView: View {
             byAdding: .day, value: -(weekday - 1), to: calendar.startOfDay(for: today)
         ) else { return [] }
 
+        let stepDays = StepGoalDayStore.goalDayKeys
         return (0..<7).map { offset in
             guard let day = calendar.date(byAdding: .day, value: offset, to: startOfWeek) else { return false }
-            return healthManager.dailyMileGoals[calendar.startOfDay(for: day)] ?? false
+            // A mile day or a 10k-step day.
+            return (healthManager.dailyMileGoals[calendar.startOfDay(for: day)] ?? false)
+                || stepDays.contains(StepGoalDayStore.dayKey(for: day))
         }
     }
 
@@ -1294,7 +1318,8 @@ struct DashboardView: View {
             currentMiles: healthManager.todaysDistance,
             totalMiles: healthManager.totalLifetimeMiles,
             fastestPace: healthManager.fastestMilePace,
-            mostMilesInDay: healthManager.mostMilesInOneDay
+            mostMilesInDay: healthManager.mostMilesInOneDay,
+            stepGoalMet: StepGoalDayStore.isTodayMet()
         )
         syncWidgetData()
     }
@@ -1477,7 +1502,8 @@ struct DashboardView: View {
     }
 
     private func maybePresentDashboardStyleChooser() {
-        guard !DashboardStylePreference.hasChosen,
+        guard DashboardStylePreference.offersChoice,
+              !DashboardStylePreference.hasChosen,
               !showDashboardStyleChooser else { return }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
@@ -1503,7 +1529,7 @@ struct DashboardView: View {
     private func syncStreakRiskActivity() {
         StreakRiskActivityManager.sync(
             isAtRisk: userManager.currentUser.isStreakAtRisk,
-            isCompleted: currentState.isCompleted,
+            isCompleted: dayDone,
             streak: userManager.currentUser.streak,
             goalMiles: currentState.goal,
             currentMiles: currentState.distance

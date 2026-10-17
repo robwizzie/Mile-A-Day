@@ -226,7 +226,8 @@ try {
     holiday_keys: ["halloween", "christmas"],
     signup_date: "2025-06-13",
     look: null, // Flamey's Closet: never saved ⇒ auto
-    owned_item_ids: ["classic", "santa_hat", "pumpkin_suit", "classic_bubble"],
+    // created 2025 ⇒ a Founding Runner, so Mile A Day+ colours are owned too.
+    owned_item_ids: ["classic", "electric", "rose_gold", "obsidian", "tropic", "santa_hat", "pumpkin_suit", "skeleton_suit", "classic_bubble"],
     name: null, // Flamey's name: never set ⇒ "Flamey" (client default)
   });
   check("…and the row itself is still there", r.json?.user_id, FUN_B);

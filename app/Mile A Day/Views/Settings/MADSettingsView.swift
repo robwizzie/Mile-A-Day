@@ -20,10 +20,11 @@ struct MADSettingsView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var friendService: FriendService
     @ObservedObject private var injuryPause = InjuryPauseState.shared
+    @ObservedObject private var plusStore = PlusStore.shared
     @Environment(\.appStateManager) var appStateManager
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStyle.modern.rawValue
+    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStylePreference.defaultStyle.rawValue
     /// Same key the tracking screen's speaker button and the Ghost Race sheet
     /// write, so all three are one switch.
     @AppStorage(GhostCoach.enabledKey) private var coachEnabled = true
@@ -42,7 +43,9 @@ struct MADSettingsView: View {
     @State private var showingDeleteAccountConfirmation = false
     @State private var isDeletingAccount = false
     @State private var deleteAccountErrorMessage: String?
-    @State private var isRecalibratingStreak = false
+    /// Recalibrate's live state. The service owns it, so leaving this page
+    /// and coming back mid-run still shows it running.
+    @ObservedObject private var syncService = WorkoutSyncService.shared
     @State private var recalibrateResultMessage: String?
     @State private var isBackfillingRoutes = false
     @State private var routeBackfillProgress: String?
@@ -67,6 +70,7 @@ struct MADSettingsView: View {
                 HealthAccessBanner {
                     healthAccessLinkActive = true
                 }
+                plusSection
                 yourDaySection
                 notificationsAndPrivacySection
                 healthAndDataSection
@@ -173,28 +177,31 @@ struct MADSettingsView: View {
             }
             .buttonStyle(.plain)
 
-            divider
+            // One style for now, so nothing to pick (`DashboardStylePreference.offered`).
+            if DashboardStylePreference.offersChoice {
+                divider
 
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                MADSettingsRow(
-                    icon: "paintbrush.pointed.fill",
-                    title: "Dashboard Style",
-                    subtitle: selectedStyle.subtitle,
-                    iconColor: .orange
-                )
-                Picker("Dashboard Style", selection: $dashboardStyleRaw) {
-                    ForEach(DashboardStyle.allCases) { style in
-                        Text(style.title).tag(style.rawValue)
+                VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                    MADSettingsRow(
+                        icon: "paintbrush.pointed.fill",
+                        title: "Dashboard Style",
+                        subtitle: selectedStyle.subtitle,
+                        iconColor: .orange
+                    )
+                    Picker("Dashboard Style", selection: $dashboardStyleRaw) {
+                        ForEach(DashboardStylePreference.offered) { style in
+                            Text(style.title).tag(style.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: dashboardStyleRaw) { _, newValue in
+                        DashboardStylePreference.current = DashboardStyle(rawValue: newValue) ?? DashboardStylePreference.defaultStyle
+                        DashboardStylePreference.markChosen()
+                        MADHaptics.tap()
                     }
                 }
-                .pickerStyle(.segmented)
-                .onChange(of: dashboardStyleRaw) { _, newValue in
-                    DashboardStylePreference.current = DashboardStyle(rawValue: newValue) ?? .modern
-                    DashboardStylePreference.markChosen()
-                    MADHaptics.tap()
-                }
+                .padding(.bottom, MADTheme.Spacing.xs)
             }
-            .padding(.bottom, MADTheme.Spacing.xs)
 
             // Flamey lives on the Fun dashboard only, so his Closet does too.
             if selectedStyle == .fun {
@@ -456,14 +463,12 @@ struct MADSettingsView: View {
                     MADSettingsRow(
                         icon: "arrow.triangle.2.circlepath",
                         title: "Recalibrate Streak",
-                        subtitle: isRecalibratingStreak
-                            ? "Re-syncing your workouts…"
-                            : "Fix a streak that looks too low",
+                        subtitle: recalibrateSubtitle,
                         iconColor: .green
                     )
                 }
                 .buttonStyle(.plain)
-                .disabled(isRecalibratingStreak)
+                .disabled(syncService.isRecalibrating)
 
                 divider
 
@@ -486,6 +491,22 @@ struct MADSettingsView: View {
         }
     }
 
+    /// The Recalibrate row's subtitle, counting along while it runs (the
+    /// banner at the bottom says the same thing everywhere else).
+    private var recalibrateSubtitle: String {
+        guard let progress = syncService.recalibration, progress.isRunning else {
+            return "Fix a streak that looks too low"
+        }
+        switch progress.stage {
+        case .uploading where progress.total > 0:
+            return "Re-checked \(progress.checked) of \(progress.total) workouts…"
+        case .recomputing:
+            return "Recounting your streak…"
+        default:
+            return "Re-syncing your workouts…"
+        }
+    }
+
     /// "Español · change in iOS Settings" — the language the app is
     /// currently running in, named in that language.
     private var languageSubtitle: String {
@@ -503,6 +524,29 @@ struct MADSettingsView: View {
         case .unavailable: return "Not available on this device"
         case .granted: return "What Mile A Day reads from Apple Health"
         }
+    }
+
+    // MARK: - Mile A Day+
+
+    private var plusSection: some View {
+        section("MILE A DAY+", icon: "sparkles", iconColor: .orange) {
+            NavigationLink(destination: PlusSettingsView()) {
+                MADSettingsRow(
+                    icon: plusStore.isPlus ? "checkmark.seal.fill" : "sparkles",
+                    title: "Mile A Day+",
+                    subtitle: plusSubtitle,
+                    iconColor: .orange
+                )
+            }
+        }
+    }
+
+    private var plusSubtitle: String {
+        guard let status = plusStore.status, status.is_plus else {
+            return "Faster streak tokens, Flamey looks, gifting"
+        }
+        if status.isFoundingRunner && status.source == "founding" { return "Founding Runner — free for life" }
+        return "Active — manage, gift or restore"
     }
 
     // MARK: - Help
@@ -644,7 +688,7 @@ struct MADSettingsView: View {
     }
 
     private var selectedStyle: DashboardStyle {
-        DashboardStyle(rawValue: dashboardStyleRaw) ?? .modern
+        DashboardStyle(rawValue: dashboardStyleRaw) ?? DashboardStylePreference.defaultStyle
     }
 
     private var versionFooter: some View {
@@ -680,9 +724,7 @@ struct MADSettingsView: View {
     /// truth, so this only ever fills server gaps — it can't shorten a
     /// legitimately broken streak.
     private func recalibrateStreak() async {
-        guard !isRecalibratingStreak else { return }
-        isRecalibratingStreak = true
-        defer { isRecalibratingStreak = false }
+        guard !syncService.isRecalibrating else { return }
 
         do {
             let outcome = try await WorkoutSyncService.shared.recalibrateStreak(
@@ -699,17 +741,12 @@ struct MADSettingsView: View {
                 message += " " + medals
             }
             recalibrateResultMessage = message
+        } catch SyncError.alreadyRunning {
+            return
         } catch {
             recalibrateResultMessage =
                 "We couldn't finish recalibrating right now. Please check your connection and try again."
         }
-
-        // Steps live in a separate daily_steps table that only ever finalizes
-        // today (and yesterday once at rollover), so a day left partial by a
-        // late Watch sync is never revisited. Re-post the recent window; the
-        // backend keeps the GREATEST, so this back-corrects a stale day and
-        // never lowers a good one. Best-effort and independent of the result.
-        await DailyStepsSyncService.shared.backfillRecentDays(30)
     }
 
     /// Every past workout with a route in HealthKit but no map on the server,

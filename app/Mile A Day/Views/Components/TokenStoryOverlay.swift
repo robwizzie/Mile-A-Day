@@ -42,13 +42,17 @@ struct TokenStoryOverlay: View {
     }
 
     private var footnote: String {
+        // The meters' own targets (Mile A Day+ fills them faster).
+        let payload = StreakTokensState.shared.payload
+        let ddDays = payload.map { Int($0.double_down.target.rounded()) } ?? 14
+        let saveDays = payload.map { Int($0.streak_save.target.rounded()) } ?? 7
         switch event.kind {
         case "double_down_recover":
-            return "That's the comeback. 14 more active days earns the next Double Down."
+            return "That's the comeback. \(ddDays) more active days earns the next Double Down."
         case "streak_assist":
             return "Someone spent 20 hard-earned over-goal miles on you. Send them some love."
         default:
-            return "Your Streak Save was spent — 7 run days earns the next one."
+            return "Your Streak Save was spent — \(saveDays) run days (or \(saveDays * 2) walk days) earns the next one."
         }
     }
 

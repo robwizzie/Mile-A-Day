@@ -4,8 +4,9 @@ import { Flame, CircleArrowUp, Target, Zap, Flag, Trophy, Timer, Footprints, Cro
 import { ProfileAvatar } from "@/components/profile-avatar"
 import { usePublicUser } from "@/lib/public-user"
 
-// Competition types — names, icons, gradients, and descriptions mirror the
-// app's CompetitionType enum exactly (Models/Competition.swift). The cards
+// Competition types — names, icons, gradients, taglines and rules mirror the
+// app's CompetitionType enum exactly (Models/Competition.swift: tagline +
+// howItWorks, the copy the Compete tab's mode gallery and explainer show). The cards
 // mirror the app's type picker (CompetitionTypeCard): gradient-tinted icon
 // in a soft circle, type name, then the description.
 const competitions = [
@@ -13,31 +14,36 @@ const competitions = [
     icon: Flame,
     name: "Streaks",
     gradient: ["#FF6B6B", "#FF8E53"],
-    description: "Hold a running streak as long as you can. First to break the streak loses.",
+    tagline: "Last one standing.",
+    description: "Everyone has to hit the same daily goal. Miss a day and you spend one of your lives. Run out of lives and you're out. Last one alive wins.",
   },
   {
     icon: CircleArrowUp,
     name: "Apex",
     gradient: ["#4ECDC4", "#44A08D"],
-    description: "Over a period of time (ex: 1 week) whoever has the most distance during that time wins.",
+    tagline: "Most miles wins.",
+    description: "Run and walk as normal for the set window. Every counted mile adds to your total. Highest total when the clock runs out wins.",
   },
   {
     icon: Target,
     name: "Targets",
     gradient: ["#F7971E", "#FFD200"],
-    description: "Anyone who completes the goal in a given day gets a point. Whoever has the most points at the end of the period wins.",
+    tagline: "Hit your goal, bank a point.",
+    description: "A goal is set for each day. Everyone who hits it that day banks a point. Most points at the end wins — you're racing the goal, not each other.",
   },
   {
     icon: Zap,
     name: "Clash",
     gradient: ["#C33764", "#1D2671"],
-    description: "Whoever goes the furthest each day wins a point. First to reach the target score or most points at the end wins.",
+    tagline: "Win the day, take the point.",
+    description: "Every day is its own mini-contest. Whoever goes furthest that day takes the point. First to the target score wins — or most points when time's up.",
   },
   {
     icon: Flag,
     name: "Race",
     gradient: ["#667EEA", "#764BA2"],
-    description: "There is a distance goal set and whoever gets there first wins.",
+    tagline: "First to the finish line.",
+    description: "One distance is set as the finish line. Every mile you log moves you toward it. First person there wins. No clock, no daily goals.",
   },
 ]
 
@@ -64,13 +70,13 @@ const leaderboardPeriods = ["Today", "Week", "Month", "Year", "All-Time"]
 // illustrative for the leaderboard demo; per-day miles aren't exposed publicly.
 // Podium order matches the app: 2nd · 1st · 3rd, 1st elevated with a crown.
 const podium = [
-  { name: "David", username: "dave", initials: "DS", value: "13.8 mi", rank: 1, size: 56 },
-  { name: "Rob", username: "rob", initials: "RW", value: "14.2 mi", rank: 0, size: 68, isYou: true },
-  { name: "Megs", username: "MegsMiles", initials: "MM", value: "11.4 mi", rank: 2, size: 52 },
+  { name: "@dave", username: "dave", initials: "DS", value: "13.8 mi", rank: 1, size: 56 },
+  { name: "@rob", username: "rob", initials: "RW", value: "14.2 mi", rank: 0, size: 68, isYou: true },
+  { name: "@MegsMiles", username: "MegsMiles", initials: "MM", value: "11.4 mi", rank: 2, size: 52 },
 ]
 const leaderboardRows = [
-  { rank: 4, name: "Aaron", username: "Aaron", initials: "AA", value: "8.9 mi" },
-  { rank: 5, name: "MAD", username: "mad", initials: "M", value: "7.4 mi" },
+  { rank: 4, name: "@Aaron", username: "Aaron", initials: "AA", value: "8.9 mi" },
+  { rank: 5, name: "@mad", username: "mad", initials: "M", value: "7.4 mi" },
 ]
 
 /** A rank-4+ leaderboard row with the user's real photo and live streak. */
@@ -108,7 +114,7 @@ export function CompetitionsSection() {
             GO THE EXTRA MILE
           </h2>
           <p className="reveal reveal-delay-2 mt-4 text-base leading-relaxed text-[#a0a0a0]">
-            Five competition modes that turn your daily mile into something you can&apos;t afford to skip.
+            Five competition modes, solo or in teams, that turn your daily mile into something you can&apos;t afford to skip.
           </p>
         </div>
 
@@ -133,6 +139,7 @@ export function CompetitionsSection() {
               </div>
 
               <h3 className="font-heading mt-4 text-[24px] tracking-[1px] text-white">{comp.name}</h3>
+              <p className="mt-0.5 text-[15px] font-semibold" style={{ color: comp.gradient[0] }}>{comp.tagline}</p>
 
               <p className="mt-2 text-[15px] leading-relaxed text-white/70">{comp.description}</p>
 
@@ -152,6 +159,7 @@ export function CompetitionsSection() {
             <Trophy className="h-5 w-5" style={{ color: MAD_RED }} />
             <h3 className="font-heading text-[28px] tracking-[2px] text-[#f5f5f5]">LEADERBOARDS</h3>
           </div>
+          <p className="-mt-5 mb-6 text-center text-sm text-[#a0a0a0]">Every friend, ranked — in the Friends tab, any day of the week.</p>
 
           <div
             className="rounded-[20px] overflow-hidden border border-white/[0.08] p-5"

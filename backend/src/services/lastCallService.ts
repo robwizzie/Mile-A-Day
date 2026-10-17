@@ -2,6 +2,8 @@ import { PostgresService } from "./DbService.js";
 import { isUserInQuietHours, sendPush } from "./pushNotificationService.js";
 import { refreshCurrentStreak } from "./leaderboardService.js";
 import { DAILY_GOAL_TOLERANCE } from "./workoutService.js";
+import { stepGoalMetSql } from "./streakFeatureCore.js";
+import { monthlyFlamesStatus } from "./monthlyFlames.js";
 
 const db = PostgresService.getInstance();
 
@@ -86,7 +88,9 @@ export async function lastCallCandidates(
 			  WHERE w.user_id = l.user_id
 			    AND w.local_date = l.local_now::date
 			    AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL), 0)
-		      < l.goal_miles * $3`,
+		      < l.goal_miles * $3
+		  -- 10k steps finished the day too (STREAK_QUALIFYING_STEPS).
+		  AND NOT ${stepGoalMetSql("l.user_id", "l.local_now::date")}`,
     [at.toISOString(), LAST_CALL_LOCAL_HOUR, DAILY_GOAL_TOLERANCE],
   );
   return rows.map((r) => ({
@@ -98,18 +102,70 @@ export async function lastCallCandidates(
   }));
 }
 
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/** A perfect month still alive tonight: what a miss would cost on top. */
+export interface PerfectMonthAtStake {
+  month: number;
+  /** The Monthly Flame's name, e.g. "Jack-o'-Lantern". */
+  flameName: string;
+}
+
 /** Short, specific, and about what's at stake — never about how late it is. */
-export function lastCallCopy(streak: number): { title: string; body: string } {
+export function lastCallCopy(
+  streak: number,
+  perfectMonth: PerfectMonthAtStake | null = null,
+): { title: string; body: string } {
+  if (perfectMonth && streak > 1) {
+    const month = MONTH_NAMES[perfectMonth.month - 1];
+    return {
+      title: `Last call: ${streak}-day streak on the line`,
+      body: `Miss today and your perfect ${month} ends — and the ${perfectMonth.flameName} Flamey with it. A mile or 10,000 steps keeps both.`,
+    };
+  }
   if (streak <= 1) {
     return {
       title: "Last call for today's mile",
-      body: "Two hours to midnight. One mile makes it a 2-day streak.",
+      body: "Two hours to midnight. A mile or 10,000 steps makes it a 2-day streak.",
     };
   }
   return {
     title: `Last call: ${streak}-day streak on the line`,
-    body: "Two hours to midnight and today's mile isn't in. One mile keeps it.",
+    body: "Two hours to midnight and today's goal isn't in. A mile or 10,000 steps keeps it.",
   };
+}
+
+/**
+ * Off until the app version with Monthly Flames is on the App Store: people
+ * on the build before it have never seen a Monthly Flame, so naming one in
+ * their last call would only confuse them. Flip to true with that release.
+ */
+const NAME_MONTHLY_FLAME_IN_LAST_CALL = false;
+
+/**
+ * Fun-dashboard users (the ones who see Flamey) whose month is still perfect
+ * from the 1st — at least two days in, so it's a run worth naming — get the
+ * Monthly Flame named in their last call. Never throws: a failed read just
+ * means the ordinary copy.
+ */
+async function perfectMonthAtStake(userId: string): Promise<PerfectMonthAtStake | null> {
+  try {
+    const rows = await db.query<{ fun: boolean }>(
+      `SELECT (dashboard_style = 'fun') AS fun FROM users WHERE user_id = $1`,
+      [userId],
+    );
+    if (rows[0]?.fun !== true) return null;
+    const { current, months } = await monthlyFlamesStatus(userId);
+    if (!current.still_perfect || current.today_done || current.day_of_month < 3) return null;
+    // Already earned in an earlier year: the form isn't at stake, just pride.
+    if (months.find((m) => m.month === current.month)?.earned) return null;
+    return { month: current.month, flameName: current.name };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -138,7 +194,10 @@ export async function sendPendingLastCalls(
       if (streak <= 0) continue;
       if (await isUserInQuietHours(c.user_id)) continue;
       await sendPush(c.user_id, {
-        ...lastCallCopy(streak),
+        ...lastCallCopy(
+          streak,
+          NAME_MONTHLY_FLAME_IN_LAST_CALL ? await perfectMonthAtStake(c.user_id) : null,
+        ),
         type: "streak_last_call",
         // Strings only: shipped inboxes decode `data` as [String: String].
         data: {

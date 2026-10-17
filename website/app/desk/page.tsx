@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { DeskShowcase } from "@/components/desk/desk-showcase";
 
 export const metadata: Metadata = {
-  title: "Mile A Day Desk - your streak, live on your desk",
+  title: { absolute: "Mile A Day Desk - your streak, live on your desk" },
   description:
     "A little LED box that runs on real Mile A Day data: your mile, your streak, friends out running, and a party for every new member. Watch it live.",
   alternates: { canonical: "/desk" },

@@ -17,6 +17,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # "Run workflow" on the Actions tab: always type-checks, no diff needed.
+  workflow_dispatch:
 
 jobs:
   typecheck:
@@ -31,20 +33,41 @@ jobs:
           fetch-depth: 0
       - name: Check for iOS changes
         id: changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
         run: |
           # On a PR, compare against the base branch. On a push to main, HEAD is
           # ALREADY the branch being compared, so `origin/main...HEAD` is empty
           # and the check skipped itself on every merge — main, the branch that
-          # deploys, was the one place this never ran. HEAD^ is the merge
-          # commit's first parent, i.e. main before the merge, so the diff is
-          # the whole of what just landed.
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            RANGE="origin/${{ github.base_ref }}...HEAD"
+          # deploys, was the one place this never ran.
+          #
+          # A push compares against `before`, main as it stood before the push,
+          # so the diff is EVERYTHING that landed. It used to be `HEAD^`, which
+          # only sees the last commit: a direct push of an iOS commit followed by
+          # a backend one skipped the type-check with Swift on main unchecked
+          # (7283f8b0). For a merged PR `before` is the merge's first parent, the
+          # same range as before. No usable `before` (a force push dropped it,
+          # or a new branch's all-zero sha): type-check rather than guess.
+          #
+          # This file counts as an iOS change, so editing the check proves it
+          # still runs.
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "Manual run"
+            echo "ios=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          elif [ "$EVENT" = "pull_request" ]; then
+            RANGE="origin/$BASE_REF...HEAD"
+          elif git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            RANGE="$BEFORE HEAD"
           else
-            RANGE="HEAD^ HEAD"
+            echo "No usable push base ('$BEFORE') — type-checking everything"
+            echo "ios=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           echo "Diffing $RANGE"
-          if git diff --name-only $RANGE -- 'app/**' | grep -q .; then
+          if git diff --name-only $RANGE -- 'app/**' '.github/workflows/ios.yml' | grep -q .; then
             echo "ios=true" >> "$GITHUB_OUTPUT"
           else
             echo "ios=false" >> "$GITHUB_OUTPUT"

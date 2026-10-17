@@ -7,10 +7,10 @@ import { useState } from "react";
 // NOT a secret — Apple client IDs travel in every sign-in request by design,
 // so a code default is safe and spares the hosting-dashboard env-var dance.
 // An env var still wins when set (e.g. a staging Services ID).
-const CLIENT_ID =
+export const CLIENT_ID =
   process.env.NEXT_PUBLIC_APPLE_WEB_CLIENT_ID ||
   "org.robertwiscount.Mile-A-Day.web";
-const REDIRECT_URI =
+export const REDIRECT_URI =
   process.env.NEXT_PUBLIC_APPLE_WEB_REDIRECT_URI ||
   "https://mileaday.run/admin";
 

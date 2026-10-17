@@ -1,12 +1,12 @@
 "use client";
 
 import { useRef, useCallback } from "react";
-import { Flame, Bell, Share2, Check, ChevronRight } from "lucide-react";
+import Image from "next/image";
+import { Flame, Bell, Check, ChevronRight } from "lucide-react";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { usePublicUser } from "@/lib/public-user";
 
 // App palette (MADTheme): madRed #D94059, success #33B34D, warning #FF9900.
-const MAD_RED = "#D94059";
 const SUCCESS_GREEN = "#33B34D";
 const NUDGE_ORANGE = "#FF9900";
 
@@ -22,7 +22,7 @@ const cheerFriends = [
     avatar: "AA",
   },
   {
-    name: "Megs",
+    name: "MegsMiles",
     username: "MegsMiles",
     progress: 0.2,
     milesToday: 0.2,
@@ -31,8 +31,8 @@ const cheerFriends = [
 ];
 
 const doneFriends = [
-  { name: "David", username: "dave", milesToday: 1.3, avatar: "DS" },
-  { name: "MAD", username: "mad", milesToday: 1.0, avatar: "M" },
+  { name: "dave", username: "dave", milesToday: 1.3, avatar: "DS" },
+  { name: "mad", username: "mad", milesToday: 1.0, avatar: "M" },
 ];
 
 /** Avatar with progress ring — mirrors the app's AvatarWithRing component:
@@ -256,122 +256,27 @@ export function SocialSection() {
             FLEX ON YOUR FRIENDS
           </h2>
           <p className="reveal reveal-delay-2 mt-4 text-base leading-relaxed text-[#a0a0a0]">
-            See who&apos;s slacking. Nudge them. Hype the ones who showed up. Or
-            flex your streak and let them know who does this every single day.
+            See who&apos;s slacking. Nudge them. Hype the ones who showed up on the feed. Or
+            share your streak straight to Instagram Stories and let them know who
+            does this every single day.
           </p>
         </div>
 
         <div className="grid gap-10 lg:grid-cols-2 lg:items-start">
-          {/* Left: Streak share card — matches app's goal-completed celebration */}
-          <div className="reveal-left">
+          {/* Left: the app's real share studio on the Streak card (capture,
+              Oct 2026). It used to be a drawn card with a week calendar,
+              pace and calories that no screen in the app has ever shown. */}
+          <div className="reveal-left flex justify-center">
             <TiltCard>
-              <div
-                className="rounded-[20px] overflow-hidden border border-white/[0.08]"
-                style={{
-                  background:
-                    "linear-gradient(180deg, rgba(217,64,89,0.15) 0%, rgba(10,10,10,0.95) 50%)",
-                }}
-              >
-                {/* Celebration header */}
-                <div className="relative px-6 pt-8 pb-4 text-center overflow-hidden">
-                  {/* Glow */}
-                  <div className="absolute inset-0 flex items-start justify-center">
-                    <div
-                      className="h-32 w-32 rounded-full opacity-20 blur-3xl"
-                      style={{ background: MAD_RED }}
-                    />
-                  </div>
-                  {/* Flame */}
-                  <div className="relative mb-3 inline-flex h-16 w-16 items-center justify-center">
-                    <Flame
-                      className="h-12 w-12 drop-shadow-[0_0_15px_rgba(217,64,89,0.6)]"
-                      style={{ color: MAD_RED }}
-                    />
-                  </div>
-                  <div className="relative font-heading text-[64px] leading-none text-white">
-                    288
-                  </div>
-                  <div className="relative font-heading text-[22px] tracking-[1px] text-white/80">
-                    day streak!
-                  </div>
-                </div>
-
-                {/* Week calendar — every past day completed (the streak is alive) */}
-                <div className="flex justify-center gap-2.5 px-6 py-4">
-                  {["S", "M", "T", "W", "T", "F", "S"].map((day, i) => {
-                    const isToday = i === 4;
-                    const isPast = i < 4;
-                    return (
-                      <div
-                        key={`${day}-${i}`}
-                        className="flex flex-col items-center gap-1"
-                      >
-                        <span className="text-[10px] font-bold text-white/40">
-                          {day}
-                        </span>
-                        <div
-                          className="flex h-9 w-9 items-center justify-center rounded-full"
-                          style={
-                            isToday
-                              ? {
-                                  background: MAD_RED,
-                                  boxShadow: "0 0 12px rgba(217,64,89,0.5)",
-                                }
-                              : isPast
-                                ? {
-                                    border: `1px solid ${SUCCESS_GREEN}66`,
-                                    background: `${SUCCESS_GREEN}1A`,
-                                  }
-                                : { border: "1px solid rgba(255,255,255,0.1)" }
-                          }
-                        >
-                          {isToday ? (
-                            <Flame className="h-4 w-4 text-white" />
-                          ) : isPast ? (
-                            <Check
-                              className="h-4 w-4"
-                              style={{ color: SUCCESS_GREEN }}
-                            />
-                          ) : null}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Stats row */}
-                <div className="flex justify-center gap-4 px-6 pb-4">
-                  {[
-                    { label: "Distance", value: "1.12 mi" },
-                    { label: "Pace", value: "7:42/mi" },
-                    { label: "Calories", value: "142" },
-                  ].map((stat) => (
-                    <div
-                      key={stat.label}
-                      className="rounded-xl bg-white/[0.04] border border-white/[0.06] px-3 py-2 text-center"
-                    >
-                      <div className="text-xs font-semibold text-white">
-                        {stat.value}
-                      </div>
-                      <div className="text-[9px] text-white/40 uppercase tracking-wider">
-                        {stat.label}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Share button */}
-                <div className="px-6 pb-6">
-                  <div
-                    className="flex items-center justify-center gap-2 rounded-2xl py-3 cursor-default"
-                    style={{ background: MAD_RED }}
-                  >
-                    <Share2 className="h-4 w-4 text-white" />
-                    <span className="text-sm font-semibold text-white">
-                      Share Your Streak
-                    </span>
-                  </div>
-                </div>
+              <div className="iphone-frame relative w-[260px] sm:w-[290px]">
+                <Image
+                  src="/images/share-streak.png"
+                  alt="Mile A Day share studio showing a 511 day streak card ready for Instagram Stories"
+                  width={776}
+                  height={1680}
+                  sizes="290px"
+                  className="block h-auto w-full"
+                />
               </div>
             </TiltCard>
           </div>
@@ -397,27 +302,6 @@ export function SocialSection() {
               ))}
             </div>
 
-            {/* Flex hint */}
-            <div
-              className="flex items-center gap-2 rounded-[16px] px-4 py-3"
-              style={{
-                border: `1px solid ${MAD_RED}33`,
-                background: `${MAD_RED}0F`,
-              }}
-            >
-              <Flame className="h-4 w-4" style={{ color: MAD_RED }} />
-              <span className="flex-1 text-sm text-white/50">
-                Tap a friend to{" "}
-                <span className="font-semibold" style={{ color: MAD_RED }}>
-                  flex your streak
-                </span>{" "}
-                on them
-              </span>
-              <ChevronRight
-                className="h-4 w-4"
-                style={{ color: `${MAD_RED}80` }}
-              />
-            </div>
           </div>
         </div>
       </div>

@@ -447,7 +447,7 @@ struct FlameBuddyView: View {
             gaze: gaze,
             asleep: mood?.eyesShut ?? false,
             grounded: grounded,
-            palette: look.flatMap { FlameyPalette.palette(for: $0.color) },
+            palette: look.flatMap { $0.figurePalette },
             lift: liftFraction,
             legLength: look?.standLift ?? 0
         )

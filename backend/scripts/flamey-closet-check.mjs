@@ -133,7 +133,7 @@ try {
     (await db.query(`SELECT badge_id FROM badges WHERE badge_id = ANY($1)`, [needed])).map((r) => r.badge_id),
   );
   check("every unlocking badge id exists", needed.filter((id) => !present.has(id)), []);
-  check("113 items", FLAMEY_CATALOG.size, 113);
+  check("130 items", FLAMEY_CATALOG.size, 130);
   check(
     "every slot has items",
     FLAMEY_SLOTS.filter((s) => ![...FLAMEY_CATALOG.values()].some((i) => i.slot === s)),

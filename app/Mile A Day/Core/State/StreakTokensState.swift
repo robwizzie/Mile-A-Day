@@ -88,8 +88,13 @@ final class StreakTokensState: ObservableObject {
             if d > 0 { gains["double_down"] = "+\(d) day\(d == 1 ? "" : "s")" }
         }
         if !new.streak_save.held {
-            let d = Int(new.streak_save.progress) - Int(old.streak_save.progress)
-            if d > 0 { gains["streak_save"] = "+\(d) run day\(d == 1 ? "" : "s")" }
+            // Walk days add ½, so the delta can be fractional.
+            let d = new.streak_save.progress - old.streak_save.progress
+            if d > 0.01 {
+                gains["streak_save"] = d == 0.5
+                    ? "+½ run day"
+                    : "+\(StreakTokenMeter.number(d)) run day\(d == 1 ? "" : "s")"
+            }
         }
         // No Assist chip: its meter is a calendar now, so it would fire a
         // "+1 day" every single day for a number the countdown already shows.

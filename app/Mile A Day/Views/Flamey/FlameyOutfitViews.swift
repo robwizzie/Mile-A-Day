@@ -719,7 +719,7 @@ struct FlameyNameEditor: View {
         var mood = FlameMood(kind: .ready, streak: 0)
         mood.pokeQuip = "Call me \(name)!"
         let look = model.look(for: model.savedChoice)
-        let glow = FlameyPalette.palette(for: look.color)?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
+        let glow = look.figurePalette?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
         return ZStack(alignment: .bottom) {
             Ellipse()
                 .fill(RadialGradient(colors: [glow.opacity(0.35), .clear], center: .center, startRadius: 1, endRadius: 70))
@@ -1445,7 +1445,7 @@ struct FlameyOutfitsSheet: View {
     }
 
     private func glow(_ look: FlameyLook) -> Color {
-        FlameyPalette.palette(for: look.color)?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
+        look.figurePalette?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
     }
 }
 
@@ -1508,7 +1508,7 @@ struct FlameyOutfitNamePreview: View {
     let look: FlameyLook
 
     var body: some View {
-        let glow = FlameyPalette.palette(for: look.color)?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
+        let glow = look.figurePalette?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
         return ZStack(alignment: .bottom) {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(RadialGradient(colors: [glow.opacity(0.26), Color.white.opacity(0.03)],

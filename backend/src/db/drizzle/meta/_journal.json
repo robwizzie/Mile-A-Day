@@ -673,6 +673,34 @@
       "when": 1791688065229,
       "tag": "0095_desk_push",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1791748542808,
+      "tag": "0096_mcp_connector",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1791783627434,
+      "tag": "0097_desk_push_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1791938662334,
+      "tag": "0098_route_walked_steps",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1792030246298,
+      "tag": "0099_plus_purchases",
+      "breakpoints": true
     }
   ]
 }

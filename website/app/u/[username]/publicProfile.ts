@@ -13,6 +13,22 @@ export type PublicProfile = {
   bio: string | null;
   profile_image_url: string | null;
   current_streak: number;
+  // Additive (backend publicProfileService). Absent on an older API — every
+  // reader treats missing exactly like null.
+  profile_banner_style?: string | null;
+  profile_banner_url?: string | null;
+  /** null = a 'private' account withholds it (never a zero). */
+  total_miles?: number | null;
+  friend_count?: number | null;
+  medals?: PublicMedal[] | null;
+};
+
+export type PublicMedal = {
+  badge_id: string;
+  name: string;
+  icon: string;
+  rarity: string;
+  category: string;
 };
 
 export async function getPublicProfile(
@@ -46,11 +62,45 @@ export function profileInitials(profile: PublicProfile): string {
     .toUpperCase();
 }
 
-/** Absolute avatar URL; a stored absolute URL is passed through, not re-prefixed. */
-export function profileAvatarURL(profile: PublicProfile): string | null {
-  const path = profile.profile_image_url;
+function absoluteUploadURL(path: string | null | undefined): string | null {
   if (!path) return null;
   return /^https?:\/\//.test(path) ? path : `${API_URL}${path}`;
+}
+
+/** Absolute avatar URL; a stored absolute URL is passed through, not re-prefixed. */
+export function profileAvatarURL(profile: PublicProfile): string | null {
+  return absoluteUploadURL(profile.profile_image_url);
+}
+
+/** Absolute uploaded-banner URL (served unsigned, like avatars). */
+export function profileBannerURL(profile: PublicProfile): string | null {
+  return absoluteUploadURL(profile.profile_banner_url);
+}
+
+// The app's ProfileBannerStyle presets (Views/Profile/ProfileHero.swift):
+// two MADTheme stops each, drawn as [a, b·0.9, b·0.32] top-leading →
+// bottom-trailing over black. Unknown or absent ⇒ ember, like
+// `ProfileBannerStyle.resolve`.
+const BANNER_STOPS: Record<string, [string, string]> = {
+  ember: ["230,77,102", "217,64,89"], // redGradient → madRed
+  sunrise: ["255,153,0", "217,64,89"], // warning → madRed
+  sky: ["64,153,242", "64,153,242"], // walkBlue
+  trail: ["51,179,77", "51,179,77"], // success
+  ghost: ["107,79,217", "61,46,140"], // the "beat the ghost" chip
+  night: ["38,38,38", "13,13,13"], // blackGradient
+};
+
+/** The preset as a CSS gradient image — lay it over black, as the app does. */
+export function bannerGradient(style: string | null | undefined): string {
+  const [a, b] = BANNER_STOPS[style ?? ""] ?? BANNER_STOPS.ember;
+  return `linear-gradient(135deg, rgb(${a}), rgba(${b},0.9), rgba(${b},0.32))`;
+}
+
+/** The Miles tile's figure: whole miles from 100, one decimal below (ProfileStatTiles). */
+export function formatMiles(miles: number): string {
+  return miles >= 100
+    ? Math.round(miles).toLocaleString("en-US")
+    : (Math.floor(miles * 10) / 10).toFixed(1);
 }
 
 /** Zero is not a badge; a missing value is not a zero. */

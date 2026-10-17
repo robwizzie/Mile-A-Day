@@ -37,6 +37,11 @@ const PUSH_HOSTS = [
   /(^|\.)notify\.windows\.com$/,
 ];
 const MAX_FAILURES = 10;
+/** Kinds whose event has no table of its own: logged on send so the remote's
+ *  Activity shows them (doodles, messages, signups and desk interest already
+ *  come from their own tables there). */
+const LOGGED_KINDS: DeskPushKind[] = ["review", "record", "lead", "box_offline"];
+const LOG_DAYS = 30;
 
 export interface PushPayload { title: string; body: string; url?: string; tag?: string }
 export interface WebPushSubscription { endpoint: string; keys: { p256dh: string; auth: string } }
@@ -137,6 +142,13 @@ export async function listSubscriptions(userId: string) {
 /** Send to every subscription of `userIds` that wants `kind`. Dead ones are dropped. */
 export async function pushTo(userIds: string[], kind: DeskPushKind, payload: PushPayload): Promise<number> {
   if (!pushConfigured() || userIds.length === 0) return 0;
+  if (LOGGED_KINDS.includes(kind)) {
+    const text = [payload.title, payload.body].filter(Boolean).join(" · ").slice(0, 300);
+    await db.query(
+      `INSERT INTO desk_push_log (user_id, kind, text) SELECT u, $2, $3 FROM unnest($1::text[]) AS u`,
+      [[...new Set(userIds)], kind, text],
+    );
+  }
   const subs = await db.query<{ id: string; endpoint: string; p256dh: string; auth: string }>(
     `SELECT id, endpoint, p256dh, auth FROM desk_push_subscriptions
       WHERE user_id = ANY($1::text[]) AND ($2 = 'test' OR $2 = ANY(kinds))`,
@@ -167,6 +179,11 @@ export async function pushTo(userIds: string[], kind: DeskPushKind, payload: Pus
 export async function pushToAdmins(kind: DeskPushKind, payload: PushPayload): Promise<number> {
   const admins = await db.query<{ user_id: string }>(`SELECT user_id FROM users WHERE role = 'admin'`);
   return pushTo(admins.map((a) => a.user_id), kind, payload);
+}
+
+/** Drop log rows older than the Activity window needs. */
+export async function pruneDeskPushLog() {
+  await db.query(`DELETE FROM desk_push_log WHERE created_at < NOW() - INTERVAL '${LOG_DAYS} days'`);
 }
 
 // ─── the poller's memory ──────────────────────────────────────────────────

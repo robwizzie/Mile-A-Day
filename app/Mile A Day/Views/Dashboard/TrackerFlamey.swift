@@ -27,7 +27,7 @@ struct TrackerFlameyBuddy: View {
     let progress: Double
     var size: CGFloat = 62
 
-    @AppStorage(DashboardStylePreference.key) private var style = DashboardStyle.modern.rawValue
+    @AppStorage(DashboardStylePreference.key) private var style = DashboardStylePreference.defaultStyle.rawValue
 
     var body: some View {
         if style == DashboardStyle.fun.rawValue {

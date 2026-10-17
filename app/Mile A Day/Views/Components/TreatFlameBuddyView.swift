@@ -110,7 +110,7 @@ struct TreatFlameBuddyView: View {
     private var dressed: FlameyLook? {
         look?.trimmed(removing: [.held, .trail, .companion, .aura])
     }
-    private var palette: FlameyPalette? { dressed.flatMap { FlameyPalette.palette(for: $0.color) } }
+    private var palette: FlameyPalette? { dressed.flatMap { $0.figurePalette } }
     /// How far his legs raise his body, in points of this view.
     private var liftPoints: CGFloat { (dressed?.bodyLift ?? 0) * scale * figureSize }
     /// Legs are extra height the scene wasn't laid out for: the whole group

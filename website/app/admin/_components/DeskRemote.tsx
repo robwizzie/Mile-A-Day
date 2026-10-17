@@ -88,6 +88,7 @@ const STYLE_INFO: Record<string, string> = {
 const ACTIVITY_ICON: Record<string, string> = {
   nudge: "👉", hype: "👏", message_in: "💬", message_out: "📤", medal: "🏅",
   run: "✅", friend_run: "🏃", friend_mile: "🎉", remote: "📱", doodle_in: "🎨", doodle_out: "🖌️",
+  new_user: "🙋", interest: "📦", review: "⭐", record: "📈", lead: "👑", box_offline: "🔌",
 };
 const MESSAGE_MAX = 48;
 const EMOJI = ["🔥", "❤️", "👏", "🏃"];

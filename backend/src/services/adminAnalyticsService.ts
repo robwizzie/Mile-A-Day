@@ -25,7 +25,14 @@
  */
 
 import { PostgresService } from "./DbService.js";
-import { FLYOVER_PLAY_FEATURE } from "./telemetryService.js";
+import {
+  FLYOVER_PLAY_FEATURE,
+  PLUS_PAYWALL_CLOSET_FEATURE,
+  PLUS_PAYWALL_FLAMEY_FEATURE,
+  PLUS_PAYWALL_STREAK_FEATURE,
+  PLUS_STREAK_CARD_SHOWN_FEATURE,
+  PLUS_STREAK_CARD_TAPPED_FEATURE,
+} from "./telemetryService.js";
 import { getSignatureRows } from "./diagnosticsService.js";
 import { PERSON_REFERRAL_SOURCES, referralHandleSql } from "./userService.js";
 import {
@@ -36,10 +43,12 @@ import {
 import {
   DOUBLE_DOWN_TARGET_DAYS,
   STREAK_SAVE_TARGET_RUN_DAYS,
+  STREAK_SAVE_WALK_DAY_CREDIT,
   STREAK_ASSIST_TARGET_DAYS,
   ENROLL_LOOKBACK_DAYS,
   METER_WINDOW_DAYS,
 } from "./streakFeatureService.js";
+import { stepGoalMetSql } from "./streakFeatureCore.js";
 
 const db = PostgresService.getInstance();
 
@@ -391,7 +400,7 @@ async function loadStreakTokenStats(): Promise<StreakTokenStats> {
       )
       SELECT COUNT(*)::int AS enrolled,
              COUNT(*) FILTER (WHERE dd.n >= $1::int)::int AS double_down,
-             COUNT(*) FILTER (WHERE sv.n >= $2::int)::int AS streak_save,
+             COUNT(*) FILTER (WHERE sv.n >= $2::numeric)::int AS streak_save,
              COUNT(*) FILTER (WHERE e.streak_assist_last_used IS NULL
                OR (${TODAY_ET_DATE_SQL} - e.streak_assist_last_used) >= $3::int)::int AS streak_assist
       FROM enrolled e
@@ -405,10 +414,13 @@ async function loadStreakTokenStats(): Promise<StreakTokenStats> {
         ) x
       ) dd ON TRUE
       LEFT JOIN LATERAL (
-        SELECT COUNT(*)::int AS n FROM (
-          SELECT w.local_date FROM workouts w
+        -- Run days count 1, other mile days STREAK_SAVE_WALK_DAY_CREDIT ($6),
+        -- same as getMeters.
+        SELECT COALESCE(SUM(CASE WHEN x.run >= 0.95 THEN 1 ELSE $6::numeric END), 0) AS n FROM (
+          SELECT w.local_date,
+                 COALESCE(SUM(w.distance) FILTER (WHERE w.workout_type = 'running'), 0) AS run
+          FROM workouts w
           WHERE w.user_id = e.user_id AND ${COUNTING_WORKOUT}
-            AND w.workout_type = 'running'
             AND w.local_date > GREATEST(e.floor_date, e.streak_save_last_used)
             AND w.local_date <= ${TODAY_ET_DATE_SQL}
           GROUP BY w.local_date HAVING SUM(w.distance) >= 0.95
@@ -421,6 +433,7 @@ async function loadStreakTokenStats(): Promise<StreakTokenStats> {
         STREAK_ASSIST_TARGET_DAYS,
         ENROLL_LOOKBACK_DAYS,
         METER_WINDOW_DAYS,
+        STREAK_SAVE_WALK_DAY_CREDIT,
       ],
     ),
     db.query<StreakTokenStats["assist_offers"][number]>(`
@@ -678,6 +691,63 @@ const ADOPTION_SOURCES: {
     actor: "w.user_id",
     at: "w.created_at",
     where: "w.source IN ('manual', 'edited')",
+  },
+  // Mile A Day+ funnel. The two onboarding paywalls are an A/B test: compare
+  // each "Saw … paywall" against "Bought Mile A Day+" for the same people
+  // (docs/PLUS_SETUP.md has the per-variant query).
+  {
+    key: PLUS_PAYWALL_STREAK_FEATURE,
+    label: "Saw the streak paywall",
+    group: "Mile A Day+",
+    from: "feature_events fe",
+    actor: "fe.user_id",
+    at: "fe.created_at",
+    where: `fe.feature = '${PLUS_PAYWALL_STREAK_FEATURE}'`,
+  },
+  {
+    key: PLUS_PAYWALL_FLAMEY_FEATURE,
+    label: "Saw the Flamey paywall",
+    group: "Mile A Day+",
+    from: "feature_events fe",
+    actor: "fe.user_id",
+    at: "fe.created_at",
+    where: `fe.feature = '${PLUS_PAYWALL_FLAMEY_FEATURE}'`,
+  },
+  {
+    key: PLUS_PAYWALL_CLOSET_FEATURE,
+    label: "Saw the Closet paywall",
+    group: "Mile A Day+",
+    from: "feature_events fe",
+    actor: "fe.user_id",
+    at: "fe.created_at",
+    where: `fe.feature = '${PLUS_PAYWALL_CLOSET_FEATURE}'`,
+  },
+  {
+    key: PLUS_STREAK_CARD_SHOWN_FEATURE,
+    label: "Saw the protect-your-streak card",
+    group: "Mile A Day+",
+    from: "feature_events fe",
+    actor: "fe.user_id",
+    at: "fe.created_at",
+    where: `fe.feature = '${PLUS_STREAK_CARD_SHOWN_FEATURE}'`,
+  },
+  {
+    key: PLUS_STREAK_CARD_TAPPED_FEATURE,
+    label: "Tapped the protect-your-streak card",
+    group: "Mile A Day+",
+    from: "feature_events fe",
+    actor: "fe.user_id",
+    at: "fe.created_at",
+    where: `fe.feature = '${PLUS_STREAK_CARD_TAPPED_FEATURE}'`,
+  },
+  {
+    key: "plus_purchase",
+    label: "Bought Mile A Day+ (incl. trials)",
+    group: "Mile A Day+",
+    from: "plus_purchases pp",
+    actor: "pp.user_id",
+    at: "pp.purchased_at",
+    where: "pp.ownership = 'PURCHASED'",
   },
 ];
 
@@ -2584,7 +2654,8 @@ const AT_RISK_MIN_STREAK = 3;
  * knowable hours before it happens.
  *
  * Two things it has to get right or it cries wolf:
- *   - the threshold is the STREAK rule (a flat `SUM(distance) >= 0.95`),
+ *   - the threshold is the STREAK rule (a flat `SUM(distance) >= 0.95`, or
+ *     10k synced steps),
  *     NOT the daily-goal rule (`goal_miles * DAILY_GOAL_TOLERANCE`). They
  *     are different numbers for anyone whose goal isn't 1.0.
  *   - "today" and "hours left" are the RUNNER's local day via localNowSql,
@@ -2622,6 +2693,8 @@ export async function getAtRisk(): Promise<AtRiskUser[]> {
          AND ${COUNTING_WORKOUT}
      ) t ON TRUE
      WHERE COALESCE(t.miles, 0) < 0.95
+       -- 10k steps finished the day too (STREAK_QUALIFYING_STEPS).
+       AND NOT ${stepGoalMetSql("c.user_id", "(c.local_now)::date")}
      ORDER BY c.current_streak DESC, hours_left ASC
      LIMIT 50`,
     [AT_RISK_MIN_STREAK],

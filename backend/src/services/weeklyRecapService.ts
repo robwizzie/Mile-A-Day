@@ -9,7 +9,11 @@ import {
   servedWeekResult,
   sundayWeekStartSql,
 } from "./weeklyChallengeService.js";
-import { readStoredStreak, streakEndingAt } from "./streakFeatureCore.js";
+import {
+  readStoredStreak,
+  streakEndingAt,
+  stepGoalMetSql,
+} from "./streakFeatureCore.js";
 import { getBlockedIds } from "./moderationService.js";
 import { isUserInQuietHours, sendPush } from "./pushNotificationService.js";
 import { CLIENT_FEATURES } from "./clientFeatures.js";
@@ -60,6 +64,7 @@ export class WeeklyRecapRequestError extends Error {
 export interface WeeklyRecapDay {
   date: string;
   miles: number;
+  /** The day's goal: the mile goal (× tolerance) OR 10,000 steps. */
   goal_met: boolean;
   covered: boolean;
 }
@@ -245,12 +250,18 @@ export async function getWeeklyRecap(
       `SELECT goal_miles FROM users WHERE user_id = $1::text`,
       [userId],
     ),
-    db.query<{ date: string; miles: string | number; covered: boolean }>(
+    db.query<{
+      date: string;
+      miles: string | number;
+      covered: boolean;
+      stepped: boolean;
+    }>(
       `SELECT to_char(d.day, 'YYYY-MM-DD') AS date,
 				COALESCE((SELECT SUM(w.distance) FROM workouts w
 					WHERE w.user_id = $1::text AND w.local_date = d.day AND ${counted}), 0) AS miles,
 				EXISTS (SELECT 1 FROM streak_coverage sc
-					WHERE sc.user_id = $1::text AND sc.local_date = d.day) AS covered
+					WHERE sc.user_id = $1::text AND sc.local_date = d.day) AS covered,
+				${stepGoalMetSql("$1::text", "d.day")} AS stepped
 			FROM (
 				SELECT ($2::date + g.n) AS day FROM generate_series(0, 6) AS g(n)
 			) d
@@ -319,7 +330,7 @@ export async function getWeeklyRecap(
     return {
       date: r.date,
       miles: round2(miles),
-      goal_met: miles >= goal * DAILY_GOAL_TOLERANCE,
+      goal_met: miles >= goal * DAILY_GOAL_TOLERANCE || r.stepped === true,
       covered: r.covered === true,
     };
   });

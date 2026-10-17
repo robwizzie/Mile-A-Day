@@ -43,6 +43,24 @@ export const SHARE_FAMILY_FEATURES = [
 export const WEEKLY_RECAP_OPENED_FEATURE = "weekly_recap_opened";
 export const WEEKLY_RECAP_SHARED_FEATURE = "weekly_recap_shared";
 
+/// Mile A Day+ conversion, mirrored by iOS `PlusTelemetry`. New accounts are
+/// split between two onboarding paywalls (`paywallVariantFor` in
+/// plusService); these say which one each person SAW, so purchases in
+/// `plus_purchases` can be compared per variant. The streak card is the
+/// in-the-moment offer on the dashboard (shown / tapped).
+export const PLUS_PAYWALL_STREAK_FEATURE = "plus_paywall_streak";
+export const PLUS_PAYWALL_FLAMEY_FEATURE = "plus_paywall_flamey";
+export const PLUS_PAYWALL_CLOSET_FEATURE = "plus_paywall_closet";
+export const PLUS_STREAK_CARD_SHOWN_FEATURE = "plus_streak_card_shown";
+export const PLUS_STREAK_CARD_TAPPED_FEATURE = "plus_streak_card_tapped";
+export const PLUS_FEATURES = [
+  PLUS_PAYWALL_STREAK_FEATURE,
+  PLUS_PAYWALL_FLAMEY_FEATURE,
+  PLUS_PAYWALL_CLOSET_FEATURE,
+  PLUS_STREAK_CARD_SHOWN_FEATURE,
+  PLUS_STREAK_CARD_TAPPED_FEATURE,
+] as const;
+
 /// Features a client may record. An off-list value is DROPPED, not stored —
 /// the table must stay a set of known, chartable signals, never a free-text
 /// sink (the referral_detail lesson).
@@ -56,6 +74,7 @@ export const TRACKED_FEATURES = new Set<string>([
   ...SHARE_FAMILY_FEATURES,
   WEEKLY_RECAP_OPENED_FEATURE,
   WEEKLY_RECAP_SHARED_FEATURE,
+  ...PLUS_FEATURES,
 ]);
 
 export async function recordFeatureEvent(

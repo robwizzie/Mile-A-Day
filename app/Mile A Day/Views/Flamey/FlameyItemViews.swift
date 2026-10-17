@@ -505,6 +505,9 @@ struct FlameyItemDetailView: View {
 
     /// "View workout": the medal's workout, on a sheet over this card.
     @State private var workout: FlameyWorkoutRef?
+    /// A Plus-only item's paywall (on `actions`, not the body: two sheets on
+    /// one node compete and one never presents).
+    @State private var showPlusPaywall = false
 
     private var owned: Bool { model.owns(item) }
     private var worn: Bool { model.isWorn(item) }
@@ -562,7 +565,7 @@ struct FlameyItemDetailView: View {
     private var preview: some View {
         let size: CGFloat = 104
         let look = model.preview(with: item)
-        let glow = FlameyPalette.palette(for: look.color)?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
+        let glow = look.figurePalette?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
         return ZStack(alignment: .bottom) {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(RadialGradient(colors: [glow.opacity(0.26), Color.white.opacity(0.03)],
@@ -642,11 +645,16 @@ struct FlameyItemDetailView: View {
                 }
             } else {
                 HStack(spacing: 10) {
-                    Image(systemName: "gift.fill")
+                    Image(systemName: item.unlock == .plus ? "sparkles" : item.month != nil ? "calendar" : "gift.fill")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundColor(FlameyClosetStyle.ember)
                         .accessibilityHidden(true)
-                    Text("Always his — no medal needed.")
+                    Text(item.unlock == .plus
+                         ? (owned ? "Yours with Mile A Day+." : "Included with Mile A Day+.")
+                         : item.month.map { m in
+                             owned ? "A Monthly Flame — yours for a perfect \(FlameyItem.monthName(m))."
+                                   : "A Monthly Flame — walk your mile every day of \(FlameyItem.monthName(m)) to unlock it for good."
+                         } ?? "Always his — no medal needed.")
                         .madFont(size: 15, weight: .semibold, design: .rounded)
                         .foregroundColor(.white.opacity(0.8))
                 }
@@ -737,6 +745,11 @@ struct FlameyItemDetailView: View {
                         onClose()
                     }
                 }
+            } else if item.unlock == .plus, model.onEarn != nil {
+                primary("Get Mile A Day+", icon: "sparkles", filled: true) {
+                    MADHaptics.action()
+                    showPlusPaywall = true
+                }
             } else if model.onEarn != nil, let title = route?.buttonTitle, let route {
                 primary(title, icon: route.icon, filled: true) {
                     MADHaptics.action()
@@ -755,6 +768,13 @@ struct FlameyItemDetailView: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+        }
+        .sheet(isPresented: $showPlusPaywall) {
+            PlusPaywallView(context: .flamey, tryOnStart: item) { purchased in
+                guard purchased else { return }
+                model.grantPlusItems()
+                Task { await FlameyClosetSync.refreshOwnedItems() }
+            }
         }
     }
 

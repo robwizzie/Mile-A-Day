@@ -15,6 +15,7 @@ import {
   computeStreakEras,
   type StreakEra,
   readStoredStreak,
+  STREAK_QUALIFYING_STEPS,
 } from "./streakFeatureCore.js";
 
 const db = PostgresService.getInstance();
@@ -1504,6 +1505,36 @@ export async function getUserLocalDate(userId: string): Promise<string> {
  * friend notifications, and posting.
  */
 export const DAILY_GOAL_TOLERANCE = 0.95;
+
+/**
+ * The user's synced step total for their local today — the same "today"
+ * getTodayMiles uses (latest workout's offset, UTC without one). 0 when the
+ * phone hasn't posted steps for that day.
+ */
+export async function getTodaySteps(userId: string): Promise<number> {
+  const rows = await db.query<{ steps: number }>(
+    `SELECT ds.steps FROM daily_steps ds
+      WHERE ds.user_id = $1
+        AND ds.local_date = (NOW() + (COALESCE(
+          (SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
+          0
+        ) || ' minutes')::interval)::date`,
+    [userId],
+  );
+  return Number(rows[0]?.steps ?? 0);
+}
+
+/**
+ * Is a day done? The flat streak rule for in-memory checks: 0.95 mi
+ * (DAILY_GOAL_TOLERANCE) OR 10,000 synced steps (STREAK_QUALIFYING_STEPS).
+ * SQL callers use streakFeatureCore's stepGoalMetSql beside their miles test.
+ */
+export function dailyGoalMet(miles: number, steps: number): boolean {
+  return (
+    Number(miles) >= DAILY_GOAL_TOLERANCE ||
+    Number(steps) >= STREAK_QUALIFYING_STEPS
+  );
+}
 
 export async function getTodayMiles(userId: string) {
   // Use the user's timezone offset from their most recent workout to determine

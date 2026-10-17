@@ -140,7 +140,7 @@ export default async function PostPage({
           </h1>
           <p className="mt-3 text-[15px] leading-relaxed text-[#a0a0a0]">
             Posts are shared with friends inside the app, so this page only says
-            who posted it. Open it in Mile A Day to see the run.
+            who posted it. Open it in Mile A Day to see it.
           </p>
 
           <div className="mt-9 space-y-3">

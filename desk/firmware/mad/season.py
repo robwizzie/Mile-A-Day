@@ -9,7 +9,7 @@
 #   THANKSGIVING (the Wed + Thu of Thanksgiving): pilgrim hats
 #   ANNIV        (MAD_BIRTHDAY / MAD_ANNIVERSARY in settings.toml): party hats
 # ...worn over the owner's own Flamey's Closet look (mad/closet.py).
-from mad.gfx import (RED, MAROON, WHITE, FAR, GREEN, FL_ORANGE, FL_GOLD, FL_DEEP,
+from mad.gfx import (RED, MAROON, WHITE, FAR, GREEN, FL_ORANGE, FL_GOLD, FL_DEEP, SPARK,
                      FL_TONGUE, GREEN_THEME, set_theme)
 
 EYE, GLINT, MOUTH = 21, 22, 20
@@ -194,6 +194,34 @@ def _pumpkin_body(saved, b, size):
                 _set(saved, b, x0 + xx, yy, GREEN)
 
 
+STAR_TIP = {17: ["..Y..", ".YXY.", "..Y.."], 24: ["...Y...", "..YYY..", "YYYXYYY", "..YYY..", ".Y...Y."]}
+
+
+def _tip(saved, b, size, color):
+    """A bare tip gets its Monthly Flame's crown, like the app: a pumpkin
+    stem for the Jack-o'-Lantern, a gold star for Twinkle Lights."""
+    if color == "jack_o_lantern":
+        stem = STEM[size]
+        x0 = _centre(b, len(stem) + 1) - len(stem[0]) // 2
+        for y in range(len(stem) - 1):         # just the very tip becomes the stem
+            for x in range(b.width):
+                if b[x, y]:
+                    _set(saved, b, x, y, 0)
+        for yy, row in enumerate(stem):
+            for xx, ch in enumerate(row):
+                if ch != ".":
+                    _set(saved, b, x0 + xx, yy, GREEN)
+    elif color == "twinkle_lights":
+        star = STAR_TIP[size]
+        rows = [y for y in range(b.height) if any(b[x, y] for x in range(b.width))]
+        top = rows[0] if rows else 0
+        x0 = _centre(b, top) - len(star[0]) // 2
+        for yy, row in enumerate(star):
+            for xx, ch in enumerate(row):
+                if ch != ".":
+                    _set(saved, b, x0 + xx, max(0, top - 2) + yy, FL_GOLD if ch == "Y" else SPARK)
+
+
 def _runner_head(saved, b, look):
     """The runner's head is 4x4 white pixels (columns 11-14). Halloween: an
     orange pumpkin head with a green stem and a carved eye. Santa: a red cap
@@ -252,10 +280,14 @@ def apply(app, look, wear=None):
     if getattr(app, "recolored", False):                  # tones back to normal
         _uncolor(flames)
         app.recolored = False
-    costume = wear.get("costume") if look != "HALLOWEEN" else None
+    costume = wear.get("costume")
+    if look == "HALLOWEEN" and costume != "skeleton_suit":   # (a skeleton IS Halloween)
+        costume = None
     theme = dict(GREEN_THEME) if look == "STPATRICK" else {}
     tones = None
-    if closet and look not in ("HALLOWEEN", "STPATRICK") and costume not in ("pumpkin_suit", "ghost_sheet"):
+    if closet and costume == "skeleton_suit":
+        tones = closet.tones("_hood")
+    elif closet and look not in ("HALLOWEEN", "STPATRICK") and costume not in ("pumpkin_suit", "ghost_sheet"):
         tones = closet.tones(wear.get("color"))
     if tones:
         theme.update(tones)
@@ -273,16 +305,18 @@ def apply(app, look, wear=None):
         for size, frames in ((17, app.flamey_m), (24, app.flamey_l)):
             for k, b in enumerate(frames):
                 undo = bytearray()
-                if look == "HALLOWEEN" or costume == "pumpkin_suit":
+                if costume == "skeleton_suit":
+                    closet.skeleton(undo, b, size)
+                elif look == "HALLOWEEN" or costume == "pumpkin_suit":
                     _pumpkin_body(undo, b, size)
                     _face(undo, b, size, k == len(frames) - 1)
                 elif costume == "ghost_sheet":
                     closet.ghost(undo, b, size)
-                if tones:
+                if tones and costume != "skeleton_suit":
                     closet.pattern(undo, b, size, wear.get("color"))
                 if look == "VALENTINE":
                     _cheeks(undo, b, size)
-                plain = look != "HALLOWEEN" and costume not in ("pumpkin_suit", "ghost_sheet")
+                plain = look != "HALLOWEEN" and costume not in ("pumpkin_suit", "ghost_sheet", "skeleton_suit")
                 if hat_look:
                     if plain or hat:
                         _hat(undo, b, size, hat_look)
@@ -290,6 +324,8 @@ def apply(app, look, wear=None):
                     closet.head(undo, b, size, wear.get("head"))
                 if closet and plain and look != "HALLOWEEN":
                     closet.eyes(undo, b, size, wear.get("eyes"))
+                if closet and plain and not hat_look and not wear.get("head"):
+                    _tip(undo, b, size, wear.get("color"))   # October's stem, December's star
                 if costume == "astronaut_helmet":
                     closet.helmet(undo, b, size)
                 saved.append((b, undo))

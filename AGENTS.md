@@ -95,7 +95,8 @@ Available on top of the project skills above:
 
 ## References
 
-- **`.claude/rules/{backend,ios,website}.md`** — area-specific conventions (existing, kept under 60 lines each)
+- **`.claude/rules/{backend,ios,website}.md`** — area-specific rules, one or two lines each (Claude Code auto-loads these, and re-injects them on every change, whenever a session touches `backend/**`, `app/**`, `website/**`)
+- **`docs/conventions/{backend,ios}.md`** — long-form reference for those rules (the why, incidents, evidence), same headings. Read the matching section before changing that area.
 - **`.claude/references/conventions.md`** — cross-cutting conventions (package manager, secrets, cross-area changes)
 - **`.claude/references/gotchas.md`** — learned mistakes (grows via `/learn` and `/remember`)
 - **`.claude/references/decisions.md`** — ADR-style architectural records
@@ -103,7 +104,7 @@ Available on top of the project skills above:
 
 ## Self-Maintenance
 
-These Codex files (AGENTS.md and .claude/rules/*.md) are living documents. Update them as you work:
+These Codex files (AGENTS.md, .claude/rules/*.md and docs/conventions/*.md) are living documents. Update them as you work:
 
 **When to add an entry:**
 - You hit a bug or build error caused by a non-obvious project quirk
@@ -116,8 +117,11 @@ These Codex files (AGENTS.md and .claude/rules/*.md) are living documents. Updat
 - Information is redundant with what you can derive from reading the code
 
 **Rules for edits:**
-- Add to the relevant rules file (.claude/rules/backend.md, ios.md, website.md) not AGENTS.md, unless it's cross-cutting
+- Area knowledge goes in two places, not AGENTS.md (unless it's cross-cutting):
+  - the RULE — one bullet of 1–2 lines, the imperative do/never plus the identifiers to grep for (function, file, constant, table, flag) — in `.claude/rules/<area>.md` (backend, ios, website);
+  - the explanation, incident and evidence in `docs/conventions/<area>.md` under the matching heading (create the file/heading if it doesn't exist yet).
+- Never write incident narratives, symptoms or history into `.claude/rules/*.md`: Claude Code injects those files into context in full, and again on every edit.
+- Changing an existing rule: update the one-liner and its long-form entry together so they don't drift.
 - Keep entries specific and actionable — "Use X, not Y" not "be careful with X"
-- Each file must stay under 60 lines. If a file is getting long, remove the least useful entries first
 - Never add obvious language conventions, code that speaks for itself, or vague advice
 - After updating, briefly mention what you added/changed so the user is aware

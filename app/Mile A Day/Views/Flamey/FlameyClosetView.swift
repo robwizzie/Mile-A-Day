@@ -33,6 +33,9 @@ struct FlameyClosetView: View {
     var onDone: () -> Void = {}
     /// "What I've unlocked" — the host shows the first-run walkthrough again.
     var onShowJourney: () -> Void = {}
+    /// Raise Monthly Flames on arrival (the dashboard's month card).
+    var opensMonthly: Bool = false
+    @State private var didOpenMonthly = false
     /// False only for a snapshot (ImageRenderer can't see into a ScrollView).
     var scrollable: Bool = true
     /// Snapshot of the scrolled state (the harness): compact stage, and the
@@ -49,7 +52,7 @@ struct FlameyClosetView: View {
     /// The Closet's own sheets (the item card rides `model.detail`, on a
     /// different node — two sheets on one node drop one).
     enum ClosetSheet: String, Identifiable {
-        case name, saveOutfit, outfits
+        case name, saveOutfit, outfits, monthly
         var id: String { rawValue }
     }
 
@@ -106,6 +109,13 @@ struct FlameyClosetView: View {
             }
         }
         .madTypeCap(.madCardCap)
+        .onAppear {
+            // After the cover has finished presenting: a sheet raised in the
+            // same transaction as its host's presentation is dropped.
+            guard opensMonthly, scrollable, !didOpenMonthly else { return }
+            didOpenMonthly = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { sheet = .monthly }
+        }
         .onChange(of: model.lineAt) { _, _ in scheduleLineClear() }
         .sheet(item: $model.detail) { item in
             FlameyItemDetailView(item: item, model: model, onClose: { model.detail = nil })
@@ -134,6 +144,11 @@ struct FlameyClosetView: View {
                 .presentationBackground(FlameyClosetStyle.ground)
         case .outfits:
             FlameyOutfitsSheet(model: model) { sheet = nil }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(FlameyClosetStyle.ground)
+        case .monthly:
+            FlameyMonthlyFlamesView(model: model) { sheet = nil }
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(FlameyClosetStyle.ground)
@@ -192,7 +207,7 @@ struct FlameyClosetView: View {
     }
 
     private var stageGlow: Color {
-        FlameyPalette.palette(for: model.stageLook.color)?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
+        model.stageLook.figurePalette?.glow ?? Color(red: 1, green: 0.55, blue: 0.2)
     }
 
     private var topBar: some View {
@@ -204,12 +219,25 @@ struct FlameyClosetView: View {
                 Image(systemName: "sparkles")
                     .madFont(size: 16, weight: .bold, maxScale: 1.3)
                     .foregroundColor(FlameyClosetStyle.ember)
-                    .frame(width: 60, height: 44, alignment: .leading)
+                    .frame(width: 40, height: 44, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("What I've unlocked")
             .accessibilityHint("Walks you through dressing him in what your medals have unlocked")
+            Button {
+                MADHaptics.tap()
+                sheet = .monthly
+            } label: {
+                Image(systemName: "calendar")
+                    .madFont(size: 16, weight: .bold, maxScale: 1.3)
+                    .foregroundColor(FlameyClosetStyle.ember)
+                    .frame(width: 40, height: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Monthly Flames")
+            .accessibilityHint("A new look for every month you walk every day")
             Spacer(minLength: 0)
             // Just a title: renaming lives on his name plate, under him.
             Text("\(model.possessiveName) Closet")
@@ -225,7 +253,7 @@ struct FlameyClosetView: View {
                     .foregroundColor(FlameyClosetStyle.ember)
                     .lineLimit(1)
                     .fixedSize()
-                    .frame(minWidth: 60, minHeight: 44, alignment: .trailing)
+                    .frame(minWidth: 80, minHeight: 44, alignment: .trailing)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

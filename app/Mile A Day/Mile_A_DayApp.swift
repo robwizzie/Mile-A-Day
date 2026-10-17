@@ -23,6 +23,9 @@ struct Mile_A_DayApp: App {
         StartMileLaunch.handler = { request in
             DeepLinkRouter.shared.requestOpenTracker(activity: request.activity)
         }
+        // Everyone is on the Fun dashboard for now — move a stored "modern"
+        // over before any view reads the style.
+        DashboardStylePreference.enforceOffered()
     }
 
     var body: some Scene {
@@ -57,6 +60,14 @@ struct Mile_A_DayApp: App {
                             // Streak-tokens enrollment stamp (idempotent; covers
                             // users who authed on an older build).
                             StreakFeatureService.enrollIfNeeded()
+                            // Mile A Day+: post anything StoreKit left
+                            // unfinished and re-read entitlement.
+                            await PlusStore.shared.refresh()
+                            // 10k-step days count for the streak: the whole
+                            // step history once per account, then a recent
+                            // window once a day (a no-op otherwise). Last, so
+                            // a long first read never delays the rest.
+                            await DailyStepsSyncService.shared.syncStepGoalHistory()
                         }
                     }
                 }

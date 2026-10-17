@@ -3534,7 +3534,7 @@ export const shoes = pgTable(
     // Optional "replace at" mileage; NULL = no target.
     replaceAtMiles: doublePrecision("replace_at_miles"),
     // LEGACY (0087): one default for every activity. Superseded by
-    // `shoe_defaults` (0088), which backfilled from these; neither column is
+    // `shoe_defaults` (0092), which backfilled from these; neither column is
     // read or written any more. Left in place rather than dropped.
     isDefault: boolean("is_default").default(false).notNull(),
     defaultSince: timestamp("default_since", {
@@ -3707,3 +3707,228 @@ export const deskPushState = pgTable("desk_push_state", {
   value: text().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).defaultNow().notNull(),
 });
+
+// Desk notifications whose event has no table of its own (App Store reviews,
+// record days, the Versus lead, a desk going offline), one row per person it
+// was for, so the remote's Activity log shows every push. Pruned after 30 days.
+export const deskPushLog = pgTable(
+  "desk_push_log",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    kind: varchar({ length: 32 }).notNull(),
+    text: varchar({ length: 300 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_desk_push_log_user").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.createdAt.desc().nullsFirst(),
+    ),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "desk_push_log_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
+/**
+ * MCP database connector (src/mcp). Six tables, all ROW LEVEL SECURITY with no
+ * policies: the connector's own database roles (pg_read_all_data, plus row
+ * grants for the write role) do NOT bypass RLS, so through the connector these
+ * tables read as empty and refuse every write. Only the app's own role (the
+ * owner) touches them. That is what stops a connector session from reading
+ * token hashes, planting a token, or erasing its audit trail.
+ */
+
+/// OAuth clients Claude registered with itself (dynamic client registration).
+/// Registration is open by spec; a client is powerless without a sign-in.
+export const mcpOauthClients = pgTable("mcp_oauth_clients", {
+  clientId: text("client_id").primaryKey().notNull(),
+  metadata: jsonb().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+    .defaultNow()
+    .notNull(),
+}).enableRLS();
+
+/// One /authorize in flight (10 minutes). `browser_key_hash` binds it to the
+/// browser that opened it, so a sign-in link sent to someone else is useless.
+export const mcpOauthRequests = pgTable("mcp_oauth_requests", {
+  id: text().primaryKey().notNull(),
+  browserKeyHash: text("browser_key_hash").notNull(),
+  clientId: text("client_id").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  state: text(),
+  scope: text().notNull(),
+  resource: text().notNull(),
+  nonce: text().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+}).enableRLS();
+
+/// Authorization codes: hashed, single use, two minutes.
+export const mcpOauthCodes = pgTable("mcp_oauth_codes", {
+  codeHash: text("code_hash").primaryKey().notNull(),
+  clientId: text("client_id").notNull(),
+  userId: text("user_id").notNull(),
+  redirectUri: text("redirect_uri").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  scope: text().notNull(),
+  resource: text().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+}).enableRLS();
+
+/// One completed sign-in. Every token hangs off a grant; revoking the grant
+/// (or it reaching expires_at, 30 days after sign-in) kills all of them.
+export const mcpOauthGrants = pgTable(
+  "mcp_oauth_grants",
+  {
+    grantId: uuid("grant_id").defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    clientId: text("client_id").notNull(),
+    scope: text().notNull(),
+    resource: text().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "mcp_oauth_grants_user_id_fkey",
+    }).onDelete("cascade"),
+  ],
+).enableRLS();
+
+/// Access (1 hour) and refresh tokens, stored as SHA-256 only.
+export const mcpOauthTokens = pgTable(
+  "mcp_oauth_tokens",
+  {
+    tokenHash: text("token_hash").primaryKey().notNull(),
+    grantId: uuid("grant_id").notNull(),
+    kind: text().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    // Refresh tokens rotate: set when this one was exchanged. Presenting it
+    // again after a short grace period revokes the whole grant.
+    usedAt: timestamp("used_at", { withTimezone: true, mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_mcp_oauth_tokens_grant").on(table.grantId),
+    foreignKey({
+      columns: [table.grantId],
+      foreignColumns: [mcpOauthGrants.grantId],
+      name: "mcp_oauth_tokens_grant_id_fkey",
+    }).onDelete("cascade"),
+    check("mcp_oauth_tokens_kind_check", sql`kind IN ('access', 'refresh')`),
+  ],
+).enableRLS();
+
+/// Every statement the connector runs, written by the app's role BEFORE the
+/// statement runs (no audit row, no statement) and finished after — plus
+/// sign-ins, refusals and token alarms (`tool` = sign_in, sign_in_denied, …).
+export const mcpAuditLog = pgTable(
+  "mcp_audit_log",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    // No foreign key: the record outlives the account.
+    userId: text("user_id"),
+    grantId: uuid("grant_id"),
+    tool: text().notNull(),
+    statement: text().notNull(),
+    commitRequested: boolean("commit_requested").default(false).notNull(),
+    // Rows the statement returned (query) or changed (execute).
+    rowCount: integer("row_count"),
+    // execute only: what changed, per table, as counted by Postgres.
+    changes: jsonb(),
+    committed: boolean().default(false).notNull(),
+    durationMs: integer("duration_ms"),
+    error: text(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [index("idx_mcp_audit_log_created").on(table.createdAt.desc())],
+).enableRLS();
+
+// ─── Mile A Day+ ─────────────────────────────────────────────────────────
+// The purchase ledger. One row per (Apple original transaction, MAD account):
+// a subscription or the lifetime unlock, as last VERIFIED from a StoreKit 2
+// signed transaction (client post or App Store Server Notification). Rows are
+// never deleted — a refund stamps `revoked_at`, a lapse is just `expires_at`
+// in the past. Entitlement is DERIVED at read (`plusActiveSql`), never stored.
+export const plusPurchases = pgTable(
+  "plus_purchases",
+  {
+    originalTransactionId: text("original_transaction_id").notNull(),
+    userId: text("user_id").notNull(),
+    productId: text("product_id").notNull(),
+    // The latest transaction seen for this original (renewals move it).
+    transactionId: text("transaction_id").notNull(),
+    // 'subscription' | 'lifetime'
+    kind: text().notNull(),
+    // Apple's ownershipType: PURCHASED | FAMILY_SHARED
+    ownership: text().notNull(),
+    // Apple's environment: Production | Sandbox
+    environment: text().notNull(),
+    purchasedAt: timestamp("purchased_at", { withTimezone: true, mode: "string" }).notNull(),
+    // NULL = never expires (lifetime).
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "string" }),
+    inTrial: boolean("in_trial").default(false).notNull(),
+    // From renewal info when a notification carried it; NULL = unknown.
+    autoRenew: boolean("auto_renew"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.originalTransactionId, table.userId],
+      name: "plus_purchases_pkey",
+    }),
+    index("idx_plus_purchases_user").on(table.userId),
+  ],
+);
+
+// "Gift a year of Plus": one row per gift purchase (a consumable), carrying
+// the shareable code. Redeeming stamps the redeemer and the window it grants;
+// a refund of the purchase stamps `voided_at`, which ends that window too.
+export const plusGifts = pgTable(
+  "plus_gifts",
+  {
+    code: varchar({ length: 16 }).primaryKey().notNull(),
+    purchaserId: text("purchaser_id").notNull(),
+    transactionId: text("transaction_id").notNull(),
+    productId: text("product_id").notNull(),
+    environment: text().notNull(),
+    months: integer().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    redeemedBy: text("redeemed_by"),
+    redeemedAt: timestamp("redeemed_at", { withTimezone: true, mode: "string" }),
+    grantStartsAt: timestamp("grant_starts_at", { withTimezone: true, mode: "string" }),
+    grantEndsAt: timestamp("grant_ends_at", { withTimezone: true, mode: "string" }),
+    voidedAt: timestamp("voided_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    unique("plus_gifts_transaction_unique").on(table.transactionId),
+    index("idx_plus_gifts_purchaser").on(table.purchaserId),
+    index("idx_plus_gifts_redeemed_by").on(table.redeemedBy),
+  ],
+);

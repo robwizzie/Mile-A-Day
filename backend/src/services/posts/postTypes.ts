@@ -113,6 +113,9 @@ export interface PostCoauthor {
   // means "follow my setting", which is what every pre-existing row does.
   on_feed?: boolean | null;
   include_route?: boolean | null;
+  // Additive, own row only (null for everyone else): the workout THEIR line
+  // resolves from, the key the phone's share-card route trim is seeded with.
+  workout_id?: string | null;
   // HOW FAR this person went and HOW LONG it took, so a card about several
   // people walking together can say what each of them did. Distance comes
   // from the participant row — the same figure `buddy_group.distance_miles`

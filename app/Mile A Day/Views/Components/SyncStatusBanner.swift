@@ -35,9 +35,16 @@ struct SyncStatusBanner: View {
             if let progress = syncService.currentProgress, shouldShow(progress) {
                 bannerContent(for: progress)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let recalibration = syncService.recalibration {
+                // Recalibrate re-sends weeks of workouts and can take a
+                // minute; the Settings row alone was a subtitle swap nobody
+                // noticed, and it vanished the moment you left the page.
+                recalibrationContent(recalibration)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(.easeInOut(duration: 0.25), value: syncService.currentProgress)
+        .animation(.easeInOut(duration: 0.25), value: syncService.recalibration)
         .onReceive(clock) { now in
             // Only while something is actually running — an idle banner must
             // not keep the run loop busy.
@@ -122,15 +129,92 @@ struct SyncStatusBanner: View {
 
             trailingControl(for: progress)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
-        )
-        .padding(.horizontal, 12)
-        .padding(.bottom, 6)
+        .modifier(BannerChrome())
+    }
+
+    // MARK: - Recalibrate
+
+    private func recalibrationContent(_ progress: WorkoutSyncService.RecalibrationProgress) -> some View {
+        HStack(spacing: 12) {
+            Group {
+                switch progress.stage {
+                case .done:
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(.green)
+                case .failed:
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.title3)
+                        .foregroundColor(.orange)
+                default:
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(recalibrationTitle(progress))
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if progress.isRunning {
+                    ProgressView(value: progress.fraction)
+                        .tint(MADTheme.Colors.madRed)
+                        .frame(height: 4)
+                }
+
+                if let subtitle = recalibrationSubtitle(progress) {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            if progress.isRunning, progress.fraction > 0 {
+                Text(ProgressCalculator.formatWholePercent(Double(Int((progress.fraction * 100).rounded()))))
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.secondary)
+                    .monospacedDigit()
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .modifier(BannerChrome())
+    }
+
+    private func recalibrationTitle(_ progress: WorkoutSyncService.RecalibrationProgress) -> String {
+        switch progress.stage {
+        case .reading, .uploading, .recomputing:
+            return "Recalibrating your streak…"
+        case .done(let streak):
+            return "Streak recalibrated — \(SyncCopy.count(streak)) \(streak == 1 ? "day" : "days")"
+        case .failed:
+            return "Recalibrate didn't finish"
+        }
+    }
+
+    private func recalibrationSubtitle(_ progress: WorkoutSyncService.RecalibrationProgress) -> String? {
+        switch progress.stage {
+        case .reading:
+            return "Reading your workouts from Apple Health"
+        case .uploading:
+            guard progress.total > 0 else { return "Re-checking your workouts" }
+            return "Re-checked \(SyncCopy.count(progress.checked)) of \(SyncCopy.count(progress.total)) workouts"
+        case .recomputing:
+            return "Recounting your streak"
+        case .done:
+            return nil
+        case .failed:
+            return "Check your connection and try again from Settings"
+        }
     }
 
     @ViewBuilder
@@ -227,6 +311,23 @@ struct SyncStatusBanner: View {
         }
         parts.append("keep the app open")
         return parts.joined(separator: " · ")
+    }
+}
+
+/// The floating card both banners sit in, so sync and Recalibrate look like
+/// one surface.
+private struct BannerChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(.ultraThinMaterial)
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+            )
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
     }
 }
 

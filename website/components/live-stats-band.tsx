@@ -164,7 +164,7 @@ export function LiveStatsBand() {
             THE MILES ARE <span className="text-[#c72554]">ADDING UP</span>
           </h2>
           <p className="reveal reveal-delay-2 mt-4 text-base leading-relaxed text-[#a0a0a0]">
-            Real numbers from real runners — updating as the community moves.
+            Real numbers from real walkers and runners — updating as the community moves.
           </p>
         </div>
 
@@ -194,7 +194,7 @@ export function LiveStatsBand() {
             icon={Users}
             color="#38bdf8"
             value={Math.round(totalUsers).toLocaleString()}
-            label="Runners strong"
+            label="Members strong"
             sublabel="the whole community"
             delay={3}
           />
@@ -202,7 +202,7 @@ export function LiveStatsBand() {
             icon={Activity}
             color="#22d3ee"
             value={Math.round(activeWeek).toLocaleString()}
-            label="Runners this week"
+            label="Out moving this week"
             sublabel="out logging miles right now"
             delay={4}
           />

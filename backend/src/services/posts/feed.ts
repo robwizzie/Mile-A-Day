@@ -4,6 +4,7 @@
 import { PostgresService } from "../DbService.js";
 import { OWNER_NOT_PRIVATE_SQL } from "../visibilityService.js";
 import { servedRouteFrom } from "../routePrivacy.js";
+import { effectiveStreakSql } from "../streakFeatureCore.js";
 import {
   postHypedByViewerMatchSql,
   runHypedByViewerMatchSql,
@@ -926,7 +927,7 @@ export async function getPublicPostPreview(
 ): Promise<PublicPostPreview | null> {
   const rows = await db.query<PublicPostPreview>(
     `SELECT p.post_id::text AS post_id, u.username, u.first_name,
-		        u.profile_image_url, u.current_streak
+		        u.profile_image_url, (${effectiveStreakSql("u")})::int AS current_streak
 		 FROM posts p
 		 JOIN users u ON u.user_id = p.user_id
 		 WHERE p.post_id = $1::uuid AND p.deleted_at IS NULL AND p.share_to_feed`,

@@ -28,6 +28,7 @@ import diagnosticsRoutes from "./routes/diagnosticsRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
 import buddyRoutes from "./routes/buddyRoutes.js";
 import injuryPauseRoutes from "./routes/injuryPauseRoutes.js";
+import plusRoutes, { storePublicRouter } from "./routes/plusRoutes.js";
 import {
   authenticateToken,
   requireAdmin,
@@ -40,6 +41,7 @@ import {
 } from "./middleware/rateLimit.js";
 import adminRoutes, { adminAuthRouter } from "./routes/adminRoutes.js";
 import displayRoutes from "./routes/displayRoutes.js";
+import { mountMcpConnector } from "./mcp/index.js";
 import { startCompetitionCron } from "./cron/competitionCron.js";
 import { startNotificationCron } from "./cron/notificationCron.js";
 import { startSilentSyncCron } from "./cron/silentSyncCron.js";
@@ -58,6 +60,7 @@ import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
 import { seedWeeklyChallenges } from "./services/weeklyChallengeService.js";
 import { PostgresService } from "./services/DbService.js";
+import { getPublicProfile } from "./services/publicProfileService.js";
 import {
   runPendingMigrations,
   getMigrationReport,
@@ -68,6 +71,7 @@ import { backfillLongestStreaks } from "./db/backfillLongestStreaks.js";
 import { backfillHolidayMedals } from "./db/backfillHolidayMedals.js";
 import { repairBadgeEarnedDates } from "./db/repairBadgeEarnedDates.js";
 import { backfillRetroBadges } from "./db/backfillRetroBadges.js";
+import { backfillStepStreaks } from "./db/backfillStepStreaks.js";
 import { backfillRoutePrivacyBounds } from "./db/backfillRoutePrivacyBounds.js";
 import {
   getUnifiedFeed,
@@ -310,9 +314,9 @@ app.get(
   },
 );
 
-// Public endpoint: minimal profile by username for the marketing site's
-// /u/<username> share pages. Intentionally excludes email and any other
-// sensitive fields — this is world-readable.
+// Public endpoint: profile by username for the marketing site's
+// /u/<username> share pages. World-readable — what it publishes, and what a
+// 'private' account withholds, is decided in publicProfileService.
 app.get(
   "/public/users/:username",
   (req, res, next) => {
@@ -320,18 +324,11 @@ app.get(
     next();
   },
   async (req, res) => {
-    const db = PostgresService.getInstance();
-    const results = await db.query(
-      `SELECT user_id, username, first_name, last_name, bio,
-              profile_image_url, current_streak
-       FROM users
-       WHERE LOWER(username) = LOWER($1)`,
-      [req.params.username],
-    );
-    if (!results.length) {
+    const profile = await getPublicProfile(req.params.username);
+    if (!profile) {
       return res.status(404).json({ error: "Not found" });
     }
-    res.json(results[0]);
+    res.json(profile);
   },
 );
 
@@ -339,10 +336,15 @@ app.use("/auth", authRoutes);
 app.use("/dev", devRoutes);
 app.use("/badges", publicBadgesRouter);
 app.use("/public", publicRoutes);
+// Apple App Store Server Notifications (signed by Apple, verified in the controller).
+app.use("/store", storePublicRouter);
 // Admin login (Apple-web verify) is public — it's how the dashboard gets a token.
 app.use("/admin/auth", adminAuthRouter);
 // Desk display feed: its own per-device key, never a user JWT (see displayService).
 app.use("/display", displayRoutes);
+// MCP database connector (src/mcp): its own OAuth sign-in, never an app JWT.
+// Mounts nothing unless MCP_ALLOWED_USERS is set.
+mountMcpConnector(app);
 
 app.use(authenticateToken);
 // Per-user backstop, far above any real client (see RATE_LIMIT_SPECS.global).
@@ -366,6 +368,7 @@ app.use("/blocks", blocksRoutes);
 app.use("/leaderboard", leaderboardRoutes);
 app.use("/buddy", buddyRoutes);
 app.use("/streak", injuryPauseRoutes);
+app.use("/plus", plusRoutes);
 app.use("/live", liveTrackingRoutes);
 app.use("/ghosts", ghostRoutes);
 app.use("/telemetry", telemetryRoutes);
@@ -436,6 +439,10 @@ runPendingMigrations()
       // everyone (what Recalibrate now does per user). Award-only, silent,
       // one user at a time, done-marker `badge_retro_v1` in maintenance_runs.
       void backfillRetroBadges();
+      // Same contract: "1 mile OR 10k steps" — re-count the stored streak,
+      // longest streak and streak medals of everyone with a 10k-step day
+      // already on file. Marker `step_streaks_v1`.
+      void backfillStepStreaks();
       // Same contract: cache every stored route's hide-start-&-end cut
       // (workout_routes.privacy_bounds). A row it hasn't reached is trimmed
       // at read anyway — this only makes that read cheap. Marker

@@ -38,6 +38,26 @@ COLORS = {
     "prism": (0x8C7910, 0x8C4D10, 0x105664, 0x2F1859, 0x8C7F65, 0x681E30),
     "cosmic": (0x625369, 0x200038, 0x100030, 0x100028, 0x8C8C69, 0x100020),
     "eternal": (0x8C8C69, 0x8C8C69, 0x8C8552, 0x7E6423, 0x8C8C69, 0x704010),
+    # Mile A Day+ colours
+    "electric": (0x417869, 0x3F8469, 0x103569, 0x170E5E, 0x828A69, 0x000026),
+    "rose_gold": (0x8C6238, 0x8C744B, 0x7F4521, 0x54200F, 0x8C845D, 0x261000),
+    "obsidian": (0x8C3A08, 0x302E36, 0x1C1A22, 0x121016, 0x8C6C2B, 0x0C0A0E),   # charcoal, a hot core
+    "tropic": (0x538C56, 0x8C8019, 0x107136, 0x003F3B, 0x8C8C5F, 0x771725),
+    # Monthly Flames (a perfect month): Jan..Dec
+    "frostbite": (0x6B8169, 0x828969, 0x476F62, 0x123A43, 0x8C8C69, 0x001826),
+    "sweetheart": (0x8C4F42, 0x8C5E4D, 0x8C1B20, 0x60000E, 0x8C7F61, 0x260000),
+    "lucky_clover": (0x537F2B, 0x66852F, 0x145B10, 0x002E00, 0x828C57, 0x002600),
+    "april_showers": (0x647669, 0x737F69, 0x375357, 0x172836, 0x8C8C69, 0x171726),
+    "wildflower": (0x6B852F, 0x7D8C3F, 0x376B13, 0x0E3A0E, 0x8C8A57, 0x002600),
+    "sunburst": (0x8C7F2B, 0x8C853D, 0x8C6600, 0x7E3700, 0x8C8C69, 0x601400),
+    "firecracker": (0x8C694B, 0x8C2B19, 0x710000, 0x370000, 0x8C8C69, 0x340000),
+    "watermelon": (0x8C4437, 0x8C4D3D, 0x8C1817, 0x65000E, 0x8C795C, 0x60000D),
+    "falling_leaves": (0x8C5A19, 0x8C6B1E, 0x7F3800, 0x511100, 0x8C804C, 0x260000),
+    "jack_o_lantern": (0x8C7A20, 0x8C6A10, 0x8C5000, 0x6A2400, 0x8C8240, 0x381000),   # pumpkin orange
+    "sweater_weather": (0x856233, 0x7F2E1C, 0x581010, 0x260000, 0x8C8256, 0x260000),
+    "twinkle_lights": (0x587F42, 0x3F7832, 0x104110, 0x002600, 0x828C60, 0x002600),
+    # the Skeleton Suit's hood (a costume, not a colour: see skeleton())
+    "_hood": (0x2C2836, 0x2C2836, 0x1E1A28, 0x16121E, 0x34303E, 0x100C16),
 }
 
 # Letters: upper case paints always; lower case only over his body (never
@@ -85,8 +105,8 @@ H bunny_ears 24 0 0 ...WW......WW...|..WTW......WTW..|..WTW......WTW..|..WTW....
 H bunny_ears 17 0 0 .W.......W.|.WT.....TW.|.WT.....TW.|..W.....W..|..WWWWWWW..
 E classic_shades 24 0 12 ..FFFFFFFFFFFF..|..EEEE....EEEE..|..EQEE....EQEE..|..EEEE....EEEE..|...EE......EE...
 E classic_shades 17 0 8 .FFFFFFFFF.|.EEEE.EEEE.|.EQEE.EQEE.|..EE...EE..
-E aviators 24 0 13 .YYYYYYYYYYYYYY.|.YLLLY....YLLLY.|.YKKY......YKKY.|..YY........YY..
-E aviators 17 0 9 .YYYYYYYYY.|.YLKY.YKLY.|..YY...YY..
+E aviators 24 0 13 .SSSSSSSSSSSSSS.|.SXEES....SXEES.|.SEES......SEES.|..SS........SS..
+E aviators 17 0 9 .SSSSSSSSS.|.SXES.SXES.|..SS...SS..
 E round_specs 24 0 12 ...FFF....FFF...|..F...FFFF...F..|..F...F..F...F..|..F...F..F...F..|..F...F..F...F..|...FFF....FFF...
 E round_specs 17 0 8 ..FF...FF..|.F..FFF..F.|.F..F.F..F.|.F..F.F..F.|..FF...FF..
 E heart_glasses 24 0 12 ..RR.RR..RR.RR..|..RhhhRRRRhhhR..|..RhhhR..RhhhR..|...RhR....RhR...|....R......R....
@@ -175,6 +195,99 @@ PATTERN = {"northern_lights": {24: ((3, "S"), (6, "T"), (9, "S")), 17: ((2, "S")
 FACE = {"northern_lights": {24: (17, 21), 17: (12, 14)}}
 
 
+# Monthly Flames: the pattern each one wears inside his outline (the app's
+# snowflakes, hearts, ribs...), as a scatter of panel colours. (letters, step)
+SCATTER = {"frostbite": ("WWX", 7), "sweetheart": ("TTR", 6), "lucky_clover": ("GSG", 6),
+           "april_showers": ("BBW", 6), "wildflower": ("TYW", 6), "falling_leaves": ("RYK", 6),
+           "watermelon": ("EEE", 7), "twinkle_lights": ("RYBW", 5), "sunburst": ("SSX", 8),
+           "electric": ("BXB", 9), "rose_gold": ("XWW", 11), "tropic": ("TYB", 8)}
+# ...and stripes: (rows from his top as a fraction of his height, letter)
+STRIPES = {"firecracker": ((0.35, "W"), (0.55, "W"), (0.75, "W")),
+           "sweater_weather": ((0.45, "W"), (0.70, "W"))}
+BODY_TONES = (8, 9, 10)                   # the closet colour's flame tones
+
+
+def _inside(b, x, y, room=2):
+    """A pixel well inside his flame and clear of his face."""
+    if not (1 <= x < b.width - 1 and 1 <= y < b.height - 1) or b[x, y] not in BODY_TONES:
+        return False
+    for dy in range(-room, room + 1):
+        for dx in range(-room, room + 1):
+            xx, yy = x + dx, y + dy
+            if 0 <= xx < b.width and 0 <= yy < b.height:
+                v = b[xx, yy]
+                if v in (EYE, GLINT, 20) or (abs(dx) <= 1 and abs(dy) <= 1 and v == 0):
+                    return False
+    return True
+
+
+def month_pattern(saved, b, size, color):
+    """Ribs, stripes or a scatter of little things, only inside his flame."""
+    lit = [y for y in range(b.height) if any(b[x, y] for x in range(b.width))]
+    if not lit:
+        return
+    top, h = lit[0], lit[-1] - lit[0] + 1
+    if color == "jack_o_lantern":             # pumpkin ribs down his body, a hot glowing core
+        cx = _centre(b, top + h * 2 // 3)
+        for x in (cx - 5, cx - 2, cx + 1, cx + 4) if size == 24 else (cx - 3, cx + 2):
+            for y in range(top + 2, lit[-1]):
+                if _inside(b, x, y, 1):
+                    _set(saved, b, x, y, 10)
+        for y in range(top + 1, top + h // 3):
+            for x in (cx - 1, cx) if size == 24 else (cx,):
+                if b[x, y] in BODY_TONES:
+                    _set(saved, b, x, y, 7)
+        return
+    for frac, ch in STRIPES.get(color, ()):
+        y = top + int(h * frac)
+        for x in range(b.width):
+            if _inside(b, x, y):
+                _set(saved, b, x, y, C[ch])
+    sc = SCATTER.get(color)
+    if sc:
+        letters, step = sc
+        k = 0
+        for y in range(top + 2, lit[-1]):
+            for x in range(b.width):
+                if (x * 3 + y * 5) % step == 0 and _inside(b, x, y):
+                    _set(saved, b, x, y, C[letters[k % len(letters)]])
+                    k += 1
+
+
+def skeleton(saved, b, size):
+    """The Skeleton Suit: a dark hood over all of him (his colour slots carry
+    the hood tones), a bone-white skull around his face with green-glowing
+    eyes, chunky ribs either side, and a little bone bow on his tip."""
+    eyes = [(x, y) for y in range(b.height) for x in range(b.width) if b[x, y] in (EYE, GLINT)]
+    if not eyes:
+        return
+    x0, x1 = min(p[0] for p in eyes), max(p[0] for p in eyes)
+    y0, y1 = min(p[1] for p in eyes), max(p[1] for p in eyes)
+    pad = 1
+    ya, yb = y0 - pad, y1 + 1                  # the skull: round, just around his face
+    for y in range(ya, yb + 1):
+        for x in range(x0 - pad, x1 + pad + 1):
+            if 0 <= x < b.width and 0 <= y < b.height and b[x, y] in BODY_TONES + (7, 11, 12):
+                if not (y in (ya, yb) and x in (x0 - pad, x1 + pad)):
+                    _set(saved, b, x, y, WHITE)
+    for x, y in eyes:                          # glowing green eyes
+        if b[x, y] == GLINT:
+            _set(saved, b, x, y, GREEN)
+    ry = yb + 2
+    for k in range(2 if size == 24 else 1):    # ribs, either side
+        y = ry + k * 2
+        if y >= b.height:
+            break
+        lit = [x for x in range(b.width) if b[x, y]]
+        if len(lit) > 6:
+            for x in (min(lit) + 1, min(lit) + 2, max(lit) - 2, max(lit) - 1):
+                _set(saved, b, x, y, WHITE)
+    top = min(y for y in range(b.height) for x in range(b.width) if b[x, y])
+    tx = _centre(b, top)                       # a bone bow on his point
+    for dx in (-1, 0, 1):
+        _set(saved, b, tx + dx, top + 1, WHITE)
+
+
 def pattern(saved, b, size, color):
     face = FACE.get(color, {}).get(size)
     if face:
@@ -184,6 +297,8 @@ def pattern(saved, b, size, color):
                 for x in range(min(lit) + 2, max(lit) - 1):   # inside his outline
                     if b[x, y] == 9:
                         _set(saved, b, x, y, 7)
+    if color in SCATTER or color in STRIPES or color == "jack_o_lantern":
+        month_pattern(saved, b, size, color)
     rows = PATTERN.get(color, {}).get(size)
     if not rows:
         return

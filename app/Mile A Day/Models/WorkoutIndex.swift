@@ -185,8 +185,10 @@ struct WorkoutIndex: Codable {
         // "not a miss", matching the server's coverage-aware walk — otherwise
         // a local recompute would break at a rescued day and fight the backend.
         // Empty store (feature off) = byte-identical legacy behavior.
+        // 10k-step days count the same way ("1 mile OR 10,000 steps").
         let covered = StreakCoverageStore.coveredDayKeys
-        guard !qualifyingDays.isEmpty else { return 0 }
+            .union(StepGoalDayStore.goalDayKeys)
+        guard !qualifyingDays.isEmpty || !covered.isEmpty else { return 0 }
 
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
@@ -261,9 +263,11 @@ struct WorkoutIndex: Codable {
 
     // MARK: - Weekly Aggregation
 
-    /// Total miles for days starting on the given date, up to `dayCount` days
+    /// Total miles for days starting on the given date, up to `dayCount` days.
+    /// A day is completed by a mile or by 10k steps.
     func weekTotal(startingOn weekStart: Date, dayCount: Int = 7) -> (miles: Double, daysCompleted: Int) {
         let calendar = Calendar.current
+        let stepDays = StepGoalDayStore.goalDayKeys
         var weekMiles = 0.0
         var daysCompleted = 0
 
@@ -271,7 +275,7 @@ struct WorkoutIndex: Codable {
             guard let date = calendar.date(byAdding: .day, value: offset, to: calendar.startOfDay(for: weekStart)) else { continue }
             let dayMiles = totalMiles(for: date)
             weekMiles += dayMiles
-            if dayMiles >= 0.95 {
+            if dayMiles >= 0.95 || stepDays.contains(dateKey(from: date)) {
                 daysCompleted += 1
             }
         }

@@ -195,6 +195,10 @@ final class MADBackgroundService: NSObject, ObservableObject {
     
     @MainActor
     private func performBackgroundWork() async {
+        // Last night's at-risk Live Activity outlives its midnight deadline
+        // unless something ends it; the Dashboard is the only other caller.
+        StreakRiskActivityManager.endExpired()
+
         // An in-app walk whose HealthKit save failed or timed out is staged on
         // disk; land it before reading today's miles, or the read below (and
         // the widget it feeds) reports a day without it. No-ops while locked.
@@ -383,7 +387,8 @@ final class MADBackgroundService: NSObject, ObservableObject {
             currentMiles: service.healthManager.todaysDistance,
             totalMiles: service.healthManager.totalLifetimeMiles,
             fastestPace: service.healthManager.fastestMilePace,
-            mostMilesInDay: service.healthManager.mostMilesInOneDay
+            mostMilesInDay: service.healthManager.mostMilesInOneDay,
+            stepGoalMet: StepGoalDayStore.isTodayMet()
         )
         
         service.log("[Background] User updated and saved - Current streak now: \(service.userManager.currentUser.streak)")

@@ -19,6 +19,8 @@
 	"license": "ISC",
 	"type": "module",
 	"dependencies": {
+		"@apple/app-store-server-library": "^3.1.0",
+		"@modelcontextprotocol/sdk": "^1.32.1",
 		"compression": "^1.8.1",
 		"dotenv": "^17.2.0",
 		"drizzle-orm": "^0.45.2",
@@ -29,8 +31,10 @@
 		"multer": "^2.1.1",
 		"node-cron": "^4.2.1",
 		"pg": "^8.16.3",
+		"pg-cursor": "^2.22.1",
 		"sharp": "^0.34.5",
-		"web-push": "^3.6.7"
+		"web-push": "^3.6.7",
+		"zod": "^4.6.6"
 	},
 	"devDependencies": {
 		"@types/compression": "^1.8.1",
@@ -40,6 +44,7 @@
 		"@types/node": "^24.0.15",
 		"@types/node-cron": "^3.0.11",
 		"@types/pg": "^8.15.4",
+		"@types/pg-cursor": "^2.7.2",
 		"@types/sharp": "^0.31.1",
 		"@types/web-push": "^3.6.4",
 		"drizzle-kit": "^0.31.10",

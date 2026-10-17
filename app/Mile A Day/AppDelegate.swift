@@ -27,6 +27,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // off-main and never blocks launch.
         DiagnosticsReporter.shared.start()
 
+        // Mile A Day+: listen for StoreKit transactions from launch, so a
+        // renewal, an Ask to Buy approval or a refund that arrives while the
+        // app is closed is delivered (and posted to our server) right away.
+        PlusStore.shared.start()
+
         // If iOS launched us in the background (no UI scene), kick off a sync immediately.
         // For UI launches, the scene lifecycle in Mile_A_DayApp handles the sync.
         if application.applicationState == .background {

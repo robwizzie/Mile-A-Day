@@ -186,6 +186,11 @@ extension HealthKitManager {
     /// Updates cached workout data with new workouts
     /// Must be called on the main thread (cachedWorkouts is @Published)
     func updateCachedWorkoutData(with newWorkouts: [HKWorkout]) {
+        // `performInitialWorkoutFetch` fills the cache without the UUID set;
+        // dedup against a stale set would append every recent workout again.
+        if cachedWorkoutUUIDs.count != cachedWorkouts.count {
+            cachedWorkoutUUIDs = Set(cachedWorkouts.map { $0.uuid })
+        }
         // Collect first, then append once — cachedWorkouts is @Published, so
         // per-item appends trigger one SwiftUI invalidation per workout.
         var appended: [HKWorkout] = []
@@ -275,7 +280,13 @@ extension HealthKitManager {
 
             DispatchQueue.main.async {
                 if let sum = result?.sumQuantity() {
-                    self.todaysSteps = Int(sum.doubleValue(for: HKUnit.count()))
+                    let steps = Int(sum.doubleValue(for: HKUnit.count()))
+                    #if !os(watchOS)
+                    // Before the publish, so views redrawn by it read the key.
+                    StepGoalDayStore.record(steps: steps, on: now)
+                    #endif
+                    self.todaysStepsDay = startOfDay
+                    self.todaysSteps = steps
                 } else {
                     self.todaysSteps = 0
                 }

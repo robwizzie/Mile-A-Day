@@ -50,19 +50,29 @@ export function servedRouteFrom(
 ): string {
   const raw = `${alias}_raw`;
   const b = `${alias}_b`;
+  const w = `${alias}_w`;
+  const route = `CASE WHEN ${b}.full_route THEN ${raw}.route
+				ELSE mad_route_slice(${raw}.route, ${b}.i_s, ${b}.i_e) END`;
+  const times = `CASE WHEN ${b}.full_route THEN ${raw}.times
+				ELSE mad_route_slice_times(${raw}.times, ${raw}.point_count, ${b}.i_s, ${b}.i_e) END`;
+  // Walked straight roads get points along them so the app doesn't read the
+  // one long simplified step as a gap (migration 0098). Decided on the FULL
+  // stored route against the recorded distance; route and clock make the
+  // same call, so they stay 1:1.
+  const filled = (timesOut: boolean) =>
+    `mad_route_fill_walked_steps(${route}, ${times}, ${raw}.route,
+				${w}.distance * 1609.344, ${timesOut})`;
   // A plain derived table, so the planner flattens it into the caller's
-  // scalar subquery and evaluates ONLY the column that subquery selects —
-  // the route column never pays for slicing the clock, and vice versa.
+  // scalar subquery and evaluates ONLY the column that subquery selects.
   return `(
 		SELECT ${raw}.workout_id,
-			CASE WHEN ${b}.full_route THEN ${raw}.route
-				ELSE mad_route_slice(${raw}.route, ${b}.i_s, ${b}.i_e) END AS route,
-			CASE WHEN ${b}.full_route THEN ${raw}.times
-				ELSE mad_route_slice_times(${raw}.times, ${raw}.point_count, ${b}.i_s, ${b}.i_e) END AS times,
+			${filled(false)} AS route,
+			${filled(true)} AS times,
 			CASE WHEN ${b}.full_route THEN ${raw}.started_at
 				ELSE mad_route_shift_start(${raw}.started_at, ${raw}.times, ${raw}.point_count, ${b}.i_s) END AS started_at,
 			NOT ${b}.full_route AS trimmed
 		  FROM workout_routes ${raw}
+		  LEFT JOIN workouts ${w} ON ${w}.workout_id = ${raw}.workout_id
 		  CROSS JOIN LATERAL mad_route_view_bounds(
 			${raw}.route, ${raw}.point_count, ${raw}.privacy_bounds,
 			${raw}.workout_id, ${ownerExpr},

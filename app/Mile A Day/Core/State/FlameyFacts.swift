@@ -102,10 +102,12 @@ enum FlameyFacts {
     /// Every wardrobe item this user owns — from earned medals, plus the
     /// streak colours their longest streak implies (a gap-filler while the
     /// badge list loads; the server awards those medals from the same
-    /// figure). Retroactive by construction.
+    /// figure), plus whatever the server last said they own (items it grants
+    /// without a medal). Retroactive by construction.
     @MainActor
     static var ownedItems: Set<FlameyItem> {
         FlameyWardrobe.owned(earnedBadgeIds: earnedBadgeIds.union(FlameyWardrobe.impliedBadgeIds(longestStreak: longestStreak)))
+            .union(FlameyClosetSync.serverOwned)
     }
 
     // MARK: The Closet choice
@@ -178,6 +180,11 @@ enum FlameyFacts {
     static func mirrorToWidget() {
         let badges = earnedBadgeIds.intersection(FlameyWardrobe.catalogBadgeIds)
             .union(FlameyWardrobe.impliedBadgeIds(longestStreak: longestStreak))
+            // The widget stores badge ids; a server-granted item rides as its own.
+            .union(FlameyClosetSync.serverOwned.compactMap(\.badgeId))
+        // Plus items and Monthly Flames have no badge id, so they ride as
+        // item ids of their own (the badge ids above stay for older widgets).
+        let serverOwned = FlameyClosetSync.serverOwned
         let signup = signupDate
         let longest = longestStreak
         let choice = self.choice
@@ -190,11 +197,12 @@ enum FlameyFacts {
                                date: $0, signupDate: WidgetDataStore.loadFlameySignupDate(), detail: .compact)
         }
         let after = days.map {
-            FlameyLook.resolve(owned: FlameyWardrobe.owned(earnedBadgeIds: badges), choice: choice,
+            FlameyLook.resolve(owned: FlameyWardrobe.owned(earnedBadgeIds: badges).union(serverOwned), choice: choice,
                                date: $0, signupDate: signup, detail: .compact)
         }
         WidgetDataStore.save(longestStreak: longest)
         WidgetDataStore.save(flameyChoice: choice)
+        WidgetDataStore.save(flameyServerItemIds: serverOwned.map(\.rawValue))
         WidgetDataStore.save(flameyBadgeIds: Array(badges), signupDate: signup, reload: before != after)
     }
 }

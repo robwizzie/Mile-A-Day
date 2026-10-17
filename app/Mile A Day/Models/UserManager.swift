@@ -259,6 +259,7 @@ class UserManager: ObservableObject {
         #if !os(watchOS)
         Task { @MainActor in InjuryPauseState.shared.reset() }
         Task { @MainActor in ShoeStore.shared.reset() }
+        Task { @MainActor in PlusStore.shared.reset() }
         #endif
 
         currentUser.appleId = nil
@@ -376,7 +377,8 @@ class UserManager: ObservableObject {
         currentMiles: Double,
         totalMiles: Double,
         fastestPace: TimeInterval,
-        mostMilesInDay: Double
+        mostMilesInDay: Double,
+        stepGoalMet: Bool = false
     ) {
         currentUser.updateFromHealthKit(
             streak: vettedHealthKitStreak(retroactiveStreak),
@@ -384,6 +386,7 @@ class UserManager: ObservableObject {
             totalMiles: totalMiles,
             fastestPace: fastestPace,
             mostMilesInDay: mostMilesInDay,
+            stepGoalMet: stepGoalMet,
             date: Date()
         )
 

@@ -49,7 +49,7 @@ struct FlameyUnlockView: View {
     }
 
     private var glow: Color {
-        FlameyPalette.palette(for: look.color)?.glow ?? Color(red: 1, green: 0.6, blue: 0.25)
+        look.figurePalette?.glow ?? Color(red: 1, green: 0.6, blue: 0.25)
     }
 
     var body: some View {
@@ -169,6 +169,9 @@ struct FlameyUnlockView: View {
         if let item = single {
             if let medalName { return "From your \(medalName) medal — " + Self.flavor(item.slot) }
             if let holiday = FlameyClosetCopy.holidayLine(item) { return holiday }
+            if let month = item.month {
+                return "Every day of \(FlameyItem.monthName(month)) — he's the \(item.displayName) flame now"
+            }
             return item.slot.shortLabel + " · " + Self.flavor(item.slot)
         }
         let slots = Set(items.map(\.slot)).count
