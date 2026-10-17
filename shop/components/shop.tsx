@@ -14,9 +14,8 @@ import {
 } from "@/lib/catalog";
 import { THEME_KEY, type ThemeChoice } from "@/lib/theme";
 import { SharedDefs } from "./designs";
-import { Garment3D, SIDE_TURN, TURN_EASE, garmentWidth, hungSize } from "./garment";
+import { Garment3D, SIDE_TURN, TURN_EASE, garmentWidth, hungSize, sideWidth } from "./garment";
 
-const SIDE_COS = Math.abs(Math.cos((SIDE_TURN * Math.PI) / 180));
 const HERO = PRODUCTS[0];
 const GUTTER = "max(24px, calc((100vw - 1024px) / 2 + 24px))";
 
@@ -197,9 +196,9 @@ function DesktopRack({
   // Every piece stays on the rail: size the row (with one piece turned open)
   // to fit between the rail's ends at any width. Layout is linear in height.
   const rowAt = (h: number) => {
-    const widths = PRODUCTS.map((p) => garmentWidth(p, h));
-    const rest = widths.reduce((a, w) => a + w * SIDE_COS + h * 0.08, 0);
-    return rest + Math.max(...widths.map((w) => w + h * 0.24 - (w * SIDE_COS + h * 0.08)));
+    const sides = PRODUCTS.map((p) => sideWidth(p, h) + h * 0.08);
+    const rest = sides.reduce((a, s) => a + s, 0);
+    return rest + Math.max(...PRODUCTS.map((p, i) => garmentWidth(p, h) + h * 0.24 - sides[i]));
   };
   const usable = Math.max(200, boxW - 56);
   const height = Math.min(preferred, Math.floor((preferred * usable) / rowAt(preferred)));
@@ -210,7 +209,7 @@ function DesktopRack({
   let cursor = 0;
   const layout = PRODUCTS.map((p, i) => {
     const w = garmentWidth(p, height);
-    const slot = hover === i ? w + gap * 3 : w * SIDE_COS + gap;
+    const slot = hover === i ? w + gap * 3 : sideWidth(p, height) + gap;
     const x = cursor;
     cursor += slot;
     return { w, slot, x };
@@ -692,7 +691,7 @@ function Detail({ index, onClose, onGo }: { index: number; onClose: () => void; 
                 product={product}
                 height={height}
                 turn={turn}
-                transition={dragging ? "none" : `transform 0.9s ${TURN_EASE}, --side 0.9s ${TURN_EASE}`}
+                transition={dragging ? "none" : `transform 0.9s ${TURN_EASE}, --turn 0.9s ${TURN_EASE}`}
               />
             </div>
           </div>
