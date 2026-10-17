@@ -1,99 +1,110 @@
 @import "tailwindcss";
 
-/* Light is a bright studio (the way a real rack is shot); dark is a lit
-   showroom. Both follow the visitor's system setting unless they pick one
-   (html[data-theme], set before paint by the script in layout.tsx). The
-   reds and fonts are the app's and mileaday.run's. */
+/* Apple-store calm: white (or true black) ground, system type, one accent —
+   MAD red — and nothing on the page competing with the clothes. Both themes
+   follow the system unless the visitor picks one (html[data-theme], set
+   before paint by the script in layout.tsx). */
 :root {
   color-scheme: light;
-  --paper: #f1ede6;
-  --ink: #141210;
-  --ink-soft: #6b655d;
-  --line: rgba(20, 18, 16, 0.12);
-  --dot: rgba(20, 18, 16, 0.13);
-  --card: rgba(246, 243, 238, 0.86);
-  --scrim: rgba(241, 237, 230, 0.62);
-  --spot: transparent;
-  --garment-shadow: rgba(20, 18, 16, 0.22);
-  --footer: #141210;
-  --footer-ink: rgba(241, 237, 230, 0.7);
-  --mad-red: #c72554;
-  --mad-burgundy: #8b1538;
-  --mad-pink: #ff4d7d;
+  --bg: #ffffff;
+  --bg-2: #f5f5f7;
+  --surface: #ffffff;
+  --ink: #1d1d1f;
+  --ink-soft: #6e6e73;
+  --line: rgba(0, 0, 0, 0.1);
+  --nav: rgba(255, 255, 255, 0.74);
+  --stage: #f5f5f7;
+  --spot: rgba(0, 0, 0, 0);
+  --scrim: rgba(0, 0, 0, 0.3);
+  --hanger: #1d1d1f;
+  --garment-shadow: rgba(0, 0, 0, 0.16);
+  --accent: #c72554;
+  --accent-ink: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --paper: #0d0c0c;
-    --ink: #f3efe9;
-    --ink-soft: #9a938a;
-    --line: rgba(255, 255, 255, 0.12);
-    --dot: rgba(255, 255, 255, 0.075);
-    --card: rgba(24, 22, 22, 0.82);
-    --scrim: rgba(13, 12, 12, 0.6);
-    --spot: rgba(255, 244, 230, 0.075);
-    --garment-shadow: rgba(0, 0, 0, 0.6);
-    --footer: #060505;
-    --footer-ink: rgba(243, 239, 233, 0.6);
+    --bg: #000000;
+    --bg-2: #161617;
+    --surface: #1c1c1e;
+    --ink: #f5f5f7;
+    --ink-soft: #86868b;
+    --line: rgba(255, 255, 255, 0.14);
+    --nav: rgba(22, 22, 23, 0.74);
+    --stage: #161617;
+    --spot: rgba(255, 255, 255, 0.07);
+    --scrim: rgba(0, 0, 0, 0.6);
+    --hanger: #48484a;
+    --garment-shadow: rgba(0, 0, 0, 0.75);
+    --accent: #e0336a;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --paper: #0d0c0c;
-  --ink: #f3efe9;
-  --ink-soft: #9a938a;
-  --line: rgba(255, 255, 255, 0.12);
-  --dot: rgba(255, 255, 255, 0.075);
-  --card: rgba(24, 22, 22, 0.82);
-  --scrim: rgba(13, 12, 12, 0.6);
-  --spot: rgba(255, 244, 230, 0.075);
-  --garment-shadow: rgba(0, 0, 0, 0.6);
-  --footer: #060505;
-  --footer-ink: rgba(243, 239, 233, 0.6);
+  --bg: #000000;
+  --bg-2: #161617;
+  --surface: #1c1c1e;
+  --ink: #f5f5f7;
+  --ink-soft: #86868b;
+  --line: rgba(255, 255, 255, 0.14);
+  --nav: rgba(22, 22, 23, 0.74);
+  --stage: #161617;
+  --spot: rgba(255, 255, 255, 0.07);
+  --scrim: rgba(0, 0, 0, 0.6);
+  --hanger: #48484a;
+  --garment-shadow: rgba(0, 0, 0, 0.75);
+  --accent: #e0336a;
 }
 
 @theme inline {
-  --font-sans: var(--font-dm-sans), system-ui, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-inter), "Helvetica Neue", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", var(--font-inter), "Helvetica Neue", sans-serif;
   --font-heading: var(--font-bebas-neue), Impact, sans-serif;
-  --color-paper: var(--paper);
+  --color-bg: var(--bg);
+  --color-bg-2: var(--bg-2);
+  --color-surface: var(--surface);
   --color-ink: var(--ink);
   --color-ink-soft: var(--ink-soft);
   --color-line: var(--line);
-  --color-card: var(--card);
-  --color-mad-red: var(--mad-red);
-  --color-mad-burgundy: var(--mad-burgundy);
+  --color-stage: var(--stage);
+  --color-accent: var(--accent);
 }
 
 html,
 body {
-  background: var(--paper);
+  background: var(--bg);
   color: var(--ink);
 }
 
 body {
   overflow-x: hidden;
+  font-feature-settings: "kern";
+  letter-spacing: -0.01em;
   transition: background-color 0.4s ease, color 0.4s ease;
 }
 
-/* A faint dot grid, like a studio backdrop, with a soft spotlight over the
-   rack in dark mode so black garments keep their edges. */
-.backdrop {
-  background-image:
-    radial-gradient(ellipse 60% 45% at 50% 42%, var(--spot), transparent 70%),
-    radial-gradient(var(--dot) 1px, transparent 1.2px);
-  background-size: 100% 100%, 22px 22px;
-  background-position: center;
+.display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.028em;
 }
 
-/* The chrome rail. */
-.rail {
-  background: linear-gradient(180deg, #fdfdfd 0%, #c9c9c9 38%, #8e8e8e 62%, #d6d6d6 100%);
-  box-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.35);
+/* Soft light pooled under the rack; in dark it keeps black pieces readable. */
+.spotlight {
+  background: radial-gradient(ellipse 55% 60% at 50% 40%, var(--spot), transparent 72%);
 }
-.rail-cap {
-  background: radial-gradient(circle at 35% 35%, #ffffff, #9a9a9a 60%, #6d6d6d);
-  box-shadow: 0 4px 10px -4px rgba(0, 0, 0, 0.4);
+
+.glass {
+  background: var(--nav);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+/* The rail: a slim brushed bar. */
+.rail {
+  background: linear-gradient(180deg, #f4f4f4 0%, #b9b9bc 50%, #8d8d91 100%);
+  box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.3);
 }
 
 /* How side-on a garment is (0 front … 1 edge-on). Registered so it can
@@ -118,44 +129,34 @@ body {
   transform: rotateY(180deg);
 }
 .garment-ink {
-  filter: brightness(calc(1 - var(--side) * 0.28)) drop-shadow(0 22px 18px var(--garment-shadow));
+  filter: brightness(calc(1 - var(--side) * 0.25)) drop-shadow(0 18px 22px var(--garment-shadow));
 }
 
-/* A garment swings from its hook when touched, settling like fabric. */
 @keyframes sway {
   0% { transform: rotate(0deg); }
-  18% { transform: rotate(2.6deg); }
-  40% { transform: rotate(-1.8deg); }
-  60% { transform: rotate(1deg); }
-  80% { transform: rotate(-0.4deg); }
+  20% { transform: rotate(2deg); }
+  45% { transform: rotate(-1.3deg); }
+  70% { transform: rotate(0.6deg); }
   100% { transform: rotate(0deg); }
 }
 .swing {
-  animation: sway 1.3s cubic-bezier(0.33, 1, 0.68, 1);
-}
-
-@keyframes marquee {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
-}
-.marquee {
-  animation: marquee 42s linear infinite;
+  animation: sway 1.2s cubic-bezier(0.33, 1, 0.68, 1);
 }
 
 @keyframes rise {
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(14px); }
   to { opacity: 1; transform: translateY(0); }
 }
 .rise {
-  animation: rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes drop-in {
-  from { opacity: 0; transform: translateY(-34px); }
+  from { opacity: 0; transform: translateY(-24px); }
   to { opacity: 1; transform: translateY(0); }
 }
 .drop-in {
-  animation: drop-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: drop-in 1s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes fade {
@@ -163,15 +164,15 @@ body {
   to { opacity: 1; }
 }
 .fade {
-  animation: fade 0.35s ease both;
+  animation: fade 0.3s ease both;
 }
 
-@keyframes sheet-up {
-  from { opacity: 0; transform: translateY(22px) scale(0.985); }
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(28px) scale(0.98); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
-.sheet-up {
-  animation: sheet-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+.sheet-in {
+  animation: sheet-in 0.5s cubic-bezier(0.32, 0.72, 0, 1) both;
 }
 
 .no-scrollbar {
@@ -183,10 +184,9 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .swing,
-  .marquee,
   .rise,
   .drop-in,
-  .sheet-up,
+  .sheet-in,
   .fade {
     animation: none !important;
   }

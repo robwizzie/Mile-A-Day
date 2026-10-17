@@ -1,13 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import { DM_Sans, Bebas_Neue } from "next/font/google";
+import { Inter, Bebas_Neue } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import { THEME_KEY } from "@/lib/theme";
 
-const dmSans = DM_Sans({
+// Apple devices render the system font (SF Pro); Inter stands in elsewhere.
+const inter = Inter({
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-dm-sans",
+  variable: "--font-inter",
   display: "swap",
 });
 
@@ -46,8 +46,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f1ede6" },
-    { media: "(prefers-color-scheme: dark)", color: "#0d0c0c" },
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#000000" },
   ],
   width: "device-width",
   initialScale: 1,
@@ -55,7 +55,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${dmSans.variable} ${bebasNeue.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${inter.variable} ${bebasNeue.variable}`} suppressHydrationWarning>
       <head>
         {/* Apply a saved light/dark choice before first paint (no flash). No
             saved choice = follow the system, via the CSS media query. */}

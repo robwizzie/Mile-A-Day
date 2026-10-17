@@ -102,8 +102,8 @@ function Hanger({ style }: { style?: CSSProperties }) {
         strokeLinecap="round"
         fill="none"
       />
-      <path d="M4 37 C 16 31, 26 25, 32 23 C 38 25, 48 31, 60 37" stroke="#2b2420" strokeWidth="4.5" strokeLinecap="round" fill="none" />
-      <circle cx="32" cy="23.5" r="3.2" fill="#2b2420" />
+      <path d="M4 37 C 16 31, 26 25, 32 23 C 38 25, 48 31, 60 37" style={{ stroke: "var(--hanger)" }} strokeWidth="4.5" strokeLinecap="round" fill="none" />
+      <circle cx="32" cy="23.5" r="3.2" style={{ fill: "var(--hanger)" }} />
     </svg>
   );
 }

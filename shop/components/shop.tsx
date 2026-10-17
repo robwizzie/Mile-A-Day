@@ -13,11 +13,12 @@ import {
   type Product,
 } from "@/lib/catalog";
 import { THEME_KEY, type ThemeChoice } from "@/lib/theme";
-import { FlameyShape, SharedDefs } from "./designs";
+import { SharedDefs } from "./designs";
 import { Garment3D, SIDE_TURN, TURN_EASE, garmentWidth, hungSize } from "./garment";
 
-const pad = (n: number) => String(n).padStart(2, "0");
 const SIDE_COS = Math.abs(Math.cos((SIDE_TURN * Math.PI) / 180));
+const HERO = PRODUCTS[0];
+const GUTTER = "max(24px, calc((100vw - 1024px) / 2 + 24px))";
 
 export function Shop() {
   const [active, setActive] = useState(0);
@@ -39,27 +40,33 @@ export function Shop() {
   }, []);
 
   return (
-    <div className="backdrop flex min-h-dvh flex-col">
+    <div className="flex min-h-dvh flex-col">
       <SharedDefs />
-      <Header />
+      <Ribbon onOpen={() => show(0)} />
+      <Nav />
 
-      <main className="relative flex flex-1 flex-col justify-center pb-6" aria-hidden={open != null}>
-        <div className="rise mx-auto mb-6 flex w-full max-w-6xl items-end justify-center gap-6 px-4 sm:justify-between sm:px-8 md:mb-10">
-          <p className="font-heading text-[13px] tracking-[0.28em] text-ink-soft">
-            DROP 01 <span className="text-mad-red">/</span> FALL 2026
-          </p>
-          <p className="hidden font-heading text-[13px] tracking-[0.28em] text-ink-soft md:block">
-            HOVER TO TURN · CLICK TO OPEN
-          </p>
-        </div>
+      <main aria-hidden={open != null}>
+        <section className="spotlight relative pb-16 pt-12 sm:pt-16">
+          <div className="rise mx-auto max-w-3xl px-6 text-center">
+            <p className="text-[17px] font-semibold text-accent">Drop 01</p>
+            <h1 className="display mt-1 text-[44px] leading-[1.05] sm:text-[64px]">Go the extra mile.</h1>
+            <p className="mx-auto mt-3 max-w-xl text-[19px] leading-snug text-ink-soft sm:text-[21px]">
+              Official Mile A Day apparel. Made for the people who show up every single day.
+            </p>
+          </div>
 
-        <DesktopRack active={active} onHover={setActive} onOpen={show} />
-        <MobileRack active={active} onActive={setActive} onOpen={show} />
+          <div className="mt-10 sm:mt-12">
+            <DesktopRack active={active} onHover={setActive} onOpen={show} />
+            <MobileRack active={active} onActive={setActive} onOpen={show} />
+          </div>
 
-        <Caption product={PRODUCTS[active]} index={active} onOpen={() => show(active)} />
+          <Caption product={PRODUCTS[active]} onOpen={() => show(active)} />
+        </section>
+
+        <Collection onOpen={show} />
+        <Promises />
       </main>
 
-      <Ticker />
       <Footer />
 
       {open != null && <Detail index={open} onClose={() => show(null)} onGo={show} />}
@@ -67,31 +74,43 @@ export function Shop() {
   );
 }
 
-// ── Header + theme ─────────────────────────────────────────────────────────
+// ── Ribbon + nav ───────────────────────────────────────────────────────────
 
-function Header() {
+function Ribbon({ onOpen }: { onOpen: () => void }) {
   return (
-    <header className="relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-4 pt-5 sm:px-8 sm:pt-7">
-      <a
-        href={SITE_URL}
-        className="hidden w-36 font-heading text-[15px] tracking-[0.2em] text-ink-soft transition-colors hover:text-ink sm:block"
-      >
-        THE APP
-      </a>
-      <a href="/" className="flex items-center gap-2.5" aria-label="Mile A Day Shop">
-        <img src="/mad-icon.png" alt="" className="h-8 w-8 rounded-full shadow-md sm:h-9 sm:w-9" />
-        <span className="font-heading text-[21px] leading-none tracking-[0.16em] sm:text-[26px] sm:tracking-[0.18em]">
-          MILE A DAY <span className="text-mad-red">SHOP</span>
-        </span>
-      </a>
-      <div className="flex items-center justify-end gap-3 sm:w-36 sm:gap-4">
-        <ThemeToggle />
-        <a
-          href={APP_STORE_URL}
-          className="font-heading text-[15px] tracking-[0.2em] text-ink-soft transition-colors hover:text-ink"
-        >
-          APP ↗
+    <div className="bg-bg-2 px-4 py-2.5 text-center text-[13px] text-ink-soft">
+      {isBuyable(HERO) ? "Drop 01 is here." : "Drop 01 is almost here."} The {HERO.name}.{" "}
+      <button type="button" onClick={onOpen} className="text-accent hover:underline">
+        Take a look ›
+      </button>
+    </div>
+  );
+}
+
+function Nav() {
+  return (
+    <header className="glass sticky top-0 z-40 border-b border-line">
+      <div className="mx-auto flex h-12 max-w-[1024px] items-center justify-between px-5">
+        <a href="/" className="flex items-center gap-2" aria-label="Mile A Day Shop">
+          <img src="/mad-icon.png" alt="" className="h-6 w-6 rounded-full" />
+          <span className="text-[15px] font-semibold tracking-[-0.01em]">Mile A Day</span>
+          <span className="text-[15px] text-ink-soft">Shop</span>
         </a>
+        <nav className="flex items-center gap-1 text-[13px] sm:gap-5">
+          <a href="#collection" className="hidden text-ink-soft transition-colors hover:text-ink sm:block">
+            Collection
+          </a>
+          <a href={SITE_URL} className="hidden text-ink-soft transition-colors hover:text-ink sm:block">
+            The App
+          </a>
+          <ThemeToggle />
+          <a
+            href={APP_STORE_URL}
+            className="ml-1 rounded-full bg-ink px-3 py-1 text-[12px] font-medium text-bg transition-opacity hover:opacity-80"
+          >
+            Get the app
+          </a>
+        </nav>
       </div>
     </header>
   );
@@ -119,16 +138,16 @@ function ThemeToggle() {
     } catch {}
   };
 
-  const label = choice === "system" ? "Theme: matches your device" : `Theme: ${choice}`;
+  const label = choice === "system" ? "Appearance: matches your device" : `Appearance: ${choice}`;
   return (
     <button
       type="button"
       onClick={() => pick(THEME_NEXT[choice])}
-      aria-label={`${label}. Switch theme`}
+      aria-label={`${label}. Change appearance`}
       title={label}
-      className="flex h-9 w-9 items-center justify-center rounded-full border border-line text-ink-soft transition-colors hover:text-ink"
+      className="flex h-8 w-8 items-center justify-center rounded-full text-ink-soft transition-colors hover:text-ink"
     >
-      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
         {choice === "light" && (
           <>
             <circle cx="12" cy="12" r="4.2" />
@@ -149,7 +168,7 @@ function ThemeToggle() {
   );
 }
 
-// ── Desktop: every piece hangs side-on; hover turns one to face you. ───────
+// ── Desktop rack: everything hangs side-on; hover turns one to face you. ───
 
 function DesktopRack({
   active,
@@ -164,7 +183,7 @@ function DesktopRack({
   const [flipped, setFlipped] = useState(false);
   const height = useDesktopGarmentHeight();
   const box = useRef<HTMLDivElement>(null);
-  const [boxW, setBoxW] = useState(1100);
+  const [boxW, setBoxW] = useState(980);
   const swingRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   useLayoutEffect(() => {
@@ -175,9 +194,9 @@ function DesktopRack({
     return () => ro.disconnect();
   }, []);
 
-  // Slots: a side-on piece takes its edge-on width, the turned one its full
-  // width. Everything slides on transforms, so it stays smooth.
-  const gap = height * 0.07;
+  // A side-on piece takes its edge-on width, the turned one its full width.
+  // Everything slides on transforms, so it stays smooth.
+  const gap = height * 0.08;
   let cursor = 0;
   const layout = PRODUCTS.map((p, i) => {
     const w = garmentWidth(p, height);
@@ -203,12 +222,12 @@ function DesktopRack({
   };
 
   return (
-    <div className="relative mx-auto hidden w-full max-w-6xl px-8 md:block">
+    <div className="relative mx-auto hidden w-full max-w-[1024px] px-6 md:block">
       <Rail />
       <div
         ref={box}
         className="relative"
-        style={{ height: tallest + 60 }}
+        style={{ height: tallest + 56 }}
         onMouseLeave={() => {
           setHover(null);
           setFlipped(false);
@@ -227,13 +246,13 @@ function DesktopRack({
                 zIndex: isHover ? 30 : active === i ? 20 : 10 + i,
               }}
             >
-              <div className="drop-in" style={{ animationDelay: `${120 + i * 80}ms` }}>
+              <div className="drop-in" style={{ animationDelay: `${200 + i * 70}ms` }}>
                 <div
                   ref={(el) => {
                     swingRefs.current[i] = el;
                   }}
                   className="origin-top"
-                  style={{ marginTop: -3 }}
+                  style={{ marginTop: -2 }}
                 >
                   <Garment3D product={p} height={height} turn={isHover ? (flipped ? 180 : 0) : SIDE_TURN} />
                 </div>
@@ -253,7 +272,7 @@ function DesktopRack({
               onFocus={() => enter(i)}
               onClick={() => onOpen(i)}
               aria-label={`${p.name}, ${p.colorName}. ${statusLabel(p)}. Open details`}
-              className="absolute left-0 top-0 z-40 cursor-pointer rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-mad-red/60"
+              className="absolute left-0 top-0 z-40 cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
               style={{
                 width: slot,
                 height: tallest,
@@ -268,12 +287,12 @@ function DesktopRack({
           <div
             className="absolute left-0 z-50"
             style={{
-              top: hungSize(PRODUCTS[hover], height).height + 12,
+              top: hungSize(PRODUCTS[hover], height).height + 10,
               transform: `translateX(${offset + layout[hover].x + layout[hover].slot / 2}px) translateX(-50%)`,
               transition: `transform 0.8s ${TURN_EASE}`,
             }}
           >
-            <FlipButton flipped={flipped} onClick={() => setFlipped((f) => !f)} />
+            <SideSwitch back={flipped} onChange={setFlipped} small />
           </div>
         )}
       </div>
@@ -281,21 +300,33 @@ function DesktopRack({
   );
 }
 
-function FlipButton({ flipped, onClick }: { flipped: boolean; onClick: () => void }) {
+/** Apple-style segmented control: Front | Back. */
+function SideSwitch({ back, onChange, small }: { back: boolean; onChange: (back: boolean) => void; small?: boolean }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="fade inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-card px-3.5 py-1.5 font-heading text-[13px] tracking-[0.2em] text-ink shadow-sm backdrop-blur transition-colors duration-200 hover:bg-ink hover:text-paper"
+    <div
+      className={`fade relative inline-grid grid-cols-2 rounded-full bg-bg-2 p-[3px] ${small ? "text-[12px]" : "text-[14px]"}`}
+      role="group"
+      aria-label="Show side"
     >
-      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" />
-        <path d="M21 3v5h-5" />
-        <path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" />
-        <path d="M3 21v-5h5" />
-      </svg>
-      {flipped ? "SEE FRONT" : "SEE BACK"}
-    </button>
+      <span
+        className="absolute inset-y-[3px] left-[3px] w-[calc(50%-3px)] rounded-full bg-surface shadow-[0_1px_4px_rgba(0,0,0,0.14)] transition-transform duration-300"
+        style={{ transform: back ? "translateX(100%)" : "none", transitionTimingFunction: TURN_EASE }}
+        aria-hidden="true"
+      />
+      {[false, true].map((b) => (
+        <button
+          key={String(b)}
+          type="button"
+          onClick={() => onChange(b)}
+          aria-pressed={back === b}
+          className={`relative z-10 rounded-full font-medium transition-colors ${small ? "px-3.5 py-1" : "px-6 py-1.5"} ${
+            back === b ? "text-ink" : "text-ink-soft hover:text-ink"
+          }`}
+        >
+          {b ? "Back" : "Front"}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -303,9 +334,9 @@ function useDesktopGarmentHeight() {
   const [h, setH] = useState(240);
   useEffect(() => {
     const fit = () => {
-      const byWidth = (Math.min(window.innerWidth, 1152) - 64) / 3.6;
-      const byHeight = window.innerHeight * 0.36;
-      setH(Math.round(Math.max(160, Math.min(320, byWidth, byHeight))));
+      const byWidth = (Math.min(window.innerWidth, 1024) - 48) / 3.6;
+      const byHeight = window.innerHeight * 0.31;
+      setH(Math.round(Math.max(170, Math.min(290, byWidth, byHeight))));
     };
     fit();
     window.addEventListener("resize", fit);
@@ -316,15 +347,13 @@ function useDesktopGarmentHeight() {
 
 function Rail() {
   return (
-    <div className="pointer-events-none absolute inset-x-4 top-0 z-0 sm:inset-x-6" aria-hidden="true">
-      <div className="rail h-[9px] rounded-full" />
-      <div className="rail-cap absolute -left-1 -top-[5px] h-[19px] w-[19px] rounded-full" />
-      <div className="rail-cap absolute -right-1 -top-[5px] h-[19px] w-[19px] rounded-full" />
+    <div className="pointer-events-none absolute inset-x-6 top-[2px] z-0 sm:inset-x-10" aria-hidden="true">
+      <div className="rail h-[5px] rounded-full" />
     </div>
   );
 }
 
-// ── Mobile: swipe the rail; the centred piece turns to face you. ──────────
+// ── Mobile rack: swipe the rail; the centred piece turns to face you. ─────
 
 function MobileRack({
   active,
@@ -410,7 +439,7 @@ function MobileRack({
                 items.current[i] = el;
               }}
               className="garment-3d"
-              style={{ marginTop: -3 }}
+              style={{ marginTop: -2 }}
             >
               <button
                 type="button"
@@ -427,69 +456,130 @@ function MobileRack({
           </div>
         ))}
       </div>
-      <div className="mt-3 flex items-center justify-center gap-4">
-        <div className="flex gap-1.5" aria-hidden="true">
-          {PRODUCTS.map((p, i) => (
-            <span
-              key={p.id}
-              className="h-1.5 rounded-full transition-all duration-300"
-              style={{ width: i === active ? 18 : 6, background: i === active ? "var(--mad-red)" : "var(--line)" }}
-            />
-          ))}
-        </div>
-        <FlipButton flipped={flipped} onClick={() => setFlipped((f) => !f)} />
+      <div className="mt-4 flex justify-center">
+        <SideSwitch back={flipped} onChange={setFlipped} small />
       </div>
     </div>
   );
 }
 
-// ── The line under the rack: whatever you're looking at. ────────────────────
+// ── Caption under the rack ─────────────────────────────────────────────────
 
-function Caption({ product, index, onOpen }: { product: Product; index: number; onOpen: () => void }) {
+function Caption({ product, onOpen }: { product: Product; onOpen: () => void }) {
+  const buyable = isBuyable(product);
   return (
-    <div className="mx-auto mt-5 flex w-full max-w-6xl flex-col items-center px-4 text-center sm:px-8 md:mt-2">
+    <div className="mx-auto mt-6 flex max-w-xl flex-col items-center px-6 text-center md:mt-0">
       <div key={product.id} className="rise flex flex-col items-center">
-        <p className="font-heading text-[13px] tracking-[0.28em] text-ink-soft">
-          {pad(index + 1)} / {pad(PRODUCTS.length)} · {product.colorName.toUpperCase()}
-        </p>
-        <h1 className="mt-1 font-heading text-[38px] leading-[0.95] tracking-[0.02em] sm:text-[52px]">{product.name}</h1>
-        <p className="mt-2 flex items-center gap-2 text-[14px] text-ink-soft">
-          <StatusDot product={product} />
-          {statusLabel(product)}
-          {product.price != null && (
-            <>
-              <span className="opacity-40">·</span>
-              <span className="font-semibold text-ink">{formatPrice(product.price)}</span>
-            </>
-          )}
+        <Eyebrow product={product} />
+        <h2 className="display mt-1 text-[28px] leading-tight sm:text-[32px]">{product.name}</h2>
+        <p className="mt-1 text-[17px] text-ink-soft">
+          {product.colorName}
+          {product.price != null && ` · ${formatPrice(product.price)}`}
         </p>
       </div>
-      <button
-        type="button"
-        onClick={onOpen}
-        className="group mt-5 inline-flex items-center gap-2 rounded-full border border-ink/70 px-6 py-2.5 font-heading text-[15px] tracking-[0.2em] transition-colors duration-300 hover:bg-ink hover:text-paper"
-      >
-        SEE THE PIECE
-        <span className="transition-transform duration-300 group-hover:translate-x-0.5">→</span>
-      </button>
+      <div className="mt-5 flex items-center gap-5">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="rounded-full bg-accent px-6 py-2.5 text-[15px] font-medium text-white transition-[transform,opacity] duration-200 hover:opacity-90 active:scale-[0.97]"
+        >
+          {buyable ? "Buy" : "Take a look"}
+        </button>
+        <a href={APP_STORE_URL} className="text-[15px] text-accent hover:underline">
+          Get notified in the app ›
+        </a>
+      </div>
     </div>
   );
 }
 
-function StatusDot({ product }: { product: Product }) {
-  const live = isBuyable(product);
-  const color = live ? "#1f9d55" : product.status === "later" ? "var(--ink-soft)" : "var(--mad-red)";
+function Eyebrow({ product, className = "" }: { product: Product; className?: string }) {
+  const label = isBuyable(product) ? "New" : statusLabel(product);
   return (
-    <span className="relative inline-flex h-2 w-2">
-      {product.status === "available" && (
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" style={{ background: color }} />
-      )}
-      <span className="relative inline-flex h-2 w-2 rounded-full" style={{ background: color }} />
-    </span>
+    <p className={`text-[14px] font-semibold ${product.status === "later" ? "text-ink-soft" : "text-accent"} ${className}`}>
+      {label}
+    </p>
   );
 }
 
-// ── Detail: the rack blurs back, the piece turns to you; drag to spin. ─────
+// ── Collection: Apple-store cards, front turns to back on hover. ──────────
+
+function Collection({ onOpen }: { onOpen: (i: number) => void }) {
+  return (
+    <section id="collection" className="scroll-mt-16 bg-bg-2 py-16 sm:py-20">
+      <div className="mx-auto max-w-[1024px] px-6">
+        <h2 className="display text-[32px] leading-tight sm:text-[44px]">
+          The collection. <span className="text-ink-soft">Every piece, front and back.</span>
+        </h2>
+      </div>
+      {/* Cards start in line with the heading and scroll to the window edge. */}
+      <div
+        className="no-scrollbar mt-6 flex snap-x snap-mandatory gap-5 overflow-x-auto py-4"
+        style={{ paddingInline: GUTTER, scrollPaddingInline: GUTTER }}
+      >
+        {PRODUCTS.map((p, i) => (
+          <CollectionCard key={p.id} product={p} onOpen={() => onOpen(i)} />
+        ))}
+        <div className="w-1 shrink-0" aria-hidden="true" />
+      </div>
+    </section>
+  );
+}
+
+function CollectionCard({ product, onOpen }: { product: Product; onOpen: () => void }) {
+  const [back, setBack] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      onMouseEnter={() => setBack(true)}
+      onMouseLeave={() => setBack(false)}
+      onFocus={() => setBack(true)}
+      onBlur={() => setBack(false)}
+      aria-label={`${product.name}, ${product.colorName}. ${statusLabel(product)}`}
+      className="group relative flex h-[440px] w-[300px] shrink-0 snap-start flex-col overflow-hidden rounded-[22px] bg-surface p-7 text-left shadow-[0_2px_12px_rgba(0,0,0,0.06)] transition-[transform,box-shadow] duration-500 hover:scale-[1.012] hover:shadow-[0_12px_36px_rgba(0,0,0,0.12)]"
+      style={{ transitionTimingFunction: TURN_EASE }}
+    >
+      <Eyebrow product={product} className="text-[12px]" />
+      <h3 className="display mt-1 text-[22px] leading-[1.15]">{product.name}</h3>
+      <p className="mt-1 text-[14px] text-ink-soft">
+        {product.colorName}
+        {product.price != null && ` · ${formatPrice(product.price)}`}
+      </p>
+      <div className="mt-auto flex justify-center">
+        <Garment3D product={product} height={product.art.kind === "photo" ? 196 : 222} turn={back ? 180 : 0} />
+      </div>
+      <span className="absolute bottom-5 right-5 flex h-8 w-8 items-center justify-center rounded-full bg-bg-2 text-ink-soft opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+      </span>
+    </button>
+  );
+}
+
+// ── Promise row ────────────────────────────────────────────────────────────
+
+const PROMISES = [
+  { title: "Printed to order.", body: "Each piece is made when you order it, so nothing sits in a warehouse." },
+  { title: "Designed for the daily mile.", body: "Every print comes from the app: the streak, the route, Flamey." },
+  { title: "Questions? We answer.", body: `Write to ${SUPPORT_EMAIL} about sizing, orders or anything else.` },
+];
+
+function Promises() {
+  return (
+    <section className="mx-auto grid max-w-[1024px] gap-10 px-6 py-16 sm:grid-cols-3 sm:py-20">
+      {PROMISES.map((p) => (
+        <div key={p.title}>
+          <h3 className="display text-[21px] leading-tight">{p.title}</h3>
+          <p className="mt-2 text-[15px] leading-relaxed text-ink-soft">{p.body}</p>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+// ── Detail: an Apple-style sheet. The piece turns in; drag to spin. ───────
 
 function Detail({ index, onClose, onGo }: { index: number; onClose: () => void; onGo: (i: number) => void }) {
   const product = PRODUCTS[index];
@@ -546,33 +636,27 @@ function Detail({ index, onClose, onGo }: { index: number; onClose: () => void; 
       role="dialog"
       aria-modal="true"
       aria-label={product.name}
-      className="fade fixed inset-0 z-50 overflow-y-auto overflow-x-hidden backdrop-blur-xl"
+      className="fade fixed inset-0 z-50 flex items-end justify-center overflow-hidden backdrop-blur-sm sm:items-center sm:p-6"
       style={{ background: "var(--scrim)" }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="pointer-events-none sticky top-0 z-10 flex justify-between px-4 pt-4 sm:px-8 sm:pt-6">
-        <p className="pointer-events-auto rounded-full border border-line bg-card px-3.5 py-2 font-heading text-[13px] tracking-[0.28em] text-ink-soft shadow-sm backdrop-blur">
-          {pad(index + 1)} / {pad(PRODUCTS.length)}
-        </p>
+      <div className="sheet-in relative flex max-h-[94dvh] w-full max-w-[1040px] flex-col overflow-y-auto overscroll-contain rounded-t-[28px] bg-surface shadow-[0_30px_100px_rgba(0,0,0,0.35)] sm:rounded-[28px] md:grid md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] md:overflow-hidden">
         <button
           type="button"
           onClick={onClose}
-          className="pointer-events-auto rounded-full bg-ink px-4 py-2 font-heading text-[14px] tracking-[0.2em] text-paper shadow-lg transition-transform duration-300 hover:scale-105"
+          aria-label="Close"
+          className="absolute right-4 top-4 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-bg-2 text-ink-soft transition-colors hover:text-ink"
         >
-          CLOSE ✕
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
         </button>
-      </div>
 
-      <div
-        className="mx-auto grid min-h-[calc(100dvh-64px)] max-w-6xl items-center gap-6 px-4 pb-10 sm:px-8 md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] md:gap-12"
-        onClick={(e) => {
-          if (e.target === e.currentTarget) onClose();
-        }}
-      >
-        {/* The piece */}
-        <div className="sheet-up relative flex flex-col items-center">
+        {/* The stage */}
+        <div className="relative m-2 flex shrink-0 flex-col items-center rounded-[22px] bg-stage px-4 pb-5 pt-8 md:m-3 md:justify-center">
+          <div className="spotlight pointer-events-none absolute inset-0 rounded-[22px]" aria-hidden="true" />
           <div
             className="relative flex w-full touch-pan-y select-none justify-center"
             style={{ cursor: dragging ? "grabbing" : "grab" }}
@@ -592,7 +676,7 @@ function Detail({ index, onClose, onGo }: { index: number; onClose: () => void; 
             onPointerUp={settle}
             onPointerCancel={settle}
           >
-            <div className="rail absolute left-1/2 top-[2px] h-[9px] w-[min(72%,380px)] -translate-x-1/2 rounded-full" aria-hidden="true" />
+            <div className="rail absolute left-1/2 top-[2px] h-[5px] w-[min(70%,340px)] -translate-x-1/2 rounded-full" aria-hidden="true" />
             <div key={index} className="swing origin-top">
               <Garment3D
                 product={product}
@@ -603,67 +687,51 @@ function Detail({ index, onClose, onGo }: { index: number; onClose: () => void; 
             </div>
           </div>
 
-          <div className="mt-5 inline-flex rounded-full border border-line bg-card p-1 backdrop-blur">
-            {([false, true] as const).map((back) => (
-              <button
-                key={String(back)}
-                type="button"
-                onClick={() => showSide(back)}
-                className={`rounded-full px-5 py-1.5 font-heading text-[14px] tracking-[0.2em] transition-colors duration-300 ${
-                  showingBack === back ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
-                }`}
-              >
-                {back ? "BACK" : "FRONT"}
-              </button>
-            ))}
-          </div>
-          <p className="mt-2 text-[12px] text-ink-soft">Drag to spin it</p>
-
-          <div className="mt-4 flex items-center gap-3">
-            <ArrowButton label="Previous piece" onClick={() => go(-1)}>
-              ←
-            </ArrowButton>
-            <ArrowButton label="Next piece" onClick={() => go(1)}>
-              →
-            </ArrowButton>
+          <div className="relative mt-5 flex w-full items-center justify-between">
+            <RoundButton label="Previous piece" onClick={() => go(-1)}>
+              <path d="M15 6l-6 6 6 6" />
+            </RoundButton>
+            <div className="flex flex-col items-center gap-1.5">
+              <SideSwitch back={showingBack} onChange={showSide} />
+              <p className="text-[12px] text-ink-soft">Drag to spin</p>
+            </div>
+            <RoundButton label="Next piece" onClick={() => go(1)}>
+              <path d="M9 6l6 6-6 6" />
+            </RoundButton>
           </div>
         </div>
 
         {/* The facts */}
-        <div
-          key={product.id}
-          className="sheet-up rounded-3xl border border-line bg-card p-6 shadow-[0_30px_80px_-30px_rgba(0,0,0,0.35)] backdrop-blur-xl sm:p-8"
-          style={{ animationDelay: "80ms" }}
-        >
-          <p className="flex items-center gap-2 text-[13px] text-ink-soft">
-            <StatusDot product={product} />
-            {statusLabel(product)}
-          </p>
-          <h2 className="mt-2 font-heading text-[42px] leading-[0.92] sm:text-[54px]">{product.name}</h2>
-          <p className="mt-1 text-[15px] text-ink-soft">{product.kind}</p>
+        <div key={product.id} className="rise px-6 pb-8 pt-4 sm:px-8 md:overflow-y-auto md:py-12 md:pr-10">
+          <Eyebrow product={product} />
+          <h2 className="display mt-1 text-[32px] leading-[1.08] sm:text-[40px]">{product.name}</h2>
+          <p className="mt-2 text-[17px] text-ink-soft">{product.kind}</p>
+          {product.price != null && <p className="mt-4 text-[21px] font-medium">{formatPrice(product.price)}</p>}
 
-          {product.price != null && (
-            <p className="mt-4 font-heading text-[34px] leading-none tracking-[0.02em]">{formatPrice(product.price)}</p>
-          )}
+          <p className="mt-4 text-[16px] leading-relaxed text-ink-soft">{product.description}</p>
 
-          <p className="mt-4 text-[15px] leading-relaxed opacity-80">{product.description}</p>
-
-          <div className="mt-5 flex items-center gap-2.5">
-            <span className="h-5 w-5 rounded-full border border-line shadow-inner" style={{ background: product.swatch }} aria-hidden="true" />
-            <span className="text-[14px] font-medium">{product.colorName}</span>
+          <div className="mt-7">
+            <p className="text-[14px] font-semibold">
+              Color <span className="font-normal text-ink-soft">· {product.colorName}</span>
+            </p>
+            <span
+              className="mt-2.5 block h-8 w-8 rounded-full ring-2 ring-accent ring-offset-2 ring-offset-surface"
+              style={{ background: product.swatch, boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.12)" }}
+              aria-hidden="true"
+            />
           </div>
 
-          <fieldset className="mt-5" disabled={product.status !== "available"}>
-            <legend className="mb-2 font-heading text-[13px] tracking-[0.24em] text-ink-soft">SIZE</legend>
-            <div className="grid grid-cols-5 gap-2">
+          <fieldset className="mt-7" disabled={product.status !== "available"}>
+            <legend className="text-[14px] font-semibold">Size</legend>
+            <div className="mt-2.5 grid grid-cols-5 gap-2">
               {product.sizes.map((s) => (
                 <button
                   key={s}
                   type="button"
                   onClick={() => setSize(s)}
                   aria-pressed={size === s}
-                  className={`rounded-xl border py-2.5 text-[14px] font-semibold transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-40 ${
-                    size === s ? "border-ink bg-ink text-paper" : "border-line hover:border-ink/60"
+                  className={`h-12 rounded-xl border text-[15px] transition-[border-color,box-shadow] duration-200 disabled:cursor-not-allowed disabled:opacity-35 ${
+                    size === s ? "border-accent shadow-[inset_0_0_0_1px_var(--accent)]" : "border-line hover:border-ink-soft"
                   }`}
                 >
                   {s}
@@ -672,37 +740,39 @@ function Detail({ index, onClose, onGo }: { index: number; onClose: () => void; 
             </div>
           </fieldset>
 
-          <div className="mt-5">
+          <div className="mt-7">
             {url ? (
               <a
                 href={url}
-                className="block w-full rounded-full bg-mad-red py-4 text-center font-heading text-[19px] tracking-[0.18em] text-white shadow-[0_14px_30px_-12px_rgba(199,37,84,0.8)] transition-transform duration-200 hover:scale-[1.015] active:scale-[0.99]"
+                className="flex h-[52px] w-full items-center justify-center rounded-full bg-accent text-[17px] font-medium text-white transition-[transform,opacity] duration-200 hover:opacity-90 active:scale-[0.98]"
               >
-                BUY · {size} · {formatPrice(product.price)}
+                Buy · {formatPrice(product.price)}
               </a>
             ) : (
               <button
                 type="button"
                 disabled
-                className="block w-full cursor-not-allowed rounded-full bg-ink py-4 text-center font-heading text-[19px] tracking-[0.18em] text-paper opacity-90"
+                className="flex h-[52px] w-full cursor-not-allowed items-center justify-center rounded-full bg-bg-2 text-[17px] font-medium text-ink-soft"
               >
-                {buyable ? "PICK A SIZE" : statusLabel(product).toUpperCase()}
+                {buyable ? "Select a size" : statusLabel(product)}
               </button>
             )}
             {!buyable && (
-              <p className="mt-3 text-center text-[13px] text-ink-soft">
-                Want to know the moment it drops?{" "}
-                <a href={APP_STORE_URL} className="font-semibold text-ink underline decoration-mad-red decoration-2 underline-offset-4">
-                  Get the app
+              <p className="mt-3 text-center text-[14px] text-ink-soft">
+                Hear the moment it drops.{" "}
+                <a href={APP_STORE_URL} className="text-accent hover:underline">
+                  Get the app ›
                 </a>
               </p>
             )}
           </div>
 
-          <ul className="mt-6 space-y-2 border-t border-line pt-5">
+          <ul className="mt-8 space-y-2.5 border-t border-line pt-6">
             {product.details.map((d) => (
-              <li key={d} className="flex gap-2.5 text-[14px] opacity-80">
-                <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-mad-red" />
+              <li key={d} className="flex gap-3 text-[15px] text-ink-soft">
+                <svg viewBox="0 0 24 24" className="mt-[3px] h-4 w-4 shrink-0 text-accent" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M5 12.5l4.5 4.5L19 7.5" />
+                </svg>
                 {d}
               </li>
             ))}
@@ -714,13 +784,13 @@ function Detail({ index, onClose, onGo }: { index: number; onClose: () => void; 
 }
 
 function useDetailHeight(product: Product) {
-  const [h, setH] = useState(380);
+  const [h, setH] = useState(360);
   useEffect(() => {
     const fit = () => {
       const w = window.innerWidth;
-      const maxW = w < 768 ? w - 48 : Math.min(w * 0.46, 600);
+      const maxW = w < 768 ? w - 64 : Math.min(w * 0.4, 500);
       const byW = maxW / (garmentWidth(product, 100) / 100);
-      setH(Math.round(Math.min(byW, window.innerHeight * (w < 768 ? 0.4 : 0.56), 500)));
+      setH(Math.round(Math.min(byW, window.innerHeight * (w < 768 ? 0.36 : 0.5), 440)));
     };
     fit();
     window.addEventListener("resize", fit);
@@ -729,65 +799,44 @@ function useDetailHeight(product: Product) {
   return h;
 }
 
-function ArrowButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+function RoundButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={label}
-      className="flex h-11 w-11 items-center justify-center rounded-full border border-line bg-card text-[18px] backdrop-blur transition-colors duration-200 hover:bg-ink hover:text-paper"
+      className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-ink-soft shadow-[0_1px_4px_rgba(0,0,0,0.1)] transition-colors hover:text-ink"
     >
-      {children}
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        {children}
+      </svg>
     </button>
   );
 }
 
-// ── Ticker + footer ────────────────────────────────────────────────────────
-
-const TICKER = [
-  "GO THE EXTRA MILE",
-  "ONE MILE. EVERY DAY.",
-  "DROP 01: THE EXTRA MILE HOODIE",
-  "TEES, LONG SLEEVES + TANKS ON THE WAY",
-  "FLAMEY MERCH COMING LATER",
-  "DON'T BREAK THE STREAK",
-];
-
-function Ticker() {
-  const row = (
-    <div className="flex shrink-0 items-center">
-      {TICKER.map((t) => (
-        <span key={t} className="flex items-center">
-          <span className="px-5 font-heading text-[17px] tracking-[0.2em] sm:text-[19px]">{t}</span>
-          <svg viewBox="0 0 200 240" className="h-[18px] w-[15px]" aria-hidden="true">
-            <FlameyShape />
-          </svg>
-        </span>
-      ))}
-    </div>
-  );
-  return (
-    <div className="relative overflow-hidden bg-mad-red py-2.5 text-white" aria-label={TICKER.join(" · ")}>
-      <div className="marquee flex w-max" aria-hidden="true">
-        {row}
-        {row}
-      </div>
-    </div>
-  );
-}
+// ── Footer ─────────────────────────────────────────────────────────────────
 
 function Footer() {
   return (
-    <footer style={{ background: "var(--footer)", color: "var(--footer-ink)" }}>
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 py-4 text-[12px] sm:flex-row sm:px-8">
-        <p>© {new Date().getFullYear()} Mile A Day</p>
-        <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1 [&_a]:transition-colors [&_a:hover]:text-white">
-          <a href={SITE_URL}>mileaday.run</a>
-          <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("Mile A Day Shop")}`}>Contact</a>
-          <a href={`${SITE_URL}/privacy`}>Privacy</a>
-          <a href="https://instagram.com/mileadayapp">Instagram</a>
-          <a href="https://tiktok.com/@mileadayapp">TikTok</a>
-        </nav>
+    <footer className="mt-auto bg-bg-2 text-[12px] text-ink-soft">
+      <div className="mx-auto max-w-[1024px] px-6 py-5">
+        <p className="border-b border-line pb-4 leading-relaxed">
+          Pieces are printed to order. Items marked coming soon or coming later aren&apos;t on sale yet. Questions?{" "}
+          <a href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent("Mile A Day Shop")}`} className="text-accent hover:underline">
+            Contact us
+          </a>
+          .
+        </p>
+        <div className="flex flex-col gap-2 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p>Copyright © {new Date().getFullYear()} Mile A Day. All rights reserved.</p>
+          <nav className="flex flex-wrap gap-x-4 gap-y-1 [&_a]:transition-colors [&_a:hover]:text-ink">
+            <a href={SITE_URL}>mileaday.run</a>
+            <a href={`${SITE_URL}/privacy`}>Privacy</a>
+            <a href={`${SITE_URL}/terms`}>Terms</a>
+            <a href="https://instagram.com/mileadayapp">Instagram</a>
+            <a href="https://tiktok.com/@mileadayapp">TikTok</a>
+          </nav>
+        </div>
       </div>
     </footer>
   );
