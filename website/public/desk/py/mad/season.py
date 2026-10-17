@@ -283,6 +283,10 @@ def apply(app, look, wear=None):
     costume = wear.get("costume")
     if look == "HALLOWEEN" and costume != "skeleton_suit":   # (a skeleton IS Halloween)
         costume = None
+    # The app's October Monthly Flame IS the box's classic pumpkin look:
+    # pumpkin-orange, a carved face and a green stem (Halloween week too).
+    if costume is None and wear.get("color") == "jack_o_lantern":
+        costume = "pumpkin_suit"
     theme = dict(GREEN_THEME) if look == "STPATRICK" else {}
     tones = None
     if closet and costume == "skeleton_suit":

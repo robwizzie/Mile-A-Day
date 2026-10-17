@@ -411,7 +411,7 @@ def runner(saved, b, look):
     if e in RUN_EYE:
         _set(saved, b, 14, top + 1, RUN_EYE[e])
         _set(saved, b, 13, top + 1, RUN_EYE[e] if e != "round_specs" else FAR)
-    if look.get("costume") == "pumpkin_suit":
+    if look.get("costume") == "pumpkin_suit" or (not look.get("costume") and look.get("color") == "jack_o_lantern"):
         for y in range(top, min(b.height, top + 4)):
             for x in range(11, 15):
                 if b[x, y] == WHITE:
