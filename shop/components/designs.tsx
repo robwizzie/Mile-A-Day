@@ -36,7 +36,19 @@ const ARMHOLES = ["M110 26 C 108 92, 94 126, 70 142", "M290 26 C 292 92, 306 126
 export function SharedDefs() {
   return (
     <svg width="0" height="0" className="pointer-events-none absolute" aria-hidden="true" focusable="false">
+      <DesignDefs />
+    </svg>
+  );
+}
+
+/** The definitions every drawn garment uses; inlined when rendering a
+ *  standalone texture (scripts/render-textures.tsx). */
+export function DesignDefs() {
+  return (
       <defs>
+        <filter id="fold-blur" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="3" />
+        </filter>
         <linearGradient id="flamey-body" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor="#ffe25a" />
           <stop offset="0.45" stopColor="#ff9a2e" />
@@ -74,7 +86,6 @@ export function SharedDefs() {
         <path id="arc-chest" d="M112 176 A 100 100 0 0 1 288 176" />
         <path id="arc-flamey" d="M108 166 A 96 96 0 0 1 292 166" />
       </defs>
-    </svg>
   );
 }
 
@@ -85,24 +96,28 @@ export function DrawnGarment({
   design,
   side,
   className,
+  texture = false,
 }: {
   cut: Cut;
   color: string;
   design: DesignId;
   side: "front" | "back";
   className?: string;
+  /** A flat print for the 3D mesh: the lighting does the shading. */
+  texture?: boolean;
 }) {
   const tone = luminance(color) < 0.35 ? "dark" : "light";
   const seam = tone === "dark" ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.13)";
   const fold = tone === "dark" ? 0.38 : 0.07;
   return (
-    <svg viewBox="0 0 400 440" className={className} aria-hidden="true">
+    <svg viewBox="0 0 400 440" className={className} aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      {texture && <DesignDefs />}
       <path d={SHAPE[cut]} fill={color} />
       <g clipPath={`url(#clip-${cut})`}>
-        <rect width="400" height="440" fill={`url(#shade-${tone})`} />
-        <rect width="400" height="440" fill={`url(#sheen-${tone})`} />
-        <path d="M122 250 C 150 300, 142 360, 130 430" stroke="#000" strokeOpacity={fold} strokeWidth="12" fill="none" style={{ filter: "blur(3px)" }} />
-        <path d="M272 214 C 262 284, 286 352, 276 430" stroke="#000" strokeOpacity={fold * 0.8} strokeWidth="10" fill="none" style={{ filter: "blur(3px)" }} />
+        {!texture && <rect width="400" height="440" fill={`url(#shade-${tone})`} />}
+        {!texture && <rect width="400" height="440" fill={`url(#sheen-${tone})`} />}
+        <path d="M122 250 C 150 300, 142 360, 130 430" stroke="#000" strokeOpacity={fold * (texture ? 0.6 : 1)} strokeWidth="12" fill="none" filter="url(#fold-blur)" />
+        <path d="M272 214 C 262 284, 286 352, 276 430" stroke="#000" strokeOpacity={fold * (texture ? 0.5 : 0.8)} strokeWidth="10" fill="none" filter="url(#fold-blur)" />
         {cut === "tank" && ARMHOLES.map((d) => <path key={d} d={d} stroke={seam} strokeWidth="9" fill="none" />)}
         {STITCH[cut].map((d) => (
           <path key={d} d={d} stroke={seam} strokeWidth="1.6" strokeDasharray="4 4" fill="none" />
