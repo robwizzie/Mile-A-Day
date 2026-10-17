@@ -1,0 +1,197 @@
+@import "tailwindcss";
+
+/* Apple-store calm: white (or true black) ground, system type, one accent —
+   MAD red — and nothing on the page competing with the clothes. Both themes
+   follow the system unless the visitor picks one (html[data-theme], set
+   before paint by the script in layout.tsx). */
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bg-2: #f5f5f7;
+  --surface: #ffffff;
+  --ink: #1d1d1f;
+  --ink-soft: #6e6e73;
+  --line: rgba(0, 0, 0, 0.1);
+  --nav: rgba(255, 255, 255, 0.74);
+  --stage: #f5f5f7;
+  --spot: rgba(0, 0, 0, 0);
+  --scrim: rgba(0, 0, 0, 0.3);
+  --hanger: #1d1d1f;
+  --garment-shadow: rgba(0, 0, 0, 0.16);
+  --accent: #c72554;
+  --accent-ink: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #000000;
+    --bg-2: #161617;
+    --surface: #1c1c1e;
+    --ink: #f5f5f7;
+    --ink-soft: #86868b;
+    --line: rgba(255, 255, 255, 0.14);
+    --nav: rgba(22, 22, 23, 0.74);
+    --stage: #161617;
+    --spot: rgba(255, 255, 255, 0.07);
+    --scrim: rgba(0, 0, 0, 0.6);
+    --hanger: #48484a;
+    --garment-shadow: rgba(0, 0, 0, 0.75);
+    --accent: #e0336a;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --bg-2: #161617;
+  --surface: #1c1c1e;
+  --ink: #f5f5f7;
+  --ink-soft: #86868b;
+  --line: rgba(255, 255, 255, 0.14);
+  --nav: rgba(22, 22, 23, 0.74);
+  --stage: #161617;
+  --spot: rgba(255, 255, 255, 0.07);
+  --scrim: rgba(0, 0, 0, 0.6);
+  --hanger: #48484a;
+  --garment-shadow: rgba(0, 0, 0, 0.75);
+  --accent: #e0336a;
+}
+
+@theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-inter), "Helvetica Neue", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", var(--font-inter), "Helvetica Neue", sans-serif;
+  --font-heading: var(--font-bebas-neue), Impact, sans-serif;
+  --color-bg: var(--bg);
+  --color-bg-2: var(--bg-2);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-line: var(--line);
+  --color-stage: var(--stage);
+  --color-accent: var(--accent);
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+body {
+  overflow-x: hidden;
+  font-feature-settings: "kern";
+  letter-spacing: -0.01em;
+  transition: background-color 0.4s ease, color 0.4s ease;
+}
+
+.display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.028em;
+}
+
+/* Soft light pooled under the rack; in dark it keeps black pieces readable. */
+.spotlight {
+  background: radial-gradient(ellipse 55% 60% at 50% 40%, var(--spot), transparent 72%);
+}
+
+.glass {
+  background: var(--nav);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+/* The rail: a slim brushed bar. */
+.rail {
+  background: linear-gradient(180deg, #f4f4f4 0%, #b9b9bc 50%, #8d8d91 100%);
+  box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.3);
+}
+
+/* How side-on a garment is (0 front … 1 edge-on). Registered so it can
+   transition: it dims the face as it turns away, like light falling off. */
+@property --side {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+.garment-3d {
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.garment-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.garment-face.is-back {
+  transform: rotateY(180deg);
+}
+.garment-ink {
+  filter: brightness(calc(1 - var(--side) * 0.25)) drop-shadow(0 18px 22px var(--garment-shadow));
+}
+
+@keyframes sway {
+  0% { transform: rotate(0deg); }
+  20% { transform: rotate(2deg); }
+  45% { transform: rotate(-1.3deg); }
+  70% { transform: rotate(0.6deg); }
+  100% { transform: rotate(0deg); }
+}
+.swing {
+  animation: sway 1.2s cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise {
+  animation: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes drop-in {
+  from { opacity: 0; transform: translateY(-24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.drop-in {
+  animation: drop-in 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.fade {
+  animation: fade 0.3s ease both;
+}
+
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(28px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.sheet-in {
+  animation: sheet-in 0.5s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swing,
+  .rise,
+  .drop-in,
+  .sheet-in,
+  .fade {
+    animation: none !important;
+  }
+  .garment-3d,
+  .rack-slot {
+    transition: none !important;
+  }
+}

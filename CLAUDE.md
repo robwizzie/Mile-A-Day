@@ -7,6 +7,7 @@ Gamified fitness app: run a mile every day, build streaks, compete with friends.
 - `app/` - iOS app (Swift/SwiftUI, targets iOS + watchOS + Widgets)
 - `backend/` - REST API (TypeScript, Express 5.1, PostgreSQL)
 - `website/` - Marketing site (Next.js 16, React 19, Tailwind CSS 4)
+- `shop/` - Merch store for mileaday.shop (Next.js 16, own Vercel project). Products live in `shop/lib/catalog.ts`; checkout is Shopify cart permalinks (`NEXT_PUBLIC_SHOPIFY_DOMAIN` + per-size variant ids), fulfilled by Tapstitch. Garments are 3D (three.js): each cut (tee, longsleeve, tank, hoodie) is a Blender cloth simulation sewn from its print outline, `public/garments/models/<cut>.glb`, rebuilt by `npm run sew` (needs Blender; `scripts/sew/sew.py`); prints map by the panels' flat-lay UVs and the fabric's motion is a vertex shader (`components/three/engine.ts`, CLOTH_*). `components/three/drape.ts` is the fallback shape when a model is missing. After editing a drawn design run `npm run textures`. Dev-only `/lab` renders every piece at four angles; `/lab?snap=name` saves a full-res PNG to `shop/.lab/`. Not in CI yet: `cd shop && npm run build` is the check.
 
 ## Quick Commands
 
@@ -42,6 +43,7 @@ This app ships through Apple's App Store. Every change — UI, backend, copy, as
 
 - Backend API: https://mad.mindgoblin.tech
 - Website: https://mileaday.run
+- Shop: https://mileaday.shop
 - GitHub: git@github.com:robwizzie/Mile-A-Day.git
 
 ## Key Gotchas
