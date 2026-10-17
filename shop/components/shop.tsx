@@ -50,7 +50,7 @@ export function Shop() {
       <Nav />
 
       <main aria-hidden={open != null}>
-        <section className="spotlight relative pb-16 pt-12 sm:pt-16">
+        <section className="spotlight relative overflow-x-clip pb-16 pt-12 sm:pt-16">
           <div className="rise mx-auto max-w-3xl px-6 text-center">
             <p className="text-[17px] font-semibold text-accent">Drop 01</p>
             <h1 className="display mt-1 text-[44px] leading-[1.05] sm:text-[64px]">Go the extra mile.</h1>
@@ -197,7 +197,7 @@ function DesktopRack({
   const dark = useDarkTheme();
   const [hover, setHover] = useState<number | null>(null);
   const [flipped, setFlipped] = useState(false);
-  const height = useDesktopGarmentHeight();
+  const preferred = useDesktopGarmentHeight();
   const box = useRef<HTMLDivElement>(null);
   const [boxW, setBoxW] = useState(980);
   const swingRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -214,10 +214,19 @@ function DesktopRack({
     return () => ro.disconnect();
   }, []);
 
-  // A side-on piece takes its edge-on width, the turned one its full width.
-  const gap = height * 0.08;
   // Side-on, a 3D piece shows its edge plus the sleeve falling back.
   const sideFrac = engine ? 0.34 : SIDE_COS;
+  // Every piece stays on the rail: size the row (with one piece turned open)
+  // to fit between the rail's ends at any width. Layout is linear in height.
+  const rowAt = (h: number) => {
+    const widths = PRODUCTS.map((p) => garmentWidth(p, h));
+    const rest = widths.reduce((a, w) => a + w * sideFrac + h * 0.08, 0);
+    return rest + Math.max(...widths.map((w) => w + h * 0.24 - (w * sideFrac + h * 0.08)));
+  };
+  const usable = Math.max(200, boxW - 56);
+  const height = Math.min(preferred, Math.floor((preferred * usable) / rowAt(preferred)));
+  // A side-on piece takes its edge-on width, the turned one its full width.
+  const gap = height * 0.08;
   let cursor = 0;
   const layout = PRODUCTS.map((p, i) => {
     const w = garmentWidth(p, height);
@@ -226,7 +235,7 @@ function DesktopRack({
     cursor += slot;
     return { w, slot, x };
   });
-  const offset = (boxW - cursor) / 2;
+  const offset = Math.max(28, (boxW - cursor) / 2);
   const three = !!engine;
   const tallest = Math.max(...PRODUCTS.map((p) => (three ? hang3d(p, height) : hungSize(p, height).height)));
   const boxH = tallest + 56;

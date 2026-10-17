@@ -12,8 +12,9 @@
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Product } from "@/lib/catalog";
-import { CUTS, drape, type Fabric, type Tailored } from "./drape";
+import { CUTS, drape, type Fabric, type Part, type Tailored } from "./drape";
 
 // ── Assets ─────────────────────────────────────────────────────────────────
 
@@ -126,15 +127,84 @@ async function buildPiece(p: Product): Promise<Piece> {
   const [front, back] = await Promise.all([loadImage(u.front), loadImage(u.back)]);
   const aspect = front.naturalWidth / front.naturalHeight;
   const key = p.art.kind === "photo" ? "hoodie" : p.art.cut;
+  // The outline gives the hanger's placement (and a fallback shape); the
+  // garment itself is the cloth-simulated model when there is one.
   // The photo's cutout is cut just inside its soft edge (see texture()).
+  const cut = drape(front, CUTS[key], FABRIC[key], p.art.kind === "photo" ? 0.92 : 0.5);
+  const sewn = await loadSewn(key, aspect);
   return {
-    ...drape(front, CUTS[key], FABRIC[key], p.art.kind === "photo" ? 0.92 : 0.5),
+    ...cut,
+    parts: sewn ?? cut.parts,
     base: new THREE.Color().setStyle(averageColor(front)),
     frontMap: texture(front),
     backMap: texture(back),
     aspect,
     scale: p.art.kind === "photo" ? p.art.scale ?? 1 : 1,
   };
+}
+
+// ── Sewn models ────────────────────────────────────────────────────────────
+
+/** Height of the art box in the sewing script (scripts/sew/sew.py), metres. */
+const SEWN_HEIGHT = 0.72;
+const sewnCache = new Map<string, Promise<Part[] | null>>();
+
+/**
+ * A garment Blender sewed from this cut's outline and draped on a hanger
+ * (public/garments/models/<cut>.glb, made by `npm run sew`). Its panels are
+ * named front/back and carry the flat-lay UVs, so the prints go straight on.
+ * Converted to garment units: height 1, the art box's top at y = 0.
+ */
+function loadSewn(cut: string, aspect: number): Promise<Part[] | null> {
+  let p = sewnCache.get(cut);
+  if (!p) {
+    p = new GLTFLoader()
+      .loadAsync(`/garments/models/${cut}.glb`)
+      .then((gltf) => {
+        const parts: Part[] = [];
+        gltf.scene.updateMatrixWorld(true);
+        const torsoW = 0.3 * aspect;
+        gltf.scene.traverse((o) => {
+          const mesh = o as THREE.Mesh;
+          if (!mesh.isMesh) return;
+          const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name;
+          const g = mesh.geometry.clone();
+          g.applyMatrix4(mesh.matrixWorld);
+          g.translate(0, -SEWN_HEIGHT, 0);
+          g.scale(1 / SEWN_HEIGHT, 1 / SEWN_HEIGHT, 1 / SEWN_HEIGHT);
+          // glTF stores V top-down; the print textures are bottom-up.
+          const uv = g.getAttribute("uv");
+          for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - uv.getY(i));
+          // How freely each point moves (the cloth shader): nothing at the
+          // shoulders, most at the hem and cuffs.
+          const pos = g.getAttribute("position");
+          const motion = new Float32Array(pos.count * 2);
+          for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i);
+            const y = pos.getY(i);
+            const out = Math.max(0, Math.abs(x) - torsoW);
+            const t = Math.min(1, Math.max(0, (-y - 0.2) / 0.75));
+            motion[i * 2] = Math.max(t * t * (3 - 2 * t), Math.min(1, out / 0.3));
+            motion[i * 2 + 1] = Math.min(1, out / 0.12) * Math.sign(x);
+          }
+          g.setAttribute("aMotion", new THREE.BufferAttribute(motion, 2));
+          // Where the fabric turns edge-on, show its own colour rather than
+          // the print's outermost pixels stretched round the side.
+          const nrm = g.getAttribute("normal");
+          const edge = new Float32Array(pos.count);
+          for (let i = 0; i < pos.count; i++) {
+            const nz = Math.abs(nrm.getZ(i));
+            edge[i] = 1 - Math.min(1, Math.max(0, (nz - 0.12) / 0.25));
+          }
+          g.setAttribute("aEdge", new THREE.BufferAttribute(edge, 1));
+          parts.push({ geometry: g, side: name.startsWith("back") ? "back" : "front" });
+        });
+        return parts.length ? parts : null;
+      })
+      .catch(() => null);
+    sewnCache.set(cut, p);
+  }
+  return p;
 }
 
 // ── Hanger + rail ──────────────────────────────────────────────────────────
@@ -258,8 +328,8 @@ transformed.xz = vec2(transformed.x * clothC + transformed.z * clothS, -transfor
 float clothW2 = clothW * clothW;
 transformed.x += uSwayX * clothW2;
 transformed.z += uSwayZ * clothW2;
-transformed.z += uRipple * clothW * 0.028 * sin(uTime * 7.0 + position.y * 15.0 + position.x * 5.0);
-transformed.x += uRipple * clothW * 0.01 * sin(uTime * 5.3 + position.y * 11.0);
+transformed.z += uRipple * clothW * 0.01 * sin(uTime * 6.0 + position.y * 12.0 + position.x * 5.0);
+transformed.x += uRipple * clothW * 0.004 * sin(uTime * 4.6 + position.y * 9.0);
 `;
 
 function injectCloth(shader: THREE.WebGLProgramParametersWithUniforms, cloth: Cloth, withNormals: boolean) {
@@ -350,14 +420,15 @@ export class HungPiece {
   private garment = new THREE.Group();
   readonly x: Spring;
   readonly turn: Spring;
-  private rockX = new Spring(0, 0, 38, 0.18);
+  private rockX = new Spring(0, 0, 38, 0.32);
   private rockZ = new Spring(0, 0, 50, 0.22);
   private drop: Spring;
   private dropDelay = 0;
   // Cloth: the fabric below the hanger follows the hanger loosely.
-  private lag = new Spring(0, 0, 24, 0.3, 0.002);
-  private swayX = new Spring(0, 0, 20, 0.28, 0.0005);
-  private swayZ = new Spring(0, 0, 20, 0.28, 0.0005);
+  // Garments have weight: the fabric follows firmly and settles quickly.
+  private lag = new Spring(0, 0, 40, 0.6, 0.002);
+  private swayX = new Spring(0, 0, 36, 0.6, 0.0005);
+  private swayZ = new Spring(0, 0, 36, 0.6, 0.0005);
   private ripple = 0;
   private prevTurn: number;
   private prevX: number;
@@ -464,14 +535,14 @@ export class HungPiece {
       this.prevTurn = this.turn.x;
       this.prevX = this.x.x;
       const clamp = (v: number, m: number) => Math.max(-m, Math.min(m, v));
-      this.lag.set(clamp(-this.vTurn * 0.0032, 0.55));
-      this.swayX.set(clamp((-this.vX / this.heightPx) * 0.22, 0.12));
-      this.swayZ.set(clamp(-this.rockX.v * 0.035, 0.09));
+      this.lag.set(clamp(-this.vTurn * 0.0014, 0.22));
+      this.swayX.set(clamp((-this.vX / this.heightPx) * 0.1, 0.05));
+      this.swayZ.set(clamp(-this.rockX.v * 0.015, 0.04));
       this.lag.step(dt);
       this.swayX.step(dt);
       this.swayZ.step(dt);
       const energy = Math.min(1, Math.abs(this.vTurn) / 260 + Math.abs(this.vX) / 700 + Math.abs(this.rockX.v) * 0.35 + Math.abs(this.lag.v) * 0.5);
-      this.ripple = Math.max(energy, this.ripple * Math.exp(-dt * 1.4));
+      this.ripple = Math.max(energy * 0.6, this.ripple * Math.exp(-dt * 2.6));
       this.cloth.uTime.value += dt;
     }
     this.cloth.uLag.value = this.lag.x;

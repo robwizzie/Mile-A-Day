@@ -6,7 +6,8 @@
     "dev": "next dev --port 3100",
     "build": "next build",
     "start": "next start --port 3100",
-    "textures": "tsx scripts/render-textures.tsx"
+    "textures": "tsx scripts/render-textures.tsx",
+    "sew": "for c in tee longsleeve tank hoodie; do blender -b -P scripts/sew/sew.py -- $c scripts/sew/$c-mask.png public/garments/models/$c.glb; done"
   },
   "dependencies": {
     "@vercel/analytics": "1.6.1",
