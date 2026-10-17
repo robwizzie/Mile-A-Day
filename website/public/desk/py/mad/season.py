@@ -1,6 +1,6 @@
 # Mile A Day desk counter - seasonal looks, painted onto the mascot frames
 # in place (and undone when the season ends):
-#   HALLOWEEN    (Oct 25-31): jack-o'-lantern Flamey; pumpkin-head runner
+#   HALLOWEEN    (Oct 14-31): jack-o'-lantern Flamey; pumpkin-head runner
 #   SANTA        (Dec 1-26):  Santa hats
 #   NEWYEAR      (Dec 31-Jan 1): scenery only (fireworks)
 #   VALENTINE    (Feb 13-14): rosy-cheeked Flamey; pink headband runner

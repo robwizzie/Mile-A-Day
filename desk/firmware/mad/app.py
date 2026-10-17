@@ -138,7 +138,7 @@ def season_for(date, anniv=None, bday=None):
         turkey = 1 + (4 - _dow(y, 11, 1)) % 7 + 21      # 4th Thursday
         if d in (turkey - 1, turkey):
             return "THANKSGIVING"
-    if mo == 10 and d >= 25:
+    if mo == 10 and d >= 14:                 # spooky season
         return "HALLOWEEN"
     if mo == 12 and d <= 26:
         return "SANTA"

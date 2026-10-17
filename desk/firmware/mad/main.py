@@ -19,7 +19,7 @@
 # Only the UP button and the phone remote change the style: a knock on the
 # desk never does.
 # Seasonal looks switch by date on their own: jack-o'-lantern Flamey and a
-# pumpkin-head runner Oct 25-31, Santa hats Dec 1-26, fireworks at New Year.
+# pumpkin-head runner Oct 14-31, Santa hats Dec 1-26, fireworks at New Year.
 #   (with matching scenery on every screen: snow, sleigh, bats, candy corn...)
 #   Plus Valentine's, St. Patrick's, July 4th, Thanksgiving, and Mile A Day's
 #   two birthdays: MAD_BIRTHDAY = "YYYY-MM-DD" (the first commit) and
