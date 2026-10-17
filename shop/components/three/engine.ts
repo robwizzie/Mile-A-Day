@@ -1,25 +1,23 @@
 // The 3D garments. Loaded on demand (dynamic import) so three.js never
 // blocks first paint.
 //
-// Each piece is built from its own artwork: the print's alpha outline is
-// "inflated" into a soft volume — flat across the body, rounded at the edges,
-// slightly draped — with the front print on the front surface and the back
-// print on the back. The two surfaces meet at the outline, so a piece seen
-// edge-on has real thickness and no gaps. A swivel hanger holds it: the
-// chrome hook stays wrapped around the rail while the hanger body and the
-// garment turn beneath it, the way a swivel-hook hanger does.
+// Each piece is tailored from its flat-lay artwork (see tailor.ts): an oval
+// torso that drapes from the shoulder seam, sleeve tubes, a hood on the
+// hoodie, with the front print wrapped round the chest, the back print round
+// the back and sleeve prints round the outside of the arm. A swivel hanger
+// holds it: the chrome hook stays wrapped around the rail while the hanger
+// body and the garment turn beneath it, the way a swivel-hook hanger does.
 //
 // One CSS pixel = one world unit at z = 0, so layouts are written in px.
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { Product } from "@/lib/catalog";
+import { CUTS, tailor, type Tailored } from "./tailor";
 
 // ── Assets ─────────────────────────────────────────────────────────────────
 
-type Piece = {
-  front: THREE.BufferGeometry;
-  back: THREE.BufferGeometry;
+type Piece = Tailored & {
   frontMap: THREE.Texture;
   backMap: THREE.Texture;
   /** Width ÷ height of the garment box. */
@@ -60,6 +58,17 @@ async function loadImage(src: string) {
 function texture(img: HTMLImageElement) {
   const w = img.naturalWidth;
   const h = img.naturalHeight;
+  // Hard-cut the edge first: a photo cutout's soft edge carries a pale halo
+  // from its white background, which would otherwise be bled outward.
+  const cut = document.createElement("canvas");
+  cut.width = w;
+  cut.height = h;
+  const cctx = cut.getContext("2d", { willReadFrequently: true })!;
+  cctx.drawImage(img, 0, 0);
+  const data = cctx.getImageData(0, 0, w, h);
+  for (let i = 3; i < data.data.length; i += 4) data.data[i] = data.data[i] > 235 ? 255 : 0;
+  cctx.putImageData(data, 0, 0);
+
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
@@ -67,10 +76,10 @@ function texture(img: HTMLImageElement) {
   for (const r of [24, 14, 8, 5, 3, 2, 1]) {
     for (let a = 0; a < 8; a++) {
       const t = (a / 8) * Math.PI * 2;
-      ctx.drawImage(img, Math.round(Math.cos(t) * r), Math.round(Math.sin(t) * r));
+      ctx.drawImage(cut, Math.round(Math.cos(t) * r), Math.round(Math.sin(t) * r));
     }
   }
-  ctx.drawImage(img, 0, 0);
+  ctx.drawImage(cut, 0, 0);
   ctx.globalCompositeOperation = "destination-over";
   ctx.fillStyle = averageColor(img);
   ctx.fillRect(0, 0, w, h);
@@ -79,12 +88,6 @@ function texture(img: HTMLImageElement) {
   t.anisotropy = 8;
   t.needsUpdate = true;
   return t;
-}
-
-/** How thick each cut is (fraction of its height): fleece is fuller. */
-function depthFor(p: Product) {
-  if (p.art.kind === "photo") return 0.11;
-  return p.art.cut === "tank" ? 0.05 : 0.065;
 }
 
 function averageColor(img: HTMLImageElement) {
@@ -112,187 +115,14 @@ async function buildPiece(p: Product): Promise<Piece> {
   const u = urls(p);
   const [front, back] = await Promise.all([loadImage(u.front), loadImage(u.back)]);
   const aspect = front.naturalWidth / front.naturalHeight;
-  // A photo's cutout keeps a pale halo from its white studio background;
-  // cut the outline just inside it.
-  const { frontGeo, backGeo } = inflate(front, aspect, depthFor(p), p.art.kind === "photo" ? 0.9 : 0.5);
+  const cut = p.art.kind === "photo" ? CUTS.hoodie : CUTS[p.art.cut];
   return {
-    front: frontGeo,
-    back: backGeo,
+    ...tailor(front, cut),
     frontMap: texture(front),
     backMap: texture(back),
     aspect,
     scale: p.art.kind === "photo" ? p.art.scale ?? 1 : 1,
   };
-}
-
-// ── Inflating an outline into a garment ────────────────────────────────────
-
-function inflate(img: HTMLImageElement, aspect: number, depth: number, cut: number) {
-  // Alpha mask.
-  const MW = 260;
-  const MH = Math.round(MW / aspect);
-  const c = document.createElement("canvas");
-  c.width = MW;
-  c.height = MH;
-  const ctx = c.getContext("2d", { willReadFrequently: true })!;
-  ctx.drawImage(img, 0, 0, MW, MH);
-  const raw = ctx.getImageData(0, 0, MW, MH).data;
-  const A = new Float32Array(MW * MH);
-  for (let i = 0; i < A.length; i++) A[i] = raw[i * 4 + 3] / 255;
-
-  const sample = (field: Float32Array, x: number, y: number) => {
-    x = Math.max(0, Math.min(MW - 1.001, x));
-    y = Math.max(0, Math.min(MH - 1.001, y));
-    const x0 = Math.floor(x);
-    const y0 = Math.floor(y);
-    const fx = x - x0;
-    const fy = y - y0;
-    const i = y0 * MW + x0;
-    return (
-      field[i] * (1 - fx) * (1 - fy) + field[i + 1] * fx * (1 - fy) + field[i + MW] * (1 - fx) * fy + field[i + MW + 1] * fx * fy
-    );
-  };
-
-  // Distance from the outline, inside the garment (chamfer transform, px).
-  const D = new Float32Array(MW * MH);
-  for (let i = 0; i < D.length; i++) D[i] = A[i] >= cut ? 1e6 : 0;
-  const R2 = Math.SQRT2;
-  for (let y = 0; y < MH; y++)
-    for (let x = 0; x < MW; x++) {
-      const i = y * MW + x;
-      if (!D[i]) continue;
-      let d = D[i];
-      if (x > 0) d = Math.min(d, D[i - 1] + 1);
-      if (y > 0) {
-        d = Math.min(d, D[i - MW] + 1);
-        if (x > 0) d = Math.min(d, D[i - MW - 1] + R2);
-        if (x < MW - 1) d = Math.min(d, D[i - MW + 1] + R2);
-      }
-      D[i] = d;
-    }
-  for (let y = MH - 1; y >= 0; y--)
-    for (let x = MW - 1; x >= 0; x--) {
-      const i = y * MW + x;
-      if (!D[i]) continue;
-      let d = D[i];
-      if (x < MW - 1) d = Math.min(d, D[i + 1] + 1);
-      if (y < MH - 1) {
-        d = Math.min(d, D[i + MW] + 1);
-        if (x < MW - 1) d = Math.min(d, D[i + MW + 1] + R2);
-        if (x > 0) d = Math.min(d, D[i + MW - 1] + R2);
-      }
-      D[i] = d;
-    }
-
-  // Node grid.
-  const C = 120;
-  const R = Math.round(C / aspect);
-  const N = (C + 1) * (R + 1);
-  const mx = new Float32Array(N);
-  const my = new Float32Array(N);
-  const state = new Uint8Array(N); // 0 out, 1 boundary, 2 inside
-  const idx = (i: number, j: number) => j * (C + 1) + i;
-  for (let j = 0; j <= R; j++)
-    for (let i = 0; i <= C; i++) {
-      const k = idx(i, j);
-      mx[k] = (i / C) * (MW - 1);
-      my[k] = (j / R) * (MH - 1);
-      state[k] = sample(A, mx[k], my[k]) >= cut ? 2 : 0;
-    }
-  // Boundary nodes sit just outside; pull each onto the outline itself so the
-  // silhouette is smooth instead of stair-stepped.
-  for (let j = 0; j <= R; j++)
-    for (let i = 0; i <= C; i++) {
-      const k = idx(i, j);
-      if (state[k] === 2) continue;
-      let sx = 0;
-      let sy = 0;
-      let n = 0;
-      for (let dj = -1; dj <= 1; dj++)
-        for (let di = -1; di <= 1; di++) {
-          if (!di && !dj) continue;
-          const ii = i + di;
-          const jj = j + dj;
-          if (ii < 0 || jj < 0 || ii > C || jj > R) continue;
-          const kk = idx(ii, jj);
-          if (state[kk] !== 2) continue;
-          let lo = 0;
-          let hi = 1; // lo outside, hi inside
-          for (let s = 0; s < 7; s++) {
-            const t = (lo + hi) / 2;
-            const a = sample(A, mx[k] + (mx[kk] - mx[k]) * t, my[k] + (my[kk] - my[k]) * t);
-            if (a >= cut) hi = t;
-            else lo = t;
-          }
-          const t = (lo + hi) / 2;
-          sx += mx[k] + (mx[kk] - mx[k]) * t;
-          sy += my[k] + (my[kk] - my[k]) * t;
-          n++;
-        }
-      if (n) {
-        state[k] = 1;
-        mx[k] = sx / n;
-        my[k] = sy / n;
-      }
-    }
-
-  // Surface height: flat across the body, a rounded edge, a gentle drape.
-  const half = depth / 2;
-  const edge = 0.055;
-  const front = new Float32Array(N * 3);
-  const back = new Float32Array(N * 3);
-  const uvF = new Float32Array(N * 2);
-  const uvB = new Float32Array(N * 2);
-  for (let k = 0; k < N; k++) {
-    if (!state[k]) continue;
-    const x = (mx[k] / (MW - 1) - 0.5) * aspect;
-    const y = -my[k] / (MH - 1);
-    const d = state[k] === 2 ? sample(D, mx[k], my[k]) / (MH - 1) : 0;
-    const t = Math.min(d / edge, 1);
-    const body = Math.min(d / 0.22, 1);
-    let z = half * Math.sqrt(t * (2 - t));
-    z += 0.012 * body * body; // a little fullness through the middle
-    z += 0.0035 * body * Math.sin(9 * x + 4 * y) * Math.sin(6 * y + 1.3); // fabric, not plastic
-    const drape = -0.1 * x * x;
-    front.set([x, y, drape + z], k * 3);
-    back.set([x, y, drape - z], k * 3);
-    const uu = mx[k] / (MW - 1);
-    const vv = 1 - my[k] / (MH - 1);
-    uvF.set([uu, vv], k * 2);
-    uvB.set([1 - uu, vv], k * 2);
-  }
-
-  const fIdx: number[] = [];
-  const bIdx: number[] = [];
-  const tri = (a: number, b: number, c: number) => {
-    if (!state[a] || !state[b] || !state[c]) return;
-    if (state[a] !== 2 && state[b] !== 2 && state[c] !== 2) return;
-    // Skip triangles that would web across a gap (between sleeve and body).
-    const cx = (mx[a] + mx[b] + mx[c]) / 3;
-    const cy = (my[a] + my[b] + my[c]) / 3;
-    if (sample(A, cx, cy) < cut * 0.7) return;
-    fIdx.push(a, b, c);
-    bIdx.push(a, c, b);
-  };
-  for (let j = 0; j < R; j++)
-    for (let i = 0; i < C; i++) {
-      const a = idx(i, j);
-      const b = idx(i + 1, j);
-      const c2 = idx(i, j + 1);
-      const d = idx(i + 1, j + 1);
-      tri(a, c2, b);
-      tri(b, c2, d);
-    }
-
-  const geo = (pos: Float32Array, uv: Float32Array, index: number[]) => {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
-    g.setIndex(index);
-    g.computeVertexNormals();
-    return g;
-  };
-  return { frontGeo: geo(front, uvF, fIdx), backGeo: geo(back, uvB, bIdx) };
 }
 
 // ── Hanger + rail ──────────────────────────────────────────────────────────
@@ -323,25 +153,49 @@ function hookMesh(railR: number, wire: number, shank: number) {
   return { mesh, swivel: new THREE.Vector3(0, -shank, r) };
 }
 
-/** Hanger body in garment units (height 1): shoulders that sit inside the
- *  garment, with a short neck up to the swivel. */
-function hangerBody(width: number) {
+/** Hanger body in garment units (height 1, y up from the box top): wooden
+ *  shoulders along the garment's own shoulder line, and a chrome neck up to
+ *  the swivel at the top of the box. */
+function hangerBody(h: Tailored["hanger"]) {
   const g = new THREE.Group();
+  const w = h.halfWidth;
   const curve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(-width / 2, -0.14, 0),
-    new THREE.Vector3(-width / 4, -0.085, 0),
-    new THREE.Vector3(0, -0.05, 0),
-    new THREE.Vector3(width / 4, -0.085, 0),
-    new THREE.Vector3(width / 2, -0.14, 0),
+    new THREE.Vector3(-w, h.shoulderY, 0),
+    new THREE.Vector3(-w * 0.5, (h.shoulderY + h.centerY) / 2 + 0.008, 0),
+    new THREE.Vector3(0, h.centerY, 0),
+    new THREE.Vector3(w * 0.5, (h.shoulderY + h.centerY) / 2 + 0.008, 0),
+    new THREE.Vector3(w, h.shoulderY, 0),
   ]);
-  const bar = new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 0.014, 10, false), wood());
-  bar.scale.z = 0.7;
+  const bar = new THREE.Mesh(new THREE.TubeGeometry(curve, 48, 0.012, 10, false), wood());
+  bar.scale.z = 0.75;
   bar.castShadow = true;
   g.add(bar);
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.012, 0.06, 12), chrome());
-  neck.position.y = -0.02;
+  const neckLen = -h.centerY;
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.0075, 0.0075, neckLen, 12), chrome());
+  neck.position.y = h.centerY / 2;
   g.add(neck);
   return g;
+}
+
+/** Fabric: double-sided, so the neckline, hem and cuffs show the inside —
+ *  shaded darker, the way the inside of a garment is. */
+function fabric(map: THREE.Texture) {
+  const m = new THREE.MeshPhysicalMaterial({
+    map,
+    roughness: 0.92,
+    metalness: 0,
+    sheen: 0.25,
+    sheenRoughness: 0.85,
+    sheenColor: new THREE.Color(0xffffff),
+    side: THREE.DoubleSide,
+  });
+  m.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <map_fragment>",
+      "#include <map_fragment>\n\tif (!gl_FrontFacing) diffuseColor.rgb *= 0.42;",
+    );
+  };
+  return m;
 }
 
 // ── Springs ────────────────────────────────────────────────────────────────
@@ -422,35 +276,16 @@ export class HungPiece {
     this.rock.add(hook);
     this.swivel.position.copy(swivel);
 
-    const mat = (map: THREE.Texture) =>
-      new THREE.MeshPhysicalMaterial({
-        map,
-        roughness: 0.9,
-        metalness: 0,
-        sheen: 0.25,
-        sheenRoughness: 0.85,
-        sheenColor: new THREE.Color(0xffffff),
-      });
-    const f = new THREE.Mesh(piece.front, mat(piece.frontMap));
-    const b = new THREE.Mesh(piece.back, mat(piece.backMap));
-    for (const m of [f, b]) {
-      m.castShadow = true;
-      m.receiveShadow = true;
+    const front = fabric(piece.frontMap);
+    const back = fabric(piece.backMap);
+    for (const part of piece.parts) {
+      const mesh = new THREE.Mesh(part.geometry, part.side === "front" ? front : back);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.garment.add(mesh);
     }
-    this.garment.add(f, b);
-    // The hanger sits on the shoulders, which on a hoodie are below the hood.
-    const hood = this.product.art.kind === "photo";
-    const body = hangerBody(piece.aspect * (hood ? 0.34 : 0.42));
-    body.position.y = hood ? -0.2 : 0;
-    this.garment.add(body);
-    if (hood) {
-      // A longer neck reaches the hook through the hood.
-      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.22, 10), chrome());
-      neck.position.y = -0.11;
-      this.garment.add(neck);
-    }
+    this.garment.add(hangerBody(piece.hanger));
     this.garment.scale.setScalar(h);
-    this.garment.position.y = -0.012 * h;
     this.ready = true;
     this.root.visible = true;
     this.resolveLoaded();
@@ -547,6 +382,12 @@ export class Stage {
     this.wall = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.1 }));
     this.wall.receiveShadow = true;
     this.scene.add(this.wall, this.rail);
+
+    // Dev only: lets a test pose pieces at exact angles (window.__madStages).
+    if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+      const w = window as unknown as { __madStages?: Stage[] };
+      (w.__madStages ??= []).push(this);
+    }
   }
 
   setTheme(dark: boolean) {

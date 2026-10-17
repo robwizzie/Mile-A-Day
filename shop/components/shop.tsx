@@ -214,10 +214,12 @@ function DesktopRack({
 
   // A side-on piece takes its edge-on width, the turned one its full width.
   const gap = height * 0.08;
+  // Side-on, a 3D piece shows its depth as well as a sliver of its front.
+  const sideFrac = engine ? 0.44 : SIDE_COS;
   let cursor = 0;
   const layout = PRODUCTS.map((p, i) => {
     const w = garmentWidth(p, height);
-    const slot = hover === i ? w + gap * 3 : w * SIDE_COS + gap;
+    const slot = hover === i ? w + gap * 3 : w * sideFrac + gap;
     const x = cursor;
     cursor += slot;
     return { w, slot, x };
@@ -401,7 +403,7 @@ function useDesktopGarmentHeight() {
   const [h, setH] = useState(240);
   useEffect(() => {
     const fit = () => {
-      const byWidth = (Math.min(window.innerWidth, 1024) - 48) / 3.6;
+      const byWidth = (Math.min(window.innerWidth, 1024) - 48) / 4.2;
       const byHeight = window.innerHeight * 0.31;
       setH(Math.round(Math.max(170, Math.min(290, byWidth, byHeight))));
     };
