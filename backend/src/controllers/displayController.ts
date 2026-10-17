@@ -30,6 +30,8 @@ import {
 } from "../services/displayService.js";
 import { logError } from "../services/errorLogService.js";
 import { listDeskInterest } from "../services/deskInterestService.js";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import {
   DEFAULT_KINDS,
   DESK_PUSH_KINDS,
@@ -377,4 +379,44 @@ export async function adminDeskPushTest(req: Request, res: Response) {
   if (!me) return res.status(401).json({ error: "Sign in first" });
   const sent = await pushTo([me], "test", { title: "Mile A Day desk", body: "Notifications are on. 🔥", tag: "test" });
   res.json({ sent });
+}
+
+// ─── box firmware (owners update their own box) ───────────────────────────
+
+/** backend/desk-firmware: firmware.uf2 + firmware.json {version, built, notes}. */
+const FIRMWARE_DIR = fileURLToPath(new URL("../../desk-firmware/", import.meta.url));
+
+async function firmwareInfo(): Promise<{ version: number; built: string; notes: string[] } | null> {
+  try {
+    const j = JSON.parse(await readFile(FIRMWARE_DIR + "firmware.json", "utf8"));
+    return { version: Number(j.version), built: String(j.built), notes: Array.isArray(j.notes) ? j.notes.map(String) : [] };
+  } catch {
+    return null;
+  }
+}
+
+/** GET /admin/desk/firmware/info: the newest build for the boxes. Desk owners only. */
+export async function adminDeskFirmwareInfo(req: Request, res: Response) {
+  noStore(res);
+  if (!viewer(req) || (await listDeskBoxes(viewer(req) ?? "")).length === 0) return res.status(404).json({ error: "No desk on this account" });
+  const info = await firmwareInfo();
+  if (!info) return res.status(404).json({ error: "No firmware published" });
+  res.json(info);
+}
+
+/** GET /admin/desk/firmware: the .uf2 itself. No secrets inside: a box's Wi-Fi
+ *  and key live in its own settings.toml, which an update never touches. */
+export async function adminDeskFirmware(req: Request, res: Response) {
+  noStore(res);
+  if (!viewer(req) || (await listDeskBoxes(viewer(req) ?? "")).length === 0) return res.status(404).json({ error: "No desk on this account" });
+  const info = await firmwareInfo();
+  let bytes: Buffer;
+  try {
+    bytes = await readFile(FIRMWARE_DIR + "firmware.uf2");
+  } catch {
+    return res.status(404).json({ error: "No firmware published" });
+  }
+  res.setHeader("Content-Type", "application/octet-stream");
+  res.setHeader("Content-Disposition", `attachment; filename="mad-desk-v${info?.version ?? "latest"}.uf2"`);
+  res.send(bytes);
 }

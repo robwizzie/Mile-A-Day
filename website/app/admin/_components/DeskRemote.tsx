@@ -18,7 +18,8 @@ import { PushSettings } from "@/components/desk/push-settings";
  * only ever come from real activity. The chosen box is remembered per phone.
  */
 
-type BoxState = { style: number; mascot: number; awake: boolean; sleep_start: number | null; sleep_end: number | null };
+type BoxState = { style: number; mascot: number; awake: boolean; sleep_start: number | null; sleep_end: number | null;
+                  firmware?: number | null };
 type Box = { id: string; label: string; username: string | null; last_seen: string | null; online: boolean;
              state: BoxState | null };
 
@@ -833,6 +834,8 @@ export function DeskRemote() {
               )}
             </Section>
 
+            <FirmwareSection running={st?.firmware ?? null} reported={!!st} />
+
             <Section title="Notifications" right={<span className="text-[11px] text-white/40">this phone</span>}>
               <PushSettings say={say} />
             </Section>
@@ -853,6 +856,50 @@ export function DeskRemote() {
         </div>
       )}
     </main>
+  );
+}
+
+/** Update your box: the newest firmware, what's on the box, and how to put
+ *  it on (the box's Wi-Fi and key live in its own settings.toml: an update
+ *  never touches them). */
+function FirmwareSection({ running, reported }: { running: number | null; reported: boolean }) {
+  const [info, setInfo] = useState<{ version: number; built: string; notes: string[] } | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    getData<{ version: number; built: string; notes: string[] }>("desk/firmware/info").then(setInfo).catch(() => setInfo(null));
+  }, []);
+  if (!info) return null;
+  const current = running != null && running >= info.version;
+  const status = running != null
+    ? (current ? `Up to date (v${running})` : `On v${running} · v${info.version} is ready`)
+    : reported ? `On an older version · v${info.version} is ready` : `v${info.version} is the newest`;
+  return (
+    <Section title="Update your box" right={<span className="text-[11px] text-white/40">{status}</span>}>
+      {!current && (
+        <>
+          <ul className="mb-3 list-disc pl-5 text-xs text-white/60">
+            {info.notes.map((n) => <li key={n}>{n}</li>)}
+          </ul>
+          <a href="/admin/api/firmware" download={`mad-desk-v${info.version}.uf2`}
+             className="block w-full rounded-xl py-2.5 text-center text-sm font-extrabold" style={{ background: MAD_RED }}>
+            Download v{info.version} for your box
+          </a>
+          <button onClick={() => setOpen((o) => !o)} className="mt-2 w-full rounded-xl bg-white/[0.06] py-2 text-sm font-bold">
+            {open ? "Hide the steps" : "How to put it on the box (1 minute)"}
+          </button>
+          {open && (
+            <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm text-white/75">
+              <li>Do this on a computer: download the file above there.</li>
+              <li>Plug the box into the computer with a USB-C cable that carries data.</li>
+              <li>Double-click the little <b>RESET</b> button on the back of the box (two quick taps). A drive called <b>MATRIXBOOT</b> shows up and the box&apos;s light turns green.</li>
+              <li>Drag the <b>.uf2</b> file onto MATRIXBOOT. The drive goes away on its own: that&apos;s normal.</li>
+              <li>Wait about 30 seconds. The box restarts with the new version, on the same Wi-Fi and showing your data.</li>
+            </ol>
+          )}
+        </>
+      )}
+      {current && <p className="text-sm text-white/50">Your box has the newest version.</p>}
+    </Section>
   );
 }
 
