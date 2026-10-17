@@ -7,7 +7,7 @@ Gamified fitness app: run a mile every day, build streaks, compete with friends.
 - `app/` - iOS app (Swift/SwiftUI, targets iOS + watchOS + Widgets)
 - `backend/` - REST API (TypeScript, Express 5.1, PostgreSQL)
 - `website/` - Marketing site (Next.js 16, React 19, Tailwind CSS 4)
-- `shop/` - Merch store for mileaday.shop (Next.js 16, own Vercel project). Products live in `shop/lib/catalog.ts`; checkout is Shopify cart permalinks (`NEXT_PUBLIC_SHOPIFY_DOMAIN` + per-size variant ids), fulfilled by Tapstitch. Garments are 3D (three.js: `components/three/tailor.ts` builds torso, sleeves and hood from each flat-lay print; per-cut proportions in `CUTS`); after editing a drawn design in `components/designs.tsx` run `npm run textures` to re-render its WebP textures. Not in CI yet: `cd shop && npm run build` is the check.
+- `shop/` - Merch store for mileaday.shop (Next.js 16, own Vercel project). Products live in `shop/lib/catalog.ts`; checkout is Shopify cart permalinks (`NEXT_PUBLIC_SHOPIFY_DOMAIN` + per-size variant ids), fulfilled by Tapstitch. Garments are 3D (three.js: `components/three/drape.ts` cuts two thin fabric layers to each flat-lay print, with folds and a crisp seam; per-cut landmarks in `CUTS`; dev-only `/lab` renders every piece at four angles, `/lab?snap=name` saves a full-res PNG to `shop/.lab/`); after editing a drawn design in `components/designs.tsx` run `npm run textures` to re-render its WebP textures. Not in CI yet: `cd shop && npm run build` is the check.
 
 ## Quick Commands
 

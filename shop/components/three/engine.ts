@@ -1,10 +1,10 @@
 // The 3D garments. Loaded on demand (dynamic import) so three.js never
 // blocks first paint.
 //
-// Each piece is tailored from its flat-lay artwork (see tailor.ts): an oval
-// torso that drapes from the shoulder seam, sleeve tubes, a hood on the
-// hoodie, with the front print wrapped round the chest, the back print round
-// the back and sleeve prints round the outside of the arm. A swivel hanger
+// Each piece is cut from its flat-lay artwork (see drape.ts): two thin layers
+// of fabric to the piece's exact outline, sewn at a crisp edge, fuller over
+// the hanger, folding toward the hem, sleeves falling back — front print on
+// the front layer, back print on the back. A swivel hanger
 // holds it: the chrome hook stays wrapped around the rail while the hanger
 // body and the garment turn beneath it, the way a swivel-hook hanger does.
 //
@@ -13,7 +13,7 @@
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { Product } from "@/lib/catalog";
-import { CUTS, tailor, type Tailored } from "./tailor";
+import { CUTS, drape, type Fabric, type Tailored } from "./drape";
 
 // ── Assets ─────────────────────────────────────────────────────────────────
 
@@ -111,13 +111,22 @@ function averageColor(img: HTMLImageElement) {
   return n ? `rgb(${r / n | 0},${g / n | 0},${b / n | 0})` : "#888";
 }
 
+/** Cloth weight per cut: fleece is fuller and folds deeper than jersey. */
+const FABRIC: Record<keyof typeof CUTS, Fabric> = {
+  tee: { body: 0.007, shoulders: 0.02, folds: 0.016 },
+  longsleeve: { body: 0.007, shoulders: 0.02, folds: 0.016 },
+  tank: { body: 0.006, shoulders: 0.016, folds: 0.014 },
+  hoodie: { body: 0.018, shoulders: 0.03, folds: 0.02 },
+};
+
 async function buildPiece(p: Product): Promise<Piece> {
   const u = urls(p);
   const [front, back] = await Promise.all([loadImage(u.front), loadImage(u.back)]);
   const aspect = front.naturalWidth / front.naturalHeight;
-  const cut = p.art.kind === "photo" ? CUTS.hoodie : CUTS[p.art.cut];
+  const key = p.art.kind === "photo" ? "hoodie" : p.art.cut;
+  // The photo's cutout is cut just inside its soft edge (see texture()).
   return {
-    ...tailor(front, cut),
+    ...drape(front, CUTS[key], FABRIC[key], p.art.kind === "photo" ? 0.92 : 0.5),
     frontMap: texture(front),
     backMap: texture(back),
     aspect,
@@ -179,9 +188,36 @@ function hangerBody(h: Tailored["hanger"]) {
 
 /** Fabric: double-sided, so the neckline, hem and cuffs show the inside —
  *  shaded darker, the way the inside of a garment is. */
+let weaveTexture: THREE.Texture | null = null;
+/** A fine knit, tiled across the cloth as a bump map. */
+function weave() {
+  if (weaveTexture) return weaveTexture;
+  const S = 128;
+  const c = document.createElement("canvas");
+  c.width = S;
+  c.height = S;
+  const ctx = c.getContext("2d")!;
+  const img = ctx.createImageData(S, S);
+  for (let y = 0; y < S; y++)
+    for (let x = 0; x < S; x++) {
+      const knit = Math.sin((x / S) * Math.PI * 2 * 32) * 0.5 + Math.sin((y / S) * Math.PI * 2 * 48 + Math.sin((x / S) * Math.PI * 64)) * 0.5;
+      const v = 128 + knit * 40 + (Math.random() - 0.5) * 50;
+      const i = (y * S + x) * 4;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = 255;
+    }
+  ctx.putImageData(img, 0, 0);
+  weaveTexture = new THREE.CanvasTexture(c);
+  weaveTexture.wrapS = weaveTexture.wrapT = THREE.RepeatWrapping;
+  weaveTexture.repeat.set(5, 5);
+  return weaveTexture;
+}
+
 function fabric(map: THREE.Texture) {
   const m = new THREE.MeshPhysicalMaterial({
     map,
+    bumpMap: weave(),
+    bumpScale: 0.18,
     roughness: 0.92,
     metalness: 0,
     sheen: 0.25,
@@ -239,6 +275,8 @@ export class HungPiece {
   private rockZ = new Spring(0, 0, 50, 0.22);
   private drop: Spring;
   private dropDelay = 0;
+  /** Extra vertical offset in px (the lab lays pieces out in rows). */
+  yOffset = 0;
   ready = false;
   /** Resolves once the garment is built and on its hanger. */
   readonly loaded: Promise<void>;
@@ -317,7 +355,7 @@ export class HungPiece {
     this.rockZ.step(dt);
     if (now >= this.dropDelay) this.drop.step(dt);
     this.root.position.x = this.x.x;
-    this.root.position.y = this.stage.railY + this.drop.x * 22;
+    this.root.position.y = this.stage.railY + this.yOffset + this.drop.x * 22;
     this.swivel.rotation.y = THREE.MathUtils.degToRad(this.turn.x);
     this.rock.rotation.x = this.rockX.x * 0.06;
     this.rock.rotation.z = this.rockZ.x * 0.02;
@@ -354,7 +392,7 @@ export class Stage {
     canvas: HTMLCanvasElement | OffscreenCanvas,
     opts: { railR?: number; shadowSize?: number } = {},
   ) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: false });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: process.env.NODE_ENV !== "production" });
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NeutralToneMapping;
@@ -428,6 +466,12 @@ export class Stage {
     cam.updateProjectionMatrix();
     this.rim.position.set(w * 0.3, h * 0.8, -dist);
     this.invalidate();
+  }
+
+  /** Degrees a piece at world x must turn to face the camera square-on
+   *  (perspective otherwise shows pieces off-centre more from one side). */
+  facing(x: number) {
+    return THREE.MathUtils.radToDeg(Math.atan2(-x, this.camera.position.z));
   }
 
   /** CSS px (from the canvas's top-left) → world. */

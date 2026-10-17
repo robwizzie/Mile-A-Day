@@ -19,6 +19,8 @@ import type { CardRenderer, HungPiece, Stage } from "./three/engine";
 import { useDarkTheme, useEngine } from "./three/react";
 
 const SIDE_COS = Math.abs(Math.cos((SIDE_TURN * Math.PI) / 180));
+/** 3D pieces rest a little more open than edge-on, so side prints read. */
+const REST_3D = -66;
 const HERO = PRODUCTS[0];
 const GUTTER = "max(24px, calc((100vw - 1024px) / 2 + 24px))";
 
@@ -214,8 +216,8 @@ function DesktopRack({
 
   // A side-on piece takes its edge-on width, the turned one its full width.
   const gap = height * 0.08;
-  // Side-on, a 3D piece shows its depth as well as a sliver of its front.
-  const sideFrac = engine ? 0.44 : SIDE_COS;
+  // Side-on, a 3D piece shows its edge plus the sleeve falling back.
+  const sideFrac = engine ? 0.34 : SIDE_COS;
   let cursor = 0;
   const layout = PRODUCTS.map((p, i) => {
     const w = garmentWidth(p, height);
@@ -258,9 +260,10 @@ function DesktopRack({
     const s = stage.current;
     if (!s) return;
     hung.current.forEach((p, i) => {
-      const { w, x, slot } = layout[i];
-      p.x.set(s.wx(PAD_X + offset + x + slot / 2 - w / 2 + w / 2), !placed.current);
-      p.turn.set(hover === i ? (flipped ? 180 : 0) : SIDE_TURN, !placed.current);
+      const { x, slot } = layout[i];
+      const wx = s.wx(PAD_X + offset + x + slot / 2);
+      p.x.set(wx, !placed.current);
+      p.turn.set((hover === i ? (flipped ? 180 : 0) : REST_3D) + s.facing(wx), !placed.current);
     });
     placed.current = true;
     s.invalidate();
@@ -487,8 +490,9 @@ function MobileRack({
       const shift = -Math.sign(d) * (0.3 * near + 0.66 * Math.max(0, a - 1)) * itemW;
       const piece = hung.current[i];
       if (s && piece) {
-        piece.x.set(s.wx(vw / 2 + d * itemW + shift), true);
-        piece.turn.set(SIDE_TURN * near + (flippedRef.current && i === center ? 180 : 0), true);
+        const wx = s.wx(vw / 2 + d * itemW + shift);
+        piece.x.set(wx, true);
+        piece.turn.set(REST_3D * near + (flippedRef.current && i === center ? 180 : 0) + s.facing(wx), true);
       }
       if (!node) return;
       if (s) return; // the 3D rack draws the pieces; the DOM only takes taps
