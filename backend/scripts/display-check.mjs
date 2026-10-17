@@ -530,7 +530,7 @@ async function main() {
   await feed({ authorization: `Display ${adminKey}`, "x-desk-state": "9,9,9,'; drop" });
   const reported = (await (await admin("desk/boxes")).json()).boxes;
   check("box state reported", (await (await admin("desk/boxes", "GET", OWNER)).json()).boxes[0].state,
-        { style: 2, mascot: 1, awake: false, sleep_start: 1350, sleep_end: 390 });
+        { style: 2, mascot: 1, awake: false, sleep_start: 1350, sleep_end: 390, firmware: null });
   check("junk state ignored", reported.find((b) => b.username === "admin").state, null);
   check("old play endpoint is gone", (await post("desk/play", { kind: "nudge" })).status, 404);
   const ownerFeedBox = await (await feed({ authorization: `Display ${key}` })).json();
@@ -682,6 +682,15 @@ async function main() {
   check("new styles can be chosen", (await (await post(`desk/box/${ownerBox}/settings`, { style: 10 }, OWNER)).json()).settings.style, 10);
   await feed({ authorization: `Display ${key}`, "x-desk-state": "10,1,1,1350,390" });
   check("Showcase (style 10) reported", (await (await admin("desk/boxes", "GET", OWNER)).json()).boxes[0].state?.style, 10);
+  check("an older box: no version", (await (await admin("desk/boxes", "GET", OWNER)).json()).boxes[0].state?.firmware, null);
+  await feed({ authorization: `Display ${key}`, "x-desk-state": "2,1,1,1350,390,24" });
+  check("the box says which firmware it runs", (await (await admin("desk/boxes", "GET", OWNER)).json()).boxes[0].state?.firmware, 24);
+  const fwInfo = await admin("desk/firmware/info", "GET", OWNER);
+  check("firmware info for a desk owner", fwInfo.status === 200 && Number.isInteger((await fwInfo.json()).version), true);
+  const fw = await admin("desk/firmware", "GET", OWNER);
+  const fwBytes = new Uint8Array(await fw.arrayBuffer());
+  check("firmware download is a .uf2", [fw.status, String.fromCharCode(...fwBytes.slice(0, 4)), fw.headers.get("content-disposition")?.startsWith("attachment")], [200, "UF2\n", true]);
+  check("no firmware for a non-admin", (await admin("desk/firmware", "GET", P + "stranger")).status, 403);
   await post(`desk/box/${ownerBox}/settings`, { style: 2 }, OWNER);
   for (let i = 0; i < 30; i++) await post(`desk/box/${ownerBox}/show`, {}, OWNER);
   check("taps are rate-limited", (await post(`desk/box/${ownerBox}/show`, {}, OWNER)).status, 429);

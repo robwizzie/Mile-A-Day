@@ -340,17 +340,20 @@ export interface DeskBoxState {
   awake: boolean;
   sleep_start: number | null; // the hours it's actually using; null = never sleeps
   sleep_end: number | null;
+  /** The firmware build it runs (boxes from v24 on say; older: null). */
+  firmware: number | null;
 }
 
-/** "style,mascot,awake,sleep_start,sleep_end" (-1 = never sleeps). Strict:
- *  anything else is ignored. */
+/** "style,mascot,awake,sleep_start,sleep_end[,firmware]" (-1 = never
+ *  sleeps). Strict: anything else is ignored. */
 export function parseBoxState(header: unknown): DeskBoxState | null {
   if (typeof header !== "string") return null;
-  const m = /^(\d{1,2}),(\d),([01]),(-1|\d{1,4}),(-1|\d{1,4})$/.exec(
+  const m = /^(\d{1,2}),(\d),([01]),(-1|\d{1,4}),(-1|\d{1,4})(?:,(\d{1,4}))?$/.exec(
     header.trim(),
   );
   if (!m) return null;
-  const [style, mascot, awake, a, b] = m.slice(1).map(Number);
+  const [style, mascot, awake, a, b] = m.slice(1, 6).map(Number);
+  const firmware = m[6] === undefined ? null : Number(m[6]);
   if (style >= DESK_STYLES.length || mascot >= DESK_MASCOTS.length) return null;
   const ok = (v: number) => v === -1 || (v >= 0 && v < 1440);
   if (!ok(a) || !ok(b)) return null;
@@ -360,6 +363,7 @@ export function parseBoxState(header: unknown): DeskBoxState | null {
     awake: awake === 1,
     sleep_start: a === -1 || b === -1 ? null : a,
     sleep_end: a === -1 || b === -1 ? null : b,
+    firmware,
   };
 }
 
@@ -412,6 +416,7 @@ function boxRow(r: BoxDbRow): DeskBox {
             awake: r.state.awake,
             sleep_start: r.state.sleep_start,
             sleep_end: r.state.sleep_end,
+            firmware: r.state.firmware ?? null,
           }
         : null,
   };

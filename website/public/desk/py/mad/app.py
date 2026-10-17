@@ -24,6 +24,7 @@ LIVE = 11                # not a choice: shown while the owner is out running
 SHOWCASE_S = 40.0        # Showcase: seconds per style
 SHOWCASE_SHOW = 180.0    # ...and a stat show about every 3 minutes
 MASCOTS = ("RUNNER", "FLAMEY")
+FIRMWARE = 24            # this build (the remote shows it and offers newer ones)
 BOOT_MIN = 3.0           # keep the logo up at least this long
 DASH_SECONDS = 25        # Classic: still dashboard time between stat shows
 T_TRANS = 1.7            # mascot wipe between screens
@@ -138,7 +139,7 @@ def season_for(date, anniv=None, bday=None):
         turkey = 1 + (4 - _dow(y, 11, 1)) % 7 + 21      # 4th Thursday
         if d in (turkey - 1, turkey):
             return "THANKSGIVING"
-    if mo == 10 and d >= 25:
+    if mo == 10 and d >= 14:                 # spooky season
         return "HALLOWEEN"
     if mo == 12 and d <= 26:
         return "SANTA"
@@ -742,7 +743,7 @@ class App:
         """What this box tells the server with each poll (X-Desk-State), so the
         phone remote shows it as it really is: style, mascot, awake, sleep hours."""
         a, b = self.night_hours if self.night_hours else (-1, -1)
-        return "%d,%d,%d,%d,%d" % (self.style, self.mascot, 0 if self.night else 1, a, b)
+        return "%d,%d,%d,%d,%d,%d" % (self.style, self.mascot, 0 if self.night else 1, a, b, FIRMWARE)
 
     def is_night(self, now):
         s = self.local_seconds(now)

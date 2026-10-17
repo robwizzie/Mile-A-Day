@@ -50,6 +50,9 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=builder /app/src/db/drizzle ./src/db/drizzle
 
+# The desk box firmware desk owners download from the remote (Admin -> Desks).
+COPY --from=builder /app/desk-firmware ./desk-firmware
+
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x docker-entrypoint.sh
 

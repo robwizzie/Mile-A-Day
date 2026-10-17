@@ -14,6 +14,8 @@ import {
   adminDeskBoxTest,
   adminDeskBoxDoodle,
   adminDeskInterest,
+  adminDeskFirmwareInfo,
+  adminDeskFirmware,
   adminDeskPush,
   adminDeskPushSubscribe,
   adminDeskPushKinds,
@@ -87,6 +89,8 @@ adminRouter.post("/desk/box/:id/message", adminDeskBoxMessage);
 adminRouter.post("/desk/box/:id/test", adminDeskBoxTest);
 adminRouter.post("/desk/box/:id/doodle", adminDeskBoxDoodle);
 adminRouter.get("/desk/interest", adminDeskInterest);
+adminRouter.get("/desk/firmware/info", adminDeskFirmwareInfo);
+adminRouter.get("/desk/firmware", adminDeskFirmware);
 adminRouter.get("/desk/push", adminDeskPush);
 adminRouter.post("/desk/push/subscribe", adminDeskPushSubscribe);
 adminRouter.post("/desk/push/kinds", adminDeskPushKinds);

@@ -3,7 +3,7 @@
 #                          twinkling string lights on the divider lines,
 #                          Arcade: presents to jump, ornaments to collect,
 #                          snowy ground. Campfire: snow-capped logs.
-#   HALLOWEEN (Oct 25-31): bats flapping by, a moon over the sky scenes,
+#   HALLOWEEN (Oct 14-31): bats flapping by, a moon over the sky scenes,
 #                          candy-corn divider lines, Arcade: pumpkins and
 #                          tombstones to jump, wrapped candy to collect.
 #   NEWYEAR   (Dec 31-Jan 1): little fireworks popping in the background.
