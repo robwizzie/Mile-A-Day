@@ -107,29 +107,30 @@ body {
   box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.3);
 }
 
-/* How side-on a garment is (0 front … 1 edge-on). Registered so it can
-   transition: it dims the face as it turns away, like light falling off. */
-@property --side {
-  syntax: "<number>";
-  inherits: true;
-  initial-value: 0;
-}
-
-.garment-3d {
+.garment-3d,
+.garment-face,
+.garment-ink {
   transform-style: preserve-3d;
+}
+.garment-3d {
   will-change: transform;
 }
 .garment-face {
   position: absolute;
   inset: 0;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
 }
 .garment-face.is-back {
   transform: rotateY(180deg);
 }
-.garment-ink {
-  filter: brightness(calc(1 - var(--side) * 0.25)) drop-shadow(0 18px 22px var(--garment-shadow));
+/* Anything flat on a face shows from its own side only. (No filter on the
+   containers: a filter flattens the 3D inside it.) */
+.garment-hanger,
+.garment-flat {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.garment-flat {
+  filter: drop-shadow(0 18px 22px var(--garment-shadow));
 }
 
 @keyframes sway {

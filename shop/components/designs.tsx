@@ -42,7 +42,7 @@ export function SharedDefs() {
 }
 
 /** The definitions every drawn garment uses; inlined when rendering a
- *  standalone texture (scripts/render-textures.tsx). */
+ *  standalone print (scripts/export-prints.tsx). */
 export function DesignDefs() {
   return (
       <defs>
@@ -96,28 +96,24 @@ export function DrawnGarment({
   design,
   side,
   className,
-  texture = false,
 }: {
   cut: Cut;
   color: string;
   design: DesignId;
   side: "front" | "back";
   className?: string;
-  /** A flat print for the 3D mesh: the lighting does the shading. */
-  texture?: boolean;
 }) {
   const tone = luminance(color) < 0.35 ? "dark" : "light";
   const seam = tone === "dark" ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.13)";
   const fold = tone === "dark" ? 0.38 : 0.07;
   return (
     <svg viewBox="0 0 400 440" className={className} aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-      {texture && <DesignDefs />}
       <path d={SHAPE[cut]} fill={color} />
       <g clipPath={`url(#clip-${cut})`}>
-        {!texture && <rect width="400" height="440" fill={`url(#shade-${tone})`} />}
-        {!texture && <rect width="400" height="440" fill={`url(#sheen-${tone})`} />}
-        <path d="M122 250 C 150 300, 142 360, 130 430" stroke="#000" strokeOpacity={fold * (texture ? 0.6 : 1)} strokeWidth="12" fill="none" filter="url(#fold-blur)" />
-        <path d="M272 214 C 262 284, 286 352, 276 430" stroke="#000" strokeOpacity={fold * (texture ? 0.5 : 0.8)} strokeWidth="10" fill="none" filter="url(#fold-blur)" />
+        <rect width="400" height="440" fill={`url(#shade-${tone})`} />
+        <rect width="400" height="440" fill={`url(#sheen-${tone})`} />
+        <path d="M122 250 C 150 300, 142 360, 130 430" stroke="#000" strokeOpacity={fold} strokeWidth="12" fill="none" filter="url(#fold-blur)" />
+        <path d="M272 214 C 262 284, 286 352, 276 430" stroke="#000" strokeOpacity={fold * 0.8} strokeWidth="10" fill="none" filter="url(#fold-blur)" />
         {cut === "tank" && ARMHOLES.map((d) => <path key={d} d={d} stroke={seam} strokeWidth="9" fill="none" />)}
         {STITCH[cut].map((d) => (
           <path key={d} d={d} stroke={seam} strokeWidth="1.6" strokeDasharray="4 4" fill="none" />
@@ -125,11 +121,35 @@ export function DrawnGarment({
       </g>
       <path d={COLLAR[cut][side]} stroke={seam} strokeWidth="8" strokeLinecap="round" fill="none" />
       {PRINTS[design][side]}
+      {side === "front" && PRINTS[design].sleeve && <g transform={SLEEVE_PLACEMENT}>{PRINTS[design].sleeve}</g>}
     </svg>
   );
 }
 
 // ── Prints ────────────────────────────────────────────────────────────────
+
+/** Where a sleeve print sits on the drawn long sleeve (down the right arm). */
+const SLEEVE_PLACEMENT = "translate(347 128) rotate(84.5)";
+
+/**
+ * One print on its own, for production (scripts/export-prints.tsx): no
+ * garment, transparent, in the design's 400×440 box. A sleeve print is drawn
+ * reading top-to-bottom, the way it runs down the arm.
+ */
+export function PrintOnly({ design, part }: { design: DesignId; part: "front" | "back" | "sleeve" }) {
+  const art = PRINTS[design][part];
+  if (!art) return null;
+  return (
+    <svg viewBox="0 0 400 440" xmlns="http://www.w3.org/2000/svg">
+      <DesignDefs />
+      {part === "sleeve" ? <g transform="translate(200 20) rotate(90)">{art}</g> : art}
+    </svg>
+  );
+}
+
+export function hasSleevePrint(design: DesignId) {
+  return !!PRINTS[design].sleeve;
+}
 
 function T({
   x = 200,
@@ -213,7 +233,11 @@ function Flamey({ x, y, s }: { x: number; y: number; s: number }) {
 
 const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
-const PRINTS: Record<DesignId, { front: ReactNode; back: ReactNode }> = {
+/** A print's parts: the chest, the back, and (some long sleeves) the right
+ *  sleeve, drawn upright — the garment lays it along the sleeve. */
+type Print = { front: ReactNode; back: ReactNode; sleeve?: ReactNode };
+
+const PRINTS: Record<DesignId, Print> = {
   // White tee: a quiet chest badge, then the whole idea on the back.
   "daily-mile": {
     front: (
@@ -305,12 +329,12 @@ const PRINTS: Record<DesignId, { front: ReactNode; back: ReactNode }> = {
         <T x={276} y={130} size={32} fill="#f3efe9" ls={1}>
           MAD
         </T>
-        <g transform="translate(347 128) rotate(84.5)">
-          <T x={0} y={0} size={19} fill="#f3efe9" ls={5} anchor="start" opacity={0.92}>
-            GO THE EXTRA MILE
-          </T>
-        </g>
       </g>
+    ),
+    sleeve: (
+      <T x={0} y={0} size={19} fill="#f3efe9" ls={5} anchor="start" opacity={0.92}>
+        GO THE EXTRA MILE
+      </T>
     ),
     back: (
       <g>
@@ -416,12 +440,12 @@ const PRINTS: Record<DesignId, { front: ReactNode; back: ReactNode }> = {
     front: (
       <g>
         <Flamey x={248} y={96} s={0.22} />
-        <g transform="translate(347 128) rotate(84.5)">
-          <T x={0} y={0} size={19} fill={EMBER} ls={5} anchor="start">
-            FLAMEY RUN CREW
-          </T>
-        </g>
       </g>
+    ),
+    sleeve: (
+      <T x={0} y={0} size={19} fill={EMBER} ls={5} anchor="start">
+        FLAMEY RUN CREW
+      </T>
     ),
     back: (
       <g>
