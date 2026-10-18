@@ -14,7 +14,7 @@ export const MODEL_CREDITS: Record<ModelId, { title: string; author: string; url
   tee: { title: "Standard T-shirt", author: "Pieter Ferreira (Badboy17Aiden)", url: "https://sketchfab.com/3d-models/1815c01895bd4538bc0bd05c3394698d" },
   longsleeve: { title: "T-shirt - Lengan Panjang", author: "Ikal.Ichwan", url: "https://sketchfab.com/3d-models/86d4292baa6c489ab5fab374bf803106" },
   tank: { title: "Tank Top", author: "Shift4cube", url: "https://sketchfab.com/3d-models/d6b2561de39f423f9c7a2e7944485beb" },
-  hoodie: { title: "HOODIE", author: "Obridje", url: "https://sketchfab.com/3d-models/ab78848ab3404a2e877929d5f8774c54" },
+  hoodie: { title: "Classic Black Flame Hoodie", author: "klir", url: "https://sketchfab.com/3d-models/0fd0effa321e456cb2a7467e2899b658" },
 };
 
 export const LICENSE = { name: "CC BY 4.0", url: "https://creativecommons.org/licenses/by/4.0/" };
@@ -31,8 +31,8 @@ export function bounds(id: ModelId): ModelBounds {
 export const HOOK_RISE = 0.075;
 
 /**
- * Where the hanger's neck runs, front to back (z, metres). A hoodie's rides
- * up the back of the hood, as on a real hanger, not through its face
- * opening. The hook is the pivot: the garment is shifted so it sits at z = 0.
+ * Where the hanger's neck runs, front to back (z, metres), for a model whose
+ * neck opening isn't centred (e.g. a hood up). The hook is the pivot: the
+ * garment is shifted so it sits at z = 0.
  */
-export const HOOK_Z: Partial<Record<ModelId, number>> = { hoodie: -0.1 };
+export const HOOK_Z: Partial<Record<ModelId, number>> = {};

@@ -141,6 +141,25 @@ async function build(product: Product, model: ModelId) {
   );
   for (const p of prints) if (p) piece.add(p);
 
+  // A sleeve print goes down the outside of both sleeves.
+  const sleeve = PLACEMENTS[`${product.id}/sleeve`];
+  if (sleeve) {
+    const map = await texture(sleeve.src);
+    // The print is the wearer's left sleeve's; the right one is its mirror.
+    const mirrored = map.clone();
+    mirrored.wrapS = THREE.RepeatWrapping;
+    mirrored.repeat.x = -1;
+    mirrored.needsUpdate = true;
+    for (const side of [1, -1]) {
+      const decal = projectSleeve(mesh, b, side, sleeve);
+      if (!decal) continue;
+      const ink = new THREE.MeshPhysicalMaterial({ map: side === 1 ? map : mirrored, transparent: true, roughness: 0.6, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 });
+      const m = new THREE.Mesh(decal, ink);
+      m.renderOrder = 1;
+      piece.add(m);
+    }
+  }
+
   const hookZ = HOOK_Z[model] ?? 0;
   piece.add(hanger(b, hookZ));
   piece.position.set(0, -HOOK_RISE, -hookZ);
@@ -164,6 +183,36 @@ function projectPrint(mesh: THREE.Mesh, b: ModelBounds, side: "front" | "back", 
   const orient = new THREE.Euler(0, front ? 0 : Math.PI, 0);
   const size = new THREE.Vector3(p.width * inch, p.height * inch, Math.min(0.14, b.depth * 0.5));
   return new DecalGeometry(mesh, hit.point, orient, size);
+}
+
+/**
+ * Projects a sleeve print onto one sleeve (side 1: +x, the wearer's left),
+ * from the front-outside at 45°: where a sleeve print sits, and seen both
+ * facing the piece and side-on on the rail.
+ */
+function projectSleeve(mesh: THREE.Mesh, b: ModelBounds, side: number, p: (typeof PLACEMENTS)[string]) {
+  const inch = b.chest / 20;
+  const y = b.collarFront - (p.below + p.height / 2) * inch;
+  const angle = (side * Math.PI) / 4;
+  const from = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle));
+  // Find the sleeve: walking in from the outside, the first fabric a ray from
+  // the front meets; its middle is a few centimetres in from that edge.
+  const ray = new THREE.Raycaster();
+  const front = new THREE.Vector3(0, 0, -1);
+  let edge: THREE.Vector3 | null = null;
+  for (let x = b.width / 2 + 0.02; x > b.chest / 4 && !edge; x -= 0.004) {
+    ray.set(new THREE.Vector3(side * x, y, 1), front);
+    edge = ray.intersectObject(mesh, false)[0]?.point ?? null;
+  }
+  if (!edge) return null;
+  ray.set(new THREE.Vector3(edge.x - side * 0.045, y, 1), front);
+  const centre = ray.intersectObject(mesh, false)[0]?.point;
+  if (!centre) return null;
+  ray.set(centre.clone().addScaledVector(from, 0.5), from.clone().negate());
+  const hit = ray.intersectObject(mesh, false)[0];
+  if (!hit) return null;
+  const orient = new THREE.Euler(0, angle, 0);
+  return new DecalGeometry(mesh, hit.point, orient, new THREE.Vector3(p.width * inch, p.height * inch, 0.12));
 }
 
 const hangerMaterial = new THREE.MeshStandardMaterial({ color: "#1d1d1f", roughness: 0.38, metalness: 0.35 });
@@ -255,8 +304,11 @@ export function GarmentStage({ zIndex, children }: { zIndex: number; children: R
     let raf = 0;
     let hangerTick = 0;
 
+    let sizedW = 0, sizedH = 0;
     const size = () => {
-      renderer.setSize(window.innerWidth, window.innerHeight, false);
+      sizedW = window.innerWidth;
+      sizedH = window.innerHeight;
+      renderer.setSize(sizedW, sizedH, false);
       dirty = true;
     };
     size();
@@ -267,6 +319,8 @@ export function GarmentStage({ zIndex, children }: { zIndex: number; children: R
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       if (document.hidden) return;
+      // Not every viewport change fires resize (zoom, some embeds): check.
+      if (window.innerWidth !== sizedW || window.innerHeight !== sizedH) size();
 
       // The hanger follows the theme.
       if (hangerTick-- <= 0) {

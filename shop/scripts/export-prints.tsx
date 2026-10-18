@@ -103,7 +103,7 @@ async function main() {
   }
   await writeFile(join(OUT, "README.md"), guide.join("\n"));
   // The hoodie predates the drawn designs: its prints are lifted from its photos.
-  for (const side of ["front", "back"] as const) placements.push(await photoPrint("extra-mile-hoodie", side));
+  for (const part of ["front", "back", "sleeve"] as const) placements.push(await photoPrint("extra-mile-hoodie", part));
   await writeFile(
     join(process.cwd(), "lib/print-placements.ts"),
     [
@@ -126,10 +126,12 @@ async function main() {
  * separates by brightness) and places it in the same inches as a drawn
  * design: the torso's width in the photo counts as the 20 in of a size M.
  */
-async function photoPrint(id: string, side: "front" | "back") {
+async function photoPrint(id: string, part: "front" | "back" | "sleeve") {
+  // The sleeve bolt is read off the front photo's wearer's-left sleeve (it faces the camera most).
+  const side = part === "sleeve" ? "front" : part;
   // Where to look (inside the torso, clear of the sleeve prints) and where
   // the collar sits at the centre line, as shares of the photo.
-  const WINDOW = { front: [0.36, 0.3, 0.64, 0.66], back: [0.32, 0.38, 0.68, 0.76] }[side];
+  const WINDOW = { front: [0.36, 0.3, 0.64, 0.66], back: [0.32, 0.38, 0.68, 0.76], sleeve: [0.8, 0.35, 0.97, 0.78] }[part];
   const COLLAR = { front: 0.33, back: 0.29 }[side];
   const [l, r] = BODIES[`/garments/hoodie-front.webp`];
   const { data, info } = await sharp(join(process.cwd(), `public/garments/hoodie-${side}.webp`))
@@ -138,7 +140,8 @@ async function photoPrint(id: string, side: "front" | "back") {
     .toBuffer({ resolveWithObject: true });
   const { width: w, height: h, channels } = info;
   const x0 = Math.round(WINDOW[0] * w), y0 = Math.round(WINDOW[1] * h), x1 = Math.round(WINDOW[2] * w), y1 = Math.round(WINDOW[3] * h);
-  const ink = (i: number) => Math.max(data[i], data[i + 1], data[i + 2]);
+  // Ink: bright on the black fabric; on the sleeve, red (the fabric's folds catch light too).
+  const ink = (i: number) => (part === "sleeve" ? Math.max(0, data[i] - Math.max(data[i + 1], data[i + 2])) * 1.4 : Math.max(data[i], data[i + 1], data[i + 2]));
   let top = h, left = w, bottom = 0, right = 0;
   for (let y = y0; y < y1; y++)
     for (let x = x0; x < x1; x++)
@@ -160,11 +163,11 @@ async function photoPrint(id: string, side: "front" | "back") {
       for (let c = 0; c < 3; c++) out[o + c] = a > 0 ? Math.min(255, Math.max(0, (data[i + c] - 18 * (1 - a)) / a)) : 0;
       out[o + 3] = Math.round(a * 255);
     }
-  const web = `${id}-${side}.webp`;
+  const web = `${id}-${part}.webp`;
   await sharp(out, { raw: { width: cw, height: ch, channels: 4 } }).webp({ quality: 90, alphaQuality: 100 }).toFile(join(WEB, web));
   const body = (r - l) * w;
   const inches = (px: number) => +((px / body) * 20).toFixed(2);
-  return `  "${id}/${side}": { src: "/prints/${web}", width: ${inches(cw)}, height: ${inches(ch)}, right: ${inches(left + cw / 2 - ((l + r) / 2) * w)}, below: ${inches(top - COLLAR * h)} },`;
+  return `  "${id}/${part}": { src: "/prints/${web}", width: ${inches(cw)}, height: ${inches(ch)}, right: ${inches(left + cw / 2 - ((l + r) / 2) * w)}, below: ${inches(top - COLLAR * h)} },`;
 }
 
 main().catch((e) => {

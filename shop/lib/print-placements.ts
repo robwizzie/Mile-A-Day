@@ -19,4 +19,5 @@ export const PLACEMENTS: Record<string, Placement> = {
   "flamey-run-crew/back": { src: "/prints/flamey-run-crew-back.webp", width: 10.02, height: 12.2, right: -0.69, below: 4.11 },
   "extra-mile-hoodie/front": { src: "/prints/extra-mile-hoodie-front.webp", width: 6.15, height: 5.19, right: 0.29, below: 3.15 },
   "extra-mile-hoodie/back": { src: "/prints/extra-mile-hoodie-back.webp", width: 14.16, height: 7.66, right: -0.19, below: 7.77 },
+  "extra-mile-hoodie/sleeve": { src: "/prints/extra-mile-hoodie-sleeve.webp", width: 4.26, height: 7.51, right: 16.9, below: 6.26 },
 };

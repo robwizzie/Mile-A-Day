@@ -19,6 +19,10 @@ import { writeFile } from "node:fs/promises";
 import { join as path } from "node:path";
 
 type Spec = {
+  /** Raw file name, when it isn't the model's own. */
+  source?: string;
+  /** Metres per source unit (Sketchfab files are mostly millimetres). */
+  unit?: number;
   /** Mesh nodes to keep (by name); everything else is dropped. */
   keep?: (name: string) => boolean;
   /** Triangle budget after simplifying. */
@@ -38,8 +42,9 @@ const SPECS: Record<string, Spec> = {
   longsleeve: { triangles: 16000, lowerSleeves: 38, chest: 0.39 },
   tank: { triangles: 16000 },
   // Object_3 is the outer shell; 4 and 5 are inner layers, 2 the drawcord.
-  // Chest: its arms hang against the torso, so rays can't find the side seams.
-  hoodie: { keep: (n) => n === "Object_3", triangles: 22000, shoulderX: 0.2, chest: 0.46 },
+  // "Classic Black Flame Hoodie": body, rib and hood fabric; the stitch meshes go.
+  // Its cloth has an inner and outer layer: under ~50k triangles the inner one pokes through.
+  hoodie: { source: "hoodie2", unit: 1, keep: (n) => !n.includes("stitches"), triangles: 55000 },
 };
 
 const RAW = path(process.cwd(), "public/models/raw");
@@ -52,7 +57,7 @@ async function main() {
 
   const bounds: string[] = [];
   for (const [name, spec] of Object.entries(SPECS)) {
-    const doc = await io.read(path(RAW, `${name}.glb`));
+    const doc = await io.read(path(RAW, `${spec.source ?? name}.glb`));
     const root = doc.getRoot();
 
     for (const node of root.listNodes()) {
@@ -76,7 +81,9 @@ async function main() {
     normalise(doc, spec);
     await doc.transform(weld(), dedup(), prune());
     await doc.transform(simplify({ simplifier: MeshoptSimplifier, ratio: triangleRatio(doc, spec.triangles), error: 0.01, lockBorder: true }), prune());
-    recomputeNormals(doc);
+    // Lowered sleeves need fresh normals; everything else keeps the source's
+    // (recomputing over a mesh with mixed winding leaves dark blotches).
+    if (spec.lowerSleeves) recomputeNormals(doc);
     bounds.push(`  ${name}: ${JSON.stringify(measure(doc, spec))},`);
     await doc.transform(reorder({ encoder: MeshoptEncoder }), quantize());
     doc.createExtension(EXTMeshoptCompression).setRequired(true).setEncoderOptions({ method: EXTMeshoptCompression.EncoderMethod.QUANTIZE });
@@ -217,8 +224,7 @@ function normalise(doc: Document, spec: Spec) {
     minZ = Math.min(minZ, p[2]); maxZ = Math.max(maxZ, p[2]);
   }
   const cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
-  // Sources are in millimetres.
-  const s = 0.001;
+  const s = spec.unit ?? 0.001;
   const height = (maxY - minY) * s;
 
   // Sleeves: everything past the shoulder swings down about the armhole,
