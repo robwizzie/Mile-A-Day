@@ -91,10 +91,12 @@ struct BuddyWalkFlowView: View {
     /// Ghost race arming for THIS buddy walk.
     ///
     /// Lives on the flow rather than in the lobby because the picker is now a
-    /// stage of the flow. Re-decided every session — the flow always runs
-    /// before tracking — so a stale `true` can't leak into a walk nobody
-    /// armed.
-    @AppStorage(BuddyGhostArming.armedKey) private var buddyGhostArmed = false
+    /// stage of the flow. Stored as the id of the walk it was armed for, so
+    /// arming one walk can't leak into the next one nobody armed.
+    @AppStorage(BuddyGhostArming.armedSessionKey) private var armedGhostSessionId = ""
+    private var buddyGhostArmed: Bool {
+        BuddyGhostArming.isArmed(armedGhostSessionId, for: session?.id)
+    }
 
     init(
         entry: BuddyWalkFlowEntry,
@@ -325,11 +327,11 @@ struct BuddyWalkFlowView: View {
                 declineTitle: "Skip the race",
                 onRace: { target in
                     BuddyGhostArming.store(target, for: BuddyGhostArming.activityKey(session))
-                    buddyGhostArmed = true
+                    armedGhostSessionId = session?.id ?? ""
                     retreat(to: .lobby)
                 },
                 onDecline: {
-                    buddyGhostArmed = false
+                    armedGhostSessionId = ""
                     retreat(to: .lobby)
                 }
             )
@@ -347,7 +349,18 @@ enum BuddyGhostArming {
     /// Read by `WorkoutTrackingView` at the buddy hand-off — the tracker skips
     /// the solo wizard entirely, so this flag is the only thing that can tell
     /// it a buddy walk is also a race.
-    static let armedKey = "buddyGhostArmedV1"
+    ///
+    /// Holds the SESSION ID the ghost was armed for, not a Bool: the old
+    /// `buddyGhostArmedV1` flag was never cleared, so one armed walk turned
+    /// every later buddy walk into a race.
+    static let armedSessionKey = "buddyGhostArmedSessionV1"
+    /// The retired Bool. Removed at the next hand-off so it can't linger.
+    static let legacyArmedKey = "buddyGhostArmedV1"
+
+    static func isArmed(_ armedSessionId: String, for sessionId: String?) -> Bool {
+        guard let sessionId, !armedSessionId.isEmpty else { return false }
+        return armedSessionId == sessionId
+    }
 
     static func activityKey(_ session: BuddySessionState?) -> String {
         (session?.isRunning ?? false) ? "running" : "walking"
