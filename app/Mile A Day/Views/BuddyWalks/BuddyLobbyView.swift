@@ -86,7 +86,10 @@ struct BuddyLobbyView: View {
 
     /// Whether a ghost is armed for this walk. The picker is a step of the
     /// flow (`onArmGhost`); this is only the readout.
-    @AppStorage(BuddyGhostArming.armedKey) private var buddyGhostArmed = false
+    @AppStorage(BuddyGhostArming.armedSessionKey) private var armedGhostSessionId = ""
+    private var buddyGhostArmed: Bool {
+        BuddyGhostArming.isArmed(armedGhostSessionId, for: session?.id)
+    }
 
     /// Drives the countdown text. Local ticking only — no network involved.
     private let tick = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()

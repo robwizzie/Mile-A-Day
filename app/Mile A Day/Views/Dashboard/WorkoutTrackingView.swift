@@ -193,8 +193,8 @@ struct WorkoutTrackingView: View {
     @AppStorage("hasArmedGhostRaceOnce") private var hasArmedGhostRaceOnce = false
     /// Set in the buddy flow's ghost step — a buddy session skips the whole
     /// pre-start wizard, where the solo race steps live. Read once on the
-    /// buddy hand-off.
-    @AppStorage(BuddyGhostArming.armedKey) private var buddyGhostArmed = false
+    /// buddy hand-off, and only counts for the session it was armed for.
+    @AppStorage(BuddyGhostArming.armedSessionKey) private var armedGhostSessionId = ""
     /// Drops the buddy card's NEW pill once it's been opened once.
     @AppStorage("hasOpenedBuddyStartOnce") private var hasOpenedBuddyStartOnce = false
     /// The buddy flow, as further STEPS of this wizard rather than as modals
@@ -2391,7 +2391,10 @@ struct WorkoutTrackingView: View {
         selectedLocationType =
             buddyService.myLocationType == .indoor ? .indoor : .outdoor
         clearPreStartSteps()
-        raceArmed = buddyGhostArmed
+        raceArmed = BuddyGhostArming.isArmed(armedGhostSessionId, for: effectiveBuddySessionId)
+        // One-shot: consumed by this walk, never carried into the next.
+        armedGhostSessionId = ""
+        UserDefaults.standard.removeObject(forKey: BuddyGhostArming.legacyArmedKey)
         isTracking = true
         startWorkout()
         return true

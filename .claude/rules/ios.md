@@ -122,6 +122,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - `GhostCoach` goes silent on calls read from the audio route (`callIsUp`: `.builtInReceiver`/`.bluetoothHFP`), bailing before `activateSession()`; buzz via `AudioServicesPlaySystemSound`; NEVER `import CallKit` in any target (China, Guideline 5).
 - Voices: rank legacy/formant voices DOWN, never filter; `usingBasicVoice` is an offer.
 - One `GhostCoach.enabledKey`; muting still publishes `lastLine`; never `AVSpeechSynthesisVoice(language: Locale.current.identifier)`, rank by `.quality`; goal milestones measure the DAY.
+- Per-walk opt-ins in `@AppStorage` store the session id they're for, never a Bool (`BuddyGhostArming.armedSessionKey`/`isArmed`); consume at hand-off.
 - `PostComposerView.init` resolves buddy context for every door (`buddySessionForWorkout`, `lastFinishedSession` fallback); stashed snaps are `.library`.
 - Shoes are private (never on friend profiles/posts/shares); defaults per `ShoeActivity`; pickers pass the activity.
 
