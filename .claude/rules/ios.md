@@ -85,6 +85,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - Present pick confirmations FROM the `PHPickerViewController` (`ImagePicker.confirmation`), never `picker.dismiss` on confirm; one `ProfileImageCropper`; crop a `.up` copy.
 - FRONT & BACK is opt-in (`allowsDual`); `MidRunPhotoStash` is time-bounded, never half-deletes a pair; draw snaps with `DualPhotoFill`; the inset snaps to corners (`dual_inset_corner`); sequential capture, never `AVCaptureMultiCamSession`; every dual save via `DualPairStore.saveToCameraRoll`, and `WorkoutPhotoImportResult` consumers handle `.acceptedPair`.
 - Dual: `pickedImage` large, `dualSecondary` inset; every photo-replacing path calls `clearDual()`; one `DualPhotoLayout`; never bake the swap glyph.
+- Post stickers are `PlacedSticker`s drawn ONLY by `PostStickerView` (editor `StickerEditorLayer`, baked `PostCanvas`); one per `PostStickerKind.Slot`; per-view sets via `layer(frontView:)` (`separateViewStickers`, reset in `clearDual()`); the route sticker comes from `RoutePrivacyTrim.shareable` behind `hasRoute`.
 - Track a cover's real state (`trackerOnScreen`) and reset dropped ones (`reconcileDroppedTrackerPresentation`).
 - Composer covers: `.fullScreenCover(item:)`, one-shot `onAppear` guards, two covers on two nodes.
 - Celebration order is `CelebrationManager.priority`, enforced by `setObscured` + `holdForGoalSequence`; photo prompt last; buddy recap after the queue (`presentBuddyRecapWhenCalm`).

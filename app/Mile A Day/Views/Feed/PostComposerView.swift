@@ -183,12 +183,19 @@ final class PostComposerViewModel: ObservableObject {
     /// story/feed/both choice themselves before Share enables, so nobody
     /// posts somewhere they didn't mean to.
     @Published var destination: PostDestination?
-    @Published var stickerEnabled: Bool = true
-    /// Sticker center in normalized canvas coordinates (0…1).
-    @Published var stickerPos: CGPoint = CGPoint(x: 0.5, y: 0.82)
-    @Published var stickerScale: CGFloat = 1.0
-    /// Sticker rotation (two-finger twist), baked into the shared image.
-    @Published var stickerRotation: Angle = .zero
+    /// The stickers on the photo, bottom to top. On a FRONT & BACK with
+    /// `separateViewStickers` on, these are the BACK view's (the arrangement
+    /// with the back camera large); otherwise they're on every view.
+    @Published var stickers: [PlacedSticker] = []
+    /// The FRONT view's own stickers. Read only while `separateViewStickers`
+    /// is on and the post is a pair — `layer(frontView:)` is the one reader.
+    @Published var frontStickers: [PlacedSticker] = []
+    /// FRONT & BACK: each view (back camera large / front camera large) gets
+    /// its own stickers, so tapping to swap on the feed reveals a different
+    /// set. Off by default — one set on both is what nearly everyone wants.
+    @Published var separateViewStickers = false
+    /// The run-stats sticker's style, accent and stats. Shared by both views:
+    /// what differs per view is whether it's there and where.
     @Published var config: StickerConfig
     @Published var isPublishing = false
     @Published var errorMessage: String?
@@ -208,6 +215,12 @@ final class PostComposerViewModel: ObservableObject {
     /// server, so the preview and the published slide draw the same path.
     @Published var routePreview: [CLLocationCoordinate2D]?
     @Published var isLoadingRoutePreview = false
+    /// The route sticker's trace — `routePreview` after the user's
+    /// hide-start-&-end trim, projected once. nil = no route sticker to offer.
+    @Published var routeSticker: RouteStickerTrace?
+    /// The route exists but the privacy trim leaves too little of it to
+    /// show, so the Route tab explains instead of offering nothing.
+    @Published var routeStickerHiddenByPrivacy = false
     /// One-shot guard: a run whose route enumerates to nothing must not
     /// re-query on every re-render (`routePreview == nil` can't tell "not
     /// loaded yet" from "loaded, and there's nothing to draw").
@@ -330,7 +343,8 @@ final class PostComposerViewModel: ObservableObject {
     /// one of the enabled stats, and one is actually selected — all three, or a
     /// chip would appear on a card that never showed the competition.
     var stickeredCompetitionId: String? {
-        guard stickerEnabled, config.isOn(.competition) else { return nil }
+        guard renderedStickers.contains(where: { $0.kind == .stats }),
+              config.isOn(.competition) else { return nil }
         return stats.competition?.competitionId
     }
 
@@ -356,11 +370,13 @@ final class PostComposerViewModel: ObservableObject {
         cfg.enabled = cfg.enabled.filter { available.contains($0) }
         if cfg.enabled.isEmpty { cfg.enabled = Array(available.prefix(1)) }
         self.config = cfg
-        // Bring the sticker back at the size and spot it was last posted at
-        // (StickerConfig sanitizes on decode; ranges live there too).
-        self.stickerScale = cfg.scale
-        self.stickerPos = CGPoint(x: cfg.posX, y: cfg.posY)
-        self.stickerRotation = Angle(degrees: cfg.rotation)
+        // The stats sticker is on by default, back at the size and spot it
+        // was last posted at (StickerConfig sanitizes on decode; ranges live
+        // there too).
+        self.stickers = [PlacedSticker(kind: .stats,
+                                       pos: CGPoint(x: cfg.posX, y: cfg.posY),
+                                       scale: cfg.scale,
+                                       rotation: Angle(degrees: cfg.rotation))]
         // Seed a pre-chosen photo (mid-run snap) AFTER all stored properties
         // are initialized — the @Published setter touches self.
         self.pickedImage = initialImage
@@ -390,19 +406,137 @@ final class PostComposerViewModel: ObservableObject {
     /// Gates the discard confirmation.
     var hasDraft: Bool { pickedImage != nil }
 
-    /// The sticker has been moved/resized/tilted off its default placement.
-    /// Epsilon-compared because pinch and twist land on irrational values.
-    var isStickerTransformed: Bool {
-        abs(stickerPos.x - 0.5) > 0.001
-            || abs(stickerPos.y - 0.82) > 0.001
-            || abs(stickerScale - 1) > 0.001
-            || abs(stickerRotation.degrees) > 0.001
+    // MARK: Stickers
+
+    /// The layer the editor shows and the tray edits: the view whose camera
+    /// is LARGE right now. Only a pair with separate stickers has two.
+    var editsFrontStickers: Bool {
+        separateViewStickers && isDualPhoto && dualPrimaryWasFront
     }
 
-    func resetStickerPlacement() {
-        stickerPos = CGPoint(x: 0.5, y: 0.82)
-        stickerScale = 1
-        stickerRotation = .zero
+    var activeStickers: [PlacedSticker] {
+        get { editsFrontStickers ? frontStickers : stickers }
+        set {
+            if editsFrontStickers { frontStickers = newValue } else { stickers = newValue }
+        }
+    }
+
+    /// The stickers drawn on the view with the front (`true`) or back camera
+    /// large. A single photo, or a pair sharing one set, always reads
+    /// `stickers`.
+    func layer(frontView: Bool) -> [PlacedSticker] {
+        separateViewStickers && isDualPhoto && frontView ? frontStickers : stickers
+    }
+
+    /// Every sticker that will be baked into some uploaded picture.
+    var renderedStickers: [PlacedSticker] {
+        separateViewStickers && isDualPhoto ? stickers + frontStickers : stickers
+    }
+
+    var stickerContext: StickerRenderContext {
+        StickerRenderContext(input: stats, config: config, route: routeSticker)
+    }
+
+    func sticker(in slot: PostStickerKind.Slot) -> PlacedSticker? {
+        activeStickers.first { $0.kind.slot == slot }
+    }
+
+    /// A tray tile tap. Each slot holds one sticker: tapping the one that's
+    /// on takes it off, tapping a sibling (another Flamey, another route
+    /// style) swaps it in place — same spot, size and tilt — and anything
+    /// else is added on top.
+    func toggleSticker(_ kind: PostStickerKind) {
+        var layer = activeStickers
+        if let i = layer.firstIndex(where: { $0.kind.slot == kind.slot }) {
+            if layer[i].kind == kind {
+                layer.remove(at: i)
+            } else {
+                layer[i].kind = kind
+            }
+        } else {
+            layer.append(PlacedSticker(kind: kind, pos: freshPosition(for: kind, in: layer)))
+        }
+        activeStickers = layer
+    }
+
+    func removeSticker(in slot: PostStickerKind.Slot) {
+        activeStickers.removeAll { $0.kind.slot == slot }
+    }
+
+    func removeSticker(id: UUID) {
+        activeStickers.removeAll { $0.id == id }
+    }
+
+    /// The sticker just handled goes on top, so the one you last touched is
+    /// never stuck under another.
+    func bringStickerToFront(id: UUID) {
+        var layer = activeStickers
+        guard let i = layer.firstIndex(where: { $0.id == id }), i != layer.count - 1 else { return }
+        layer.append(layer.remove(at: i))
+        activeStickers = layer
+    }
+
+    /// A binding into one sticker of the active layer, for the editor's
+    /// gesture commits. Reads fall back to `fallback` once the sticker has
+    /// been removed, so a late commit can't trap.
+    func stickerBinding<Value>(_ id: UUID, _ keyPath: WritableKeyPath<PlacedSticker, Value>,
+                               fallback: Value) -> Binding<Value> {
+        Binding(
+            get: { self.activeStickers.first { $0.id == id }?[keyPath: keyPath] ?? fallback },
+            set: { value in
+                var layer = self.activeStickers
+                guard let i = layer.firstIndex(where: { $0.id == id }) else { return }
+                layer[i][keyPath: keyPath] = value
+                self.activeStickers = layer
+            }
+        )
+    }
+
+    /// Numbers stack down from the top so a second one doesn't land on the
+    /// first; everything else takes its kind's spot.
+    private func freshPosition(for kind: PostStickerKind, in layer: [PlacedSticker]) -> CGPoint {
+        guard case .number = kind else { return kind.defaultPosition }
+        let numbers = layer.filter { if case .number = $0.kind { return true } else { return false } }.count
+        let base = kind.defaultPosition
+        return CGPoint(x: base.x, y: min(base.y + CGFloat(numbers) * 0.14, 0.7))
+    }
+
+    /// FRONT & BACK: give each view its own stickers, or one set for both.
+    /// Splitting copies what's on now onto the other view, so nothing
+    /// vanishes the moment you flip it; joining keeps the set you're looking
+    /// at for both.
+    func setSeparateViewStickers(_ separate: Bool) {
+        guard separate != separateViewStickers else { return }
+        if separate {
+            frontStickers = stickers.map { $0.duplicated() }
+            separateViewStickers = true
+        } else {
+            let keep = activeStickers
+            separateViewStickers = false
+            frontStickers = []
+            stickers = keep
+        }
+    }
+
+    /// The stats sticker has been moved/resized/tilted off its default
+    /// placement. Epsilon-compared because pinch and twist land on
+    /// irrational values.
+    var isStatsStickerTransformed: Bool {
+        guard let s = sticker(in: .stats) else { return false }
+        let home = PostStickerKind.stats.defaultPosition
+        return abs(s.pos.x - home.x) > 0.001
+            || abs(s.pos.y - home.y) > 0.001
+            || abs(s.scale - 1) > 0.001
+            || abs(s.rotation.degrees) > 0.001
+    }
+
+    func resetStatsStickerPlacement() {
+        var layer = activeStickers
+        guard let i = layer.firstIndex(where: { $0.kind == .stats }) else { return }
+        layer[i].pos = PostStickerKind.stats.defaultPosition
+        layer[i].scale = 1
+        layer[i].rotation = .zero
+        activeStickers = layer
     }
 
     /// Check whether the linked workout has GPS route data, enabling the
@@ -442,6 +576,14 @@ final class PostComposerViewModel: ObservableObject {
         // A single point can't draw a path — treat it as no preview rather
         // than rendering a lone dot the post won't have.
         routePreview = locations.count >= 2 ? locations.map(\.coordinate) : nil
+        if let coordinates = routePreview {
+            // The sticker is the user publishing the shape of their walk in a
+            // picture, so it gets the share studio's treatment: the same
+            // hide-start-&-end trim friends see.
+            let shareable = RoutePrivacyTrim.shareable(coordinates, key: workoutId)
+            routeSticker = RouteStickerTrace.make(coordinates: shareable, key: workoutId)
+            routeStickerHiddenByPrivacy = routeSticker == nil
+        }
         hasLoadedRoutePreview = true
         isLoadingRoutePreview = false
     }
@@ -465,6 +607,11 @@ final class PostComposerViewModel: ObservableObject {
     /// longer draws a ⇄ disc on the inset, so this sentence — on your own
     /// photo, before you post — is where the tap is learned.
     var dualHint: String {
+        // Per-view stickers: the corner tap is ALSO how you reach the other
+        // view's stickers, so the line says which set is on screen.
+        if separateViewStickers {
+            return "\(dualPrimaryWasFront ? "Front" : "Back") view's stickers · tap the corner to switch"
+        }
         let who = dualPrimaryWasFront ? "The view's" : "You're"
         return "\(who) in the corner · tap to swap, drag to move"
     }
@@ -495,6 +642,11 @@ final class PostComposerViewModel: ObservableObject {
     /// this, or a fresh single shot inherits the previous capture's other
     /// half and publishes a flip to a photo of somewhere else.
     func clearDual() {
+        // Per-view stickers go with the pair: one picture is one view, and
+        // the set the poster was looking at is the one that stays. Read
+        // BEFORE the frame is dropped — after it, the front layer is
+        // unreachable.
+        setSeparateViewStickers(false)
         dualSecondary = nil
         dualPrimaryWasFront = false
         // The corner belongs to the pair, not to the canvas: a fresh single
@@ -518,16 +670,15 @@ final class PostComposerViewModel: ObservableObject {
         if swapped && dualSecondary == nil { return nil }
         let big = swapped ? (dualSecondary ?? image) : image
         let small = swapped ? image : dualSecondary
+        // Each arrangement wears the stickers of the camera that's LARGE in
+        // it — with per-view stickers off, that's the same set either way.
+        let bigIsFront = swapped ? !dualPrimaryWasFront : dualPrimaryWasFront
         let canvas = PostCanvas(
             image: big,
             secondary: small,
             dualCorner: dualInsetCorner,
-            showSticker: stickerEnabled,
-            stickerPos: stickerPos,
-            stickerScale: stickerScale,
-            stickerRotation: stickerRotation,
-            input: stats,
-            config: config
+            stickers: layer(frontView: bigIsFront),
+            context: stickerContext
         )
         .frame(width: canvasSize.width, height: canvasSize.height)
 
@@ -695,7 +846,7 @@ final class PostComposerViewModel: ObservableObject {
                 PostedWorkoutRegistry.markPosted(workoutId)
                 CelebrationManager.shared.resolvePhotoPrompt(forWorkout: workoutId)
             }
-            if stickerEnabled {
+            if let statsSticker = renderedStickers.first(where: { $0.kind == .stats }) {
                 // Remember the user's overlay style — but merge back any stats
                 // that were remembered and merely had no data TODAY (init
                 // filters those out of the session config); otherwise one
@@ -707,10 +858,10 @@ final class PostComposerViewModel: ObservableObject {
                 toSave.enabled = config.enabled + rememberedUnavailable
                 // Remember the transform too, so the next post's sticker shows
                 // up at this exact size and position.
-                toSave.scale = stickerScale
-                toSave.posX = stickerPos.x
-                toSave.posY = stickerPos.y
-                toSave.rotation = stickerRotation.degrees
+                toSave.scale = statsSticker.scale
+                toSave.posX = statsSticker.pos.x
+                toSave.posY = statsSticker.pos.y
+                toSave.rotation = statsSticker.rotation.degrees
                 toSave.save()
             }
             return true
@@ -853,12 +1004,10 @@ struct PostCanvas: View {
     var dualCorner: DualInsetCorner = .topTrailing
     /// Live drag only, never set by `flatten`.
     var dualDragOffset: CGSize = .zero
-    let showSticker: Bool
-    let stickerPos: CGPoint
-    let stickerScale: CGFloat
-    var stickerRotation: Angle = .zero
-    let input: RunStatsInput
-    let config: StickerConfig
+    /// Baked stickers, bottom to top. The live editor passes none and draws
+    /// its own manipulable layers over the photo instead.
+    var stickers: [PlacedSticker] = []
+    var context: StickerRenderContext? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -885,11 +1034,14 @@ struct PostCanvas: View {
                         .clipped()
                 }
 
-                if showSticker {
-                    RunStatsStickerView(input: input, config: config)
-                        .scaleEffect(stickerScale)
-                        .rotationEffect(stickerRotation)
-                        .position(x: stickerPos.x * geo.size.width, y: stickerPos.y * geo.size.height)
+                if let context {
+                    ForEach(stickers) { sticker in
+                        PostStickerView(kind: sticker.kind, context: context)
+                            .scaleEffect(sticker.scale)
+                            .rotationEffect(sticker.rotation)
+                            .position(x: sticker.pos.x * geo.size.width,
+                                      y: sticker.pos.y * geo.size.height)
+                    }
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
@@ -911,15 +1063,32 @@ struct PostCanvas: View {
 /// Placement aids (centre snap, guides, selection ring) live ENTIRELY in here for
 /// the same reason: routing snap state up through a `@Binding` would re-render the
 /// whole composer mid-drag and undo the isolation this layer exists to provide.
+///
+/// One layer per sticker. Each is canvas-sized but only its sticker is
+/// hit-testable, so a stack of them leaves every sticker grabbable.
+///
+/// Removing is the Instagram gesture: while a sticker is dragged a bin
+/// appears near the bottom, and letting go over it removes the sticker.
+/// Hover is judged by the FINGER, not the sticker's centre — the centre is
+/// clamped inside the canvas, so a big sticker could never reach the bin.
 private struct StickerEditorLayer: View {
-    let input: RunStatsInput
-    let config: StickerConfig
+    let kind: PostStickerKind
+    let context: StickerRenderContext
     /// Canvas size in points — the SAME value `flatten()` renders at, so the
     /// live sticker and the baked image land pixel-identically.
     let canvas: CGSize
     @Binding var pos: CGPoint      // normalized 0…1 center (committed)
     @Binding var scale: CGFloat    // committed
     @Binding var rotation: Angle   // committed
+    /// Dropped on the bin.
+    let onRemove: () -> Void
+    /// A gesture landed — the sticker goes on top of the stack.
+    let onCommit: () -> Void
+
+    /// The canvas's coordinate space. The canvas never moves during a drag,
+    /// so this is as stable as `.global` (see `manipulation`) while also
+    /// giving the finger's position in canvas points for the bin.
+    static let space = "postStickerCanvas"
 
     // Identity-at-rest transients — SwiftUI auto-resets these when the gesture
     // ends, in the same transaction the `.onEnded` commit lands, so there's no
@@ -928,6 +1097,10 @@ private struct StickerEditorLayer: View {
     @GestureState private var magnifyFactor: CGFloat = 1
     @GestureState private var twist: Angle = .zero
     @GestureState private var isManipulating = false
+    /// The finger, in canvas points, while dragging; nil otherwise.
+    @GestureState private var fingerLocation: CGPoint? = nil
+    /// One-shot latch for the bin's haptic, like `snappedX`.
+    @State private var overBin = false
 
     /// Natural, untransformed sticker size. Measured under the transforms, so it
     /// only changes when the style / enabled stats change — never per frame.
@@ -943,6 +1116,7 @@ private struct StickerEditorLayer: View {
     var body: some View {
         ZStack {
             centerGuides
+            bin
             sticker
         }
         .frame(width: canvas.width, height: canvas.height)
@@ -956,7 +1130,7 @@ private struct StickerEditorLayer: View {
     }
 
     private var sticker: some View {
-        RunStatsStickerView(input: input, config: config)
+        PostStickerView(kind: kind, context: context)
             .equatable()                       // MUST stay OUTSIDE the transforms
             // Probe sits OUTSIDE .equatable() but UNDER the transforms, so it
             // reports the NATURAL size and settles instead of firing per frame.
@@ -970,6 +1144,15 @@ private struct StickerEditorLayer: View {
             .overlay { selectionRing }
             .scaleEffect(liveScale)
             .rotationEffect(liveRotation)
+            // Over the bin it shrinks and fades, so "let go to remove" reads
+            // before anyone lets go. Its own scale, so the clamp math and the
+            // commit never see it.
+            .scaleEffect(isOverBin ? 0.45 : 1)
+            .opacity(isOverBin ? 0.6 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isOverBin)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(kind.accessibilityName)
+            .accessibilityAction(named: "Remove sticker") { onRemove() }
             // Generous, invisible hit margin so a shrunk-down sticker stays easy
             // to grab. After the transforms → a fixed screen-space margin.
             .padding(20)
@@ -995,6 +1178,48 @@ private struct StickerEditorLayer: View {
                 )
                 .padding(-5)
                 .allowsHitTesting(false)
+        }
+    }
+
+    // MARK: Bin
+
+    /// Above the bottom hint pill, centred — the spot every photo editor
+    /// people already know puts it.
+    private var binCenter: CGPoint {
+        CGPoint(x: canvas.width / 2, y: canvas.height - 64)
+    }
+    private static let binRadius: CGFloat = 24
+    /// How near the finger has to come. Wider than the bin itself: you are
+    /// aiming with a sticker under your thumb.
+    private static let binReach: CGFloat = 46
+
+    private func binContains(_ point: CGPoint?) -> Bool {
+        guard let point else { return false }
+        return hypot(point.x - binCenter.x, point.y - binCenter.y) < Self.binReach
+    }
+
+    private var isOverBin: Bool { binContains(fingerLocation) }
+
+    @ViewBuilder
+    private var bin: some View {
+        if fingerLocation != nil {
+            let hot = isOverBin
+            ZStack {
+                Circle()
+                    .fill(hot ? MADTheme.Colors.error : Color.black.opacity(0.55))
+                Circle()
+                    .strokeBorder(Color.white.opacity(hot ? 0 : 0.7), lineWidth: 1.5)
+                Image(systemName: "trash.fill")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+            }
+            .frame(width: Self.binRadius * 2, height: Self.binRadius * 2)
+            .scaleEffect(hot ? 1.18 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: hot)
+            .position(binCenter)
+            .allowsHitTesting(false)
+            .transition(.scale(scale: 0.6).combined(with: .opacity))
+            .accessibilityHidden(true)
         }
     }
 
@@ -1091,22 +1316,36 @@ private struct StickerEditorLayer: View {
     }
 
     private var manipulation: some Gesture {
-        // Measure the drag in GLOBAL (screen) space, not the default `.local`.
+        // Measure the drag in the CANVAS's space, not the default `.local`.
         // The sticker is moved every frame by `.position(liveCenter)` and sits
         // below `.scaleEffect`/`.rotationEffect`, so its local space moves AND
         // rotates with it — a local-space translation feeds back on itself and
-        // makes the sticker jitter (and drags along the rotated axis). Global
-        // space is fixed to the screen, so `translation` is the true finger
-        // delta: smooth, straight, and rotation-independent.
-        let drag = DragGesture(coordinateSpace: .global)
+        // makes the sticker jitter (and drags along the rotated axis). The
+        // canvas stays put while a sticker is dragged (it used to be `.global`
+        // for the same reason), so `translation` is the true finger delta —
+        // smooth, straight, rotation-independent — and `location` lands in
+        // canvas points, which is what the bin is measured in.
+        let drag = DragGesture(coordinateSpace: CoordinateSpace.named(Self.space))
             .updating($dragTranslation) { value, state, _ in state = value.translation }
             .updating($isManipulating) { _, state, _ in state = true }
-            .onChanged { value in updateSnapHaptics(for: value.translation) }
+            .updating($fingerLocation) { value, state, _ in state = value.location }
+            .onChanged { value in
+                updateSnapHaptics(for: value.translation)
+                let hot = binContains(value.location)
+                if hot != overBin { overBin = hot; if hot { MADHaptics.tap() } }
+            }
             .onEnded { value in
-                pos = CGPoint(x: committedX(addingDrag: value.translation.width),
-                              y: committedY(addingDrag: value.translation.height))
                 snappedX = false
                 snappedY = false
+                overBin = false
+                if binContains(value.location) {
+                    MADHaptics.success()
+                    onRemove()
+                    return
+                }
+                pos = CGPoint(x: committedX(addingDrag: value.translation.width),
+                              y: committedY(addingDrag: value.translation.height))
+                onCommit()
             }
         let magnify = MagnifyGesture()
             .updating($magnifyFactor) { value, state, _ in state = value.magnification }
@@ -1301,19 +1540,7 @@ struct PostComposerView: View {
                             chooseFromLibraryButton
                         }
                         if vm.pickedImage != nil {
-                            StickerTrayView(
-                                input: vm.stats,
-                                config: $vm.config,
-                                isEnabled: $vm.stickerEnabled,
-                                isTransformed: vm.isStickerTransformed,
-                                onReset: {
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                        vm.resetStickerPlacement()
-                                    }
-                                },
-                                competitions: vm.liveCompetitions,
-                                onSelectCompetition: { vm.selectCompetition($0) }
-                            )
+                            StickerTrayView(vm: vm)
                         }
                         if let notice = vm.crewHandoffNotice {
                             ComposerNoticeBanner(text: notice)
@@ -1433,6 +1660,9 @@ struct PostComposerView: View {
             .task { await resolveTermsIfNeeded() }
             .task { await vm.refreshCompetitionSticker() }
             .task { await vm.checkRouteAvailability() }
+            // The Route sticker needs the trace itself, not just the probe —
+            // loaded once, as soon as there is a route to load.
+            .task(id: vm.hasRoute) { await vm.loadRoutePreview() }
             .task { try? await friendService.loadFriends() }
             // Re-probe once a photo lands — todaysWorkouts may not have been
             // loaded yet when the composer first appeared.
@@ -1688,24 +1918,28 @@ struct PostComposerView: View {
                             image: image,
                             secondary: vm.dualSecondary,
                             dualCorner: vm.dualInsetCorner,
-                            dualDragOffset: dualDrag,
-                            showSticker: false,
-                            stickerPos: vm.stickerPos,
-                            stickerScale: vm.stickerScale,
-                            input: vm.stats,
-                            config: vm.config
+                            dualDragOffset: dualDrag
                         )
-                        if vm.stickerEnabled {
-                            // Pass geo.size — the exact value flatten() renders
-                            // at (via vm.canvasSize) — for pixel-perfect parity.
+                        // One layer per sticker on the view being edited.
+                        // Pass geo.size — the exact value flatten() renders
+                        // at (via vm.canvasSize) — for pixel-perfect parity.
+                        let context = vm.stickerContext
+                        ForEach(vm.activeStickers) { placed in
                             StickerEditorLayer(
-                                input: vm.stats,
-                                config: vm.config,
+                                kind: placed.kind,
+                                context: context,
                                 canvas: geo.size,
-                                pos: $vm.stickerPos,
-                                scale: $vm.stickerScale,
-                                rotation: $vm.stickerRotation
+                                pos: vm.stickerBinding(placed.id, \.pos, fallback: placed.pos),
+                                scale: vm.stickerBinding(placed.id, \.scale, fallback: placed.scale),
+                                rotation: vm.stickerBinding(placed.id, \.rotation, fallback: placed.rotation),
+                                onRemove: {
+                                    withAnimation(.easeOut(duration: 0.15)) {
+                                        vm.removeSticker(id: placed.id)
+                                    }
+                                },
+                                onCommit: { vm.bringStickerToFront(id: placed.id) }
                             )
+                            .transition(.scale(scale: 0.85).combined(with: .opacity))
                         }
                         // The swap, learned HERE where it is still editable:
                         // the exact gesture the published card will offer, on
@@ -1741,6 +1975,9 @@ struct PostComposerView: View {
                         }
                     }
                     .frame(width: width, height: height)
+                    // The space every sticker drag is measured in (and the
+                    // bin is placed in).
+                    .coordinateSpace(name: StickerEditorLayer.space)
                     .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous))
                     // Track the LIVE geometry (initial + every later pass) —
                     // a size captured once on appear can go stale (e.g. first
@@ -1794,8 +2031,10 @@ struct PostComposerView: View {
                                 .padding(.horizontal, 10).padding(.vertical, 4)
                                 .background(Capsule().fill(.black.opacity(0.45)))
                                 .padding(.bottom, 8)
-                        } else if vm.stickerEnabled {
-                            Text("Drag · pinch · twist")
+                        } else if !vm.activeStickers.isEmpty {
+                            (Text("Drag · pinch · twist · drop on ")
+                                + Text(Image(systemName: "trash.fill"))
+                                + Text(" to remove"))
                                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                                 .foregroundColor(.white.opacity(0.65))
                                 .padding(.horizontal, 10).padding(.vertical, 4)
