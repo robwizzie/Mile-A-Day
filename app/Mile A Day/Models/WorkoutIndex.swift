@@ -212,7 +212,9 @@ struct WorkoutIndex: Codable {
             streak += 1
             guard let previous = calendar.date(byAdding: .day, value: -1, to: checkDate) else { break }
             checkDate = previous
-            if streak > 1000 { break } // safety against runaway loops
+            // Runaway guard only (~100 years): the walk ends at the first
+            // missing day. It was 1000, which capped real streaks at 1001.
+            if streak > 36_500 { break }
         }
         return streak
     }

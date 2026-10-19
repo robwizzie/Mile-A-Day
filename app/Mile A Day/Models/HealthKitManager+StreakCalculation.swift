@@ -85,8 +85,8 @@ extension HealthKitManager {
                 break
             }
 
-            // Safety break to avoid infinite loops
-            if currentStreak > 1000 {
+            // Runaway guard only (~100 years) — never a cap on real streaks.
+            if currentStreak > 36_500 {
                 break
             }
         }
