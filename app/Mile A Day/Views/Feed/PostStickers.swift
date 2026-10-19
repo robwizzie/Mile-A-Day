@@ -58,15 +58,26 @@ enum FlameySticker: String, CaseIterable, Identifiable {
 
 /// How the route sticker draws the walk's trace.
 enum RouteStickerStyle: String, CaseIterable, Identifiable {
-    case line, glow, card
+    case line, glow, markers, flamey, card
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .line: return "Line"
         case .glow: return "Glow"
+        case .markers: return DistanceUnits.current == .miles ? "Miles" : "Km"
+        case .flamey: return "Flamey"
         case .card: return "Card"
         }
+    }
+}
+
+extension CaseIterable where Self: Equatable {
+    /// The next case, wrapping — what a tap-to-cycle steps through.
+    var cycled: Self {
+        let all = Array(Self.allCases)
+        guard let i = all.firstIndex(of: self) else { return self }
+        return all[(i + 1) % all.count]
     }
 }
 
@@ -160,9 +171,14 @@ struct RouteStickerTrace: Equatable {
     let key: String
     let points: [CGPoint]
     let size: CGSize
+    /// One dot per whole display unit (mile or km) along the shown line,
+    /// measured from the walk's REAL start — so a trimmed start doesn't
+    /// shift every marker.
+    var markers: [CGPoint] = []
 
     static func == (a: RouteStickerTrace, b: RouteStickerTrace) -> Bool {
         a.key == b.key && a.points.count == b.points.count && a.size == b.size
+            && a.markers.count == b.markers.count
     }
 
     /// The longest side of the trace, in points, before any pinch.
@@ -170,10 +186,15 @@ struct RouteStickerTrace: Equatable {
     /// Most points worth drawing at sticker size.
     private static let maxPoints = 400
 
-    /// - Parameter coordinates: the route AFTER `RoutePrivacyTrim.shareable`
-    ///   — a sticker publishes the shape of the walk, so it gets the same
-    ///   hide-start-&-end treatment as every other surface that shares it.
-    static func make(coordinates: [CLLocationCoordinate2D], key: String) -> RouteStickerTrace? {
+    /// - Parameters:
+    ///   - full: the whole route as recorded.
+    ///   - kept: the part `RoutePrivacyTrim` lets leave the phone — a sticker
+    ///     publishes the shape of the walk, so it gets the same
+    ///     hide-start-&-end treatment as every other surface that shares it.
+    ///     Only these points are ever drawn; `full` is read for distances.
+    static func make(full: [CLLocationCoordinate2D], kept: ClosedRange<Int>, key: String) -> RouteStickerTrace? {
+        guard kept.lowerBound >= 0, kept.upperBound < full.count else { return nil }
+        let coordinates = Array(full[kept])
         guard coordinates.count >= 2 else { return nil }
         let step = max(1, coordinates.count / maxPoints)
         var sampled = stride(from: 0, to: coordinates.count, by: step).map { coordinates[$0] }
@@ -202,7 +223,36 @@ struct RouteStickerTrace: Equatable {
         let projection = RouteArtProjection(coordinates: sampled, size: size, padding: 9)
         return RouteStickerTrace(key: "\(key)|\(coordinates.count)",
                                  points: sampled.map { projection.point(for: $0) },
-                                 size: size)
+                                 size: size,
+                                 markers: unitMarkers(full: full, kept: kept).map { projection.point(for: $0) })
+    }
+
+    /// The coordinate at each whole display unit from the start, kept only
+    /// where it falls inside the shown stretch. Capped so a marathon stays
+    /// a line with dots, not a string of beads.
+    private static func unitMarkers(full: [CLLocationCoordinate2D], kept: ClosedRange<Int>) -> [CLLocationCoordinate2D] {
+        let unitMeters = 1609.344 / DistanceUnits.current.perMile
+        var out: [CLLocationCoordinate2D] = []
+        var walked = 0.0
+        var next = unitMeters
+        for i in 1..<full.count {
+            walked += meters(full[i - 1], full[i])
+            while walked >= next {
+                if kept.contains(i) { out.append(full[i]) }
+                next += unitMeters
+                if out.count >= 26 { return out }
+            }
+        }
+        return out
+    }
+
+    private static func meters(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> Double {
+        let r = 6_371_000.0, rad = Double.pi / 180
+        let dLat = (b.latitude - a.latitude) * rad
+        let dLon = (b.longitude - a.longitude) * rad
+        let h = sin(dLat / 2) * sin(dLat / 2)
+            + cos(a.latitude * rad) * cos(b.latitude * rad) * sin(dLon / 2) * sin(dLon / 2)
+        return 2 * r * asin(min(1, sqrt(h)))
     }
 }
 
@@ -226,13 +276,53 @@ struct RouteTraceSticker: View {
     let accent: Color
     /// "1.02 mi · 9:41" — the Card style's caption.
     let caption: String?
+    /// The photo under it is bright: frameless lines go dark so they read.
+    var onBright: Bool = false
+
+    private var ink: Color { onBright ? Color(red: 0.08, green: 0.08, blue: 0.1) : .white }
+    private var inkShadow: Color { onBright ? .white.opacity(0.5) : .black.opacity(0.55) }
 
     var body: some View {
         Group {
             switch style {
             case .line:
-                line(color: .white, width: 5)
-                    .shadow(color: .black.opacity(0.55), radius: 4, x: 0, y: 1)
+                line(color: ink, width: 5)
+                    .shadow(color: inkShadow, radius: 4, x: 0, y: 1)
+            case .markers:
+                ZStack {
+                    line(color: ink, width: 5)
+                    ForEach(Array(trace.markers.enumerated()), id: \.offset) { index, point in
+                        Text("\(index + 1)")
+                            .font(.system(size: 9, weight: .black, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundColor(.white)
+                            .frame(width: 17, height: 17)
+                            .background(Circle().fill(accent))
+                            .overlay(Circle().strokeBorder(Color.white, lineWidth: 1.5))
+                            .position(point)
+                    }
+                }
+                .shadow(color: inkShadow, radius: 4, x: 0, y: 1)
+            case .flamey:
+                ZStack {
+                    line(color: ink, width: 5)
+                        .shadow(color: inkShadow, radius: 4, x: 0, y: 1)
+                    if let end = trace.points.last {
+                        // He stands on the finish, feet on the dot.
+                        FlameBuddyView(health: .blazing, size: Self.finishFlameySize,
+                                       phase: .blazing, coalWarmth: 1,
+                                       mood: FlameMood(kind: .done, streak: 0),
+                                       still: true, showsMoodBubble: false,
+                                       look: FlameyFacts.ownLook(mood: .done))
+                            .frame(width: Self.finishFlameySize, height: Self.finishFlameySize)
+                            .position(x: end.x, y: end.y - Self.finishFlameySize * 0.42)
+                    }
+                }
+                .frame(width: trace.size.width, height: trace.size.height)
+                // Room for him to stand above the line's top edge, inside the
+                // sticker's measured frame (so the editor's clamp sees him).
+                .padding(.top, Self.finishFlameySize * 0.9)
+                .padding(.horizontal, Self.finishFlameySize * 0.5)
             case .glow:
                 ZStack {
                     line(color: accent, width: 7)
@@ -270,6 +360,8 @@ struct RouteTraceSticker: View {
         }
         .fixedSize()
     }
+
+    private static let finishFlameySize: CGFloat = 46
 
     /// The line with its start and finish dots.
     private func line(color: Color, width: CGFloat) -> some View {
@@ -345,6 +437,11 @@ struct NumberPostSticker: View {
     let kind: RunStatKind
     let input: RunStatsInput
     let accent: StickerAccent
+    /// Bright photo under it: dark numbers with a light halo instead of
+    /// white numbers that vanish into a sky.
+    var onBright: Bool = false
+
+    private var ink: Color { onBright ? Color(red: 0.08, green: 0.08, blue: 0.1) : .white }
 
     /// Label, value and an optional smaller unit. Nil when the walk has no
     /// such number (the tray never offers it then).
@@ -394,17 +491,17 @@ struct NumberPostSticker: View {
                     Text(parts.value)
                         .font(.system(size: kind == .date ? 30 : 46, weight: .black, design: .rounded))
                         .monospacedDigit()
-                        .foregroundColor(.white)
+                        .foregroundColor(ink)
                     if let u = parts.unit {
                         Text(u)
                             .font(.system(size: 18, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white.opacity(0.9))
+                            .foregroundColor(ink.opacity(0.9))
                     }
                 }
             }
             .lineLimit(1)
             .padding(.horizontal, 6)
-            .shadow(color: .black.opacity(0.55), radius: 6, x: 0, y: 2)
+            .shadow(color: onBright ? .white.opacity(0.55) : .black.opacity(0.55), radius: 6, x: 0, y: 2)
             .fixedSize()
         }
     }
@@ -417,6 +514,10 @@ struct NumberPostSticker: View {
 struct PostStickerView: View, Equatable {
     let kind: PostStickerKind
     let context: StickerRenderContext
+    /// The photo under this sticker is bright (`StickerPlacement.brightThreshold`).
+    /// Decided by the composer from where the sticker sits, identically for
+    /// the editor and the bake.
+    var onBright: Bool = false
 
     var body: some View {
         switch kind {
@@ -428,10 +529,11 @@ struct PostStickerView: View, Equatable {
         case .route(let style):
             if let trace = context.route {
                 RouteTraceSticker(trace: trace, style: style, accent: context.config.accent.color,
-                                  caption: Self.routeCaption(context.input))
+                                  caption: Self.routeCaption(context.input), onBright: onBright)
             }
         case .number(let stat):
-            NumberPostSticker(kind: stat, input: context.input, accent: context.config.accent)
+            NumberPostSticker(kind: stat, input: context.input, accent: context.config.accent,
+                              onBright: onBright)
         }
     }
 

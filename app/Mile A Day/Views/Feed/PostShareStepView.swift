@@ -55,10 +55,12 @@ struct PostShareStepView: View {
                     if vm.isCrewPhoto {
                         captionRow
                         if !captionMentionCandidates.isEmpty { mentionRail }
+                        dualViewsPreview
                         crewPhotoDestinationNote
                     } else {
                         captionRow
                         if !captionMentionCandidates.isEmpty { mentionRail }
+                        dualViewsPreview
 
                         Divider().overlay(Color.white.opacity(0.08))
 
@@ -175,6 +177,58 @@ struct PostShareStepView: View {
         .onChange(of: vm.caption) { _, newValue in
             if newValue.count > 280 { vm.caption = String(newValue.prefix(280)) }
         }
+    }
+
+    /// FRONT & BACK: both finished pictures side by side — the one friends see
+    /// first and the one a tap swaps to — so per-view stickers (or just the
+    /// swap itself) are never a surprise after posting. Both are the SAME
+    /// `flatten` renders the upload uses.
+    @ViewBuilder
+    private var dualViewsPreview: some View {
+        if vm.isDualPhoto, let first = vm.previewComposite, let second = vm.previewCompositeSwapped {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("WHAT FRIENDS SEE")
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.4))
+                HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
+                    dualPreviewTile(first, title: "First",
+                                    subtitle: vm.dualLeadIsFront ? "Front camera big" : "Back camera big")
+                    Image(systemName: "hand.tap.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white.opacity(0.35))
+                        .frame(maxHeight: .infinity)
+                        .accessibilityHidden(true)
+                    dualPreviewTile(second, title: "After a tap",
+                                    subtitle: vm.dualLeadIsFront ? "Back camera big" : "Front camera big")
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func dualPreviewTile(_ image: UIImage, title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(4.0 / 5.0, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                )
+            Text(title)
+                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+                .lineLimit(1)
+            Text(subtitle)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+        .frame(maxWidth: 150)
+        .accessibilityElement(children: .combine)
     }
 
     /// Shows the FLATTENED composite, so the thumbnail is literally what gets

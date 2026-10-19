@@ -197,6 +197,21 @@ final class PostComposerViewModel: ObservableObject {
     /// The run-stats sticker's style, accent and stats. Shared by both views:
     /// what differs per view is whether it's there and where.
     @Published var config: StickerConfig
+    /// The last post's stickers (`StickerMemory`), read once at open: they
+    /// seed this post and give a re-added kind its remembered spot.
+    private let memory: StickerMemory?
+    /// The sticker last tapped on the photo. A second tap on it cycles its
+    /// style; the tray follows it to its tab.
+    @Published var selectedStickerId: UUID?
+    /// The tray's open tab — here, not in the tray, so a tap on the photo
+    /// can open it.
+    @Published var trayTab: StickerTrayTab = .stats
+    /// Just dropped on the bin, kept for the undo toast.
+    @Published var removedSticker: RemovedSticker?
+    /// Saliency + brightness per photo on the canvas, keyed by image identity
+    /// and pruned to the current frames (so a freed image's address can never
+    /// match a stale entry).
+    @Published private(set) var photoAnalyses: [ObjectIdentifier: PhotoAnalysis] = [:]
     @Published var isPublishing = false
     @Published var errorMessage: String?
     /// Whether the linked workout has a GPS route to offer alongside the photo.
@@ -282,6 +297,9 @@ final class PostComposerViewModel: ObservableObject {
     /// Never read by `publish()`: that re-flattens, so the upload path stays
     /// byte-for-byte what it has always been.
     @Published var previewComposite: UIImage?
+    /// FRONT & BACK's other arrangement, rendered the same way, for the share
+    /// step's side-by-side "what friends see". nil on a single photo.
+    @Published var previewCompositeSwapped: UIImage?
 
     /// Published: the competition sticker text is re-resolved after a fresh
     /// competitions fetch (see `refreshCompetitionSticker`), and the tray
@@ -370,13 +388,30 @@ final class PostComposerViewModel: ObservableObject {
         cfg.enabled = cfg.enabled.filter { available.contains($0) }
         if cfg.enabled.isEmpty { cfg.enabled = Array(available.prefix(1)) }
         self.config = cfg
-        // The stats sticker is on by default, back at the size and spot it
-        // was last posted at (StickerConfig sanitizes on decode; ranges live
-        // there too).
-        self.stickers = [PlacedSticker(kind: .stats,
-                                       pos: CGPoint(x: cfg.posX, y: cfg.posY),
-                                       scale: cfg.scale,
-                                       rotation: Angle(degrees: cfg.rotation))]
+        // Start where the last post left off: the stats sticker (on unless
+        // it was turned off last time) back at its size and spot
+        // (StickerConfig sanitizes on decode; ranges live there too), then
+        // whatever else was on it that today's walk can still draw. A route
+        // waits for its trace (`loadRoutePreview`).
+        let memory = StickerMemory.load()
+        self.memory = memory
+        var seeded: [PlacedSticker] = []
+        if memory?.statsOn ?? true {
+            seeded.append(PlacedSticker(kind: .stats,
+                                        pos: CGPoint(x: cfg.posX, y: cfg.posY),
+                                        scale: cfg.scale,
+                                        rotation: Angle(degrees: cfg.rotation)))
+        }
+        let numbers = Set(NumberPostSticker.available(for: stats))
+        for slot in memory?.slots ?? [] {
+            guard let remembered = memory?.sticker(in: slot) else { continue }
+            switch remembered.kind {
+            case .flamey: seeded.append(remembered)
+            case .number(let k) where numbers.contains(k): seeded.append(remembered)
+            default: break
+            }
+        }
+        self.stickers = seeded
         // Seed a pre-chosen photo (mid-run snap) AFTER all stored properties
         // are initialized — the @Published setter touches self.
         self.pickedImage = initialImage
@@ -454,7 +489,15 @@ final class PostComposerViewModel: ObservableObject {
                 layer[i].kind = kind
             }
         } else {
-            layer.append(PlacedSticker(kind: kind, pos: freshPosition(for: kind, in: layer)))
+            // A kind the poster has placed before goes back to THEIR spot;
+            // anything new finds the emptiest part of the photo.
+            if let remembered = memory?.sticker(in: kind.slot) {
+                layer.append(PlacedSticker(kind: kind, pos: remembered.pos, scale: remembered.scale,
+                                           rotation: remembered.rotation))
+            } else {
+                layer.append(PlacedSticker(kind: kind, pos: freshPosition(for: kind, in: layer)))
+            }
+            selectedStickerId = nil
         }
         activeStickers = layer
     }
@@ -492,13 +535,128 @@ final class PostComposerViewModel: ObservableObject {
         )
     }
 
-    /// Numbers stack down from the top so a second one doesn't land on the
-    /// first; everything else takes its kind's spot.
+    /// The emptiest good spot on the photo being edited — off its subject
+    /// (Vision saliency), the other stickers, the inset and the top pills.
     private func freshPosition(for kind: PostStickerKind, in layer: [PlacedSticker]) -> CGPoint {
-        guard case .number = kind else { return kind.defaultPosition }
-        let numbers = layer.filter { if case .number = $0.kind { return true } else { return false } }.count
-        let base = kind.defaultPosition
-        return CGPoint(x: base.x, y: min(base.y + CGFloat(numbers) * 0.14, 0.7))
+        StickerPlacement.bestSpot(for: kind, analysis: analysis(for: pickedImage),
+                                  existing: layer, inset: normalizedInsetRect)
+    }
+
+    /// The FRONT & BACK inset as a canvas fraction, nil on a single photo.
+    var normalizedInsetRect: CGRect? {
+        guard isDualPhoto else { return nil }
+        let ref = canvasSize.width > 0 ? canvasSize : CGSize(width: 100, height: 125)
+        let r = DualPhotoLayout.insetRect(in: ref, corner: dualInsetCorner)
+        return CGRect(x: r.minX / ref.width, y: r.minY / ref.height,
+                      width: r.width / ref.width, height: r.height / ref.height)
+    }
+
+    // MARK: Photo analysis
+
+    func analysis(for image: UIImage?) -> PhotoAnalysis? {
+        image.flatMap { photoAnalyses[ObjectIdentifier($0)] }
+    }
+
+    /// Analyse whichever frames are on the canvas and not yet analysed; drop
+    /// entries for frames that are gone.
+    func analyzePhotos() async {
+        let current = [pickedImage, dualSecondary].compactMap { $0 }
+        let ids = Set(current.map { ObjectIdentifier($0) })
+        photoAnalyses = photoAnalyses.filter { ids.contains($0.key) }
+        for image in current where photoAnalyses[ObjectIdentifier(image)] == nil {
+            let result = await PhotoAnalysis.analyze(image)
+            // Still on the canvas after the await?
+            guard pickedImage === image || dualSecondary === image else { continue }
+            photoAnalyses[ObjectIdentifier(image)] = result
+        }
+    }
+
+    /// Whether `sticker` sits on a bright part of `image` — the photo LARGE
+    /// in the arrangement it's drawn on.
+    func isOnBright(_ sticker: PlacedSticker, image: UIImage?) -> Bool {
+        guard let analysis = analysis(for: image) else { return false }
+        switch sticker.kind {
+        case .number, .route: break
+        // The stats card and Flamey's tag carry their own backdrops.
+        case .stats, .flamey: return false
+        }
+        let box = StickerPlacement.box(of: sticker.kind, at: sticker.pos, scale: sticker.scale)
+        return analysis.brightness(in: box) > StickerPlacement.brightThreshold
+    }
+
+    // MARK: Tap, cycle, undo
+
+    /// The selected sticker, if it is still on the view being edited — a
+    /// swap to the other view's set, or a removal, leaves none.
+    var selectedSticker: PlacedSticker? {
+        guard let id = selectedStickerId else { return nil }
+        return activeStickers.first { $0.id == id }
+    }
+
+    /// First tap selects (and opens its tab); a tap on the selected one
+    /// cycles its style, Instagram-style.
+    func tapSticker(id: UUID) {
+        guard let placed = activeStickers.first(where: { $0.id == id }) else { return }
+        if selectedStickerId == id {
+            cycleStyle(of: id)
+        } else {
+            selectedStickerId = id
+        }
+        trayTab = StickerTrayTab(for: placed.kind)
+    }
+
+    func cycleStyle(of id: UUID) {
+        var layer = activeStickers
+        guard let i = layer.firstIndex(where: { $0.id == id }) else { return }
+        switch layer[i].kind {
+        case .stats:
+            config.style = config.style.cycled
+            return
+        case .flamey(let f):
+            layer[i].kind = .flamey(f.cycled)
+        case .route(let s):
+            layer[i].kind = .route(s.cycled)
+        case .number(let k):
+            // The next number this walk HAS that isn't already on the photo.
+            let options = NumberPostSticker.available(for: stats)
+            let taken = Set(layer.compactMap { s -> RunStatKind? in
+                if case .number(let n) = s.kind { return n } else { return nil }
+            })
+            guard let start = options.firstIndex(of: k) else { return }
+            let candidate = (1..<options.count).lazy
+                .map { options[(start + $0) % options.count] }
+                .first { !taken.contains($0) }
+            guard let candidate else { return }
+            layer[i].kind = .number(candidate)
+        }
+        activeStickers = layer
+    }
+
+    /// The bin's removal, undoable for a few seconds.
+    func removeStickerWithUndo(id: UUID) {
+        let layer = activeStickers
+        guard let index = layer.firstIndex(where: { $0.id == id }) else { return }
+        let removed = RemovedSticker(sticker: layer[index], index: index, frontLayer: editsFrontStickers)
+        removeSticker(id: id)
+        if selectedStickerId == id { selectedStickerId = nil }
+        removedSticker = removed
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self, self.removedSticker?.token == removed.token else { return }
+            withAnimation(.easeOut(duration: 0.2)) { self.removedSticker = nil }
+        }
+    }
+
+    func undoRemove() {
+        guard let removed = removedSticker else { return }
+        removedSticker = nil
+        // Back into the layer it came out of, even if the big photo was
+        // swapped since — and never as a second sticker in a taken slot.
+        let front = removed.frontLayer && separateViewStickers && isDualPhoto
+        var layer = front ? frontStickers : stickers
+        guard !layer.contains(where: { $0.kind.slot == removed.sticker.kind.slot }) else { return }
+        layer.insert(removed.sticker, at: min(removed.index, layer.count))
+        if front { frontStickers = layer } else { stickers = layer }
     }
 
     /// FRONT & BACK: give each view its own stickers, or one set for both.
@@ -580,9 +738,22 @@ final class PostComposerViewModel: ObservableObject {
             // The sticker is the user publishing the shape of their walk in a
             // picture, so it gets the share studio's treatment: the same
             // hide-start-&-end trim friends see.
-            let shareable = RoutePrivacyTrim.shareable(coordinates, key: workoutId)
-            routeSticker = RouteStickerTrace.make(coordinates: shareable, key: workoutId)
+            let kept: ClosedRange<Int>?
+            switch RoutePrivacyTrim.outcome(coordinates: coordinates, workoutId: workoutId) {
+            case .full: kept = 0...(coordinates.count - 1)
+            case .trimmed(let range): kept = range
+            case .hidden: kept = nil
+            }
+            routeSticker = kept.flatMap {
+                RouteStickerTrace.make(full: coordinates, kept: $0, key: workoutId)
+            }
             routeStickerHiddenByPrivacy = routeSticker == nil
+            // A remembered route sticker could only come back once there was
+            // a route to draw — this is that moment.
+            if routeSticker != nil, sticker(in: .route) == nil,
+               let remembered = memory?.sticker(in: .route) {
+                stickers.append(remembered)
+            }
         }
         hasLoadedRoutePreview = true
         isLoadingRoutePreview = false
@@ -610,7 +781,8 @@ final class PostComposerViewModel: ObservableObject {
         // Per-view stickers: the corner tap is ALSO how you reach the other
         // view's stickers, so the line says which set is on screen.
         if separateViewStickers {
-            return "\(dualPrimaryWasFront ? "Front" : "Back") view's stickers · tap the corner to switch"
+            // The FRONT/BACK VIEW chip beside it names the set.
+            return "Tap the corner to edit the other view"
         }
         let who = dualPrimaryWasFront ? "The view's" : "You're"
         return "\(who) in the corner · tap to swap, drag to move"
@@ -673,12 +845,16 @@ final class PostComposerViewModel: ObservableObject {
         // Each arrangement wears the stickers of the camera that's LARGE in
         // it — with per-view stickers off, that's the same set either way.
         let bigIsFront = swapped ? !dualPrimaryWasFront : dualPrimaryWasFront
+        let baked = layer(frontView: bigIsFront)
         let canvas = PostCanvas(
             image: big,
             secondary: small,
             dualCorner: dualInsetCorner,
-            stickers: layer(frontView: bigIsFront),
-            context: stickerContext
+            stickers: baked,
+            context: stickerContext,
+            // Judged against the photo that's LARGE in this arrangement —
+            // the same call the editor makes for what's on screen.
+            brightStickerIds: Set(baked.filter { isOnBright($0, image: big) }.map(\.id))
         )
         .frame(width: canvasSize.width, height: canvasSize.height)
 
@@ -864,6 +1040,9 @@ final class PostComposerViewModel: ObservableObject {
                 toSave.rotation = statsSticker.rotation.degrees
                 toSave.save()
             }
+            // And the rest of what was on it, so tomorrow starts here too.
+            // The main set only: per-view extras are a one-off arrangement.
+            StickerMemory(stickers: stickers).save()
             return true
         } catch let APIError.buddyWalkAlreadyPosted(postId, mine) {
             // This walk is already on the feed. Whose card it is decides
@@ -1008,6 +1187,8 @@ struct PostCanvas: View {
     /// its own manipulable layers over the photo instead.
     var stickers: [PlacedSticker] = []
     var context: StickerRenderContext? = nil
+    /// Stickers sitting on a bright part of the photo (`isOnBright`).
+    var brightStickerIds: Set<UUID> = []
 
     var body: some View {
         GeometryReader { geo in
@@ -1036,7 +1217,8 @@ struct PostCanvas: View {
 
                 if let context {
                     ForEach(stickers) { sticker in
-                        PostStickerView(kind: sticker.kind, context: context)
+                        PostStickerView(kind: sticker.kind, context: context,
+                                        onBright: brightStickerIds.contains(sticker.id))
                             .scaleEffect(sticker.scale)
                             .rotationEffect(sticker.rotation)
                             .position(x: sticker.pos.x * geo.size.width,
@@ -1080,15 +1262,27 @@ private struct StickerEditorLayer: View {
     @Binding var pos: CGPoint      // normalized 0…1 center (committed)
     @Binding var scale: CGFloat    // committed
     @Binding var rotation: Angle   // committed
-    /// Dropped on the bin.
+    /// Selected on the photo: a resting ring says "tap again to restyle".
+    var isSelected: Bool = false
+    /// The photo under it is bright — drawn the way the bake will draw it.
+    var onBright: Bool = false
+    /// The other stickers' committed centres, to align with.
+    var peers: [CGPoint] = []
+    /// Dropped on the bin (or removed by VoiceOver).
     let onRemove: () -> Void
     /// A gesture landed — the sticker goes on top of the stack.
     let onCommit: () -> Void
+    /// A tap: select, or cycle the style when already selected.
+    var onTap: () -> Void = {}
+    /// VoiceOver's "Change style".
+    var onCycle: () -> Void = {}
 
     /// The canvas's coordinate space. The canvas never moves during a drag,
     /// so this is as stable as `.global` (see `manipulation`) while also
     /// giving the finger's position in canvas points for the bin.
     static let space = "postStickerCanvas"
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // Identity-at-rest transients — SwiftUI auto-resets these when the gesture
     // ends, in the same transaction the `.onEnded` commit lands, so there's no
@@ -1101,21 +1295,37 @@ private struct StickerEditorLayer: View {
     @GestureState private var fingerLocation: CGPoint? = nil
     /// One-shot latch for the bin's haptic, like `snappedX`.
     @State private var overBin = false
+    /// The springy pop when the sticker first lands on the photo.
+    @State private var appeared = false
 
     /// Natural, untransformed sticker size. Measured under the transforms, so it
     /// only changes when the style / enabled stats change — never per frame.
     @State private var natural: CGSize = .zero
-    /// One-shot latch so the snap haptic fires on ENTERING the centre zone rather
-    /// than on every frame spent inside it.
-    @State private var snappedX = false
-    @State private var snappedY = false
+    /// One-shot latches so a snap haptic fires on ENTERING a snap rather than
+    /// on every frame spent inside it.
+    @State private var snappedX: SnapLine? = nil
+    @State private var snappedY: SnapLine? = nil
+    @State private var snappedAngle = false
 
-    /// Finger travel (points) within which the sticker locks to a centre line.
+    /// Finger travel (points) within which the sticker locks to a line.
     private static let snapThreshold: CGFloat = 8
+    /// The gap a sticker keeps from the photo's edge when it snaps to it,
+    /// on top of `StickerBounds.bleed`.
+    private static let edgeGap: CGFloat = 8
+    /// Degrees within which a twist locks to straight (0°, 90°, …).
+    private static let angleSnap: Double = 5
+
+    /// What an axis locked to — for the guide line and the haptic latch.
+    enum SnapLine: Equatable {
+        case center
+        case peer(CGFloat)
+        case leadingEdge
+        case trailingEdge
+    }
 
     var body: some View {
         ZStack {
-            centerGuides
+            guides
             bin
             sticker
         }
@@ -1127,10 +1337,18 @@ private struct StickerEditorLayer: View {
         // no-op at rest and can't fire mid-gesture (`natural` is constant then).
         .onChange(of: natural, initial: true) { _, _ in reclamp() }
         .onChange(of: canvas) { _, _ in reclamp() }
+        .onAppear {
+            guard !appeared else { return }
+            if reduceMotion {
+                appeared = true
+            } else {
+                withAnimation(.spring(response: 0.38, dampingFraction: 0.55)) { appeared = true }
+            }
+        }
     }
 
     private var sticker: some View {
-        PostStickerView(kind: kind, context: context)
+        PostStickerView(kind: kind, context: context, onBright: onBright)
             .equatable()                       // MUST stay OUTSIDE the transforms
             // Probe sits OUTSIDE .equatable() but UNDER the transforms, so it
             // reports the NATURAL size and settles instead of firing per frame.
@@ -1145,36 +1363,47 @@ private struct StickerEditorLayer: View {
             .scaleEffect(liveScale)
             .rotationEffect(liveRotation)
             // Over the bin it shrinks and fades, so "let go to remove" reads
-            // before anyone lets go. Its own scale, so the clamp math and the
-            // commit never see it.
-            .scaleEffect(isOverBin ? 0.45 : 1)
-            .opacity(isOverBin ? 0.6 : 1)
+            // before anyone lets go; on arrival it pops in. Their own scale, so
+            // the clamp math and the commit never see either.
+            .scaleEffect((isOverBin ? 0.45 : 1) * (appeared ? 1 : 0.35))
+            .opacity(isOverBin ? 0.6 : (appeared ? 1 : 0))
             .animation(.spring(response: 0.25, dampingFraction: 0.8), value: isOverBin)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(kind.accessibilityName)
+            .accessibilityHint("Actions move, resize, restyle or remove it.")
+            .accessibilityAction(named: "Move up") { nudge(dx: 0, dy: -0.06) }
+            .accessibilityAction(named: "Move down") { nudge(dx: 0, dy: 0.06) }
+            .accessibilityAction(named: "Move left") { nudge(dx: -0.06, dy: 0) }
+            .accessibilityAction(named: "Move right") { nudge(dx: 0.06, dy: 0) }
+            .accessibilityAction(named: "Bigger") { resize(by: 1.15) }
+            .accessibilityAction(named: "Smaller") { resize(by: 1 / 1.15) }
+            .accessibilityAction(named: "Change style") { onCycle() }
             .accessibilityAction(named: "Remove sticker") { onRemove() }
             // Generous, invisible hit margin so a shrunk-down sticker stays easy
             // to grab. After the transforms → a fixed screen-space margin.
             .padding(20)
             .contentShape(Rectangle())
+            // A tap never moves anything, so it can't fight the drag: a drag
+            // only begins past its minimum distance.
+            .onTapGesture { onTap() }
             .gesture(manipulation)             // BEFORE .position → grab the sticker itself
             .position(liveCenter)
             .onPreferenceChange(StickerNaturalSizeKey.self) { natural = $0 }
     }
 
-    /// Dashed outline while a gesture is in flight, so it's obvious the sticker —
-    /// not the photo — is what's being moved. It sits inside the transforms (so it
-    /// tracks scale and rotation) and divides its stroke and dash by `liveScale`,
-    /// which cancels the scale back out and keeps the outline visually constant at
-    /// any sticker size. Sized by the overlay itself, so it needs no measurement.
+    /// Dashed outline while a gesture is in flight — so it's obvious the
+    /// sticker, not the photo, is what's moving — and, fainter, while it's
+    /// selected. It sits inside the transforms (so it tracks scale and
+    /// rotation) and divides its stroke and dash by `liveScale`, which keeps
+    /// the outline visually constant at any sticker size.
     @ViewBuilder
     private var selectionRing: some View {
-        if isManipulating {
+        if isManipulating || isSelected {
             let s = max(liveScale, 0.01)
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(
-                    Color.white.opacity(0.85),
-                    style: StrokeStyle(lineWidth: 1.5 / s, dash: [5 / s, 4 / s])
+                    Color.white.opacity(isManipulating ? 0.85 : 0.7),
+                    style: StrokeStyle(lineWidth: (isManipulating ? 1.5 : 2) / s, dash: [5 / s, 4 / s])
                 )
                 .padding(-5)
                 .allowsHitTesting(false)
@@ -1223,36 +1452,61 @@ private struct StickerEditorLayer: View {
         }
     }
 
-    /// Thin centre lines that appear only while the sticker is locked to them.
+    // MARK: Guides
+
+    /// Thin lines that appear only while the sticker is locked to one: the
+    /// centre, another sticker's centre, or the photo's edge margin.
     @ViewBuilder
-    private var centerGuides: some View {
+    private var guides: some View {
         if isManipulating {
+            let x = snap(axisX: true, adding: dragTranslation.width).line
+            let y = snap(axisX: false, adding: dragTranslation.height).line
             ZStack {
-                if isSnappedX {
+                if let x {
                     Rectangle()
                         .fill(MADTheme.Colors.madRed)
-                        .frame(width: 1)
-                        .frame(maxHeight: .infinity)
+                        .frame(width: 1, height: canvas.height)
+                        .position(x: guideOffset(x, span: canvas.width), y: canvas.height / 2)
                 }
-                if isSnappedY {
+                if let y {
                     Rectangle()
                         .fill(MADTheme.Colors.madRed)
-                        .frame(height: 1)
-                        .frame(maxWidth: .infinity)
+                        .frame(width: canvas.width, height: 1)
+                        .position(x: canvas.width / 2, y: guideOffset(y, span: canvas.height))
                 }
             }
+            .frame(width: canvas.width, height: canvas.height)
             .opacity(0.9)
             .allowsHitTesting(false)
             .transition(.opacity)
         }
     }
 
+    private func guideOffset(_ line: SnapLine, span: CGFloat) -> CGFloat {
+        let margin = StickerBounds.bleed + Self.edgeGap
+        switch line {
+        case .center: return span / 2
+        case .peer(let p): return p * span
+        case .leadingEdge: return margin
+        case .trailingEdge: return span - margin
+        }
+    }
+
+    // MARK: Transform
+
     // Live = committed ∘ transient, clamped IDENTICALLY to the `.onEnded` commit
     // so releasing never snaps the sticker to a different spot/size.
     private var liveScale: CGFloat {
         (scale * magnifyFactor).clamped(to: fittedScaleRange)
     }
-    private var liveRotation: Angle { rotation + twist }
+    private var liveRotation: Angle { snappedRotation(rotation + twist) }
+
+    /// Straight up (or any quarter turn) when the twist is within a few
+    /// degrees of it.
+    private func snappedRotation(_ angle: Angle) -> Angle {
+        let nearest = (angle.degrees / 90).rounded() * 90
+        return abs(angle.degrees - nearest) < Self.angleSnap ? .degrees(nearest) : angle
+    }
 
     /// `StickerConfig.scaleRange` narrowed to what actually fits the canvas, so a
     /// pinch can't grow the sticker past the photo's edges.
@@ -1271,21 +1525,35 @@ private struct StickerEditorLayer: View {
                              rotation: liveRotation, canvas: canvas)
     }
 
-    private var isSnappedX: Bool { committedX(addingDrag: dragTranslation.width) == 0.5 }
-    private var isSnappedY: Bool { committedY(addingDrag: dragTranslation.height) == 0.5 }
+    /// One axis's position after the drag, locked to the nearest line within
+    /// `snapThreshold` points: the centre, a peer's centre, or the spot that
+    /// puts the sticker's edge `edgeGap` in from the photo's. Snap BEFORE the
+    /// clamp, in both the live value and the commit, so the sticker never
+    /// jumps on release.
+    private func snap(axisX: Bool, adding delta: CGFloat) -> (value: CGFloat, line: SnapLine?) {
+        let span = max(axisX ? canvas.width : canvas.height, 1)
+        let range = axisX ? liveRanges.x : liveRanges.y
+        let raw = (axisX ? pos.x : pos.y) + delta / span
+        var targets: [(CGFloat, SnapLine)] = [(0.5, .center)]
+        for peer in peers {
+            let p = axisX ? peer.x : peer.y
+            targets.append((p, .peer(p)))
+        }
+        if range.upperBound - range.lowerBound > 0.001 {
+            let gap = Self.edgeGap / span
+            targets.append((range.lowerBound + gap, .leadingEdge))
+            targets.append((range.upperBound - gap, .trailingEdge))
+        }
+        let threshold = Self.snapThreshold / span
+        let hit = targets
+            .filter { abs(raw - $0.0) < threshold }
+            .min { abs(raw - $0.0) < abs(raw - $1.0) }
+        let value = (hit?.0 ?? raw).clamped(to: range)
+        return (value, hit?.1)
+    }
 
-    // Snap BEFORE the clamp, in both the live value and the commit, so the
-    // sticker never jumps on release.
-    private func committedX(addingDrag dx: CGFloat) -> CGFloat {
-        let raw = pos.x + dx / max(canvas.width, 1)
-        let snapped = abs(raw - 0.5) * canvas.width < Self.snapThreshold ? 0.5 : raw
-        return snapped.clamped(to: liveRanges.x)
-    }
-    private func committedY(addingDrag dy: CGFloat) -> CGFloat {
-        let raw = pos.y + dy / max(canvas.height, 1)
-        let snapped = abs(raw - 0.5) * canvas.height < Self.snapThreshold ? 0.5 : raw
-        return snapped.clamped(to: liveRanges.y)
-    }
+    private func committedX(addingDrag dx: CGFloat) -> CGFloat { snap(axisX: true, adding: dx).value }
+    private func committedY(addingDrag dy: CGFloat) -> CGFloat { snap(axisX: false, adding: dy).value }
 
     /// Pull the committed scale and position back inside the current legal ranges.
     /// Only writes when something actually moves, so it's inert at rest.
@@ -1304,15 +1572,27 @@ private struct StickerEditorLayer: View {
         if fixed != pos { pos = fixed }
     }
 
-    /// Fire once per snap-line entry, not once per frame spent on it. Reads the
+    /// VoiceOver's move actions: a step, then back inside the legal range.
+    private func nudge(dx: CGFloat, dy: CGFloat) {
+        pos = CGPoint(x: pos.x + dx, y: pos.y + dy)
+        reclamp()
+        onCommit()
+    }
+
+    private func resize(by factor: CGFloat) {
+        scale = (scale * factor).clamped(to: fittedScaleRange)
+        reclamp()
+    }
+
+    /// Fire once per snap entry, not once per frame spent on it. Reads the
     /// translation straight off the gesture value rather than `dragTranslation` —
     /// `updating` and `onChanged` fire for the same event with no guaranteed
     /// ordering, so the transient could still be a frame behind here.
     private func updateSnapHaptics(for translation: CGSize) {
-        let x = committedX(addingDrag: translation.width) == 0.5
-        let y = committedY(addingDrag: translation.height) == 0.5
-        if x != snappedX { snappedX = x; if x { MADHaptics.tap() } }
-        if y != snappedY { snappedY = y; if y { MADHaptics.tap() } }
+        let x = snap(axisX: true, adding: translation.width).line
+        let y = snap(axisX: false, adding: translation.height).line
+        if x != snappedX { snappedX = x; if x != nil { MADHaptics.tap() } }
+        if y != snappedY { snappedY = y; if y != nil { MADHaptics.tap() } }
     }
 
     private var manipulation: some Gesture {
@@ -1324,7 +1604,9 @@ private struct StickerEditorLayer: View {
         // canvas stays put while a sticker is dragged (it used to be `.global`
         // for the same reason), so `translation` is the true finger delta —
         // smooth, straight, rotation-independent — and `location` lands in
-        // canvas points, which is what the bin is measured in.
+        // canvas points, which is what the bin is measured in. A canvas that's
+        // been scaled to fit a short screen still reports in its own (unscaled)
+        // points, which is what every number here is in.
         let drag = DragGesture(coordinateSpace: CoordinateSpace.named(Self.space))
             .updating($dragTranslation) { value, state, _ in state = value.translation }
             .updating($isManipulating) { _, state, _ in state = true }
@@ -1335,8 +1617,8 @@ private struct StickerEditorLayer: View {
                 if hot != overBin { overBin = hot; if hot { MADHaptics.tap() } }
             }
             .onEnded { value in
-                snappedX = false
-                snappedY = false
+                snappedX = nil
+                snappedY = nil
                 overBin = false
                 if binContains(value.location) {
                     MADHaptics.success()
@@ -1359,8 +1641,16 @@ private struct StickerEditorLayer: View {
         let rotate = RotateGesture()
             .updating($twist) { value, state, _ in state = value.rotation }
             .updating($isManipulating) { _, state, _ in state = true }
+            .onChanged { value in
+                // Only once the twist is real, or merely touching a
+                // straight sticker would buzz.
+                let raw = rotation + value.rotation
+                let locked = snappedRotation(raw) != raw && abs(value.rotation.degrees) > 2
+                if locked != snappedAngle { snappedAngle = locked; if locked { MADHaptics.tap() } }
+            }
             .onEnded { value in
-                rotation = rotation + value.rotation
+                snappedAngle = false
+                rotation = snappedRotation(rotation + value.rotation)
                 reclamp()
             }
         return drag.simultaneously(with: magnify).simultaneously(with: rotate)
@@ -1490,73 +1780,48 @@ struct PostComposerView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: MADTheme.Spacing.lg) {
-                        canvasSection
-                            // Distinct node from the NavigationStack (terms gate),
-                            // the ZStack (camera) and the ScrollView (discard
-                            // dialog) — see showLibraryImport.
-                            .fullScreenCover(isPresented: $showLibraryImport) {
-                                WorkoutPhotoImportPicker(window: importWindow) { result in
-                                    showLibraryImport = false
-                                    switch result {
-                                    case .accepted(let image):
-                                        vm.pickedImage = image
-                                        // A library pick is one picture, so
-                                        // any FRONT & BACK frame still held
-                                        // from a previous capture goes with
-                                        // the photo it belonged to.
-                                        vm.clearDual()
-                                        // Declares the day tier to the server —
-                                        // this photo is bounded by when it was
-                                        // SHOT, not by when it's posted.
-                                        vm.photoSource = .library
-                                        vm.errorMessage = nil
-                                    case .acceptedPair(let primary, let secondary, let primaryWasFront):
-                                        // A FRONT & BACK from the library —
-                                        // restored as the pair it was taken
-                                        // as, so it posts swappable.
-                                        vm.clearDual()
-                                        vm.pickedImage = primary
-                                        vm.dualSecondary = secondary
-                                        vm.dualPrimaryWasFront = primaryWasFront
-                                        vm.photoSource = .library
-                                        vm.errorMessage = nil
-                                    case .failed:
-                                        vm.errorMessage = "Couldn't load that photo. Try another one."
-                                    case .cancelled:
-                                        break
-                                    }
+                GeometryReader { outer in
+                    editContent(container: outer.size)
+                        .frame(maxWidth: .infinity)
+                        // Its own node, distinct from the NavigationStack (terms
+                        // gate), the ZStack (camera) and the GeometryReader
+                        // (discard dialog) — two presentations on one node
+                        // silently drop one. On the VStack, not the canvas, so the
+                        // node survives the empty → pinned switch a pick causes.
+                        .fullScreenCover(isPresented: $showLibraryImport) {
+                            WorkoutPhotoImportPicker(window: importWindow) { result in
+                                showLibraryImport = false
+                                switch result {
+                                case .accepted(let image):
+                                    vm.pickedImage = image
+                                    // A library pick is one picture, so
+                                    // any FRONT & BACK frame still held
+                                    // from a previous capture goes with
+                                    // the photo it belonged to.
+                                    vm.clearDual()
+                                    // Declares the day tier to the server —
+                                    // this photo is bounded by when it was
+                                    // SHOT, not by when it's posted.
+                                    vm.photoSource = .library
+                                    vm.errorMessage = nil
+                                case .acceptedPair(let primary, let secondary, let primaryWasFront):
+                                    // A FRONT & BACK from the library —
+                                    // restored as the pair it was taken
+                                    // as, so it posts swappable.
+                                    vm.clearDual()
+                                    vm.pickedImage = primary
+                                    vm.dualSecondary = secondary
+                                    vm.dualPrimaryWasFront = primaryWasFront
+                                    vm.photoSource = .library
+                                    vm.errorMessage = nil
+                                case .failed:
+                                    vm.errorMessage = "Couldn't load that photo. Try another one."
+                                case .cancelled:
+                                    break
                                 }
                             }
-                        // Directly under the photo it decides the shape of.
-                        dualLeadPicker
-                        // A photo snapped DURING this walk/run is a valid post,
-                        // not just a fresh camera shot — mirrors the post-run
-                        // prompt's "Choose from this walk". Only offered when the
-                        // post is tied to a workout (empty state only).
-                        if vm.pickedImage == nil, vm.stats.workoutId != nil {
-                            snapsFromThisWalkButton
-                            chooseFromLibraryButton
                         }
-                        if vm.pickedImage != nil {
-                            StickerTrayView(vm: vm)
-                        }
-                        if let notice = vm.crewHandoffNotice {
-                            ComposerNoticeBanner(text: notice)
-                        }
-                        if let error = vm.errorMessage {
-                            Text(error)
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .foregroundColor(MADTheme.Colors.error)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(MADTheme.Spacing.md)
                 }
-                .scrollDismissesKeyboard(.interactively)
-                // The ScrollView's own presentation slot — the terms gate that used
-                // to live here moved up to the NavigationStack.
                 .confirmationDialog("Discard this post?", isPresented: $showDiscardConfirm,
                                     titleVisibility: .visible) {
                     Button("Discard", role: .destructive) { onFinished(.cancelled); dismiss() }
@@ -1645,7 +1910,10 @@ struct PostComposerView: View {
             }
             // A stale composite must never survive a trip back to the editor.
             .onChange(of: path) { _, newPath in
-                if newPath.isEmpty { vm.previewComposite = nil }
+                if newPath.isEmpty {
+                    vm.previewComposite = nil
+                    vm.previewCompositeSwapped = nil
+                }
             }
             .onAppear {
                 if autoOpenCamera, !didAutoOpenCamera, vm.pickedImage == nil {
@@ -1713,6 +1981,68 @@ struct PostComposerView: View {
         }
     }
 
+    // MARK: - Edit layout
+
+    /// Pinned: with a photo on the canvas, the photo stays put
+    /// and only the controls under it scroll, so a sticker
+    /// tapped in the tray lands where you can see it. On a
+    /// short screen the canvas is SCALED down (never laid out
+    /// narrower — a narrower canvas would bake every sticker
+    /// relatively bigger), and its own controls are counter-
+    /// scaled back to full size (`canvasSection(displayScale:)`).
+    @ViewBuilder
+    private func editContent(container: CGSize) -> some View {
+        let logicalWidth = max(container.width - MADTheme.Spacing.md * 2, 1)
+        let logicalHeight = logicalWidth * 5 / 4
+        let roomForCanvas = container.height - MADTheme.Spacing.md
+            - MADTheme.Spacing.sm - Self.pinnedTrayMinimum
+        let displayScale = min(1, max(Self.minimumCanvasScale, roomForCanvas / logicalHeight))
+        VStack(spacing: 0) {
+            if vm.pickedImage != nil {
+                canvasSection(displayScale: displayScale)
+                    .frame(width: logicalWidth)
+                    .scaleEffect(displayScale, anchor: .top)
+                    .frame(width: logicalWidth, height: logicalHeight * displayScale, alignment: .top)
+                    .padding(.top, MADTheme.Spacing.md)
+                    .padding(.bottom, MADTheme.Spacing.sm)
+                ScrollView {
+                    VStack(spacing: MADTheme.Spacing.lg) {
+                        // Directly under the photo it decides the shape of.
+                        dualLeadPicker
+                        StickerTrayView(vm: vm)
+                        composerMessages
+                    }
+                    .padding(.horizontal, MADTheme.Spacing.md)
+                    .padding(.top, MADTheme.Spacing.sm)
+                    .padding(.bottom, MADTheme.Spacing.md)
+                }
+                // A hairline where the tray slides under the photo.
+                .overlay(alignment: .top) {
+                    LinearGradient(colors: [.black, .black.opacity(0)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: 10)
+                        .allowsHitTesting(false)
+                }
+            } else {
+                ScrollView {
+                    VStack(spacing: MADTheme.Spacing.lg) {
+                        canvasSection()
+                        // A photo snapped DURING this walk/run is a valid post,
+                        // not just a fresh camera shot — mirrors the post-run
+                        // prompt's "Choose from this walk". Only offered when the
+                        // post is tied to a workout (empty state only).
+                        if vm.stats.workoutId != nil {
+                            snapsFromThisWalkButton
+                            chooseFromLibraryButton
+                        }
+                        composerMessages
+                    }
+                    .padding(MADTheme.Spacing.md)
+                }
+            }
+        }
+    }
+
     // MARK: - Step titles
 
     /// A buddy walk's post is a THREE-step wizard that starts in
@@ -1729,6 +2059,28 @@ struct PostComposerView: View {
 
     private var editStepTitle: String { isBuddyWizard ? "Step 2 of 3 · Photo" : "New Post" }
 
+    /// What the pinned canvas always leaves below it for the tray: its
+    /// header, tabs and one row of tiles, so picking a sticker never needs a
+    /// scroll on any phone.
+    private static let pinnedTrayMinimum: CGFloat = 250
+    /// Below this the photo is too small to place anything on; the tray
+    /// scrolls instead.
+    private static let minimumCanvasScale: CGFloat = 0.55
+
+    /// The notice and error lines, under the tray (or the empty canvas).
+    @ViewBuilder
+    private var composerMessages: some View {
+        if let notice = vm.crewHandoffNotice {
+            ComposerNoticeBanner(text: notice)
+        }
+        if let error = vm.errorMessage {
+            Text(error)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundColor(MADTheme.Colors.error)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     private var shareStepTitle: String { isBuddyWizard ? "Step 3 of 3 · Share" : "Share" }
 
     // MARK: - Step actions
@@ -1741,6 +2093,7 @@ struct PostComposerView: View {
         guard vm.pickedImage != nil, vm.canvasSize.width > 0 else { return }
         MADHaptics.tap()
         vm.previewComposite = vm.flatten()
+        vm.previewCompositeSwapped = vm.isDualPhoto ? vm.flatten(swapped: true) : nil
         path.append(.share)
     }
 
@@ -1903,8 +2256,13 @@ struct PostComposerView: View {
 
     // MARK: - Canvas
 
-    private var canvasSection: some View {
-        GeometryReader { geo in
+    /// - Parameter displayScale: how far the pinned canvas is scaled down to
+    ///   fit a short screen. The controls drawn ON it (Save, Change, the hint
+    ///   and the undo toast) are scaled back up by its inverse, so they stay
+    ///   full size and full-size tappable however small the photo is drawn.
+    private func canvasSection(displayScale: CGFloat = 1) -> some View {
+        let counter = 1 / max(displayScale, 0.01)
+        return GeometryReader { geo in
             let width = geo.size.width
             let height = width * 5 / 4
             Group {
@@ -1920,11 +2278,18 @@ struct PostComposerView: View {
                             dualCorner: vm.dualInsetCorner,
                             dualDragOffset: dualDrag
                         )
+                        // A tap on the photo itself lets go of the selection.
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard vm.selectedStickerId != nil else { return }
+                            withAnimation(.easeOut(duration: 0.15)) { vm.selectedStickerId = nil }
+                        }
                         // One layer per sticker on the view being edited.
                         // Pass geo.size — the exact value flatten() renders
                         // at (via vm.canvasSize) — for pixel-perfect parity.
                         let context = vm.stickerContext
-                        ForEach(vm.activeStickers) { placed in
+                        let layer = vm.activeStickers
+                        ForEach(layer) { placed in
                             StickerEditorLayer(
                                 kind: placed.kind,
                                 context: context,
@@ -1932,14 +2297,24 @@ struct PostComposerView: View {
                                 pos: vm.stickerBinding(placed.id, \.pos, fallback: placed.pos),
                                 scale: vm.stickerBinding(placed.id, \.scale, fallback: placed.scale),
                                 rotation: vm.stickerBinding(placed.id, \.rotation, fallback: placed.rotation),
+                                isSelected: vm.selectedStickerId == placed.id,
+                                onBright: vm.isOnBright(placed, image: image),
+                                peers: layer.filter { $0.id != placed.id }.map(\.pos),
                                 onRemove: {
                                     withAnimation(.easeOut(duration: 0.15)) {
-                                        vm.removeSticker(id: placed.id)
+                                        vm.removeStickerWithUndo(id: placed.id)
                                     }
                                 },
-                                onCommit: { vm.bringStickerToFront(id: placed.id) }
+                                onCommit: { vm.bringStickerToFront(id: placed.id) },
+                                onTap: {
+                                    MADHaptics.tap()
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                                        vm.tapSticker(id: placed.id)
+                                    }
+                                },
+                                onCycle: { vm.cycleStyle(of: placed.id) }
                             )
-                            .transition(.scale(scale: 0.85).combined(with: .opacity))
+                            .transition(.opacity)
                         }
                         // The swap, learned HERE where it is still editable:
                         // the exact gesture the published card will offer, on
@@ -1990,6 +2365,7 @@ struct PostComposerView: View {
                     }
                     .overlay(alignment: .topTrailing) {
                         changePhotoControl.padding(10)
+                            .scaleEffect(counter, anchor: .topTrailing)
                     }
                     // Keep a copy exactly as composed — stats sticker baked
                     // in (the camera already saved the RAW shot at capture).
@@ -2019,35 +2395,97 @@ struct PostComposerView: View {
                         }
                         .padding(10)
                         .disabled(showSavedToPhotos)
+                        .scaleEffect(counter, anchor: .topLeading)
                     }
                     .overlay(alignment: .bottom) {
-                        if vm.isDualPhoto {
-                            // Outranks the sticker hint while it is showing:
-                            // dragging a sticker is a thing people already
-                            // expect from a photo editor, and the swap is not.
-                            Text(vm.dualHint)
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                .foregroundColor(.white.opacity(0.75))
-                                .padding(.horizontal, 10).padding(.vertical, 4)
-                                .background(Capsule().fill(.black.opacity(0.45)))
-                                .padding(.bottom, 8)
-                        } else if !vm.activeStickers.isEmpty {
-                            (Text("Drag · pinch · twist · drop on ")
-                                + Text(Image(systemName: "trash.fill"))
-                                + Text(" to remove"))
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                .foregroundColor(.white.opacity(0.65))
-                                .padding(.horizontal, 10).padding(.vertical, 4)
-                                .background(Capsule().fill(.black.opacity(0.4)))
-                                .padding(.bottom, 8)
-                        }
+                        canvasFooter
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 8)
+                            .frame(width: geo.size.width * displayScale)
+                            .scaleEffect(counter, anchor: .bottom)
                     }
+                    // Subject + brightness for placing and drawing stickers,
+                    // whenever a frame changes.
+                    .task(id: ObjectIdentifier(image)) { await vm.analyzePhotos() }
+                    .task(id: vm.dualSecondary.map { ObjectIdentifier($0) }) { await vm.analyzePhotos() }
                 } else {
                     photoPlaceholder.frame(width: width, height: height)
                 }
             }
         }
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
+    }
+
+    /// The one line along the photo's bottom edge, most urgent first: the
+    /// undo for a sticker just binned, what a second tap on the selected
+    /// sticker does, which view's stickers are on screen, then the gesture
+    /// hint. One slot, so they never stack into a pile of pills.
+    @ViewBuilder
+    private var canvasFooter: some View {
+        if let removed = vm.removedSticker {
+            HStack(spacing: 10) {
+                Text("Sticker removed")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.9))
+                Button {
+                    MADHaptics.tap()
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) { vm.undoRemove() }
+                } label: {
+                    Text("Undo")
+                        .font(.system(size: 12, weight: .black, design: .rounded))
+                        .foregroundColor(MADTheme.Colors.madRed)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Undo removing \(removed.sticker.kind.accessibilityName)")
+            }
+            .lineLimit(1)
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .background(Capsule().fill(.black.opacity(0.7)))
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .id(removed.token)
+        } else {
+            HStack(spacing: 6) {
+                if vm.separateViewStickers, vm.isDualPhoto {
+                    // Which set you're editing, named on the photo itself.
+                    Text(vm.dualLeadIsFront ? "FRONT VIEW" : "BACK VIEW")
+                        .font(.system(size: 10, weight: .black, design: .rounded))
+                        .tracking(0.8)
+                        .foregroundColor(.black)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Capsule().fill(Color.white))
+                }
+                if let hint = canvasHint {
+                    hint
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.75))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .background(Capsule().fill(.black.opacity(0.45)))
+                }
+            }
+            .transition(.opacity)
+        }
+    }
+
+    private var canvasHint: Text? {
+        if vm.selectedSticker != nil {
+            return Text("Tap again to change style")
+        }
+        if vm.isDualPhoto {
+            // Outranks the sticker hint while it is showing: dragging a
+            // sticker is a thing people already expect from a photo editor,
+            // and the swap is not.
+            return Text(vm.dualHint)
+        }
+        if !vm.activeStickers.isEmpty {
+            return Text("Tap · drag · pinch · twist · drop on ")
+                + Text(Image(systemName: "trash.fill"))
+                + Text(" to remove")
+        }
+        return nil
     }
 
     /// Swapping the photo used to mean "Retake" and nothing else — the library

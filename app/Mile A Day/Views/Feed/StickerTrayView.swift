@@ -13,7 +13,16 @@ import SwiftUI
 /// BACK the scope row decides whether that's both views or just this one.
 struct StickerTrayView: View {
     @ObservedObject var vm: PostComposerViewModel
-    @State private var tab: StickerTrayTab = .stats
+    /// The one-time "what's new" line over the tabs.
+    @AppStorage("post.stickers.newTabsHintSeen.v1") private var newTabsHintSeen = false
+
+    /// Lives on the view model, so tapping a sticker on the photo can open
+    /// its tab.
+    private var tab: StickerTrayTab { vm.trayTab }
+
+    /// The sticker selected on the photo — its tile is focused and scrolled
+    /// into view.
+    private var focusedKind: PostStickerKind? { vm.selectedSticker?.kind }
 
     private var context: StickerRenderContext { vm.stickerContext }
 
@@ -32,6 +41,8 @@ struct StickerTrayView: View {
             }
 
             if vm.isDualPhoto { viewScopeRow }
+
+            if !newTabsHintSeen { newTabsHint }
 
             tabBar
 
@@ -67,7 +78,8 @@ struct StickerTrayView: View {
                 Button {
                     guard !selected else { return }
                     MADHaptics.tap()
-                    tab = item
+                    vm.trayTab = item
+                    if item != .stats { newTabsHintSeen = true }
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: item.icon)
@@ -140,6 +152,7 @@ struct StickerTrayView: View {
                     context: statsContext(style: style),
                     title: style.title,
                     selected: statsIsOn && vm.config.style == style,
+                    focused: focusedKind == .stats && vm.config.style == style,
                     accessibilityName: "\(style.title) stats sticker"
                 ) {
                     vm.config.style = style
@@ -198,6 +211,7 @@ struct StickerTrayView: View {
                 StickerPreviewTile(
                     kind: kind, context: context, title: sticker.title,
                     selected: current == kind,
+                    focused: focusedKind == kind,
                     accessibilityName: kind.accessibilityName
                 ) { vm.toggleSticker(kind) }
             }
@@ -220,6 +234,7 @@ struct StickerTrayView: View {
                     StickerPreviewTile(
                         kind: kind, context: context, title: style.title,
                         selected: current == kind,
+                        focused: focusedKind == kind,
                         accessibilityName: kind.accessibilityName
                     ) { vm.toggleSticker(kind) }
                 }
@@ -248,6 +263,7 @@ struct StickerTrayView: View {
                 StickerPreviewTile(
                     kind: kind, context: context, title: stat.label,
                     selected: vm.sticker(in: kind.slot) != nil,
+                    focused: focusedKind == kind,
                     accessibilityName: kind.accessibilityName
                 ) { vm.toggleSticker(kind) }
             }
@@ -331,17 +347,62 @@ struct StickerTrayView: View {
     }
 
     private func tileRail<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                content()
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    content()
+                }
+                // Room for the selected tile's ring + glow, which a ScrollView
+                // would otherwise clip at its bounds.
+                .padding(6)
             }
-            // Room for the selected tile's ring + glow, which a ScrollView
-            // would otherwise clip at its bounds.
-            .padding(6)
+            // A sticker tapped on the photo brings its tile into view —
+            // including after a second tap cycles it to a tile further along.
+            .onChange(of: focusedKind, initial: true) { _, kind in
+                guard let kind else { return }
+                withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(kind, anchor: .center) }
+            }
+            .onChange(of: vm.config.style) { _, _ in
+                guard focusedKind == .stats else { return }
+                withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(PostStickerKind.stats, anchor: .center) }
+            }
         }
         // Pull the rail back out by the same amount so the first tile still
         // lines up with the labels above it.
         .padding(-6)
+    }
+
+    private var newTabsHint: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(MADTheme.Colors.warning)
+                .accessibilityHidden(true)
+            Text("New: Flamey, route & big-number stickers")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.9))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { newTabsHintSeen = true }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(.white.opacity(0.6))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.leading, 12)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(MADTheme.Colors.warning.opacity(0.12))
+        )
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
     private func offTile(selected: Bool, label: String, action: @escaping () -> Void) -> some View {
@@ -499,8 +560,12 @@ private struct StickerPreviewTile: View {
     let context: StickerRenderContext
     let title: String
     let selected: Bool
+    /// This is the sticker selected on the photo.
+    var focused: Bool = false
     let accessibilityName: String
     let action: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let tileSize = CGSize(width: 84, height: 105)   // 4:5, echoing the canvas
     /// Breathing room so the sticker's own drop shadow doesn't hit the tile edge.
@@ -517,7 +582,9 @@ private struct StickerPreviewTile: View {
     var body: some View {
         Button {
             MADHaptics.tap()
-            withAnimation(.easeInOut(duration: 0.15)) { action() }
+            // Springy, so a sticker arriving on the photo pops rather than fades.
+            withAnimation(reduceMotion ? .easeInOut(duration: 0.15)
+                                       : .spring(response: 0.38, dampingFraction: 0.6)) { action() }
         } label: {
             VStack(spacing: 6) {
                 ZStack {
@@ -538,6 +605,13 @@ private struct StickerPreviewTile: View {
                 .frame(width: Self.tileSize.width, height: Self.tileSize.height)
                 .clipped()
                 .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                // Focused: the one selected on the photo, ringed in white.
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.white, lineWidth: focused ? 2.5 : 0)
+                )
+                .scaleEffect(focused ? 1.04 : 1)
+                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: focused)
                 .overlay(alignment: .topTrailing) {
                     if selected {
                         Image(systemName: "checkmark.circle.fill")
@@ -556,6 +630,7 @@ private struct StickerPreviewTile: View {
             }
         }
         .buttonStyle(ScaleButtonStyle())
+        .id(kind)
         .onPreferenceChange(StickerNaturalSizeKey.self) { natural = $0 }
         .accessibilityLabel(accessibilityName)
         .accessibilityHint(selected ? "On the photo. Double-tap to remove." : "Double-tap to add to the photo.")
