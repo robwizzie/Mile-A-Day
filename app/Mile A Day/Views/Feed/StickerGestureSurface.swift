@@ -260,8 +260,8 @@ struct StickerGestureSurface: UIViewRepresentable {
             let v = CGPoint(x: base.center.x - anchor.x, y: base.center.y - anchor.y)
             let rotated = CGPoint(x: (v.x * cos(twist) - v.y * sin(twist)) * s,
                                   y: (v.x * sin(twist) + v.y * cos(twist)) * s)
-            var center = CGPoint(x: anchor.x + translation.width + rotated.x,
-                                 y: anchor.y + translation.height + rotated.y)
+            var center = CGPoint(x: anchor.x + translation.x + rotated.x,
+                                 y: anchor.y + translation.y + rotated.y)
 
             // Straight up (or any quarter turn) within a few degrees.
             var rotation = base.rotation + twist
