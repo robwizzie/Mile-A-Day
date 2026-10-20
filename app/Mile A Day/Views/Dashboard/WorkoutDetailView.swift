@@ -929,7 +929,7 @@ struct WorkoutDetailView: View {
         WorkoutStatsCard(
             duration: workout.formattedDuration,
             pace: workout.pace,
-            calories: calories.map { Int($0) }
+            calories: (calories ?? WorkoutDetailCache.calories[workout.uuid]).map { Int($0) }
         )
     }
 
@@ -946,7 +946,7 @@ struct WorkoutDetailView: View {
 
     @ViewBuilder
     private var mileSplitsSection: some View {
-        if let splitTimes = splitTimes, !splitTimes.isEmpty {
+        if let splitTimes = splitTimes ?? WorkoutDetailCache.splits[workout.uuid], !splitTimes.isEmpty {
             let fastest = splitTimes.min() ?? 0
             let slowest = splitTimes.max() ?? 0
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
@@ -1284,6 +1284,7 @@ struct WorkoutDetailView: View {
             healthManager.getWorkoutSplitTimes(for: workout) { splits in
                 DispatchQueue.main.async {
                     self.splitTimes = splits
+                    WorkoutDetailCache.splits[workout.uuid] = splits
                     self.isLoadingSplits = false
                 }
                 continuation.resume()
@@ -1322,11 +1323,24 @@ struct WorkoutDetailView: View {
             let calories = sum.doubleValue(for: HKUnit.kilocalorie())
             DispatchQueue.main.async {
                 self.calories = calories
+                WorkoutDetailCache.calories[workout.uuid] = calories
             }
         }
 
         healthStore.execute(query)
     }
+}
+
+/// What a workout's detail page already loaded, by workout. A page whose
+/// view is rebuilt (the pager re-creating it, a sheet re-presenting) draws
+/// these at once instead of blanking and loading again; its own fetch still
+/// runs and replaces them. HealthKit samples for a finished workout don't
+/// change, so a stale entry is at worst the previous identical value.
+/// Read and written only on the main thread (view bodies and the
+/// `DispatchQueue.main` hops of the HealthKit callbacks).
+enum WorkoutDetailCache {
+    nonisolated(unsafe) static var calories: [UUID: Double] = [:]
+    nonisolated(unsafe) static var splits: [UUID: [TimeInterval]] = [:]
 }
 
 // MARK: - Supporting Components

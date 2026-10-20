@@ -140,8 +140,10 @@ enum FunBadge: String, CaseIterable, Identifiable {
 }
 
 /// How the route sticker draws the walk's trace.
+/// Raw values are persisted (`StickerMemory`): add cases, never rename.
 enum RouteStickerStyle: String, CaseIterable, Identifiable {
     case line, glow, markers, flamey, card
+    case stats, gradient, bold, trail, badge
     var id: String { rawValue }
 
     var title: String {
@@ -151,6 +153,11 @@ enum RouteStickerStyle: String, CaseIterable, Identifiable {
         case .markers: return DistanceUnits.current == .miles ? "Miles" : "Km"
         case .flamey: return "Flamey"
         case .card: return "Card"
+        case .stats: return "Stats"
+        case .gradient: return "Sunset"
+        case .bold: return "Bold"
+        case .trail: return "Trail"
+        case .badge: return "Badge"
         }
     }
 }
@@ -258,9 +265,11 @@ struct PlacedSticker: Identifiable, Equatable {
     var variant: Int = 0
     /// Words frozen when it was added (a badge's time, crew, day number).
     var text: String? = nil
+    /// A text sticker's line width (`TextPostSticker.width`); nil = default.
+    var textWidth: CGFloat? = nil
 
     init(kind: PostStickerKind, pos: CGPoint? = nil, scale: CGFloat = 1, rotation: Angle = .zero,
-         accent: StickerAccent? = nil, variant: Int = 0, text: String? = nil) {
+         accent: StickerAccent? = nil, variant: Int = 0, text: String? = nil, textWidth: CGFloat? = nil) {
         self.kind = kind
         self.pos = pos ?? kind.defaultPosition
         self.scale = scale
@@ -268,13 +277,14 @@ struct PlacedSticker: Identifiable, Equatable {
         self.accent = accent
         self.variant = variant
         self.text = text
+        self.textWidth = textWidth
     }
 
     /// The same sticker under a new identity — used when one view's stickers
     /// are copied onto the other, so the two layers never share view ids.
     func duplicated() -> PlacedSticker {
         PlacedSticker(kind: kind, pos: pos, scale: scale, rotation: rotation,
-                      accent: accent, variant: variant, text: text)
+                      accent: accent, variant: variant, text: text, textWidth: textWidth)
     }
 }
 
@@ -382,6 +392,9 @@ struct RouteStickerTrace: Equatable {
     }
 }
 
+/// The trace as a smooth line: a quadratic curve through each sample's
+/// midpoints, so GPS jitter reads as a hand-drawn path, not a zig-zag. It
+/// still starts and ends exactly on the first and last points (the dots).
 private struct RouteTraceShape: Shape {
     let points: [CGPoint]
 
@@ -389,7 +402,15 @@ private struct RouteTraceShape: Shape {
         var path = Path()
         guard let first = points.first else { return path }
         path.move(to: first)
-        for p in points.dropFirst() { path.addLine(to: p) }
+        guard points.count > 2 else {
+            for p in points.dropFirst() { path.addLine(to: p) }
+            return path
+        }
+        for i in 1..<(points.count - 1) {
+            let p = points[i], q = points[i + 1]
+            path.addQuadCurve(to: CGPoint(x: (p.x + q.x) / 2, y: (p.y + q.y) / 2), control: p)
+        }
+        if let last = points.last { path.addLine(to: last) }
         return path
     }
 }
@@ -402,6 +423,9 @@ struct RouteTraceSticker: View {
     let accent: Color
     /// "1.02 mi · 9:41" — the Card style's caption.
     let caption: String?
+    /// The Stats and Badge styles' numbers: (label, value) for distance,
+    /// time and pace, whichever the walk has.
+    var stats: [(label: String, value: String)] = []
     /// The photo under it is bright: frameless lines go dark so they read.
     var onBright: Bool = false
 
@@ -412,8 +436,8 @@ struct RouteTraceSticker: View {
         Group {
             switch style {
             case .line:
-                line(color: ink, width: 5)
-                    .shadow(color: inkShadow, radius: 4, x: 0, y: 1)
+                line(color: ink, width: 5, outlined: true)
+                    .shadow(color: inkShadow.opacity(0.6), radius: 3, x: 0, y: 1)
             case .markers:
                 ZStack {
                     line(color: ink, width: 5)
@@ -458,6 +482,54 @@ struct RouteTraceSticker: View {
                                 style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                         .frame(width: trace.size.width, height: trace.size.height)
                 }
+            case .stats:
+                // Strava's share: the line, then the numbers under it.
+                VStack(spacing: 12) {
+                    line(color: ink, width: 5, outlined: true)
+                    if !stats.isEmpty {
+                        HStack(alignment: .top, spacing: 18) {
+                            ForEach(Array(stats.enumerated()), id: \.offset) { _, stat in
+                                VStack(spacing: 2) {
+                                    Text(stat.label)
+                                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                        .tracking(0.8)
+                                        .opacity(0.85)
+                                    Text(stat.value)
+                                        .font(.system(size: 20, weight: .black, design: .rounded))
+                                        .monospacedDigit()
+                                }
+                                .lineLimit(1)
+                            }
+                        }
+                        .foregroundColor(ink)
+                        .shadow(color: inkShadow, radius: 4, x: 0, y: 1)
+                    }
+                }
+            case .gradient:
+                gradientLine(width: 6)
+                    .shadow(color: .black.opacity(0.35), radius: 4, x: 0, y: 1)
+            case .bold:
+                ZStack {
+                    RouteTraceShape(points: trace.points)
+                        .stroke(Color.white, style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
+                    RouteTraceShape(points: trace.points)
+                        .stroke(accent, style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round))
+                    endDots
+                }
+                .frame(width: trace.size.width, height: trace.size.height)
+                .shadow(color: .black.opacity(0.35), radius: 5, x: 0, y: 2)
+            case .trail:
+                // Footsteps: a dotted path from the start to the finish.
+                ZStack {
+                    RouteTraceShape(points: trace.points)
+                        .stroke(ink, style: StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round,
+                                                        dash: [0.1, 9]))
+                    endDots
+                }
+                .frame(width: trace.size.width, height: trace.size.height)
+                .shadow(color: inkShadow, radius: 3, x: 0, y: 1)
+            case .badge:
+                badge
             case .card:
                 VStack(spacing: 10) {
                     line(color: accent, width: 5)
@@ -489,11 +561,72 @@ struct RouteTraceSticker: View {
 
     private static let finishFlameySize: CGFloat = 46
 
-    /// The line with its start and finish dots.
-    private func line(color: Color, width: CGFloat) -> some View {
+    /// A circle sticker: the route in the middle, the distance under it.
+    private var badge: some View {
+        let d: CGFloat = 176
+        let fit = (d * 0.56) / max(trace.size.width, trace.size.height, 1)
+        return ZStack {
+            Circle().fill(accent)
+            Circle().strokeBorder(Color.white, lineWidth: 5)
+            RouteTraceShape(points: trace.points)
+                .stroke(Color.white, style: StrokeStyle(lineWidth: 4.5 / fit, lineCap: .round, lineJoin: .round))
+                .frame(width: trace.size.width, height: trace.size.height)
+                .scaleEffect(fit)
+                .offset(y: -10)
+            if let distance = stats.first?.value {
+                Text(distance)
+                    .font(.system(size: 17, weight: .black, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .frame(width: d * 0.6)
+                    .offset(y: d * 0.33)
+            }
+        }
+        .frame(width: d, height: d)
+        .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+    }
+
+    /// Start → finish in a sunset: the accent at the start, gold at the end.
+    private func gradientLine(width: CGFloat) -> some View {
+        let start = trace.points.first ?? .zero, end = trace.points.last ?? .zero
+        let w = max(trace.size.width, 1), h = max(trace.size.height, 1)
+        // A loop starts where it ends; run the gradient across the shape then.
+        let loop = hypot(end.x - start.x, end.y - start.y) < 20
+        let from = loop ? UnitPoint.topLeading : UnitPoint(x: start.x / w, y: start.y / h)
+        let to = loop ? UnitPoint.bottomTrailing : UnitPoint(x: end.x / w, y: end.y / h)
+        return ZStack {
+            RouteTraceShape(points: trace.points)
+                .stroke(LinearGradient(colors: [accent, Color(red: 1, green: 0.55, blue: 0.2),
+                                                Color(red: 1, green: 0.85, blue: 0.3)],
+                                       startPoint: from, endPoint: to),
+                        style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
+            endDots
+        }
+        .frame(width: trace.size.width, height: trace.size.height)
+    }
+
+    /// The line with its start and finish dots. `outlined` puts a thin dark
+    /// edge round it, so it holds up on any photo without a heavy shadow.
+    private func line(color: Color, width: CGFloat, outlined: Bool = false) -> some View {
         ZStack {
+            if outlined {
+                RouteTraceShape(points: trace.points)
+                    .stroke(Color.black.opacity(onBright ? 0.15 : 0.35),
+                            style: StrokeStyle(lineWidth: width + 3, lineCap: .round, lineJoin: .round))
+            }
             RouteTraceShape(points: trace.points)
                 .stroke(color, style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
+            endDots
+        }
+        .frame(width: trace.size.width, height: trace.size.height)
+    }
+
+    /// The start (white, ringed) and finish (filled) dots.
+    @ViewBuilder
+    private var endDots: some View {
+        ZStack {
             if let start = trace.points.first {
                 Circle()
                     .fill(Color.white)
@@ -509,7 +642,6 @@ struct RouteTraceSticker: View {
                     .position(end)
             }
         }
-        .frame(width: trace.size.width, height: trace.size.height)
     }
 }
 
@@ -681,47 +813,95 @@ struct TextPostSticker: View {
     let text: String
     let style: TextStickerStyle
     let accent: StickerAccent
+    /// How wide a line may run before it wraps — the editor's line-width
+    /// slider. nil = `defaultWidth`.
+    var width: CGFloat? = nil
+
+    static let widthRange: ClosedRange<CGFloat> = 90...320
+    static let defaultWidth: CGFloat = 260
+    static let lineLimit = 6
 
     /// The ink that reads on the accent fill (mono is white).
     private var onAccent: Color { accent == .mono ? Color(red: 0.08, green: 0.06, blue: 0.08) : .white }
 
     var body: some View {
         let words = text.isEmpty ? " " : text
+        let w = Self.lineWidth(for: words, style: style, limit: width)
         Group {
             switch style {
             case .classic:
-                Text(words)
-                    .font(.system(size: 30, weight: .heavy, design: .rounded))
+                wrapped(words, width: w)
                     .foregroundColor(accent.color)
                     .shadow(color: .black.opacity(0.45), radius: 4, x: 0, y: 2)
             case .pill:
-                Text(words)
-                    .font(.system(size: 26, weight: .black, design: .rounded))
+                wrapped(words, width: w)
                     .foregroundColor(onAccent)
                     .padding(.horizontal, 14).padding(.vertical, 8)
                     .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(accent.color))
             case .neon:
-                Text(words)
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .italic()
+                wrapped(words, width: w)
                     .foregroundColor(.white)
                     .shadow(color: accent.color, radius: 2)
                     .shadow(color: accent.color, radius: 8)
                     .shadow(color: accent.color.opacity(0.8), radius: 16)
             case .typewriter:
-                Text(words)
-                    .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                wrapped(words, width: w)
                     .foregroundColor(Color(red: 0.08, green: 0.06, blue: 0.08))
                     .padding(.horizontal, 10).padding(.vertical, 6)
                     .background(Rectangle().fill(Color.white))
                     .overlay(Rectangle().fill(accent.color).frame(height: 3), alignment: .bottom)
             }
         }
-        .multilineTextAlignment(.center)
-        .lineLimit(4)
         .fixedSize()
         .padding(6)
         .accessibilityHidden(true)
+    }
+
+    /// The words at a FIXED width, so the sticker wraps the same in the
+    /// editor, on the photo and in the bake, whatever size it's offered.
+    private func wrapped(_ words: String, width: CGFloat) -> some View {
+        Text(words)
+            .font(Self.font(style))
+            .multilineTextAlignment(.center)
+            .lineLimit(Self.lineLimit)
+            .frame(width: width)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    static func font(_ style: TextStickerStyle) -> Font {
+        switch style {
+        case .classic: return .system(size: 30, weight: .heavy, design: .rounded)
+        case .pill: return .system(size: 26, weight: .black, design: .rounded)
+        case .neon: return .system(size: 30, weight: .bold, design: .rounded).italic()
+        case .typewriter: return .system(size: 22, weight: .semibold, design: .monospaced)
+        }
+    }
+
+    private static func uiFont(_ style: TextStickerStyle) -> UIFont {
+        let spec: (size: CGFloat, weight: UIFont.Weight, design: UIFontDescriptor.SystemDesign)
+        switch style {
+        case .classic: spec = (30, .heavy, .rounded)
+        case .pill: spec = (26, .black, .rounded)
+        case .neon: spec = (30, .bold, .rounded)
+        case .typewriter: spec = (22, .semibold, .monospaced)
+        }
+        let (size, weight, design) = spec
+        let base = UIFont.systemFont(ofSize: size, weight: weight)
+        var descriptor = base.fontDescriptor.withDesign(design) ?? base.fontDescriptor
+        if style == .neon { descriptor = descriptor.withSymbolicTraits(.traitItalic) ?? descriptor }
+        return UIFont(descriptor: descriptor, size: size)
+    }
+
+    /// The narrower of the longest typed line and the chosen limit: short
+    /// words stay hugged, long ones wrap at the limit.
+    static func lineWidth(for words: String, style: TextStickerStyle, limit: CGFloat?) -> CGFloat {
+        let cap = (limit ?? defaultWidth).clamped(to: widthRange)
+        let font = uiFont(style)
+        let longest = words.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { (String($0) as NSString).size(withAttributes: [.font: font]).width }
+            .max() ?? 0
+        // A little slack so rounding never wraps a line that fits.
+        return min(cap, ceil(longest) + 6)
     }
 }
 
@@ -858,21 +1038,24 @@ struct PostStickerView: View, Equatable {
     var accent: StickerAccent? = nil
     var variant: Int = 0
     var text: String? = nil
+    var textWidth: CGFloat? = nil
 
     init(kind: PostStickerKind, context: StickerRenderContext, onBright: Bool = false,
-         accent: StickerAccent? = nil, variant: Int = 0, text: String? = nil) {
+         accent: StickerAccent? = nil, variant: Int = 0, text: String? = nil, textWidth: CGFloat? = nil) {
         self.kind = kind
         self.context = context
         self.onBright = onBright
         self.accent = accent
         self.variant = variant
         self.text = text
+        self.textWidth = textWidth
     }
 
     /// Everything one placed sticker needs, in one call.
     init(_ sticker: PlacedSticker, context: StickerRenderContext, onBright: Bool = false) {
         self.init(kind: sticker.kind, context: context, onBright: onBright,
-                  accent: sticker.accent, variant: sticker.variant, text: sticker.text)
+                  accent: sticker.accent, variant: sticker.variant, text: sticker.text,
+                  textWidth: sticker.textWidth)
     }
 
     private var resolvedAccent: StickerAccent { accent ?? context.config.accent }
@@ -889,7 +1072,8 @@ struct PostStickerView: View, Equatable {
         case .route(let style):
             if let trace = context.route {
                 RouteTraceSticker(trace: trace, style: style, accent: resolvedAccent.color,
-                                  caption: Self.routeCaption(context.input), onBright: onBright)
+                                  caption: Self.routeCaption(context.input),
+                                  stats: Self.routeStats(context.input), onBright: onBright)
             }
         case .number(let stat):
             NumberPostSticker(kind: stat, input: context.input, accent: resolvedAccent,
@@ -898,7 +1082,7 @@ struct PostStickerView: View, Equatable {
             FunBadgeSticker(badge: badge, text: badge.text(captured: text), accent: resolvedAccent,
                             variant: variant)
         case .text(let style):
-            TextPostSticker(text: text ?? "", style: style, accent: resolvedAccent)
+            TextPostSticker(text: text ?? "", style: style, accent: resolvedAccent, width: textWidth)
         case .pack(let sticker):
             FlameyPackStickerView(sticker: sticker)
         case .emoji(let emoji):
@@ -919,6 +1103,16 @@ struct PostStickerView: View, Equatable {
     }
 
     /// "1.02 mi · 9:41" (time only when the walk has one).
+    /// Distance, time and pace for the route's Stats and Badge styles,
+    /// through the same formatting as the number stickers.
+    static func routeStats(_ input: RunStatsInput) -> [(label: String, value: String)] {
+        [RunStatKind.distance, .duration, .pace].compactMap { kind in
+            NumberPostSticker.parts(for: kind, input: input).map { parts in
+                (label: parts.label, value: parts.value + (parts.unit.map { " " + $0 } ?? ""))
+            }
+        }
+    }
+
     static func routeCaption(_ input: RunStatsInput) -> String? {
         guard input.distance > 0 else { return nil }
         var text = input.distance.distanceFormatted
