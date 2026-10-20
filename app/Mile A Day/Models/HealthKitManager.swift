@@ -1689,10 +1689,23 @@ final class MADWatchBridge: NSObject {
     private var lastPushedHash: Int = 0
 
     #if os(iOS)
-    /// Today's run plan for the Watch (`WatchRunPlan.json()`), written only by
-    /// the iPhone-only `RunPlanWatchSync` on the main thread. nil = no plan
-    /// today (or not Plus): the key is left out and the Watch drops its copy.
-    var runPlanJSON: String?
+    /// The coming week's runnable plan days for the Watch
+    /// (`WatchRunPlan.json(_:)`), written only by the iPhone-only
+    /// `RunPlanWatchSync`. PERSISTED, not in-memory: most launches (including
+    /// background HealthKit launches) push a context before `RunPlanStore`
+    /// exists, and a context without the key deletes the Watch's copy.
+    /// nil = no plan (or signed out): the key is left out on purpose.
+    static let runPlanJSONKey = "MAD_watchRunPlanJSONV1"
+    var runPlanJSON: String? {
+        get { UserDefaults.standard.string(forKey: Self.runPlanJSONKey) }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(newValue, forKey: Self.runPlanJSONKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.runPlanJSONKey)
+            }
+        }
+    }
     #endif
 
     private override init() { super.init() }
@@ -1755,9 +1768,11 @@ final class MADWatchBridge: NSObject {
         } ?? 0
         payload["tokensReady"] = tokensReady
 
-        // Run Plans (Mile A Day+): today's segments so the Watch can coach the
-        // session. Omitted when there is none — the context REPLACES the last
-        // one, so a missing key is how the Watch learns the plan is gone.
+        // Run Plans (Mile A Day+): the coming week's sessions so the Watch can
+        // coach today's even after midnight with the phone app closed. Omitted
+        // when there is none — the context REPLACES the last one, so a missing
+        // key is how the Watch learns the plan is gone.
+        let runPlanJSON = self.runPlanJSON
         if let runPlanJSON { payload[WatchRunPlan.contextKey] = runPlanJSON }
 
         // Hash on the value-bearing fields only (not the timestamp) so we don't
@@ -1822,8 +1837,8 @@ final class MADWatchBridge: NSObject {
             if let tokens = context["tokensReady"] as? Int {
                 hk.heldStreakTokens = tokens
             }
-            // Absent = no plan today (the iPhone omits the key), so this
-            // also clears a plan that was ended or changed to nothing.
+            // Absent = no plan (the iPhone omits the key), so this also
+            // clears a plan that was ended or a signed-out account's.
             WatchRunPlanStore.shared.apply(json: context[WatchRunPlan.contextKey] as? String)
             userManager.saveUserData()
         }
@@ -2586,7 +2601,9 @@ struct RunPlanLiveSegment: Codable, Equatable {
     var isDurationBased: Bool { !isDistanceBased && (durationSeconds ?? 0) > 0 }
 }
 
-/// Today's plan as the iPhone pushes it to the Watch (app context, as JSON).
+/// One planned day as the iPhone pushes it to the Watch. The app context
+/// carries the coming week's days as a JSON ARRAY (`json(_:)` / `decodeDays`)
+/// under `contextKey`; the Watch picks the one dated today.
 struct WatchRunPlan: Codable, Equatable {
     static let contextKey = "runPlan"
 
@@ -2604,14 +2621,15 @@ struct WatchRunPlan: Codable, Equatable {
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
-    func json() -> String? {
-        guard let data = try? JSONEncoder().encode(self) else { return nil }
+    /// nil for no days (so the key is omitted).
+    static func json(_ days: [WatchRunPlan]) -> String? {
+        guard !days.isEmpty, let data = try? JSONEncoder().encode(days) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
-    static func decode(_ json: String?) -> WatchRunPlan? {
-        guard let json, let data = json.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(WatchRunPlan.self, from: data)
+    static func decodeDays(_ json: String?) -> [WatchRunPlan] {
+        guard let json, let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([WatchRunPlan].self, from: data)) ?? []
     }
 }
 
@@ -2816,22 +2834,22 @@ struct RunPlanPaceWindow {
 }
 
 #if os(watchOS)
-/// The plan the iPhone last pushed. Watch-only; fed by `MADWatchBridge.apply`.
+/// The plan days the iPhone last pushed. Watch-only; fed by `MADWatchBridge.apply`.
 final class WatchRunPlanStore: ObservableObject {
     static let shared = WatchRunPlanStore()
 
-    @Published private(set) var plan: WatchRunPlan?
+    @Published private(set) var days: [WatchRunPlan] = []
 
-    /// Today's plan, when there is one with segments.
+    /// Today's session, when one was pushed (read at render time, so it
+    /// rolls over at midnight without a new push).
     var today: WatchRunPlan? {
-        guard let plan, plan.isForToday, !plan.segments.isEmpty else { return nil }
-        return plan
+        days.first { $0.isForToday && !$0.segments.isEmpty }
     }
 
     /// Called on the main thread from `MADWatchBridge.apply`.
     func apply(json: String?) {
-        let fresh = WatchRunPlan.decode(json)
-        if fresh != plan { plan = fresh }
+        let fresh = WatchRunPlan.decodeDays(json)
+        if fresh != days { days = fresh }
     }
 }
 #endif

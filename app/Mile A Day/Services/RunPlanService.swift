@@ -235,9 +235,9 @@ private enum JSONAnyValue: Decodable {
 final class RunPlanStore: ObservableObject {
     static let shared = RunPlanStore()
 
-    /// Every change re-sends today's segments to the Watch (`RunPlanWatchSync`).
+    /// Every change re-sends the coming week's plan days to the Watch (`RunPlanWatchSync`).
     @Published private(set) var current: RunPlanCurrent? {
-        didSet { RunPlanWatchSync.update(today: current?.today) }
+        didSet { RunPlanWatchSync.update(current: current) }
     }
     /// A server answer (or this account's cache) is in hand.
     @Published private(set) var loaded = false
@@ -256,8 +256,10 @@ final class RunPlanStore: ObservableObject {
             current = cached
             loaded = true
         }
-        // `didSet` doesn't run inside init.
-        RunPlanWatchSync.update(today: current?.today)
+        // `didSet` doesn't run inside init. Only with a cached plan in hand:
+        // no cache yet (a fresh launch before the first read) must not wipe
+        // the persisted Watch copy that the server hasn't contradicted.
+        if current != nil { RunPlanWatchSync.update(current: current) }
     }
 
     var plan: RunPlan? { current?.plan }
@@ -382,6 +384,7 @@ final class RunPlanStore: ObservableObject {
     /// Sign-out: the cached plan belongs to the account we're leaving.
     func reset() {
         current = nil
+        RunPlanWatchSync.clear()
         loaded = false
         fitness = nil
         fitnessLoaded = false

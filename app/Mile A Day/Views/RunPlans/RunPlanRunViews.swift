@@ -19,21 +19,44 @@ struct RunPlanPreRunCard: View {
     @State private var errorText: String?
     @State private var showFlamey = false
     @State private var canTalk = FlameyCoach.isAvailable
-    /// Adjusted here: keep showing the day even when "Just my mile" turned
-    /// it into the streak mile, so the card doesn't vanish under the tap.
+    /// Adjusted here (a chip, or opening Flamey): keep showing the day even
+    /// when the change turned it into the streak mile, so the card doesn't
+    /// vanish under the tap.
     @State private var adjustedDate: String?
 
     private var day: RunPlanDay? {
-        guard plus.isPlus, !store.plusRequired, let today = store.today, !today.liveSegments.isEmpty else { return nil }
+        // `store.today` falls back to the server's `today`, which after
+        // midnight can still be YESTERDAY's (cached read): only today counts,
+        // or the card offers a session `PlanRunCoach.begin` then rejects.
+        guard plus.isPlus, !store.plusRequired, let today = store.today,
+              today.local_date == RunPlanDate.todayKey(), !today.liveSegments.isEmpty else { return nil }
         guard today.offersPlanRun || today.local_date == adjustedDate else { return nil }
         return today
     }
 
+    /// Kicks the plan read from the always-present mode step: this card
+    /// renders nothing (no lifecycle) when nothing is cached yet. Plus only,
+    /// so a free account doesn't earn a 403 on every wizard.
+    @MainActor
+    static func refreshIfPlus() async {
+        guard PlusStore.shared.isPlus else { return }
+        await RunPlanStore.shared.refreshIfStale()
+    }
+
     var body: some View {
+        // The sheet hangs off a view that outlives the card: a Flamey change
+        // that makes today the streak mile (or done) must not dismiss the
+        // conversation it came from.
+        content
+            .sheet(isPresented: $showFlamey) { flameySheet }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if let day {
             card(day)
-                .task { await store.refreshIfStale() }
-                .sheet(isPresented: $showFlamey) { flameySheet }
+        } else if showFlamey {
+            Color.clear.frame(height: 0)
         }
     }
 
@@ -53,7 +76,7 @@ struct RunPlanPreRunCard: View {
                     .foregroundColor(Color(red: 1.0, green: 0.85, blue: 0.6))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if canTalk { talkButton }
+            if canTalk { talkButton(day) }
             RunPlanPrimaryButton(title: "Start plan run", enabled: busy == nil) {
                 onStart(day)
             }
@@ -123,9 +146,10 @@ struct RunPlanPreRunCard: View {
         }
     }
 
-    private var talkButton: some View {
+    private func talkButton(_ day: RunPlanDay) -> some View {
         Button {
             MADHaptics.tap()
+            adjustedDate = day.local_date
             showFlamey = true
         } label: {
             HStack(spacing: 8) {

@@ -553,6 +553,9 @@ struct WorkoutTrackingView: View {
             ) {
                 chooseRaceMode(ghost: false)
             }
+            // Always on this step, unlike the plan card (which renders nothing
+            // until a plan is cached), so the plan read is kicked from here.
+            .task { await RunPlanPreRunCard.refreshIfPlus() }
 
             workoutOptionButton(
                 leading: {
@@ -2837,11 +2840,14 @@ struct WorkoutTrackingView: View {
                     goalProgress: totalDailyDistance
                 )
             )
-            // Plan coach (Run Plans): same tick, same figures, speaks through
-            // GhostCoach. No-op unless a plan run is live.
+            // Plan coach (Run Plans): same tick, speaks through GhostCoach.
+            // No-op unless a plan run is live. Segment time is WALL time
+            // minus manual pauses (`elapsedTime`), not `raceClockSeconds`:
+            // the moving clock stands still while you do, so a timed
+            // recovery spent standing would never end.
             PlanRunCoach.shared.update(
                 distance: locationManager.liveDistance,
-                clock: locationManager.raceClockSeconds,
+                clock: elapsedTime,
                 recentPace: locationManager.recentPaceSecondsPerMile
             )
             // Foreground heartbeat driver (self-throttled to ~45s). The

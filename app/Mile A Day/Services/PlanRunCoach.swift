@@ -97,9 +97,11 @@ final class PlanRunCoach {
 
     // MARK: Tick
 
-    /// The tracker's 1 Hz tick. `distance` = `liveDistance`, `clock` = the
-    /// moving clock (`raceClockSeconds`, pauses excluded), `recentPace` =
-    /// `recentPaceSecondsPerMile` — the same figures GhostCoach gets.
+    /// The tracker's 1 Hz tick. `distance` = `liveDistance`; `clock` = the
+    /// tracker's `elapsedTime` (wall time minus MANUAL pauses — never the
+    /// moving clock, which freezes while the runner stands, so a timed
+    /// recovery spent standing still would never end); `recentPace` =
+    /// `recentPaceSecondsPerMile`, the figure GhostCoach also gets.
     func update(distance: Double, clock: TimeInterval, recentPace: Double?) {
         guard var walker = tracker else { return }
         let change = walker.step(miles: distance, clock: clock)
