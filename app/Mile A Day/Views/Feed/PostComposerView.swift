@@ -404,7 +404,7 @@ final class PostComposerViewModel: ObservableObject {
         let numbers = Set(NumberPostSticker.available(for: stats))
         for remembered in memory?.stickers() ?? [] {
             switch remembered.kind {
-            case .flamey, .basicFlamey: seeded.append(remembered)
+            case .flamey, .basicFlamey, .pack: seeded.append(remembered)
             case .number(let k) where numbers.contains(k):
                 if !seeded.contains(where: { $0.kind == remembered.kind }) { seeded.append(remembered) }
             // Words that were true of THAT walk (its time, its crew, its day
@@ -507,6 +507,39 @@ final class PostComposerViewModel: ObservableObject {
         }
         activeStickers = layer
     }
+
+    /// The poster's own words, typed in the text editor, landing focused in
+    /// the middle the way Instagram's do.
+    func addText(_ text: String, style: TextStickerStyle, accent: StickerAccent?) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var placed = PlacedSticker(kind: .text(style), pos: CGPoint(x: 0.5, y: 0.45))
+        placed.text = String(trimmed.prefix(Self.maxStickerText))
+        placed.accent = accent
+        var layer = activeStickers
+        layer.append(placed)
+        activeStickers = layer
+        selectedStickerId = placed.id
+    }
+
+    /// Re-typed text on an existing text sticker; emptied, it goes.
+    func updateText(id: UUID, text: String, style: TextStickerStyle, accent: StickerAccent?) {
+        var layer = activeStickers
+        guard let i = layer.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            layer.remove(at: i)
+            if selectedStickerId == id { selectedStickerId = nil }
+        } else {
+            layer[i].text = String(trimmed.prefix(Self.maxStickerText))
+            layer[i].kind = .text(style)
+            layer[i].accent = accent
+        }
+        activeStickers = layer
+    }
+
+    /// Long enough for a caption-ish line, short enough to stay a sticker.
+    static let maxStickerText = 80
 
     /// Words a badge freezes the moment it's added, so the bake can't
     /// disagree with what was on screen.
@@ -661,7 +694,7 @@ final class PostComposerViewModel: ObservableObject {
         case .number, .route: break
         // The stats card, the badges and Flamey's tag carry their own
         // backdrops.
-        case .stats, .flamey, .basicFlamey, .badge: return false
+        case .stats, .flamey, .basicFlamey, .badge, .text, .emoji, .pack: return false
         }
         let box = StickerPlacement.box(of: sticker.kind, at: sticker.pos, scale: sticker.scale)
         return analysis.brightness(in: box) > StickerPlacement.brightThreshold
@@ -700,6 +733,12 @@ final class PostComposerViewModel: ObservableObject {
             layer[i].kind = .basicFlamey(f.cycled)
         case .badge:
             layer[i].variant += 1
+        case .text(let style):
+            layer[i].kind = .text(style.cycled)
+        case .emoji:
+            return
+        case .pack(let p):
+            layer[i].kind = .pack(p.cycled)
         case .route(let s):
             layer[i].kind = .route(s.cycled)
         case .number(let k):

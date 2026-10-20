@@ -132,6 +132,9 @@ enum StickerPlacement {
         case .route: base = CGSize(width: 0.5, height: 0.42)
         case .number: base = CGSize(width: 0.42, height: 0.16)
         case .badge: base = CGSize(width: 0.5, height: 0.1)
+        case .text: base = CGSize(width: 0.6, height: 0.12)
+        case .emoji: base = CGSize(width: 0.25, height: 0.2)
+        case .pack: base = CGSize(width: 0.42, height: 0.42)
         }
         return CGSize(width: base.width * scale, height: base.height * scale)
     }
@@ -279,6 +282,9 @@ extension PostStickerKind {
         case .route(let s): return "route.\(s.rawValue)"
         case .number(let k): return "number.\(k.rawValue)"
         case .badge(let b): return "badge.\(b.rawValue)"
+        case .text(let t): return "text.\(t.rawValue)"
+        case .emoji(let e): return "emoji.\(e)"
+        case .pack(let p): return "pack.\(p.rawValue)"
         }
     }
 
@@ -297,6 +303,15 @@ extension PostStickerKind {
         case "badge":
             guard let b = FunBadge(rawValue: raw) else { return nil }
             self = .badge(b)
+        case "text":
+            guard let t = TextStickerStyle(rawValue: raw) else { return nil }
+            self = .text(t)
+        case "emoji":
+            guard !raw.isEmpty else { return nil }
+            self = .emoji(raw)
+        case "pack":
+            guard let p = FlameyPackSticker(rawValue: raw) else { return nil }
+            self = .pack(p)
         case "route":
             guard let s = RouteStickerStyle(rawValue: raw) else { return nil }
             self = .route(s)

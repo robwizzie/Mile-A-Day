@@ -13,6 +13,10 @@ import SwiftUI
 struct StickerActionBar: View {
     @ObservedObject var vm: PostComposerViewModel
     @State private var showPicker = false
+    /// The picker's "Aa" asked for the text editor; it opens once the sheet
+    /// is down (one presentation at a time).
+    @State private var textAfterPicker = false
+    @State private var textEdit: TextEditRequest?
     /// The NEW tag on the button, until the picker has been opened once.
     @AppStorage("post.stickers.pickerSeen.v1") private var pickerSeen = false
 
@@ -36,8 +40,28 @@ struct StickerActionBar: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: vm.selectedStickerId)
         .animation(.easeInOut(duration: 0.2), value: vm.separateViewStickers)
         // Its own node: nothing else in the composer presents from here.
-        .sheet(isPresented: $showPicker) {
-            StickerPickerSheet(vm: vm)
+        .sheet(isPresented: $showPicker, onDismiss: {
+            guard textAfterPicker else { return }
+            textAfterPicker = false
+            textEdit = TextEditRequest(stickerId: nil, text: "", style: .classic, accent: .mono)
+        }) {
+            StickerPickerSheet(vm: vm) { textAfterPicker = true }
+        }
+        // The text editor on a node of its own: two presentations on one
+        // node silently drop one.
+        .background {
+            Color.clear
+                .fullScreenCover(item: $textEdit) { request in
+                    TextStickerEditor(request: request) { done in
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                            if let id = done.stickerId {
+                                vm.updateText(id: id, text: done.text, style: done.style, accent: done.accent)
+                            } else {
+                                vm.addText(done.text, style: done.style, accent: done.accent)
+                            }
+                        }
+                    }
+                }
         }
     }
 
@@ -85,7 +109,7 @@ struct StickerActionBar: View {
             .accessibilityHint("Your stats, route, Flamey and more.")
 
             caption(vm.activeStickers.isEmpty
-                ? "Your stats, your route, your Flamey, the Flamey pack and more."
+                ? "Text, emoji, your stats, your route, your Flamey and the Flamey pack."
                 : "Tap a sticker to edit it. Drag to move, pinch to resize, twist to turn.")
         }
     }
@@ -108,6 +132,12 @@ struct StickerActionBar: View {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             vm.resetStatsStickerPlacement()
                         }
+                    }
+                }
+                if case .text(let style) = sticker.kind {
+                    pillButton(title: "Edit", icon: "character.cursor.ibeam", label: "Edit text") {
+                        textEdit = TextEditRequest(stickerId: sticker.id, text: sticker.text ?? "",
+                                                   style: style, accent: vm.accent(of: sticker))
                     }
                 }
                 pillButton(title: nil, icon: "trash", label: "Remove sticker") {
@@ -290,16 +320,30 @@ struct StickerActionBar: View {
 
 // MARK: - Picker sheet
 
-/// Instagram's sticker tray: a sheet of every sticker, drawn for real
-/// (`PostStickerView`, so what you tap is what lands), in sections, with
-/// search. A tap adds the sticker to the photo, focused, and closes the
-/// sheet; one-per-photo kinds already on it are ticked and a tap restyles
-/// them instead (`addSticker`).
+/// Instagram's sticker tray: a dark sheet with search, a cloud of white
+/// "tool" chips (text, numbers, words — each with its own coloured icon,
+/// tilted a touch the way Instagram's are), then grids of picture stickers
+/// drawn for real (`PostStickerView`, so what you tap is what lands). A tap
+/// adds the sticker to the photo, focused, and closes the sheet; one-per-photo
+/// kinds already on it are ticked and a tap restyles them (`addSticker`).
 struct StickerPickerSheet: View {
     @ObservedObject var vm: PostComposerViewModel
+    /// The "Aa" chip: the host opens the text editor once this sheet is down.
+    let onText: () -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var query = ""
+
+    struct Chip: Identifiable {
+        let id: String
+        let title: String
+        let icon: String
+        let tint: Color
+        let keywords: String
+        /// nil = the "Aa" text chip.
+        let kind: PostStickerKind?
+        var isNew = false
+    }
 
     struct Item: Identifiable {
         let id: String
@@ -315,75 +359,128 @@ struct StickerPickerSheet: View {
         let title: String
         let items: [Item]
         var note: String? = nil
+        var compact = false
+    }
+
+    // Instagram's chip palette.
+    private static let tints: [Color] = [
+        Color(red: 0.55, green: 0.27, blue: 0.95), Color(red: 0.98, green: 0.45, blue: 0.1),
+        Color(red: 0.93, green: 0.16, blue: 0.48), Color(red: 0.1, green: 0.6, blue: 0.95),
+        Color(red: 0.13, green: 0.72, blue: 0.35), Color(red: 0.8, green: 0.1, blue: 0.75),
+    ]
+
+    private var chips: [Chip] {
+        var out: [Chip] = [
+            Chip(id: "text", title: "Text", icon: "textformat", tint: Self.tints[0],
+                 keywords: "text aa type words caption write", kind: nil, isNew: true),
+        ]
+        out += NumberPostSticker.available(for: vm.stats).map { stat in
+            Chip(id: "number.\(stat.rawValue)", title: stat.label, icon: stat.icon, tint: .clear,
+                 keywords: "number big stat \(stat.label)".lowercased(), kind: .number(stat))
+        }
+        out += vm.offeredBadges.map { badge in
+            Chip(id: "badge.\(badge.rawValue)", title: chipTitle(for: badge),
+                 icon: badge.icon, tint: .clear, keywords: badge.keywords, kind: .badge(badge),
+                 isNew: badge == .buddies)
+        }
+        // Colour each by position so neighbours never match.
+        return out.enumerated().map { i, chip in
+            Chip(id: chip.id, title: chip.title, icon: chip.icon,
+                 tint: chip.kind == nil ? chip.tint : Self.tints[(i + 1) % Self.tints.count],
+                 keywords: chip.keywords, kind: chip.kind, isNew: chip.isNew)
+        }
+    }
+
+    /// A word sticker's chip says what it will print where that's short
+    /// ("Day 42", "With Alex & Sam"), else its name.
+    private func chipTitle(for badge: FunBadge) -> String {
+        switch badge {
+        case .dayCount, .buddies:
+            return vm.capturedText(for: .badge(badge))?.capitalizedWords ?? badge.title
+        case .clock:
+            return badge.title
+        default:
+            return badge.text(captured: nil).capitalizedWords
+        }
     }
 
     private var sections: [PickerSection] {
-        var run: [Item] = StickerStyle.allCases.map { style in
+        var cards: [Item] = StickerStyle.allCases.map { style in
             Item(id: "stats.\(style.rawValue)", kind: .stats, title: style.title,
                  keywords: "stats card \(style.title) distance pace time streak".lowercased(),
                  statsStyle: style)
         }
         if vm.routeSticker != nil {
-            run += RouteStickerStyle.allCases.map { style in
+            cards += RouteStickerStyle.allCases.map { style in
                 Item(id: "route.\(style.rawValue)", kind: .route(style), title: "Route · \(style.title)",
                      keywords: "route map path line strava gps \(style.title)".lowercased())
             }
-        }
-        run += NumberPostSticker.available(for: vm.stats).map { stat in
-            Item(id: "number.\(stat.rawValue)", kind: .number(stat), title: stat.label,
-                 keywords: "number big \(stat.label)".lowercased())
         }
         let own = FlameySticker.allCases.map { sticker in
             Item(id: "flamey.\(sticker.rawValue)", kind: .flamey(sticker), title: sticker.title,
                  keywords: "your flamey custom closet mine \(sticker.keywords)")
         }
-        let pack = FlameySticker.allCases.map { sticker in
-            Item(id: "basic.\(sticker.rawValue)", kind: .basicFlamey(sticker), title: sticker.title,
-                 keywords: "flamey pack basic classic original \(sticker.keywords)")
+        let pack = FlameyPackSticker.allCases.map { sticker in
+            Item(id: "pack.\(sticker.rawValue)", kind: .pack(sticker), title: sticker.title,
+                 keywords: sticker.keywords)
         }
-        let words = vm.offeredBadges.map { badge in
-            Item(id: "badge.\(badge.rawValue)", kind: .badge(badge), title: badge.title,
-                 keywords: badge.keywords)
+        let classic = FlameySticker.allCases.map { sticker in
+            Item(id: "basic.\(sticker.rawValue)", kind: .basicFlamey(sticker), title: sticker.title,
+                 keywords: "flamey basic classic original \(sticker.keywords)")
+        }
+        let emoji = StickerEmoji.all.map { e in
+            Item(id: "emoji.\(e)", kind: .emoji(e), title: e, keywords: "emoji \(e)")
         }
         let routeNote: String? = vm.routeStickerAvailable && vm.routeSticker == nil
             ? "Loading your route…" : nil
         return [
-            PickerSection(id: "run", title: "YOUR WALK", items: run, note: routeNote),
-            PickerSection(id: "own", title: "YOUR FLAMEY", items: own,
-                          note: "Dressed the way you left him in the Closet."),
             PickerSection(id: "pack", title: "FLAMEY PACK", items: pack),
-            PickerSection(id: "words", title: "WORDS", items: words),
+            PickerSection(id: "cards", title: "YOUR WALK", items: cards, note: routeNote),
+            PickerSection(id: "own", title: "YOUR FLAMEY", items: own),
+            PickerSection(id: "classic", title: "CLASSIC FLAMEY", items: classic),
+            PickerSection(id: "emoji", title: "EMOJI", items: emoji, compact: true),
         ]
     }
 
-    private var filtered: [PickerSection] {
-        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return sections }
-        return sections.compactMap { section in
-            let items = section.items.filter { $0.keywords.contains(q) || $0.title.lowercased().contains(q) }
-            return items.isEmpty ? nil : PickerSection(id: section.id, title: section.title, items: items)
-        }
+    private var trimmedQuery: String { query.trimmingCharacters(in: .whitespaces).lowercased() }
+
+    private func matches(_ keywords: String, _ title: String) -> Bool {
+        let q = trimmedQuery
+        return q.isEmpty || keywords.contains(q) || title.lowercased().contains(q)
     }
 
-    private let columns = [GridItem(.adaptive(minimum: StickerPickerTile.size.width), spacing: 10)]
-
     var body: some View {
-        let shown = filtered
+        let shownChips = chips.filter { matches($0.keywords, $0.title) }
+        let shownSections = sections.compactMap { section -> PickerSection? in
+            let items = section.items.filter { matches($0.keywords, $0.title) }
+            guard !items.isEmpty else { return nil }
+            return PickerSection(id: section.id, title: section.title, items: items,
+                                 note: trimmedQuery.isEmpty ? section.note : nil, compact: section.compact)
+        }
         VStack(spacing: 0) {
             searchField
                 .padding(.horizontal, MADTheme.Spacing.md)
                 .padding(.top, 22)
-                .padding(.bottom, 10)
+                .padding(.bottom, 12)
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-                    if shown.isEmpty {
+                VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
+                    if shownChips.isEmpty && shownSections.isEmpty {
                         Text("No stickers match “\(query)”")
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
                             .foregroundColor(.white.opacity(0.5))
                             .frame(maxWidth: .infinity)
                             .padding(.top, 40)
                     }
-                    ForEach(shown) { section in
+                    if !shownChips.isEmpty {
+                        ChipCloud(spacing: 10, rowSpacing: 12) {
+                            ForEach(Array(shownChips.enumerated()), id: \.element.id) { i, chip in
+                                chipButton(chip, tilt: Self.tilts[i % Self.tilts.count])
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                    }
+                    ForEach(shownSections) { section in
                         sectionView(section)
                     }
                 }
@@ -392,28 +489,80 @@ struct StickerPickerSheet: View {
             }
             .scrollDismissesKeyboard(.immediately)
         }
-        .background(Color(white: 0.07).ignoresSafeArea())
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .presentationBackground(Color(white: 0.07))
+        .presentationBackground(.ultraThinMaterial)
         .preferredColorScheme(.dark)
         .madTypeCap(.madCardCap)
     }
 
+    /// Instagram's chips sit a little askew, never in a ruler-straight grid.
+    private static let tilts: [Double] = [-2, 1.5, -1, 2, 0.5, -1.5, 1]
+
+    private func chipButton(_ chip: Chip, tilt: Double) -> some View {
+        let onPhoto = chip.kind.map { kind in
+            kind.isSingleton && vm.activeStickers.contains { $0.kind == kind }
+        } ?? false
+        return Button {
+            MADHaptics.tap()
+            if let kind = chip.kind {
+                withAnimation(reduceMotion ? .easeInOut(duration: 0.15)
+                                           : .spring(response: 0.38, dampingFraction: 0.6)) {
+                    vm.addSticker(kind)
+                }
+            } else {
+                onText()
+            }
+            dismiss()
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: onPhoto ? "checkmark.circle.fill" : chip.icon)
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundColor(chip.tint)
+                    .accessibilityHidden(true)
+                Text(chip.title)
+                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    .foregroundColor(Color(red: 0.08, green: 0.08, blue: 0.1))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .padding(.horizontal, 15)
+            .frame(height: 44)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white))
+            .shadow(color: .black.opacity(0.18), radius: 3, x: 0, y: 2)
+            .overlay(alignment: .bottomTrailing) {
+                if chip.isNew {
+                    Text("New")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Capsule().fill(chip.tint))
+                        .offset(x: 6, y: 9)
+                        .accessibilityHidden(true)
+                }
+            }
+            .rotationEffect(.degrees(reduceMotion ? 0 : tilt))
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .accessibilityLabel(chip.kind?.accessibilityName ?? "Add your own text")
+        .accessibilityAddTraits(onPhoto ? [.isSelected] : [])
+    }
+
     private func sectionView(_ section: PickerSection) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let size = section.compact ? StickerPickerTile.compactSize : StickerPickerTile.size
+        return VStack(alignment: .leading, spacing: 10) {
             Text(section.title)
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
                 .tracking(1.2)
-                .foregroundColor(.white.opacity(0.45))
+                .foregroundColor(.white.opacity(0.5))
             if let note = section.note {
                 Text(note)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.45))
+                    .foregroundColor(.white.opacity(0.5))
             }
-            LazyVGrid(columns: columns, spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: size.width), spacing: 8)], spacing: 8) {
                 ForEach(section.items) { item in
-                    tile(item)
+                    tile(item, size: size, showsTitle: !section.compact && section.id != "pack")
                 }
             }
         }
@@ -422,11 +571,11 @@ struct StickerPickerSheet: View {
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(.white.opacity(0.5))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white.opacity(0.6))
                 .accessibilityHidden(true)
-            TextField("Search stickers", text: $query)
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
+            TextField("Search", text: $query)
+                .font(.system(size: 17, weight: .regular, design: .rounded))
                 .foregroundColor(.white)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
@@ -441,10 +590,10 @@ struct StickerPickerSheet: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 40)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.08)))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.14)))
     }
 
-    private func tile(_ item: Item) -> some View {
+    private func tile(_ item: Item, size: CGSize, showsTitle: Bool) -> some View {
         let onPhoto = item.kind.isSingleton
             && vm.activeStickers.contains { $0.kind == item.kind }
             && (item.statsStyle == nil || item.statsStyle == vm.config.style)
@@ -453,7 +602,8 @@ struct StickerPickerSheet: View {
             kind: item.kind,
             context: context,
             text: vm.capturedText(for: item.kind),
-            title: item.title,
+            title: showsTitle ? item.title : nil,
+            size: size,
             onPhoto: onPhoto
         ) {
             if let style = item.statsStyle { vm.config.style = style }
@@ -473,9 +623,64 @@ struct StickerPickerSheet: View {
     }
 }
 
+private extension String {
+    /// "NO DAYS OFF" → "No Days Off", for a chip label.
+    var capitalizedWords: String { lowercased().capitalized }
+}
+
+// MARK: - Chip cloud
+
+/// Rows of chips, each row centred, wrapping at the sheet's width — the
+/// layout of Instagram's sticker tray.
+struct ChipCloud: Layout {
+    var spacing: CGFloat = 8
+    var rowSpacing: CGFloat = 8
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> [[(index: Int, size: CGSize)]] {
+        var rows: [[(Int, CGSize)]] = [[]]
+        var x: CGFloat = 0
+        for (i, view) in subviews.enumerated() {
+            let size = view.sizeThatFits(.unspecified)
+            let w = min(size.width, width)
+            if x > 0, x + spacing + w > width {
+                rows.append([])
+                x = 0
+            }
+            rows[rows.count - 1].append((i, CGSize(width: w, height: size.height)))
+            x += (x > 0 ? spacing : 0) + w
+        }
+        return rows.map { $0.map { (index: $0.0, size: $0.1) } }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 320
+        let rows = arrange(subviews, width: width)
+        let height = rows.reduce(CGFloat(0)) { sum, row in
+            sum + (row.map(\.size.height).max() ?? 0)
+        } + rowSpacing * CGFloat(max(rows.count - 1, 0))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in arrange(subviews, width: bounds.width) {
+            let rowWidth = row.map(\.size.width).reduce(0, +) + spacing * CGFloat(max(row.count - 1, 0))
+            let rowHeight = row.map(\.size.height).max() ?? 0
+            var x = bounds.minX + (bounds.width - rowWidth) / 2
+            for item in row {
+                subviews[item.index].place(at: CGPoint(x: x, y: y + (rowHeight - item.size.height) / 2),
+                                           proposal: ProposedViewSize(item.size))
+                x += item.size.width + spacing
+            }
+            y += rowHeight + rowSpacing
+        }
+    }
+}
+
 // MARK: - Tile
 
-/// One sticker in the picker, drawn for real and scaled to fit.
+/// One picture sticker in the picker, drawn for real and scaled to fit, on
+/// no tile at all — the sticker is the button, as in Instagram.
 ///
 /// Stickers are `.fixedSize()`, so they can't simply be handed a small
 /// frame: the natural size is measured and the sticker scaled down to fit.
@@ -485,20 +690,21 @@ private struct StickerPickerTile: View {
     let kind: PostStickerKind
     let context: StickerRenderContext
     let text: String?
-    let title: String
+    let title: String?
+    let size: CGSize
     /// A one-per-photo sticker already there: ticked, and a tap restyles it.
     let onPhoto: Bool
     let action: () -> Void
 
     static let size = CGSize(width: 100, height: 100)
-    private static let inset: CGFloat = 16
+    static let compactSize = CGSize(width: 54, height: 54)
 
     @State private var natural: CGSize = .zero
 
     private var fit: CGFloat {
         guard natural.width > 0, natural.height > 0 else { return 0.001 }
-        return min(1.4, (Self.size.width - Self.inset) / natural.width,
-                   (Self.size.height - Self.inset) / natural.height)
+        let inset: CGFloat = size.width > 80 ? 12 : 4
+        return min(1.4, (size.width - inset) / natural.width, (size.height - inset) / natural.height)
     }
 
     var body: some View {
@@ -506,44 +712,38 @@ private struct StickerPickerTile: View {
             MADHaptics.tap()
             action()
         } label: {
-            VStack(spacing: 6) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color.white.opacity(0.06))
-                    PostStickerView(kind: kind, context: context, text: text)
-                        .equatable()
-                        .background(
-                            GeometryReader { geo in
-                                Color.clear.preference(key: StickerNaturalSizeKey.self, value: geo.size)
-                            }
-                        )
-                        .scaleEffect(fit, anchor: .center)
-                        // Hide the one frame before the measurement lands, or
-                        // the sticker flashes at full size inside the tile.
-                        .opacity(natural == .zero ? 0 : 1)
-                }
-                .frame(width: Self.size.width, height: Self.size.height)
-                .clipped()
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(onPhoto ? MADTheme.Colors.madRed : Color.white.opacity(0.08),
-                                      lineWidth: onPhoto ? 2 : 1)
-                )
-                .overlay(alignment: .topTrailing) {
-                    if onPhoto {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(Color.white, MADTheme.Colors.madRed)
-                            .padding(5)
-                            .accessibilityHidden(true)
+            VStack(spacing: 4) {
+                PostStickerView(kind: kind, context: context, text: text)
+                    .equatable()
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(key: StickerNaturalSizeKey.self, value: geo.size)
+                        }
+                    )
+                    .scaleEffect(fit, anchor: .center)
+                    // Hide the one frame before the measurement lands, or
+                    // the sticker flashes at full size inside the tile.
+                    .opacity(natural == .zero ? 0 : 1)
+                    .frame(width: size.width, height: size.height)
+                    .clipped()
+                    .contentShape(Rectangle())
+                    .overlay(alignment: .topTrailing) {
+                        if onPhoto {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(Color.white, MADTheme.Colors.madRed)
+                                .padding(2)
+                                .accessibilityHidden(true)
+                        }
                     }
+                if let title {
+                    Text(title)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.65))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .frame(width: size.width)
                 }
-                Text(title)
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                    .frame(width: Self.size.width)
             }
         }
         .buttonStyle(ScaleButtonStyle())
@@ -551,5 +751,156 @@ private struct StickerPickerTile: View {
         .accessibilityLabel(kind.accessibilityName)
         .accessibilityHint(onPhoto ? "On the photo. Double-tap to restyle it." : "Double-tap to add to the photo.")
         .accessibilityAddTraits(onPhoto ? [.isSelected] : [])
+    }
+}
+
+// MARK: - Text editor
+
+/// What the text editor is editing: a new text sticker, or one on the photo.
+struct TextEditRequest: Identifiable {
+    let id = UUID()
+    var stickerId: UUID?
+    var text: String
+    var style: TextStickerStyle
+    var accent: StickerAccent
+}
+
+/// Instagram's "Aa": the photo dims, the keyboard comes up, the words are
+/// drawn in their real style as you type, with the style and colours along
+/// the top and bottom.
+struct TextStickerEditor: View {
+    let request: TextEditRequest
+    let onDone: (TextEditRequest) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var draft: TextEditRequest
+    @FocusState private var focused: Bool
+
+    init(request: TextEditRequest, onDone: @escaping (TextEditRequest) -> Void) {
+        self.request = request
+        self.onDone = onDone
+        _draft = State(initialValue: request)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button {
+                    MADHaptics.tap()
+                    draft.style = draft.style.cycled
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "textformat")
+                            .font(.system(size: 14, weight: .bold))
+                        Text(draft.style.title)
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14).frame(height: 36)
+                    .background(Capsule().fill(Color.white.opacity(0.18)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Text style, \(draft.style.title)")
+                .accessibilityHint("Double-tap for the next style.")
+                Spacer()
+                Button {
+                    MADHaptics.tap()
+                    onDone(draft)
+                    dismiss()
+                } label: {
+                    Text("Done")
+                        .font(.system(size: 16, weight: .black, design: .rounded))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 16).frame(height: 36)
+                        .background(Capsule().fill(Color.white))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.top, MADTheme.Spacing.md)
+
+            Spacer(minLength: 12)
+
+            // The words in their real style as you type, in a native field
+            // (caret, selection, dictation all just work).
+            styledField
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, MADTheme.Spacing.lg)
+                .animation(.spring(response: 0.25, dampingFraction: 0.8), value: draft.style)
+
+            Spacer(minLength: 12)
+
+            HStack(spacing: 10) {
+                ForEach(StickerAccent.allCases) { accent in
+                    Button {
+                        MADHaptics.tap()
+                        draft.accent = accent
+                    } label: {
+                        Circle()
+                            .fill(accent.color)
+                            .frame(width: 28, height: 28)
+                            .overlay(Circle().strokeBorder(Color.white, lineWidth: draft.accent == accent ? 3 : 1.5))
+                            .frame(width: 40, height: 40)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(accent.rawValue) text")
+                    .accessibilityAddTraits(draft.accent == accent ? [.isSelected] : [])
+                }
+            }
+            .padding(.bottom, MADTheme.Spacing.md)
+        }
+        .presentationBackground(Color.black.opacity(0.72))
+        .preferredColorScheme(.dark)
+        .madTypeCap(.madCardCap)
+        .onAppear { focused = true }
+    }
+
+    private var ink: Color { draft.accent == .mono ? Color(red: 0.08, green: 0.06, blue: 0.08) : .white }
+
+    /// The field dressed like `TextPostSticker`'s style of the same name.
+    @ViewBuilder
+    private var styledField: some View {
+        let field = TextField("", text: $draft.text,
+                              prompt: Text("Say something").foregroundColor(.white.opacity(0.4)),
+                              axis: .vertical)
+            .focused($focused)
+            .lineLimit(1...4)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .onChange(of: draft.text) { _, text in
+                if text.count > PostComposerViewModel.maxStickerText {
+                    draft.text = String(text.prefix(PostComposerViewModel.maxStickerText))
+                }
+            }
+            .accessibilityLabel("Sticker text")
+        switch draft.style {
+        case .classic:
+            field
+                .font(.system(size: 30, weight: .heavy, design: .rounded))
+                .foregroundColor(draft.accent.color)
+                .tint(.white)
+                .shadow(color: .black.opacity(0.45), radius: 4, x: 0, y: 2)
+        case .pill:
+            field
+                .font(.system(size: 26, weight: .black, design: .rounded))
+                .foregroundColor(ink)
+                .tint(ink)
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(draft.accent.color))
+        case .neon:
+            field
+                .font(.system(size: 30, weight: .bold, design: .rounded).italic())
+                .foregroundColor(.white)
+                .tint(.white)
+                .shadow(color: draft.accent.color, radius: 2)
+                .shadow(color: draft.accent.color, radius: 8)
+        case .typewriter:
+            field
+                .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                .foregroundColor(Color(red: 0.08, green: 0.06, blue: 0.08))
+                .tint(.black)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(Rectangle().fill(Color.white))
+        }
     }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreLocation
+import UIKit
 
 // MARK: - Post stickers
 //
@@ -96,7 +97,7 @@ enum FunBadge: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .dayCount: return "Day count"
-        case .clock: return "Time"
+        case .clock: return "Time of day"
         case .buddies: return "Crew"
         case .noDaysOff: return "No days off"
         case .rainOrShine: return "Rain or shine"
@@ -177,9 +178,15 @@ enum PostStickerKind: Hashable {
     /// One big number, Strava-style: "3.12 mi", "28:41", "42 day streak".
     case number(RunStatKind)
     case badge(FunBadge)
+    /// The poster's own words (`PlacedSticker.text`), Instagram's "Aa".
+    case text(TextStickerStyle)
+    /// One emoji, big.
+    case emoji(String)
+    /// One of the drawn Flamey sticker-pack images (`FlameyPackSticker`).
+    case pack(FlameyPackSticker)
 
     enum Slot: Hashable {
-        case stats, flamey, basicFlamey, route, badge
+        case stats, flamey, basicFlamey, route, badge, text, emoji, pack
         case number(RunStatKind)
     }
 
@@ -191,6 +198,9 @@ enum PostStickerKind: Hashable {
         case .route: return .route
         case .number(let kind): return .number(kind)
         case .badge: return .badge
+        case .text: return .text
+        case .emoji: return .emoji
+        case .pack: return .pack
         }
     }
 
@@ -198,7 +208,7 @@ enum PostStickerKind: Hashable {
     var isSingleton: Bool {
         switch self {
         case .stats, .route, .number: return true
-        case .flamey, .basicFlamey, .badge: return false
+        case .flamey, .basicFlamey, .badge, .text, .emoji, .pack: return false
         }
     }
 
@@ -212,7 +222,9 @@ enum PostStickerKind: Hashable {
         case .flamey, .basicFlamey: return CGPoint(x: 0.74, y: 0.58)
         case .route: return CGPoint(x: 0.36, y: 0.46)
         case .number: return CGPoint(x: 0.34, y: 0.2)
-        case .badge: return CGPoint(x: 0.5, y: 0.5)
+        case .badge, .text: return CGPoint(x: 0.5, y: 0.5)
+        case .emoji: return CGPoint(x: 0.7, y: 0.3)
+        case .pack: return CGPoint(x: 0.72, y: 0.6)
         }
     }
 
@@ -224,6 +236,9 @@ enum PostStickerKind: Hashable {
         case .route(let s): return "Route sticker, \(s.title)"
         case .number(let k): return "\(k.label) sticker"
         case .badge(let b): return "\(b.title) sticker"
+        case .text: return "Text sticker"
+        case .emoji(let e): return "\(e) sticker"
+        case .pack(let p): return "Flamey sticker, \(p.title)"
         }
     }
 }
@@ -555,6 +570,161 @@ struct FlameyPostSticker: View {
     }
 }
 
+// MARK: - Flamey pack
+
+/// The drawn Flamey sticker pack, shipped as images in
+/// Assets.xcassets/FlameyPack (trimmed, @3x). Raw values are the asset
+/// names AND are persisted (`StickerMemory`): add cases, never rename.
+enum FlameyPackSticker: String, CaseIterable, Identifiable {
+    case hiii, lol, bet, loveThis = "love-this", thankYouuu = "thank-youuu", omw, gn, gm
+    case nooo, letsGooo = "lets-gooo", nah, hmm, hypnotize, absoluteCinema = "absolute-cinema"
+    case thisIsFine = "this-is-fine", sideEye = "side-eye", elevenFiftyEight = "1158pm", what
+    case imDead = "im-dead", dealWithIt = "deal-with-it", bruh, mileDone = "mile-done"
+    var id: String { rawValue }
+
+    var assetName: String { "FlameyPack/\(rawValue)" }
+
+    var title: String {
+        switch self {
+        case .hiii: return "hiii"
+        case .lol: return "LMAOOO"
+        case .bet: return "bet"
+        case .loveThis: return "love this"
+        case .thankYouuu: return "thank youuu"
+        case .omw: return "omw"
+        case .gn: return "gn"
+        case .gm: return "gm"
+        case .nooo: return "nooo"
+        case .letsGooo: return "LET'S GOOO"
+        case .nah: return "nah"
+        case .hmm: return "hmm"
+        case .hypnotize: return "you WILL get your mile in"
+        case .absoluteCinema: return "absolute cinema"
+        case .thisIsFine: return "this is fine"
+        case .sideEye: return "side eye"
+        case .elevenFiftyEight: return "11:58 PM"
+        case .what: return "WHAT"
+        case .imDead: return "i'm dead"
+        case .dealWithIt: return "deal with it"
+        case .bruh: return "bruh"
+        case .mileDone: return "mile done"
+        }
+    }
+
+    var keywords: String {
+        let extra: String
+        switch self {
+        case .hiii: extra = "hi hello wave"
+        case .lol: extra = "lol lmao laugh funny"
+        case .gn: extra = "good night sleep tired"
+        case .gm: extra = "good morning coffee"
+        case .omw: extra = "on my way run fast"
+        case .elevenFiftyEight: extra = "late close call midnight"
+        case .hypnotize: extra = "hypnotize motivation"
+        case .imDead: extra = "dead skeleton tired exhausted"
+        case .dealWithIt: extra = "sunglasses cool"
+        case .mileDone: extra = "done finished medal"
+        default: extra = ""
+        }
+        return "flamey pack \(rawValue) \(title) \(extra)".lowercased()
+    }
+}
+
+/// A pack sticker at a fixed natural size (longest side 150pt), from a
+/// bundled image so `ImageRenderer` bakes it synchronously.
+struct FlameyPackStickerView: View {
+    let sticker: FlameyPackSticker
+    static let longestSide: CGFloat = 150
+
+    var body: some View {
+        if let image = UIImage(named: sticker.assetName), image.size.width > 0, image.size.height > 0 {
+            let k = Self.longestSide / max(image.size.width, image.size.height)
+            Image(uiImage: image)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: image.size.width * k, height: image.size.height * k)
+                .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 3)
+                .fixedSize()
+                .accessibilityHidden(true)
+        } else {
+            Color.clear.frame(width: 1, height: 1)
+        }
+    }
+}
+
+// MARK: - Text
+
+/// How the poster's own words are drawn — Instagram's text styles. A tap on
+/// the photo cycles them. Raw values are persisted: add cases, never rename.
+enum TextStickerStyle: String, CaseIterable, Identifiable {
+    case classic, pill, neon, typewriter
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .classic: return "Classic"
+        case .pill: return "Strong"
+        case .neon: return "Neon"
+        case .typewriter: return "Typewriter"
+        }
+    }
+}
+
+/// Emoji the picker offers, walk-themed first.
+enum StickerEmoji {
+    static let all = ["🔥", "💪", "👟", "🏃", "🚶", "🌅", "☀️", "🌧️", "❄️", "🌙",
+                      "💯", "⚡️", "🎉", "🏆", "🥵", "😮‍💨", "😎", "🥳", "❤️", "🙌",
+                      "🐶", "🌳", "🌊", "⛰️", "☕️", "🎧", "📍", "✨"]
+}
+
+struct TextPostSticker: View {
+    let text: String
+    let style: TextStickerStyle
+    let accent: StickerAccent
+
+    /// The ink that reads on the accent fill (mono is white).
+    private var onAccent: Color { accent == .mono ? Color(red: 0.08, green: 0.06, blue: 0.08) : .white }
+
+    var body: some View {
+        let words = text.isEmpty ? " " : text
+        Group {
+            switch style {
+            case .classic:
+                Text(words)
+                    .font(.system(size: 30, weight: .heavy, design: .rounded))
+                    .foregroundColor(accent.color)
+                    .shadow(color: .black.opacity(0.45), radius: 4, x: 0, y: 2)
+            case .pill:
+                Text(words)
+                    .font(.system(size: 26, weight: .black, design: .rounded))
+                    .foregroundColor(onAccent)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(accent.color))
+            case .neon:
+                Text(words)
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .italic()
+                    .foregroundColor(.white)
+                    .shadow(color: accent.color, radius: 2)
+                    .shadow(color: accent.color, radius: 8)
+                    .shadow(color: accent.color.opacity(0.8), radius: 16)
+            case .typewriter:
+                Text(words)
+                    .font(.system(size: 22, weight: .semibold, design: .monospaced))
+                    .foregroundColor(Color(red: 0.08, green: 0.06, blue: 0.08))
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(Rectangle().fill(Color.white))
+                    .overlay(Rectangle().fill(accent.color).frame(height: 3), alignment: .bottom)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .lineLimit(4)
+        .fixedSize()
+        .padding(6)
+        .accessibilityHidden(true)
+    }
+}
+
 // MARK: - Badge
 
 /// A word or two on a pill. A tap cycles `variant` through four looks.
@@ -727,6 +897,17 @@ struct PostStickerView: View, Equatable {
         case .badge(let badge):
             FunBadgeSticker(badge: badge, text: badge.text(captured: text), accent: resolvedAccent,
                             variant: variant)
+        case .text(let style):
+            TextPostSticker(text: text ?? "", style: style, accent: resolvedAccent)
+        case .pack(let sticker):
+            FlameyPackStickerView(sticker: sticker)
+        case .emoji(let emoji):
+            Text(emoji)
+                .font(.system(size: 84))
+                .shadow(color: .black.opacity(0.25), radius: 6, x: 0, y: 3)
+                .padding(4)
+                .fixedSize()
+                .accessibilityHidden(true)
         }
     }
 
