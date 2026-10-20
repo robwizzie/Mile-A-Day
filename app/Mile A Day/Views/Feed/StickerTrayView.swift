@@ -43,7 +43,8 @@ struct StickerActionBar: View {
         .sheet(isPresented: $showPicker, onDismiss: {
             guard textAfterPicker else { return }
             textAfterPicker = false
-            textEdit = TextEditRequest(stickerId: nil, text: "", style: .classic, accent: .mono)
+            textEdit = TextEditRequest(stickerId: nil, text: "", style: .classic, accent: .mono,
+                                       width: TextPostSticker.defaultWidth)
         }) {
             StickerPickerSheet(vm: vm) { textAfterPicker = true }
         }
@@ -55,9 +56,10 @@ struct StickerActionBar: View {
                     TextStickerEditor(request: request) { done in
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
                             if let id = done.stickerId {
-                                vm.updateText(id: id, text: done.text, style: done.style, accent: done.accent)
+                                vm.updateText(id: id, text: done.text, style: done.style, accent: done.accent,
+                                              width: done.width)
                             } else {
-                                vm.addText(done.text, style: done.style, accent: done.accent)
+                                vm.addText(done.text, style: done.style, accent: done.accent, width: done.width)
                             }
                         }
                     }
@@ -137,7 +139,8 @@ struct StickerActionBar: View {
                 if case .text(let style) = sticker.kind {
                     pillButton(title: "Edit", icon: "character.cursor.ibeam", label: "Edit text") {
                         textEdit = TextEditRequest(stickerId: sticker.id, text: sticker.text ?? "",
-                                                   style: style, accent: vm.accent(of: sticker))
+                                                   style: style, accent: vm.accent(of: sticker),
+                                                   width: sticker.textWidth ?? TextPostSticker.defaultWidth)
                     }
                 }
                 pillButton(title: nil, icon: "trash", label: "Remove sticker") {
@@ -150,9 +153,31 @@ struct StickerActionBar: View {
 
             colorRow(sticker)
 
+            if case .text = sticker.kind { textWidthRow(sticker) }
+
             if sticker.kind == .stats { statsOptions }
 
             caption("Tap it again on the photo to change its style.")
+        }
+    }
+
+    /// How many lines the words take: narrow stacks them, wide runs them on.
+    private func textWidthRow(_ sticker: PlacedSticker) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "text.aligncenter")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.white.opacity(0.6))
+                .accessibilityHidden(true)
+            Slider(value: Binding(
+                get: { sticker.textWidth ?? TextPostSticker.defaultWidth },
+                set: { vm.setTextWidth(id: sticker.id, width: $0) }
+            ), in: TextPostSticker.widthRange)
+            .tint(.white)
+            .accessibilityLabel("Line width")
+            Image(systemName: "arrow.left.and.right")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.white.opacity(0.6))
+                .accessibilityHidden(true)
         }
     }
 
@@ -763,6 +788,8 @@ struct TextEditRequest: Identifiable {
     var text: String
     var style: TextStickerStyle
     var accent: StickerAccent
+    /// Line width before wrapping (`TextPostSticker.widthRange`).
+    var width: CGFloat
 }
 
 /// Instagram's "Aa": the photo dims, the keyboard comes up, the words are
@@ -822,10 +849,24 @@ struct TextStickerEditor: View {
 
             // The words in their real style as you type, in a native field
             // (caret, selection, dictation all just work).
-            styledField
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, MADTheme.Spacing.lg)
-                .animation(.spring(response: 0.25, dampingFraction: 0.8), value: draft.style)
+            // The field is laid out at the sticker's real width; on a narrow
+            // phone it's drawn scaled down to fit beside the slider.
+            GeometryReader { geo in
+                let need = fieldWidth + 40
+                styledField
+                    .scaleEffect(min(1, geo.size.width / max(need, 1)))
+                    .frame(width: geo.size.width, height: geo.size.height)
+            }
+            .frame(height: 230)
+            .padding(.horizontal, 56)
+            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: draft.style)
+                // Instagram's vertical slider, here for line width: up for
+                // longer lines, down to stack the words.
+                .overlay(alignment: .leading) {
+                    LineWidthSlider(value: $draft.width, range: TextPostSticker.widthRange)
+                        .frame(width: 40, height: 220)
+                        .padding(.leading, 8)
+                }
 
             Spacer(minLength: 12)
 
@@ -857,6 +898,11 @@ struct TextStickerEditor: View {
 
     private var ink: Color { draft.accent == .mono ? Color(red: 0.08, green: 0.06, blue: 0.08) : .white }
 
+    private var fieldWidth: CGFloat {
+        TextPostSticker.lineWidth(for: draft.text.isEmpty ? "Say something" : draft.text,
+                                  style: draft.style, limit: draft.width)
+    }
+
     /// The field dressed like `TextPostSticker`'s style of the same name.
     @ViewBuilder
     private var styledField: some View {
@@ -864,8 +910,11 @@ struct TextStickerEditor: View {
                               prompt: Text("Say something").foregroundColor(.white.opacity(0.4)),
                               axis: .vertical)
             .focused($focused)
-            .lineLimit(1...4)
+            .lineLimit(1...TextPostSticker.lineLimit)
             .multilineTextAlignment(.center)
+            // The sticker's own wrap width, so lines break here exactly
+            // where they will on the photo.
+            .frame(width: fieldWidth)
             .fixedSize(horizontal: false, vertical: true)
             .onChange(of: draft.text) { _, text in
                 if text.count > PostComposerViewModel.maxStickerText {
@@ -901,6 +950,73 @@ struct TextStickerEditor: View {
                 .tint(.black)
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .background(Rectangle().fill(Color.white))
+        }
+    }
+}
+
+// MARK: - Line width slider
+
+/// Instagram's vertical text slider: a tapering track, wide at the top
+/// (long lines) and thin at the bottom (stacked words), with a thumb you
+/// drag. Adjustable for VoiceOver.
+struct LineWidthSlider: View {
+    @Binding var value: CGFloat
+    let range: ClosedRange<CGFloat>
+    @State private var atEnd = false
+
+    private var fraction: CGFloat {
+        (value - range.lowerBound) / max(range.upperBound - range.lowerBound, 1)
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let h = geo.size.height, w = geo.size.width
+            let y = (1 - fraction) * h
+            ZStack(alignment: .top) {
+                Taper()
+                    .fill(Color.white.opacity(0.35))
+                    .frame(width: w * 0.45, height: h)
+                    .frame(maxWidth: .infinity)
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 26, height: 26)
+                    .shadow(color: .black.opacity(0.3), radius: 3, x: 0, y: 1)
+                    .position(x: w / 2, y: min(max(y, 13), h - 13))
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { g in
+                        let f = 1 - min(max(g.location.y / max(h, 1), 0), 1)
+                        value = range.lowerBound + f * (range.upperBound - range.lowerBound)
+                        let end = f <= 0.001 || f >= 0.999
+                        if end != atEnd { atEnd = end; if end { MADHaptics.tap() } }
+                    }
+            )
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Line width")
+        .accessibilityValue("\(Int((fraction * 100).rounded())) percent")
+        .accessibilityAdjustableAction { direction in
+            let step = (range.upperBound - range.lowerBound) / 10
+            switch direction {
+            case .increment: value = min(range.upperBound, value + step)
+            case .decrement: value = max(range.lowerBound, value - step)
+            @unknown default: break
+            }
+        }
+    }
+
+    /// Wide at the top, nearly a point at the bottom.
+    private struct Taper: Shape {
+        func path(in rect: CGRect) -> Path {
+            var p = Path()
+            p.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.midX + 1.5, y: rect.maxY))
+            p.addLine(to: CGPoint(x: rect.midX - 1.5, y: rect.maxY))
+            p.closeSubpath()
+            return p
         }
     }
 }

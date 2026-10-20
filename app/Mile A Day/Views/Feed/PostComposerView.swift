@@ -510,12 +510,13 @@ final class PostComposerViewModel: ObservableObject {
 
     /// The poster's own words, typed in the text editor, landing focused in
     /// the middle the way Instagram's do.
-    func addText(_ text: String, style: TextStickerStyle, accent: StickerAccent?) {
+    func addText(_ text: String, style: TextStickerStyle, accent: StickerAccent?, width: CGFloat? = nil) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         var placed = PlacedSticker(kind: .text(style), pos: CGPoint(x: 0.5, y: 0.45))
         placed.text = String(trimmed.prefix(Self.maxStickerText))
         placed.accent = accent
+        placed.textWidth = width
         var layer = activeStickers
         layer.append(placed)
         activeStickers = layer
@@ -523,7 +524,8 @@ final class PostComposerViewModel: ObservableObject {
     }
 
     /// Re-typed text on an existing text sticker; emptied, it goes.
-    func updateText(id: UUID, text: String, style: TextStickerStyle, accent: StickerAccent?) {
+    func updateText(id: UUID, text: String, style: TextStickerStyle, accent: StickerAccent?,
+                    width: CGFloat? = nil) {
         var layer = activeStickers
         guard let i = layer.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -534,7 +536,16 @@ final class PostComposerViewModel: ObservableObject {
             layer[i].text = String(trimmed.prefix(Self.maxStickerText))
             layer[i].kind = .text(style)
             layer[i].accent = accent
+            layer[i].textWidth = width
         }
+        activeStickers = layer
+    }
+
+    /// The focused bar's line-width slider, live.
+    func setTextWidth(id: UUID, width: CGFloat) {
+        var layer = activeStickers
+        guard let i = layer.firstIndex(where: { $0.id == id }) else { return }
+        layer[i].textWidth = width.clamped(to: TextPostSticker.widthRange)
         activeStickers = layer
     }
 

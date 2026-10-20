@@ -119,9 +119,15 @@ struct StickerGestureSurface: UIViewRepresentable {
             g.delegate = c
             view.addGestureRecognizer(g)
         }
+        // A tap only counts once no drag, pinch or twist could still be
+        // starting — so grabbing a sticker never restyles it.
+        tap.require(toFail: pan)
+        tap.require(toFail: pinch)
+        tap.require(toFail: rotate)
         c.pan = pan
         c.pinch = pinch
         c.rotate = rotate
+        c.tapRecognizer = tap
         return view
     }
 
@@ -135,6 +141,14 @@ struct StickerGestureSurface: UIViewRepresentable {
         weak var pan: UIPanGestureRecognizer?
         weak var pinch: UIPinchGestureRecognizer?
         weak var rotate: UIRotationGestureRecognizer?
+        weak var tapRecognizer: UITapGestureRecognizer?
+        /// Where the finger went down, to tell a tap from a short drag.
+        private var touchDown: CGPoint?
+        /// When the last move/pinch/twist ended: a tap straight after one is
+        /// the tail of that gesture, not a tap.
+        private var lastTransformEnd: Date = .distantPast
+        /// Finger travel beyond which a touch is a drag, never a tap.
+        private static let tapSlop: CGFloat = 6
 
         private struct Transform {
             var center: CGPoint      // canvas points
@@ -156,7 +170,13 @@ struct StickerGestureSurface: UIViewRepresentable {
 
         func gestureRecognizer(_ g: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-            true
+            // The transforms run together; the tap never runs alongside them.
+            !(g is UITapGestureRecognizer || other is UITapGestureRecognizer)
+        }
+
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            if g === tapRecognizer, let view = g.view { touchDown = touch.location(in: view) }
+            return true
         }
 
         /// A transform only starts on a sticker (or, for a pinch or twist,
@@ -171,7 +191,12 @@ struct StickerGestureSurface: UIViewRepresentable {
         // MARK: Tap
 
         @objc func tap(_ g: UITapGestureRecognizer) {
-            guard g.state == .ended, target == nil else { return }
+            guard g.state == .ended, target == nil, active.isEmpty else { return }
+            guard Date().timeIntervalSince(lastTransformEnd) > 0.25 else { return }
+            if let down = touchDown, let view = g.view {
+                let up = g.location(in: view)
+                guard hypot(up.x - down.x, up.y - down.y) <= Self.tapSlop else { return }
+            }
             if let id = hit(g.location(in: g.view)) {
                 parent.onTap(id)
             } else {
@@ -328,6 +353,7 @@ struct StickerGestureSurface: UIViewRepresentable {
             edit.reset()
             target = nil
             active.removeAll()
+            lastTransformEnd = Date()
         }
 
         // MARK: Hit-testing
