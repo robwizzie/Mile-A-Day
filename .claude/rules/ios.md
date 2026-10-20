@@ -46,6 +46,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - Buddy cards share `PostCardView.crewColors`; `WorkoutSplitsSheet(walkers:)` keeps split-less walkers; pace via `DisplayPace`/`Walker.servedPace`; `hasSplits` = anyone has splits.
 - Captions follow the face; name links via `MentionText.nameLink`, never nested Buttons; `PostDetailView` always wires profiles.
 - On a buddy card the viewer's own slide leads (`myPhotoFirst`), never ahead of the lock.
+- `WorkoutPagerView` snapshots + uuid-dedupes its pages at init (`@State workouts`), never live HealthKit lists; detail data survives a page rebuild via `WorkoutDetailCache`.
 - A past buddy walk opens `BuddyWalkDetailView` everywhere; nil `finalDistanceMiles` = "not synced"; spin only while `mayStillSync`; `BuddyWalkPhoto.id` = post+user.
 - Tune `StreakFlameClock.flameScale(vigor:)`'s table, never add a curve; start `repeatForever` next turn inside `withAnimation`.
 - Flamey's blink is a frame toggle; start loops on the next turn; keep `face`'s `.transaction { $0.animation = nil }`.
