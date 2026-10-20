@@ -395,9 +395,13 @@ struct RunPlanView: View {
             }
             if reply.pain { painFlagged = true }
             thread.append(RunPlanChatItem(kind: .flamey(reply.reply)))
-            // The message is the check-in; no feeling, so the server proposes
-            // nothing on its own — Flamey's action is the proposal.
-            _ = try? await store.checkIn(feeling: nil, message: text, pain: reply.pain)
+            // The message is the check-in. With pain the server proposes
+            // `just_mile` itself; use that instead of a second proposal.
+            let checkin = try? await store.checkIn(feeling: nil, message: text, pain: reply.pain)
+            if let p = checkin?.proposal, p.isPending {
+                thread.append(RunPlanChatItem(kind: .proposal(p.id)))
+                return
+            }
             guard let action = reply.action else { return }
             do {
                 let proposal = try await store.propose(action: action, summary: nil, rationale: reply.reply)

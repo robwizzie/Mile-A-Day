@@ -23,7 +23,7 @@ struct RunPlanGoalDraft: Equatable {
     }
 
     var goals: [RunPlanGoal] {
-        selected.map { RunPlanGoal(type: $0, targetSeconds: targets[$0], distanceMiles: $0.raceMiles) }
+        selected.map { RunPlanGoal(type: $0, targetSeconds: targets[$0]) }
     }
 
     var finishByKey: String? { finishBy.map(RunPlanDate.key(for:)) }
@@ -67,14 +67,19 @@ struct RunPlanGoalDraft: Equatable {
     }
 
     /// A first target: a bit faster than now, on a round number.
+    /// The server refuses targets faster than 4:01/mi (`engine.ts` validateGoals).
+    static func minTarget(_ type: RunPlanGoalType) -> Double {
+        ((type.raceMiles ?? 0) * 241).rounded(.up)
+    }
+
     static func suggestedTarget(_ type: RunPlanGoalType, fitness: RunPlanFitness?) -> Double? {
         guard let current = Self.now(type, fitness: fitness) else { return nil }
         switch type {
         case .fasterMile:
-            return max(240, (current - 30).rounded(.down))
+            return max(minTarget(type), (current - 30).rounded(.down))
         default:
             let goal = current * 0.92
-            return max(60, (goal / 60).rounded(.down) * 60 - 1)
+            return max(minTarget(type), (goal / 60).rounded(.down) * 60 - 1)
         }
     }
 }
@@ -367,7 +372,7 @@ struct RunPlanGoalsStep: View {
     private func targetControl(_ type: RunPlanGoalType, target: Double?, now: Double?) -> some View {
         if let target {
             HStack(spacing: 2) {
-                stepButton("minus", label: "Faster") { draft.targets[type] = max(60, target - RunPlanGoalDraft.step(type)) }
+                stepButton("minus", label: "Faster") { draft.targets[type] = max(RunPlanGoalDraft.minTarget(type), target - RunPlanGoalDraft.step(type)) }
                 Text(type == .fasterMile ? "Beat \(RunPlanFormat.clock(target))" : RunPlanFormat.clock(target))
                     .madFont(size: 13, weight: .black, design: .rounded, monospacedDigit: true)
                     .foregroundColor(.white)

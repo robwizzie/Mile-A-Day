@@ -150,7 +150,7 @@ struct RunPlanGoal: Codable, Equatable, Hashable, Sendable {
 
 /// An intermediate target when the goal is far ("sub-24 first").
 struct RunPlanCheckpoint: Codable, Equatable, Hashable, Sendable {
-    let type: String?
+    let goal_type: String?
     @RunPlanNumber var target_seconds: Double?
     let by_date: String?
     /// Server-written sentence, when it sends one.
@@ -158,7 +158,7 @@ struct RunPlanCheckpoint: Codable, Equatable, Hashable, Sendable {
 }
 
 struct RunPlan: Codable, Equatable, Hashable, Identifiable, Sendable {
-    let plan_id: String
+    let id: String
     let status: String?
     let goals: [RunPlanGoal]
     /// 1 Easy does it · 2 Steady · 3 Push · 4 All in.
@@ -175,7 +175,6 @@ struct RunPlan: Codable, Equatable, Hashable, Identifiable, Sendable {
     let created_at: String?
     let updated_at: String?
 
-    var id: String { plan_id }
     var autoApplyClaude: Bool { claude_auto_apply ?? false }
 }
 
@@ -338,7 +337,7 @@ struct RunPlanCurrent: Codable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        plan = try c.decodeIfPresent(RunPlan.self, forKey: .plan)
+        plan = try? c.decodeIfPresent(RunPlan.self, forKey: .plan)
         days = (try? c.decodeIfPresent([RunPlanDay].self, forKey: .days)) ?? []
         todayDay = try? c.decodeIfPresent(RunPlanDay.self, forKey: .today)
         week_total_mi = (try? c.decode(RunPlanNumber.self, forKey: .week_total_mi))?.wrappedValue

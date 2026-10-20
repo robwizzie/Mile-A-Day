@@ -23,13 +23,24 @@ enum RunPlanError: Error, Equatable {
             switch api {
             case .apiError(let m) where m == "plus_required": return .plusRequired
             case .notFound: return .notFound
-            case .badRequest(let m): return .other(m)
-            case .conflict(let m): return .other(m)
+            case .badRequest(let m): return .other(friendly(m))
+            case .conflict(let m): return .other(friendly(m))
             case .rateLimited(let m): return .other(m)
             default: break
             }
         }
         return .other("Couldn't reach your plan right now. Try again in a moment.")
+    }
+
+    /// Server error codes → sentences; never show a raw code.
+    private static func friendly(_ code: String) -> String {
+        switch code {
+        case "proposal_stale": return "That change no longer fits your plan."
+        case "proposal_not_pending": return "That change was already handled."
+        case "action_not_possible": return "That change isn't possible today."
+        case "invalid_goals": return "Those goals didn't work. Check the target times."
+        default: return "Couldn't update your plan right now. Try again in a moment."
+        }
     }
 }
 
@@ -238,7 +249,7 @@ final class RunPlanStore: ObservableObject {
 
     private var lastRefresh: Date?
     private var lastRefreshDay: String?
-    private let cachePrefix = "runPlanCurrentV1|"
+    private let cachePrefix = "runPlanCurrentV2|"
 
     private init() {
         if let cached = loadCache() {
