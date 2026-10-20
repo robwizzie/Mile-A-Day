@@ -346,7 +346,7 @@ struct StickerTrayView: View {
         }
     }
 
-    private func tileRail<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    private func tileRail<Content: View>(@ViewBuilder _ content: @escaping () -> Content) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: MADTheme.Spacing.sm) {

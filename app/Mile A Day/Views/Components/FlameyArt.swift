@@ -1111,7 +1111,6 @@ enum FlameyArt {
         let L = max(1.1, 0.013 * u)
         let ink = self.ink
         let b = a.bottom
-        let top = b - chestTop * u
         func q(_ x: CGFloat, _ y: CGFloat) -> CGPoint { pt(x * u, b + y * u) }
         // His outline at chest height, for anything that wraps round him.
         let body = FlameBuddyOuterShape(wobble: 0).path(in: bodyRect(a, u))
@@ -2916,7 +2915,7 @@ enum FlameyArt {
             ctx.fill(ellipse(x + sx * r * 0.78, y + r * 0.30, r * 0.17, r * 0.10), with: .color(cheeks.opacity(0.55)))
         }
         let my = y + r * 0.40
-        if let beak {
+        if beak != nil {
             var bk = Path()
             bk.move(to: pt(x - r * 0.16, my - r * 0.10)); bk.addLine(to: pt(x + r * 0.16, my - r * 0.10)); bk.addLine(to: pt(x, my + r * 0.12)); bk.closeSubpath()
             ctx.fill(bk, with: lin([hx(0xFFE45C), hx(0xFFA41F)], pt(x, my - r * 0.1), pt(x, my + r * 0.12)))
