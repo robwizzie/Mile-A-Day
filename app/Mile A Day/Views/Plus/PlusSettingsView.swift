@@ -264,7 +264,7 @@ struct PlusSettingsView: View {
                 .foregroundColor(.secondary)
             PlusTokenComparison(onDark: false)
             Divider().overlay(Color.white.opacity(0.06))
-            ForEach([PlusPerk.flameyColors, .family, .support]) { perk in
+            ForEach([PlusPerk.runPlans, .flameyColors, .family, .support]) { perk in
                 HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
                     Image(systemName: perk.icon)
                         .madFont(size: 15, weight: .bold, maxScale: 1.3)

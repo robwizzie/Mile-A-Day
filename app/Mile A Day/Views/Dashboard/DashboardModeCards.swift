@@ -343,6 +343,10 @@ struct FunDashboardBody: View {
                 // unless the streak is at risk or Plus would already hold a
                 // Save. Zero-spacing stack: hidden, it adds no gap.
                 PlusStreakCard(streak: userManager.currentUser.streak, topSpacing: 18)
+                // Run Plans: today's planned run for Plus members with a plan,
+                // "Build your plan" without one, a teaser otherwise. Its own
+                // view (state, refresh, sheet) so DashboardView.body is untouched.
+                RunPlanDashboardCard(topSpacing: 18)
             }
 
             HStack(alignment: .top, spacing: 12) {

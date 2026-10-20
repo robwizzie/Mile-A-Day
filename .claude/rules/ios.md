@@ -140,6 +140,13 @@ Details: docs/conventions/ios.md § Mile A Day+
 - Preview a Plus look via `PlusLookShowcase.look(_:)` (fixed non-holiday date, no signup date); founders read `status.source == "founding"` → `FoundingRunnerCard`; token numbers in `PlusTokenComparison` mirror backend targets.
 - Monthly Flames are `color` items with `FlameyUnlock.month(n)` (server-granted); their art is palette + `FlameyMonthlyFX` INSIDE his outline (never a new silhouette) plus a bare-tip crown (`FlameyArt.monthCrown`, counted in `crest`); progress comes only from the closet's `monthly_flames` (`FlameyMonthlyStore`).
 
+## Run Plans
+Details: docs/conventions/ios.md § Run Plans
+- FoundationModels lives only in `FlameyCoach.swift`, inside `#if canImport(FoundationModels)` + `@available(iOS 26.0, *)`; callers use `FlameyCoach.availability` / `respond(to:context:)`, never `SystemLanguageModel`; no model ⇒ chips only (`unavailableNote`).
+- Every plan number comes from the server engine via `RunPlanStore.shared` (`current?.today` for pre-run/live/Watch); Flamey only picks a `RunPlanAction` → `propose`; never compute or override distances/paces client-side.
+- Show `RunPlanDoctorLine` whenever pain is flagged or the feeling is Sore; keep the Apple Intelligence line by the composer and the Anthropic disclosure on `RunPlanClaudeView`.
+- Run plan dates are `RunPlanDate.todayKey()` (Gregorian `yyyy-MM-dd`), never `DayKeyFormatter`; run-plan DTO numbers use `@RunPlanNumber` (accepts numeric strings).
+
 ## Auth / Session
 Details: docs/conventions/ios.md § Auth / Session
 - "Who am I" = the token's `sub` (`TokenUtils.subject`); `SessionIdentity.enforce()` catches drift; never blanket-sign-out on 403.

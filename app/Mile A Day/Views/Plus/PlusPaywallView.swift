@@ -5,13 +5,14 @@ import SwiftUI
 /// rejects a paywall that sells features that aren't in the build, so a perk
 /// goes here the day it works, never before.
 enum PlusPerk: CaseIterable, Identifiable {
-    case fasterTokens, flameyColors, family, support
+    case fasterTokens, flameyColors, runPlans, family, support
 
     var id: Self { self }
 
     var icon: String {
         switch self {
         case .fasterTokens: return "shield.lefthalf.filled"
+        case .runPlans: return "calendar"
         case .flameyColors: return "paintpalette.fill"
         case .family: return "person.3.fill"
         case .support: return "heart.fill"
@@ -22,6 +23,7 @@ enum PlusPerk: CaseIterable, Identifiable {
         switch self {
         case .fasterTokens: return .cyan
         case .flameyColors: return .orange
+        case .runPlans: return Color(red: 1.0, green: 0.7, blue: 0.28)
         case .family: return .green
         case .support: return MADTheme.Colors.madRed
         }
@@ -31,6 +33,7 @@ enum PlusPerk: CaseIterable, Identifiable {
         switch self {
         case .fasterTokens: return "Streak tokens, faster"
         case .flameyColors: return "Plus-only Flamey looks"
+        case .runPlans: return "Run plans, coached by Flamey"
         case .family: return "Share with your family"
         case .support: return "Keep Mile A Day independent"
         }
@@ -42,6 +45,8 @@ enum PlusPerk: CaseIterable, Identifiable {
             return "Double Down in 5 days instead of 14, Streak Save in 3 runs instead of 7, and a Streak Assist every 14 days instead of 30."
         case .flameyColors:
             return "Electric, Rose Gold, Obsidian and Tropic colors, plus the glow-in-the-dark Skeleton Suit."
+        case .runPlans:
+            return "A plan for your goal, from a first 5K to a marathon, that adjusts to your runs and how you feel. Your daily mile still counts."
         case .family:
             return "One subscription covers up to five family members with Family Sharing."
         case .support:
@@ -58,6 +63,8 @@ enum PlusPerk: CaseIterable, Identifiable {
 struct PlusPaywallView: View {
     enum Context {
         case onboarding, settings, flamey, streakTokens, streakAtRisk
+        /// The Run Plans door (dashboard teaser, lapsed plan).
+        case runPlans
     }
 
     /// Three designs, each for the moment it's shown in:
@@ -67,7 +74,8 @@ struct PlusPaywallView: View {
     /// - `.flamey`: Flamey trying on the Plus looks over the full perk list.
     ///   Settings, and the other arm of the onboarding A/B test.
     /// - `.closet`: a dressing room, for someone who just tapped a locked look.
-    enum Layout { case streak, flamey, closet }
+    /// - `.runPlans`: the coach pitch, for the Run Plans door.
+    enum Layout { case streak, flamey, closet, runPlans }
 
     var context: Context = .settings
     /// A line about THIS user's tokens ("You're 2 runs from a Streak Save…"),
@@ -110,6 +118,7 @@ struct PlusPaywallView: View {
         case .streakTokens, .streakAtRisk: return .streak
         case .flamey: return .closet
         case .settings: return .flamey
+        case .runPlans: return .runPlans
         }
     }
 
@@ -142,6 +151,7 @@ struct PlusPaywallView: View {
                             case .flamey: flameyContent
                             case .streak: streakContent
                             case .closet: closetContent
+                            case .runPlans: runPlansContent
                             }
                         }
                     }
@@ -209,6 +219,7 @@ struct PlusPaywallView: View {
         case .streak: return Color(red: 0.37, green: 0.78, blue: 1.0)
         case .flamey: return .orange
         case .closet: return Color(red: 1.0, green: 0.55, blue: 0.62)
+        case .runPlans: return .orange
         }
     }
 
@@ -250,6 +261,7 @@ struct PlusPaywallView: View {
         case .flamey: return "Dress Flamey in looks only Plus members have."
         case .onboarding: return "Your daily mile is free, forever. Plus makes protecting your streak easier and Flamey a lot more fun."
         case .settings: return "Everything you love about Mile A Day stays free. Plus is a little extra."
+        case .runPlans: return "Your coach, in your pocket."
         }
     }
 
@@ -533,6 +545,77 @@ struct PlusPaywallView: View {
         }
     }
 
+    // MARK: Layout D — Run Plans (the coach)
+
+    /// Flamey, the coach headline and four perks; Yearly / Monthly ride the
+    /// pinned bar like the streak layout.
+    @ViewBuilder
+    private var runPlansContent: some View {
+        HStack(alignment: .center, spacing: 12) {
+            FlameBuddyView(health: .healthy, size: 64, still: true, showsMoodBubble: false,
+                           look: FlameyFacts.look(detail: .compact), wardrobeReach: 0.8)
+                .frame(width: 64, height: 64)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("MILE A DAY+")
+                    .madFont(size: 12, weight: .black, design: .rounded, maxScale: 1.3)
+                    .tracking(1.4)
+                    .foregroundColor(.orange)
+                Text(headline)
+                    .madFont(size: 25, weight: .black, design: .rounded, maxScale: 1.4)
+                    .foregroundColor(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, MADTheme.Spacing.xl)
+        .padding(.trailing, 28)
+
+        VStack(alignment: .leading, spacing: 14) {
+            coachPerk(icon: "calendar", tint: .orange, title: "A plan built for your goal",
+                      detail: "First 5K to marathon, around your daily mile.")
+            coachPerk(icon: "waveform.path.ecg", tint: Color(red: 0.25, green: 0.6, blue: 0.95), title: "It reads your runs",
+                      detail: "Slower than target or walking more? Tomorrow adjusts.")
+            coachPerk(icon: "face.smiling", tint: .green, title: "Tell it how you feel",
+                      detail: "Tired, sore, or fired up. The week reshapes itself.")
+            coachPerk(icon: "powerplug.fill", tint: Color(red: 1.0, green: 0.7, blue: 0.28), title: "Connect Claude",
+                      detail: "Optional: let Claude review your training in depth.")
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(card)
+
+        Text("Plus also includes faster Streak Saves, Plus-only Flamey looks and Family Sharing.")
+            .madFont(size: 13, weight: .semibold, design: .rounded)
+            .foregroundColor(.white.opacity(0.55))
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        if store.products.isEmpty { plans }
+    }
+
+    private func coachPerk(icon: String, tint: Color, title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .madFont(size: 15, weight: .bold, maxScale: 1.3)
+                .foregroundColor(tint)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(tint.opacity(0.15)))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .madFont(size: 15, weight: .black, design: .rounded)
+                    .foregroundColor(.white)
+                Text(detail)
+                    .madFont(size: 13, weight: .medium, design: .rounded)
+                    .foregroundColor(.white.opacity(0.62))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
     // MARK: Layout C — Closet try-on
 
     @ViewBuilder
@@ -646,6 +729,8 @@ struct PlusPaywallView: View {
 
     private var extras: some View {
         VStack(spacing: 0) {
+            extraRow(PlusPerk.runPlans)
+            Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 52)
             extraRow(PlusPerk.flameyColors)
             Divider().overlay(Color.white.opacity(0.08)).padding(.leading, 52)
             extraRow(PlusPerk.family)
@@ -834,7 +919,7 @@ struct PlusPaywallView: View {
 
     private var purchaseBar: some View {
         VStack(spacing: 8) {
-            if layout == .streak && !store.products.isEmpty {
+            if (layout == .streak || layout == .runPlans) && !store.products.isEmpty {
                 billingToggle
             }
             purchaseButton
