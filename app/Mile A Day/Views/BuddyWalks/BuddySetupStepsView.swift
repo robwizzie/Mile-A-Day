@@ -48,6 +48,13 @@ struct BuddySetupStepsView: View {
     /// second one beside it.
     @State private var pendingTwin: JoinableFriendSession?
     @State private var joiningId: String?
+    /// The find step's search phase — shown at least briefly so it reads as
+    /// a search even when every answer was already cached.
+    @State private var isSearching = true
+    /// The find-step suggestion whose one-tap action is in flight.
+    @State private var actingSuggestionId: String?
+    /// "Walk with Sam again" from the history screen, claimed once at open.
+    @State private var walkAgainUserId: String?
 
     /// Last setup, restored on open.
     ///
@@ -143,6 +150,13 @@ struct BuddySetupStepsView: View {
         }
         .task {
             restoreLastSetup()
+            claimWalkAgainHandoff()
+            let searchStarted = Date()
+            // A slow network must never hold the search screen hostage.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(4))
+                finishSearching()
+            }
             // Both already prefetched on the dashboard, so this opens
             // populated and these are a refresh, not a blocking load. Run
             // concurrently — they have nothing to do with each other.
@@ -150,11 +164,32 @@ struct BuddySetupStepsView: View {
             async let routines: Void = buddy.loadRoutines()
             async let partners: Void = buddy.loadPartners()
             async let sessions: Void = buddy.refreshMySessions()
-            _ = await (candidates, routines, partners, sessions)
+            // "I'm looking" + who else is: the Jam signal.
+            async let looking: Void = buddy.markLooking(activityType: activityType)
+            async let out: Void = buddy.refreshFriendsOutNow()
+            _ = await (candidates, routines, partners, sessions, looking, out)
             // Friends' walks starting right now — offered at the top so two
             // people standing together end up in ONE walk.
             await buddy.refreshJoinableFriendSessions()
+            let shown = Date().timeIntervalSince(searchStarted)
+            if shown < 1.2 { try? await Task.sleep(for: .seconds(1.2 - shown)) }
+            finishSearching()
+
+            // Keep looking while the screen is open, so a friend who opens
+            // buddy walks a minute from now still turns up — and an invite
+            // they send lands here without a refresh. Cancelled with the view.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(20))
+                guard !Task.isCancelled else { break }
+                async let beat: Void = buddy.markLooking(activityType: activityType)
+                async let mine: Void = buddy.refreshMySessions()
+                async let rooms: Void = buddy.refreshJoinableFriendSessions()
+                _ = await (beat, mine, rooms)
+            }
         }
+        // Closing setup (or moving on to a lobby) ends the search for
+        // everyone else too. The server also forgets it after 150s.
+        .onDisappear { Task { await buddy.stopLooking() } }
         .confirmationDialog(
             pendingTwin.map { "\($0.hostDisplayName) already started a \($0.isRunning ? "run" : "walk")" } ?? "",
             isPresented: Binding(get: { pendingTwin != nil }, set: { if !$0 { pendingTwin = nil } }),
@@ -183,8 +218,13 @@ struct BuddySetupStepsView: View {
 
     // MARK: - Per-step content
 
+    private var suggestions: [BuddySuggestion] {
+        BuddySuggestion.ranked(buddy: buddy, walkAgainUserId: walkAgainUserId)
+    }
+
     private var stepGlyph: WizardGlyph {
         switch step {
+        case .find: return .symbol(isSearching ? "dot.radiowaves.left.and.right" : "figure.2")
         case .who: return .symbol("person.2.fill")
         case .activity: return .symbol("figure.walk")
         // The plan step's glyph is the two figures, not a mode's icon: every
@@ -197,6 +237,9 @@ struct BuddySetupStepsView: View {
 
     private var stepTitle: String {
         switch step {
+        case .find:
+            if isSearching { return "Finding Your Buddy" }
+            return suggestions.isEmpty ? "Walk With a Friend" : "Walk Together?"
         case .who: return "Who's Coming?"
         case .activity: return "Choose Activity Type"
         case .plan: return "Choose Your Mode"
@@ -206,6 +249,11 @@ struct BuddySetupStepsView: View {
 
     private var stepSubtitle: String {
         switch step {
+        case .find:
+            if isSearching { return "Seeing which friends are free right now." }
+            return suggestions.isEmpty
+                ? "Nobody's out or looking yet."
+                : "One tap and you're in a lobby together."
         case .who:
             return "Pick who's in, or make the lobby and invite from there."
         // Word for word the solo wizard's line, on purpose.
@@ -218,7 +266,17 @@ struct BuddySetupStepsView: View {
     @ViewBuilder
     private var stepContent: some View {
         switch step {
+        case .find:
+            BuddyFindContent(
+                isSearching: isSearching,
+                suggestions: suggestions,
+                actingId: actingSuggestionId,
+                onAct: act(on:),
+                onChooseOthers: { advance(to: .who) }
+            )
+
         case .who:
+            lookingNowSection
             startingNowSection
             invitesSection
             partnersSection
@@ -295,6 +353,85 @@ struct BuddySetupStepsView: View {
             advance(to: .goal)
         } else {
             Task { await create() }
+        }
+    }
+
+    // MARK: - Find
+
+    private func finishSearching() {
+        guard isSearching else { return }
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) { isSearching = false }
+    }
+
+    /// The history screen's "Walk with Sam again" leaves Sam's id here. Read
+    /// once and cleared, so it only ever suggests the walk it was tapped for.
+    private func claimWalkAgainHandoff() {
+        let key = "buddyLastInviteesV1"
+        guard walkAgainUserId == nil,
+              let id = UserDefaults.standard.string(forKey: key), !id.isEmpty else { return }
+        UserDefaults.standard.removeObject(forKey: key)
+        walkAgainUserId = id
+    }
+
+    /// A suggestion's one tap: join what's waiting, or make a Just Together
+    /// lobby with them in it. The lobby can still change the plan, so this
+    /// never decides anything that can't be undone before anyone moves.
+    private func act(on suggestion: BuddySuggestion) {
+        guard actingSuggestionId == nil else { return }
+        actingSuggestionId = suggestion.id
+        MADHaptics.action()
+        Task {
+            do {
+                switch suggestion.action {
+                case .acceptInvite(let sessionId):
+                    try await buddy.join(sessionId: sessionId)
+                    if let joined = buddy.session { onCreated(joined) }
+                case .join(let open):
+                    try await buddy.join(sessionId: open.sessionId)
+                    if let joined = buddy.session { onCreated(joined) }
+                case .askOutNow(let friend):
+                    try await buddy.askFriendToWalk(friend)
+                    if let made = buddy.session { onCreated(made) }
+                case .invite(let userId, let theirActivity):
+                    let state = try await buddy.createSession(
+                        mode: .together,
+                        goalValue: nil,
+                        activityType: theirActivity ?? activityType,
+                        inviteUserIds: [userId],
+                        origin: .invite
+                    )
+                    onCreated(state)
+                }
+                MADHaptics.success()
+            } catch {
+                MADHaptics.error()
+                buddy.errorMessage =
+                    (error as? LocalizedError)?.errorDescription ?? "Couldn't start that walk."
+            }
+            actingSuggestionId = nil
+        }
+    }
+
+    /// Friends whose buddy setup is open right now, pickable like any friend
+    /// — at the top of the list, because they're the ones deciding with you.
+    private var lookingNowCandidates: [BuddyCandidate] {
+        let looking = Set(buddy.lookingFriends.map(\.userId))
+        return buddy.candidates.filter { looking.contains($0.userId) }
+    }
+
+    @ViewBuilder
+    private var lookingNowSection: some View {
+        if !lookingNowCandidates.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                sectionTitle("Looking right now")
+                VStack(spacing: 0) {
+                    ForEach(Array(lookingNowCandidates.enumerated()), id: \.element.id) { index, candidate in
+                        if index > 0 { Divider().background(Color.white.opacity(0.12)) }
+                        friendRow(candidate)
+                    }
+                }
+                .background(panel())
+            }
         }
     }
 
@@ -884,26 +1021,37 @@ struct BuddySetupStepsView: View {
 
     // MARK: - Friends
 
+    /// Everyone pickable who isn't already in "Looking right now".
+    private var otherCandidates: [BuddyCandidate] {
+        let looking = Set(lookingNowCandidates.map(\.userId))
+        return buddy.candidates.filter { !looking.contains($0.userId) }
+    }
+
+    @ViewBuilder
     private var friendSection: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            HStack {
-                sectionTitle("Who's coming?")
-                Spacer()
+        // Everyone pickable is already in "Looking right now": no second,
+        // empty list under it.
+        if buddy.candidates.isEmpty || !otherCandidates.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                HStack {
+                    sectionTitle("Who's coming?")
+                    Spacer()
 
-            }
-
-            if buddy.candidates.isEmpty {
-                emptyFriendsCard
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(buddy.candidates.enumerated()), id: \.element.id) { index, candidate in
-                        if index > 0 {
-                            Divider().background(Color.white.opacity(0.12))
-                        }
-                        friendRow(candidate)
-                    }
                 }
-                .background(panel())
+
+                if buddy.candidates.isEmpty {
+                    emptyFriendsCard
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(otherCandidates.enumerated()), id: \.element.id) { index, candidate in
+                            if index > 0 {
+                                Divider().background(Color.white.opacity(0.12))
+                            }
+                            friendRow(candidate)
+                        }
+                    }
+                    .background(panel())
+                }
             }
         }
     }

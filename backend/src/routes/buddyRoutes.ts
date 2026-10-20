@@ -8,6 +8,7 @@ import {
   finishController,
   inviteCandidatesController,
   joinableFriendSessionsController,
+  lookingController,
   joinByCodeController,
   joinSessionController,
   leaveSessionController,
@@ -17,6 +18,7 @@ import {
   recapController,
   sessionStateController,
   startSessionController,
+  stopLookingController,
   startSessionNowController,
   setJoinPolicyController,
   mergeSessionController,
@@ -45,6 +47,11 @@ router.get("/candidates", inviteCandidatesController);
 // Friends walking RIGHT NOW that the caller could join. The deliberate,
 // permission-free substitute for ambient proximity sensing (see the service).
 router.get("/joinable", joinableFriendSessionsController);
+// "Looking for a buddy right now": a heartbeat while the setup screen is open,
+// answered with the friends who are looking too (the Spotify-Jam moment).
+// Pull only, no location (see buddyLookingService).
+router.post("/looking", lookingController);
+router.delete("/looking", stopLookingController);
 
 // Static segments MUST precede "/sessions/:sessionId/..." or "mine" and "join"
 // get captured as session ids — the same ordering trap the /friends/close

@@ -21,6 +21,7 @@ Details: docs/conventions/backend.md § Backend Conventions
 - Keep `JOIN_POLICY_ALLOWS_SQL` and `assertJoinPolicyAllows` in agreement; restricted walks: `join_closed`, `invites_host_only`. Check: `buddy-join-policy-check`.
 - `mergeSession` joins via `joinSession`, returns `left_behind`, cancels the source silently with `merged_into`. Check: `buddy-merge-check`.
 - `…/invite` for any member/phase; `…/request` parks `'requested'` (no slot; only in `join_requests`, never `participants`); one `JOINABLE_WINDOW_SQL`.
+- `buddy_looking` is a 150s heartbeat (`markLookingAndList`): friends-only, enrolled, opted in, blocks both ways, and `share_live_presence` SYMMETRIC (not recorded, sees nobody); create/join clear it; never push, never location. Check: `buddy-looking-check`.
 - A join into a running session lands `'active'`; keep `getJoinableFriendSessions` = `friendsOutNow`; cancel releases as `'left'`, never `'finished'`.
 - Buddy day = HOST's (`SESSION_LOCAL_DATE_SQL`); `closeSession` runs `linkSyncedWorkouts` first; no-progress sweep CANCELS; `startSessionNow` moves `ends_at`. Check: `buddy-lifecycle-check`.
 - Gaps-and-islands: `ORDER BY d DESC` pairs with `d + rn`, ASC with `d - rn`; verify on seeded dates.

@@ -701,6 +701,13 @@
       "when": 1792030246298,
       "tag": "0099_plus_purchases",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1792457578358,
+      "tag": "0100_buddy_looking",
+      "breakpoints": true
     }
   ]
 }

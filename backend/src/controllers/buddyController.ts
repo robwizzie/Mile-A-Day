@@ -3,6 +3,10 @@ import { AuthenticatedRequest } from "../middleware/auth.js";
 import { BadRequestError } from "../errors/Errors.js";
 import { buddySessionsEnabled } from "../services/buddyFeatures.js";
 import {
+  clearLooking,
+  markLookingAndList,
+} from "../services/buddyLookingService.js";
+import {
   BUDDY_ACTIVITY_TYPES,
   BUDDY_JOIN_POLICIES,
   BUDDY_LOCATION_TYPES,
@@ -167,6 +171,55 @@ export async function joinableFriendSessionsController(
   }
 }
 
+/**
+ * POST /buddy/looking — "I'm looking for a buddy right now" (a heartbeat while
+ * the setup screen is open). Returns the friends who are looking too.
+ */
+export async function lookingController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    const activityType = req.body?.activityType;
+    if (
+      activityType !== undefined &&
+      activityType !== null &&
+      !BUDDY_ACTIVITY_TYPES.includes(activityType as BuddyActivityType)
+    ) {
+      return res.status(400).json({ error: "invalid_activity_type" });
+    }
+    const looking = await markLookingAndList(
+      req.userId!,
+      (activityType ?? null) as BuddyActivityType | null,
+    );
+    res.json({ looking });
+  } catch (error) {
+    handleError(res, error, "recording buddy looking");
+  }
+}
+
+/** DELETE /buddy/looking — the setup screen closed. Idempotent. */
+export async function stopLookingController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    await clearLooking(req.userId!);
+    res.json({ ok: true });
+  } catch (error) {
+    handleError(res, error, "clearing buddy looking");
+  }
+}
+
+/** Making or joining a walk ends the search; never fails the walk. */
+function stopLookingQuietly(userId: string): void {
+  clearLooking(userId).catch((error) =>
+    console.error("Error clearing buddy looking:", error),
+  );
+}
+
 export async function createSessionController(
   req: AuthenticatedRequest,
   res: Response,
@@ -218,6 +271,7 @@ export async function createSessionController(
       scheduledStartAt: scheduled,
       joinPolicy: (joinPolicy ?? undefined) as BuddyJoinPolicy | undefined,
     });
+    stopLookingQuietly(req.userId!);
     res.status(201).json(state);
   } catch (error) {
     handleError(res, error, "creating buddy session");
@@ -366,14 +420,14 @@ export async function joinSessionController(
     if (activityType === INVALID_ACTIVITY) {
       return res.status(400).json({ error: "invalid_activity_type" });
     }
-    res.json(
-      await joinSession(req.userId!, {
-        sessionId: req.params.sessionId,
-        code,
-        locationType,
-        activityType,
-      }),
-    );
+    const joined = await joinSession(req.userId!, {
+      sessionId: req.params.sessionId,
+      code,
+      locationType,
+      activityType,
+    });
+    stopLookingQuietly(req.userId!);
+    res.json(joined);
   } catch (error) {
     handleError(res, error, "joining buddy session");
   }
@@ -393,7 +447,9 @@ export async function joinByCodeController(
     if (locationType === INVALID_LOCATION) {
       return res.status(400).json({ error: "invalid_location_type" });
     }
-    res.json(await joinSession(req.userId!, { code, locationType }));
+    const joined = await joinSession(req.userId!, { code, locationType });
+    stopLookingQuietly(req.userId!);
+    res.json(joined);
   } catch (error) {
     handleError(res, error, "joining buddy session by code");
   }

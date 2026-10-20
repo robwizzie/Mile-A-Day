@@ -68,6 +68,7 @@ Details: docs/conventions/ios.md § Key Patterns
 - Two friends starting end in one walk (`twinWalk`); follow `merged_into`; never restore invitees.
 - Mid-walk invites use `buddy.invite(userIds:)`, never `updateSession`; route `buddy_join_request` like `buddy_joined`; declare `ClientFeatures.buddyJoinRequestV1`.
 - Buddy setup is steps of the shared wizard chrome (`BuddyWalkFlowView`), never a sheet/cover; `WizardPalette.accent` is white; extract children from `WorkoutTrackingView`'s body; errors via `buddy.errorMessage`.
+- Buddy setup OPENS on `.find`: `BuddySuggestion.ranked` (invites → walk-again → `lookingFriends` → rooms → out-now → partners), one-tap actions; heartbeat `markLooking` while setup is open, `stopLooking` on disappear; no location/Bluetooth.
 - Store/score/sync miles; convert only at the formatter (`DistanceUnits.current`); no bare `"… mi"` literals (widgets keep miles).
 - Icon-only controls get `.accessibilityLabel` on the glyph (`.accessibilityHidden(true)` beside text); guard every loop with `accessibilityReduceMotion`.
 - Dynamic Type via `.madFont(...)`/`@MADScaledMetric`, capped with `.madTypeCap` below any `.sheet`, never `.dynamicTypeSize`; never scale baked images.

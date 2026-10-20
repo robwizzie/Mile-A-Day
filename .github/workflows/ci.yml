@@ -79,6 +79,11 @@ jobs:
       # and the host-only lobby PATCH.
       - name: Buddy gate + lobby-edit check
         run: node scripts/buddy-gate-check.mjs
+      # "Looking for a buddy right now" (the buddy setup's first screen): every
+      # friend it returns is one tap from an invite, so it must hold the
+      # picker's gates, blocks both ways and the live-presence opt-out.
+      - name: Buddy looking check
+        run: node scripts/buddy-looking-check.mjs
       # Cross-app duplicate detection. An app that records a FRAGMENT of a walk
       # another app already recorded fails every distance-agreement test while
       # being unambiguously the same walk — which is how a 1.84 mi walk counted

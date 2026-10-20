@@ -21,13 +21,17 @@ enum BuddyWalkFlowEntry: String, Identifiable, Hashable {
 /// top bar is rendered once for the whole flow: it needs to know which segment
 /// to fill, and Back has to be able to walk the steps from outside them.
 enum BuddySetupStep: Equatable {
+    /// The first thing setup does: look for friends to walk with RIGHT NOW
+    /// and offer the best one, Spotify-Jam style (`BuddyFindContent`).
+    case find
     case who, activity, plan, goal
 
     /// The goal is a SUB-step of the plan — it shares the third segment the
-    /// way the solo flow's ghost options share its third.
+    /// way the solo flow's ghost options share its third. Finding and picking
+    /// are one question ("who?"), so they share the first.
     var indicator: Int {
         switch self {
-        case .who: return 1
+        case .find, .who: return 1
         case .activity: return 2
         case .plan, .goal: return 3
         }
@@ -80,7 +84,7 @@ struct BuddyWalkFlowView: View {
     }
 
     @State private var stage: Stage
-    @State private var setupStep: BuddySetupStep = .who
+    @State private var setupStep: BuddySetupStep = .find
     /// Set OUTSIDE the animated state change, or the enclosing transaction
     /// picks the edge before this has flipped (ios.md). Shared by the stage
     /// machine and the setup steps so one back tap can't slide two ways.
@@ -241,7 +245,8 @@ struct BuddyWalkFlowView: View {
         switch stage {
         case .setup:
             switch setupStep {
-            case .who: onExit()
+            case .find: onExit()
+            case .who: retreat(setupTo: .find)
             case .activity: retreat(setupTo: .who)
             case .plan: retreat(setupTo: .activity)
             case .goal: retreat(setupTo: .plan)

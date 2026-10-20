@@ -240,6 +240,39 @@ final class BuddySessionService: ObservableObject {
         }
     }
 
+    // MARK: - Looking (the Jam moment)
+
+    /// Friends whose buddy setup is open right now, newest first. Filled by
+    /// `markLooking`, the heartbeat the setup screen runs while it's open.
+    @Published private(set) var lookingFriends: [BuddyLookingFriend] = []
+
+    /// "I'm looking for a buddy right now" — and who else is. Silent on
+    /// failure and KEEPS the last list (same reasoning as `loadCandidates`):
+    /// this decorates a screen nobody is waiting on, and a blip must not make
+    /// a friend who's looking vanish from it.
+    func markLooking(activityType: String?) async {
+        guard currentUserId != nil else { return }
+        var json: [String: Any] = [:]
+        if let activityType { json["activityType"] = activityType }
+        do {
+            lookingFriends = try await request(
+                "/buddy/looking", method: .POST, json: json,
+                responseType: BuddyLookingResponse.self
+            ).looking
+        } catch {
+            print("[BuddySessionService] markLooking failed: \(error)")
+        }
+    }
+
+    /// The setup screen closed. Best effort: the server also forgets a
+    /// heartbeat after 150s, and making or joining a walk clears it there.
+    func stopLooking() async {
+        guard currentUserId != nil else { return }
+        lookingFriends = []
+        _ = try? await request(
+            "/buddy/looking", method: .DELETE, responseType: BuddyOKResponse.self)
+    }
+
     /// Start a walk *because* a friend is already out, and invite them into it.
     ///
     /// Mirrors their activity so you're doing the same thing they are, and
