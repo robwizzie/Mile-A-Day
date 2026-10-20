@@ -89,9 +89,12 @@ struct StickerConfig: Equatable, Codable {
     /// Transform bounds, owned HERE so every consumer of a persisted config
     /// (composer gestures, decode-time sanitizing, any future render path)
     /// enforces the same invariant.
-    static let scaleRange: ClosedRange<CGFloat> = 0.6...1.9
-    static let posXRange: ClosedRange<CGFloat> = 0.12...0.88
-    static let posYRange: ClosedRange<CGFloat> = 0.1...0.9
+    /// Wide on purpose: the editor (`StickerGestureSurface`) bounds a live
+    /// pinch by the sticker's real size, and a sticker may hang off the edge
+    /// the way Instagram's do as long as its centre stays on the photo.
+    static let scaleRange: ClosedRange<CGFloat> = 0.25...6
+    static let posXRange: ClosedRange<CGFloat> = 0...1
+    static let posYRange: ClosedRange<CGFloat> = 0...1
 
     var style: StickerStyle = .card
     var accent: StickerAccent = .orange

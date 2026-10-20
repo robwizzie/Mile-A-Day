@@ -10,22 +10,30 @@ import CoreLocation
 // may depend on a view lifecycle (ImageRenderer drives none): fixed sizes,
 // no AsyncImage, every figure `still: true`.
 
-/// One of Flamey's stickers: a mood that renders still, plus a tag.
+/// One of Flamey's stickers: a still mood, an arm pose, and a tag.
 ///
-/// Each is a real `FlameBuddyView` in the user's OWN look
-/// (`FlameyFacts.ownLook`) — the Flamey they dressed in the Closet, whatever
-/// the dashboard style — so the sticker is recognisably theirs.
+/// Drawn twice over: in the user's OWN look (`.flamey`, the Flamey they
+/// dressed in the Closet, whatever the dashboard style) and as the basic,
+/// undressed Flamey (`.basicFlamey`), the sticker-pack version everybody
+/// knows. Both are the real figure (`FlameyDressedFigure`), never art.
+///
+/// Raw values are persisted (`StickerMemory`): add cases, never rename.
 enum FlameySticker: String, CaseIterable, Identifiable {
-    case mileDone, onFire, closeCall, riseAndRun, justFlamey
+    case mileDone, onFire, highFive, letsGo, tooEasy, noDaysOff, closeCall, riseAndRun, fiveMore, justFlamey
     var id: String { rawValue }
 
-    /// The tray tile's label.
+    /// The picker tile's label.
     var title: String {
         switch self {
         case .mileDone: return "Mile done"
         case .onFire: return "On fire"
+        case .highFive: return "High five"
+        case .letsGo: return "Let's go"
+        case .tooEasy: return "Too easy"
+        case .noDaysOff: return "No days off"
         case .closeCall: return "Close call"
         case .riseAndRun: return "Rise & run"
+        case .fiveMore: return "5 more min"
         case .justFlamey: return "Just him"
         }
     }
@@ -35,11 +43,24 @@ enum FlameySticker: String, CaseIterable, Identifiable {
     /// a picture reads as a caption nobody wrote.
     var mood: FlameMood.Kind? {
         switch self {
-        case .mileDone: return .done
+        case .mileDone, .highFive, .tooEasy: return .done
         case .onFire: return .party
+        case .letsGo: return .halfway
+        case .noDaysOff: return .going
         case .closeCall: return .nervous
         case .riseAndRun: return .sleepy
+        case .fiveMore: return .bedtime
         case .justFlamey: return nil
+        }
+    }
+
+    /// How he holds his arms; nil = the mood's own pose.
+    var arms: FlameArmPose? {
+        switch self {
+        case .highFive, .noDaysOff: return .highFive
+        case .letsGo, .tooEasy: return .cheer
+        case .fiveMore: return .tucked
+        default: return nil
         }
     }
 
@@ -49,11 +70,72 @@ enum FlameySticker: String, CaseIterable, Identifiable {
         case .onFire:
             if let streak, streak > 0 { return "DAY \(streak)" }
             return "ON FIRE"
+        case .highFive: return "UP TOP!"
+        case .letsGo: return "LET'S GO!"
+        case .tooEasy: return "TOO EASY"
+        case .noDaysOff: return "NO DAYS OFF"
         case .closeCall: return "THAT WAS CLOSE"
         case .riseAndRun: return "RISE & RUN"
+        case .fiveMore: return "5 MORE MINUTES"
         case .justFlamey: return nil
         }
     }
+
+    /// Words the picker's search matches besides the title.
+    var keywords: String {
+        "flamey flame mascot \(title) \(tag(streak: nil) ?? "")".lowercased()
+    }
+}
+
+/// Text stickers: a word or two on a pill, the Instagram "badge" kind.
+/// Raw values are persisted (`StickerMemory`): add cases, never rename.
+enum FunBadge: String, CaseIterable, Identifiable {
+    case dayCount, clock, buddies, noDaysOff, rainOrShine, touchedGrass, streakMode, mileADay
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .dayCount: return "Day count"
+        case .clock: return "Time"
+        case .buddies: return "Crew"
+        case .noDaysOff: return "No days off"
+        case .rainOrShine: return "Rain or shine"
+        case .touchedGrass: return "Touched grass"
+        case .streakMode: return "Streak mode"
+        case .mileADay: return "Mile a Day"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .dayCount, .streakMode: return "flame.fill"
+        case .clock: return "clock.fill"
+        case .buddies: return "person.2.fill"
+        case .noDaysOff: return "bolt.fill"
+        case .rainOrShine: return "cloud.sun.rain.fill"
+        case .touchedGrass: return "leaf.fill"
+        case .mileADay: return "figure.walk"
+        }
+    }
+
+    /// The words on the pill. `captured` is what was frozen when the sticker
+    /// was added (the time, the crew, the day number), so a bake a minute
+    /// later can't print something different from what was on screen.
+    func text(captured: String?) -> String {
+        if let captured, !captured.isEmpty { return captured }
+        switch self {
+        case .dayCount: return "DAY ONE"
+        case .clock: return "MILE O'CLOCK"
+        case .buddies: return "BUDDY WALK"
+        case .noDaysOff: return "NO DAYS OFF"
+        case .rainOrShine: return "RAIN OR SHINE"
+        case .touchedGrass: return "TOUCHED GRASS ✓"
+        case .streakMode: return "STREAK MODE"
+        case .mileADay: return "MILE A DAY"
+        }
+    }
+
+    var keywords: String { "text badge \(title) \(text(captured: nil))".lowercased() }
 }
 
 /// How the route sticker draws the walk's trace.
@@ -81,19 +163,23 @@ extension CaseIterable where Self: Equatable {
     }
 }
 
-/// What a sticker IS. Each case is also a slot: a photo carries at most one
-/// sticker per slot (`slot`), so the tray can show a plain on/off state for
-/// every tile instead of a pile of duplicates nobody asked for.
+/// What a sticker IS. Most kinds can be added as often as you like, the way
+/// Instagram's can; `isSingleton` kinds (the stats card, the route, each
+/// number) hold one per photo, and adding one again restyles the one there.
 enum PostStickerKind: Hashable {
     /// The run-stats sticker, styled by the composer's `StickerConfig`.
     case stats
+    /// Flamey in the user's own Closet look.
     case flamey(FlameySticker)
+    /// The basic, undressed Flamey: the sticker-pack set.
+    case basicFlamey(FlameySticker)
     case route(RouteStickerStyle)
     /// One big number, Strava-style: "3.12 mi", "28:41", "42 day streak".
     case number(RunStatKind)
+    case badge(FunBadge)
 
     enum Slot: Hashable {
-        case stats, flamey, route
+        case stats, flamey, basicFlamey, route, badge
         case number(RunStatKind)
     }
 
@@ -101,8 +187,18 @@ enum PostStickerKind: Hashable {
         switch self {
         case .stats: return .stats
         case .flamey: return .flamey
+        case .basicFlamey: return .basicFlamey
         case .route: return .route
         case .number(let kind): return .number(kind)
+        case .badge: return .badge
+        }
+    }
+
+    /// One per photo: adding it again restyles the one already there.
+    var isSingleton: Bool {
+        switch self {
+        case .stats, .route, .number: return true
+        case .flamey, .basicFlamey, .badge: return false
         }
     }
 
@@ -113,18 +209,21 @@ enum PostStickerKind: Hashable {
     var defaultPosition: CGPoint {
         switch self {
         case .stats: return CGPoint(x: 0.5, y: 0.82)
-        case .flamey: return CGPoint(x: 0.74, y: 0.58)
+        case .flamey, .basicFlamey: return CGPoint(x: 0.74, y: 0.58)
         case .route: return CGPoint(x: 0.36, y: 0.46)
         case .number: return CGPoint(x: 0.34, y: 0.2)
+        case .badge: return CGPoint(x: 0.5, y: 0.5)
         }
     }
 
     var accessibilityName: String {
         switch self {
         case .stats: return "Stats sticker"
-        case .flamey(let f): return "Flamey sticker, \(f.title)"
+        case .flamey(let f): return "Your Flamey sticker, \(f.title)"
+        case .basicFlamey(let f): return "Flamey sticker, \(f.title)"
         case .route(let s): return "Route sticker, \(s.title)"
         case .number(let k): return "\(k.label) sticker"
+        case .badge(let b): return "\(b.title) sticker"
         }
     }
 }
@@ -137,18 +236,30 @@ struct PlacedSticker: Identifiable, Equatable {
     var pos: CGPoint
     var scale: CGFloat = 1
     var rotation: Angle = .zero
+    /// This sticker's own colour; nil = the composer's default
+    /// (`StickerConfig.accent`).
+    var accent: StickerAccent? = nil
+    /// Which look a tap has cycled a badge to.
+    var variant: Int = 0
+    /// Words frozen when it was added (a badge's time, crew, day number).
+    var text: String? = nil
 
-    init(kind: PostStickerKind, pos: CGPoint? = nil, scale: CGFloat = 1, rotation: Angle = .zero) {
+    init(kind: PostStickerKind, pos: CGPoint? = nil, scale: CGFloat = 1, rotation: Angle = .zero,
+         accent: StickerAccent? = nil, variant: Int = 0, text: String? = nil) {
         self.kind = kind
         self.pos = pos ?? kind.defaultPosition
         self.scale = scale
         self.rotation = rotation
+        self.accent = accent
+        self.variant = variant
+        self.text = text
     }
 
     /// The same sticker under a new identity — used when one view's stickers
     /// are copied onto the other, so the two layers never share view ids.
     func duplicated() -> PlacedSticker {
-        PlacedSticker(kind: kind, pos: pos, scale: scale, rotation: rotation)
+        PlacedSticker(kind: kind, pos: pos, scale: scale, rotation: rotation,
+                      accent: accent, variant: variant, text: text)
     }
 }
 
@@ -164,7 +275,7 @@ struct StickerRenderContext: Equatable {
 
 /// The walk's trace, already projected into the sticker's own frame.
 ///
-/// Built ONCE from the privacy-trimmed coordinates (`make`), so the editor
+/// Built ONCE from the walk's coordinates (`make`), so the editor
 /// never re-projects thousands of GPS samples per frame, and compared by key +
 /// count so equality is O(1).
 struct RouteStickerTrace: Equatable {
@@ -188,10 +299,10 @@ struct RouteStickerTrace: Equatable {
 
     /// - Parameters:
     ///   - full: the whole route as recorded.
-    ///   - kept: the part `RoutePrivacyTrim` lets leave the phone — a sticker
-    ///     publishes the shape of the walk, so it gets the same
-    ///     hide-start-&-end treatment as every other surface that shares it.
-    ///     Only these points are ever drawn; `full` is read for distances.
+    ///   - kept: the stretch to draw. The composer passes the WHOLE walk: a
+    ///     sticker is the walk's shape with no map under it (Strava's line),
+    ///     so it says how the walk went, not where. Map surfaces keep the
+    ///     server's hide-start-&-end trim; this one is the poster's own call.
     static func make(full: [CLLocationCoordinate2D], kept: ClosedRange<Int>, key: String) -> RouteStickerTrace? {
         guard kept.lowerBound >= 0, kept.upperBound < full.count else { return nil }
         let coordinates = Array(full[kept])
@@ -393,21 +504,36 @@ struct FlameyPostSticker: View {
     let sticker: FlameySticker
     let streak: Int?
     let accent: StickerAccent
+    /// The undressed sticker-pack Flamey instead of the user's own look.
+    var basic: Bool = false
 
     /// Figure size before his outfit is fitted (`ShareDressedFigure`).
     private static let figureSize: CGFloat = 104
 
+    /// 10 March: no holiday, so the basic Flamey never borrows a holiday hat.
+    private static let basicDate: Date = {
+        var c = DateComponents()
+        c.year = 2026; c.month = 3; c.day = 10; c.hour = 12
+        return Calendar.current.date(from: c) ?? Date()
+    }()
+
+    private var look: FlameyLook {
+        let mood = sticker.mood
+        if basic {
+            let props = mood.map { FlameMood(kind: $0, streak: 0).props } ?? []
+            return FlameyLook.resolve(owned: [], choice: .basic, date: Self.basicDate, mood: props)
+        }
+        return FlameyFacts.ownLook(mood: mood)
+    }
+
     var body: some View {
         let mood = sticker.mood
-        let look = FlameyFacts.ownLook(mood: mood)
+        let look = self.look
         VStack(spacing: -4) {
             ShareDressedFigure(envelope: ShareFlameyEnvelope(look: look, mood: mood),
                                size: Self.figureSize, maxWidth: 170, maxHeight: 140) { d in
-                FlameBuddyView(health: .blazing, size: d,
-                               phase: .blazing, coalWarmth: 1,
-                               mood: mood.map { FlameMood(kind: $0, streak: streak ?? 0) },
-                               still: true, showsMoodBubble: false,
-                               look: look)
+                FlameyDressedFigure(look: look, health: .blazing, size: d, scale: 1,
+                                    arms: sticker.arms, mood: mood)
             }
             if let tag = sticker.tag(streak: streak) {
                 Text(tag)
@@ -424,6 +550,46 @@ struct FlameyPostSticker: View {
                     .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 4)
             }
         }
+        .fixedSize()
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Badge
+
+/// A word or two on a pill. A tap cycles `variant` through four looks.
+struct FunBadgeSticker: View {
+    let badge: FunBadge
+    let text: String
+    let accent: StickerAccent
+    let variant: Int
+
+    static let variantCount = 4
+
+    private var dark: Color { Color(red: 0.08, green: 0.06, blue: 0.08) }
+
+    var body: some View {
+        let v = ((variant % Self.variantCount) + Self.variantCount) % Self.variantCount
+        let fills: [Color] = [accent.color, Color.white, Color.black.opacity(0.5), accent.color]
+        let fill = fills[v]
+        let ink: Color = (v == 1 || (accent == .mono && (v == 0 || v == 3))) ? dark : .white
+        HStack(spacing: 7) {
+            Image(systemName: badge.icon)
+                .font(.system(size: v == 3 ? 20 : 16, weight: .heavy))
+            Text(text)
+                .font(.system(size: v == 3 ? 22 : 18, weight: .black, design: .rounded))
+                .tracking(0.6)
+                .monospacedDigit()
+        }
+        .lineLimit(1)
+        .foregroundColor(ink)
+        .padding(.horizontal, v == 3 ? 20 : 16)
+        .padding(.vertical, v == 3 ? 12 : 9)
+        .background(Capsule().fill(fill))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(v == 2 ? 0.55 : 0.3), lineWidth: v == 2 ? 1.5 : 1))
+        .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+        .rotationEffect(.degrees(v == 3 ? -6 : 0))
+        .padding(v == 3 ? 10 : 2)
         .fixedSize()
         .accessibilityHidden(true)
     }
@@ -518,23 +684,57 @@ struct PostStickerView: View, Equatable {
     /// Decided by the composer from where the sticker sits, identically for
     /// the editor and the bake.
     var onBright: Bool = false
+    /// The sticker's own colour (`PlacedSticker.accent`); nil = the default.
+    var accent: StickerAccent? = nil
+    var variant: Int = 0
+    var text: String? = nil
+
+    init(kind: PostStickerKind, context: StickerRenderContext, onBright: Bool = false,
+         accent: StickerAccent? = nil, variant: Int = 0, text: String? = nil) {
+        self.kind = kind
+        self.context = context
+        self.onBright = onBright
+        self.accent = accent
+        self.variant = variant
+        self.text = text
+    }
+
+    /// Everything one placed sticker needs, in one call.
+    init(_ sticker: PlacedSticker, context: StickerRenderContext, onBright: Bool = false) {
+        self.init(kind: sticker.kind, context: context, onBright: onBright,
+                  accent: sticker.accent, variant: sticker.variant, text: sticker.text)
+    }
+
+    private var resolvedAccent: StickerAccent { accent ?? context.config.accent }
 
     var body: some View {
         switch kind {
         case .stats:
-            RunStatsStickerView(input: context.input, config: context.config)
+            RunStatsStickerView(input: context.input, config: statsConfig)
         case .flamey(let sticker):
-            FlameyPostSticker(sticker: sticker, streak: context.input.streak,
-                              accent: context.config.accent)
+            FlameyPostSticker(sticker: sticker, streak: context.input.streak, accent: resolvedAccent)
+        case .basicFlamey(let sticker):
+            FlameyPostSticker(sticker: sticker, streak: context.input.streak, accent: resolvedAccent,
+                              basic: true)
         case .route(let style):
             if let trace = context.route {
-                RouteTraceSticker(trace: trace, style: style, accent: context.config.accent.color,
+                RouteTraceSticker(trace: trace, style: style, accent: resolvedAccent.color,
                                   caption: Self.routeCaption(context.input), onBright: onBright)
             }
         case .number(let stat):
-            NumberPostSticker(kind: stat, input: context.input, accent: context.config.accent,
+            NumberPostSticker(kind: stat, input: context.input, accent: resolvedAccent,
                               onBright: onBright)
+        case .badge(let badge):
+            FunBadgeSticker(badge: badge, text: badge.text(captured: text), accent: resolvedAccent,
+                            variant: variant)
         }
+    }
+
+    private var statsConfig: StickerConfig {
+        guard let accent else { return context.config }
+        var cfg = context.config
+        cfg.accent = accent
+        return cfg
     }
 
     /// "1.02 mi · 9:41" (time only when the walk has one).
