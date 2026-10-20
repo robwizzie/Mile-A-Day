@@ -128,9 +128,13 @@ enum StickerPlacement {
         let base: CGSize
         switch kind {
         case .stats: base = CGSize(width: 0.6, height: 0.3)
-        case .flamey: base = CGSize(width: 0.42, height: 0.4)
+        case .flamey, .basicFlamey: base = CGSize(width: 0.42, height: 0.4)
         case .route: base = CGSize(width: 0.5, height: 0.42)
         case .number: base = CGSize(width: 0.42, height: 0.16)
+        case .badge: base = CGSize(width: 0.5, height: 0.1)
+        case .text: base = CGSize(width: 0.6, height: 0.12)
+        case .emoji: base = CGSize(width: 0.25, height: 0.2)
+        case .pack: base = CGSize(width: 0.42, height: 0.42)
         }
         return CGSize(width: base.width * scale, height: base.height * scale)
     }
@@ -207,6 +211,11 @@ struct StickerMemory: Codable {
         var posY: Double
         var scale: Double
         var rotation: Double
+        // Added with per-sticker colour and badges. Optional, so a memory
+        // written by the previous build still decodes.
+        var accent: String?
+        var variant: Int?
+        var text: String?
     }
 
     var items: [Item]
@@ -231,28 +240,34 @@ struct StickerMemory: Codable {
         items = stickers.compactMap { s in
             guard s.kind != .stats else { return nil }
             return Item(kind: s.kind.memoryKey, posX: s.pos.x, posY: s.pos.y,
-                        scale: s.scale, rotation: s.rotation.degrees)
+                        scale: s.scale, rotation: s.rotation.degrees,
+                        accent: s.accent?.rawValue, variant: s.variant, text: s.text)
         }
         statsOn = stickers.contains { $0.kind == .stats }
     }
 
-    /// The remembered sticker in `slot`, rebuilt — clamped like
-    /// `StickerConfig` clamps its own transform.
-    func sticker(in slot: PostStickerKind.Slot) -> PlacedSticker? {
-        for item in items {
-            guard let kind = PostStickerKind(memoryKey: item.kind), kind.slot == slot else { continue }
-            return PlacedSticker(
-                kind: kind,
-                pos: CGPoint(x: CGFloat(item.posX).clamped(to: StickerConfig.posXRange),
-                             y: CGFloat(item.posY).clamped(to: StickerConfig.posYRange)),
-                scale: CGFloat(item.scale).clamped(to: StickerConfig.scaleRange),
-                rotation: .degrees(item.rotation))
-        }
-        return nil
+    /// Every remembered sticker, rebuilt in the order they were on the photo
+    /// and clamped to today's limits. Unknown kinds (a newer build's) drop.
+    func stickers() -> [PlacedSticker] {
+        items.compactMap(Self.rebuild)
     }
 
-    var slots: [PostStickerKind.Slot] {
-        items.compactMap { PostStickerKind(memoryKey: $0.kind)?.slot }
+    /// The last spot a sticker of exactly this kind was left in.
+    func remembered(_ kind: PostStickerKind) -> PlacedSticker? {
+        items.first { $0.kind == kind.memoryKey }.flatMap(Self.rebuild)
+    }
+
+    private static func rebuild(_ item: Item) -> PlacedSticker? {
+        guard let kind = PostStickerKind(memoryKey: item.kind) else { return nil }
+        return PlacedSticker(
+            kind: kind,
+            pos: CGPoint(x: CGFloat(item.posX).clamped(to: StickerConfig.posXRange),
+                         y: CGFloat(item.posY).clamped(to: StickerConfig.posYRange)),
+            scale: CGFloat(item.scale).clamped(to: StickerConfig.scaleRange),
+            rotation: .degrees(item.rotation),
+            accent: item.accent.flatMap(StickerAccent.init(rawValue:)),
+            variant: item.variant ?? 0,
+            text: item.text)
     }
 }
 
@@ -263,8 +278,13 @@ extension PostStickerKind {
         switch self {
         case .stats: return "stats"
         case .flamey(let f): return "flamey.\(f.rawValue)"
+        case .basicFlamey(let f): return "basicflamey.\(f.rawValue)"
         case .route(let s): return "route.\(s.rawValue)"
         case .number(let k): return "number.\(k.rawValue)"
+        case .badge(let b): return "badge.\(b.rawValue)"
+        case .text(let t): return "text.\(t.rawValue)"
+        case .emoji(let e): return "emoji.\(e)"
+        case .pack(let p): return "pack.\(p.rawValue)"
         }
     }
 
@@ -277,6 +297,21 @@ extension PostStickerKind {
         case "flamey":
             guard let f = FlameySticker(rawValue: raw) else { return nil }
             self = .flamey(f)
+        case "basicflamey":
+            guard let f = FlameySticker(rawValue: raw) else { return nil }
+            self = .basicFlamey(f)
+        case "badge":
+            guard let b = FunBadge(rawValue: raw) else { return nil }
+            self = .badge(b)
+        case "text":
+            guard let t = TextStickerStyle(rawValue: raw) else { return nil }
+            self = .text(t)
+        case "emoji":
+            guard !raw.isEmpty else { return nil }
+            self = .emoji(raw)
+        case "pack":
+            guard let p = FlameyPackSticker(rawValue: raw) else { return nil }
+            self = .pack(p)
         case "route":
             guard let s = RouteStickerStyle(rawValue: raw) else { return nil }
             self = .route(s)
