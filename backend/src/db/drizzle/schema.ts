@@ -3959,3 +3959,170 @@ export const plusGifts = pgTable(
     index("idx_plus_gifts_redeemed_by").on(table.redeemedBy),
   ],
 );
+
+// ─── Run Plans (Mile A Day+) ─────────────────────────────────────────────
+// A training plan built and policed by the rules engine (services/runPlans).
+// One ACTIVE plan per user (partial unique index); ending or replacing a plan
+// archives it, never deletes. Everything a coach (Flamey, Claude, the user)
+// changes goes through the engine's action set and its caps. Entitlement is
+// not stored here: the routes are Plus-gated live (`isPlusActive`).
+export const runPlans = pgTable(
+  "run_plans",
+  {
+    planId: uuid("plan_id").defaultRandom().primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    // 'active' | 'archived'
+    status: text().default("active").notNull(),
+    // [{ type, target_seconds?, distance_mi? }]
+    goals: jsonb().notNull(),
+    effort: smallint().notNull(),
+    // 1–7 override; NULL = from effort.
+    hardDays: smallint("hard_days"),
+    runDailyMile: boolean("run_daily_mile").default(true).notNull(),
+    // NULL = keep improving (no finish line).
+    finishBy: date("finish_by"),
+    // The user's local date the plan started on: week 0 = its Monday-week.
+    startDate: date("start_date").notNull(),
+    // Fitness snapshot at creation (getFitness).
+    baseline: jsonb().notNull(),
+    claudeAutoApply: boolean("claude_auto_apply").default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "run_plans_user_id_fkey",
+    }).onDelete("cascade"),
+    uniqueIndex("run_plans_one_active_per_user")
+      .on(table.userId)
+      .where(sql`(status = 'active'::text)`),
+    index("idx_run_plans_user").on(table.userId),
+    check("run_plans_status_check", sql`${table.status} IN ('active', 'archived')`),
+    check("run_plans_effort_check", sql`${table.effort} BETWEEN 1 AND 4`),
+    check(
+      "run_plans_hard_days_check",
+      sql`${table.hardDays} IS NULL OR ${table.hardDays} BETWEEN 1 AND 7`,
+    ),
+  ],
+);
+
+// The materialized days of a plan (current + next week, rolled forward on
+// read). `original` is the engine's version before anyone changed the day;
+// `moved_from` marks a missed hard day the engine moved here.
+export const runPlanDays = pgTable(
+  "run_plan_days",
+  {
+    planId: uuid("plan_id").notNull(),
+    localDate: date("local_date").notNull(),
+    kind: text().notNull(),
+    title: text().notNull(),
+    distanceMi: numeric("distance_mi", { precision: 6, scale: 2 }).notNull(),
+    segments: jsonb().default([]).notNull(),
+    note: text(),
+    // 'engine' | 'flamey' | 'claude' | 'user'
+    source: text().default("engine").notNull(),
+    original: jsonb(),
+    movedFrom: date("moved_from"),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.planId, table.localDate],
+      name: "run_plan_days_pkey",
+    }),
+    foreignKey({
+      columns: [table.planId],
+      foreignColumns: [runPlans.planId],
+      name: "run_plan_days_plan_id_fkey",
+    }).onDelete("cascade"),
+    check(
+      "run_plan_days_kind_check",
+      sql`${table.kind} IN ('streak', 'easy', 'intervals', 'tempo', 'long', 'race_test')`,
+    ),
+    check(
+      "run_plan_days_source_check",
+      sql`${table.source} IN ('engine', 'flamey', 'claude', 'user')`,
+    ),
+  ],
+);
+
+export const runPlanCheckins = pgTable(
+  "run_plan_checkins",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    planId: uuid("plan_id").notNull(),
+    userId: text("user_id").notNull(),
+    localDate: date("local_date").notNull(),
+    // 'tired' | 'sore' | 'normal' | 'great' | NULL
+    feeling: text(),
+    message: text(),
+    painFlag: boolean("pain_flag").default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.planId],
+      foreignColumns: [runPlans.planId],
+      name: "run_plan_checkins_plan_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "run_plan_checkins_user_id_fkey",
+    }).onDelete("cascade"),
+    index("idx_run_plan_checkins_user_date").on(table.userId, table.localDate),
+    check(
+      "run_plan_checkins_feeling_check",
+      sql`${table.feeling} IS NULL OR ${table.feeling} IN ('tired', 'sore', 'normal', 'great')`,
+    ),
+  ],
+);
+
+export const runPlanProposals = pgTable(
+  "run_plan_proposals",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    planId: uuid("plan_id").notNull(),
+    // 'flamey' | 'claude' | 'engine'
+    source: text().notNull(),
+    action: text().notNull(),
+    summary: text().notNull(),
+    rationale: text(),
+    // [{ local_date, before: DaySummary, after: DaySummary }]
+    changes: jsonb().default([]).notNull(),
+    capNote: text("cap_note"),
+    // 'pending' | 'applied' | 'declined' | 'expired'
+    status: text().default("pending").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.planId],
+      foreignColumns: [runPlans.planId],
+      name: "run_plan_proposals_plan_id_fkey",
+    }).onDelete("cascade"),
+    index("idx_run_plan_proposals_plan_status").on(table.planId, table.status),
+    check(
+      "run_plan_proposals_source_check",
+      sql`${table.source} IN ('flamey', 'claude', 'engine')`,
+    ),
+    check(
+      "run_plan_proposals_status_check",
+      sql`${table.status} IN ('pending', 'applied', 'declined', 'expired')`,
+    ),
+  ],
+);

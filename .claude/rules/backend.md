@@ -154,6 +154,14 @@ Details: docs/conventions/backend.md § Mile A Day+
 - Founding Runners are Plus for life (no end constant). Never move `FOUNDING_CUTOFF` back; check scripts seed users AFTER it (or they become Founding Runners).
 - A Plus meter target lives in `plusCatalog.ts`; any SQL that decides "holds an Assist" must use the same per-user target (`getAssistableFriends`).
 
+## Run Plans
+Details: docs/conventions/backend.md § Run Plans
+- Every plan number comes from the PURE `services/runPlans/engine.ts`; `runPlanService.ts` only loads/persists. Coaches (Flamey, Claude, user) change days only via `planAction` (the `ACTIONS` list) and `validateChanges` re-runs at apply. Check: `run-plans-check`.
+- Plan routes are Plus-gated in the router (`requirePlus` → 403 `plus_required`) except `DELETE /run-plans/claude`; the service never checks Plus, so the coach MCP must.
+- Day status, completion, adaptation and checkpoints are DERIVED on read; only the horizon (this + next week), missed-day moves (`moved_from`) and applied changes are written. Never store a status.
+- `run_plan_days.original` = the engine's version before the first change (`COALESCE`); PATCH regenerates only `source = 'engine'` days without `moved_from`.
+- Coach connection state lives behind `coachConnectionStatus`/`revokeCoachTokens` (`runPlans/coachConnection.ts`); the coach MCP fills those in, not the plan service.
+
 ## ESM Reminder
 Details: docs/conventions/backend.md § ESM Reminder
 All imports MUST end with `.js` extension, e.g. `import { foo } from './services/fooService.js';`

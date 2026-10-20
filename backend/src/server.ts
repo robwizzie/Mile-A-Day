@@ -29,6 +29,7 @@ import publicRoutes from "./routes/publicRoutes.js";
 import buddyRoutes from "./routes/buddyRoutes.js";
 import injuryPauseRoutes from "./routes/injuryPauseRoutes.js";
 import plusRoutes, { storePublicRouter } from "./routes/plusRoutes.js";
+import runPlansRoutes from "./routes/runPlansRoutes.js";
 import {
   authenticateToken,
   requireAdmin,
@@ -369,6 +370,7 @@ app.use("/leaderboard", leaderboardRoutes);
 app.use("/buddy", buddyRoutes);
 app.use("/streak", injuryPauseRoutes);
 app.use("/plus", plusRoutes);
+app.use("/run-plans", runPlansRoutes);
 app.use("/live", liveTrackingRoutes);
 app.use("/ghosts", ghostRoutes);
 app.use("/telemetry", telemetryRoutes);

@@ -366,6 +366,14 @@ jobs:
       # Plus-only Flamey items follow entitlement live. Every miss is money.
       - name: Mile A Day+ check
         run: node scripts/plus-check.mjs
+      # Run Plans (Plus): the rules engine sets every number and polices
+      # every change from Flamey, Claude or the user. Effort → hard days, no
+      # back-to-back hard days, every day ≥ 1 mi, recovery weeks, the long-run
+      # cap, the action caps (+2 reps / +20%, week total + 0.5 mi), missed
+      # hard days moving, proposals apply/decline/stale, check-in mappings,
+      # and plus_required for everyone else.
+      - name: Run Plans check
+        run: node scripts/run-plans-check.mjs
       # Monthly Flames: a perfect calendar month (every day done by the
       # streak's own rule — miles, 10k steps or a token) unlocks that month's
       # Flamey form, evergreen; one missing / short / deleted / duplicate day
